@@ -906,14 +906,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           await client.request('turn/steer', { threadId, expectedTurnId: activeTurnId, input: promptInput })
         } else {
           const selection = get().sessionModels?.current
+          const latestSession = get().selectedSession?.sessionId === session.sessionId
+            ? get().selectedSession
+            : get().sessions.find(item => item.sessionId === session.sessionId)
           const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
-          let permissionPreset = savedPermissions[threadId]
+          let permissionPreset = latestSession?.backend === 'codex'
+            ? codexPermissionPreset(latestSession)
+            : savedPermissions[threadId]
           const resumeResult = await client.request('thread/resume', {
             threadId,
+            ...(permissionPreset === undefined ? {} : { permissionPreset }),
             ...(selection?.provider === 'codex' ? { model: selection.model } : {}),
           })
           const serverPreset = codexPermissionPresetFromResponse(resumeResult)
-          if (permissionPreset === undefined && serverPreset !== undefined) {
+          if (serverPreset !== undefined) {
             permissionPreset = serverPreset
             set(state => withCodexPermissionState(state, session.sessionId, serverPreset))
           }

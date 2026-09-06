@@ -186,6 +186,8 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
+  const runQuickPrompt = (prompt: string) => void sendMessage(prompt)
+
   const pickModel = async (group: ModelProviderGroup, model: ModelCatalogModel, reasoningEffort?: string) => {
     setModelPickerOpen(false)
     await selectModel({
@@ -263,7 +265,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
           </Pressable>
         )}
         {permissions !== undefined && (
-          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.approvalModeLabel(currentPermission?.name ?? permissions.currentValue)} onPress={() => setPermissionPickerOpen(true)} style={styles.permissionChip}>
+          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.approvalModeLabel(currentPermission?.name ?? permissions.currentValue)} accessibilityState={{ disabled: permissionSelecting || canStop, busy: permissionSelecting }} disabled={permissionSelecting || canStop} onPress={() => setPermissionPickerOpen(true)} style={[styles.permissionChip, (permissionSelecting || canStop) && styles.permissionChipDisabled]}>
             <ShieldAlert size={14} color={colors.primary} />
             <Text style={styles.modelChipText} numberOfLines={1}>{currentPermission?.name ?? permissions.currentValue}</Text>
             {permissionSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
@@ -311,6 +313,35 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
       />
 
       <View style={styles.composerWrap}>
+        {session.backend === 'codex' && <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          contentContainerStyle={styles.quickActions}
+        >
+          {([
+            [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
+            [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
+            [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
+          ] as const).map(([label, prompt]) => (
+            <Pressable
+              key={label}
+              accessibilityRole="link"
+              accessibilityLabel={label}
+              accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
+              disabled={!connected || permissionSelecting || busy !== undefined}
+              onPress={() => runQuickPrompt(prompt)}
+              hitSlop={6}
+              style={styles.quickAction}
+            >
+              {({ pressed }) => <Text style={[
+                styles.quickActionText,
+                (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
+                pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
+              ]}>{label}</Text>}
+            </Pressable>
+          ))}
+        </ScrollView>}
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -332,8 +363,8 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={zhCN.chat.addImages}
-            accessibilityState={{ disabled: !connected || pickingImages || busy === 'send-message' }}
-            disabled={!connected || pickingImages || busy === 'send-message'}
+            accessibilityState={{ disabled: !connected || pickingImages || busy === 'send-message' || permissionSelecting }}
+            disabled={!connected || pickingImages || busy === 'send-message' || permissionSelecting}
             onPress={() => void pickImages()}
             style={({ pressed }) => [styles.attachButton, pressed && styles.attachPressed]}
           >
@@ -350,7 +381,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
             placeholderTextColor={colors.muted}
             multiline
             maxLength={12_000}
-            editable={connected}
+            editable={connected && !permissionSelecting}
             selectionColor={colors.accent}
           />
           {canStop
@@ -369,10 +400,10 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
             : <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.send}
-                accessibilityState={{ disabled: !connected || (draft.trim().length === 0 && images.length === 0) }}
-                disabled={!connected || (draft.trim().length === 0 && images.length === 0)}
+                accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
+                disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
                 onPress={() => void submit()}
-                style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
               >
                 <Send size={19} color={colors.white} />
               </Pressable>}
@@ -1000,6 +1031,7 @@ function createStyles(colors: ThemeColors) {
   sessionControls: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   modelChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 8, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },
   permissionChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 8, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
+  permissionChipDisabled: { opacity: 0.52 },
   modelChipText: { ...type.smallStrong, color: colors.ink, flexShrink: 1 },
   olderButton: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   olderText: { ...type.smallStrong, color: colors.primary },
@@ -1096,6 +1128,11 @@ function createStyles(colors: ThemeColors) {
   welcomeTitle: { ...type.heading, color: colors.ink },
   welcomeBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs, maxWidth: 340 },
   composerWrap: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
+  quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
+  quickAction: { minHeight: 32, justifyContent: 'center' },
+  quickActionText: { ...type.smallStrong, color: colors.primary },
+  quickActionPressed: { opacity: 0.6 },
+  quickActionDisabled: { color: colors.disabled },
   imageTray: { gap: spacing.xs, paddingBottom: spacing.xs },
   imagePreviewWrap: { width: 72, height: 72 },
   imagePreview: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },
