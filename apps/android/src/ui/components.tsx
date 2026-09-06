@@ -228,12 +228,16 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
   return <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{children}</Text>{action}</View>
 }
 
-export function KeyValue({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+export function KeyValue({ label, value, mono = false, onPress }: { label: string; value: string; mono?: boolean; onPress?: () => void }) {
   const styles = useThemedStyles(createStyles)
   return (
     <View style={styles.keyValue}>
       <Text style={styles.keyLabel}>{label}</Text>
-      <Text style={[styles.keyValueText, mono && styles.mono]} selectable={mono}>{value}</Text>
+      {onPress === undefined
+        ? <Text style={[styles.keyValueText, mono && styles.mono]} selectable={mono}>{value}</Text>
+        : <Pressable accessibilityRole="link" accessibilityLabel={`${label}: ${value}`} onPress={onPress} hitSlop={8} style={styles.keyValueLinkTarget}>
+            {({ pressed }) => <Text style={[styles.keyValueText, styles.keyValueLink, pressed && styles.keyValueLinkPressed]}>{value}</Text>}
+          </Pressable>}
     </View>
   )
 }
@@ -323,6 +327,9 @@ function createStyles(colors: ThemeColors) {
     keyValue: { paddingVertical: spacing.sm, flexDirection: 'row', gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
     keyLabel: { ...type.small, color: colors.muted, width: 116 },
     keyValueText: { ...type.smallStrong, color: colors.ink, flex: 1, textAlign: 'right' },
+    keyValueLinkTarget: { flex: 1 },
+    keyValueLink: { color: colors.primary },
+    keyValueLinkPressed: { opacity: 0.65 },
     mono: { fontFamily: 'monospace', fontWeight: '500' },
     skeletonRow: { height: 82, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
     skeletonIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.surfaceStrong },

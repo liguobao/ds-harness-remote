@@ -70,6 +70,7 @@ import type {
   ChatItem,
   CodexPermissionPreset,
   ConnectionProbeTransport,
+  ConnectionNetworkDetails,
   ConnectionStage,
   ConnectionSnapshot,
   DeviceIdentity,
@@ -101,6 +102,7 @@ interface AppState {
   connection: ConnectionSnapshot
   connectionStage?: ConnectionStage
   connectionProbeOrder: ConnectionProbeTransport[]
+  connectionNetworkDetails?: ConnectionNetworkDetails
   hostDescriptor?: HostDescriptor
   codexAvailable: boolean
   workspaces: WorkspaceView[]
@@ -132,6 +134,7 @@ interface AppState {
   completeOAuth(token: string): Promise<boolean>
   refreshDevices(): Promise<void>
   refreshWorkspaces(): Promise<void>
+  refreshConnectionNetworkDetails(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
   connectDevice(device: RemoteDevice, options?: { forceRelay?: boolean }): Promise<boolean>
@@ -363,6 +366,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
       connectionStage: 'authenticating',
       connectionProbeOrder: [],
+      connectionNetworkDetails: undefined,
       hostDescriptor: undefined,
       codexAvailable: false,
       workspaces: [],
@@ -424,6 +428,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
       const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
+      const connectionNetworkDetails = await connection.getNetworkDetails().catch(() => undefined)
       set(state => {
         const codexSessions = codexCatalog.sessions.map(session => {
           const previous = state.sessions.find(item => item.sessionId === session.sessionId)
@@ -437,6 +442,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: [...sessions, ...codexSessions],
           connectionStage: 'ready',
+          connectionNetworkDetails,
           connection: { phase: 'connected', stats: connection.getStats() ?? { mode: 'Relay', connected: true } },
           ...(codexError === undefined ? {} : { error: codexError }),
         }
@@ -461,6 +467,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     return get().connectDevice(device, options)
   },
 
+  async refreshConnectionNetworkDetails() {
+    if (get().connection.phase !== 'connected') return
+    const details = await connection.getNetworkDetails().catch(() => undefined)
+    if (details !== undefined && get().connection.phase === 'connected') {
+      set(state => ({
+        connectionNetworkDetails: details,
+        connection: { ...state.connection, stats: connection.getStats() ?? state.connection.stats },
+      }))
+    }
+  },
+
   async disconnect() {
     await closeActiveCodexStream(false)
     await connection.close()
@@ -469,6 +486,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       connection: disconnected,
       connectionStage: undefined,
       connectionProbeOrder: [],
+      connectionNetworkDetails: undefined,
       selectedDevice: undefined,
       hostDescriptor: undefined,
       codexAvailable: false,
@@ -1322,7 +1340,7 @@ function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'workspaces' |
   'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
-  'connectionProbeOrder'> {
+  'connectionProbeOrder' | 'connectionNetworkDetails'> {
   return {
     config: undefined,
     account: undefined,
@@ -1330,6 +1348,7 @@ function initialData(): Pick<AppState,
     selectedDevice: undefined,
     connection: disconnected,
     connectionProbeOrder: [],
+    connectionNetworkDetails: undefined,
     hostDescriptor: undefined,
     codexAvailable: false,
     workspaces: [],

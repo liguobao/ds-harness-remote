@@ -46,6 +46,7 @@ const zhCN = {
       loading: { title: '读取工作区', body: '同步工作区和对话列表' },
     },
     info: '设备信息', harness: 'DeepSeek Harness', provider: '模型服务', directory: '当前目录', model: '当前模型', workspaces: '工作区', conversations: '对话', secureConnection: '连接信息', path: '连接方式', probeOrder: '探测顺序', encryption: '安全保护', viewWorkspaces: '查看工作区和对话', unknownVersion: '版本信息不可用',
+    networkDetails: '网络详情', phoneEndpoint: '手机端点', computerEndpoint: '电脑端点', relayEndpointUnavailable: '服务器转发未公开', connectionServer: '连接服务器', networkProtocol: '网络协议', candidatePath: '候选路径', roundTripTime: '往返延迟', availableBitrate: '可用上行带宽', traffic: '本次流量', connectedAt: '连接时间', sent: '发送', received: '接收',
     forgetTitle: (name: string) => `不再信任“${name}”？`, forgetBody: '移除后，下次连接时需要重新确认这台设备。', forget: '移除设备',
   },
   sessions: { title: '对话', new: '新建对话', deviceTitle: '这台设备上的对话', lead: '从上次停下的地方继续', creating: '正在新建对话…', emptyTitle: '还没有对话', emptyBody: '新建对话，或先在电脑上的 DeepSeek Harness 中开始工作。', archived: (count: number) => `已归档 ${count}`, continue: '继续对话', untitled: '新对话', child: '子任务对话' },

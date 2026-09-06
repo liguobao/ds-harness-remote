@@ -1,4 +1,5 @@
 import type { TransportStats } from '@dsh-remote/protocol'
+import type { AdaptiveConnectionDetails } from '@dsh-remote/webrtc'
 import { strings as zhCN } from './locales/i18n'
 
 export type AgentBackend = 'harness' | 'codex'
@@ -341,6 +342,9 @@ export interface ConnectionSnapshot {
   stats: TransportStats
   error?: string
 }
+
+/** Diagnostics for the currently selected network path. Kept in memory only. */
+export type ConnectionNetworkDetails = AdaptiveConnectionDetails
 
 export interface PairLink {
   server?: string

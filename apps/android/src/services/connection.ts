@@ -1,5 +1,5 @@
 import { CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, probeRemoteHostFeatures } from '@dsh-remote/client-core'
-import { AdaptiveTransport, type RtcIceServer } from '@dsh-remote/webrtc'
+import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
@@ -25,6 +25,7 @@ export class AndroidRemoteConnection {
   private closeMux?: (notifyRemote?: boolean) => Promise<void>
   private unsubscribeClose?: () => void
   private muxHandler?: MuxFrameHandler
+  private transport?: AdaptiveTransport
 
   async connect(
     baseUrl: string,
@@ -71,6 +72,7 @@ export class AndroidRemoteConnection {
     })
     const connectCore = async (relayOnly: boolean) => {
       const transport = createTransport(relayOnly)
+      this.transport = transport
       // Host-side ApiProxy calls are capped at 30s. Leave a small delivery
       // margin, then treat silence as an unhealthy business channel.
       const core = new RemoteClientCore(
@@ -155,6 +157,10 @@ export class AndroidRemoteConnection {
     return this.core?.getStats()
   }
 
+  async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
+    return await this.transport?.connectionDetails()
+  }
+
   async close(): Promise<void> {
     this.muxHandler = undefined
     const mux = this.closeMux
@@ -167,6 +173,7 @@ export class AndroidRemoteConnection {
     this.unsubscribeClose = undefined
     const core = this.core
     this.core = undefined
+    this.transport = undefined
     this.proxy = undefined
     this.codex = undefined
     if (core !== undefined) await core.close()

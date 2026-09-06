@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, Settings, ShieldCheck } from 'lucide-react-native'
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Archive, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, Settings, ShieldCheck, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession } from '../types'
+import type { TransportStats } from '@dsh-remote/protocol'
+import type { ConnectionNetworkDetails, ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession } from '../types'
 import {
   Button,
   EmptyState,
@@ -214,11 +215,18 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const connection = useAppStore(state => state.connection)
   const connectionProbeOrder = useAppStore(state => state.connectionProbeOrder)
   const descriptor = useAppStore(state => state.hostDescriptor)
+  const networkDetails = useAppStore(state => state.connectionNetworkDetails)
   const workspaces = useAppStore(state => state.workspaces)
+  const refreshNetworkDetails = useAppStore(state => state.refreshConnectionNetworkDetails)
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
+  const [showNetworkDetails, setShowNetworkDetails] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
+
+  useEffect(() => {
+    if (isConnected && showNetworkDetails) void refreshNetworkDetails()
+  }, [isConnected, refreshNetworkDetails, showNetworkDetails])
 
   const trustAndContinue = async () => {
     if (await trust(device) && device.online) onConnect()
@@ -281,7 +289,11 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
                 <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
                 <View style={styles.group}>
-                  <KeyValue label={zhCN.devices.path} value={connectionPath(connection.stats.mode)} />
+                  <KeyValue
+                    label={zhCN.devices.path}
+                    value={connectionPath(connection.stats.mode)}
+                    onPress={() => setShowNetworkDetails(true)}
+                  />
                   {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
                   <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
                 </View>
@@ -289,7 +301,47 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
               </>}
       </Screen>
+      <NetworkDetailsModal
+        visible={showNetworkDetails}
+        details={networkDetails}
+        stats={connection.stats}
+        onClose={() => setShowNetworkDetails(false)}
+      />
     </View>
+  )
+}
+
+function NetworkDetailsModal({ visible, details, stats, onClose }: {
+  visible: boolean
+  details?: ConnectionNetworkDetails
+  stats: TransportStats
+  onClose: () => void
+}) {
+  const styles = useThemedStyles(createStyles)
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable accessibilityViewIsModal style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+          <View style={styles.modalHeader}>
+            <Text accessibilityRole="header" style={styles.modalTitle}>{zhCN.devices.networkDetails}</Text>
+            <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <View style={styles.group}>
+              <KeyValue label={zhCN.devices.phoneEndpoint} value={details?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={details?.webRtc?.localAddress !== undefined} />
+              <KeyValue label={zhCN.devices.computerEndpoint} value={details?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={details?.webRtc?.remoteAddress !== undefined} />
+              {details !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(details.controlChannelUrl)} mono />}
+              {details?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(details.webRtc.protocol, details.webRtc.relayProtocol)} />}
+              {details?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(details.webRtc.localCandidateType, details.webRtc.localAddressScope, details.webRtc.remoteCandidateType, details.webRtc.remoteAddressScope)} />}
+              {details?.webRtc?.currentRoundTripTimeMs !== undefined && <KeyValue label={zhCN.devices.roundTripTime} value={`${details.webRtc.currentRoundTripTimeMs.toLocaleString()} ms`} />}
+              {details?.webRtc?.availableOutgoingBitrate !== undefined && <KeyValue label={zhCN.devices.availableBitrate} value={formatBitrate(details.webRtc.availableOutgoingBitrate)} />}
+              {details !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={details.connectedAt === undefined ? zhCN.common.unavailable : new Date(details.connectedAt).toLocaleString()} />}
+              {(stats.bytesSent !== undefined || stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
+            </View>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   )
 }
 
@@ -423,6 +475,34 @@ function connectionPath(mode: string | undefined): string {
   return mode === undefined ? zhCN.common.unavailable : names[mode] ?? mode
 }
 
+function controlServerName(value: string): string {
+  try { return new URL(value).host }
+  catch { return zhCN.common.unavailable }
+}
+
+function protocolText(protocol: string, relayProtocol?: string): string {
+  return relayProtocol === undefined
+    ? protocol.toUpperCase()
+    : `${protocol.toUpperCase()} · TURN/${relayProtocol.toUpperCase()}`
+}
+
+function candidatePathText(localType?: string, localScope?: string, remoteType?: string, remoteScope?: string): string {
+  const candidate = (candidateType?: string, scope?: string) => [candidateType, scope].filter(Boolean).join(' · ') || zhCN.common.unknown
+  return `${candidate(localType, localScope)} → ${candidate(remoteType, remoteScope)}`
+}
+
+function formatBitrate(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} Mbps`
+  if (value >= 1_000) return `${Math.round(value / 1_000)} Kbps`
+  return `${Math.round(value)} bps`
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1_048_576) return `${(value / 1_048_576).toFixed(1)} MB`
+  if (value >= 1_024) return `${(value / 1_024).toFixed(1)} KB`
+  return `${value} B`
+}
+
 function probeOrderText(order: readonly ConnectionProbeTransport[]): string {
   return order.map(probeTransportDiagnosticLabel).join(' → ')
 }
@@ -508,6 +588,11 @@ function createStyles(colors: ThemeColors) {
   contentCountValue: { ...type.heading, color: colors.ink },
   contentCountLabel: { ...type.caption, color: colors.muted, marginTop: 2 },
   contentCountDivider: { width: StyleSheet.hairlineWidth, height: 32, backgroundColor: colors.separator },
+  modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
+  modalSheet: { maxHeight: '78%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.sm },
+  modalTitle: { ...type.heading, color: colors.ink },
+  modalContent: { paddingBottom: spacing.xs },
   creatingText: { ...type.small, color: colors.muted, marginBottom: spacing.sm },
   archivedSection: { marginTop: spacing.lg },
   archivedHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm },
