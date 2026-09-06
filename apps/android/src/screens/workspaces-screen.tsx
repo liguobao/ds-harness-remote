@@ -64,10 +64,16 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
     if (!codexAvailable) setActiveBackend('harness')
   }, [codexAvailable])
 
-  const toggleWorkspace = (workspaceId: string) => setCollapsedWorkspaceIds(current => {
+  const toggleWorkspace = (workspace: WorkspaceView) => setCollapsedWorkspaceIds(current => {
     const next = new Set(current)
-    if (next.has(workspaceId)) next.delete(workspaceId)
-    else next.add(workspaceId)
+    const key = workspaceCollapseKey(workspace, selectedDevice?.platform)
+    if (next.has(key) || next.has(workspace.workspaceId)) {
+      next.delete(key)
+      // Remove the pre-path-key value when migrating an existing install.
+      next.delete(workspace.workspaceId)
+    } else {
+      next.add(key)
+    }
     const deviceId = selectedDevice?.deviceId
     if (deviceId !== undefined) void saveCollapsedWorkspaceIds(deviceId, [...next])
     return next
@@ -216,7 +222,8 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
                 const session = sessions.find(item => item.sessionId === sessionId)
                 return session === undefined ? [] : [session]
               })
-              const collapsed = collapsedWorkspaceIds.has(workspace.workspaceId)
+              const collapseKey = workspaceCollapseKey(workspace, selectedDevice?.platform)
+              const collapsed = collapsedWorkspaceIds.has(collapseKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
               return (
                 <View key={workspace.workspaceId} style={styles.workspaceGroup}>
                   <View style={styles.workspaceRow}>
@@ -224,7 +231,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
                       accessibilityRole="button"
                       accessibilityLabel={collapsed ? zhCN.workspaces.expandWorkspace(workspace.title) : zhCN.workspaces.collapseWorkspace(workspace.title)}
                       accessibilityState={{ expanded: !collapsed }}
-                      onPress={() => toggleWorkspace(workspace.workspaceId)}
+                      onPress={() => toggleWorkspace(workspace)}
                       style={({ pressed }) => [styles.workspaceToggle, pressed && styles.workspaceRowPressed]}
                     >
                       <View style={styles.workspaceIcon}>
@@ -369,6 +376,13 @@ function workspaceParentPath(path: string): string {
   if (parentSegments.length === 0) return normalized.startsWith('/') ? '/' : path
   const rootPrefix = normalized.startsWith('/') ? '/' : ''
   return `${rootPrefix}${parentSegments.join('/')}`
+}
+
+/** CodeX project ids can change when its catalog falls back to thread cwd; the authority path remains stable. */
+function workspaceCollapseKey(workspace: WorkspaceView, platform?: string): string {
+  if (workspace.backend !== 'codex') return workspace.workspaceId
+  const normalized = workspace.path.replace(/\\/gu, '/').replace(/\/+$/u, '') || '/'
+  return `codex:path:${platform === 'win32' ? normalized.toLocaleLowerCase() : normalized}`
 }
 
 function relativeTime(timestamp: number): string {

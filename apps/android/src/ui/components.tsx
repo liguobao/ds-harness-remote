@@ -228,14 +228,14 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
   return <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{children}</Text>{action}</View>
 }
 
-export function KeyValue({ label, value, mono = false, onPress }: { label: string; value: string; mono?: boolean; onPress?: () => void }) {
+export function KeyValue({ label, value, mono = false, onPress, expanded }: { label: string; value: string; mono?: boolean; onPress?: () => void; expanded?: boolean }) {
   const styles = useThemedStyles(createStyles)
   return (
     <View style={styles.keyValue}>
       <Text style={styles.keyLabel}>{label}</Text>
       {onPress === undefined
         ? <Text style={[styles.keyValueText, mono && styles.mono]} selectable={mono}>{value}</Text>
-        : <Pressable accessibilityRole="link" accessibilityLabel={`${label}: ${value}`} onPress={onPress} hitSlop={8} style={styles.keyValueLinkTarget}>
+        : <Pressable accessibilityRole="link" accessibilityLabel={`${label}: ${value}`} accessibilityState={expanded === undefined ? undefined : { expanded }} onPress={onPress} hitSlop={8} style={styles.keyValueLinkTarget}>
             {({ pressed }) => <Text style={[styles.keyValueText, styles.keyValueLink, pressed && styles.keyValueLinkPressed]}>{value}</Text>}
           </Pressable>}
     </View>
