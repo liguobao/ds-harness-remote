@@ -3535,7 +3535,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }
       function installStyle() {
         let style = document.createElement("style");
-        return style.dataset.pluginCss = "dsh-remote", style.textContent = [
+        return style.dataset.plugin = clientModuleId, style.dataset.pluginCss = "dsh-remote", style.textContent = [
           'html.dshRemoteTargetActive button[aria-label="\u6DFB\u52A0\u5DE5\u4F5C\u533A"],html.dshRemoteTargetActive button[aria-label="Add workspace"]{display:none!important}',
           'html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="\u6307\u4EE4"],html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="Commands"]{display:none!important}',
           "[data-dsh-remote-hidden-action]{display:none!important}",

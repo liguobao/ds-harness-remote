@@ -2381,6 +2381,7 @@ window.__ModuleLoader__.load({
 
     function installStyle(): () => void {
       const style = document.createElement('style')
+      style.dataset.plugin = clientModuleId
       style.dataset.pluginCss = 'dsh-remote'
       style.textContent = [
         'html.dshRemoteTargetActive button[aria-label="添加工作区"],html.dshRemoteTargetActive button[aria-label="Add workspace"]{display:none!important}',
