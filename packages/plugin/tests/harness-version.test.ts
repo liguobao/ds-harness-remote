@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  harnessSessionGeneration,
   normalizeHarnessVersion,
   readHarnessDistributionVersion,
   selectHarnessVersion,
@@ -36,5 +37,12 @@ describe('Harness version discovery', () => {
   it('rejects malformed reported versions', () => {
     expect(normalizeHarnessVersion('  ')).toBeUndefined()
     expect(normalizeHarnessVersion('0.1.0\ninvalid')).toBeUndefined()
+  })
+
+  it('separates the v0.1.5 Session V3 wire from the v0.1.2 profile', () => {
+    expect(harnessSessionGeneration('0.1.2-rc.1')).toBe('legacy')
+    expect(harnessSessionGeneration('dsh-v0.1.5-alpha.1')).toBe('v3')
+    expect(harnessSessionGeneration('0.1.5-rc.1')).toBe('v3')
+    expect(harnessSessionGeneration(undefined)).toBe('legacy')
   })
 })

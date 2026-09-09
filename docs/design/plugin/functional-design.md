@@ -5,7 +5,7 @@
 
 ## 1. 受控业务接入面
 
-Harness rc.2 会话业务只使用官方 `@deepseek-ai/dsh-host-apiproxy/api`；v0.1.2 alpha.1–rc.1 会话业务只
+Harness rc.2 会话业务只使用官方 `@deepseek-ai/dsh-host-apiproxy/api`；v0.1.2 alpha.1–rc.1 与 v0.1.5 alpha.1 Session V3 会话业务只
 使用官方 `TypertGateway` Remote carrier；可选文件预览只使用
 `dsh-file-viewer` 暴露的 `fileViewerHost` 只读服务。Plugin 不读取或解释
 `SessionStore`、`AgentRegistry`、Workspace 或 Approval 内部对象，也不把 Harness

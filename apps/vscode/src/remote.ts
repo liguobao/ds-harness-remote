@@ -68,7 +68,7 @@ export class RemoteConnection {
       if (core === undefined) throw new Error('Unable to establish a remote transport.')
       const features = await probeRemoteHostFeatures(core, host.clientVersion)
       const closeMux = features.remoteGateway
-        ? this.openAlphaClient(core, host)
+        ? this.openAlphaClient(core, host, features.sessionFormat)
         : await this.openMuxStream(core)
       if (this.core !== core) {
         await closeMux().catch(() => undefined)
@@ -184,10 +184,14 @@ export class RemoteConnection {
     return response.result.value
   }
 
-  private openAlphaClient(core: RemoteClientCore, host: RemoteHost): () => Promise<void> {
+  private openAlphaClient(core: RemoteClientCore, host: RemoteHost, sessionFormat?: 3): () => Promise<void> {
     const alpha = new HarnessAlphaClient(
       core,
-      { clientVersion: host.clientVersion, harnessVersion: host.harnessVersion },
+      {
+        clientVersion: host.clientVersion,
+        harnessVersion: host.harnessVersion,
+        ...(sessionFormat === undefined ? {} : { sessionFormat }),
+      },
       frame => this.dispatchFrame(frame as unknown as MuxFrame),
     )
     alpha.start()

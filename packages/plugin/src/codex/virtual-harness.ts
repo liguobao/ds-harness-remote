@@ -12,6 +12,7 @@ import type {
 } from '../typert-gateway-contract.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
+import type { HarnessSessionGeneration } from '../harness-version.js'
 
 const CODEX_SESSION_PREFIX = 'codex:'
 const CODEX_WORKSPACE_PREFIX = 'codex-workspace:'
@@ -120,7 +121,9 @@ interface NativeEvent {
   time: number
   data: unknown
   sourceEventSeqs?: number[]
-  surfaceOp?: 'append' | { op: 'replace'; start: number; end: number }
+  surfaceOp?: 'append'
+    | { op: 'replace'; start: number; end: number }
+    | { op: 'replace'; startSeq: number; endSeq: number }
 }
 
 export interface CodexNativeHistory {
@@ -129,6 +132,7 @@ export interface CodexNativeHistory {
     id: string
     createdAt: number
     cwd?: string
+    isSeeded?: boolean
   }
   entries: Array<{ type: 'event'; event: NativeEvent; view?: ToolEventView }>
   lastSeq: number
@@ -152,6 +156,13 @@ interface StreamedBlock {
   text: string
 }
 
+interface AssistantStreamAttempt {
+  attemptId: string
+  startedAfterSeq: number
+  nextIndex: number
+  stream: Array<{ time: number; chunk: JsonRecord }>
+}
+
 interface FollowState {
   sessionId: string
   threadId: string
@@ -164,6 +175,8 @@ interface FollowState {
   streamedBlocks: Map<string, StreamedBlock>
   nextBlockIndex: number
   streamActive: boolean
+  assistantStreamRevision: number
+  assistantAttempt?: AssistantStreamAttempt
   liveItems: Map<string, JsonRecord>
   liveToolOutput: Map<string, string>
   liveToolResultSeq: Map<string, number>
@@ -236,6 +249,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: CodexClientLike,
     private readonly host: { deviceId: string; name: string },
+    private readonly sessionGeneration: HarnessSessionGeneration = 'legacy',
   ) {
     this.api = this.createApiProxy()
   }
@@ -243,8 +257,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   static remote(
     core: ConstructorParameters<typeof CodexRemoteClient>[0],
     host: { deviceId: string; name: string },
+    sessionGeneration: HarnessSessionGeneration = 'legacy',
   ): CodexVirtualHarness {
-    return new CodexVirtualHarness(new CodexRemoteClient(core), host)
+    return new CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration)
   }
 
   async workspaces(signal?: AbortSignal): Promise<CodexVirtualWorkspaceView[]> {
@@ -648,6 +663,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       streamedBlocks: new Map(),
       nextBlockIndex: 0,
       streamActive: false,
+      assistantStreamRevision: 0,
       liveItems: new Map(),
       liveToolOutput: new Map(),
       liveToolResultSeq: new Map(),
@@ -672,6 +688,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
           imageLimits: codexImageLimitsProjection(),
         },
       },
+      ...(this.sessionGeneration === 'v3' ? { assistantStream: { revision: 0 } } : {}),
     })
     try {
       const stream = await this.client.subscribe(
@@ -710,6 +727,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     }
     if (frame.method === 'turn/started') {
       const turn = record(params.turn)
+      this.endAssistantAttempt(follow, { kind: 'abandoned' })
       this.resetLiveTurn(follow)
       follow.turn += 1
       follow.activeTurnId = string(turn.id)
@@ -839,6 +857,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       if (follow.stepOpen) {
         this.closeAllStreamBlocks(follow)
         if (follow.streamActive) this.finishStream(follow)
+        this.endAssistantAttempt(follow, { kind: 'abandoned' })
         this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
         follow.stepOpen = false
       }
@@ -881,6 +900,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.closeItemStreamBlocks(follow, itemId, itemText(item))
     if (type === 'agentMessage' && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow)
     const supplementalImages = type === 'agentMessage' ? follow.pendingToolImages : []
+    let assistantMessageSeq: number | undefined
     for (const event of itemEvents(
       item,
       follow.turn,
@@ -892,7 +912,17 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     )) {
       if (event.type === 'tool/call' && follow.startedItems.has(itemId)) continue
       if (event.type === 'tool/result') this.pushToolResult(follow, itemId, event)
-      else this.pushEvent(follow, event.type, event.data, event.view)
+      else {
+        const seq = this.pushEvent(follow, event.type, event.data, event.view)
+        if (event.type === 'assistant/message') assistantMessageSeq = seq
+      }
+    }
+    if (type === 'agentMessage' && assistantMessageSeq !== undefined) {
+      this.endAssistantAttempt(follow, {
+        kind: 'committed',
+        eventType: 'assistant/message',
+        seq: assistantMessageSeq,
+      })
     }
     if (type === 'agentMessage' && supplementalImages.length > 0) follow.pendingToolImages = []
     else if (type !== undefined && isToolItemType(type)) {
@@ -916,24 +946,29 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       type,
       seq,
       time: Date.now(),
-      data,
+      data: adaptEventData(
+        type,
+        type === 'assistant/message' && this.sessionGeneration === 'v3' && follow.assistantAttempt !== undefined
+          ? { ...record(data), stream: follow.assistantAttempt.stream }
+          : data,
+        this.sessionGeneration,
+      ),
       ...(isSurfaceEvent(type)
         ? placement === undefined
           ? { surfaceOp: 'append' as const }
           : {
-              surfaceOp: { op: 'replace' as const, start: placement.replaceSeq, end: placement.replaceSeq },
+              surfaceOp: this.sessionGeneration === 'v3'
+                ? { op: 'replace' as const, startSeq: placement.replaceSeq, endSeq: placement.replaceSeq }
+                : { op: 'replace' as const, start: placement.replaceSeq, end: placement.replaceSeq },
               sourceEventSeqs: [placement.replaceSeq],
             }
           : {}),
     }
     this.cacheImageBlocks(follow.sessionId, event.data)
     if (!follow.rcOnly) {
-      const alphaEvent = typeof event.surfaceOp === 'object'
-        ? { ...event, surfaceOp: 'replace' as const }
-        : event
       follow.queue.push({
         type: 'event',
-        event: alphaEvent,
+        event,
         ...(view === undefined ? {} : { view }),
       })
     }
@@ -967,11 +1002,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const block = { itemId, index: follow.nextBlockIndex++, kind, text: '' }
     follow.streamedBlocks.set(key, block)
     follow.streamActive = true
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: 'block-start', index: block.index, blockType: kind },
-    })
+    this.pushAssistantChunk(follow, { type: 'block-start', index: block.index, blockType: kind })
     return block
   }
 
@@ -984,10 +1015,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   ): void {
     const block = this.ensureStreamBlock(follow, key, itemId, kind)
     block.text = appendBoundedText(block.text, delta)
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: kind === 'reasoning' ? 'reasoning-delta' : 'text-delta', index: block.index, text: delta },
+    this.pushAssistantChunk(follow, {
+      type: kind === 'reasoning' ? 'reasoning-delta' : 'text-delta', index: block.index, text: delta,
     })
   }
 
@@ -995,10 +1024,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const matches = [...follow.streamedBlocks].filter(([, block]) => block.itemId === itemId)
     for (const [key, block] of matches) {
       const text = block.text || fallback || ''
-      this.pushEvent(follow, 'assistant/chunk', {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: 'block-end', index: block.index, block: { type: block.kind, text } },
+      this.pushAssistantChunk(follow, {
+        type: 'block-end', index: block.index, block: { type: block.kind, text },
       })
       follow.streamedBlocks.delete(key)
     }
@@ -1006,22 +1033,82 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
 
   private closeAllStreamBlocks(follow: FollowState): void {
     for (const block of follow.streamedBlocks.values()) {
-      this.pushEvent(follow, 'assistant/chunk', {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: 'block-end', index: block.index, block: { type: block.kind, text: block.text } },
+      this.pushAssistantChunk(follow, {
+        type: 'block-end', index: block.index, block: { type: block.kind, text: block.text },
       })
     }
     follow.streamedBlocks.clear()
   }
 
   private finishStream(follow: FollowState): void {
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: 'finish', reason: { kind: 'stop' } },
-    })
+    this.pushAssistantChunk(follow, { type: 'finish', reason: { kind: 'stop' } })
     follow.streamActive = false
+  }
+
+  private pushAssistantChunk(follow: FollowState, chunk: JsonRecord): void {
+    if (this.sessionGeneration !== 'v3' || follow.rcOnly === true) {
+      this.pushEvent(follow, 'assistant/chunk', { turn: follow.turn, step: 1, chunk })
+      return
+    }
+    let attempt = follow.assistantAttempt
+    if (attempt === undefined) {
+      attempt = {
+        attemptId: `codex-attempt:${follow.activeTurnId ?? follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: [],
+      }
+      follow.assistantAttempt = attempt
+      follow.assistantStreamRevision += 1
+      follow.queue.push({
+        type: 'assistant-stream',
+        frame: {
+          type: 'start',
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: 1,
+        },
+      })
+    }
+    const time = Date.now()
+    const index = attempt.nextIndex++
+    attempt.stream.push({ time, chunk })
+    follow.assistantStreamRevision += 1
+    follow.queue.push({
+      type: 'assistant-stream',
+      frame: {
+        type: 'chunk',
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk,
+      },
+    })
+  }
+
+  private endAssistantAttempt(
+    follow: FollowState,
+    outcome: { kind: 'abandoned' } | { kind: 'committed'; eventType: 'assistant/message'; seq: number },
+  ): void {
+    const attempt = follow.assistantAttempt
+    if (attempt === undefined) return
+    follow.assistantAttempt = undefined
+    follow.assistantStreamRevision += 1
+    if (this.sessionGeneration === 'v3' && follow.rcOnly !== true) {
+      follow.queue.push({
+        type: 'assistant-stream',
+        frame: {
+          type: 'end',
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          index: attempt.nextIndex,
+          outcome,
+        },
+      })
+    }
   }
 
   private ensureToolStarted(follow: FollowState, item: JsonRecord): void {
@@ -1069,6 +1156,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     follow.streamedBlocks.clear()
     follow.nextBlockIndex = 0
     follow.streamActive = false
+    follow.assistantAttempt = undefined
     follow.liveItems.clear()
     follow.liveToolOutput.clear()
     follow.liveToolResultSeq.clear()
@@ -1376,7 +1464,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       const thread = record(result.thread)
       if (string(thread.id) !== threadId) throw new Error('CodeX returned an invalid Thread history.')
       value = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
+        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
         {
           beforeSeq: page.beforeSeq,
           throughSeq: page.throughSeq,
@@ -1384,6 +1472,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         },
       )
     }
+    value = adaptCodexHistoryPage(value, this.sessionGeneration)
     if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
       throw new Error('CodeX Remote returned an invalid paginated History.')
     }
@@ -1460,6 +1549,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       streamedBlocks: new Map(),
       nextBlockIndex: 0,
       streamActive: false,
+      assistantStreamRevision: 0,
       liveItems: new Map(),
       liveToolOutput: new Map(),
       liveToolResultSeq: new Map(),
@@ -1769,7 +1859,11 @@ async function loadModelDirectory(client: CodexClientLike, signal?: AbortSignal)
   }
 }
 
-export function projectCodexNativeHistory(thread: JsonRecord, sessionId: string): CodexNativeHistory {
+export function projectCodexNativeHistory(
+  thread: JsonRecord,
+  sessionId: string,
+  sessionGeneration: HarnessSessionGeneration = 'legacy',
+): CodexNativeHistory {
   const entries: CodexNativeHistory['entries'] = []
   let seq = 0
   let turnNumber = 0
@@ -1788,7 +1882,7 @@ export function projectCodexNativeHistory(thread: JsonRecord, sessionId: string)
         type,
         seq: eventSeq,
         time,
-        data,
+        data: adaptEventData(type, data, sessionGeneration),
         ...(sourceEventSeqs === undefined ? {} : { sourceEventSeqs }),
         ...(isSurfaceEvent(type) ? { surfaceOp: 'append' as const } : {}),
       },
@@ -1843,10 +1937,11 @@ export function projectCodexNativeHistory(thread: JsonRecord, sessionId: string)
   const projected = projectCodexThread(thread)
   return {
     header: {
-      version: 1,
+      version: sessionGeneration === 'v3' ? 3 : 1,
       id: sessionId,
       createdAt: projected?.createdAt ?? Date.now(),
       ...(projected?.cwd === undefined ? {} : { cwd: projected.cwd }),
+      ...(sessionGeneration === 'v3' ? { isSeeded: false } : {}),
     },
     entries,
     lastSeq: seq - 1,
@@ -1881,6 +1976,54 @@ export function paginateCodexNativeHistory(
     records: window.filter(entry => entry.event.seq >= cut),
     hasMore: window.some(entry => entry.event.seq < cut),
     ...(history.activeTurnId === undefined ? {} : { activeTurnId: history.activeTurnId }),
+  }
+}
+
+function adaptEventData(type: string, data: unknown, sessionGeneration: HarnessSessionGeneration): unknown {
+  if (sessionGeneration !== 'v3' || type !== 'assistant/message') return data
+  const value = record(data)
+  return Array.isArray(value.stream) ? value : { ...value, stream: [] }
+}
+
+function adaptCodexHistoryPage(value: unknown, sessionGeneration: HarnessSessionGeneration): unknown {
+  if (sessionGeneration !== 'v3') return value
+  const page = record(value)
+  const sourceHeader = record(page.header)
+  const { seedLength: _seedLength, ...header } = sourceHeader
+  const records = Array.isArray(page.records)
+    ? page.records.map(raw => {
+        const entry = record(raw)
+        const sourceEvent = record(entry.event)
+        const sourceSurfaceOp = record(sourceEvent.surfaceOp)
+        const surfaceOp = sourceEvent.surfaceOp === 'append'
+          ? 'append'
+          : sourceSurfaceOp.op === 'replace'
+              && integer(sourceSurfaceOp.startSeq) !== undefined
+              && integer(sourceSurfaceOp.endSeq) !== undefined
+            ? sourceSurfaceOp
+            : sourceSurfaceOp.op === 'replace'
+                && integer(sourceSurfaceOp.start) !== undefined
+                && integer(sourceSurfaceOp.end) !== undefined
+              ? {
+                  op: 'replace',
+                  startSeq: sourceSurfaceOp.start,
+                  endSeq: sourceSurfaceOp.end,
+                }
+              : sourceEvent.surfaceOp
+        return {
+          ...entry,
+          event: {
+            ...sourceEvent,
+            data: adaptEventData(string(sourceEvent.type) ?? '', sourceEvent.data, sessionGeneration),
+            ...(surfaceOp === undefined ? {} : { surfaceOp }),
+          },
+        }
+      })
+    : page.records
+  return {
+    ...page,
+    header: { ...header, version: 3, isSeeded: sourceHeader.isSeeded === true },
+    records,
   }
 }
 

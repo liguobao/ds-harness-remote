@@ -597,7 +597,9 @@ describe('CodexVirtualHarness', () => {
       params: { turnId: 'turn_2', itemId: 'command_2', delta: 'second' },
     })
     await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'tool/result', surfaceOp: 'replace', sourceEventSeqs: [firstOutput.value.event.seq],
+      type: 'tool/result',
+      surfaceOp: { op: 'replace', start: firstOutput.value.event.seq, end: firstOutput.value.event.seq },
+      sourceEventSeqs: [firstOutput.value.event.seq],
     }, view: { view: { output: 'first\nsecond' } } } })
 
     client.emit('thr_1', {
@@ -642,7 +644,7 @@ describe('CodexVirtualHarness', () => {
       } },
     })
     await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'tool/result', surfaceOp: 'replace',
+      type: 'tool/result', surfaceOp: { op: 'replace' },
     } } })
     client.emit('thr_1', {
       method: 'item/completed',
@@ -749,6 +751,108 @@ describe('CodexVirtualHarness', () => {
     await iterator.return?.()
     await controlIterator.return?.()
     await eventsIterator.return?.()
+    await target.close()
+  })
+
+  it('emits Session V3 history, replacements, and assistant stream frames for v0.1.5', async () => {
+    const sessionSurface = await import('@deepseek-ai/dsh-session/surface') as unknown as {
+      validateSurfaceMetadata(event: unknown): void
+      validateSessionEventData(event: unknown, subject: string): void
+    }
+    const assertV3Event = (event: unknown): void => {
+      sessionSurface.validateSurfaceMetadata(event)
+      sessionSurface.validateSessionEventData(event, 'CodeX V3 fixture')
+    }
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'v3')
+    const controller = new AbortController()
+    const source = await target.open('session/follow', {
+      args: { request: {
+        address: { kind: 'session', sessionId: 'codex:thr_1' },
+        assistantStream: true,
+      } },
+    }, controller.signal)
+    const iterator = source[Symbol.asyncIterator]()
+    const snapshot = await iterator.next()
+    expect(snapshot.value).toMatchObject({
+      type: 'snapshot',
+      header: { version: 3, id: 'codex:thr_1', isSeeded: false },
+      assistantStream: { revision: 0 },
+    })
+    for (const record of snapshot.value.records) {
+      expect(() => assertV3Event(record.event)).not.toThrow()
+      if (record.event.type === 'assistant/message') expect(record.event.data.stream).toEqual([])
+    }
+
+    client.emit('thr_1', {
+      method: 'turn/started',
+      params: { turn: { id: 'turn_v3', status: 'inProgress', items: [] } },
+    })
+    await iterator.next()
+    await iterator.next()
+    client.emit('thr_1', {
+      method: 'item/started',
+      params: { turnId: 'turn_v3', item: {
+        id: 'command_v3', type: 'commandExecution', command: 'pnpm test', status: 'inProgress',
+      } },
+    })
+    await iterator.next()
+    client.emit('thr_1', {
+      method: 'item/commandExecution/outputDelta',
+      params: { turnId: 'turn_v3', itemId: 'command_v3', delta: 'one' },
+    })
+    const firstResult = await iterator.next()
+    client.emit('thr_1', {
+      method: 'item/commandExecution/outputDelta',
+      params: { turnId: 'turn_v3', itemId: 'command_v3', delta: ' two' },
+    })
+    const replacement = await iterator.next()
+    expect(replacement).toMatchObject({ value: { event: {
+      type: 'tool/result',
+      surfaceOp: {
+        op: 'replace',
+        startSeq: firstResult.value.event.seq,
+        endSeq: firstResult.value.event.seq,
+      },
+      sourceEventSeqs: [firstResult.value.event.seq],
+    } } })
+    expect(() => assertV3Event(replacement.value.event)).not.toThrow()
+
+    client.emit('thr_1', {
+      method: 'item/agentMessage/delta',
+      params: { turnId: 'turn_v3', itemId: 'assistant_v3', delta: 'hello' },
+    })
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'assistant-stream', frame: {
+      type: 'start', attemptId: expect.any(String), revision: 1,
+    } } })
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'assistant-stream', frame: {
+      type: 'chunk', index: 0, chunk: { type: 'block-start' },
+    } } })
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'assistant-stream', frame: {
+      type: 'chunk', index: 1, chunk: { type: 'text-delta', text: 'hello' },
+    } } })
+    client.emit('thr_1', {
+      method: 'item/completed',
+      params: { turnId: 'turn_v3', item: {
+        id: 'assistant_v3', type: 'agentMessage', text: 'hello', status: 'completed',
+      } },
+    })
+    await iterator.next()
+    await iterator.next()
+    const settlement = await iterator.next()
+    expect(settlement.value).toMatchObject({ type: 'event', event: {
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: { stream: expect.any(Array), message: { content: [{ type: 'text', text: 'hello' }] } },
+    } })
+    expect(() => assertV3Event(settlement.value.event)).not.toThrow()
+    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'assistant-stream', frame: {
+      type: 'end',
+      outcome: { kind: 'committed', eventType: 'assistant/message', seq: settlement.value.event.seq },
+    } } })
+
+    controller.abort()
+    await iterator.return?.()
     await target.close()
   })
 

@@ -306,7 +306,9 @@ export interface NativeSessionEvent {
   time: number
   data: Record<string, unknown>
   sourceEventSeqs?: number[]
-  surfaceOp?: 'append' | 'replace'
+  surfaceOp?: 'append'
+    | { op: 'replace'; start: number; end: number }
+    | { op: 'replace'; startSeq: number; endSeq: number }
   ignorable?: true
 }
 

@@ -13977,6 +13977,45 @@ function uuidV7(now = Date.now()) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// src/harness-version.ts
+import { readFile } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
+var LEGACY_PLACEHOLDER_VERSION = "0.0.1";
+function normalizeHarnessVersion(value) {
+  if (typeof value !== "string") return void 0;
+  const version = value.trim();
+  if (version.length === 0 || version.length > 64 || /[\u0000-\u001f]/u.test(version)) return void 0;
+  return version;
+}
+function selectHarnessVersion(reportedVersion, distributionVersion) {
+  if (reportedVersion !== void 0 && reportedVersion !== LEGACY_PLACEHOLDER_VERSION) return reportedVersion;
+  return distributionVersion;
+}
+function harnessSessionGeneration(version) {
+  if (version === void 0) return "legacy";
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim());
+  if (match === null) return "legacy";
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  return major === 0 && minor === 1 && patch >= 5 ? "v3" : "legacy";
+}
+async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
+  if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
+  let directory = dirname(entrypoint);
+  for (let depth = 0; depth < 8; depth += 1) {
+    try {
+      const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
+      if (manifest.name === "@deepseek-ai/dsh") return normalizeHarnessVersion(manifest.version);
+    } catch {
+    }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return void 0;
+}
+
 // src/remote-api-proxy.ts
 var DIRECT_API_CALL_BYTES = 2 * 1024 * 1024;
 var RemoteHarnessApiProxy = class {
@@ -14510,9 +14549,10 @@ async function discoverCodexVirtualWorkspaces(client, signal) {
   return (await loadCatalog(client, signal)).workspaces;
 }
 var CodexVirtualHarness = class _CodexVirtualHarness {
-  constructor(client, host) {
+  constructor(client, host, sessionGeneration = "legacy") {
     this.client = client;
     this.host = host;
+    this.sessionGeneration = sessionGeneration;
     this.api = this.createApiProxy();
   }
   api;
@@ -14536,8 +14576,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   commandSeq = 0;
   selectedWorkspaceId;
   closed = false;
-  static remote(core, host) {
-    return new _CodexVirtualHarness(new CodexRemoteClient(core), host);
+  static remote(core, host, sessionGeneration = "legacy") {
+    return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration);
   }
   async workspaces(signal) {
     return (await this.refreshCatalog(signal)).workspaces;
@@ -14927,6 +14967,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       streamedBlocks: /* @__PURE__ */ new Map(),
       nextBlockIndex: 0,
       streamActive: false,
+      assistantStreamRevision: 0,
       liveItems: /* @__PURE__ */ new Map(),
       liveToolOutput: /* @__PURE__ */ new Map(),
       liveToolResultSeq: /* @__PURE__ */ new Map(),
@@ -14950,7 +14991,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
           imageLimits: codexImageLimitsProjection()
         }
-      }
+      },
+      ...this.sessionGeneration === "v3" ? { assistantStream: { revision: 0 } } : {}
     });
     try {
       const stream = await this.client.subscribe(
@@ -14988,6 +15030,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     }
     if (frame.method === "turn/started") {
       const turn = record2(params.turn);
+      this.endAssistantAttempt(follow, { kind: "abandoned" });
       this.resetLiveTurn(follow);
       follow.turn += 1;
       follow.activeTurnId = string(turn.id);
@@ -15103,6 +15146,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       if (follow.stepOpen) {
         this.closeAllStreamBlocks(follow);
         if (follow.streamActive) this.finishStream(follow);
+        this.endAssistantAttempt(follow, { kind: "abandoned" });
         this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
         follow.stepOpen = false;
       }
@@ -15141,6 +15185,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.closeItemStreamBlocks(follow, itemId, itemText2(item));
     if (type === "agentMessage" && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow);
     const supplementalImages = type === "agentMessage" ? follow.pendingToolImages : [];
+    let assistantMessageSeq;
     for (const event of itemEvents(
       item,
       follow.turn,
@@ -15152,7 +15197,17 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     )) {
       if (event.type === "tool/call" && follow.startedItems.has(itemId)) continue;
       if (event.type === "tool/result") this.pushToolResult(follow, itemId, event);
-      else this.pushEvent(follow, event.type, event.data, event.view);
+      else {
+        const seq = this.pushEvent(follow, event.type, event.data, event.view);
+        if (event.type === "assistant/message") assistantMessageSeq = seq;
+      }
+    }
+    if (type === "agentMessage" && assistantMessageSeq !== void 0) {
+      this.endAssistantAttempt(follow, {
+        kind: "committed",
+        eventType: "assistant/message",
+        seq: assistantMessageSeq
+      });
     }
     if (type === "agentMessage" && supplementalImages.length > 0) follow.pendingToolImages = [];
     else if (type !== void 0 && isToolItemType2(type)) {
@@ -15169,18 +15224,21 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       type,
       seq,
       time: Date.now(),
-      data,
+      data: adaptEventData(
+        type,
+        type === "assistant/message" && this.sessionGeneration === "v3" && follow.assistantAttempt !== void 0 ? { ...record2(data), stream: follow.assistantAttempt.stream } : data,
+        this.sessionGeneration
+      ),
       ...isSurfaceEvent(type) ? placement === void 0 ? { surfaceOp: "append" } : {
-        surfaceOp: { op: "replace", start: placement.replaceSeq, end: placement.replaceSeq },
+        surfaceOp: this.sessionGeneration === "v3" ? { op: "replace", startSeq: placement.replaceSeq, endSeq: placement.replaceSeq } : { op: "replace", start: placement.replaceSeq, end: placement.replaceSeq },
         sourceEventSeqs: [placement.replaceSeq]
       } : {}
     };
     this.cacheImageBlocks(follow.sessionId, event.data);
     if (!follow.rcOnly) {
-      const alphaEvent = typeof event.surfaceOp === "object" ? { ...event, surfaceOp: "replace" } : event;
       follow.queue.push({
         type: "event",
-        event: alphaEvent,
+        event,
         ...view === void 0 ? {} : { view }
       });
     }
@@ -15207,51 +15265,104 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const block = { itemId, index: follow.nextBlockIndex++, kind, text: "" };
     follow.streamedBlocks.set(key, block);
     follow.streamActive = true;
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: "block-start", index: block.index, blockType: kind }
-    });
+    this.pushAssistantChunk(follow, { type: "block-start", index: block.index, blockType: kind });
     return block;
   }
   appendStreamDelta(follow, key, itemId, kind, delta) {
     const block = this.ensureStreamBlock(follow, key, itemId, kind);
     block.text = appendBoundedText(block.text, delta);
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: kind === "reasoning" ? "reasoning-delta" : "text-delta", index: block.index, text: delta }
+    this.pushAssistantChunk(follow, {
+      type: kind === "reasoning" ? "reasoning-delta" : "text-delta",
+      index: block.index,
+      text: delta
     });
   }
   closeItemStreamBlocks(follow, itemId, fallback) {
     const matches = [...follow.streamedBlocks].filter(([, block]) => block.itemId === itemId);
     for (const [key, block] of matches) {
       const text = block.text || fallback || "";
-      this.pushEvent(follow, "assistant/chunk", {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: "block-end", index: block.index, block: { type: block.kind, text } }
+      this.pushAssistantChunk(follow, {
+        type: "block-end",
+        index: block.index,
+        block: { type: block.kind, text }
       });
       follow.streamedBlocks.delete(key);
     }
   }
   closeAllStreamBlocks(follow) {
     for (const block of follow.streamedBlocks.values()) {
-      this.pushEvent(follow, "assistant/chunk", {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: "block-end", index: block.index, block: { type: block.kind, text: block.text } }
+      this.pushAssistantChunk(follow, {
+        type: "block-end",
+        index: block.index,
+        block: { type: block.kind, text: block.text }
       });
     }
     follow.streamedBlocks.clear();
   }
   finishStream(follow) {
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: "finish", reason: { kind: "stop" } }
-    });
+    this.pushAssistantChunk(follow, { type: "finish", reason: { kind: "stop" } });
     follow.streamActive = false;
+  }
+  pushAssistantChunk(follow, chunk) {
+    if (this.sessionGeneration !== "v3" || follow.rcOnly === true) {
+      this.pushEvent(follow, "assistant/chunk", { turn: follow.turn, step: 1, chunk });
+      return;
+    }
+    let attempt = follow.assistantAttempt;
+    if (attempt === void 0) {
+      attempt = {
+        attemptId: `codex-attempt:${follow.activeTurnId ?? follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: []
+      };
+      follow.assistantAttempt = attempt;
+      follow.assistantStreamRevision += 1;
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "start",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: 1
+        }
+      });
+    }
+    const time = Date.now();
+    const index = attempt.nextIndex++;
+    attempt.stream.push({ time, chunk });
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "chunk",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk
+      }
+    });
+  }
+  endAssistantAttempt(follow, outcome) {
+    const attempt = follow.assistantAttempt;
+    if (attempt === void 0) return;
+    follow.assistantAttempt = void 0;
+    follow.assistantStreamRevision += 1;
+    if (this.sessionGeneration === "v3" && follow.rcOnly !== true) {
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "end",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          index: attempt.nextIndex,
+          outcome
+        }
+      });
+    }
   }
   ensureToolStarted(follow, item) {
     const itemId = string(item.id);
@@ -15295,6 +15406,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     follow.streamedBlocks.clear();
     follow.nextBlockIndex = 0;
     follow.streamActive = false;
+    follow.assistantAttempt = void 0;
     follow.liveItems.clear();
     follow.liveToolOutput.clear();
     follow.liveToolResultSeq.clear();
@@ -15565,7 +15677,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       const thread = record2(result.thread);
       if (string(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
       value = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
+        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
         {
           beforeSeq: page.beforeSeq,
           throughSeq: page.throughSeq,
@@ -15573,6 +15685,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         }
       );
     }
+    value = adaptCodexHistoryPage(value, this.sessionGeneration);
     if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
       throw new Error("CodeX Remote returned an invalid paginated History.");
     }
@@ -15640,6 +15753,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       streamedBlocks: /* @__PURE__ */ new Map(),
       nextBlockIndex: 0,
       streamActive: false,
+      assistantStreamRevision: 0,
       liveItems: /* @__PURE__ */ new Map(),
       liveToolOutput: /* @__PURE__ */ new Map(),
       liveToolResultSeq: /* @__PURE__ */ new Map(),
@@ -15922,7 +16036,7 @@ async function loadModelDirectory(client, signal) {
     models
   };
 }
-function projectCodexNativeHistory(thread, sessionId) {
+function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
   const entries = [];
   let seq = 0;
   let turnNumber = 0;
@@ -15935,7 +16049,7 @@ function projectCodexNativeHistory(thread, sessionId) {
         type,
         seq: eventSeq,
         time,
-        data,
+        data: adaptEventData(type, data, sessionGeneration),
         ...sourceEventSeqs === void 0 ? {} : { sourceEventSeqs },
         ...isSurfaceEvent(type) ? { surfaceOp: "append" } : {}
       },
@@ -15988,10 +16102,11 @@ function projectCodexNativeHistory(thread, sessionId) {
   const projected = projectCodexThread(thread);
   return {
     header: {
-      version: 1,
+      version: sessionGeneration === "v3" ? 3 : 1,
       id: sessionId,
       createdAt: projected?.createdAt ?? Date.now(),
-      ...projected?.cwd === void 0 ? {} : { cwd: projected.cwd }
+      ...projected?.cwd === void 0 ? {} : { cwd: projected.cwd },
+      ...sessionGeneration === "v3" ? { isSeeded: false } : {}
     },
     entries,
     lastSeq: seq - 1,
@@ -16022,6 +16137,40 @@ function paginateCodexNativeHistory(history, request) {
     records: window.filter((entry) => entry.event.seq >= cut),
     hasMore: window.some((entry) => entry.event.seq < cut),
     ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+  };
+}
+function adaptEventData(type, data, sessionGeneration) {
+  if (sessionGeneration !== "v3" || type !== "assistant/message") return data;
+  const value = record2(data);
+  return Array.isArray(value.stream) ? value : { ...value, stream: [] };
+}
+function adaptCodexHistoryPage(value, sessionGeneration) {
+  if (sessionGeneration !== "v3") return value;
+  const page = record2(value);
+  const sourceHeader = record2(page.header);
+  const { seedLength: _seedLength, ...header } = sourceHeader;
+  const records = Array.isArray(page.records) ? page.records.map((raw) => {
+    const entry = record2(raw);
+    const sourceEvent = record2(entry.event);
+    const sourceSurfaceOp = record2(sourceEvent.surfaceOp);
+    const surfaceOp = sourceEvent.surfaceOp === "append" ? "append" : sourceSurfaceOp.op === "replace" && integer(sourceSurfaceOp.startSeq) !== void 0 && integer(sourceSurfaceOp.endSeq) !== void 0 ? sourceSurfaceOp : sourceSurfaceOp.op === "replace" && integer(sourceSurfaceOp.start) !== void 0 && integer(sourceSurfaceOp.end) !== void 0 ? {
+      op: "replace",
+      startSeq: sourceSurfaceOp.start,
+      endSeq: sourceSurfaceOp.end
+    } : sourceEvent.surfaceOp;
+    return {
+      ...entry,
+      event: {
+        ...sourceEvent,
+        data: adaptEventData(string(sourceEvent.type) ?? "", sourceEvent.data, sessionGeneration),
+        ...surfaceOp === void 0 ? {} : { surfaceOp }
+      }
+    };
+  }) : page.records;
+  return {
+    ...page,
+    header: { ...header, version: 3, isSeeded: sourceHeader.isSeeded === true },
+    records
   };
 }
 function itemEvents(item, turn, step, requestId, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
@@ -16982,7 +17131,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.10";
+var PLUGIN_VERSION = "0.4.11";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -17536,7 +17685,7 @@ import { networkInterfaces } from "node:os";
 // src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname as dirname2, join as join2 } from "node:path";
 import { fileURLToPath } from "node:url";
 var cachedExternalFactory;
 var cachedExternalFactoryResolved = false;
@@ -17587,21 +17736,21 @@ function nodeBinaryCandidates() {
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
   add3(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join(part, process.platform === "win32" ? "node.exe" : "node"));
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join2(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");
   add3("/usr/bin/node");
-  add3(join(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join2(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join2(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join2(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
-  const root = join(process.env.HOME ?? "", ".nvm", "versions", "node");
+  const root = join2(process.env.HOME ?? "", ".nvm", "versions", "node");
   if (root === "" || !existsSync(root)) return [];
   try {
-    return readdirSync(root).map((version) => join(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root).map((version) => join2(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -17623,7 +17772,7 @@ function isUsableExternalNode(candidate, requireFrom) {
       "console.log(`node:${process.versions.node}`);"
     ].join("")
   ], {
-    cwd: dirname(requireFrom),
+    cwd: dirname2(requireFrom),
     env,
     encoding: "utf8",
     timeout: 3e3
@@ -17645,7 +17794,7 @@ var ExternalNativePeerConnection = class {
     this.nodeBinary = nodeBinary;
     this.requireFrom = requireFrom;
     this.child = spawn(this.nodeBinary, ["--input-type=module", "--eval", HELPER_SOURCE], {
-      cwd: dirname(this.requireFrom),
+      cwd: dirname2(this.requireFrom),
       env: { ...process.env, DSH_REMOTE_RTC_HELPER_REQUIRE_FROM: this.requireFrom },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -18855,7 +19004,7 @@ var ClientModeRuntime = class {
     const virtual = CodexVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    });
+    }, harnessSessionGeneration(this.host?.localHarnessVersion?.()));
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal);
@@ -19087,7 +19236,16 @@ var ClientModeRuntime = class {
   }
   assertRemoteCompatible(remote) {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier();
-    if (localRemoteGateway && remote.features.remoteGateway || !localRemoteGateway && this.proxySwitch !== void 0 && remote.features.apiProxy) return;
+    if (localRemoteGateway && remote.features.remoteGateway) {
+      const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
+      const remoteSessionGeneration = remote.features.sessionFormat === 3 ? "v3" : "legacy";
+      if (localSessionGeneration === remoteSessionGeneration) return;
+      throw new ClientModeError(
+        "HARNESS_VERSION_INCOMPATIBLE",
+        `The local and remote Harness Session formats differ (${localSessionGeneration} vs ${remoteSessionGeneration}).`
+      );
+    }
+    if (!localRemoteGateway && this.proxySwitch !== void 0 && remote.features.apiProxy) return;
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",
       localRemoteGateway ? "The selected Host does not provide the Harness v0.1.2 Typert Remote Gateway transport." : "The selected Host does not provide the legacy Harness ApiProxy transport."
@@ -19216,7 +19374,8 @@ var ClientModeRuntime = class {
         transport: connectedTransport,
         features,
         progressRunId,
-        ...serverDevice.clientVersion === void 0 ? {} : { clientVersion: serverDevice.clientVersion }
+        ...serverDevice.clientVersion === void 0 ? {} : { clientVersion: serverDevice.clientVersion },
+        ...serverDevice.harnessVersion === void 0 ? {} : { harnessVersion: serverDevice.harnessVersion }
       };
     } catch (error) {
       this.clearConnectionProgress(progressRunId);
@@ -19567,7 +19726,13 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   }
   const capabilities = new Set(value.capabilities);
   const apiProxy = capabilities.has("harness.api.v1");
-  const remoteGateway = capabilities.has("harness.remote.v1");
+  const remoteV1 = capabilities.has("harness.remote.v1");
+  const remoteV3 = capabilities.has("harness.remote.v3");
+  if (remoteV1 && remoteV3) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
+  }
+  const sessionFormat = remoteV3 ? 3 : void 0;
+  const remoteGateway = remoteV3 || remoteV1;
   if (!apiProxy && !remoteGateway) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
@@ -19576,6 +19741,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     fileViewer: capabilities.has("fileviewer.read.v1"),
     apiProxy,
     remoteGateway,
+    ...sessionFormat === void 0 ? {} : { sessionFormat },
     codex: capabilities.has("codex.appserver.v1")
   };
 }
@@ -19642,9 +19808,9 @@ import { hostname as hostname2 } from "node:os";
 
 // src/identity-store.ts
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { dirname as dirname3, join as join3 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -19673,14 +19839,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join2(options.homeDirectory ?? homedir(), ".dsh");
-    this.directory = options.directory ?? join2(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join3(options.homeDirectory ?? homedir(), ".dsh");
+    this.directory = options.directory ?? join3(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
     await mkdir(this.directory, { recursive: true, mode: 448 });
     await chmod(this.directory, 448);
-    const devicePath = join2(this.directory, "device.json");
-    const keyPath = join2(this.directory, "device.key");
+    const devicePath = join3(this.directory, "device.json");
+    const keyPath = join3(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -19694,8 +19860,8 @@ var IdentityStore = class {
     }
     await assertPrivateMode(keyPath);
     try {
-      let record6 = identitySchema.parse(JSON.parse(await readFile(devicePath, "utf8")));
-      const privateKey = (await readFile(keyPath, "utf8")).trim();
+      let record6 = identitySchema.parse(JSON.parse(await readFile2(devicePath, "utf8")));
+      const privateKey = (await readFile2(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
       if (regenerated.publicKey !== record6.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
@@ -19749,11 +19915,11 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join2(this.directory, "trusted-peers.json");
+    const path = join3(this.directory, "trusted-peers.json");
     if (!await exists(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
-    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile2(path, "utf8")));
     const peers = /* @__PURE__ */ new Map();
     for (const peer of parsed.peers) {
       if (peer.fingerprint !== fingerprint(peer.publicKey)) {
@@ -19765,7 +19931,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join2(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join3(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -19774,7 +19940,7 @@ var IdentityStore = class {
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
   const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join2(root, "servers", scope, role);
+  return join3(root, "servers", scope, role);
 }
 function fingerprint(publicKey) {
   const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -19792,7 +19958,7 @@ async function atomicJsonWrite(path, value, mode) {
 `, mode);
 }
 async function atomicTextWrite(path, value, mode) {
-  await mkdir(dirname2(path), { recursive: true, mode: 448 });
+  await mkdir(dirname3(path), { recursive: true, mode: 448 });
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
   await writeFile(temporary, value, { encoding: "utf8", mode, flag: "wx" });
   await chmod(temporary, mode);
@@ -19816,8 +19982,8 @@ function safeErrorMessage(error) {
 }
 
 // src/server-credentials.ts
-import { chmod as chmod2, mkdir as mkdir2, readFile as readFile2, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import { dirname as dirname4, join as join4 } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -19832,14 +19998,14 @@ var credentialSchema = external_exports.object({
 var ServerCredentialStore = class {
   path;
   constructor(directory) {
-    this.path = join3(directory, "server-credentials.json");
+    this.path = join4(directory, "server-credentials.json");
   }
   async load(serverUrl, deviceId) {
     if (!await exists2(this.path)) return void 0;
     await assertPrivateMode2(this.path);
     let parsed;
     try {
-      parsed = credentialSchema.parse(JSON.parse(await readFile2(this.path, "utf8")));
+      parsed = credentialSchema.parse(JSON.parse(await readFile3(this.path, "utf8")));
     } catch (error) {
       throw new ServerCredentialsInvalidError(`server credentials are invalid: ${safeMessage(error)}`);
     }
@@ -19859,7 +20025,7 @@ var ServerCredentialsInvalidError = class extends Error {
   code = "SERVER_CREDENTIALS_INVALID";
 };
 async function atomicWrite(path, contents) {
-  await mkdir2(dirname3(path), { recursive: true, mode: 448 });
+  await mkdir2(dirname4(path), { recursive: true, mode: 448 });
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
   await writeFile2(temporary, contents, { encoding: "utf8", mode: 384, flag: "wx" });
   await chmod2(temporary, 384);
@@ -20335,36 +20501,6 @@ function diagnosticReason2(error) {
 }
 function shortId2(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
-}
-
-// src/harness-version.ts
-import { readFile as readFile3 } from "node:fs/promises";
-import { dirname as dirname4, isAbsolute, join as join4 } from "node:path";
-var LEGACY_PLACEHOLDER_VERSION = "0.0.1";
-function normalizeHarnessVersion(value) {
-  if (typeof value !== "string") return void 0;
-  const version = value.trim();
-  if (version.length === 0 || version.length > 64 || /[\u0000-\u001f]/u.test(version)) return void 0;
-  return version;
-}
-function selectHarnessVersion(reportedVersion, distributionVersion) {
-  if (reportedVersion !== void 0 && reportedVersion !== LEGACY_PLACEHOLDER_VERSION) return reportedVersion;
-  return distributionVersion;
-}
-async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
-  if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
-  let directory = dirname4(entrypoint);
-  for (let depth = 0; depth < 8; depth += 1) {
-    try {
-      const manifest = JSON.parse(await readFile3(join4(directory, "package.json"), "utf8"));
-      if (manifest.name === "@deepseek-ai/dsh") return normalizeHarnessVersion(manifest.version);
-    } catch {
-    }
-    const parent = dirname4(directory);
-    if (parent === directory) break;
-    directory = parent;
-  }
-  return void 0;
 }
 
 // src/safe-error.ts
@@ -24498,6 +24634,9 @@ var HostPluginRuntime = class {
       accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED"
     };
   }
+  localHarnessVersion() {
+    return this.harnessVersion;
+  }
   reconnectHost() {
     if (this.closed) throw new Error("remote runtime is closed");
     if (this.serverConnection === void 0) {
@@ -24667,9 +24806,13 @@ var HostPluginRuntime = class {
   }
   hostCapabilities() {
     const capabilities = [];
-    if (this.apiProxy !== void 0) capabilities.push("harness.api.v1", "harness.api.transfer.v1");
     if (this.localGateway?.supportsCarrier === true) {
-      capabilities.push("harness.remote.v1", "harness.remote.transfer.v1");
+      capabilities.push(
+        harnessSessionGeneration(this.harnessVersion) === "v3" ? "harness.remote.v3" : "harness.remote.v1",
+        "harness.remote.transfer.v1"
+      );
+    } else if (this.apiProxy !== void 0) {
+      capabilities.push("harness.api.v1", "harness.api.transfer.v1");
     }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");

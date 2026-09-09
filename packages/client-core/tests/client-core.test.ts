@@ -216,6 +216,39 @@ describe('Remote Host feature probing', () => {
     })
   })
 
+  it('recognizes the v0.1.5 Session V3 Typert capability', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(encodeMessage(createRpcResponse(request.id, {
+      capabilities: ['harness.remote.v3', 'harness.remote.transfer.v1'],
+    })))
+
+    await expect(probing).resolves.toMatchObject({
+      apiProxy: false,
+      remoteGateway: true,
+      sessionFormat: 3,
+      remoteTransfer: true,
+    })
+  })
+
+  it('rejects a Host that advertises conflicting Session generations', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(encodeMessage(createRpcResponse(request.id, {
+      capabilities: ['harness.remote.v1', 'harness.remote.v3'],
+    })))
+
+    await expect(probing).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+  })
+
   it('falls back to ApiProxy for legacy Hosts without describe', async () => {
     const transport = new LoopbackTransport()
     const client = new RemoteClientCore(transport)
@@ -466,6 +499,62 @@ describe('HarnessAlphaClient', () => {
         { event: { type: 'assistant/chunk', seq: 3, time: 105, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'lo' } } } },
       ],
     })
+    await client.close()
+  })
+
+  it('requests and projects v0.1.5 assistant stream frames', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(
+      core as unknown as RemoteClientCore,
+      { sessionFormat: 3 },
+      frame => frames.push(frame),
+    )
+
+    const history = client.sessionHistory('session-v3')
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const streamId = core.streamIdFor('session/follow')
+    const open = core.rpcCalls.find(call => call.method === 'harness.remote.stream.open'
+      && (call.params as { streamId?: string }).streamId === streamId)
+    expect(open?.params).toMatchObject({
+      endpoint: 'session/follow',
+      payload: { args: { request: { assistantStream: true } } },
+    })
+    core.emit({ event: 'harness.remote.frame', data: { streamId, hasValue: true, value: {
+      type: 'snapshot', cursor: 4, records: [{ type: 'event', event: {
+        type: 'tool/result', seq: 4, time: 100, data: {}, sourceEventSeqs: [3],
+        surfaceOp: { op: 'replace', startSeq: 3, endSeq: 3 },
+      } }], hasMore: false,
+      projections: { asOfSeq: 4, values: {} }, assistantStream: { revision: 0 },
+    } } })
+    await expect(history).resolves.toEqual({ events: [{ event: {
+      type: 'tool/result', seq: 4, time: 100, data: {}, sourceEventSeqs: [3],
+      surfaceOp: { op: 'replace', startSeq: 3, endSeq: 3 },
+    } }], hasMore: false })
+
+    core.emit({ event: 'harness.remote.frame', data: { streamId, hasValue: true, value: {
+      type: 'assistant-stream', frame: {
+        type: 'start', attemptId: 'attempt-1', revision: 1, startedAfterSeq: 4, turn: 2, step: 1,
+      },
+    } } })
+    core.emit({ event: 'harness.remote.frame', data: { streamId, hasValue: true, value: {
+      type: 'assistant-stream', frame: {
+        type: 'chunk', attemptId: 'attempt-1', revision: 2, index: 0, time: 123,
+        chunk: { type: 'text-delta', index: 0, text: 'hello' },
+      },
+    } } })
+
+    await vi.waitFor(() => expect(frames).toContainEqual({
+      rpcId: '',
+      payload: {
+        type: 'session/event',
+        sessionId: 'session-v3',
+        event: {
+          type: 'assistant/chunk', seq: 4.5, time: 123,
+          data: { turn: 2, step: 1, chunk: { type: 'text-delta', index: 0, text: 'hello' } },
+        },
+      },
+    }))
     await client.close()
   })
 })
