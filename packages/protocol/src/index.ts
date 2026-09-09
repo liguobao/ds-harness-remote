@@ -354,27 +354,6 @@ export interface DeviceDescriptor {
   harnessVersion?: string
 }
 
-export interface SessionSummary {
-  id: string
-  title: string
-  cwd?: string
-  running: boolean
-  updatedAt?: number
-}
-
-export interface PermissionRequest {
-  requestId: string
-  sessionId: string
-  permission: {
-    kind: 'command' | 'tool' | 'workspace' | 'unknown'
-    command?: string
-    cwd?: string
-    toolName?: string
-    description?: string
-    raw?: unknown
-  }
-}
-
 export type PermissionDecision = 'allow_once' | 'deny'
 
 export interface TransportStats {
