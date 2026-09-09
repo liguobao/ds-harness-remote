@@ -1081,7 +1081,7 @@ Plugin 按 Harness 代际发送 `harness.api.frame` / `harness.api.stream.closed
 冻结 Android 原型事件（`session.created`、`session.updated`、`message.created`、
 `message.delta`、`tool.started`、`tool.updated`、`tool.finished`、
 `permission.requested`、`permission.resolved`、`agent.status`、`connection.stats`）
-已退出协议，Host 不得发送，Client 不得依赖。数据结构见 §18 历史记录。
+已退出协议，Host 不得发送，Client 不得依赖。历史类型概览见 §18。
 
 Event envelope：
 
