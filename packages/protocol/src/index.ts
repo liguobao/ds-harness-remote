@@ -83,17 +83,6 @@ export const rpcMethods = [
 ] as const
 
 export const remoteEvents = [
-  'session.created',
-  'session.updated',
-  'message.created',
-  'message.delta',
-  'tool.started',
-  'tool.updated',
-  'tool.finished',
-  'permission.requested',
-  'permission.resolved',
-  'agent.status',
-  'connection.stats',
   'harness.api.frame',
   'harness.api.stream.closed',
   'harness.remote.frame',
@@ -353,8 +342,6 @@ export interface DeviceDescriptor {
   clientVersion: string
   harnessVersion?: string
 }
-
-export type PermissionDecision = 'allow_once' | 'deny'
 
 export interface TransportStats {
   mode: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'

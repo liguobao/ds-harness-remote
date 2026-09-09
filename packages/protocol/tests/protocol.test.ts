@@ -83,8 +83,8 @@ describe('protocol envelope', () => {
   })
 
   it('carries event metadata and retryable RPC errors', () => {
-    expect(createEvent('agent.status', { status: 'idle' }, { seq: 7, sessionId: 's1' })).toMatchObject({
-      payload: { seq: 7, sessionId: 's1', event: 'agent.status' },
+    expect(createEvent('harness.api.frame', { streamId: 's1', frame: {} }, { seq: 7, sessionId: 's1' })).toMatchObject({
+      payload: { seq: 7, sessionId: 's1', event: 'harness.api.frame' },
     })
     expect(createRpcError('r1', 'RATE_LIMITED', 'Busy', undefined, true)).toMatchObject({
       payload: { requestId: 'r1', retryable: true },

@@ -778,7 +778,7 @@ Message（含 role/content 数组）、ToolCall（含 callId/input/output）和 
 
 旧 Core RPC（`system.info`、`workspace.get`、`sessions.list`、`sessions.get`、`sessions.create`、
 `session.send`、`session.stop`、`permissions.respond`、`connection.ping`、`sync.from`）
-均已退出 Plugin 协议，Host 必须拒绝。这些方法的详细签名和数据结构见 §18 历史记录。
+均已退出 Plugin 协议，Host 必须拒绝。
 
 ### Native Harness API bridge
 
@@ -1076,8 +1076,12 @@ resume；如果 App Server 因 Thread 已在本进程加载而拒绝重复 resum
 
 Plugin 按 Harness 代际发送 `harness.api.frame` / `harness.api.stream.closed`，或
 `harness.remote.frame` / `harness.remote.stream.closed`。可选 Codex 领域发送
-`codex.app.frame` / `codex.app.stream.closed`。本节其余 Remote Event 名称属于
-冻结 Android 原型，不得据此恢复 Host 事件投影层。
+`codex.app.frame` / `codex.app.stream.closed`。
+
+冻结 Android 原型事件（`session.created`、`session.updated`、`message.created`、
+`message.delta`、`tool.started`、`tool.updated`、`tool.finished`、
+`permission.requested`、`permission.resolved`、`agent.status`、`connection.stats`）
+已退出协议，Host 不得发送，Client 不得依赖。数据结构见 §18 历史记录。
 
 Event envelope：
 
@@ -1089,80 +1093,13 @@ Event envelope：
   "timestamp": 1786000000000,
   "payload": {
     "seq": 8272,
-    "event": "message.delta",
-    "sessionId": "session-1",
+    "event": "harness.api.frame",
     "data": {}
   }
 }
 ```
 
 `seq` 在同一 Host identity 上严格递增。重放必须保留原始 seq/id/timestamp。
-
-### `session.created`
-
-data：`SessionSummary`
-
-### `session.updated`
-
-data：完整 `SessionSummary`。v1 不发送隐式 merge patch，避免不同客户端产生不同状态。
-
-### `message.created`
-
-data：`Message`。Streaming assistant message 首次创建时 `status: streaming`。
-
-### `message.delta`
-
-```json
-{
-  "messageId": "message-1",
-  "deltaIndex": 3,
-  "delta": "next chunk",
-  "final": false,
-  "finishReason": null
-}
-```
-
-`deltaIndex` 对同一 message 从 0 连续递增。最后一帧 `final: true`，可携带 `finishReason`。Client 检测 gap 时必须 resync，不能静默拼接。
-
-### `tool.started`, `tool.updated`, `tool.finished`
-
-data：`ToolCall` 的当前完整值。`tool.finished` 的 status 为 `success`, `error` 或 `cancelled`。
-
-### `permission.requested`
-
-data：`PermissionRequest`。
-
-### `permission.resolved`
-
-```json
-{
-  "requestId": "permission-1",
-  "outcome": "allowed-once",
-  "resolvedAt": 1786000000000
-}
-```
-
-Harness outcome enum：`allowed-once`, `rejected`, `cancelled`, `unavailable`。Client decision 与 Host outcome 不完全相同。
-
-### `agent.status`
-
-```json
-{ "status": "running" }
-```
-
-status：`idle`, `running`, `stopping`, `disposed`, `error`。
-
-### `connection.stats`
-
-```json
-{
-  "mode": "Relay",
-  "connected": true,
-  "rttMs": 86,
-  "bytesSent": 1024,
-  "bytesReceived": 2048
-}
-```
 
 ### `harness.api.frame`
 
