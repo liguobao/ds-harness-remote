@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.11
+
+- Adds experimental DeepSeek Harness `dsh-v0.1.5-alpha.1` support across the
+  Desktop Plugin, Android, and VS Code Typert clients.
+- Advertises Session V3 Hosts with `harness.remote.v3` and rejects Desktop
+  v0.1.2/V3 mixed connections before switching targets or mutating a Workspace.
+- Updates the CodeX native projection for Session V3 headers, replacement ranges,
+  assistant settlement streams, and strict event validation while retaining the
+  `dsh-v0.1.2-alpha.1`–`rc.1` path.
+- Narrows DSH peer dependency ranges to versions covered by the compatibility
+  matrix and advances the Plugin and Android app to `0.4.11` (`versionCode 28`).
+
 ## 0.4.10
 
 - Fixes Web and Desktop Codex approval controls to show Host-confirmed policy,

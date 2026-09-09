@@ -16,6 +16,7 @@ import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { uuidV7 } from './ids.js'
 import type { SafeLogger } from './logging.js'
+import { harnessSessionGeneration } from './harness-version.js'
 import { RemoteHarnessApiProxy } from './remote-api-proxy.js'
 import { RemoteTypertGateway } from './remote-typert-gateway.js'
 import {
@@ -42,6 +43,7 @@ interface ConnectedRemote {
   features: RemoteHostFeatures
   progressRunId: number
   clientVersion?: string
+  harnessVersion?: string
 }
 
 export interface RemoteHostFeatures {
@@ -49,6 +51,7 @@ export interface RemoteHostFeatures {
   fileViewer: boolean
   apiProxy: boolean
   remoteGateway: boolean
+  sessionFormat?: 3
   codex: boolean
 }
 
@@ -137,6 +140,7 @@ export interface HostAuthorizationControl {
   }
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>
+  localHarnessVersion?(): string | undefined
   authorizeHostAsOwned(accessToken: string, account?: string): Promise<unknown>
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>
   authorizeHostWithCode(code: string): Promise<unknown>
@@ -439,7 +443,7 @@ export class ClientModeRuntime {
     const virtual = CodexVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    })
+    }, harnessSessionGeneration(this.host?.localHarnessVersion?.()))
     let workspace: CodexVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
@@ -713,8 +717,16 @@ export class ClientModeRuntime {
 
   private assertRemoteCompatible(remote: ConnectedRemote): void {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier()
-    if ((localRemoteGateway && remote.features.remoteGateway)
-      || (!localRemoteGateway && this.proxySwitch !== undefined && remote.features.apiProxy)) return
+    if (localRemoteGateway && remote.features.remoteGateway) {
+      const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.())
+      const remoteSessionGeneration = remote.features.sessionFormat === 3 ? 'v3' : 'legacy'
+      if (localSessionGeneration === remoteSessionGeneration) return
+      throw new ClientModeError(
+        'HARNESS_VERSION_INCOMPATIBLE',
+        `The local and remote Harness Session formats differ (${localSessionGeneration} vs ${remoteSessionGeneration}).`,
+      )
+    }
+    if (!localRemoteGateway && this.proxySwitch !== undefined && remote.features.apiProxy) return
     throw new ClientModeError(
       'HARNESS_VERSION_INCOMPATIBLE',
       localRemoteGateway
@@ -853,6 +865,7 @@ export class ClientModeRuntime {
         features,
         progressRunId,
         ...(serverDevice.clientVersion === undefined ? {} : { clientVersion: serverDevice.clientVersion }),
+        ...(serverDevice.harnessVersion === undefined ? {} : { harnessVersion: serverDevice.harnessVersion }),
       }
     } catch (error) {
       this.clearConnectionProgress(progressRunId)
@@ -1254,7 +1267,13 @@ export async function probeRemoteHostFeatures(
   }
   const capabilities = new Set(value.capabilities as string[])
   const apiProxy = capabilities.has('harness.api.v1')
-  const remoteGateway = capabilities.has('harness.remote.v1')
+  const remoteV1 = capabilities.has('harness.remote.v1')
+  const remoteV3 = capabilities.has('harness.remote.v3')
+  if (remoteV1 && remoteV3) {
+    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
+  }
+  const sessionFormat = remoteV3 ? 3 as const : undefined
+  const remoteGateway = remoteV3 || remoteV1
   if (!apiProxy && !remoteGateway) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
@@ -1263,6 +1282,7 @@ export async function probeRemoteHostFeatures(
     fileViewer: capabilities.has('fileviewer.read.v1'),
     apiProxy,
     remoteGateway,
+    ...(sessionFormat === undefined ? {} : { sessionFormat }),
     codex: capabilities.has('codex.appserver.v1'),
   }
 }

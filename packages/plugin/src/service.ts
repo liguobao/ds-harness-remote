@@ -5,6 +5,7 @@ import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
 import {
+  harnessSessionGeneration,
   normalizeHarnessVersion,
   readHarnessDistributionVersion,
   selectHarnessVersion,
@@ -148,6 +149,10 @@ export class HostPluginRuntime {
       authorized: authorization !== undefined,
       accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED',
     }
+  }
+
+  localHarnessVersion(): string | undefined {
+    return this.harnessVersion
   }
 
   reconnectHost(): void {
@@ -341,9 +346,13 @@ export class HostPluginRuntime {
 
   private hostCapabilities(): string[] {
     const capabilities: string[] = []
-    if (this.apiProxy !== undefined) capabilities.push('harness.api.v1', 'harness.api.transfer.v1')
     if (this.localGateway?.supportsCarrier === true) {
-      capabilities.push('harness.remote.v1', 'harness.remote.transfer.v1')
+      capabilities.push(
+        harnessSessionGeneration(this.harnessVersion) === 'v3' ? 'harness.remote.v3' : 'harness.remote.v1',
+        'harness.remote.transfer.v1',
+      )
+    } else if (this.apiProxy !== undefined) {
+      capabilities.push('harness.api.v1', 'harness.api.transfer.v1')
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')

@@ -3,6 +3,8 @@ import { dirname, isAbsolute, join } from 'node:path'
 
 const LEGACY_PLACEHOLDER_VERSION = '0.0.1'
 
+export type HarnessSessionGeneration = 'legacy' | 'v3'
+
 export function normalizeHarnessVersion(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const version = value.trim()
@@ -16,6 +18,21 @@ export function selectHarnessVersion(
 ): string | undefined {
   if (reportedVersion !== undefined && reportedVersion !== LEGACY_PLACEHOLDER_VERSION) return reportedVersion
   return distributionVersion
+}
+
+/**
+ * Select the Typert Session wire generation used by supported DSH builds.
+ * Unknown builds stay on the established v0.1.2 profile; package peer ranges
+ * prevent them from being presented as supported installations.
+ */
+export function harnessSessionGeneration(version: string | undefined): HarnessSessionGeneration {
+  if (version === undefined) return 'legacy'
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim())
+  if (match === null) return 'legacy'
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  const patch = Number(match[3])
+  return major === 0 && minor === 1 && patch >= 5 ? 'v3' : 'legacy'
 }
 
 /**

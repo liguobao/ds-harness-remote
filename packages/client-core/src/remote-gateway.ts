@@ -20,6 +20,7 @@ export interface RemoteHostFeatures {
   apiProxy: boolean
   apiTransfer: boolean
   remoteGateway: boolean
+  sessionFormat?: 3
   remoteTransfer: boolean
   capabilities: readonly string[]
 }
@@ -89,7 +90,13 @@ export async function probeRemoteHostFeatures(
   const description = value as unknown as HarnessTransportDescription
   const capabilities = new Set(description.capabilities)
   const apiProxy = capabilities.has('harness.api.v1')
-  const remoteGateway = capabilities.has('harness.remote.v1')
+  const remoteV1 = capabilities.has('harness.remote.v1')
+  const remoteV3 = capabilities.has('harness.remote.v3')
+  if (remoteV1 && remoteV3) {
+    throw new RemoteGatewayError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
+  }
+  const sessionFormat = remoteV3 ? 3 as const : undefined
+  const remoteGateway = remoteV3 || remoteV1
   if (!apiProxy && !remoteGateway) {
     throw new RemoteGatewayError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
@@ -99,6 +106,7 @@ export async function probeRemoteHostFeatures(
     apiProxy,
     apiTransfer: capabilities.has('harness.api.transfer.v1') || apiProxy,
     remoteGateway,
+    ...(sessionFormat === undefined ? {} : { sessionFormat }),
     remoteTransfer: capabilities.has('harness.remote.transfer.v1'),
     capabilities: description.capabilities,
   }

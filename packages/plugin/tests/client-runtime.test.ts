@@ -47,6 +47,18 @@ describe('ClientModeRuntime Host account control', () => {
       codex: true,
     })
 
+    alphaClient.rpc.mockResolvedValueOnce({
+      capabilities: ['transport.relay', 'harness.remote.v3', 'harness.remote.transfer.v1'],
+    })
+    await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.11')).resolves.toEqual({
+      commandList: true,
+      fileViewer: false,
+      apiProxy: false,
+      remoteGateway: true,
+      sessionFormat: 3,
+      codex: false,
+    })
+
     const legacyClient = {
       rpc: vi.fn(async () => {
         throw Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' })
@@ -526,6 +538,35 @@ describe('ClientModeRuntime Host account control', () => {
     expect(legacyRuntime.status()).toMatchObject({ mode: 'local' })
     await alphaRuntime.close()
     await legacyRuntime.close()
+  })
+
+  it('rejects v0.1.2 and Session V3 Typert peers before a Workspace mutation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-session-format-mismatch-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      undefined,
+      gatewayWithCarrier(),
+      logger(),
+      { localHarnessVersion: () => '0.1.5-alpha.1' } as unknown as HostAuthorizationControl,
+    )
+    await runtime.start()
+    const rpc = vi.fn()
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
+      target: {
+        deviceId: 'host-device-v2', name: 'V2 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
+      },
+      transport: {},
+      features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, codex: false },
+    }
+
+    await expect(runtime.openRemoteWorkspace('host-device-v2', '/srv/project'))
+      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
+    expect(rpc).not.toHaveBeenCalled()
+    await runtime.close()
   })
 
   it('exposes Host authorization status and forwards login only through loopback control', async () => {

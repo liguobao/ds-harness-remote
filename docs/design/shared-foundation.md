@@ -5,7 +5,7 @@
 ## 1. 目的
 
 统一 Desktop 双角色 Plugin 与外部 Server 的身份、加密、连接和传输边界。Harness 业务层以
-rc.2 官方 `ApiProxy` 或 v0.1.2 alpha.1–rc.1 官方 Typert Remote Gateway 为唯一事实来源；可选文件预览以 `dsh-file-viewer` provider 为唯一授权来源，
+rc.2 官方 `ApiProxy`、v0.1.2 alpha.1–rc.1 或 v0.1.5 alpha.1 Session V3 官方 Typert Remote Gateway 为唯一事实来源；可选文件预览以 `dsh-file-viewer` provider 为唯一授权来源，
 不再维护平行的 Remote Session/Event 或文件系统协议。
 Android 与 VS Code Client 复用同一 capability 探测，在 rc.2 ApiProxy 和 v0.1.2 Typert Remote carrier 之间选择数据面。
 
