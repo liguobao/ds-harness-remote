@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, Settings, ShieldCheck } from 'lucide-react-native'
+import { ActivityIndicator, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, ShieldCheck } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession } from '../types'
 import {
@@ -22,27 +22,37 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveSessionDisplayTitle } from './session-title'
 
-export function DevicesScreen({ onDevice, onMore }: {
+export function DevicesScreen({ onDevice, onBack }: {
   onDevice: (device: RemoteDevice) => void
-  onMore: () => void
+  onBack?: () => void
 }) {
   const devices = useAppStore(state => state.devices)
   const refreshing = useAppStore(state => state.refreshing)
   const refresh = useAppStore(state => state.refreshDevices)
-  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
   return (
     <View style={styles.flex}>
-      <TopBar title="DSH Remote" action={<IconButton label={zhCN.settings.more} icon={Settings} onPress={onMore} />} />
+      <TopBar
+        title={onBack === undefined ? 'DSH Remote' : zhCN.devices.myDevices}
+        onBack={onBack}
+      />
       <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
-        <View style={styles.pageHeading}>
-          <View>
-            <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
-            <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
+        {onBack === undefined && (
+          <View style={styles.pageHeading}>
+            <View>
+              <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
+              <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
+            </View>
+            <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
           </View>
-          <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
-        </View>
+        )}
+        {onBack !== undefined && (
+          <View style={styles.pageHeading}>
+            <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
+            <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
+          </View>
+        )}
 
         {refreshing && devices.length === 0
           ? <LoadingRows />
@@ -70,6 +80,7 @@ export function DevicesScreen({ onDevice, onMore }: {
 }
 
 const connectionStages = ['authenticating', 'transport', 'secure', 'loading'] as const satisfies readonly ConnectionStage[]
+const CONNECTION_STUCK_MS = 3000
 
 export function ConnectionScreen({ device, onBack, onConnected }: {
   device: RemoteDevice
@@ -84,6 +95,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const disconnect = useAppStore(state => state.disconnect)
   const clearError = useAppStore(state => state.clearError)
   const [attempt, setAttempt] = useState(0)
+  const [stuck, setStuck] = useState(false)
   const launchedAttempt = useRef(-1)
   const leaving = useRef(false)
   const onConnectedRef = useRef(onConnected)
@@ -119,12 +131,39 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const failed = selectedDevice?.deviceId === device.deviceId
     && connection.phase === 'offline'
     && connection.error !== undefined
+  const showBack = failed || stuck
+
+  // Reveal cancel after a stage stalls, or immediately on failure.
+  useEffect(() => {
+    if (failed) {
+      setStuck(true)
+      return
+    }
+    if (currentStage === 'ready') {
+      setStuck(false)
+      return
+    }
+    setStuck(false)
+    const timer = setTimeout(() => setStuck(true), CONNECTION_STUCK_MS)
+    return () => clearTimeout(timer)
+  }, [attempt, currentStage, failed])
 
   const cancel = () => {
     leaving.current = true
     void disconnect()
     onBack()
   }
+  const cancelRef = useRef(cancel)
+  cancelRef.current = cancel
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!showBack) return true
+      cancelRef.current()
+      return true
+    })
+    return () => subscription.remove()
+  }, [showBack])
 
   const retry = () => {
     clearError()
@@ -133,7 +172,11 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
 
   return (
     <View style={styles.flex}>
-      <TopBar title={zhCN.devices.connectingTitle} onBack={cancel} />
+      {showBack && (
+        <View style={styles.connectionBack}>
+          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={cancel} />
+        </View>
+      )}
       <Screen>
         <View style={styles.connectionHero}>
           <View style={styles.connectionDeviceIcon}><Laptop size={30} color={colors.primary} /></View>
@@ -516,6 +559,7 @@ function createStyles(colors: ThemeColors) {
   pageHeading: { paddingTop: spacing.xxl, paddingBottom: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { ...type.title, color: colors.ink },
   subtitle: { ...type.small, color: colors.muted, marginTop: 2 },
+  connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
   connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
   connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
   connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xxs },

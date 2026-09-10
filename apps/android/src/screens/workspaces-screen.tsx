@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, Laptop, MessageSquareText, MoreVertical, Pencil, Search, Trash2, X } from 'lucide-react-native'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MessageSquareText, MoreVertical, Pencil, Search, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
+import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -11,12 +11,14 @@ import { strings as zhCN } from '../locales/i18n'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { resolveSessionDisplayTitle } from './session-title'
 
-export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
-  onBack: () => void
+export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
+  onBack?: () => void
   onSession: (session: RemoteSession) => void
   onDeviceInfo: () => void
+  onMore?: () => void
 }) {
   const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connection = useAppStore(state => state.connection)
   const codexAvailable = useAppStore(state => state.codexAvailable)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
@@ -134,27 +136,29 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
     void workspaceMove(actionsTarget.workspaceId, beforeWorkspaceId)
   }
 
+  const connectionStatusLabel = workspaceConnectionStatus(connection.phase, connection.stats.mode)
+  const deviceSubtitle = selectedDevice === undefined
+    ? zhCN.workspaces.noDevice
+    : zhCN.workspaces.deviceSubtitle(selectedDevice.name, connectionStatusLabel)
+
   return (
     <View style={styles.flex}>
       <TopBar
         title={zhCN.workspaces.title}
+        subtitle={deviceSubtitle}
+        onSubtitlePress={onDeviceInfo}
         onBack={onBack}
-        action={<IconButton label={zhCN.workspaces.deviceInfo} icon={Laptop} onPress={onDeviceInfo} />}
+        action={(
+          <View style={styles.topBarActions}>
+            <IconButton label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />
+            {onMore !== undefined && (
+              <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
+            )}
+          </View>
+        )}
       />
       <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
-        <View style={styles.pageHeading}>
-          <View style={styles.pageHeadingCopy}>
-            <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
-              {selectedDevice === undefined ? zhCN.workspaces.title : zhCN.workspaces.deviceTitle(selectedDevice.name)}
-            </Text>
-          </View>
-          <IconButton
-            label={zhCN.workspaces.create}
-            icon={CirclePlus}
-            onPress={() => setCreateOpen(true)}
-          />
-        </View>
-        {codexAvailable && <View style={styles.backendTabs} accessibilityRole="tablist">
+        {codexAvailable && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">
           <Pressable
             accessibilityRole="tab"
             accessibilityState={{ selected: activeBackend === 'harness' }}
@@ -180,36 +184,42 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo }: {
             <Text style={[styles.backendTabText, activeBackend === 'codex' && styles.backendTabTextActive]}>{zhCN.workspaces.codex}</Text>
           </Pressable>
         </View>}
-        {backendWorkspaces.length > 0 && <View style={styles.searchField}>
-          <Search size={18} color={colors.muted} />
-          <TextInput
-            accessibilityLabel={zhCN.workspaces.search}
-            style={styles.searchInput}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder={zhCN.workspaces.search}
-            placeholderTextColor={colors.muted}
-            returnKeyType="search"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {searchQuery.length > 0 && <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={zhCN.workspaces.clearSearch}
-            hitSlop={8}
-            onPress={() => setSearchQuery('')}
-            style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
-          >
-            <X size={17} color={colors.muted} />
-          </Pressable>}
-        </View>}
-        {backendWorkspaces.length === 0
-          ? <EmptyState
-              icon={FolderOpen}
-              title={zhCN.workspaces.emptyTitle}
-              body={zhCN.workspaces.emptyBody}
-              action={<Button label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />}
+        {backendWorkspaces.length > 0 && (
+          <View style={[styles.searchField, !codexAvailable && styles.contentTop]}>
+            <Search size={18} color={colors.muted} />
+            <TextInput
+              accessibilityLabel={zhCN.workspaces.search}
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={zhCN.workspaces.search}
+              placeholderTextColor={colors.muted}
+              returnKeyType="search"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
+            {searchQuery.length > 0 && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.workspaces.clearSearch}
+                hitSlop={8}
+                onPress={() => setSearchQuery('')}
+                style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
+              >
+                <X size={17} color={colors.muted} />
+              </Pressable>
+            )}
+          </View>
+        )}
+        {backendWorkspaces.length === 0
+          ? <View style={!codexAvailable ? styles.contentTop : undefined}>
+              <EmptyState
+                icon={FolderOpen}
+                title={zhCN.workspaces.emptyTitle}
+                body={zhCN.workspaces.emptyBody}
+                action={<Button label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />}
+              />
+            </View>
           : filteredWorkspaces.length === 0
             ? <EmptyState
                 icon={Search}
@@ -398,6 +408,17 @@ function initialWorkspaceBackend(workspaces: readonly WorkspaceView[], codexAvai
   const hasHarnessWorkspace = workspaces.some(workspace => workspace.backend !== 'codex')
   const hasCodexWorkspace = workspaces.some(workspace => workspace.backend === 'codex')
   return !hasHarnessWorkspace && hasCodexWorkspace ? 'codex' : 'harness'
+}
+
+function workspaceConnectionStatus(phase: ConnectionPhase, mode: string | undefined): string {
+  if (phase === 'connecting' || phase === 'reconnecting') return zhCN.status.waiting
+  if (phase === 'offline') return zhCN.status.offline
+  if (phase !== 'connected') return zhCN.status.disconnected
+  if (mode === 'LAN') return zhCN.status.lan
+  if (mode === 'P2P' || mode === 'WebRTC') return zhCN.status.p2p
+  if (mode === 'TURN') return zhCN.status.turn
+  if (mode === 'Relay') return zhCN.status.relay
+  return zhCN.status.online
 }
 
 function CreateWorkspaceModal({ visible, codexAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
@@ -645,10 +666,8 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  pageHeading: { paddingTop: spacing.xxl, paddingBottom: spacing.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  pageHeadingCopy: { flex: 1 },
-  title: { ...type.title, color: colors.ink },
-  subtitle: { ...type.small, color: colors.muted, marginTop: 2 },
+  topBarActions: { flexDirection: 'row', alignItems: 'center' },
+  contentTop: { marginTop: spacing.md },
   backendTabs: { flexDirection: 'row', padding: spacing.xxs, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, marginBottom: spacing.md },
   backendTab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs },
   backendTabActive: { backgroundColor: colors.surface },

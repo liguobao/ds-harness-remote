@@ -15,7 +15,7 @@ import {
   type AppLanguage,
   type LanguagePreference,
 } from '../locales/i18n'
-import { friendlyError, isRpcTimeoutError } from '../lib/errors'
+import { friendlyError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import {
   loginFlow,
@@ -47,10 +47,14 @@ import { AndroidRemoteConnection } from '../services/connection'
 import { reconcileTrustedDevices } from '../services/device-directory'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
+import { resolveAutoConnectDevice } from '../lib/auto-connect'
 import {
   clearLocalData,
   clearCodexPermissionPresets,
+  clearDeviceCredentials,
+  clearLastConnectedDeviceId,
   forgetHost,
+  loadLastConnectedDeviceId,
   loadOrCreateIdentity,
   loadLanguagePreference,
   loadCodexPermissionPresets,
@@ -59,6 +63,7 @@ import {
   loadTransportPreference,
   loadTrustedHosts,
   saveLanguagePreference,
+  saveLastConnectedDeviceId,
   saveCodexPermissionPreset,
   saveServerConfig,
   saveThemePreference,
@@ -126,8 +131,16 @@ interface AppState {
   refreshing: boolean
   busyAction?: string
   error?: string
+  /** Remembered host from the last successful connect (persisted). */
+  lastConnectedDeviceId?: string
+  /** Set during bootstrap when that host is trusted + online; consumed by the navigator. */
+  pendingAutoConnectDeviceId?: string
+  /** True when credentials are invalid and the UI should show the sign-in screen. */
+  reauthRequired: boolean
 
   bootstrap(): Promise<void>
+  requireReauth(message?: string): Promise<void>
+  consumePendingAutoConnect(): string | undefined
   configureServer(input: string, email: string, password: string): Promise<boolean>
   startOAuth(input: string): Promise<string | undefined>
   startGithubOAuth(input: string): Promise<string | undefined>
@@ -197,23 +210,61 @@ export const useAppStore = create<AppState>((set, get) => ({
   themePreference: 'system',
   authPhase: 'idle',
   refreshing: false,
+  reauthRequired: false,
 
   async bootstrap() {
-    set({ bootPhase: 'loading', error: undefined })
+    set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
     try {
-      const [config, identity, transportPreference, languagePreference, themePreference] = await Promise.all([
+      const [config, identity, transportPreference, languagePreference, themePreference, lastConnectedDeviceId] = await Promise.all([
         loadServerConfig(),
         loadOrCreateIdentity(),
         loadTransportPreference(),
         loadLanguagePreference(),
         loadThemePreference(),
+        loadLastConnectedDeviceId(),
       ])
       const language = applyLanguagePreference(languagePreference)
-      set({ config, identity, account: config?.account, transportPreference, languagePreference, language, themePreference, bootPhase: 'ready' })
-      if (config !== undefined) await get().refreshDevices()
+      set({
+        config,
+        identity,
+        account: config?.account,
+        transportPreference,
+        languagePreference,
+        language,
+        themePreference,
+        lastConnectedDeviceId,
+      })
+      let pendingAutoConnectDeviceId: string | undefined
+      if (config !== undefined) {
+        await get().refreshDevices()
+        if (!get().reauthRequired) {
+          pendingAutoConnectDeviceId = resolveAutoConnectDevice(get().devices, lastConnectedDeviceId)?.deviceId
+        }
+      }
+      set({ bootPhase: 'ready', pendingAutoConnectDeviceId })
     } catch (error) {
       set({ bootPhase: 'error', error: friendlyError(error) })
     }
+  },
+
+  async requireReauth(message) {
+    await get().disconnect()
+    await clearDeviceCredentials()
+    const config = get().config
+    const nextConfig = config === undefined
+      ? undefined
+      : { baseUrl: config.baseUrl, ...(config.loginMethod === undefined ? {} : { loginMethod: config.loginMethod }) }
+    if (nextConfig !== undefined) await saveServerConfig(nextConfig)
+    set({
+      config: nextConfig,
+      account: undefined,
+      devices: [],
+      pendingAutoConnectDeviceId: undefined,
+      refreshing: false,
+      busyAction: undefined,
+      reauthRequired: true,
+      error: message,
+    })
   },
 
   async configureServer(input, email, password) {
@@ -298,6 +349,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       set({ devices: result.devices, refreshing: false })
     } catch (error) {
+      if (isSessionAuthError(error)) {
+        await get().requireReauth(friendlyError(error))
+        return
+      }
       set({ refreshing: false, error: friendlyError(error) })
     }
   },
@@ -443,13 +498,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessions: [...sessions, ...codexSessions],
           connectionStage: 'ready',
           connectionNetworkDetails,
+          lastConnectedDeviceId: device.deviceId,
+          pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: connection.getStats() ?? { mode: 'Relay', connected: true } },
           ...(codexError === undefined ? {} : { error: codexError }),
         }
       })
+      await saveLastConnectedDeviceId(device.deviceId)
       return true
     } catch (error) {
       await connection.close()
+      if (isSessionAuthError(error)) {
+        await get().requireReauth(friendlyError(error))
+        return false
+      }
       const message = friendlyError(error)
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: message },
@@ -458,6 +520,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       return false
     }
+  },
+
+  consumePendingAutoConnect() {
+    const deviceId = get().pendingAutoConnectDeviceId
+    if (deviceId !== undefined) set({ pendingAutoConnectDeviceId: undefined })
+    return deviceId
   },
 
   async reconnect(options = {}) {
@@ -1053,8 +1121,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (get().selectedDevice?.deviceId === deviceId) await get().disconnect()
       await forgetHost(deviceId)
       await clearCodexPermissionPresets(deviceId)
+      const clearedLast = get().lastConnectedDeviceId === deviceId
+      if (clearedLast) await clearLastConnectedDeviceId()
       set(state => ({
         devices: state.devices.filter(device => device.deviceId !== deviceId),
+        lastConnectedDeviceId: clearedLast ? undefined : state.lastConnectedDeviceId,
+        pendingAutoConnectDeviceId: state.pendingAutoConnectDeviceId === deviceId
+          ? undefined
+          : state.pendingAutoConnectDeviceId,
         busyAction: undefined,
       }))
       return true
@@ -1069,7 +1143,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     await clearLocalData()
     const identity = await loadOrCreateIdentity()
     const language = applyLanguagePreference('system')
-    set({ ...initialData(), identity, languagePreference: 'system', language, themePreference: 'system', bootPhase: 'ready' })
+    set({
+      ...initialData(),
+      identity,
+      languagePreference: 'system',
+      language,
+      themePreference: 'system',
+      lastConnectedDeviceId: undefined,
+      pendingAutoConnectDeviceId: undefined,
+      reauthRequired: false,
+      bootPhase: 'ready',
+    })
   },
 
   async signOut() {
@@ -1087,7 +1171,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     await saveLanguagePreference(languagePreference)
     await saveThemePreference(themePreference)
     const nextIdentity = await loadOrCreateIdentity()
-    set({ ...initialData(), identity: nextIdentity, bootPhase: 'ready' })
+    set({
+      ...initialData(),
+      identity: nextIdentity,
+      lastConnectedDeviceId: undefined,
+      pendingAutoConnectDeviceId: undefined,
+      reauthRequired: false,
+      bootPhase: 'ready',
+    })
   },
 
   async setTransportPreference(preference) {
@@ -1337,16 +1428,18 @@ async function finalizeLogin(
     busyAction: undefined,
     devices: [],
     authPhase: 'complete',
+    reauthRequired: false,
+    error: undefined,
   })
   await get().refreshDevices()
-  return true
+  return !get().reauthRequired
 }
 
 function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'workspaces' |
   'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
-  'connectionProbeOrder' | 'connectionNetworkDetails'> {
+  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired'> {
   return {
     config: undefined,
     account: undefined,
@@ -1373,5 +1466,6 @@ function initialData(): Pick<AppState,
     refreshing: false,
     busyAction: undefined,
     error: undefined,
+    reauthRequired: false,
   }
 }

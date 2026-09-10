@@ -33,29 +33,57 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh 
       showsVerticalScrollIndicator={false}
       refreshControl={onRefresh === undefined
         ? undefined
-        : <RefreshControl
+        : (
+          <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             colors={[colors.primary]}
             progressBackgroundColor={colors.surface}
             tintColor={colors.primary}
-          />}
+          />
+        )}
     >
       {children}
     </ScrollView>
   )
 }
 
-export function TopBar({ title, onBack, action }: { title: string; onBack?: () => void; action?: ReactNode }) {
+export function TopBar({ title, subtitle, onSubtitlePress, onBack, action }: {
+  title: string
+  subtitle?: string
+  onSubtitlePress?: () => void
+  onBack?: () => void
+  action?: ReactNode
+}) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const hasSubtitle = subtitle !== undefined && subtitle.length > 0
   return (
-    <View style={styles.topBar}>
+    <View style={[styles.topBar, hasSubtitle && styles.topBarWithSubtitle]}>
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} />
         )}
       </View>
-      <Text style={styles.topBarTitle} numberOfLines={1}>{title}</Text>
+      <View style={styles.topBarTitles}>
+        <Text style={styles.topBarTitle} numberOfLines={1}>{title}</Text>
+        {hasSubtitle && (
+          onSubtitlePress === undefined
+            ? <Text style={styles.topBarSubtitle} numberOfLines={1}>{subtitle}</Text>
+            : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={subtitle}
+                onPress={onSubtitlePress}
+                hitSlop={4}
+                style={({ pressed }) => [styles.topBarSubtitleRow, pressed && styles.iconButtonPressed]}
+              >
+                <Text style={styles.topBarSubtitle} numberOfLines={1}>{subtitle}</Text>
+                <ChevronRight size={14} color={colors.subtle} />
+              </Pressable>
+            )
+        )}
+      </View>
       <View style={[styles.topBarSide, styles.topBarTrailing]}>{action}</View>
     </View>
   )
@@ -283,10 +311,14 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
     screenContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
-    topBar: { height: 60, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator, backgroundColor: colors.surface },
-    topBarSide: { width: 52, alignItems: 'flex-start' },
-    topBarTrailing: { alignItems: 'flex-end' },
-    topBarTitle: { ...type.heading, flex: 1, textAlign: 'center', color: colors.ink },
+    topBar: { minHeight: 60, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator, backgroundColor: colors.surface },
+    topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
+    topBarSide: { minWidth: 52, flexDirection: 'row', alignItems: 'center' },
+    topBarTrailing: { justifyContent: 'flex-end' },
+    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 1 },
+    topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink },
+    topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
+    topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
     button: { minHeight: 50, paddingHorizontal: spacing.lg, borderRadius: radius.md, flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
