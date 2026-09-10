@@ -1,10 +1,10 @@
 ## English
 
-`v0.4.12` upgrades DeepSeek Harness `dsh-v0.1.5` support to `rc.1`, keeps the existing rc.2 and v0.1.2 compatibility paths, and adds a Remote-side fallback for released sessions that still name the retired `code` agent preset. It contains the changes since `v0.4.10` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)).
+`v0.4.12` supports DeepSeek Harness `dsh-v0.1.5-rc.1`, keeps the existing rc.2 and v0.1.2 compatibility paths, and adds a Remote-side fallback for released sessions that still name the retired `code` agent preset. It contains the changes since `v0.4.10` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)).
 
 ### What changed
 
-- Updates the Plugin, Android, and VS Code Typert clients from the `dsh-v0.1.5-alpha.1` compatibility baseline to `dsh-v0.1.5-rc.1`.
+- Adds `dsh-v0.1.5-rc.1` Session V3 support across the Plugin, Android app, and VS Code Typert client.
 - Keeps `dsh-v0.1.1-rc.2` on the official legacy ApiProxy path and `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` on the official Typert Remote Gateway path.
 - Preserves the Session V3 capability contract and rejects mixed v0.1.2/V3 Desktop connections before switching native UI state or mutating a Workspace.
 - Normalizes released sessions that still report `agentPreset: "code"` to `ptc` in the Plugin adapter, Android app, and shared Typert Remote client. This keeps old Remote sessions resumable on `dsh-v0.1.5-rc.1` without patching DeepSeek Harness itself.
@@ -26,11 +26,11 @@ dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 
 ## 中文
 
-`v0.4.12` 将 DeepSeek Harness `dsh-v0.1.5` 兼容基线升级到 `rc.1`，保留既有 rc.2 与 v0.1.2 兼容路径，并在 Remote 自己的边界里为仍记录已退役 `code` agent preset 的旧会话增加兜底。本版本包含自 `v0.4.10` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)）。
+`v0.4.12` 支持 DeepSeek Harness `dsh-v0.1.5-rc.1`，保留既有 rc.2 与 v0.1.2 兼容路径，并在 Remote 自己的边界里为仍记录已退役 `code` agent preset 的旧会话增加兜底。本版本包含自 `v0.4.10` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)）。
 
 ### 主要变更
 
-- Plugin、Android 和 VS Code Typert Client 的 `dsh-v0.1.5` 兼容基线从 `alpha.1` 升级到 `rc.1`。
+- Plugin、Android App 和 VS Code Typert Client 都已支持 `dsh-v0.1.5-rc.1` Session V3。
 - `dsh-v0.1.1-rc.2` 继续走官方 legacy ApiProxy 路径，`dsh-v0.1.2-alpha.1` 到 `dsh-v0.1.2-rc.1` 继续走官方 Typert Remote Gateway 路径。
 - 保留 Session V3 capability 契约，并在切换原生 UI 状态或修改 Workspace 前拒绝 Desktop v0.1.2/V3 混连。
 - Plugin adapter、Android App 和共享 Typert Remote Client 会把旧会话仍上报的 `agentPreset: "code"` 归一为 `ptc`，让旧 Remote 会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改 DeepSeek Harness 本身。
