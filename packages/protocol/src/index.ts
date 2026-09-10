@@ -365,6 +365,28 @@ export const transportCapabilities = [
   'transport.relay',
 ] as const
 
+/**
+ * Universe of known harness/transfer/file-viewer/codex capability values (§17).
+ *
+ * This is a reference set for type checking and validation, NOT a capability
+ * set that a Host may advertise wholesale.  A Typert Host must advertise only
+ * the capability matching its Session generation (harness.remote.v1 XOR
+ * harness.remote.v3); advertising both is a protocol violation.
+ */
+export const harnessCapabilityValues = [
+  'harness.api.v1',
+  'harness.api.transfer.v1',
+  'harness.remote.v1',
+  'harness.remote.v3',
+  'harness.remote.transfer.v1',
+  'fileviewer.read.v1',
+  'codex.appserver.v1',
+  'codex.appserver.transfer.v1',
+] as const
+
+export type TransportCapability = typeof transportCapabilities[number]
+export type HarnessCapabilityValue = typeof harnessCapabilityValues[number]
+
 export function selectProtocolVersion(
   offered: readonly number[],
   supported: readonly number[] = [PROTOCOL_VERSION],
