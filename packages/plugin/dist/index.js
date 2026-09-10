@@ -14509,6 +14509,7 @@ function normalizeRecords(value) {
   const records = [];
   let previousSeq;
   for (const record6 of value) {
+    if (!isEventEntry(record6)) continue;
     const seq = entrySeq(record6);
     if (previousSeq !== void 0 && seq !== void 0 && seq > previousSeq + 1) {
       for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
@@ -14521,11 +14522,11 @@ function normalizeRecords(value) {
   return records;
 }
 function normalizeEntry(value) {
-  if (!isRecord3(value) || value.type !== "event") return value;
+  if (!isEventEntry(value)) return value;
   return { ...value, event: normalizeEvent(value.event) };
 }
 function entrySeq(value) {
-  if (!isRecord3(value) || value.type !== "event" || !isRecord3(value.event)) return void 0;
+  if (!isEventEntry(value)) return void 0;
   return isEventSeq(value.event.seq) ? value.event.seq : void 0;
 }
 function createLegacyGapRecord(seq, nextRecord) {
@@ -14541,8 +14542,11 @@ function createLegacyGapRecord(seq, nextRecord) {
   };
 }
 function eventTime(value) {
-  if (!isRecord3(value) || value.type !== "event" || !isRecord3(value.event)) return 0;
+  if (!isEventEntry(value)) return 0;
   return typeof value.event.time === "number" && Number.isSafeInteger(value.event.time) ? value.event.time : 0;
+}
+function isEventEntry(value) {
+  return isRecord3(value) && value.type === "event" && isRecord3(value.event);
 }
 function normalizeHeader(value) {
   if (!isRecord3(value)) return value;
@@ -17489,7 +17493,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.18";
+var PLUGIN_VERSION = "0.4.19";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -19356,7 +19360,7 @@ var ClientModeRuntime = class {
     if (!remote.features.codex) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
-    this.assertRemoteCompatible(remote);
+    this.assertLocalHarnessCarrierAvailable();
     const virtual = CodexVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
@@ -19389,7 +19393,7 @@ var ClientModeRuntime = class {
     if (!remote.features.codex) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
-    this.assertRemoteCompatible(remote);
+    this.assertLocalHarnessCarrierAvailable();
     const result = record3(await new CodexRemoteClient(remote.client).request("project/create", {
       name: remoteWorkspaceTitle(trimmedPath),
       roots: [{ path: trimmedPath }],
@@ -19599,11 +19603,25 @@ var ClientModeRuntime = class {
   }
   assertRemoteCompatible(remote) {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier();
-    if (localRemoteGateway && remote.features.remoteGateway) return;
+    const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
+    if (localRemoteGateway && remote.features.remoteGateway) {
+      if (localSessionGeneration === "v3" || remote.features.sessionFormat !== 3) return;
+      throw new ClientModeError(
+        "HARNESS_VERSION_INCOMPATIBLE",
+        "The selected Host uses Harness Session V3, but this Client uses the legacy Typert Remote session format."
+      );
+    }
     if (!localRemoteGateway && this.proxySwitch !== void 0 && remote.features.apiProxy) return;
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",
-      localRemoteGateway ? "The selected Host does not provide the Harness v0.1.2 Typert Remote Gateway transport." : "The selected Host does not provide the legacy Harness ApiProxy transport."
+      localRemoteGateway ? "The selected Host does not provide a compatible Harness Typert Remote Gateway transport." : "The selected Host does not provide the legacy Harness ApiProxy transport."
+    );
+  }
+  assertLocalHarnessCarrierAvailable() {
+    if (this.gatewaySwitch.supportsCarrier() || this.proxySwitch !== void 0) return;
+    throw new ClientModeError(
+      "HARNESS_VERSION_INCOMPATIBLE",
+      "This Client does not provide a compatible Harness carrier for the selected remote workspace."
     );
   }
   async connect(targetDeviceId, signal) {
@@ -20083,12 +20101,13 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const apiProxy = capabilities.has("harness.api.v1");
   const remoteV1 = capabilities.has("harness.remote.v1");
   const remoteV3 = capabilities.has("harness.remote.v3");
+  const codex = capabilities.has("codex.appserver.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway) {
+  if (!apiProxy && !remoteGateway && !codex) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -20097,7 +20116,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     apiProxy,
     remoteGateway,
     ...sessionFormat === void 0 ? {} : { sessionFormat },
-    codex: capabilities.has("codex.appserver.v1")
+    codex
   };
 }
 async function waitForCodexFrames(stream, signal) {
@@ -25617,7 +25636,7 @@ function remoteStatusLines(target) {
     `Device: ${status2.deviceId ?? "not initialized"}`,
     `Authorization: ${status2.authorized ? status2.account === void 0 ? "logged in" : `logged in (${status2.account})` : "logged out"}`,
     `Server connection: ${connection}`,
-    `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
+    `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : "disabled"}`,
     "",

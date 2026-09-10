@@ -282,8 +282,10 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
     `Server connection: ${connection}`,
     `Harness Remote API: ${capabilities.has('harness.api.v1')
       ? 'available (ApiProxy)'
-      : capabilities.has('harness.remote.v1')
-        ? 'available (Typert Remote)'
+      : capabilities.has('harness.remote.v3')
+        ? 'available (Typert Remote Session V3)'
+        : capabilities.has('harness.remote.v1')
+          ? 'available (Typert Remote)'
         : 'unavailable'}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : 'disabled'}`,

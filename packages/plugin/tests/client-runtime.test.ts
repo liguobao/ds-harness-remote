@@ -59,6 +59,17 @@ describe('ClientModeRuntime Host account control', () => {
       codex: false,
     })
 
+    alphaClient.rpc.mockResolvedValueOnce({
+      capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1'],
+    })
+    await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.19')).resolves.toEqual({
+      commandList: false,
+      fileViewer: false,
+      apiProxy: false,
+      remoteGateway: false,
+      codex: true,
+    })
+
     const legacyClient = {
       rpc: vi.fn(async () => {
         throw Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' })
@@ -350,7 +361,7 @@ describe('ClientModeRuntime Host account control', () => {
     }
     const rpc = vi.fn(async (method: string, params: unknown) => {
       if (method === 'harness.transport.describe') return {
-        capabilities: ['harness.api.v1', 'harness.api.transfer.v1', 'codex.appserver.v1'],
+        capabilities: ['codex.appserver.v1', 'codex.appserver.transfer.v1'],
       }
       if (method === 'codex.app.call') {
         const request = params as { method: string; params: Record<string, unknown> }
@@ -372,7 +383,7 @@ describe('ClientModeRuntime Host account control', () => {
         deviceId: 'host-device-1', name: 'Workstation', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
       },
       transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: true, remoteGateway: false, codex: true },
+      features: { commandList: false, fileViewer: false, apiProxy: false, remoteGateway: false, codex: true },
     }
 
     await expect(runtime.createCodexWorkspace('host-device-1', '/srv/project')).resolves.toMatchObject({
@@ -538,6 +549,44 @@ describe('ClientModeRuntime Host account control', () => {
     expect(legacyRuntime.status()).toMatchObject({ mode: 'local' })
     await alphaRuntime.close()
     await legacyRuntime.close()
+  })
+
+  it('rejects Session V3 Hosts when the local Typert carrier still uses the legacy session format', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-mismatch-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      undefined,
+      gatewayWithCarrier(),
+      logger(),
+      {
+        localHarnessVersion: () => '0.1.2-rc.1',
+        hostStatus: () => ({
+          configured: true,
+          online: false,
+          reconnecting: false,
+          authorized: false,
+          accountRequired: false,
+        }),
+      } as unknown as HostAuthorizationControl,
+    )
+    await runtime.start()
+    const rpc = vi.fn()
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
+      target: {
+        deviceId: 'host-device-v3', name: 'V3 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
+      },
+      transport: {},
+      features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, sessionFormat: 3, codex: false },
+    }
+
+    await expect(runtime.openRemoteWorkspace('host-device-v3', '/srv/project'))
+      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
+    expect(rpc).not.toHaveBeenCalled()
+    await runtime.close()
   })
 
   it('allows Session V3 clients to open legacy Typert Remote Host workspaces', async () => {

@@ -440,7 +440,7 @@ export class ClientModeRuntime {
     if (!remote.features.codex) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
     }
-    this.assertRemoteCompatible(remote)
+    this.assertLocalHarnessCarrierAvailable()
     const virtual = CodexVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
@@ -478,7 +478,7 @@ export class ClientModeRuntime {
     if (!remote.features.codex) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
     }
-    this.assertRemoteCompatible(remote)
+    this.assertLocalHarnessCarrierAvailable()
     const result = record(await new CodexRemoteClient(remote.client).request('project/create', {
       name: remoteWorkspaceTitle(trimmedPath),
       roots: [{ path: trimmedPath }],
@@ -726,13 +726,28 @@ export class ClientModeRuntime {
 
   private assertRemoteCompatible(remote: ConnectedRemote): void {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier()
-    if (localRemoteGateway && remote.features.remoteGateway) return
+    const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.())
+    if (localRemoteGateway && remote.features.remoteGateway) {
+      if (localSessionGeneration === 'v3' || remote.features.sessionFormat !== 3) return
+      throw new ClientModeError(
+        'HARNESS_VERSION_INCOMPATIBLE',
+        'The selected Host uses Harness Session V3, but this Client uses the legacy Typert Remote session format.',
+      )
+    }
     if (!localRemoteGateway && this.proxySwitch !== undefined && remote.features.apiProxy) return
     throw new ClientModeError(
       'HARNESS_VERSION_INCOMPATIBLE',
       localRemoteGateway
-        ? 'The selected Host does not provide the Harness v0.1.2 Typert Remote Gateway transport.'
+        ? 'The selected Host does not provide a compatible Harness Typert Remote Gateway transport.'
         : 'The selected Host does not provide the legacy Harness ApiProxy transport.',
+    )
+  }
+
+  private assertLocalHarnessCarrierAvailable(): void {
+    if (this.gatewaySwitch.supportsCarrier() || this.proxySwitch !== undefined) return
+    throw new ClientModeError(
+      'HARNESS_VERSION_INCOMPATIBLE',
+      'This Client does not provide a compatible Harness carrier for the selected remote workspace.',
     )
   }
 
@@ -1270,12 +1285,13 @@ export async function probeRemoteHostFeatures(
   const apiProxy = capabilities.has('harness.api.v1')
   const remoteV1 = capabilities.has('harness.remote.v1')
   const remoteV3 = capabilities.has('harness.remote.v3')
+  const codex = capabilities.has('codex.appserver.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
   const sessionFormat = remoteV3 ? 3 as const : undefined
   const remoteGateway = remoteV3 || remoteV1
-  if (!apiProxy && !remoteGateway) {
+  if (!apiProxy && !remoteGateway && !codex) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
@@ -1284,7 +1300,7 @@ export async function probeRemoteHostFeatures(
     apiProxy,
     remoteGateway,
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
-    codex: capabilities.has('codex.appserver.v1'),
+    codex,
   }
 }
 

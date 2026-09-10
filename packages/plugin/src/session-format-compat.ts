@@ -29,6 +29,7 @@ function normalizeRecords(value: unknown): unknown {
   const records: unknown[] = []
   let previousSeq: number | undefined
   for (const record of value) {
+    if (!isEventEntry(record)) continue
     const seq = entrySeq(record)
     if (previousSeq !== undefined && seq !== undefined && seq > previousSeq + 1) {
       for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
@@ -42,12 +43,12 @@ function normalizeRecords(value: unknown): unknown {
 }
 
 function normalizeEntry(value: unknown): unknown {
-  if (!isRecord(value) || value.type !== 'event') return value
+  if (!isEventEntry(value)) return value
   return { ...value, event: normalizeEvent(value.event) }
 }
 
 function entrySeq(value: unknown): number | undefined {
-  if (!isRecord(value) || value.type !== 'event' || !isRecord(value.event)) return undefined
+  if (!isEventEntry(value)) return undefined
   return isEventSeq(value.event.seq) ? value.event.seq : undefined
 }
 
@@ -65,10 +66,14 @@ function createLegacyGapRecord(seq: number, nextRecord: unknown): unknown {
 }
 
 function eventTime(value: unknown): number {
-  if (!isRecord(value) || value.type !== 'event' || !isRecord(value.event)) return 0
+  if (!isEventEntry(value)) return 0
   return typeof value.event.time === 'number' && Number.isSafeInteger(value.event.time)
     ? value.event.time
     : 0
+}
+
+function isEventEntry(value: unknown): value is Record<string, unknown> & { event: Record<string, unknown> } {
+  return isRecord(value) && value.type === 'event' && isRecord(value.event)
 }
 
 function normalizeHeader(value: unknown): unknown {

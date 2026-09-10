@@ -248,6 +248,12 @@ describe('RemoteTypertGateway', () => {
               },
             },
             {
+              type: 'projection',
+              key: 'todos',
+              seq: 2,
+              value: null,
+            },
+            {
               type: 'event',
               event: {
                 type: 'assistant/message',
