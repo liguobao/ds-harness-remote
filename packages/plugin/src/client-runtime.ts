@@ -690,7 +690,7 @@ export class ClientModeRuntime {
   private selectRemoteTarget(remote: ConnectedRemote): void {
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     if (this.gatewaySwitch.supportsCarrier()) {
-      this.gatewaySwitch.selectRemote(new RemoteTypertGateway(remote.client), undefined, target)
+      this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
       return
     }
     this.proxySwitch!.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target)
@@ -698,6 +698,14 @@ export class ClientModeRuntime {
       execute: true,
       list: remote.features.commandList,
     }, target)
+  }
+
+  private remoteTypertGateway(remote: ConnectedRemote): RemoteTypertGateway {
+    const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.())
+    return new RemoteTypertGateway(
+      remote.client,
+      localSessionGeneration === 'v3' && remote.features.sessionFormat !== 3 ? 'legacy-to-v3' : undefined,
+    )
   }
 
   private selectCodexTarget(virtual: CodexVirtualHarness, remote: ConnectedRemote): void {

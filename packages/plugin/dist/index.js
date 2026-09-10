@@ -14482,11 +14482,124 @@ function base64ToBytes2(value) {
   return bytes;
 }
 
+// src/session-format-compat.ts
+function normalizeLegacySessionGatewayValue(endpoint, value) {
+  if (endpoint === "session/page") return normalizePage(value);
+  if (endpoint === "session/follow") return normalizeFollowFrame(value);
+  return value;
+}
+function normalizeFollowFrame(value) {
+  if (!isRecord3(value)) return value;
+  if (value.type === "snapshot") {
+    return {
+      ...value,
+      header: normalizeHeader(value.header),
+      records: normalizeRecords(value.records)
+    };
+  }
+  return normalizeEntry(value);
+}
+function normalizePage(value) {
+  if (!isRecord3(value)) return value;
+  return { ...value, records: normalizeRecords(value.records) };
+}
+function normalizeRecords(value) {
+  if (!Array.isArray(value)) return value;
+  return value.map((record6) => normalizeEntry(record6));
+}
+function normalizeEntry(value) {
+  if (!isRecord3(value) || value.type !== "event") return value;
+  return { ...value, event: normalizeEvent(value.event) };
+}
+function normalizeHeader(value) {
+  if (!isRecord3(value)) return value;
+  const next = {
+    ...value,
+    version: 3,
+    ...value.delegationDepth === void 0 ? { delegationDepth: 0 } : {}
+  };
+  return next.agentPreset === "code" ? { ...next, agentPreset: "ptc" } : next;
+}
+function normalizeEvent(value) {
+  if (!isRecord3(value)) return value;
+  let next = value;
+  const type = normalizeEventType(value.type);
+  if (type !== value.type) next = { ...next, type };
+  const data = normalizeEventData(type, next.data);
+  if (data !== next.data) next = { ...next, data };
+  const surfaceOp = normalizeSurfaceOp(next.surfaceOp);
+  if (surfaceOp !== next.surfaceOp) next = { ...next, surfaceOp };
+  return next;
+}
+function normalizeEventType(value) {
+  if (value === "tool/code-dispatch-start") return "tool/ptc-dispatch-start";
+  if (value === "tool/code-dispatch") return "tool/ptc-dispatch";
+  return value;
+}
+function normalizeEventData(type, value) {
+  if (!isRecord3(value)) return value;
+  if (type === "request/header") return normalizeRequestHeaderData(value);
+  if (type === "agent-preset/selected" && value.agentPreset === "code") return { ...value, agentPreset: "ptc" };
+  if (type === "user/message") return normalizeMessage(value);
+  if (type === "agent/inbox/spliced" && Array.isArray(value.inserted)) {
+    return { ...value, inserted: value.inserted.map((item) => normalizeMessage(item)) };
+  }
+  if (type === "session/title-llm-request" && Array.isArray(value.messages)) {
+    return { ...value, messages: value.messages.map((item) => normalizeMessage(item)) };
+  }
+  return value;
+}
+function normalizeRequestHeaderData(value) {
+  if (!isRecord3(value.header)) return value;
+  const header = normalizeRequestHeader(value.header);
+  return header === value.header ? value : { ...value, header };
+}
+function normalizeRequestHeader(value) {
+  let changed = false;
+  const next = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (key === "system") {
+      changed = true;
+      continue;
+    }
+    if (key === "tools" && Array.isArray(field) && field.length === 0) {
+      changed = true;
+      continue;
+    }
+    if (key === "adapterDefaults" && isRecord3(field) && Object.keys(field).length === 0) {
+      changed = true;
+      continue;
+    }
+    next[key] = field;
+  }
+  return changed ? next : value;
+}
+function normalizeMessage(value) {
+  if (!isRecord3(value) || !isRecord3(value.source)) return value;
+  if (value.source.kind !== "plugin" || value.source.plugin !== "tools-code-mode") return value;
+  return { ...value, source: { ...value.source, plugin: "tools-ptc" } };
+}
+function normalizeSurfaceOp(value) {
+  if (!isRecord3(value) || value.op !== "replace") return value;
+  const { start, end, ...rest } = value;
+  if (start === void 0 && end === void 0) return value;
+  return {
+    ...rest,
+    op: "replace",
+    ...start === void 0 ? {} : { startSeq: start },
+    ...end === void 0 ? {} : { endSeq: end }
+  };
+}
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
 var RemoteTypertGateway2 = class {
-  constructor(client) {
+  constructor(client, compatibility) {
     this.client = client;
+    this.compatibility = compatibility;
   }
   async invoke(request) {
     const result = await this.dispatch(
@@ -14511,7 +14624,11 @@ var RemoteTypertGateway2 = class {
         response = await this.callTransferred(encoded, signal);
       }
     }
-    return parseRpcResult(response);
+    const result = parseRpcResult(response);
+    if (result.ok && this.compatibility === "legacy-to-v3") {
+      return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) };
+    }
+    return result;
   }
   async open(endpoint, payload, signal) {
     const streamId = uuidV7();
@@ -14530,11 +14647,13 @@ var RemoteTypertGateway2 = class {
       unsubscribeClose();
       throw error;
     }
-    return this.iterate(streamId, queue, unsubscribe, unsubscribeClose, signal, onAbort);
+    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort);
   }
-  async *iterate(streamId, queue, unsubscribe, unsubscribeClose, signal, onAbort) {
+  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort) {
     try {
-      yield* queue;
+      for await (const value of queue) {
+        yield this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, value) : value;
+      }
     } finally {
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
@@ -14654,16 +14773,16 @@ function routeStreamEvent2(event, streamId, queue) {
     queue.fail(remoteFailure({
       code: typeof failure2?.code === "string" ? failure2.code : "internal",
       message: typeof failure2?.message === "string" ? failure2.message : "The remote Harness stream failed.",
-      details: isRecord3(failure2?.details) ? failure2.details : {}
+      details: isRecord4(failure2?.details) ? failure2.details : {}
     }));
   } else {
     queue.close();
   }
 }
 function parseRpcResult(value) {
-  if (!isRecord3(value)) throw new Error("The remote Host returned an invalid Gateway result.");
+  if (!isRecord4(value)) throw new Error("The remote Host returned an invalid Gateway result.");
   if (value.ok === true) return Object.hasOwn(value, "value") ? { ok: true, value: value.value } : { ok: true };
-  if (value.ok !== false || !isRecord3(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord3(value.error.details)) {
+  if (value.ok !== false || !isRecord4(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord4(value.error.details)) {
     throw new Error("The remote Host returned an invalid Gateway failure.");
   }
   return {
@@ -14697,7 +14816,7 @@ function base64ToBytes3(value) {
   if (bytesToBase643(bytes) !== value) throw new Error("The remote Host returned non-canonical Harness Remote transfer data.");
   return bytes;
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasErrorCode(error, code) {
@@ -15618,7 +15737,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
     } else if (event === "api-session/removed" && sessionId !== void 0) {
       this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord4(args[0])) {
+    } else if (event === "api-session/added" && isRecord5(args[0])) {
       const summary = args[0];
       this.broadcastRcHost({
         type: "host/session-added",
@@ -16003,7 +16122,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   createApiProxy() {
     const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord4(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
+      const payload = endpoint === "session.prompt" && isRecord5(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
       const result = await this.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
       return {
         rpcId: request.rpcId,
@@ -16528,7 +16647,7 @@ function collectImageBlocks(value, output = []) {
     for (const item of value) collectImageBlocks(item, output);
     return output;
   }
-  if (!isRecord4(value)) return output;
+  if (!isRecord5(value)) return output;
   if (value.type === "image") output.push(value);
   for (const [key, child] of Object.entries(value)) {
     if (key === "attachment") continue;
@@ -16858,7 +16977,7 @@ function codexPromptInput(content) {
   if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return void 0;
   const input2 = [];
   for (const value of content) {
-    if (!isRecord4(value)) return void 0;
+    if (!isRecord5(value)) return void 0;
     if (value.type === "text") {
       if (typeof value.text !== "string" || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return void 0;
       input2.push({ type: "text", text: value.text });
@@ -17111,12 +17230,12 @@ function errorCode(error) {
   return "code" in error && typeof error.code === "string" ? error.code : void 0;
 }
 function errorDetails(error) {
-  return "details" in error && isRecord4(error.details) ? error.details : {};
+  return "details" in error && isRecord5(error.details) ? error.details : {};
 }
 function record2(value) {
-  return isRecord4(value) ? value : {};
+  return isRecord5(value) ? value : {};
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function array(value) {
@@ -17849,7 +17968,7 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details = "details" in source && isRecord5(source.details) ? source.details : {};
+    const details = "details" in source && isRecord6(source.details) ? source.details : {};
     return { code, message: source.message, details };
   }
 };
@@ -17858,7 +17977,7 @@ function requestFromCarrier(endpoint, payload, signal) {
   if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error("The Harness Gateway endpoint is invalid.");
   }
-  if (!isRecord5(payload) || !isRecord5(payload.args)) {
+  if (!isRecord6(payload) || !isRecord6(payload.args)) {
     throw new Error("The Harness Gateway payload is invalid.");
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
@@ -17873,7 +17992,7 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -19318,10 +19437,10 @@ var ClientModeRuntime = class {
       }
     }
     stream.unsubscribe = remote.client.onEvent((event) => {
-      if (event.event === "codex.app.frame" && isRecord6(event.data) && event.data.streamId === value.streamId) {
+      if (event.event === "codex.app.frame" && isRecord7(event.data) && event.data.streamId === value.streamId) {
         this.appendCodexFrame(stream, event.data);
       }
-      if (event.event === "codex.app.stream.closed" && isRecord6(event.data) && event.data.streamId === value.streamId) {
+      if (event.event === "codex.app.stream.closed" && isRecord7(event.data) && event.data.streamId === value.streamId) {
         stream.closed = typeof event.data.reason === "string" ? event.data.reason : "closed";
         stream.wake();
       }
@@ -19348,7 +19467,7 @@ var ClientModeRuntime = class {
     stream.wake();
   };
   appendCodexFrame(stream, data) {
-    if (!isRecord6(data) || !isRecord6(data.frame) || typeof data.frame.method !== "string") return;
+    if (!isRecord7(data) || !isRecord7(data.frame) || typeof data.frame.method !== "string") return;
     if (stream.frames.length >= 256) {
       stream.closed = "overflow";
     } else {
@@ -19408,7 +19527,7 @@ var ClientModeRuntime = class {
   selectRemoteTarget(remote) {
     const target = { deviceId: remote.target.deviceId, name: remote.target.name };
     if (this.gatewaySwitch.supportsCarrier()) {
-      this.gatewaySwitch.selectRemote(new RemoteTypertGateway2(remote.client), void 0, target);
+      this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target);
       return;
     }
     this.proxySwitch.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target);
@@ -19416,6 +19535,13 @@ var ClientModeRuntime = class {
       execute: true,
       list: remote.features.commandList
     }, target);
+  }
+  remoteTypertGateway(remote) {
+    const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
+    return new RemoteTypertGateway2(
+      remote.client,
+      localSessionGeneration === "v3" && remote.features.sessionFormat !== 3 ? "legacy-to-v3" : void 0
+    );
   }
   selectCodexTarget(virtual, remote) {
     const target = { deviceId: remote.target.deviceId, name: remote.target.name };
@@ -19816,7 +19942,7 @@ function record3(value) {
   }
   return value;
 }
-function isRecord6(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function ok2(value) {
@@ -19841,11 +19967,11 @@ async function readRemoteWorkspaceBaseline(gateway, signal) {
   const iterator = source[Symbol.asyncIterator]();
   try {
     const first = await iterator.next();
-    if (first.done || !isRecord6(first.value) || first.value.type !== "baseline" || !isRecord6(first.value.value) || !Array.isArray(first.value.value.items)) {
+    if (first.done || !isRecord7(first.value) || first.value.type !== "baseline" || !isRecord7(first.value.value) || !Array.isArray(first.value.value.items)) {
       throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace baseline.");
     }
     return first.value.value.items.map((item) => {
-      if (!isRecord6(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
+      if (!isRecord7(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace row.");
       }
       return { workspaceId: item.workspaceId, path: item.path, title: item.title };
@@ -19910,7 +20036,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") return fallback;
     throw error;
   }
-  if (!isRecord6(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
+  if (!isRecord7(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned invalid transport capabilities.");
   }
   const capabilities = new Set(value.capabilities);
@@ -20463,11 +20589,11 @@ function editableConfig(config) {
     }
   };
 }
-function isRecord7(value) {
+function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record4(value) {
-  if (!isRecord7(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord8(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -23043,13 +23169,13 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record5(payload);
-  const args = isRecord8(root.args) ? root.args : root;
+  const args = isRecord9(root.args) ? root.args : root;
   return record5(args.request ?? args._request ?? args);
 }
 function record5(value) {
-  return isRecord8(value) ? value : {};
+  return isRecord9(value) ? value : {};
 }
-function isRecord8(value) {
+function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -23243,7 +23369,7 @@ var CodexAppServerClient = class {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
       return;
     }
-    if (!isRecord9(value)) {
+    if (!isRecord10(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
       return;
     }
@@ -23288,12 +23414,12 @@ var CodexAppServerClient = class {
   }
 };
 function safeUpstreamError(value) {
-  if (!isRecord9(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  if (!isRecord10(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("active writer")) return "Codex thread already has an active writer.";
   return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
 }
-function isRecord9(value) {
+function isRecord10(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -23662,15 +23788,15 @@ function decodeCanonicalBase643(value) {
   }
   return decoded;
 }
-function isRecord10(value) {
+function isRecord11(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode2(error) {
-  if (isRecord10(error) && typeof error.code === "string") return error.code;
+  if (isRecord11(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod(input2) {
-  return isRecord10(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+  return isRecord11(input2) && typeof input2.method === "string" ? input2.method : "invalid";
 }
 function concatChunks3(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -24087,14 +24213,14 @@ var CodexRemoteDomain = class {
       await this.assertResultThreadAllowed(result);
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
-        result = { ...isRecord11(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+        result = { ...isRecord12(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
     await this.publishPermission(threadId, result);
     return result;
   }
   async publishPermission(threadId, value) {
-    const source = isRecord11(value) ? value : {};
+    const source = isRecord12(value) ? value : {};
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
     await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
   }
@@ -24190,9 +24316,9 @@ var CodexRemoteDomain = class {
         itemsView,
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      const pageResult = isRecord11(result) ? result : {};
+      const pageResult = isRecord12(result) ? result : {};
       for (const rawTurn of array2(pageResult.data)) {
-        if (!isRecord11(rawTurn)) continue;
+        if (!isRecord12(rawTurn)) continue;
         const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
         const items = rawTurn.itemsView === "full" || turnId === void 0 ? array2(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array2(rawTurn.items));
         turns.push({ ...rawTurn, items });
@@ -24214,9 +24340,9 @@ var CodexRemoteDomain = class {
           sortDirection: "asc",
           ...cursor2 === void 0 ? {} : { cursor: cursor2 }
         });
-        const pageResult = isRecord11(result) ? result : {};
+        const pageResult = isRecord12(result) ? result : {};
         for (const entry of array2(pageResult.data)) {
-          if (isRecord11(entry) && entry.item !== void 0) items.push(entry.item);
+          if (isRecord12(entry) && entry.item !== void 0) items.push(entry.item);
         }
         cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
         if (cursor2 === void 0) break;
@@ -24280,7 +24406,7 @@ var CodexRemoteDomain = class {
     return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
   }
   resolveUpstreamApproval(params) {
-    if (!isRecord11(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    if (!isRecord12(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
     }
@@ -24497,24 +24623,24 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ])];
 }
 function parseCallEnvelope(input2) {
-  if (!isRecord11(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
+  if (!isRecord12(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
   }
   return { method: input2.method, params: input2.params };
 }
 function parseRespond(input2) {
-  if (!isRecord11(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
+  if (!isRecord12(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
   }
   return input2;
 }
 function accountCanRun(result) {
-  if (!isRecord11(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord11(result.account);
+  if (!isRecord12(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord12(result.account);
 }
 function sanitizeAccount(result) {
-  if (!isRecord11(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord11(result.account) ? result.account : void 0;
+  if (!isRecord12(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord12(result.account) ? result.account : void 0;
   return {
     authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
     requiresOpenaiAuth: result.requiresOpenaiAuth === true,
@@ -24527,11 +24653,11 @@ function sanitizeAccount(result) {
   };
 }
 function sanitizeThreadList(result) {
-  if (!isRecord11(result) || !Array.isArray(result.data)) {
+  if (!isRecord12(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   const data = result.data.flatMap((value) => {
-    if (!isRecord11(value) || typeof value.id !== "string") return [];
+    if (!isRecord12(value) || typeof value.id !== "string") return [];
     return [{
       id: value.id,
       ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
@@ -24543,7 +24669,7 @@ function sanitizeThreadList(result) {
       ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
       ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
       ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord11(value.status) ? { status: value.status } : {}
+      ...isRecord12(value.status) ? { status: value.status } : {}
     }];
   });
   return {
@@ -24553,18 +24679,18 @@ function sanitizeThreadList(result) {
   };
 }
 function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord11(result) || !Array.isArray(result.data)) {
+  if (!isRecord12(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record6) => isRecord11(record6) ? record6 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record6) => isRecord12(record6) ? record6 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
-  if (!isRecord11(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  if (!isRecord12(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord11(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    const path = isRecord12(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
     return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -24578,7 +24704,7 @@ function sanitizeProject(value) {
   };
 }
 function sanitizeProjectList(result) {
-  if (!isRecord11(result) || !Array.isArray(result.data)) {
+  if (!isRecord12(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
   }
   const data = result.data.flatMap((value) => sanitizeProject(value) ?? []);
@@ -24588,7 +24714,7 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project = isRecord11(result) ? sanitizeProject(result.project) : void 0;
+  const project = isRecord12(result) ? sanitizeProject(result.project) : void 0;
   if (project === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
@@ -24620,19 +24746,19 @@ function codexDirectoryCrumbs(root, path) {
   return crumbs2;
 }
 function extractThread(result) {
-  return isRecord11(result) && isRecord11(result.thread) ? result.thread : void 0;
+  return isRecord12(result) && isRecord12(result.thread) ? result.thread : void 0;
 }
 function extractTurnId(result) {
-  if (!isRecord11(result)) return void 0;
+  if (!isRecord12(result)) return void 0;
   if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord11(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  if (isRecord12(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
   return void 0;
 }
 function extractThreadId(params) {
-  if (!isRecord11(params)) return void 0;
+  if (!isRecord12(params)) return void 0;
   if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord11(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord11(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  if (isRecord12(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord12(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
 }
 function optionalInteger2(value) {
@@ -24674,13 +24800,13 @@ function mapCodexImageInputs(params) {
   return {
     ...params,
     input: params.input.map((value) => {
-      if (!isRecord11(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      if (!isRecord12(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
       return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
     })
   };
 }
 function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord11(params)) return { requestHandle };
+  if (!isRecord12(params)) return { requestHandle };
   const safe = { ...params };
   delete safe.proposedExecpolicyAmendment;
   delete safe.additionalPermissions;
@@ -24711,7 +24837,7 @@ function isProjectListFallbackError(error) {
 function canTryNextBinary(error) {
   return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
 }
-function isRecord11(value) {
+function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function array2(value) {

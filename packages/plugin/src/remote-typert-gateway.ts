@@ -9,6 +9,10 @@ import {
   type HarnessRemoteStreamClosedData,
 } from '@dsh-remote/protocol'
 import { uuidV7 } from './ids.js'
+import {
+  normalizeLegacySessionGatewayValue,
+  type SessionFormatCompatibility,
+} from './session-format-compat.js'
 import type {
   RemoteTypertGatewayTarget,
   TypertGatewayRequest,
@@ -19,7 +23,10 @@ const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
 
 /** Client-side alpha Gateway carrier over the authenticated Remote channel. */
 export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
-  constructor(private readonly client: RemoteClientCore) {}
+  constructor(
+    private readonly client: RemoteClientCore,
+    private readonly compatibility?: SessionFormatCompatibility,
+  ) {}
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
     const result = await this.dispatch(
@@ -49,7 +56,11 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
         response = await this.callTransferred(encoded, signal)
       }
     }
-    return parseRpcResult(response)
+    const result = parseRpcResult(response)
+    if (result.ok && this.compatibility === 'legacy-to-v3') {
+      return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) }
+    }
+    return result
   }
 
   async open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
@@ -69,11 +80,12 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       unsubscribeClose()
       throw error
     }
-    return this.iterate(streamId, queue, unsubscribe, unsubscribeClose, signal, onAbort)
+    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort)
   }
 
   private async *iterate(
     streamId: string,
+    endpoint: string,
     queue: AsyncValueQueue,
     unsubscribe: () => void,
     unsubscribeClose: () => void,
@@ -81,7 +93,11 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     onAbort: () => void,
   ): AsyncGenerator<unknown> {
     try {
-      yield* queue
+      for await (const value of queue) {
+        yield this.compatibility === 'legacy-to-v3'
+          ? normalizeLegacySessionGatewayValue(endpoint, value)
+          : value
+      }
     } finally {
       signal.removeEventListener('abort', onAbort)
       unsubscribe()
