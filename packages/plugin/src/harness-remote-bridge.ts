@@ -11,7 +11,10 @@ import type {
 } from '@dsh-remote/protocol'
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
+  MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
+  MAX_ALPHA_STREAMS_PER_CONNECTION,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { SafeLogger } from './logging.js'
@@ -70,9 +73,8 @@ const directoryListSchema = z.object({
   path: z.string().min(1).max(4096).optional(),
 }).strict()
 
-const MAX_ACTIVE_STREAMS = 16
-const MAX_ACTIVE_TRANSFERS = 2
-const TRANSFER_IDLE_MS = 2 * 60_000
+const MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION
+const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Fixed v0.1.2 Typert Remote subset exposed to authenticated peers. */

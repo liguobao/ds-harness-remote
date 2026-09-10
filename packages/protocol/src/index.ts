@@ -21,6 +21,41 @@ export const MAX_DEVICE_PLATFORM_LENGTH = 64
 export const MAX_DEVICE_VERSION_LENGTH = 64
 export const MAX_AUTH_TOKEN_LENGTH = 8 * 1024
 
+// ────────────────────────────────────────────────────────────────────────────
+// §24 Default limits
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Hello frame must arrive within this timeout after WebSocket open. */
+export const HELLO_TIMEOUT_MS = 5_000
+/** Host registration code time-to-live. */
+export const HOST_REGISTRATION_CODE_TTL_MS = 10 * 60_000
+/** Default control channel heartbeat interval. */
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
+/** Disconnection threshold: no valid pong within this window. */
+export const HEARTBEAT_DISCONNECT_MS = 75_000
+/** Maximum in-flight RPC requests per connection. */
+export const MAX_PENDING_RPC_PER_CONNECTION = 128
+/** Maximum pending permission requests per session. */
+export const MAX_PENDING_PERMISSION_PER_SESSION = 16
+/** Maximum ICE candidates收集 per connection. */
+export const MAX_ICE_CANDIDATES_PER_CONNECTION = 256
+/** Maximum active transfers per direction per connection. */
+export const MAX_ACTIVE_TRANSFERS_PER_DIRECTION = 2
+/** Transfer idle timeout before automatic cleanup. */
+export const TRANSFER_IDLE_MS = 2 * 60_000
+/** Maximum RPC text input size. */
+export const MAX_RPC_TEXT_INPUT_BYTES = 64 * 1024
+/** Maximum File Viewer range per RPC call. */
+export const MAX_FILEVIEWER_RANGE_BYTES = 512 * 1024
+/** Maximum directory entries returned by File Viewer per RPC. */
+export const MAX_FILEVIEWER_DIRECTORY_ENTRIES = 1_000
+/** Minimum event replay window by event count. */
+export const MIN_REPLAY_WINDOW_EVENTS = 10_000
+/** Minimum event replay window by time. */
+export const MIN_REPLAY_WINDOW_MS = 15 * 60_000
+/** Maximum concurrent alpha streams per connection. */
+export const MAX_ALPHA_STREAMS_PER_CONNECTION = 16
+
 const SECURE_FRAGMENT_MAGIC = new Uint8Array([0x44, 0x53, 0x48, 0x46]) // DSHF
 const SECURE_FRAGMENT_VERSION = 1
 const SECURE_FRAGMENT_HEADER_BYTES = 17
@@ -102,6 +137,63 @@ export const remoteEvents = [
   'codex.app.stream.closed',
 ] as const
 
+export const errorCodes = [
+  // Protocol / Version
+  'INVALID_MESSAGE',
+  'UNSUPPORTED_VERSION',
+  'CAPABILITY_NOT_SUPPORTED',
+  'METHOD_NOT_FOUND',
+  'METHOD_NOT_ALLOWED',
+  'REQUEST_CONFLICT',
+  'FRAME_TOO_LARGE',
+  'RATE_LIMITED',
+  // Auth / Device
+  'AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'ACCOUNT_AUTH_REQUIRED',
+  'TOKEN_EXPIRED',
+  'DEVICE_NOT_FOUND',
+  'DEVICE_REVOKED',
+  'DEVICE_OWNERSHIP_REQUIRED',
+  'MEMBERSHIP_REQUIRED',
+  'PEER_IDENTITY_MISMATCH',
+  'HOST_REGISTRATION_CODE_NOT_FOUND',
+  'HOST_REGISTRATION_CODE_EXPIRED',
+  'HOST_REGISTRATION_CODE_CONSUMED',
+  // Connection / Transport
+  'HOST_OFFLINE',
+  'CONNECTION_NOT_FOUND',
+  'CONNECTION_FAILED',
+  'CONNECTION_REPLACED',
+  'P2P_FAILED',
+  'TURN_UNAVAILABLE',
+  'RELAY_UNAVAILABLE',
+  'SLOW_CONSUMER',
+  'SECURE_CHANNEL_FAILED',
+  // Harness
+  'HARNESS_UNAVAILABLE',
+  'HARNESS_VERSION_INCOMPATIBLE',
+  'RESPONSE_TOO_LARGE',
+  'SESSION_NOT_FOUND',
+  'SESSION_NOT_READY',
+  'AGENT_BUSY',
+  'PERMISSION_DENIED',
+  'PERMISSION_NOT_PENDING',
+  'RPC_TIMEOUT',
+  'FULL_RESYNC_REQUIRED',
+  'INTERNAL_ERROR',
+] as const
+
+/**
+ * Known wire-protocol error codes from §23, §17 (HARNESS_VERSION_INCOMPATIBLE),
+ * and the transfer protocol (RESPONSE_TOO_LARGE — Client must retry via chunked path).
+ *
+ * This is the authoritative reference set; callers should prefer these codes but
+ * the wire format accepts any string to allow subsystem-specific extensions
+ * (e.g. CODEX_*, FILE_VIEWER_*) without a protocol version bump.
+ */
+export type ErrorCode = typeof errorCodes[number]
+
 export type MessageType = typeof messageTypes[number]
 export type ControlFrameType = typeof controlFrameTypes[number]
 export type RpcMethod = typeof rpcMethods[number]
@@ -181,6 +273,8 @@ export interface HelloPayload {
   capabilities: string[]
   /** Version of the Client/Plugin software reporting in; symmetric to ``HelloAckPayload.serverVersion``. */
   clientVersion?: string
+  /** Host Harness version; sent on first hello to refresh the device record. */
+  harnessVersion?: string
 }
 
 export interface HelloAckPayload {
@@ -226,7 +320,8 @@ export interface SecureHandshakePayload {
 }
 
 export interface ControlErrorPayload {
-  code: string
+  /** Known wire-protocol codes from §23/§17. */
+  code: ErrorCode | (string & {})
   message: string
   retryable?: boolean
   connectionId?: string
@@ -331,7 +426,8 @@ export interface RpcResponsePayload<TResult = unknown> {
 
 export interface RpcErrorPayload {
   requestId: string
-  code: string
+  /** Known wire-protocol codes from §23/§17; subsystem extensions (CODEX_*, FILE_VIEWER_*, etc.) are also valid. */
+  code: ErrorCode | (string & {})
   message: string
   retryable?: boolean
   details?: unknown
@@ -568,6 +664,7 @@ export interface CodexAppTransferReadResult {
 const rpcMethodSchema = z.enum(rpcMethods)
 const messageTypeSchema = z.enum(messageTypes)
 const controlFrameTypeSchema = z.enum(controlFrameTypes)
+export const errorCodeSchema = z.enum(errorCodes)
 const uniqueStrings = (values: string[]): boolean => new Set(values).size === values.length
 const uniqueNumbers = (values: number[]): boolean => new Set(values).size === values.length
 const utf8Length = (value: string): number => new TextEncoder().encode(value).byteLength
@@ -620,6 +717,17 @@ export const hostRegistrationCodeRequestSchema: z.ZodType<HostRegistrationCodeRe
   v: z.literal(PROTOCOL_VERSION),
   code: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/u),
   device: hostDeviceDescriptorSchema,
+}).strict()
+
+/** §8.1.2 Register a new opposite-role device using an existing device access token. */
+export interface RegisterOwnedRoleRequest {
+  v: typeof PROTOCOL_VERSION
+  device: AccountDeviceDescriptor
+}
+
+export const registerOwnedRoleRequestSchema: z.ZodType<RegisterOwnedRoleRequest> = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  device: accountDeviceDescriptorSchema,
 }).strict()
 
 export const deviceRefreshRequestSchema: z.ZodType<DeviceRefreshRequest> = z.object({
@@ -851,7 +959,7 @@ export function createRpcResponse<TResult>(
 
 export function createRpcError(
   requestId: string,
-  code: string,
+  code: ErrorCode | (string & {}),
   message: string,
   details?: unknown,
   retryable?: boolean,
