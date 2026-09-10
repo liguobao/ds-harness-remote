@@ -10,8 +10,11 @@ import type {
 } from '@dsh-remote/protocol'
 import {
   CODEX_APP_TRANSFER_CHUNK_BYTES,
+  MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
+  MAX_ALPHA_STREAMS_PER_CONNECTION,
   MAX_CODEX_APP_TRANSFER_BYTES,
   MAX_SECURE_MESSAGE_BYTES,
+  TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { PeerConnectionContext } from '../connection-controller.js'
@@ -57,9 +60,8 @@ const transferChunkSchema = z.object({
 const transferIdSchema = z.object({ transferId: z.string().uuid() }).strict()
 const transferReadSchema = z.object({ transferId: z.string().uuid(), index: z.number().int().nonnegative() }).strict()
 
-const MAX_ACTIVE_STREAMS = 16
-const MAX_ACTIVE_TRANSFERS = 2
-const TRANSFER_IDLE_MS = 2 * 60_000
+const MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION
+const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Per-authenticated-connection state for the Codex Remote domain. */
