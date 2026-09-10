@@ -378,6 +378,24 @@ class ScriptedCore {
     if (method === 'harness.remote.call') {
       const request = params as { endpoint?: string; payload?: { args?: Record<string, unknown> } }
       if (request.endpoint === '$events/result') return { ok: true, value: undefined }
+      if (request.endpoint === 'session/list') {
+        return {
+          ok: true,
+          value: {
+            items: [{
+              sessionId: 'legacy-session',
+              updatedAt: 1,
+              running: false,
+              blank: false,
+              agentPreset: 'code',
+              projections: {
+                asOfSeq: 4,
+                values: { agentPreset: 'code', other: 'code' },
+              },
+            }],
+          },
+        }
+      }
       if (request.endpoint === 'commands/execute') {
         return { ok: true, value: { commandId: 'permission', result: { kind: 'success' } } }
       }
@@ -409,6 +427,47 @@ class ScriptedCore {
 }
 
 describe('HarnessAlphaClient', () => {
+  it('normalizes legacy code preset in session list projections', async () => {
+    const core = new ScriptedCore()
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+
+    const sessions = await client.sessionList()
+
+    expect(sessions).toEqual([expect.objectContaining({
+      sessionId: 'legacy-session',
+      agentPreset: 'ptc',
+      projections: {
+        asOfSeq: 4,
+        values: { agentPreset: 'ptc', other: 'code' },
+      },
+    })])
+  })
+
+  it('normalizes legacy code preset in live projection frames', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, frame => frames.push(frame))
+
+    client.start()
+    await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: core.streamIdFor('session/control'),
+        hasValue: true,
+        value: { type: 'projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'code', seq: 7 },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        rpcId: '',
+        payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'ptc', seq: 7 },
+      })
+    })
+    await client.close()
+  })
+
   it('maps alpha approval waterfalls to legacy client frames and answers through $events/result', async () => {
     const core = new ScriptedCore()
     const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []

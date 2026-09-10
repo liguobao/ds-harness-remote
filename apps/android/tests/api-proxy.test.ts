@@ -5,7 +5,7 @@ import { ApiProxyError, RemoteApiProxy } from '../src/services/api-proxy'
 type CoreRpc = (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>
 type CoreRpcMock = ReturnType<typeof vi.fn<CoreRpc>>
 
-function fakeCore(): RemoteClientCore & { rpcCalls: CoreRpcMock } {
+function fakeCore(): RemoteClientCore & { rpcCalls: CoreRpcMock; emitEvent(event: unknown): void } {
   const eventHandlers = new Set<(event: unknown) => void>()
   const transferChunks: Uint8Array[] = []
   const rpcCalls = vi.fn<CoreRpc>(async (method: string, params: unknown) => {
@@ -100,8 +100,11 @@ function fakeCore(): RemoteClientCore & { rpcCalls: CoreRpcMock } {
     eventHandlers.add(handler)
     return () => eventHandlers.delete(handler)
   })
+  const emitEvent = (event: unknown) => {
+    for (const handler of eventHandlers) handler(event)
+  }
   const core = { rpc: rpcCalls, onEvent } as unknown as RemoteClientCore
-  return { ...core, rpcCalls } as unknown as RemoteClientCore & { rpcCalls: CoreRpcMock }
+  return { ...core, rpcCalls, emitEvent } as unknown as RemoteClientCore & { rpcCalls: CoreRpcMock; emitEvent(event: unknown): void }
 }
 
 describe('Remote ApiProxy tunnel client', () => {
@@ -115,6 +118,39 @@ describe('Remote ApiProxy tunnel client', () => {
       expect.objectContaining({ method: 'session.list' }),
       undefined,
     )
+  })
+
+  it('normalizes legacy code preset in session list projections', async () => {
+    const core = fakeCore()
+    core.rpcCalls.mockImplementationOnce(async (_method, params) => {
+      const request = params as { rpcId: string }
+      return {
+        rpcId: request.rpcId,
+        result: {
+          ok: true,
+          value: {
+            items: [{
+              sessionId: 'legacy-session',
+              agentPreset: 'code',
+              projections: {
+                asOfSeq: 4,
+                values: { agentPreset: 'code', other: 'code' },
+              },
+            }],
+          },
+        },
+      }
+    })
+    const proxy = new RemoteApiProxy(core)
+
+    await expect(proxy.sessionList()).resolves.toEqual([{
+      sessionId: 'legacy-session',
+      agentPreset: 'ptc',
+      projections: {
+        asOfSeq: 4,
+        values: { agentPreset: 'ptc', other: 'code' },
+      },
+    }])
   })
 
   it('surfaces native RpcResult errors as ApiProxyError', async () => {
@@ -176,6 +212,32 @@ describe('Remote ApiProxy tunnel client', () => {
       rpcId: 'host-rpc-1',
       payload: expect.objectContaining({ type: 'approval/requested', approvalId: 'a1' }),
     })])
+    await close()
+  })
+
+  it('normalizes legacy code preset in mux projection frames', async () => {
+    const core = fakeCore()
+    const proxy = new RemoteApiProxy(core)
+    const frames: unknown[] = []
+    const close = await proxy.openMuxStream(frame => frames.push(frame))
+    const open = core.rpcCalls.mock.calls.find(call => call[0] === 'harness.api.stream.open')
+    const streamId = String((open?.[1] as { streamId: unknown }).streamId)
+
+    core.emitEvent({
+      event: 'harness.api.frame',
+      data: {
+        streamId,
+        frame: {
+          rpcId: '',
+          payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'code', seq: 7 },
+        },
+      },
+    })
+
+    expect(frames).toContainEqual({
+      rpcId: '',
+      payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'ptc', seq: 7 },
+    })
     await close()
   })
 

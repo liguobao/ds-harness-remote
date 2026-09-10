@@ -28,6 +28,8 @@ import type {
 } from '../types'
 
 const DIRECT_API_CALL_BYTES = 2 * 1024 * 1024
+const LEGACY_AGENT_PRESET = 'code'
+const LEGACY_AGENT_PRESET_TARGET = 'ptc'
 
 /** Native ApiProxy RpcResult envelope (mirrors @deepseek-ai/dsh-host-apiproxy/api). */
 export type NativeRpcResult<T> = {
@@ -210,7 +212,7 @@ export class RemoteApiProxy {
 
   async sessionList(): Promise<RemoteSession[]> {
     const result = await this.call<{ items: RemoteSession[] }>('session.list', {})
-    return Array.isArray(result.items) ? result.items : []
+    return Array.isArray(result.items) ? result.items.map(normalizeSession) : []
   }
 
   async sessionCreate(workspaceId?: string, cwd?: string): Promise<{ sessionId: string }> {
@@ -346,7 +348,7 @@ export class RemoteApiProxy {
         return
       }
       const handler = this.streams.get(streamId)
-      if (handler !== undefined) handler({ rpcId: data.frame.rpcId, payload: data.frame.payload as unknown as MuxFrame })
+      if (handler !== undefined) handler({ rpcId: data.frame.rpcId, payload: normalizeMuxFrame(data.frame.payload as unknown as MuxFrame) })
       return
     }
     if (event.event === 'harness.api.stream.closed') {
@@ -370,6 +372,48 @@ export class ApiProxyError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeSession(session: RemoteSession): RemoteSession {
+  return {
+    ...session,
+    ...(session.agentPreset === undefined ? {} : { agentPreset: normalizeAgentPreset(session.agentPreset) as string }),
+    ...(session.projections === undefined
+      ? {}
+      : {
+          projections: {
+            ...session.projections,
+            ...(isRecord(session.projections.values)
+              ? { values: normalizeProjectionValues(session.projections.values) }
+              : {}),
+          },
+        }),
+  }
+}
+
+function normalizeMuxFrame(frame: MuxFrame): MuxFrame {
+  const record = frame as unknown as Record<string, unknown>
+  if (frame.type === 'session/projection' && typeof record.key === 'string') {
+    return { ...record, value: normalizeProjectionValue(record.key, record.value) } as unknown as MuxFrame
+  }
+  if (frame.type === 'host/session-added' && isRecord(record.session)) {
+    return { ...record, session: normalizeSession(record.session as unknown as RemoteSession) } as unknown as MuxFrame
+  }
+  return frame
+}
+
+function normalizeProjectionValues(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, normalizeProjectionValue(key, value)]),
+  )
+}
+
+function normalizeProjectionValue(key: string, value: unknown): unknown {
+  return key === 'agentPreset' ? normalizeAgentPreset(value) : value
+}
+
+function normalizeAgentPreset(value: unknown): unknown {
+  return value === LEGACY_AGENT_PRESET ? LEGACY_AGENT_PRESET_TARGET : value
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

@@ -154,6 +154,9 @@ type SessionFollowHandle = StreamHandle & {
   assistant?: AssistantStreamState
 }
 
+const LEGACY_AGENT_PRESET = 'code'
+const LEGACY_AGENT_PRESET_TARGET = 'ptc'
+
 export class HarnessAlphaClient {
   readonly mode = 'remote' as const
 
@@ -616,34 +619,36 @@ export class HarnessAlphaClient {
   private applyProjectionBaseline(sessionId: string, block: unknown): void {
     if (!isRecord(block) || !isRecord(block.values)) return
     const seq = typeof block.asOfSeq === 'number' ? block.asOfSeq : undefined
+    const values = normalizeProjectionValues(block.values)
     const cached = this.sessionsCache.get(sessionId)
     if (cached !== undefined) {
       this.sessionsCache.set(sessionId, {
         ...cached,
-        projections: { asOfSeq: seq, values: { ...cached.projections?.values, ...block.values } },
+        projections: { asOfSeq: seq, values: { ...cached.projections?.values, ...values } },
       })
     }
-    for (const [key, value] of Object.entries(block.values)) this.applyProjection(sessionId, key, value, seq)
+    for (const [key, value] of Object.entries(values)) this.applyProjection(sessionId, key, value, seq)
   }
 
   private applyProjection(sessionId: string, key: string, value: unknown, seq?: number): void {
+    const projectedValue = normalizeProjectionValue(key, value)
     const cached = this.sessionsCache.get(sessionId)
     if (cached !== undefined) {
       this.sessionsCache.set(sessionId, {
         ...cached,
         projections: {
           asOfSeq: seq ?? cached.projections?.asOfSeq,
-          values: { ...cached.projections?.values, [key]: value },
+          values: { ...cached.projections?.values, [key]: projectedValue },
         },
       })
     }
     if (key === 'modelSelection') {
-      const selection = modelSelectionFromValue(value)
+      const selection = modelSelectionFromValue(projectedValue)
       if (selection !== undefined) this.selectedModels.set(sessionId, selection)
     }
     this.emitFrame({
       rpcId: '',
-      payload: { type: 'session/projection', sessionId, key, value, ...(seq === undefined ? {} : { seq }) },
+      payload: { type: 'session/projection', sessionId, key, value: projectedValue, ...(seq === undefined ? {} : { seq }) },
     })
   }
 
@@ -680,7 +685,35 @@ function normalizeSession(value: unknown): HarnessRemoteSession | undefined {
     || typeof value.updatedAt !== 'number'
     || typeof value.running !== 'boolean'
     || typeof value.blank !== 'boolean') return undefined
-  return value as unknown as HarnessRemoteSession
+  const session = value as unknown as HarnessRemoteSession
+  return {
+    ...session,
+    ...(session.agentPreset === undefined ? {} : { agentPreset: normalizeAgentPreset(session.agentPreset) as string }),
+    ...(session.projections === undefined
+      ? {}
+      : {
+          projections: {
+            ...session.projections,
+            ...(isRecord(session.projections.values)
+              ? { values: normalizeProjectionValues(session.projections.values) }
+              : {}),
+          },
+        }),
+  }
+}
+
+function normalizeProjectionValues(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, normalizeProjectionValue(key, value)]),
+  )
+}
+
+function normalizeProjectionValue(key: string, value: unknown): unknown {
+  return key === 'agentPreset' ? normalizeAgentPreset(value) : value
+}
+
+function normalizeAgentPreset(value: unknown): unknown {
+  return value === LEGACY_AGENT_PRESET ? LEGACY_AGENT_PRESET_TARGET : value
 }
 
 function normalizeWorkspaceList(value: Record<string, unknown>): HarnessWorkspaceList {
