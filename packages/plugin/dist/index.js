@@ -17330,7 +17330,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.13";
+var PLUGIN_VERSION = "0.4.14";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -19433,15 +19433,7 @@ var ClientModeRuntime = class {
   }
   assertRemoteCompatible(remote) {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier();
-    if (localRemoteGateway && remote.features.remoteGateway) {
-      const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
-      const remoteSessionGeneration = remote.features.sessionFormat === 3 ? "v3" : "legacy";
-      if (localSessionGeneration === remoteSessionGeneration) return;
-      throw new ClientModeError(
-        "HARNESS_VERSION_INCOMPATIBLE",
-        `The local and remote Harness Session formats differ (${localSessionGeneration} vs ${remoteSessionGeneration}).`
-      );
-    }
+    if (localRemoteGateway && remote.features.remoteGateway) return;
     if (!localRemoteGateway && this.proxySwitch !== void 0 && remote.features.apiProxy) return;
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",

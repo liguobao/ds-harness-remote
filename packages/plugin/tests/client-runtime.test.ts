@@ -487,7 +487,7 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
-  it('rejects mixed Harness transport generations before mutating the active target', async () => {
+  it('rejects Hosts without a transport compatible with the local Harness carrier', async () => {
     const alphaDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-alpha-mismatch-'))
     const legacyDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-legacy-mismatch-'))
     directories.push(alphaDirectory, legacyDirectory)
@@ -540,8 +540,8 @@ describe('ClientModeRuntime Host account control', () => {
     await legacyRuntime.close()
   })
 
-  it('rejects v0.1.2 and Session V3 Typert peers before a Workspace mutation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-session-format-mismatch-'))
+  it('allows Session V3 clients to open legacy Typert Remote Host workspaces', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-legacy-remote-'))
     directories.push(directory)
     const runtime = new ClientModeRuntime(
       config(),
@@ -550,10 +550,24 @@ describe('ClientModeRuntime Host account control', () => {
       undefined,
       gatewayWithCarrier(),
       logger(),
-      { localHarnessVersion: () => '0.1.5-rc.1' } as unknown as HostAuthorizationControl,
+      {
+        localHarnessVersion: () => '0.1.5-rc.1',
+        hostStatus: () => ({
+          configured: true,
+          online: false,
+          reconnecting: false,
+          authorized: false,
+          accountRequired: false,
+        }),
+      } as unknown as HostAuthorizationControl,
     )
     await runtime.start()
-    const rpc = vi.fn()
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      if (method === 'harness.remote.call' && (params as { endpoint?: string }).endpoint === 'workspace/create') {
+        return { ok: true, value: { workspace: { workspaceId: 'workspace-v2-1' }, created: true } }
+      }
+      return { ok: true, value: undefined }
+    })
     ;(runtime as unknown as { connected: unknown }).connected = {
       client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
       target: {
@@ -563,9 +577,14 @@ describe('ClientModeRuntime Host account control', () => {
       features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, codex: false },
     }
 
-    await expect(runtime.openRemoteWorkspace('host-device-v2', '/srv/project'))
-      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
-    expect(rpc).not.toHaveBeenCalled()
+    await expect(runtime.openRemoteWorkspace('host-device-v2', '/srv/project')).resolves.toMatchObject({
+      mode: 'remote',
+      workspace: { created: true, workspace: { workspaceId: 'workspace-v2-1' } },
+    })
+    expect(rpc).toHaveBeenCalledWith('harness.remote.call', {
+      endpoint: 'workspace/create',
+      payload: { args: { request: { path: '/srv/project' } } },
+    }, expect.any(AbortSignal))
     await runtime.close()
   })
 
