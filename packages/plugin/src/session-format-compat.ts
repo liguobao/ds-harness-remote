@@ -13,6 +13,7 @@ function normalizeFollowFrame(value: unknown): unknown {
       ...value,
       header: normalizeHeader(value.header),
       records: normalizeRecords(value.records),
+      ...(value.assistantStream === undefined ? { assistantStream: { revision: 0 } } : {}),
     }
   }
   return normalizeEntry(value)

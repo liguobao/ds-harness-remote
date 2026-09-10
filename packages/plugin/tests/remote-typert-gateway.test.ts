@@ -165,6 +165,7 @@ describe('RemoteTypertGateway', () => {
         type: 'snapshot',
         header: { version: 3, id: 'session-1', createdAt: 1, isSeeded: false, delegationDepth: 0, agentPreset: 'ptc' },
         cursor: 4,
+        assistantStream: { revision: 0 },
         records: [{
           type: 'event',
           event: {

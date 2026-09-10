@@ -14494,7 +14494,8 @@ function normalizeFollowFrame(value) {
     return {
       ...value,
       header: normalizeHeader(value.header),
-      records: normalizeRecords(value.records)
+      records: normalizeRecords(value.records),
+      ...value.assistantStream === void 0 ? { assistantStream: { revision: 0 } } : {}
     };
   }
   return normalizeEntry(value);
@@ -17449,7 +17450,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.15";
+var PLUGIN_VERSION = "0.4.16";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
