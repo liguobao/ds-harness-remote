@@ -1,8 +1,8 @@
 # TODO
 
-本清单按 2026-09-09 的兼容方向维护：Harness v0.1.1 rc.2 使用官方 ApiProxy，
-v0.1.2 alpha.1–rc.1 使用既有 Typert Remote Gateway，v0.1.5 alpha.1 作为 Session V3
-实验兼容目标。Android 与 VS Code Client 通过 capability 探测兼容这些 Host carrier；Server、Remote Web 和 Admin 只在独立
+本清单按 2026-09-10 的兼容方向维护：Harness v0.1.1 rc.2 使用官方 ApiProxy，
+v0.1.2 alpha.1–rc.1 使用既有 Typert Remote Gateway，v0.1.5 rc.1 作为 Session V3
+兼容目标。Android 与 VS Code Client 通过 capability 探测兼容这些 Host carrier；Server、Remote Web 和 Admin 只在独立
 Server 仓库实现。
 
 Desktop 已使用独立 Remote 工作区入口：本地选择账号下的 Host 与远端 Workspace，或通过
@@ -22,7 +22,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI
 - [x] Host ApiProxy allowlist bridge、mux/host stream 与后台 Local/Remote ApiProxy switch
 - [x] Harness v0.1.2 alpha.1–rc.1 Typert Remote unary/stream/event carrier、固定 endpoint allowlist、加密 capability 探测与 legacy ApiProxy 激活兼容
-- [x] Harness v0.1.5 alpha.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
+- [x] Harness v0.1.5 rc.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
 - [x] Android 与 VS Code Client 按 Host capability 在 rc.2 ApiProxy 和 v0.1.2 Typert Remote 之间选择数据面
 - [x] Remote 模态框、主机自过滤、OS/Harness/Plugin 版本展示、远端 Workspace 与目录选择
 - [x] Remote Header、LAN/P2P/TURN/Relay 链路、端到端加密状态与退出入口
@@ -39,7 +39,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval
 - [x] 分别用 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 跑通双机 Workspace/Session/Prompt/approval E2E，并验证混合代际在 mutation 前拒绝
 - [ ] 用 `dsh-v0.1.2-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval E2E 与长期稳定性回归
-- [ ] 用 `dsh-v0.1.5-alpha.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E；RC 发布后复核最终 Session V3 contract 再转正式支持
+- [ ] 用 `dsh-v0.1.5-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E 与长期稳定性回归
 - [x] 用两台真实 Harness + 外部 Server 跑通同账号授权、选择 Remote、创建/继续会话
 - [x] 验证原生 mux/host stream、approval/question respond 与断线关闭行为
 - [x] 用手机 Web 与电脑 Web 同时连接一个真实 Host，验证并发操作、同设备重连和流隔离

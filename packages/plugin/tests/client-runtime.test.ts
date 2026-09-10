@@ -550,7 +550,7 @@ describe('ClientModeRuntime Host account control', () => {
       undefined,
       gatewayWithCarrier(),
       logger(),
-      { localHarnessVersion: () => '0.1.5-alpha.1' } as unknown as HostAuthorizationControl,
+      { localHarnessVersion: () => '0.1.5-rc.1' } as unknown as HostAuthorizationControl,
     )
     await runtime.start()
     const rpc = vi.fn()

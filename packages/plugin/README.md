@@ -29,7 +29,7 @@ Continue your DeepSeek Harness sessions and experimental Codex workspaces from a
 Add the exact package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.11
+dsh plugin --profile web add ds-harness-remote@0.4.12
 ```
 
 ### dsh-TUI Host
@@ -37,7 +37,7 @@ dsh plugin --profile web add ds-harness-remote@0.4.11
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.11
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 ```
 
 After starting dsh-TUI, manage Remote with its native slash command:
@@ -79,11 +79,11 @@ Codex support is enabled by default and can be disabled in the DeepSeek Remote s
 
 ## Compatibility
 
-Plugin `0.4.11` supports:
+Plugin `0.4.12` supports:
 
 - DeepSeek Harness `dsh-v0.1.1-rc.2` through the official legacy `ApiProxy`
 - DeepSeek Harness `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` through the official Typert Remote Gateway
-- DeepSeek Harness `dsh-v0.1.5-alpha.1` Session V3 through the official Typert Remote Gateway (experimental)
+- DeepSeek Harness `dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway
 
 Both Desktop endpoints must use the same Harness carrier and Session generation. ApiProxy/Typert and v0.1.2/V3 connections are not translated; mixed-generation connections are rejected before mutations.
 

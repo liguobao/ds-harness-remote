@@ -1,7 +1,7 @@
 # DSH Remote Protocol v1
 
 状态：Draft v0.2（首版发布前，不保留旧业务 RPC 兼容）
-日期：2026-09-09
+日期：2026-09-10
 协议版本：`1`
 实现状态：**当前仓库必须实现 Client/Plugin 侧协议；Server 侧由独立项目实现**
 
@@ -12,7 +12,7 @@
 当前仓库负责：
 
 - `packages/protocol` 的类型、schema、编解码和版本校验
-- Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 alpha.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
+- Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
 - Mock Host/Client 与协议 conformance fixtures
 
 当前仓库不负责实现 Server REST API、WebSocket Hub、数据库、Admin 或部署。本文出现的 Server endpoint 和行为用于约束独立 Server 项目，不表示应在当前仓库创建 Server 代码。
@@ -32,7 +32,7 @@ DSH Remote Protocol 定义 Host Plugin、DSH Remote Server 和 Remote Client 之
 - WebRTC signaling 与 Relay routing
 - Host/Client 端到端安全通道
 - rc.2 ApiProxy tunnel 的 unary、respond 与 mux/host streaming
-- v0.1.2 alpha.1–rc.1 与 v0.1.5 alpha.1 Session V3 Typert Remote 的 unary、stream 与 `$events` 双向事件 carrier
+- v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 Typert Remote 的 unary、stream 与 `$events` 双向事件 carrier
 - reconnect 与原生 stream 重建
 - capability 与版本协商
 - 错误码、限制和安全不变量
@@ -747,7 +747,7 @@ Host handshake 的 capability 例子：
 空对象，Result 为 `{ "capabilities": string[] }`。当前 Host 按实际注入服务动态返回
 `harness.api.v1`、`harness.remote.v1` 或 `harness.remote.v3`，不得宣告不存在的 carrier。
 Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使用
-`harness.remote.v1`，v0.1.5 alpha.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
+`harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
 
 ApiProxy 与 Typert Remote contract 仍随 Desktop Plugin 发布物升级，但新增的可选业务能力
@@ -763,7 +763,7 @@ carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、
 | `0.3.24–0.3.36` / rc.2 | `harness.api.v1` | 支持 | provider 存在时支持 | `harness.api.transfer.v1` |
 | `0.4.x` / rc.2 | capability 探测返回 `harness.api.v1` | 支持 | provider 存在时支持 | `harness.api.transfer.v1` |
 | `0.4.x` / v0.1.2 alpha.1–rc.1 | capability 探测返回 `harness.remote.v1` | 支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
-| `0.4.11+` / v0.1.5 alpha.1 | capability 探测返回 `harness.remote.v3` | 实验支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
+| `0.4.12+` / v0.1.5 rc.1 | capability 探测返回 `harness.remote.v3` | 支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
 
 未知版本按 `0.3.15` 之前的能力处理。未来 Server 暴露 Host capability 后，应优先使用
 capability，`clientVersion` 仅保留为旧 Server 的兼容路径。
@@ -1076,10 +1076,10 @@ Open Params：
 
 `stream` 仅允许 `mux | host`，每条 peer connection 最多同时打开三个原生流：常驻的 host/mux 各一条，加一条 mux 切换缓冲。mux 流的 `payload` 可携带可选 `sessionId`（focus）：提供后 Host 只转发该 session 的 mux 帧（`session/event`、approval、question 等），其余 session 的流量不进入 tunnel；省略时转发全部。Remote Web 每次只关注一个 session，用 focus 避免把其他活跃 session 的大事件流（可能达数 MB）推过 WebRTC/relay 数据面。切换 session 时 Client 先打开新 mux，成功后立即关闭旧 mux；新流失败时保留旧流。Close Params：`{ "streamId": "client-stream-id" }`。`streamId` namespace、三条流上限和生命周期都属于发起它的 `connectionId`；不同 Client 可使用相同 `streamId`，不得互相关闭或接收对方的 tunnel event。连接替换、撤销或断开时 Host 只取消该 connection 的全部流。
 
-### Harness v0.1.2 alpha.1–rc.1 / v0.1.5 alpha.1 Typert Remote bridge
+### Harness v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Typert Remote bridge
 
 `harness.remote.v1` 只承载 `dsh-v0.1.2-alpha.1`–`rc.1` 官方 `TypertGateway` 已编码的 carrier
-envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-alpha.1` 的相同官方 carrier 与 Session V3
+envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 的相同官方 carrier 与 Session V3
 业务 envelope。Plugin 不解析或重建远端 Harness Session、Workspace、Approval、Question 等业务模型，也不
 注册第二套 Remote namespace。
 

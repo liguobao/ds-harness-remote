@@ -6,7 +6,7 @@
 ## 1. 产品定位
 
 Remote Plugin 同时承担 Host 和 Desktop Client 两个角色。Host 把官方 Harness
-rc.2 `ApiProxy`、v0.1.2 alpha.1–rc.1 或 v0.1.5 alpha.1 Session V3 Typert Remote Gateway 的安全子集接入端到端加密通道；Remote
+rc.2 `ApiProxy`、v0.1.2 alpha.1–rc.1 或 v0.1.5 rc.1 Session V3 Typert Remote Gateway 的安全子集接入端到端加密通道；Remote
 runtime 让官方 Harness UI 使用同账号 Host 上的工作区。产品不呈现 Client 模式开关。
 
 Plugin 是受控数据网关，不是独立 Agent、远程 Shell，也不重新实现 Harness 会话协议。

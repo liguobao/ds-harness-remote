@@ -29,7 +29,7 @@ describe('Remote Server API compatibility', () => {
         role: 'client',
         platform: 'android',
         identityKey: identity.publicKey,
-        clientVersion: '0.4.11',
+        clientVersion: '0.4.12',
       },
     })
   })

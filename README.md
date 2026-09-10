@@ -38,7 +38,7 @@ Return to the same Harness session from whichever device is with you. Harness ke
 ## Features
 
 - Continue active sessions and review their latest progress from another device
-- Send new instructions, change direction, and use image prompts with Harness `dsh-v0.1.1-rc.2`, `dsh-v0.1.2-alpha.1`–`rc.1`, or experimental `dsh-v0.1.5-alpha.1`
+- Send new instructions, change direction, and use image prompts with Harness `dsh-v0.1.1-rc.2`, `dsh-v0.1.2-alpha.1`–`rc.1`, or `dsh-v0.1.5-rc.1`
 - Answer questions and permission requests from clients with live conversation controls
 - Open workspaces from another authorized computer on the same account
 - Reuse the native Harness interface instead of maintaining a separate desktop conversation UI
@@ -58,7 +58,7 @@ Linux. Remote is included and enabled by default, so no separate plugin installa
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.11
+dsh plugin --profile web add ds-harness-remote@0.4.12
 ```
 
 Restart Harness after installation.
@@ -73,7 +73,7 @@ profile; it does not require the Desktop browser `connection` service. Install t
 TUI profile:
 
 ```sh
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.11
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 ```
 
 Start dsh-TUI and use its native slash command:
@@ -91,8 +91,8 @@ code. Login defaults to Zhihu; GitHub is also supported. Host control is enabled
 `/remote logout` revokes the Host and rotates its local device identity. Host configuration is not
 exposed yet; the integration uses `https://dsh.r2049.cn`. Tab completion is available for the
 subcommands and login providers. The `/remote` Host-management surface supports TUI profiles on
-`dsh-v0.1.1-rc.2`, `dsh-v0.1.2-alpha.1`–`rc.1`, and experimental
-`dsh-v0.1.5-alpha.1`; Remote workspace capabilities are advertised
+`dsh-v0.1.1-rc.2`, `dsh-v0.1.2-alpha.1`–`rc.1`, and
+`dsh-v0.1.5-rc.1`; Remote workspace capabilities are advertised
 only when their official Harness carrier is available.
 
 See the [dsh-TUI Remote guide](docs/dsh-tui.md) for the compatibility matrix, rc.2 ApiProxy setup,
@@ -215,10 +215,10 @@ Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
 `ApiProxy` or the v0.1.2 Typert Remote Gateway, and this plugin does not provide
 an adapter or wire-format translation for the old RPC surface.
 
-Plugin `0.4.11` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
+Plugin `0.4.12` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
 official `ApiProxy`, and `dsh-v0.1.2-alpha.1`–`rc.1` through the
-official Typert Remote Gateway. It also provides experimental
-`dsh-v0.1.5-alpha.1` Session V3 support. A `0.4.11` Client running rc.2 remains compatible
+official Typert Remote Gateway. It also supports
+`dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway. A `0.4.12` Client running rc.2 remains compatible
 with older rc.2 Hosts through the legacy capability fallback.
 
 Both Desktop endpoints must use the same Harness carrier and Session generation. Plugin
