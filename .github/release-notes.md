@@ -1,53 +1,68 @@
 ## English
 
-`v0.4.12` supports DeepSeek Harness `dsh-v0.1.5-rc.1`, keeps the existing rc.2 and v0.1.2 compatibility paths, and adds a Remote-side fallback for released sessions that still name the retired `code` agent preset. It contains the changes since `v0.4.10` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)).
+`v0.4.13` is a compatibility release for DeepSeek Harness Remote. It restores the
+newer Desktop control route, keeps rc.2 Clients working against Session V3 Hosts
+that still expose ApiProxy, and lets Session V3 Desktop clients open legacy
+v0.1.2 Typert Remote Hosts through Remote-side normalization. It contains the
+changes since `v0.4.12` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.12...v0.4.13)).
 
 ### What changed
 
-- Adds `dsh-v0.1.5-rc.1` Session V3 support across the Plugin, Android app, and VS Code Typert client.
-- Keeps `dsh-v0.1.1-rc.2` on the official legacy ApiProxy path and `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` on the official Typert Remote Gateway path.
-- The DSH peer dependency range remains intentionally broad across supported carrier families: `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <=0.1.2-rc.1 || >=0.1.5-alpha.1 <=0.1.5-rc.1`.
-- Preserves the Session V3 capability contract and rejects mixed v0.1.2/V3 Desktop connections before switching native UI state or mutating a Workspace.
-- Normalizes released sessions that still report `agentPreset: "code"` to `ptc` in the Plugin adapter, Android app, and shared Typert Remote client. This keeps old Remote sessions resumable on `dsh-v0.1.5-rc.1` without patching DeepSeek Harness itself.
-- Keeps the `0.4.11` experimental Session V3 work in the release line, including Host capability probing and the newer assistant-stream projection path.
-- Synchronizes the Plugin and Android app at version `0.4.12` with Android `versionCode 29`.
+- Registers the Remote loopback control route directly on the DSH web server
+  when available, while preserving Host request rejection checks.
+- Advertises legacy ApiProxy capabilities alongside Session V3 when the Host has
+  both carriers, so older Remote Web clients can still choose the rc.2 path.
+- Allows Session V3 Desktop clients to open legacy v0.1.2 Typert Remote Hosts by
+  normalizing legacy session pages, follow snapshots, event names, message
+  sources, replacement ranges, and history gaps at the Remote boundary.
+- Keeps legacy Typert clients fail-closed against Session V3 Hosts.
+- Permits Codex-only Hosts to pass feature probing without requiring a Harness
+  carrier.
+- Synchronizes the Plugin and Android app at version `0.4.13` with Android
+  `versionCode 30`.
 
 ### Install and downloads
 
 Install through DSH's plugin manager:
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.12
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
+dsh plugin --profile web add ds-harness-remote@0.4.13
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
 ```
 
-- [npm package](https://www.npmjs.com/package/ds-harness-remote/v/0.4.12)
-- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.12/dsh-remote-android-v0.4.12.apk)
+- [npm package](https://www.npmjs.com/package/ds-harness-remote/v/0.4.13)
+- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.13/dsh-remote-android-v0.4.13.apk)
 - Release assets also include the npm tarball and `SHA256SUMS.txt`.
 
 ## 中文
 
-`v0.4.12` 支持 DeepSeek Harness `dsh-v0.1.5-rc.1`，保留既有 rc.2 与 v0.1.2 兼容路径，并在 Remote 自己的边界里为仍记录已退役 `code` agent preset 的旧会话增加兜底。本版本包含自 `v0.4.10` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)）。
+`v0.4.13` 是 DeepSeek Harness Remote 的兼容性版本。它恢复新版 Desktop 的控制路由，
+让仍暴露 ApiProxy 的 Session V3 Host 继续兼容 rc.2 Client，并允许 Session V3 Desktop
+Client 通过 Remote 侧归一化打开 legacy v0.1.2 Typert Remote Host。本版本包含自
+`v0.4.12` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.12...v0.4.13)）。
 
 ### 主要变更
 
-- Plugin、Android App 和 VS Code Typert Client 都已支持 `dsh-v0.1.5-rc.1` Session V3。
-- `dsh-v0.1.1-rc.2` 继续走官方 legacy ApiProxy 路径，`dsh-v0.1.2-alpha.1` 到 `dsh-v0.1.2-rc.1` 继续走官方 Typert Remote Gateway 路径。
-- DSH peer dependency 仍然按受支持 carrier 家族保留较宽范围：`>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <=0.1.2-rc.1 || >=0.1.5-alpha.1 <=0.1.5-rc.1`。
-- 保留 Session V3 capability 契约，并在切换原生 UI 状态或修改 Workspace 前拒绝 Desktop v0.1.2/V3 混连。
-- Plugin adapter、Android App 和共享 Typert Remote Client 会把旧会话仍上报的 `agentPreset: "code"` 归一为 `ptc`，让旧 Remote 会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改 DeepSeek Harness 本身。
-- 将 `0.4.11` 的实验性 Session V3 工作纳入发布线，包括 Host capability 探测和新的 assistant-stream projection 路径。
-- Plugin 与 Android App 版本统一更新为 `0.4.12`，Android `versionCode` 更新为 `29`。
+- 在可用时直接把 Remote loopback control route 注册到 DSH web server，同时保留 Host
+  request rejection 检查。
+- 当 Host 同时具备 Session V3 与 ApiProxy carrier 时继续发布 legacy ApiProxy capability，
+  让旧 Remote Web Client 仍可选择 rc.2 路径。
+- Session V3 Desktop Client 可以通过 Remote 边界内的归一化打开 legacy v0.1.2 Typert
+  Remote Host；归一化覆盖 session page、follow snapshot、event 名称、message source、
+  replacement range 与 history gap。
+- legacy Typert Client 仍会对 Session V3 Host fail closed。
+- 允许仅提供 Codex 能力的 Host 通过 feature probing，不强制要求 Harness carrier。
+- Plugin 与 Android App 版本统一更新为 `0.4.13`，Android `versionCode` 更新为 `30`。
 
 ### 安装与下载
 
 请通过 DSH Plugin 管理器安装：
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.12
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
+dsh plugin --profile web add ds-harness-remote@0.4.13
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
 ```
 
-- [npm 包](https://www.npmjs.com/package/ds-harness-remote/v/0.4.12)
-- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.12/dsh-remote-android-v0.4.12.apk)
+- [npm 包](https://www.npmjs.com/package/ds-harness-remote/v/0.4.13)
+- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.13/dsh-remote-android-v0.4.13.apk)
 - Release 附件还包括 npm tarball 与 `SHA256SUMS.txt`。

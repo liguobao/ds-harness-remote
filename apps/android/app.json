@@ -3,7 +3,7 @@
     "name": "DSH Remote",
     "slug": "dsh-remote",
     "scheme": "dshremote",
-    "version": "0.4.12",
+    "version": "0.4.13",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "io.github.liguobao.dshremote",
-      "versionCode": 29,
+      "versionCode": 30,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"

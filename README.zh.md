@@ -58,7 +58,7 @@ DSH Desktop 已默认集成并启用 Remote，无需另行安装插件。
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.12
+dsh plugin --profile web add ds-harness-remote@0.4.13
 ```
 
 安装后请重启 Harness。
@@ -71,7 +71,7 @@ Remote 可以在纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) prof
 运行，不再依赖 Desktop 浏览器的 `connection` 服务。先把插件安装进 TUI profile：
 
 ```sh
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
 ```
 
 启动 dsh-TUI 后，使用原生 Slash Command：
@@ -198,18 +198,19 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
 本插件不提供旧 RPC 的适配层或 wire format 翻译。
 
-Plugin `0.4.12` 同时兼容 DeepSeek Harness `dsh-v0.1.1-rc.2` 与
+Plugin `0.4.13` 同时兼容 DeepSeek Harness `dsh-v0.1.1-rc.2` 与
 `dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
 Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` Session V3 官方 Typert Remote
-Gateway。运行 rc.2 的 `0.4.12` Client 仍可通过 legacy capability 降级连接旧 rc.2 Host。
+Gateway。运行 rc.2 的 `0.4.13` Client 仍可通过 legacy capability 降级连接旧 rc.2 Host。
 
 Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的已退役 `code`
 agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改
 DeepSeek Harness 本身。
 
-两端 Desktop 必须处于同一 Harness carrier 与 Session 代际。`0.4.x` 不翻译 legacy ApiProxy、v0.1.2 Session wire 与 Session V3 的业务模型：
-Typert Client 不能打开 ApiProxy Host，ApiProxy Client 也不能打开 Typert Host；混连会在切换原生
-UI 或修改 Workspace 前被拒绝。v0.1.2/V3 混连同样会在 mutation 前被拒绝。
+Desktop 两端必须使用兼容的 Harness carrier。`0.4.13` 会在 Host 暴露 rc.2 ApiProxy 时
+选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
+打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
+前拒绝 Session V3 Host。
 
 ## 文档
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.13
+
+- Registers the Remote loopback control route directly on the DSH web server
+  when available, preserving the same request rejection checks while restoring
+  `/ds-harness-remote/*` control calls on newer Desktop hosts.
+- Advertises legacy ApiProxy capabilities alongside Session V3 when the Host has
+  both carriers, so older Remote Web clients can still select the rc.2 path.
+- Lets Session V3 Desktop clients open legacy v0.1.2 Typert Remote Hosts by
+  normalizing legacy session pages, follow snapshots, event names, message
+  sources, replacement ranges, and history gaps at the Remote boundary.
+- Keeps legacy Typert clients fail-closed against Session V3 Hosts and permits
+  Codex-only Hosts to pass feature probing without requiring a Harness carrier.
+- Advances the Plugin and Android app to `0.4.13` (`versionCode 30`).
+
 ## 0.4.12
 
 - Upgrades the DeepSeek Harness `dsh-v0.1.5` compatibility baseline from

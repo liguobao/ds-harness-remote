@@ -58,7 +58,7 @@ Linux. Remote is included and enabled by default, so no separate plugin installa
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.12
+dsh plugin --profile web add ds-harness-remote@0.4.13
 ```
 
 Restart Harness after installation.
@@ -73,7 +73,7 @@ profile; it does not require the Desktop browser `connection` service. Install t
 TUI profile:
 
 ```sh
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
 ```
 
 Start dsh-TUI and use its native slash command:
@@ -215,20 +215,20 @@ Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
 `ApiProxy` or the v0.1.2 Typert Remote Gateway, and this plugin does not provide
 an adapter or wire-format translation for the old RPC surface.
 
-Plugin `0.4.12` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
+Plugin `0.4.13` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
 official `ApiProxy`, and `dsh-v0.1.2-alpha.1`–`rc.1` through the
 official Typert Remote Gateway. It also supports
-`dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway. A `0.4.12` Client running rc.2 remains compatible
+`dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway. A `0.4.13` Client running rc.2 remains compatible
 with older rc.2 Hosts through the legacy capability fallback.
 
 Remote Web/Desktop and the Android app also normalize released sessions that
 still report the retired `code` agent preset to `ptc`, so old sessions can
 resume on `dsh-v0.1.5-rc.1` without changing DeepSeek Harness itself.
 
-Both Desktop endpoints must use the same Harness carrier and Session generation. Plugin
-`0.4.x` does not translate legacy ApiProxy, the v0.1.2 Session wire, and Session V3 business models: a
-Typert Client cannot open an ApiProxy Host, and an ApiProxy Client cannot open a Typert Host. Mixed
-v0.1.2/V3 connections are also rejected before switching the native UI or mutating a Workspace.
+Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.13` selects the legacy
+ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop clients can open
+legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
+Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.
 
 ## Documentation
 
