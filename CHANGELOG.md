@@ -6,6 +6,10 @@
   `alpha.1` to `rc.1` across the Plugin, Android, and VS Code Typert clients.
 - Extends the DSH peer dependency matrix to `0.1.5-rc.1` while retaining the
   existing Session V3 capability and mixed-generation rejection behavior.
+- Normalizes released Remote sessions that still report the retired `code`
+  agent preset to `ptc` in the Plugin adapter, Android app, and shared
+  Typert Remote client so old sessions resume on `dsh-v0.1.5-rc.1` without
+  patching Harness itself.
 - Advances the Plugin and Android app to `0.4.12` (`versionCode 29`).
 
 ## 0.4.11

@@ -1,59 +1,83 @@
 ## English
 
-`v0.4.10` fixes Codex approval policy handling, remembers Android workspace tabs, and strengthens shared account authorization validation. It contains the changes since `v0.4.9` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.9...v0.4.10)).
+`v0.4.12` upgrades DeepSeek Harness `dsh-v0.1.5` support to `rc.1`, keeps the existing rc.2 and v0.1.2 compatibility paths, and adds a Remote-side fallback for released sessions that still name the retired `code` agent preset. It contains the changes since `v0.4.10` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)).
 
 ### What changed
 
-- Web and Desktop Codex approval controls now show the Host-confirmed policy for each Thread, or indicate that Host settings are inherited when the policy is unknown. Explicit changes require Host confirmation and update connected observers; sending prompts and forking preserve the current Thread policy.
-- Android remembers the selected DSH or CodeX workspace tab for each Host and removes the redundant permission hint below the chat composer.
-- Desktop connection progress highlights one transport probe at a time. During direct negotiation, the visible cue advances from LAN to P2P while the completed connection still reports its actual route.
-- Adds shared Account Authorization schemas for device registration, Host registration codes, token refresh, and Browser authorization exchange. Plugin, Android, Browser, and VS Code credential parsing now uses the shared validation.
-- Expands Protocol v1 conformance fixtures and runs the shared suites in Android tests.
-- Synchronizes the Plugin and Android app at version `0.4.10` with Android `versionCode 27`.
+- Updates the Plugin, Android, and VS Code Typert clients from the `dsh-v0.1.5-alpha.1` compatibility baseline to `dsh-v0.1.5-rc.1`.
+- Keeps `dsh-v0.1.1-rc.2` on the official legacy ApiProxy path and `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` on the official Typert Remote Gateway path.
+- Preserves the Session V3 capability contract and rejects mixed v0.1.2/V3 Desktop connections before switching native UI state or mutating a Workspace.
+- Normalizes released sessions that still report `agentPreset: "code"` to `ptc` in the Plugin adapter, Android app, and shared Typert Remote client. This keeps old Remote sessions resumable on `dsh-v0.1.5-rc.1` without patching DeepSeek Harness itself.
+- Keeps the `0.4.11` experimental Session V3 work in the release line, including Host capability probing and the newer assistant-stream projection path.
+- Synchronizes the Plugin and Android app at version `0.4.12` with Android `versionCode 29`.
 
 ### Validation
 
-CI checks workspace types and tests, verifies the committed Host bundle and GitHub plugin package, and performs production builds. The release workflow runs checks, tests, and builds before publishing npm and GitHub Packages artifacts and attaching the Android APK.
+Local validation covered the Plugin adapter, Android app, shared client core, and package build before tagging:
+
+- `pnpm --filter './packages/**' -r build`
+- `pnpm --filter @dsh-remote/android test`
+- `pnpm --filter @dsh-remote/android check`
+- `pnpm --filter @dsh-remote/client-core test`
+- `pnpm --filter @dsh-remote/client-core check`
+- `pnpm test -- --run tests/remote-api-proxy.test.ts` in `packages/plugin`
+- `pnpm check` and `pnpm build` in `packages/plugin`
+- `node scripts/verify-dsh-plugin.mjs`
+- `git diff --check`
+
+The release workflow repeats checks, tests, and production builds, publishes npm and GitHub Packages artifacts when needed, and attaches the Android APK.
 
 ### Install and downloads
 
 Install through DSH's plugin manager:
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.10
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.10
+dsh plugin --profile web add ds-harness-remote@0.4.12
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 ```
 
-- [npm package](https://www.npmjs.com/package/ds-harness-remote/v/0.4.10)
-- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.10/dsh-remote-android-v0.4.10.apk)
+- [npm package](https://www.npmjs.com/package/ds-harness-remote/v/0.4.12)
+- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.12/dsh-remote-android-v0.4.12.apk)
 - Release assets also include the npm tarball and `SHA256SUMS.txt`.
 
 ## 中文
 
-`v0.4.10` 修复 CodeX 审批策略处理，记住 Android 工作区分页，并加强共享账号授权校验。本版本包含自 `v0.4.9` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.9...v0.4.10)）。
+`v0.4.12` 将 DeepSeek Harness `dsh-v0.1.5` 兼容基线升级到 `rc.1`，保留既有 rc.2 与 v0.1.2 兼容路径，并在 Remote 自己的边界里为仍记录已退役 `code` agent preset 的旧会话增加兜底。本版本包含自 `v0.4.10` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.12)）。
 
 ### 主要变更
 
-- Web 与 Desktop 的 CodeX 审批控件按 Thread 显示 Host 已确认的策略，未知时显示沿用 Host 设置。显式切换须由 Host 确认并同步其他连接；发送 Prompt 和 fork 保留当前 Thread 的策略。
-- Android 按 Host 记住上次选择的 DSH 或 CodeX 工作区分页，并移除聊天输入框下方重复的权限提示。
-- Desktop 连接进度每次只高亮一个探测路径。直连协商期间，界面提示从 LAN 推进到 P2P，连接完成后仍显示实际使用的路径。
-- 新增设备注册、主机匹配码、Token 刷新和 Browser 授权交换的共享 Account Authorization schema；Plugin、Android、Browser 和 VS Code 的凭证解析统一使用共享校验。
-- 扩展 Protocol v1 conformance fixtures，并在 Android 测试中运行共享用例。
-- Plugin 与 Android App 版本统一更新为 `0.4.10`，Android `versionCode` 更新为 `27`。
+- Plugin、Android 和 VS Code Typert Client 的 `dsh-v0.1.5` 兼容基线从 `alpha.1` 升级到 `rc.1`。
+- `dsh-v0.1.1-rc.2` 继续走官方 legacy ApiProxy 路径，`dsh-v0.1.2-alpha.1` 到 `dsh-v0.1.2-rc.1` 继续走官方 Typert Remote Gateway 路径。
+- 保留 Session V3 capability 契约，并在切换原生 UI 状态或修改 Workspace 前拒绝 Desktop v0.1.2/V3 混连。
+- Plugin adapter、Android App 和共享 Typert Remote Client 会把旧会话仍上报的 `agentPreset: "code"` 归一为 `ptc`，让旧 Remote 会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改 DeepSeek Harness 本身。
+- 将 `0.4.11` 的实验性 Session V3 工作纳入发布线，包括 Host capability 探测和新的 assistant-stream projection 路径。
+- Plugin 与 Android App 版本统一更新为 `0.4.12`，Android `versionCode` 更新为 `29`。
 
 ### 验证
 
-CI 执行 workspace 类型检查与测试、校验已提交的 Host bundle 和 GitHub Plugin 包，并完成生产构建。Release workflow 在检查、测试和构建通过后发布 npm 与 GitHub Packages 产物，并附加 Android APK。
+打 tag 前，本地验证覆盖了 Plugin adapter、Android App、共享 client core 和 package build：
+
+- `pnpm --filter './packages/**' -r build`
+- `pnpm --filter @dsh-remote/android test`
+- `pnpm --filter @dsh-remote/android check`
+- `pnpm --filter @dsh-remote/client-core test`
+- `pnpm --filter @dsh-remote/client-core check`
+- 在 `packages/plugin` 运行 `pnpm test -- --run tests/remote-api-proxy.test.ts`
+- 在 `packages/plugin` 运行 `pnpm check` 和 `pnpm build`
+- `node scripts/verify-dsh-plugin.mjs`
+- `git diff --check`
+
+Release workflow 会再次执行检查、测试和生产构建，按需发布 npm 与 GitHub Packages 产物，并附加 Android APK。
 
 ### 安装与下载
 
 请通过 DSH Plugin 管理器安装：
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.10
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.10
+dsh plugin --profile web add ds-harness-remote@0.4.12
+dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 ```
 
-- [npm 包](https://www.npmjs.com/package/ds-harness-remote/v/0.4.10)
-- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.10/dsh-remote-android-v0.4.10.apk)
+- [npm 包](https://www.npmjs.com/package/ds-harness-remote/v/0.4.12)
+- [Android APK](https://github.com/liguobao/ds-harness-remote/releases/download/v0.4.12/dsh-remote-android-v0.4.12.apk)
 - Release 附件还包括 npm tarball 与 `SHA256SUMS.txt`。

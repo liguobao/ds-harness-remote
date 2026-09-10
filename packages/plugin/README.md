@@ -85,6 +85,10 @@ Plugin `0.4.12` supports:
 - DeepSeek Harness `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` through the official Typert Remote Gateway
 - DeepSeek Harness `dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway
 
+Remote Web/Desktop and Android clients normalize released sessions that still report the retired
+`code` agent preset to `ptc`, so old sessions can resume on `dsh-v0.1.5-rc.1` without patching
+DeepSeek Harness itself.
+
 Both Desktop endpoints must use the same Harness carrier and Session generation. ApiProxy/Typert and v0.1.2/V3 connections are not translated; mixed-generation connections are rejected before mutations.
 
 ## Documentation

@@ -203,6 +203,10 @@ Plugin `0.4.12` 同时兼容 DeepSeek Harness `dsh-v0.1.1-rc.2` 与
 Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` Session V3 官方 Typert Remote
 Gateway。运行 rc.2 的 `0.4.12` Client 仍可通过 legacy capability 降级连接旧 rc.2 Host。
 
+Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的已退役 `code`
+agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改
+DeepSeek Harness 本身。
+
 两端 Desktop 必须处于同一 Harness carrier 与 Session 代际。`0.4.x` 不翻译 legacy ApiProxy、v0.1.2 Session wire 与 Session V3 的业务模型：
 Typert Client 不能打开 ApiProxy Host，ApiProxy Client 也不能打开 Typert Host；混连会在切换原生
 UI 或修改 Workspace 前被拒绝。v0.1.2/V3 混连同样会在 mutation 前被拒绝。

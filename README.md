@@ -221,6 +221,10 @@ official Typert Remote Gateway. It also supports
 `dsh-v0.1.5-rc.1` Session V3 through the official Typert Remote Gateway. A `0.4.12` Client running rc.2 remains compatible
 with older rc.2 Hosts through the legacy capability fallback.
 
+Remote Web/Desktop and the Android app also normalize released sessions that
+still report the retired `code` agent preset to `ptc`, so old sessions can
+resume on `dsh-v0.1.5-rc.1` without changing DeepSeek Harness itself.
+
 Both Desktop endpoints must use the same Harness carrier and Session generation. Plugin
 `0.4.x` does not translate legacy ApiProxy, the v0.1.2 Session wire, and Session V3 business models: a
 Typert Client cannot open an ApiProxy Host, and an ApiProxy Client cannot open a Typert Host. Mixed
