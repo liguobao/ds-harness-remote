@@ -1,23 +1,28 @@
 ## English
 
-`v0.4.13` is a compatibility release for DeepSeek Harness Remote. It restores the
-newer Desktop control route, keeps rc.2 Clients working against Session V3 Hosts
-that still expose ApiProxy, and lets Session V3 Desktop clients open legacy
-v0.1.2 Typert Remote Hosts through Remote-side normalization. It contains the
-changes since `v0.4.12` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.12...v0.4.13)).
+`v0.4.13` is the cumulative upgrade from `v0.4.10` to the current DeepSeek
+Harness compatibility line. The main change is support for the latest
+`dsh-v0.1.5-rc.1` Session V3 stack, while keeping the existing rc.2 ApiProxy and
+v0.1.2 Typert Remote paths available where they are still needed. It contains
+the changes since `v0.4.10` ([full comparison](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.13)).
 
 ### What changed
 
-- Registers the Remote loopback control route directly on the DSH web server
-  when available, while preserving Host request rejection checks.
-- Advertises legacy ApiProxy capabilities alongside Session V3 when the Host has
-  both carriers, so older Remote Web clients can still choose the rc.2 path.
-- Allows Session V3 Desktop clients to open legacy v0.1.2 Typert Remote Hosts by
-  normalizing legacy session pages, follow snapshots, event names, message
-  sources, replacement ranges, and history gaps at the Remote boundary.
-- Keeps legacy Typert clients fail-closed against Session V3 Hosts.
-- Permits Codex-only Hosts to pass feature probing without requiring a Harness
-  carrier.
+- Adds `dsh-v0.1.5-rc.1` Session V3 support across the Plugin, Android app, and
+  VS Code Typert client.
+- Extends the DSH peer dependency matrix through `0.1.5-rc.1` while keeping
+  `dsh-v0.1.1-rc.2` on the official legacy ApiProxy path and
+  `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` on the official Typert Remote
+  Gateway path.
+- Normalizes released sessions that still report the retired
+  `agentPreset: "code"` to `ptc`, so old Remote sessions can resume on
+  `dsh-v0.1.5-rc.1` without patching DeepSeek Harness itself.
+- Restores compatibility around mixed client generations: Hosts with Session V3
+  and ApiProxy advertise both carriers for older Remote Web clients, while
+  Session V3 Desktop clients can open legacy v0.1.2 Typert Remote Hosts through
+  Remote-side history and event normalization.
+- Registers the Remote loopback control route directly on the newer DSH web
+  server when available, preserving the same request rejection checks.
 - Synchronizes the Plugin and Android app at version `0.4.13` with Android
   `versionCode 30`.
 
@@ -36,22 +41,26 @@ dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
 
 ## 中文
 
-`v0.4.13` 是 DeepSeek Harness Remote 的兼容性版本。它恢复新版 Desktop 的控制路由，
-让仍暴露 ApiProxy 的 Session V3 Host 继续兼容 rc.2 Client，并允许 Session V3 Desktop
-Client 通过 Remote 侧归一化打开 legacy v0.1.2 Typert Remote Host。本版本包含自
-`v0.4.12` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.12...v0.4.13)）。
+`v0.4.13` 是从 `v0.4.10` 升级到当前 DeepSeek Harness 兼容线的累计版本。主要变化是
+兼容最新的 `dsh-v0.1.5-rc.1` Session V3，同时保留既有 rc.2 ApiProxy 与 v0.1.2 Typert
+Remote 路径。本版本包含自 `v0.4.10` 以来的改动（[完整对比](https://github.com/liguobao/ds-harness-remote/compare/v0.4.10...v0.4.13)）。
 
 ### 主要变更
 
-- 在可用时直接把 Remote loopback control route 注册到 DSH web server，同时保留 Host
+- Plugin、Android App 和 VS Code Typert Client 都已支持 `dsh-v0.1.5-rc.1`
+  Session V3。
+- DSH peer dependency 矩阵扩展到 `0.1.5-rc.1`；同时保留 `dsh-v0.1.1-rc.2`
+  的官方 legacy ApiProxy 路径，以及 `dsh-v0.1.2-alpha.1` 到
+  `dsh-v0.1.2-rc.1` 的官方 Typert Remote Gateway 路径。
+- Remote 会把已发布旧会话中仍然上报的已退役 `agentPreset: "code"` 归一为
+  `ptc`，因此旧 Remote 会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改
+  DeepSeek Harness 本身。
+- 修复不同 Client 代际之间的兼容细节：同时具备 Session V3 与 ApiProxy 的 Host 会继续
+  发布两种 carrier，便于旧 Remote Web Client 选择 rc.2 路径；Session V3 Desktop
+  Client 也可以通过 Remote 侧 history/event 归一化打开 legacy v0.1.2 Typert Remote
+  Host。
+- 在新版 DSH web server 可用时直接注册 Remote loopback control route，同时保留相同的
   request rejection 检查。
-- 当 Host 同时具备 Session V3 与 ApiProxy carrier 时继续发布 legacy ApiProxy capability，
-  让旧 Remote Web Client 仍可选择 rc.2 路径。
-- Session V3 Desktop Client 可以通过 Remote 边界内的归一化打开 legacy v0.1.2 Typert
-  Remote Host；归一化覆盖 session page、follow snapshot、event 名称、message source、
-  replacement range 与 history gap。
-- legacy Typert Client 仍会对 Session V3 Host fail closed。
-- 允许仅提供 Codex 能力的 Host 通过 feature probing，不强制要求 Harness carrier。
 - Plugin 与 Android App 版本统一更新为 `0.4.13`，Android `versionCode` 更新为 `30`。
 
 ### 安装与下载
