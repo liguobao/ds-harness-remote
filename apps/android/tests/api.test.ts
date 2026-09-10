@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { RemoteServerApi } from '../src/services/api'
+import { ANDROID_CLIENT_VERSION, RemoteServerApi } from '../src/services/api'
 import type { DeviceIdentity } from '../src/types'
 
 const identity: DeviceIdentity = {
@@ -29,7 +29,7 @@ describe('Remote Server API compatibility', () => {
         role: 'client',
         platform: 'android',
         identityKey: identity.publicKey,
-        clientVersion: '0.4.12',
+        clientVersion: ANDROID_CLIENT_VERSION,
       },
     })
   })
