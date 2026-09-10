@@ -6,8 +6,31 @@ import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
+import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
+  it('advertises ApiProxy alongside Session V3 for older Remote Web clients', async () => {
+    const runtime = new HostPluginRuntime(
+      config(),
+      identities(),
+      apiProxy({}),
+      logger(),
+      localGateway(),
+    )
+    await runtime.start()
+    ;(runtime as unknown as { harnessVersion: string }).harnessVersion = '0.1.5-rc.1'
+
+    expect(runtime.diagnostics()).toMatchObject({
+      capabilities: expect.arrayContaining([
+        'harness.remote.v3',
+        'harness.remote.transfer.v1',
+        'harness.api.v1',
+        'harness.api.transfer.v1',
+      ]),
+    })
+    await runtime.close()
+  })
+
   it('allows identical stream ids on different Client connections without crossing frames', async () => {
     const streamSignals: AbortSignal[] = []
     const mux: ApiProxy['events']['mux'] = async function* (request, signal) {
@@ -111,6 +134,16 @@ function apiProxy(events: Partial<ApiProxy['events']>): ApiProxy {
     downloads: empty,
     respond: async () => ({ accepted: true }),
   } as unknown as ApiProxy
+}
+
+function localGateway(): LocalTypertGateway {
+  return {
+    invoke: vi.fn(async () => undefined),
+    dispatch: vi.fn(async () => ({ ok: true as const })),
+    open: vi.fn(async () => (async function* () { return })()),
+    failure: vi.fn(() => ({ code: 'internal', message: 'failed', details: {} })),
+    supportsCarrier: true,
+  }
 }
 
 function fakeChannel(

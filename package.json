@@ -1,6 +1,6 @@
 {
   "name": "ds-harness-remote",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "End-to-end encrypted remote access to DeepSeek Harness and experimental Codex workspaces from desktop, web, and Android, with dsh-TUI Host support.",
   "keywords": [
     "deepseek",

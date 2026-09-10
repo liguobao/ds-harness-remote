@@ -351,7 +351,8 @@ export class HostPluginRuntime {
         harnessSessionGeneration(this.harnessVersion) === 'v3' ? 'harness.remote.v3' : 'harness.remote.v1',
         'harness.remote.transfer.v1',
       )
-    } else if (this.apiProxy !== undefined) {
+    }
+    if (this.apiProxy !== undefined) {
       capabilities.push('harness.api.v1', 'harness.api.transfer.v1')
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
