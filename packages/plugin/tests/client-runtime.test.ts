@@ -589,6 +589,51 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
+  it('selects the legacy ApiProxy transport for rc.2 Hosts even when the local Typert carrier exists', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-dual-carrier-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gatewayWithCarrier(),
+      logger(),
+    )
+    await runtime.start()
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      if (method === 'harness.api.call' && (params as { method?: string }).method === 'workspace.create') {
+        return {
+          rpcId: (params as { rpcId: string }).rpcId,
+          result: {
+            ok: true,
+            value: { workspace: { workspaceId: 'workspace-rc2-1' }, created: true },
+          },
+        }
+      }
+      throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`)
+    })
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
+      target: {
+        deviceId: 'host-device-rc2', name: 'RC2 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
+      },
+      transport: {},
+      features: { commandList: true, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false },
+    }
+
+    await expect(runtime.openRemoteWorkspace('host-device-rc2', '/srv/project')).resolves.toMatchObject({
+      mode: 'remote',
+      workspace: { created: true, workspace: { workspaceId: 'workspace-rc2-1' } },
+    })
+    expect(rpc).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
+      method: 'workspace.create',
+      payload: { path: '/srv/project' },
+    }), undefined)
+    expect(rpc).not.toHaveBeenCalledWith('harness.remote.call', expect.anything(), expect.anything())
+    await runtime.close()
+  })
+
   it('allows Session V3 clients to open legacy Typert Remote Host workspaces', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-legacy-remote-'))
     directories.push(directory)

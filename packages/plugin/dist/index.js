@@ -19322,9 +19322,9 @@ var ClientModeRuntime = class {
   async openRemoteWorkspace(targetDeviceId, path, signal) {
     if (path.trim() === "") throw new ClientModeError("INVALID_MESSAGE", "A remote working directory is required.");
     const remote = await this.ensureConnected(targetDeviceId, signal);
-    this.assertRemoteCompatible(remote);
+    const transport = this.selectHarnessRemoteTransport(remote);
     let workspace;
-    if (remote.features.remoteGateway) {
+    if (transport === "remoteGateway") {
       workspace = await new RemoteTypertGateway2(remote.client).invoke({
         namespace: "workspace",
         method: "create",
@@ -19340,7 +19340,7 @@ var ClientModeRuntime = class {
       workspace = unwrapNativeResult(response);
     }
     await this.closeCodexVirtual();
-    this.selectRemoteTarget(remote);
+    this.selectRemoteTarget(remote, transport);
     const workspaceId = workspaceRecordId(workspace.workspace);
     this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
     this.logger.info("Remote workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
@@ -19568,13 +19568,13 @@ var ClientModeRuntime = class {
       await stream.close();
     }));
   }
-  selectRemoteTarget(remote) {
+  selectRemoteTarget(remote, transport = this.selectHarnessRemoteTransport(remote)) {
     const target = { deviceId: remote.target.deviceId, name: remote.target.name };
-    if (this.gatewaySwitch.supportsCarrier()) {
+    if (transport === "remoteGateway") {
       this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target);
       return;
     }
-    this.proxySwitch.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target);
+    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target);
     this.gatewaySwitch.selectRemote((request) => invokeRemoteCommand(remote.client, request), {
       execute: true,
       list: remote.features.commandList
@@ -19602,16 +19602,19 @@ var ClientModeRuntime = class {
     await virtual?.close();
   }
   assertRemoteCompatible(remote) {
+    this.selectHarnessRemoteTransport(remote);
+  }
+  selectHarnessRemoteTransport(remote) {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier();
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
     if (localRemoteGateway && remote.features.remoteGateway) {
-      if (localSessionGeneration === "v3" || remote.features.sessionFormat !== 3) return;
+      if (localSessionGeneration === "v3" || remote.features.sessionFormat !== 3) return "remoteGateway";
       throw new ClientModeError(
         "HARNESS_VERSION_INCOMPATIBLE",
         "The selected Host uses Harness Session V3, but this Client uses the legacy Typert Remote session format."
       );
     }
-    if (!localRemoteGateway && this.proxySwitch !== void 0 && remote.features.apiProxy) return;
+    if (this.proxySwitch !== void 0 && remote.features.apiProxy) return "apiProxy";
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",
       localRemoteGateway ? "The selected Host does not provide a compatible Harness Typert Remote Gateway transport." : "The selected Host does not provide the legacy Harness ApiProxy transport."
