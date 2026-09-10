@@ -42,6 +42,37 @@ function clientThatReturns(response: unknown): RemoteClientCore {
 }
 
 describe('RemoteHarnessApiProxy', () => {
+  it('maps legacy code preset requests to ptc before forwarding them to Harness', async () => {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const client = {
+      rpc: async (method: string, params: unknown) => {
+        calls.push({ method, params })
+        return {
+          rpcId: (params as { rpcId: string }).rpcId,
+          result: { ok: true, value: {} },
+        }
+      },
+      onEvent: () => () => undefined,
+      onClose: () => () => undefined,
+    } as unknown as RemoteClientCore
+    const proxy = new RemoteHarnessApiProxy(client)
+
+    await proxy.api.agentPresets.read({ rpcId: 'read-1' as never, payload: { agentPreset: 'code' } as never })
+    await proxy.api.agentPresets.select({ rpcId: 'select-1' as never, payload: { agentPreset: 'code' } as never })
+    await proxy.api.agentPresets.copy({ rpcId: 'copy-1' as never, payload: { from: 'code' } as never })
+    await proxy.api.settings.update({
+      rpcId: 'settings-1' as never,
+      payload: { ns: 'agent-presets', patch: { default: 'code', other: 'code' } } as never,
+    })
+
+    expect(calls.map(call => (call.params as { method: string; payload: unknown }).payload)).toEqual([
+      { agentPreset: 'ptc' },
+      { agentPreset: 'ptc' },
+      { from: 'ptc' },
+      { ns: 'agent-presets', patch: { default: 'ptc', other: 'code' } },
+    ])
+  })
+
   it('uses the bounded transfer path to read an rc.2 session image from the Host', async () => {
     const imageData = 'A'.repeat(2 * 1024 * 1024)
     const bridge = new HarnessApiBridge({

@@ -24,6 +24,10 @@ type NativeResponse = RpcResponse<unknown>
 type NativeCall = (request: NativeRequest, signal?: AbortSignal) => Promise<NativeResponse>
 
 const DIRECT_API_CALL_BYTES = 2 * 1024 * 1024
+const AGENT_PRESET_SETTINGS_NS = 'agent-presets'
+const LEGACY_AGENT_PRESET_ALIASES: Record<string, string> = {
+  code: 'ptc',
+}
 
 /** ApiProxy-compatible face that preserves the native Harness envelopes over Remote RPC. */
 export class RemoteHarnessApiProxy {
@@ -115,7 +119,7 @@ export class RemoteHarnessApiProxy {
     const params: HarnessApiCallParams = {
       method,
       rpcId: String(request.rpcId),
-      payload: request.payload,
+      payload: normalizeLegacyRequest(method, request.payload),
     }
     const encoded = new TextEncoder().encode(JSON.stringify(params))
     const response = method === 'session.attachment' || encoded.byteLength > DIRECT_API_CALL_BYTES
@@ -249,9 +253,37 @@ function normalizeLegacyResponse(method: string, response: NativeResponse): Nati
   }
 }
 
+/** Older Remote Web clients persisted the pre-rc.1 coding preset id as `code`. */
+function normalizeLegacyRequest(method: string, payload: unknown): unknown {
+  if (!isRecord(payload)) return payload
+  if (method === 'agentPreset.read') return replaceAgentPreset(payload, 'agentPreset')
+  if (method === 'agentPreset.select') return replaceAgentPreset(payload, 'agentPreset')
+  if (method === 'agentPreset.copy') return replaceAgentPreset(payload, 'from')
+  if (method === 'settings.update' || method === 'settings.replace' || method === 'settings.mutate') {
+    return replaceAgentPresetSettings(payload)
+  }
+  return payload
+}
+
+function replaceAgentPreset(payload: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = payload[key]
+  const replacement = typeof value === 'string' ? LEGACY_AGENT_PRESET_ALIASES[value] : undefined
+  return replacement === undefined ? payload : { ...payload, [key]: replacement }
+}
+
+function replaceAgentPresetSettings(payload: Record<string, unknown>): Record<string, unknown> {
+  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord(payload.patch)) return payload
+  const patch = replaceAgentPreset(payload.patch, 'default')
+  return patch === payload.patch ? payload : { ...payload, patch }
+}
+
 function isRemoteDisconnect(error: unknown): boolean {
   return error instanceof RemoteClientError
     && (error.code === 'TRANSPORT_CLOSED' || error.code === 'CLIENT_CLOSED')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 class AsyncFrameQueue<TFrame> implements AsyncIterable<RpcRequest<TFrame>> {
