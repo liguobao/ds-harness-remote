@@ -26,12 +26,49 @@ function normalizePage(value: unknown): unknown {
 
 function normalizeRecords(value: unknown): unknown {
   if (!Array.isArray(value)) return value
-  return value.map(record => normalizeEntry(record))
+  const records: unknown[] = []
+  let previousSeq: number | undefined
+  for (const record of value) {
+    const seq = entrySeq(record)
+    if (previousSeq !== undefined && seq !== undefined && seq > previousSeq + 1) {
+      for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
+        records.push(createLegacyGapRecord(fillerSeq, record))
+      }
+    }
+    records.push(normalizeEntry(record))
+    if (seq !== undefined) previousSeq = seq
+  }
+  return records
 }
 
 function normalizeEntry(value: unknown): unknown {
   if (!isRecord(value) || value.type !== 'event') return value
   return { ...value, event: normalizeEvent(value.event) }
+}
+
+function entrySeq(value: unknown): number | undefined {
+  if (!isRecord(value) || value.type !== 'event' || !isRecord(value.event)) return undefined
+  return isEventSeq(value.event.seq) ? value.event.seq : undefined
+}
+
+function createLegacyGapRecord(seq: number, nextRecord: unknown): unknown {
+  return {
+    type: 'event',
+    event: {
+      type: 'legacy/session-gap',
+      seq,
+      time: eventTime(nextRecord),
+      ignorable: true,
+      data: {},
+    },
+  }
+}
+
+function eventTime(value: unknown): number {
+  if (!isRecord(value) || value.type !== 'event' || !isRecord(value.event)) return 0
+  return typeof value.event.time === 'number' && Number.isSafeInteger(value.event.time)
+    ? value.event.time
+    : 0
 }
 
 function normalizeHeader(value: unknown): unknown {
@@ -131,4 +168,8 @@ function normalizeSurfaceOp(value: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isEventSeq(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0)
 }

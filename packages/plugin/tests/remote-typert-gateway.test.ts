@@ -231,6 +231,93 @@ describe('RemoteTypertGateway', () => {
     })
   })
 
+  it('fills legacy session history gaps with ignorable records for Session V3 clients', async () => {
+    const client = {
+      rpc: vi.fn(async () => ({
+        ok: true,
+        value: {
+          records: [
+            {
+              type: 'event',
+              event: {
+                type: 'user/message',
+                seq: 2,
+                time: 300,
+                surfaceOp: 'append',
+                data: { id: 'user-1', role: 'user', content: [] },
+              },
+            },
+            {
+              type: 'event',
+              event: {
+                type: 'assistant/message',
+                seq: 5,
+                time: 500,
+                sourceEventSeqs: [2],
+                surfaceOp: 'append',
+                data: { message: { id: 'assistant-1', role: 'assistant', content: [] } },
+              },
+            },
+          ],
+          hasMore: true,
+        },
+      })),
+    } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client, 'legacy-to-v3').dispatch(
+      'session/page',
+      { args: {} },
+      new AbortController().signal,
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        records: [
+          {
+            type: 'event',
+            event: {
+              type: 'user/message',
+              seq: 2,
+              time: 300,
+              surfaceOp: 'append',
+              data: { id: 'user-1', role: 'user', content: [] },
+            },
+          },
+          {
+            type: 'event',
+            event: {
+              type: 'legacy/session-gap',
+              seq: 3,
+              time: 500,
+              ignorable: true,
+              data: {},
+            },
+          },
+          {
+            type: 'event',
+            event: {
+              type: 'legacy/session-gap',
+              seq: 4,
+              time: 500,
+              ignorable: true,
+              data: {},
+            },
+          },
+          {
+            type: 'event',
+            event: {
+              type: 'assistant/message',
+              seq: 5,
+              time: 500,
+              surfaceOp: 'append',
+              data: { message: { id: 'assistant-1', role: 'assistant', content: [] } },
+            },
+          },
+        ],
+        hasMore: true,
+      },
+    })
+  })
+
   it('marks Host stream failures for v0.1.2-alpha.2+ cross-bundle RemoteError detection', async () => {
     let eventHandler: ((event: EventPayload) => void) | undefined
     let streamId: string | undefined

@@ -14506,11 +14506,43 @@ function normalizePage(value) {
 }
 function normalizeRecords(value) {
   if (!Array.isArray(value)) return value;
-  return value.map((record6) => normalizeEntry(record6));
+  const records = [];
+  let previousSeq;
+  for (const record6 of value) {
+    const seq = entrySeq(record6);
+    if (previousSeq !== void 0 && seq !== void 0 && seq > previousSeq + 1) {
+      for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
+        records.push(createLegacyGapRecord(fillerSeq, record6));
+      }
+    }
+    records.push(normalizeEntry(record6));
+    if (seq !== void 0) previousSeq = seq;
+  }
+  return records;
 }
 function normalizeEntry(value) {
   if (!isRecord3(value) || value.type !== "event") return value;
   return { ...value, event: normalizeEvent(value.event) };
+}
+function entrySeq(value) {
+  if (!isRecord3(value) || value.type !== "event" || !isRecord3(value.event)) return void 0;
+  return isEventSeq(value.event.seq) ? value.event.seq : void 0;
+}
+function createLegacyGapRecord(seq, nextRecord) {
+  return {
+    type: "event",
+    event: {
+      type: "legacy/session-gap",
+      seq,
+      time: eventTime(nextRecord),
+      ignorable: true,
+      data: {}
+    }
+  };
+}
+function eventTime(value) {
+  if (!isRecord3(value) || value.type !== "event" || !isRecord3(value.event)) return 0;
+  return typeof value.event.time === "number" && Number.isSafeInteger(value.event.time) ? value.event.time : 0;
 }
 function normalizeHeader(value) {
   if (!isRecord3(value)) return value;
@@ -14597,6 +14629,9 @@ function normalizeSurfaceOp(value) {
 }
 function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isEventSeq(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);
 }
 
 // src/remote-typert-gateway.ts
@@ -17454,7 +17489,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.17";
+var PLUGIN_VERSION = "0.4.18";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
