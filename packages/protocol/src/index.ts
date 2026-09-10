@@ -174,8 +174,7 @@ export const errorCodes = [
 ] as const
 
 /**
- * Known wire-protocol error codes from §23, §17 (HARNESS_VERSION_INCOMPATIBLE),
- * and the transfer protocol (RESPONSE_TOO_LARGE — Client must retry via chunked path).
+ * Known wire-protocol error codes from §23.
  *
  * This is the authoritative reference set; callers should prefer these codes but
  * the wire format accepts any string to allow subsystem-specific extensions
