@@ -4,6 +4,8 @@
 - insert:
     - id: ds-harness-remote
       name: ds-harness-remote
+      inject:
+        - webServer
       # dsh-TUI needs a scoped entry with explicit command/scene injects.
       # Keep this ordinary Desktop entry inactive when that front door exists.
       disabled: !!js >-

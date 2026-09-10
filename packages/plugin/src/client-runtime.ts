@@ -11,7 +11,7 @@ import {
 import { ApiProxySwitch, type HarnessMode } from './api-proxy-switch.js'
 import { ClientSecureTransport } from './client-secure-transport.js'
 import type { ResolvedConfig } from './config.js'
-import { CONTROL_RPC_PREFIX } from './control-route.js'
+import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { uuidV7 } from './ids.js'
@@ -124,7 +124,10 @@ export interface HostConnectionRpc {
   ): () => Promise<void>
 }
 
-export interface HostConnectionHandle { rpc: HostConnectionRpc }
+export interface HostConnectionHandle {
+  requestRejection?(request: { headers: Record<string, string | string[] | undefined> }): number | undefined
+  rpc: HostConnectionRpc
+}
 
 export interface HostAuthorizationControl {
   hostStatus(): {
@@ -193,10 +196,8 @@ export class ClientModeRuntime {
     })
   }
 
-  registerControl(connection: HostConnectionHandle): () => Promise<void> {
-    return connection.rpc.handle(CONTROL_RPC_PREFIX, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), {
-      authority: 'loopback',
-    })
+  registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
+    return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer)
   }
 
   status(): Record<string, unknown> {

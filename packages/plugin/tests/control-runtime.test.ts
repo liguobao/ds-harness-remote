@@ -40,6 +40,30 @@ describe('PluginControlRuntime settings setup', () => {
     expect(channels).toEqual(new Set(['/remote']))
   })
 
+  it('registers loopback control directly on webServer when dsh-v0.1.5 exposes request rejection', async () => {
+    const legacyHandle = vi.fn(() => async () => undefined)
+    const requestRejection = vi.fn(() => undefined)
+    const registerRoute = vi.fn(() => async () => undefined)
+    const runtime = new PluginControlRuntime(
+      resolveConfig(), '/unused', undefined, undefined, undefined,
+    )
+
+    const dispose = runtime.register({
+      requestRejection,
+      rpc: { handle: legacyHandle },
+    } as unknown as HostConnectionHandle, {
+      register: registerRoute,
+    })
+
+    expect(legacyHandle).not.toHaveBeenCalled()
+    expect(registerRoute).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'prefix',
+      path: CONTROL_RPC_PREFIX,
+      handler: expect.any(Function),
+    }))
+    await dispose()
+  })
+
   it('updates the Server address without creating a separate authorization', async () => {
     const directory = await temporaryDirectory()
     const settings = settingsScope({

@@ -14016,6 +14016,120 @@ async function waitForResponder(inner, noise) {
 
 // src/control-route.ts
 var CONTROL_RPC_PREFIX = "/ds-harness-remote";
+var ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
+var INVALID_REQUEST_RPC_ID = "invalid-request";
+function registerControlRoute(connection, handler, webServer) {
+  if (webServer !== void 0 && connection.requestRejection !== void 0) {
+    const dispose = webServer.register({
+      kind: "prefix",
+      path: CONTROL_RPC_PREFIX,
+      handler: (req, res) => handleControlRequest(connection, handler, req, res)
+    });
+    return async () => {
+      await dispose();
+    };
+  }
+  return connection.rpc.handle(CONTROL_RPC_PREFIX, handler, {
+    authority: "loopback"
+  });
+}
+async function handleControlRequest(connection, handler, req, res) {
+  const rejection = connection.requestRejection?.(req);
+  if (rejection !== void 0) {
+    res.writeHead(rejection);
+    res.end(rejection === 401 ? "unauthorized" : "forbidden");
+    return;
+  }
+  const endpoint = endpointFromPath(CONTROL_RPC_PREFIX, new URL(req.url ?? "/", "http://dsh.internal").pathname);
+  if (req.method !== "POST" || endpoint === void 0) {
+    writeText(res, 404, "not found");
+    return;
+  }
+  if (contentType(req.headers) !== "application/json") {
+    writeText(res, 415, "content type must be application/json");
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    writeText(res, 400, "body is not JSON");
+    return;
+  }
+  const message = clientRequest(body);
+  if (message === void 0) {
+    writeJson(res, 200, errorResponse(rpcId(body), {
+      code: "gateway/bad-request",
+      message: "invalid client-request message",
+      details: { issues: [] }
+    }));
+    return;
+  }
+  if (message.method !== endpoint) {
+    writeJson(res, 200, errorResponse(message.rpcId, {
+      code: "gateway/bad-request",
+      message: `method ${JSON.stringify(message.method)} does not match endpoint ${JSON.stringify(endpoint)}`,
+      details: { issues: [] }
+    }));
+    return;
+  }
+  try {
+    const result = await handler(endpoint, message.payload, requestSignal(req));
+    writeJson(res, 200, fullResponse(message.rpcId, result));
+  } catch (error) {
+    writeText(res, 500, `handler failure: ${String(error)}`);
+  }
+}
+function endpointFromPath(channel, pathname) {
+  if (!pathname.startsWith(`${channel}/`)) return void 0;
+  const endpoint = pathname.slice(channel.length + 1);
+  if (endpoint.split("/").some((segment) => segment === "" || segment === "." || segment === ".." || !ENDPOINT_SEGMENT_PATTERN.test(segment))) {
+    return void 0;
+  }
+  return endpoint;
+}
+function contentType(headers) {
+  const raw = headers["content-type"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value?.split(";", 1)[0]?.trim().toLowerCase();
+}
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+function requestSignal(req) {
+  const abort = new AbortController();
+  req.on("close", () => {
+    if (!req.complete) abort.abort();
+  });
+  return abort.signal;
+}
+function clientRequest(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
+  const record6 = value;
+  if (record6.type !== "client-request" || typeof record6.rpcId !== "string" || typeof record6.method !== "string") return void 0;
+  return { type: "client-request", rpcId: record6.rpcId, method: record6.method, payload: record6.payload };
+}
+function rpcId(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return INVALID_REQUEST_RPC_ID;
+  const record6 = value;
+  return typeof record6.rpcId === "string" ? record6.rpcId : INVALID_REQUEST_RPC_ID;
+}
+function errorResponse(rpcId2, error) {
+  return fullResponse(rpcId2, { ok: false, error });
+}
+function fullResponse(rpcId2, result) {
+  return { type: "server-response", rpcId: rpcId2, result };
+}
+function writeJson(res, status2, body) {
+  res.writeHead(status2, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+function writeText(res, status2, body) {
+  res.writeHead(status2);
+  res.end(body);
+}
 
 // src/ids.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
@@ -15973,8 +16087,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       queue.close();
     }
   }
-  broadcastRcMux(payload, rpcId = `codex-mux:${Date.now()}:${Math.random()}`) {
-    for (const queue of this.rcMuxStreams) queue.push({ rpcId, payload });
+  broadcastRcMux(payload, rpcId2 = `codex-mux:${Date.now()}:${Math.random()}`) {
+    for (const queue of this.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
   }
   broadcastRcHost(payload) {
     const frame = { rpcId: `codex-host:${Date.now()}:${Math.random()}`, payload };
@@ -17216,7 +17330,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.12";
+var PLUGIN_VERSION = "0.4.13";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -18863,10 +18977,8 @@ var ClientModeRuntime = class {
       fingerprint: this.identity.fingerprint
     });
   }
-  registerControl(connection) {
-    return connection.rpc.handle(CONTROL_RPC_PREFIX, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), {
-      authority: "loopback"
-    });
+  registerControl(connection, webServer) {
+    return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer);
   }
   status() {
     const targetStatus = this.gatewaySwitch.supportsCarrier() ? this.gatewaySwitch.status() : this.proxySwitch?.status() ?? this.gatewaySwitch.status();
@@ -19719,13 +19831,13 @@ function ok2(value) {
   return { ok: true, value };
 }
 async function invokeRemoteCommand(client, request) {
-  const rpcId = uuidV7();
+  const rpcId2 = uuidV7();
   const response = await client.rpc("harness.api.call", {
     method: `${request.namespace}.${request.method}`,
-    rpcId,
+    rpcId: rpcId2,
     payload: request.args
   }, request.signal);
-  if (response.rpcId !== rpcId) {
+  if (response.rpcId !== rpcId2) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid command response.");
   }
   return unwrapNativeResult(response);
@@ -20144,10 +20256,8 @@ var PluginControlRuntime = class {
     this.client = client;
     this.host = host;
   }
-  register(connection) {
-    return connection.rpc.handle(CONTROL_RPC_PREFIX, (endpoint, payload, signal) => this.handle(endpoint, payload, signal), {
-      authority: "loopback"
-    });
+  register(connection, webServer) {
+    return registerControlRoute(connection, (endpoint, payload, signal) => this.handle(endpoint, payload, signal), webServer);
   }
   async handle(endpoint, payload, signal) {
     try {
@@ -20686,7 +20796,7 @@ var RpcRouter = class {
       });
       return createRpcResponse(request.id, result);
     } catch (error) {
-      const response = errorResponse(request.id, error);
+      const response = errorResponse2(request.id, error);
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
         durationMs: Math.round(performance.now() - startedAt),
@@ -20785,7 +20895,7 @@ var RpcRouter = class {
     return this.codex;
   }
 };
-function errorResponse(requestId, error) {
+function errorResponse2(requestId, error) {
   const code = safeErrorCode(error);
   if (error instanceof RpcError) return createRpcError(requestId, code, error.message, error.details, error.retryable);
   return createRpcError(
@@ -22056,9 +22166,9 @@ var HarnessApiBridge = class {
     const value = await listRemoteDirectory(payload.path, signal);
     return { rpcId: params.rpcId, result: { ok: true, value } };
   }
-  describeFallback(rpcId) {
+  describeFallback(rpcId2) {
     return {
-      rpcId,
+      rpcId: rpcId2,
       result: {
         ok: true,
         value: {
@@ -22276,8 +22386,8 @@ var HarnessApiBridge = class {
     }
   }
   deleteRespondable(value) {
-    for (const [rpcId, correlation] of this.respondable) {
-      if (correlation === value) this.respondable.delete(rpcId);
+    for (const [rpcId2, correlation] of this.respondable) {
+      if (correlation === value) this.respondable.delete(rpcId2);
     }
   }
 };
@@ -22464,9 +22574,9 @@ function sanitizeModelDiscoveryResponse(response, settingsNs) {
   if (typeof result === "object" && result !== null && "ok" in result && result.ok === true) return response;
   return modelDiscoveryFailure(response.rpcId, settingsNs);
 }
-function modelDiscoveryFailure(rpcId, settingsNs) {
+function modelDiscoveryFailure(rpcId2, settingsNs) {
   return {
-    rpcId,
+    rpcId: rpcId2,
     result: {
       ok: false,
       error: {
@@ -22526,15 +22636,15 @@ function frameSessionId(frame) {
   const payload = frame.payload;
   return typeof payload.sessionId === "string" && payload.sessionId.length > 0 ? payload.sessionId : void 0;
 }
-function callSessionHistory(callWithTimeout, payload, rpcId) {
+function callSessionHistory(callWithTimeout, payload, rpcId2) {
   const fallbackPageSizes = sessionHistoryFallbackPageSizes(payloadMaxMessages(payload));
-  return callHistoryWithRetry(callWithTimeout, payload, rpcId, fallbackPageSizes);
+  return callHistoryWithRetry(callWithTimeout, payload, rpcId2, fallbackPageSizes);
 }
-async function callHistoryWithRetry(callWithTimeout, payload, rpcId, pageSizes) {
+async function callHistoryWithRetry(callWithTimeout, payload, rpcId2, pageSizes) {
   for (const maxMessages of pageSizes) {
     const requestPayload = historyRequestPayload(payload, maxMessages);
     const response = await callWithTimeout(requestPayload);
-    const request = createRpcResponse(rpcId, response.result);
+    const request = createRpcResponse(rpcId2, response.result);
     if (encodeMessage(request).byteLength <= MAX_SECURE_MESSAGE_BYTES) return response;
     if (maxMessages === pageSizes[pageSizes.length - 1]) {
       throw new RpcError(
@@ -25622,6 +25732,7 @@ function apply(ctx, input2 = {}) {
   const activateWhenCarrierReady = (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
+    const webServer = runtimeContext.get("webServer");
     let disposePendingControl;
     const installPendingControl = () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
@@ -25633,7 +25744,7 @@ function apply(ctx, input2 = {}) {
           void 0,
           void 0
         );
-        return control.register(connection);
+        return control.register(connection, webServer);
       }, "dsh-remote pending control");
     };
     const startActiveRuntime = async (activeContext) => {
@@ -25667,13 +25778,14 @@ async function activate(ctx, input2, tuiBinding) {
     reportSettingsMigration(ctx, await migration);
   }
   const connection = ctx.get("connection");
+  const webServer = ctx.get("webServer");
   const resolvedConfig = resolveConfig(settingsScope?.get() ?? input2);
   const config = connection === void 0 && resolvedConfig.serverUrl === void 0 ? { ...resolvedConfig, serverUrl: DEFAULT_REMOTE_SERVER_URL } : resolvedConfig;
   const defaultIdentityDirectory = new IdentityStore().directory;
   if (!config.enabled) {
     if (connection !== void 0) {
       const controlRuntime2 = new PluginControlRuntime(config, defaultIdentityDirectory, settingsScope, void 0, void 0);
-      ctx.effect(() => controlRuntime2.register(connection), "dsh-remote disabled control");
+      ctx.effect(() => controlRuntime2.register(connection, webServer), "dsh-remote disabled control");
     }
     return;
   }
@@ -25732,7 +25844,7 @@ async function activate(ctx, input2, tuiBinding) {
   if (tuiBinding !== void 0) tuiBinding.target = tuiTarget;
   await disableLegacyLoaderEntries(ctx, logger);
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection);
+    const disposeControl = controlRuntime?.register(connection, webServer);
     try {
       await runtime.start();
       if (clientRuntime !== void 0) {

@@ -10,6 +10,7 @@ import {
   type ResolvedConfig,
 } from './config.js'
 import { PluginControlRuntime } from './control-runtime.js'
+import type { HostWebServerLike } from './control-route.js'
 import { IdentityStore, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
@@ -70,6 +71,7 @@ export function apply(ctx: Context, input: ConfigInput = {}): void {
   const activateWhenCarrierReady = (runtimeContext: Context): void | Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
+    const webServer = runtimeContext.get('webServer') as HostWebServerLike | undefined
     let disposePendingControl: (() => Promise<void>) | undefined
     const installPendingControl = (): void => {
       if (connection === undefined || disposePendingControl !== undefined) return
@@ -81,7 +83,7 @@ export function apply(ctx: Context, input: ConfigInput = {}): void {
           undefined,
           undefined,
         )
-        return control.register(connection)
+        return control.register(connection, webServer)
       }, 'dsh-remote pending control')
     }
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
@@ -123,6 +125,7 @@ async function activate(
     reportSettingsMigration(ctx, await migration)
   }
   const connection = ctx.get('connection') as HostConnectionHandle | undefined
+  const webServer = ctx.get('webServer') as HostWebServerLike | undefined
   const resolvedConfig = resolveConfig(settingsScope?.get() ?? input)
   // dsh-TUI has no settings UI or browser connection. In that profile the
   // QR-authorized Host is enabled against the hosted Server by default.
@@ -133,7 +136,7 @@ async function activate(
   if (!config.enabled) {
     if (connection !== undefined) {
       const controlRuntime = new PluginControlRuntime(config, defaultIdentityDirectory, settingsScope, undefined, undefined)
-      ctx.effect(() => controlRuntime.register(connection), 'dsh-remote disabled control')
+      ctx.effect(() => controlRuntime.register(connection, webServer), 'dsh-remote disabled control')
     }
     return
   }
@@ -193,7 +196,7 @@ async function activate(
   if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection!)
+    const disposeControl = controlRuntime?.register(connection!, webServer)
     try {
       await runtime.start()
       if (clientRuntime !== undefined) {
