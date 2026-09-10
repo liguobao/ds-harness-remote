@@ -188,6 +188,49 @@ describe('RemoteTypertGateway', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
+  it('removes legacy assistant message source refs for Session V3 clients', async () => {
+    const client = {
+      rpc: vi.fn(async () => ({
+        ok: true,
+        value: {
+          records: [{
+            type: 'event',
+            event: {
+              type: 'assistant/message',
+              seq: 7,
+              time: 321,
+              sourceEventSeqs: [3, 4],
+              surfaceOp: 'append',
+              data: { message: { id: 'assistant-1', role: 'assistant', content: [] } },
+            },
+          }],
+          hasMore: false,
+        },
+      })),
+    } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client, 'legacy-to-v3').dispatch(
+      'session/page',
+      { args: {} },
+      new AbortController().signal,
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        records: [{
+          type: 'event',
+          event: {
+            type: 'assistant/message',
+            seq: 7,
+            time: 321,
+            surfaceOp: 'append',
+            data: { message: { id: 'assistant-1', role: 'assistant', content: [] } },
+          },
+        }],
+        hasMore: false,
+      },
+    })
+  })
+
   it('marks Host stream failures for v0.1.2-alpha.2+ cross-bundle RemoteError detection', async () => {
     let eventHandler: ((event: EventPayload) => void) | undefined
     let streamId: string | undefined

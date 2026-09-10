@@ -14526,6 +14526,10 @@ function normalizeEvent(value) {
   let next = value;
   const type = normalizeEventType(value.type);
   if (type !== value.type) next = { ...next, type };
+  if (type === "assistant/message" && Object.hasOwn(next, "sourceEventSeqs")) {
+    const { sourceEventSeqs: _sourceEventSeqs, ...rest } = next;
+    next = rest;
+  }
   const data = normalizeEventData(type, next.data);
   if (data !== next.data) next = { ...next, data };
   const surfaceOp = normalizeSurfaceOp(next.surfaceOp);
@@ -17450,7 +17454,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.16";
+var PLUGIN_VERSION = "0.4.17";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;

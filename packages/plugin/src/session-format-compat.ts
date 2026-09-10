@@ -50,6 +50,11 @@ function normalizeEvent(value: unknown): unknown {
   const type = normalizeEventType(value.type)
   if (type !== value.type) next = { ...next, type }
 
+  if (type === 'assistant/message' && Object.hasOwn(next, 'sourceEventSeqs')) {
+    const { sourceEventSeqs: _sourceEventSeqs, ...rest } = next
+    next = rest
+  }
+
   const data = normalizeEventData(type, next.data)
   if (data !== next.data) next = { ...next, data }
 
