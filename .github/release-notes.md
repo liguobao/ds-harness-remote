@@ -11,22 +11,6 @@
 - Keeps the `0.4.11` experimental Session V3 work in the release line, including Host capability probing and the newer assistant-stream projection path.
 - Synchronizes the Plugin and Android app at version `0.4.12` with Android `versionCode 29`.
 
-### Validation
-
-Local validation covered the Plugin adapter, Android app, shared client core, and package build before tagging:
-
-- `pnpm --filter './packages/**' -r build`
-- `pnpm --filter @dsh-remote/android test`
-- `pnpm --filter @dsh-remote/android check`
-- `pnpm --filter @dsh-remote/client-core test`
-- `pnpm --filter @dsh-remote/client-core check`
-- `pnpm test -- --run tests/remote-api-proxy.test.ts` in `packages/plugin`
-- `pnpm check` and `pnpm build` in `packages/plugin`
-- `node scripts/verify-dsh-plugin.mjs`
-- `git diff --check`
-
-The release workflow repeats checks, tests, and production builds, publishes npm and GitHub Packages artifacts when needed, and attaches the Android APK.
-
 ### Install and downloads
 
 Install through DSH's plugin manager:
@@ -52,22 +36,6 @@ dsh plugin --profile dsh-tui add ds-harness-remote@0.4.12
 - Plugin adapter、Android App 和共享 Typert Remote Client 会把旧会话仍上报的 `agentPreset: "code"` 归一为 `ptc`，让旧 Remote 会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改 DeepSeek Harness 本身。
 - 将 `0.4.11` 的实验性 Session V3 工作纳入发布线，包括 Host capability 探测和新的 assistant-stream projection 路径。
 - Plugin 与 Android App 版本统一更新为 `0.4.12`，Android `versionCode` 更新为 `29`。
-
-### 验证
-
-打 tag 前，本地验证覆盖了 Plugin adapter、Android App、共享 client core 和 package build：
-
-- `pnpm --filter './packages/**' -r build`
-- `pnpm --filter @dsh-remote/android test`
-- `pnpm --filter @dsh-remote/android check`
-- `pnpm --filter @dsh-remote/client-core test`
-- `pnpm --filter @dsh-remote/client-core check`
-- 在 `packages/plugin` 运行 `pnpm test -- --run tests/remote-api-proxy.test.ts`
-- 在 `packages/plugin` 运行 `pnpm check` 和 `pnpm build`
-- `node scripts/verify-dsh-plugin.mjs`
-- `git diff --check`
-
-Release workflow 会再次执行检查、测试和生产构建，按需发布 npm 与 GitHub Packages 产物，并附加 Android APK。
 
 ### 安装与下载
 
