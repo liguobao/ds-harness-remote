@@ -768,237 +768,20 @@ carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、
 未知版本按 `0.3.15` 之前的能力处理。未来 Server 暴露 Host capability 后，应优先使用
 capability，`clientVersion` 仅保留为旧 Server 的兼容路径。
 
-## 18. 数据结构
+## 18. 历史数据结构（已废弃）
 
-本节 18.1–18.6 是冻结 Android 原型的旧投影，仅作历史记录，不是 Plugin Host 可接受或
-发出的结构。Desktop Plugin 的业务结构以 rc.2 官方 ApiProxy 或 alpha 官方 Typert Remote contract 为准。
+§18.1–18.6 是冻结 Android 原型的旧投影，已在代码中清除，不是 Plugin Host 可接受或
+发出的结构。业务结构以 rc.2 官方 ApiProxy 或 v0.1.2 alpha Typert Remote contract 为准。
 
-### 18.1 SystemInfo
-
-```json
-{
-  "deviceId": "01KHOST...",
-  "deviceName": "Workstation",
-  "hostname": "devbox",
-  "os": "linux",
-  "harnessVersion": "0.1.0-rc.6",
-  "pluginVersion": "0.1.0",
-  "protocol": 1,
-  "capabilities": [],
-  "connectionMode": "Relay"
-}
-```
-
-`connectionMode`：`LAN`, `P2P`, `TURN`, `Relay`。
-
-### 18.2 WorkspaceInfo
-
-```json
-{
-  "id": "workspace-id-or-null",
-  "name": "deepseek-harness-remote",
-  "cwd": "/home/user/project"
-}
-```
-
-cwd 是敏感业务数据，只存在 E2EE payload，不进入 Server DB/Admin。
-
-### 18.3 SessionSummary
-
-```json
-{
-  "id": "session-1",
-  "title": "Fix OAuth issue",
-  "cwd": "/home/user/project",
-  "status": "idle",
-  "createdAt": 1786000000000,
-  "updatedAt": 1786000000000,
-  "lastSeq": 8271
-}
-```
-
-`status`：`idle`, `running`, `stopping`, `unavailable`。
-
-### 18.4 Message
-
-```json
-{
-  "id": "message-id",
-  "sessionId": "session-1",
-  "role": "assistant",
-  "content": [
-    { "type": "text", "text": "I will inspect the file." }
-  ],
-  "status": "complete",
-  "createdAt": 1786000000000
-}
-```
-
-Client 必须安全渲染 Markdown/code，禁止把模型内容作为 HTML 直接注入。
-
-### 18.5 ToolCall
-
-```json
-{
-  "callId": "call-1",
-  "sessionId": "session-1",
-  "toolName": "bash",
-  "title": "Run tests",
-  "status": "running",
-  "input": { "command": "npm test" },
-  "output": null,
-  "isError": false
-}
-```
-
-Tool input/output 是 E2EE 业务内容。Plugin 只转发 Harness 已产生、可展示的结构，不增加通用 tool execution RPC。
-
-### 18.6 PermissionRequest
-
-```json
-{
-  "requestId": "permission-1",
-  "sessionId": "session-1",
-  "toolName": "bash",
-  "callId": "call-1",
-  "reason": "The command needs to run outside the sandbox.",
-  "permission": {
-    "kind": "command",
-    "command": "npm test",
-    "cwd": "/home/user/project"
-  },
-  "status": "pending",
-  "expiresAt": 1786000120000
-}
-```
+原结构包括：SystemInfo、WorkspaceInfo、SessionSummary（含 status/createdAt/lastSeq）、
+Message（含 role/content 数组）、ToolCall（含 callId/input/output）和 PermissionRequest
+（含 status/expiresAt）。这些类型不再出现在 `packages/protocol` 中。
 
 ## 19. Core RPC Methods
 
-本节中 Native Harness API bridge 是当前规范；其前面的旧 Core RPC 小节均已退出
-Plugin 协议，Host 必须拒绝。
-
-### `system.info`
-
-Params：`{}`
-Result：`SystemInfo`
-
-### `workspace.get`
-
-Params：`{ "sessionId": "session-1" }`，`sessionId` 可省略表示当前/root workspace。
-Result：`WorkspaceInfo | null`
-
-### `sessions.list`
-
-Params：
-
-```json
-{ "cursor": null, "limit": 50 }
-```
-
-Result：
-
-```json
-{ "items": [], "nextCursor": null }
-```
-
-### `sessions.get`
-
-Params：
-
-```json
-{ "sessionId": "session-1" }
-```
-
-Result：
-
-```json
-{
-  "session": {},
-  "workspace": {},
-  "messages": [],
-  "tools": [],
-  "pendingPermissions": [],
-  "snapshotSeq": 8271
-}
-```
-
-snapshot 是该 `snapshotSeq` 的一致投影。Client 应先安装 snapshot，再接收 seq 更大的 event。
-
-### `sessions.create`
-
-Params：
-
-```json
-{
-  "clientRequestId": "01KIDEMPOTENCY...",
-  "cwd": "/home/user/project",
-  "title": null
-}
-```
-
-Result：`SessionSummary`。Plugin 必须通过 Harness Agent factory 创建可运行 Agent，不可只创建无 driver 的 Session。
-
-### `session.send`
-
-Params：
-
-```json
-{
-  "sessionId": "session-1",
-  "clientMessageId": "01KCLIENTMSG...",
-  "text": "Continue investigating the OAuth issue."
-}
-```
-
-Result：
-
-```json
-{ "accepted": true, "clientMessageId": "01KCLIENTMSG..." }
-```
-
-Plugin 根据 Agent 状态选择 followup/steer，不允许 Client 直接指定 Harness 内部方法。`clientMessageId` 用于去重。
-
-### `session.stop`
-
-Params：
-
-```json
-{ "sessionId": "session-1" }
-```
-
-Result：`{ "accepted": true }`。最终停止状态以后续 Agent/Event 为准。
-
-### `permissions.respond`
-
-Params：
-
-```json
-{
-  "sessionId": "session-1",
-  "requestId": "permission-1",
-  "decision": "allow_once"
-}
-```
-
-`decision` v1 仅：`allow_once`, `deny`。
-
-Result：
-
-```json
-{ "accepted": true, "requestId": "permission-1" }
-```
-
-若请求已取消、已处理或过期，返回 `PERMISSION_NOT_PENDING`。RPC timeout 表示结果未知，Client 必须等待 `permission.resolved` 或 resync，不能自动重试相反决定。
-
-### `connection.ping`
-
-Params：`{ "sentAt": 1786000000000 }`
-Result：`{ "sentAt": 1786000000000, "hostAt": 1786000000020 }`
-
-### `sync.from`
-
-Params：`{ "afterSeq": 8271, "limit": 1000 }`。
-Result：见“Event Replay 与重连”。这是 v1 核心恢复 RPC；Host 不具备 replay window 时必须返回 `FULL_RESYNC_REQUIRED`，不能返回不连续事件。
+旧 Core RPC（`system.info`、`workspace.get`、`sessions.list`、`sessions.get`、`sessions.create`、
+`session.send`、`session.stop`、`permissions.respond`、`connection.ping`、`sync.from`）
+均已退出 Plugin 协议，Host 必须拒绝。
 
 ### Native Harness API bridge
 
@@ -1304,8 +1087,12 @@ resume；如果 App Server 因 Thread 已在本进程加载而拒绝重复 resum
 
 Plugin 按 Harness 代际发送 `harness.api.frame` / `harness.api.stream.closed`，或
 `harness.remote.frame` / `harness.remote.stream.closed`。可选 Codex 领域发送
-`codex.app.frame` / `codex.app.stream.closed`。本节其余 Remote Event 名称属于
-冻结 Android 原型，不得据此恢复 Host 事件投影层。
+`codex.app.frame` / `codex.app.stream.closed`。
+
+冻结 Android 原型事件（`session.created`、`session.updated`、`message.created`、
+`message.delta`、`tool.started`、`tool.updated`、`tool.finished`、
+`permission.requested`、`permission.resolved`、`agent.status`、`connection.stats`）
+已退出协议，Host 不得发送，Client 不得依赖。历史类型概览见 §18。
 
 Event envelope：
 
@@ -1317,80 +1104,13 @@ Event envelope：
   "timestamp": 1786000000000,
   "payload": {
     "seq": 8272,
-    "event": "message.delta",
-    "sessionId": "session-1",
+    "event": "harness.api.frame",
     "data": {}
   }
 }
 ```
 
 `seq` 在同一 Host identity 上严格递增。重放必须保留原始 seq/id/timestamp。
-
-### `session.created`
-
-data：`SessionSummary`
-
-### `session.updated`
-
-data：完整 `SessionSummary`。v1 不发送隐式 merge patch，避免不同客户端产生不同状态。
-
-### `message.created`
-
-data：`Message`。Streaming assistant message 首次创建时 `status: streaming`。
-
-### `message.delta`
-
-```json
-{
-  "messageId": "message-1",
-  "deltaIndex": 3,
-  "delta": "next chunk",
-  "final": false,
-  "finishReason": null
-}
-```
-
-`deltaIndex` 对同一 message 从 0 连续递增。最后一帧 `final: true`，可携带 `finishReason`。Client 检测 gap 时必须 resync，不能静默拼接。
-
-### `tool.started`, `tool.updated`, `tool.finished`
-
-data：`ToolCall` 的当前完整值。`tool.finished` 的 status 为 `success`, `error` 或 `cancelled`。
-
-### `permission.requested`
-
-data：`PermissionRequest`。
-
-### `permission.resolved`
-
-```json
-{
-  "requestId": "permission-1",
-  "outcome": "allowed-once",
-  "resolvedAt": 1786000000000
-}
-```
-
-Harness outcome enum：`allowed-once`, `rejected`, `cancelled`, `unavailable`。Client decision 与 Host outcome 不完全相同。
-
-### `agent.status`
-
-```json
-{ "status": "running" }
-```
-
-status：`idle`, `running`, `stopping`, `disposed`, `error`。
-
-### `connection.stats`
-
-```json
-{
-  "mode": "Relay",
-  "connected": true,
-  "rttMs": 86,
-  "bytesSent": 1024,
-  "bytesReceived": 2048
-}
-```
 
 ### `harness.api.frame`
 
