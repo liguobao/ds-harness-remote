@@ -6,6 +6,8 @@ import {
   controlErrorPayloadSchema,
   createRpcError,
   registerOwnedRoleRequestSchema,
+  transportCapabilities,
+  harnessCapabilityValues,
   HELLO_TIMEOUT_MS,
   HOST_REGISTRATION_CODE_TTL_MS,
   DEFAULT_HEARTBEAT_INTERVAL_MS,
@@ -211,5 +213,36 @@ describe('§24 default limit constants', () => {
 
   it('heartbeat disconnect is 3x the interval', () => {
     expect(HEARTBEAT_DISCONNECT_MS).toBe(DEFAULT_HEARTBEAT_INTERVAL_MS * 3)
+  })
+})
+
+describe('capability constants', () => {
+  it('transportCapabilities matches §14 data plane negotiation set', () => {
+    expect(transportCapabilities).toEqual([
+      'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay',
+    ])
+  })
+
+  it('harnessCapabilityValues matches §17 universe of known values', () => {
+    expect(harnessCapabilityValues).toEqual([
+      'harness.api.v1',
+      'harness.api.transfer.v1',
+      'harness.remote.v1',
+      'harness.remote.v3',
+      'harness.remote.transfer.v1',
+      'fileviewer.read.v1',
+      'codex.appserver.v1',
+      'codex.appserver.transfer.v1',
+    ])
+  })
+
+  it('no overlap between transport and harness capability values', () => {
+    const overlap = transportCapabilities.filter(c => (harnessCapabilityValues as readonly string[]).includes(c))
+    expect(overlap).toEqual([])
+  })
+
+  it('no duplicates within each set', () => {
+    expect(new Set(transportCapabilities).size).toBe(transportCapabilities.length)
+    expect(new Set(harnessCapabilityValues).size).toBe(harnessCapabilityValues.length)
   })
 })

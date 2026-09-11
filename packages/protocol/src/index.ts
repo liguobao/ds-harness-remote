@@ -174,8 +174,7 @@ export const errorCodes = [
 ] as const
 
 /**
- * Known wire-protocol error codes from §23, §17 (HARNESS_VERSION_INCOMPATIBLE),
- * and the transfer protocol (RESPONSE_TOO_LARGE — Client must retry via chunked path).
+ * Known wire-protocol error codes from §23.
  *
  * This is the authoritative reference set; callers should prefer these codes but
  * the wire format accepts any string to allow subsystem-specific extensions
@@ -365,6 +364,28 @@ export const transportCapabilities = [
   'transport.turn',
   'transport.relay',
 ] as const
+
+/**
+ * Universe of known harness/transfer/file-viewer/codex capability values (§17).
+ *
+ * This is a reference set for type checking and validation, NOT a capability
+ * set that a Host may advertise wholesale.  A Typert Host must advertise only
+ * the capability matching its Session generation (harness.remote.v1 XOR
+ * harness.remote.v3); advertising both is a protocol violation.
+ */
+export const harnessCapabilityValues = [
+  'harness.api.v1',
+  'harness.api.transfer.v1',
+  'harness.remote.v1',
+  'harness.remote.v3',
+  'harness.remote.transfer.v1',
+  'fileviewer.read.v1',
+  'codex.appserver.v1',
+  'codex.appserver.transfer.v1',
+] as const
+
+export type TransportCapability = typeof transportCapabilities[number]
+export type HarnessCapabilityValue = typeof harnessCapabilityValues[number]
 
 export function selectProtocolVersion(
   offered: readonly number[],
