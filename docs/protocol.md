@@ -418,7 +418,9 @@ ack：
     "heartbeatIntervalMs": 25000,
     "maxControlFrameBytes": 65536,
     "maxRelayFrameBytes": 1048576,
-    "capabilities": ["transport.relay", "transport.p2p"]
+    "capabilities": ["transport.relay", "transport.p2p"],
+    "webrtcEnabled": true,
+    "webrtcFallbackTimeoutMs": 12000
   }
 }
 ```
@@ -431,6 +433,12 @@ Server 不能返回 Client 未宣告的 capability。Client 后续只能使用�
 
 `maxControlFrameBytes` 和 `maxRelayFrameBytes` 可以声明更小的上限。
 双方必须对后续收发 frame 使用该上限。大于 v1 默认值的声明必须拒绝。
+
+`webrtcEnabled` 是可选实现扩展。值为 `false` 时，Client 只能使用 Relay。
+字段缺失时，Client 可以协商 WebRTC。Client 仍必须遵守 `hello.ack.capabilities`。
+
+`webrtcFallbackTimeoutMs` 是可选实现扩展。它必须是正安全整数。
+字段缺失时，Client 使用本地超时。字段存在时，Client 使用 Server 与本地值中的较大值。
 
 ## 11. 建立 Host/Client Connection
 
@@ -1247,6 +1255,9 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 - `INTERNAL_ERROR`
 
 错误 message 面向用户但不包含内部路径、stack、secret 或原始异常。`retryable` 只表示同一操作稍后重试可能成功，不代表 Client 应自动重放非幂等请求。`error.payload.connectionId` 为可选字段；存在时错误作用域仅限该逻辑连接。
+
+错误码字段可以使用非空扩展字符串。子系统扩展应使用稳定前缀。
+当前前缀包括 `CODEX_*` 和 `FILE_VIEWER_*`。扩展码不属于上面的 v1 标准错误码集合。
 
 ## 24. 默认限制
 

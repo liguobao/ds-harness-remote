@@ -273,7 +273,9 @@ export interface HelloAckPayload {
   maxControlFrameBytes: number
   maxRelayFrameBytes: number
   capabilities?: string[]
+  /** Optional implementation extension. This field reports WebRTC DataChannel support. */
   webrtcEnabled?: boolean
+  /** Optional implementation extension. This field sets the Relay fallback timeout. */
   webrtcFallbackTimeoutMs?: number
 }
 
@@ -308,7 +310,7 @@ export interface SecureHandshakePayload {
 }
 
 export interface ControlErrorPayload {
-  /** Known wire-protocol codes from §23/§17. */
+  /** §23 defines standard codes. Subsystems can add names such as CODEX_* and FILE_VIEWER_*. */
   code: ErrorCode | (string & {})
   message: string
   retryable?: boolean
@@ -436,7 +438,7 @@ export interface RpcResponsePayload<TResult = unknown> {
 
 export interface RpcErrorPayload {
   requestId: string
-  /** Known wire-protocol codes from §23/§17; subsystem extensions (CODEX_*, FILE_VIEWER_*, etc.) are also valid. */
+  /** §23 defines standard codes. Subsystems can add names such as CODEX_* and FILE_VIEWER_*. */
   code: ErrorCode | (string & {})
   message: string
   retryable?: boolean
