@@ -736,34 +736,63 @@ function MessageBubble({ item }: { item: ChatMessage }) {
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
+  const showReasoning = remote && hasVisibleMessageText(item.reasoning ?? '')
+  const showText = hasVisibleMessageText(item.text)
+  const showImages = item.images !== undefined && item.images.length > 0
+  const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
+
+  // Assistant replies keep the avatar on the identity row only, so reasoning /
+  // answer text share the same first-level left edge as tool rows.
+  if (remote) {
+    return (
+      <View style={styles.assistantBlock}>
+        <View style={styles.messageRow}>
+          <View style={[styles.avatar, styles.avatarAssistant]}>
+            <Image
+              source={require('../../assets/android-icon-foreground-adaptive.png')}
+              style={styles.remoteAvatarLogo}
+              resizeMode="contain"
+              accessible={false}
+            />
+          </View>
+          <Text style={styles.messageLabel}>Remote</Text>
+        </View>
+        {showReasoning && <ReasoningDisclosure item={item} />}
+        {showImages && <ChatImages images={item.images!} />}
+        {showText && (
+          <View style={styles.assistantText}>
+            <NativeMarkdown text={item.text} />
+          </View>
+        )}
+        {showStreaming && (
+          <View style={styles.assistantText}>
+            <StreamingCursor />
+          </View>
+        )}
+      </View>
+    )
+  }
+
   return (
     <View style={[styles.messageRow, user && styles.messageRowUser]}>
       <View style={[styles.avatar, user ? styles.avatarUser : styles.avatarAssistant]}>
         {user ? (
           <User size={16} color={colors.white} />
-        ) : remote ? (
-          <Image
-            source={require('../../assets/android-icon-foreground-adaptive.png')}
-            style={styles.remoteAvatarLogo}
-            resizeMode="contain"
-            accessible={false}
-          />
         ) : (
           <Bot size={17} color={colors.primary} />
         )}
       </View>
       <View style={[styles.messageBody, user && styles.messageBodyUser]}>
-        <Text style={styles.messageLabel}>{user ? zhCN.chat.you : item.role === 'system' ? zhCN.chat.system : 'Remote'}</Text>
-        {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} alignEnd={user} />}
-        {item.role === 'assistant' && hasVisibleMessageText(item.reasoning ?? '') && <ReasoningDisclosure item={item} embedded />}
-        {hasVisibleMessageText(item.text) && <NativeMarkdown text={item.text} />}
-        {item.streaming && item.streamingPhase !== 'reasoning' && <StreamingCursor />}
+        <Text style={styles.messageLabel}>{user ? zhCN.chat.you : zhCN.chat.system}</Text>
+        {showImages && <ChatImages images={item.images!} alignEnd={user} />}
+        {showText && <NativeMarkdown text={item.text} />}
+        {showStreaming && <StreamingCursor />}
       </View>
     </View>
   )
 }
 
-function ReasoningDisclosure({ item, embedded = false }: { item: ChatMessage; embedded?: boolean }) {
+function ReasoningDisclosure({ item }: { item: ChatMessage }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [expanded, setExpanded] = useState(false)
@@ -772,7 +801,7 @@ function ReasoningDisclosure({ item, embedded = false }: { item: ChatMessage; em
   const preview = compactActivityText(item.reasoning) ?? ''
   const actionLabel = expanded ? zhCN.chat.reasoningCollapse : zhCN.chat.reasoningExpand
   return (
-    <View style={[styles.reasoningCard, embedded && styles.reasoningCardEmbedded]}>
+    <View style={styles.reasoningCard}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel}。${preview}`}
@@ -1060,6 +1089,8 @@ function createStyles(colors: ThemeColors) {
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginVertical: spacing.xs },
   messageRowUser: { flexDirection: 'row-reverse' },
+  assistantBlock: { alignSelf: 'stretch', gap: spacing.xxs, marginVertical: spacing.xs },
+  assistantText: { paddingHorizontal: spacing.xs },
   avatar: { width: 32, height: 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   avatarUser: { backgroundColor: colors.primary },
   avatarAssistant: { backgroundColor: colors.primarySoft },
@@ -1074,10 +1105,9 @@ function createStyles(colors: ThemeColors) {
   messageImagePlaceholder: { width: 132, minHeight: 76, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', padding: spacing.sm, gap: spacing.xs },
   messageImageName: { ...type.caption, color: colors.primary, maxWidth: '100%' },
   reasoningCard: { alignSelf: 'stretch', borderRadius: radius.md, overflow: 'hidden' },
-  reasoningCardEmbedded: { marginBottom: spacing.xs },
   reasoningHeader: { minHeight: 48, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   reasoningHeaderPressed: { backgroundColor: colors.surfaceStrong },
-  reasoningLabel: { ...type.smallStrong, color: colors.ink },
+  reasoningLabel: { ...type.smallStrong, color: colors.muted },
   reasoningLabelActive: { color: colors.accent },
   reasoningPreview: { ...type.small, color: colors.muted, flex: 1 },
   activitySeparator: { ...type.small, color: colors.subtle },
@@ -1091,7 +1121,7 @@ function createStyles(colors: ThemeColors) {
   toolRowPressed: { backgroundColor: colors.surfaceStrong },
   toolIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   toolCopy: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  toolName: { ...type.smallStrong, color: colors.ink },
+  toolName: { ...type.smallStrong, color: colors.muted },
   toolSummary: { ...type.small, color: colors.muted, flex: 1 },
   toolStateGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   toolState: { ...type.caption, color: colors.success },
