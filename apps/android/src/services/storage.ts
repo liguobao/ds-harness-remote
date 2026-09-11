@@ -12,6 +12,7 @@ const KEYS = {
   identity: 'dshremote.identity.v1',
   credentials: 'dshremote.credentials.v1',
   trustedHosts: 'dshremote.trusted-hosts.v1',
+  lastConnectedDeviceId: 'dshremote.last-connected-device.v1',
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
@@ -70,6 +71,10 @@ export async function saveDeviceCredentials(credentials: DeviceCredentials): Pro
   await writeJson(KEYS.credentials, credentials)
 }
 
+export async function clearDeviceCredentials(): Promise<void> {
+  await SecureStore.deleteItemAsync(KEYS.credentials, secureOptions)
+}
+
 export async function trustHost(host: RemoteDevice): Promise<void> {
   const hosts = await loadTrustedHosts()
   const next = [...hosts.filter(item => item.deviceId !== host.deviceId), { ...host, trusted: true }]
@@ -79,6 +84,25 @@ export async function trustHost(host: RemoteDevice): Promise<void> {
 export async function forgetHost(deviceId: string): Promise<void> {
   const hosts = await loadTrustedHosts()
   await writeJson(KEYS.trustedHosts, hosts.filter(host => host.deviceId !== deviceId))
+  const lastConnectedDeviceId = await loadLastConnectedDeviceId()
+  if (lastConnectedDeviceId === deviceId) await clearLastConnectedDeviceId()
+}
+
+export async function loadLastConnectedDeviceId(): Promise<string | undefined> {
+  const stored = await readJson<{ deviceId?: unknown }>(KEYS.lastConnectedDeviceId)
+  return typeof stored?.deviceId === 'string' && stored.deviceId.trim() !== ''
+    ? stored.deviceId.trim()
+    : undefined
+}
+
+export async function saveLastConnectedDeviceId(deviceId: string): Promise<void> {
+  const trimmed = deviceId.trim()
+  if (trimmed === '') return
+  await writeJson(KEYS.lastConnectedDeviceId, { deviceId: trimmed })
+}
+
+export async function clearLastConnectedDeviceId(): Promise<void> {
+  await SecureStore.deleteItemAsync(KEYS.lastConnectedDeviceId, secureOptions)
 }
 
 export async function loadTransportPreference(): Promise<import('../types').TransportPreference> {

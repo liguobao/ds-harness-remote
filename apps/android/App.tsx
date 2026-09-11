@@ -76,6 +76,8 @@ function AppNavigator() {
   const error = useAppStore(state => state.error)
   const bootstrap = useAppStore(state => state.bootstrap)
   const reconnect = useAppStore(state => state.reconnect)
+  const consumePendingAutoConnect = useAppStore(state => state.consumePendingAutoConnect)
+  const reauthRequired = useAppStore(state => state.reauthRequired)
   const setOffline = useAppStore(state => state.setOffline)
   const clearError = useAppStore(state => state.clearError)
   const [routes, setRoutes] = useState<Route[]>([{ name: 'server' }])
@@ -93,13 +95,16 @@ function AppNavigator() {
 
   const openDevice = (device: (typeof devices)[number]) => {
     if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') {
-      push({ name: 'workspaces' })
+      reset({ name: 'workspaces' })
       return
     }
     push(device.trusted && device.online
       ? { name: 'connecting', deviceId: device.deviceId }
       : { name: 'device', deviceId: device.deviceId })
   }
+
+  const goHomeWorkspaces = () => reset({ name: 'workspaces' })
+  const openHomeMenu = () => setHomeMenuOpen(true)
 
   useEffect(() => { void bootstrap() }, [bootstrap])
 
@@ -138,8 +143,25 @@ function AppNavigator() {
   useEffect(() => {
     if (bootPhase !== 'ready' || didChooseInitialRoute.current) return
     didChooseInitialRoute.current = true
-    reset(config === undefined ? { name: 'server' } : { name: 'devices' })
-  }, [bootPhase, config])
+    if (config === undefined || reauthRequired) {
+      reset({ name: 'server' })
+      return
+    }
+    const autoConnectDeviceId = consumePendingAutoConnect()
+    if (autoConnectDeviceId !== undefined) {
+      reset({ name: 'connecting', deviceId: autoConnectDeviceId })
+      return
+    }
+    // Not yet connected — pick a host first; workspaces becomes home after connect.
+    reset({ name: 'devices' })
+  }, [bootPhase, config, consumePendingAutoConnect, reauthRequired])
+
+  // Session expired while already navigating — send the user to sign-in.
+  useEffect(() => {
+    if (bootPhase !== 'ready' || !reauthRequired) return
+    if (route.name === 'server') return
+    reset({ name: 'server' })
+  }, [bootPhase, reauthRequired, route.name])
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -147,8 +169,9 @@ function AppNavigator() {
         setHomeMenuOpen(false)
         return true
       }
+      // ConnectionScreen owns hardware back (and may swallow it while connecting).
+      if (route.name === 'connecting') return false
       if (routes.length <= 1) return false
-      if (route.name === 'connecting') void useAppStore.getState().disconnect()
       pop()
       return true
     })
@@ -191,24 +214,40 @@ function AppNavigator() {
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
     ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
     : undefined
+  const devicesIsRoot = route.name === 'devices' && routes.length === 1
+  const homeMenuVisible = homeMenuOpen && route.name === 'workspaces'
 
   return (
     <View style={styles.flex}>
       {error !== undefined && route.name !== 'connecting' && <ErrorBanner message={error} onDismiss={clearError} />}
       {route.name === 'server' && <ServerSetupScreen onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
-      {route.name === 'devices' && <DevicesScreen onDevice={openDevice} onMore={() => setHomeMenuOpen(true)} />}
-      {route.name === 'connecting' && deviceForRoute !== undefined && <ConnectionScreen device={deviceForRoute} onBack={pop} onConnected={() => replace({ name: 'workspaces' })} />}
+      {route.name === 'devices' && (
+        <DevicesScreen
+          onDevice={openDevice}
+          onBack={devicesIsRoot ? undefined : pop}
+        />
+      )}
+      {route.name === 'connecting' && deviceForRoute !== undefined && (
+        <ConnectionScreen
+          device={deviceForRoute}
+          onBack={() => {
+            if (routes.length > 1) pop()
+            else reset({ name: 'devices' })
+          }}
+          onConnected={goHomeWorkspaces}
+        />
+      )}
       {route.name === 'connecting' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'devices' })} />}
       {route.name === 'device' && deviceForRoute !== undefined && <DeviceDetailScreen
         device={deviceForRoute}
         onBack={pop}
         onConnect={() => replace({ name: 'connecting', deviceId: deviceForRoute.deviceId })}
-        onWorkspaces={route.source === 'workspaces' ? undefined : () => push({ name: 'workspaces' })}
+        onWorkspaces={route.source === 'workspaces' ? undefined : goHomeWorkspaces}
       />}
       {route.name === 'device' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'devices' })} />}
       {route.name === 'workspaces' && <WorkspacesScreen
-        onBack={pop}
         onSession={() => push({ name: 'chat' })}
+        onMore={openHomeMenu}
         onDeviceInfo={() => {
           if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId, source: 'workspaces' })
         }}
@@ -218,8 +257,14 @@ function AppNavigator() {
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       <HomeActionsMenu
-        visible={route.name === 'devices' && homeMenuOpen}
+        visible={homeMenuVisible}
         onClose={() => setHomeMenuOpen(false)}
+        onDevices={route.name === 'workspaces'
+          ? () => {
+              setHomeMenuOpen(false)
+              push({ name: 'devices' })
+            }
+          : undefined}
         onSettings={() => {
           setHomeMenuOpen(false)
           push({ name: 'settings' })
