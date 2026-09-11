@@ -80,6 +80,7 @@ export class HostPluginRuntime {
             this.localGateway,
             (event, data) => send(createEvent(event, data)),
             this.logger,
+            this.harnessVersion,
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(

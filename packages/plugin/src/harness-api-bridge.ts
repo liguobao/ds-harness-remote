@@ -29,6 +29,7 @@ import {
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import {
+  harnessSessionGeneration,
   normalizeHarnessVersion,
   selectHarnessVersion,
 } from './harness-version.js'
@@ -89,11 +90,22 @@ const transferCloseSchema = z.object({ transferId: transferIdSchema }).strict()
 const commandExecuteSchema = z.object({
   agentId: z.string().min(1).max(128),
   line: z.string().min(1).max(2048),
-  // The official Harness command endpoint requires the `images` wire field.
-  // Remote command execution keeps attachments out of scope, so only an empty
-  // list is accepted and legacy clients that omit it are normalized below.
+  // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
+  // renamed it to `submittedAttachments` and expanded its element type to
+  // include staged file receipts. Remote command execution keeps attachments
+  // out of scope, so either compatibility field is restricted to an empty
+  // list. The dispatcher below chooses the matching Host descriptor.
   images: z.array(z.never()).length(0).optional(),
-}).strict()
+  submittedAttachments: z.array(z.never()).length(0).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.images !== undefined && value.submittedAttachments !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Use either images or submittedAttachments, not both.',
+      path: ['submittedAttachments'],
+    })
+  }
+})
 
 const commandListSchema = z.object({
   agentId: z.string().min(1).max(128),
@@ -300,7 +312,7 @@ export class HarnessApiBridge {
     typertGateway?: TypertGatewayLike,
     private readonly harnessVersion?: string,
   ) {
-    this.methods = createMethodMap(api, typertGateway)
+    this.methods = createMethodMap(api, typertGateway, harnessVersion)
     this.mux = api.events.mux.bind(api.events)
     this.host = api.events.host.bind(api.events)
     this.answer = api.respond.bind(api)
@@ -667,7 +679,7 @@ function normalizeHostDescribe(
   }
 }
 
-function createMethodMap(api: ApiProxy, typertGateway?: TypertGatewayLike): ReadonlyMap<string, NativeMethod> {
+function createMethodMap(api: ApiProxy, typertGateway?: TypertGatewayLike, harnessVersion?: string): ReadonlyMap<string, NativeMethod> {
   const domains = api as unknown as Record<string, Record<string, NativeMethod>>
   const methods = new Map<string, NativeMethod>()
   for (const method of HARNESS_API_ALLOWLIST) {
@@ -680,7 +692,17 @@ function createMethodMap(api: ApiProxy, typertGateway?: TypertGatewayLike): Read
       const implementation: NativeMethod = async (request, signal) => {
         if (commandMethod === 'execute') {
           const payload = commandExecuteSchema.parse(request.payload)
-          const args = { ...payload, images: payload.images ?? [] }
+          const legacyArgs = {
+            agentId: payload.agentId,
+            line: payload.line,
+            images: payload.images ?? [],
+          }
+          const currentArgs = {
+            agentId: payload.agentId,
+            line: payload.line,
+            submittedAttachments: payload.submittedAttachments ?? [],
+          }
+          const args = harnessSessionGeneration(harnessVersion) === 'v3' ? currentArgs : legacyArgs
           const value = await typertGateway.invoke({
             namespace,
             method: 'execute',

@@ -22154,11 +22154,22 @@ var transferCloseSchema = external_exports.object({ transferId: transferIdSchema
 var commandExecuteSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
-  // The official Harness command endpoint requires the `images` wire field.
-  // Remote command execution keeps attachments out of scope, so only an empty
-  // list is accepted and legacy clients that omit it are normalized below.
-  images: external_exports.array(external_exports.never()).length(0).optional()
-}).strict();
+  // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
+  // renamed it to `submittedAttachments` and expanded its element type to
+  // include staged file receipts. Remote command execution keeps attachments
+  // out of scope, so either compatibility field is restricted to an empty
+  // list. The dispatcher below chooses the matching Host descriptor.
+  images: external_exports.array(external_exports.never()).length(0).optional(),
+  submittedAttachments: external_exports.array(external_exports.never()).length(0).optional()
+}).strict().superRefine((value, context) => {
+  if (value.images !== void 0 && value.submittedAttachments !== void 0) {
+    context.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "Use either images or submittedAttachments, not both.",
+      path: ["submittedAttachments"]
+    });
+  }
+});
 var commandListSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128)
 }).strict();
@@ -22279,7 +22290,7 @@ var HarnessApiBridge = class {
     this.maxStreams = maxStreams;
     this.logger = logger;
     this.harnessVersion = harnessVersion;
-    this.methods = createMethodMap(api, typertGateway);
+    this.methods = createMethodMap(api, typertGateway, harnessVersion);
     this.mux = api.events.mux.bind(api.events);
     this.host = api.events.host.bind(api.events);
     this.answer = api.respond.bind(api);
@@ -22600,7 +22611,7 @@ function normalizeHostDescribe(response, harnessVersion, canListDirectory) {
     }
   };
 }
-function createMethodMap(api, typertGateway) {
+function createMethodMap(api, typertGateway, harnessVersion) {
   const domains = api;
   const methods = /* @__PURE__ */ new Map();
   for (const method of HARNESS_API_ALLOWLIST) {
@@ -22610,7 +22621,17 @@ function createMethodMap(api, typertGateway) {
       const implementation2 = async (request, signal) => {
         if (commandMethod === "execute") {
           const payload = commandExecuteSchema.parse(request.payload);
-          const args2 = { ...payload, images: payload.images ?? [] };
+          const legacyArgs = {
+            agentId: payload.agentId,
+            line: payload.line,
+            images: payload.images ?? []
+          };
+          const currentArgs = {
+            agentId: payload.agentId,
+            line: payload.line,
+            submittedAttachments: payload.submittedAttachments ?? []
+          };
+          const args2 = harnessSessionGeneration(harnessVersion) === "v3" ? currentArgs : legacyArgs;
           const value2 = await typertGateway.invoke({
             namespace,
             method: "execute",
@@ -22912,6 +22933,24 @@ var streamOpenSchema2 = external_exports.object({
   payload: external_exports.unknown()
 }).strict();
 var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var commandExecuteArgsSchema = external_exports.object({
+  agentId: external_exports.string().min(1).max(128),
+  line: external_exports.string().min(1).max(2048),
+  // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
+  // renamed it to `submittedAttachments`. Only empty arrays are exposed by
+  // the Remote bridge; command attachments are deliberately out of scope.
+  images: external_exports.array(external_exports.never()).length(0).optional(),
+  submittedAttachments: external_exports.array(external_exports.never()).length(0).optional()
+}).strict().superRefine((value, context) => {
+  if (value.images !== void 0 && value.submittedAttachments !== void 0) {
+    context.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "Use either images or submittedAttachments, not both.",
+      path: ["submittedAttachments"]
+    });
+  }
+});
+var commandExecutePayloadSchema = external_exports.object({ args: commandExecuteArgsSchema }).strict();
 var transferOpenSchema2 = external_exports.object({
   transferId: external_exports.string().uuid(),
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
@@ -22993,10 +23032,11 @@ var HARNESS_REMOTE_ALLOWLIST = [
 ];
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger) {
+  constructor(gateway, publish, logger, harnessVersion) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger;
+    this.harnessVersion = harnessVersion;
   }
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
@@ -23010,7 +23050,7 @@ var HarnessRemoteBridge = class {
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);
     try {
-      const nativeResult = await this.gateway.dispatch(params.endpoint, params.payload, signal);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, params.payload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -23209,6 +23249,29 @@ var HarnessRemoteBridge = class {
     for (const [id2, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id2);
   }
 };
+async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) {
+  const parsed = commandExecutePayloadSchema.parse(payload);
+  const legacyPayload = {
+    args: {
+      agentId: parsed.args.agentId,
+      line: parsed.args.line,
+      images: parsed.args.images ?? []
+    }
+  };
+  const currentPayload = {
+    args: {
+      agentId: parsed.args.agentId,
+      line: parsed.args.line,
+      submittedAttachments: parsed.args.submittedAttachments ?? []
+    }
+  };
+  const args = harnessSessionGeneration(harnessVersion) === "v3" ? currentPayload : legacyPayload;
+  return gateway.dispatch(
+    "commands/execute",
+    args,
+    signal
+  );
+}
 function decodeCanonicalBase642(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
@@ -24934,7 +24997,8 @@ var HostPluginRuntime = class {
       const harnessRemote = this.localGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
         this.localGateway,
         (event, data) => send(createEvent(event, data)),
-        this.logger
+        this.logger,
+        this.harnessVersion
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),

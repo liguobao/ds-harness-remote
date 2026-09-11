@@ -17,6 +17,7 @@ import {
   TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
+import { harnessSessionGeneration } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
 import { listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
@@ -54,6 +55,24 @@ const streamOpenSchema = z.object({
   payload: z.unknown(),
 }).strict()
 const streamCloseSchema = z.object({ streamId: z.string().min(1).max(128) }).strict()
+const commandExecuteArgsSchema = z.object({
+  agentId: z.string().min(1).max(128),
+  line: z.string().min(1).max(2048),
+  // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
+  // renamed it to `submittedAttachments`. Only empty arrays are exposed by
+  // the Remote bridge; command attachments are deliberately out of scope.
+  images: z.array(z.never()).length(0).optional(),
+  submittedAttachments: z.array(z.never()).length(0).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.images !== undefined && value.submittedAttachments !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Use either images or submittedAttachments, not both.',
+      path: ['submittedAttachments'],
+    })
+  }
+})
+const commandExecutePayloadSchema = z.object({ args: commandExecuteArgsSchema }).strict()
 const transferOpenSchema = z.object({
   transferId: z.string().uuid(),
   totalBytes: z.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
@@ -149,6 +168,7 @@ export class HarnessRemoteBridge {
     private readonly gateway: LocalTypertGateway,
     private readonly publish: PublishRemoteFrame,
     private readonly logger?: SafeLogger,
+    private readonly harnessVersion?: string,
   ) {}
 
   async call(input: unknown): Promise<TypertRpcResult> {
@@ -160,7 +180,9 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
-      const nativeResult = await this.gateway.dispatch(params.endpoint, params.payload, signal)
+      const nativeResult = params.endpoint === 'commands/execute'
+        ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
+        : await this.gateway.dispatch(params.endpoint, params.payload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -372,6 +394,35 @@ export class HarnessRemoteBridge {
     for (const [id, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id)
     for (const [id, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id)
   }
+}
+
+async function dispatchCommandForHost(
+  gateway: LocalTypertGateway,
+  payload: unknown,
+  signal: AbortSignal,
+  harnessVersion?: string,
+): Promise<TypertRpcResult> {
+  const parsed = commandExecutePayloadSchema.parse(payload)
+  const legacyPayload = {
+    args: {
+      agentId: parsed.args.agentId,
+      line: parsed.args.line,
+      images: parsed.args.images ?? [],
+    },
+  }
+  const currentPayload = {
+    args: {
+      agentId: parsed.args.agentId,
+      line: parsed.args.line,
+      submittedAttachments: parsed.args.submittedAttachments ?? [],
+    },
+  }
+  const args = harnessSessionGeneration(harnessVersion) === 'v3' ? currentPayload : legacyPayload
+  return gateway.dispatch(
+    'commands/execute',
+    args,
+    signal,
+  )
 }
 
 function decodeCanonicalBase64(value: string): Uint8Array {

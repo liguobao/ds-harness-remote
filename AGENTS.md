@@ -103,7 +103,7 @@ Android 不能使用 Expo Go，因为 `react-native-webrtc` 依赖原生模块�
 截至 2026-09-11：
 
 - workspace check 与 DSH bundle 校验通过
-- Plugin test 通过：26 个测试文件、205 个测试；Android test 通过：12 个测试文件、158 个测试；完整 workspace 数量以当前 CI 输出为准
+- Plugin test 通过：26 个测试文件、207 个测试；Android test 通过：12 个测试文件、158 个测试；完整 workspace 数量以当前 CI 输出为准
 - workspace build 通过，包括 Android Hermes bundle
 - 真实设备验证已覆盖 Web → Host、Desktop/dsh-TUI 跨机、Android Harness/CodeX、WebRTC、CodeX Desktop/Android E2E 与独立 Server 跨仓库联调
 - `git diff --check` 通过

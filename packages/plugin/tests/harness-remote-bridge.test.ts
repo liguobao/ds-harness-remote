@@ -64,6 +64,23 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
+  it('selects the renamed command attachment field for a 0.1.5 Host', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: { args: Record<string, unknown> }) => {
+      expect(payload.args).toEqual({ agentId: 'session-1', line: '/goal complete', submittedAttachments: [] })
+      return { ok: true as const, value: { commandId: 'cmd-0.1.5' } }
+    })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.1.5-rc.1')
+
+    await expect(bridge.call({
+      endpoint: 'commands/execute',
+      payload: { args: { agentId: 'session-1', line: '/goal complete', images: [] } },
+    })).resolves.toEqual({ ok: true, value: { commandId: 'cmd-0.1.5' } })
+    expect(dispatch).toHaveBeenCalledWith('commands/execute', {
+      args: { agentId: 'session-1', line: '/goal complete', submittedAttachments: [] },
+    }, expect.any(AbortSignal))
+    expect(dispatch).toHaveBeenCalledOnce()
+  })
+
   it('publishes alpha stream frames and an explicit terminal event', async () => {
     const publish = vi.fn(async () => undefined)
     const open = vi.fn(async () => (async function* () {

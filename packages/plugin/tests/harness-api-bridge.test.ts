@@ -230,6 +230,23 @@ describe('HarnessApiBridge', () => {
     expect(invoke).toHaveBeenCalledTimes(4)
   })
 
+  it('selects submittedAttachments for a 0.1.5 Host descriptor', async () => {
+    const invoke = vi.fn(async () => ({ commandId: 'cmd-0.1.5', result: { kind: 'success' as const, text: 'ok' } }))
+    const bridged = new HarnessApiBridge(api({}), vi.fn(async () => undefined), 3, undefined, { invoke }, '0.1.5-rc.1')
+
+    await expect(bridged.call({
+      method: 'commands.execute',
+      rpcId: 'cmd-current-descriptor',
+      payload: { agentId: 'session-1', line: '/goal complete', images: [] },
+    })).resolves.toMatchObject({
+      rpcId: 'cmd-current-descriptor',
+      result: { ok: true, value: { commandId: 'cmd-0.1.5' } },
+    })
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      args: { agentId: 'session-1', line: '/goal complete', submittedAttachments: [] },
+    }))
+  })
+
   it('publishes native stream frames and an explicit terminal event', async () => {
     const publish = vi.fn(async () => undefined)
     const bridge = new HarnessApiBridge(api({
