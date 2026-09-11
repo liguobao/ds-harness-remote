@@ -81,7 +81,7 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 ## P0：协议与安全
 
 - [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
-- [ ] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型
+- [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
 - [ ] 完成 Noise 实现独立安全审查、长期连接 rekey 与断线密钥清理策略
