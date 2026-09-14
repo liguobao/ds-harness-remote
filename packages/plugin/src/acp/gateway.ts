@@ -6,23 +6,25 @@ import type { ResolvedCursorConfig } from '../config.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
+import { PLUGIN_VERSION } from '../version.js'
 import {
   CursorAcpClient,
   CursorAcpError,
   type CursorAcpInbound,
   type CursorAcpLike,
-} from './acp-server.js'
+} from './adapters/cursor-process.js'
 import {
+  ACP_METHOD_ALLOWLIST,
   isSessionMutation,
-  parseCursorCall,
+  parseAcpCall,
   sessionIdFromParams,
-  type AllowedCursorAppMethod,
+  type AllowedAcpMethod,
 } from './method-policy.js'
-import { CursorPeerBridge, type PublishCursorFrame } from './peer-bridge.js'
+import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
-const CURSOR_DIRECTORY_ENTRY_LIMIT = 500
+const ACP_DIRECTORY_ENTRY_LIMIT = 500
 
 interface PendingApproval {
   upstreamId: string | number
@@ -32,32 +34,32 @@ interface PendingApproval {
   expiresAt: number
 }
 
-interface CursorDirectoryEntry {
+interface AcpDirectoryEntry {
   name: string
   path: string
   hidden: boolean
 }
 
-interface CursorDirectoryListing {
+interface AcpDirectoryListing {
   path: string
   home: string
-  crumbs: CursorDirectoryEntry[]
-  entries: CursorDirectoryEntry[]
+  crumbs: AcpDirectoryEntry[]
+  entries: AcpDirectoryEntry[]
   truncated: boolean
 }
 
 type AcpFactory = (binary: string, logger: SafeLogger) => CursorAcpLike
 
 /**
- * Optional Cursor ACP domain inside the existing Remote Plugin. Shares Remote
- * identity/transport with Harness, but owns its `agent acp` process, method
- * policy, subscriptions, and permission handles. Sessions stay in ACP memory.
+ * Host-side Agent ACP gateway (#65). Reuses the authenticated Remote channel and
+ * delegates to a backend adapter (Cursor `agent acp` first). Owns method policy,
+ * session ownership, subscriptions, and permission handles per connection.
  */
-export class CursorRemoteDomain {
+export class AcpRemoteGateway {
   private acp?: CursorAcpLike
   private unsubscribeInbound?: () => void
   private unsubscribeUnavailable?: () => void
-  private readonly peers = new Map<string, CursorPeerBridge>()
+  private readonly peers = new Map<string, AcpPeerBridge>()
   private readonly sessionOwners = new Map<string, string>()
   private readonly approvals = new Map<string, PendingApproval>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
@@ -108,16 +110,22 @@ export class CursorRemoteDomain {
     }
   }
 
-  createPeer(context: PeerConnectionContext, publish: PublishCursorFrame): CursorPeerBridge | undefined {
+  createPeer(context: PeerConnectionContext, publish: PublishAcpFrame): AcpPeerBridge | undefined {
     if (!this.config.enabled) return undefined
-    const bridge = new CursorPeerBridge(this, context, publish, this.logger)
+    const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     return bridge
   }
 
   async call(connectionId: string, input: unknown): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
-    const call = parseCursorCall(envelope.method, envelope.params)
+    const call = parseAcpCall(envelope.method, envelope.params)
+
+    if (call.method === 'initialize') {
+      this.requireAcp()
+      return this.initializeResult(call.params)
+    }
+
     this.requireAcp()
 
     if (call.method === 'dsh/directoryList') {
@@ -331,11 +339,29 @@ export class CursorRemoteDomain {
     return this.acp
   }
 
+  private initializeResult(params: Record<string, unknown>): Record<string, unknown> {
+    const requested = typeof params.protocolVersion === 'number' ? params.protocolVersion : 1
+    return {
+      protocolVersion: requested,
+      agentInfo: {
+        name: 'dsh-remote-acp',
+        version: PLUGIN_VERSION,
+      },
+      backend: 'cursor',
+      authMethods: [],
+      capabilities: {
+        loadSession: true,
+        promptTypes: ['text'],
+        methods: [...ACP_METHOD_ALLOWLIST],
+      },
+    }
+  }
+
   private callUpstream(method: string, params: unknown): Promise<unknown> {
     return this.requireAcp().call(method, params)
   }
 
-  private requireSessionAccess(connectionId: string, sessionId: string, method: AllowedCursorAppMethod): void {
+  private requireSessionAccess(connectionId: string, sessionId: string, method: AllowedAcpMethod): void {
     if (method === 'session/load') return
     const owner = this.sessionOwners.get(sessionId)
     if (owner === undefined) {
@@ -370,7 +396,7 @@ export class CursorRemoteDomain {
     }
   }
 
-  private async listDirectory(path: string): Promise<CursorDirectoryListing> {
+  private async listDirectory(path: string): Promise<AcpDirectoryListing> {
     const home = homedir()
     const target = path.trim() === '~' || path.trim() === ''
       ? home
@@ -379,10 +405,10 @@ export class CursorRemoteDomain {
         : path
     const canonical = await this.requireExistingDirectory(isAbsolute(target) ? target : resolve(target))
     const names = await readdir(canonical)
-    const entries: CursorDirectoryEntry[] = []
+    const entries: AcpDirectoryEntry[] = []
     let truncated = false
     for (const name of names.sort((a, b) => a.localeCompare(b))) {
-      if (entries.length >= CURSOR_DIRECTORY_ENTRY_LIMIT) {
+      if (entries.length >= ACP_DIRECTORY_ENTRY_LIMIT) {
         truncated = true
         break
       }
@@ -413,7 +439,7 @@ export class CursorRemoteDomain {
   }
 }
 
-export type { PublishCursorFrame }
+export type { PublishAcpFrame }
 
 function parseCallEnvelope(input: unknown): { method: string; params: unknown } {
   if (!isRecord(input) || typeof input.method !== 'string') {
@@ -478,8 +504,8 @@ function sanitizeSessionResult(value: unknown): unknown {
   return Object.keys(next).length > 0 ? next : value
 }
 
-function buildCrumbs(path: string, home: string): CursorDirectoryEntry[] {
-  const crumbs: CursorDirectoryEntry[] = []
+function buildCrumbs(path: string, home: string): AcpDirectoryEntry[] {
+  const crumbs: AcpDirectoryEntry[] = []
   let current = path
   while (true) {
     crumbs.unshift({

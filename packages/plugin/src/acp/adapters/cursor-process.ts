@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
-import type { SafeLogger } from '../logging.js'
-import { PLUGIN_VERSION } from '../version.js'
+import type { SafeLogger } from '../../logging.js'
+import { PLUGIN_VERSION } from '../../version.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_START_TIMEOUT_MS = 20_000

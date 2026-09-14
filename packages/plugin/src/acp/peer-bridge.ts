@@ -1,27 +1,27 @@
 import { Buffer } from 'node:buffer'
 import type {
-  CursorAppFrameData,
-  CursorAppStreamClosedData,
-  CursorAppTransferChunkParams,
-  CursorAppTransferCommitResult,
-  CursorAppTransferOpenParams,
-  CursorAppTransferReadParams,
-  CursorAppTransferReadResult,
+  AgentAcpFrameData,
+  AgentAcpStreamClosedData,
+  AgentAcpTransferChunkParams,
+  AgentAcpTransferCommitResult,
+  AgentAcpTransferOpenParams,
+  AgentAcpTransferReadParams,
+  AgentAcpTransferReadResult,
 } from '@dsh-remote/protocol'
 import {
-  CURSOR_APP_TRANSFER_CHUNK_BYTES,
-  MAX_CURSOR_APP_TRANSFER_BYTES,
+  AGENT_ACP_TRANSFER_CHUNK_BYTES,
+  MAX_AGENT_ACP_TRANSFER_BYTES,
   MAX_SECURE_MESSAGE_BYTES,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
-import type { CursorRemoteDomain } from './domain.js'
+import type { AcpRemoteGateway } from './gateway.js'
 
-export type PublishCursorFrame = (
-  event: 'cursor.app.frame' | 'cursor.app.stream.closed',
-  data: CursorAppFrameData | CursorAppStreamClosedData,
+export type PublishAcpFrame = (
+  event: 'agent.acp.frame' | 'agent.acp.stream.closed',
+  data: AgentAcpFrameData | AgentAcpStreamClosedData,
 ) => Promise<void>
 
 interface IncomingTransfer {
@@ -46,13 +46,13 @@ const streamOpenSchema = z.object({
 const streamCloseSchema = z.object({ streamId: z.string().min(1).max(128) }).strict()
 const transferOpenSchema = z.object({
   transferId: z.string().uuid(),
-  totalBytes: z.number().int().positive().max(MAX_CURSOR_APP_TRANSFER_BYTES),
+  totalBytes: z.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
   totalChunks: z.number().int().positive(),
 }).strict()
 const transferChunkSchema = z.object({
   transferId: z.string().uuid(),
   index: z.number().int().nonnegative(),
-  data: z.string().min(1).max(Math.ceil(CURSOR_APP_TRANSFER_CHUNK_BYTES / 3) * 4),
+  data: z.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4),
 }).strict()
 const transferIdSchema = z.object({ transferId: z.string().uuid() }).strict()
 const transferReadSchema = z.object({ transferId: z.string().uuid(), index: z.number().int().nonnegative() }).strict()
@@ -63,16 +63,16 @@ const TRANSFER_IDLE_MS = 2 * 60_000
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Per-authenticated-connection state for the Cursor Remote domain. */
-export class CursorPeerBridge {
+export class AcpPeerBridge {
   private readonly streams = new Map<string, string>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
   private closed = false
 
   constructor(
-    private readonly domain: CursorRemoteDomain,
+    private readonly domain: AcpRemoteGateway,
     private readonly context: PeerConnectionContext,
-    private readonly publish: PublishCursorFrame,
+    private readonly publish: PublishAcpFrame,
     private readonly logger?: SafeLogger,
   ) {}
 
@@ -103,9 +103,9 @@ export class CursorPeerBridge {
   async openStream(input: unknown): Promise<{ opened: true; streamId: string; sessionId: string }> {
     this.requireOpen()
     const params = streamOpenSchema.parse(input)
-    if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The Cursor stream id is already active.')
+    if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The ACP stream id is already active.')
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
-      throw new RpcError('RATE_LIMITED', 'Too many Cursor streams are active for this connection.', undefined, true)
+      throw new RpcError('RATE_LIMITED', 'Too many ACP streams are active for this connection.', undefined, true)
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId)
     this.streams.set(params.streamId, params.sessionId)
@@ -121,15 +121,15 @@ export class CursorPeerBridge {
   openTransfer(input: unknown): { opened: true; transferId: string } {
     this.requireOpen()
     this.pruneTransfers()
-    const params = transferOpenSchema.parse(input) as CursorAppTransferOpenParams
-    if (params.totalChunks !== Math.ceil(params.totalBytes / CURSOR_APP_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer chunk count is invalid.')
+    const params = transferOpenSchema.parse(input) as AgentAcpTransferOpenParams
+    if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
+      throw new RpcError('INVALID_MESSAGE', 'The ACP transfer chunk count is invalid.')
     }
     if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError('REQUEST_CONFLICT', 'The Cursor transfer id is already active.')
+      throw new RpcError('REQUEST_CONFLICT', 'The ACP transfer id is already active.')
     }
     if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
-      throw new RpcError('RATE_LIMITED', 'Too many Cursor transfers are active.', undefined, true)
+      throw new RpcError('RATE_LIMITED', 'Too many ACP transfers are active.', undefined, true)
     }
     this.incomingTransfers.set(params.transferId, {
       totalBytes: params.totalBytes,
@@ -144,21 +144,21 @@ export class CursorPeerBridge {
   appendTransfer(input: unknown): { accepted: true; transferId: string; index: number } {
     this.requireOpen()
     this.pruneTransfers()
-    const params = transferChunkSchema.parse(input) as CursorAppTransferChunkParams
+    const params = transferChunkSchema.parse(input) as AgentAcpTransferChunkParams
     const transfer = this.incomingTransfers.get(params.transferId)
-    if (transfer === undefined) throw new RpcError('TRANSFER_NOT_FOUND', 'The Cursor transfer is not active.')
+    if (transfer === undefined) throw new RpcError('TRANSFER_NOT_FOUND', 'The ACP transfer is not active.')
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
       this.incomingTransfers.delete(params.transferId)
-      throw new RpcError('INVALID_MESSAGE', 'Cursor transfer chunks must arrive exactly once and in order.')
+      throw new RpcError('INVALID_MESSAGE', 'ACP transfer chunks must arrive exactly once and in order.')
     }
     const chunk = decodeCanonicalBase64(params.data)
     const expectedBytes = Math.min(
-      CURSOR_APP_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * CURSOR_APP_TRANSFER_CHUNK_BYTES,
+      AGENT_ACP_TRANSFER_CHUNK_BYTES,
+      transfer.totalBytes - params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES,
     )
     if (chunk.byteLength !== expectedBytes) {
       this.incomingTransfers.delete(params.transferId)
-      throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer chunk size is invalid.')
+      throw new RpcError('INVALID_MESSAGE', 'The ACP transfer chunk size is invalid.')
     }
     transfer.chunks.push(chunk)
     transfer.receivedBytes += chunk.byteLength
@@ -166,27 +166,27 @@ export class CursorPeerBridge {
     return { accepted: true, transferId: params.transferId, index: params.index }
   }
 
-  async commitTransfer(input: unknown): Promise<CursorAppTransferCommitResult> {
+  async commitTransfer(input: unknown): Promise<AgentAcpTransferCommitResult> {
     this.requireOpen()
     this.pruneTransfers()
     const params = transferIdSchema.parse(input)
     const transfer = this.incomingTransfers.get(params.transferId)
-    if (transfer === undefined) throw new RpcError('TRANSFER_NOT_FOUND', 'The Cursor transfer is not active.')
+    if (transfer === undefined) throw new RpcError('TRANSFER_NOT_FOUND', 'The ACP transfer is not active.')
     this.incomingTransfers.delete(params.transferId)
     if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer is incomplete.')
+      throw new RpcError('INVALID_MESSAGE', 'The ACP transfer is incomplete.')
     }
     let request: unknown
     try {
       request = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(concatChunks(transfer.chunks, transfer.totalBytes)))
     } catch {
-      throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer does not contain a valid request.')
+      throw new RpcError('INVALID_MESSAGE', 'The ACP transfer does not contain a valid request.')
     }
     let response: unknown
     try {
       response = await this.callDomain(request, false)
     } catch (error) {
-      this.logger?.warn('Cursor transfer call failed', {
+      this.logger?.warn('ACP transfer call failed', {
         method: safeMethod(request),
         code: safeErrorCode(error),
       })
@@ -194,13 +194,13 @@ export class CursorPeerBridge {
     }
     const responseBytes = new TextEncoder().encode(JSON.stringify(response))
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: 'inline', response }
-    if (responseBytes.byteLength > MAX_CURSOR_APP_TRANSFER_BYTES) {
+    if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
       throw new RpcError('RESPONSE_TOO_LARGE', 'The Cursor response exceeds the bounded transfer limit.')
     }
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
       throw new RpcError('RATE_LIMITED', 'Too many Cursor response transfers are active.', undefined, true)
     }
-    const totalChunks = Math.ceil(responseBytes.byteLength / CURSOR_APP_TRANSFER_CHUNK_BYTES)
+    const totalChunks = Math.ceil(responseBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES)
     this.outgoingTransfers.set(params.transferId, {
       bytes: responseBytes,
       totalChunks,
@@ -210,18 +210,18 @@ export class CursorPeerBridge {
     return { kind: 'chunked', transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks }
   }
 
-  readTransfer(input: unknown): CursorAppTransferReadResult {
+  readTransfer(input: unknown): AgentAcpTransferReadResult {
     this.requireOpen()
     this.pruneTransfers()
-    const params = transferReadSchema.parse(input) as CursorAppTransferReadParams
+    const params = transferReadSchema.parse(input) as AgentAcpTransferReadParams
     const transfer = this.outgoingTransfers.get(params.transferId)
     if (transfer === undefined) throw new RpcError('TRANSFER_NOT_FOUND', 'The Cursor response transfer is not active.')
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
       this.outgoingTransfers.delete(params.transferId)
       throw new RpcError('INVALID_MESSAGE', 'Cursor response chunks must be read exactly once and in order.')
     }
-    const start = params.index * CURSOR_APP_TRANSFER_CHUNK_BYTES
-    const end = Math.min(start + CURSOR_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength)
+    const start = params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES
+    const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength)
     transfer.nextIndex += 1
     transfer.touchedAt = Date.now()
     return {
@@ -243,24 +243,24 @@ export class CursorPeerBridge {
       .filter(([, targetSessionId]) => targetSessionId === sessionId)
       .map(([streamId]) => streamId)
     for (const streamId of streamIds) {
-      const data: CursorAppFrameData = { streamId, frame }
+      const data: AgentAcpFrameData = { streamId, frame }
       if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId)
-        await this.publish('cursor.app.stream.closed', { streamId, reason: 'failed' })
-        this.logger?.warn('Cursor stream closed after oversized frame', { streamId })
+        await this.publish('agent.acp.stream.closed', { streamId, reason: 'failed' })
+        this.logger?.warn('ACP stream closed after oversized frame', { streamId })
         continue
       }
-      await this.publish('cursor.app.frame', data)
+      await this.publish('agent.acp.frame', data)
     }
   }
 
-  async failStreams(reason: CursorAppStreamClosedData['reason'] = 'failed'): Promise<void> {
+  async failStreams(reason: AgentAcpStreamClosedData['reason'] = 'failed'): Promise<void> {
     if (this.closed) return
     const streamIds = [...this.streams.keys()]
     this.streams.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
-    await Promise.all(streamIds.map(streamId => this.publish('cursor.app.stream.closed', {
+    await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {
       streamId,
       reason,
     }).catch(() => undefined)))
@@ -273,7 +273,7 @@ export class CursorPeerBridge {
     this.streams.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
-    await Promise.all(streamIds.map(streamId => this.publish('cursor.app.stream.closed', {
+    await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {
       streamId,
       reason: 'peer-disconnected',
     }).catch(() => undefined)))
@@ -291,17 +291,17 @@ export class CursorPeerBridge {
   }
 
   private requireOpen(): void {
-    if (this.closed) throw new RpcError('CURSOR_CONNECTION_CLOSED', 'The Cursor connection is closed.')
+    if (this.closed) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.')
   }
 }
 
 function decodeCanonicalBase64(value: string): Uint8Array {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer chunk is not canonical base64.')
+    throw new RpcError('INVALID_MESSAGE', 'The ACP transfer chunk is not canonical base64.')
   }
   const decoded = Buffer.from(value, 'base64')
   if (decoded.toString('base64') !== value) {
-    throw new RpcError('INVALID_MESSAGE', 'The Cursor transfer chunk is not canonical base64.')
+    throw new RpcError('INVALID_MESSAGE', 'The ACP transfer chunk is not canonical base64.')
   }
   return decoded
 }

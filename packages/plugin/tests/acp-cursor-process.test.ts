@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { CursorAcpClient } from '../src/cursor/acp-server.js'
+import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
 
 describe('CursorAcpClient', () => {

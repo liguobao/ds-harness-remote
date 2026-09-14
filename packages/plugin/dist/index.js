@@ -4053,10 +4053,10 @@ var SECURE_FRAGMENT_CHUNK_BYTES = 48 * 1024;
 var MAX_SECURE_MESSAGE_BYTES = 4 * 1024 * 1024;
 var HARNESS_API_TRANSFER_CHUNK_BYTES = 512 * 1024;
 var CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024;
-var CURSOR_APP_TRANSFER_CHUNK_BYTES = 512 * 1024;
+var AGENT_ACP_TRANSFER_CHUNK_BYTES = 512 * 1024;
 var MAX_HARNESS_API_TRANSFER_BYTES = 288 * 1024 * 1024;
 var MAX_CODEX_APP_TRANSFER_BYTES = 288 * 1024 * 1024;
-var MAX_CURSOR_APP_TRANSFER_BYTES = 288 * 1024 * 1024;
+var MAX_AGENT_ACP_TRANSFER_BYTES = 288 * 1024 * 1024;
 var MAX_DEVICE_NAME_LENGTH = 128;
 var MAX_DEVICE_PLATFORM_LENGTH = 64;
 var MAX_DEVICE_VERSION_LENGTH = 64;
@@ -4124,15 +4124,15 @@ var rpcMethods = [
   "codex.app.transfer.commit",
   "codex.app.transfer.read",
   "codex.app.transfer.close",
-  "cursor.app.call",
-  "cursor.app.respond",
-  "cursor.app.stream.open",
-  "cursor.app.stream.close",
-  "cursor.app.transfer.open",
-  "cursor.app.transfer.chunk",
-  "cursor.app.transfer.commit",
-  "cursor.app.transfer.read",
-  "cursor.app.transfer.close"
+  "agent.acp.call",
+  "agent.acp.respond",
+  "agent.acp.stream.open",
+  "agent.acp.stream.close",
+  "agent.acp.transfer.open",
+  "agent.acp.transfer.chunk",
+  "agent.acp.transfer.commit",
+  "agent.acp.transfer.read",
+  "agent.acp.transfer.close"
 ];
 var errorCodes = [
   // Protocol / Version
@@ -20984,15 +20984,15 @@ var apiMethods = /* @__PURE__ */ new Set([
   "codex.app.transfer.commit",
   "codex.app.transfer.read",
   "codex.app.transfer.close",
-  "cursor.app.call",
-  "cursor.app.respond",
-  "cursor.app.stream.open",
-  "cursor.app.stream.close",
-  "cursor.app.transfer.open",
-  "cursor.app.transfer.chunk",
-  "cursor.app.transfer.commit",
-  "cursor.app.transfer.read",
-  "cursor.app.transfer.close"
+  "agent.acp.call",
+  "agent.acp.respond",
+  "agent.acp.stream.open",
+  "agent.acp.stream.close",
+  "agent.acp.transfer.open",
+  "agent.acp.transfer.chunk",
+  "agent.acp.transfer.commit",
+  "agent.acp.transfer.read",
+  "agent.acp.transfer.close"
 ]);
 var HOST_CAPABILITIES = [
   "harness.api.v1",
@@ -21002,11 +21002,11 @@ var HOST_CAPABILITIES = [
   "fileviewer.read.v1",
   "codex.appserver.v1",
   "codex.appserver.transfer.v1",
-  "cursor.acp.v1",
-  "cursor.acp.transfer.v1"
+  "agent.acp.v1",
+  "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, cursor2) {
+  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp) {
     this.harnessApi = harnessApi;
     this.maxPending = maxPending;
     this.logger = logger;
@@ -21014,7 +21014,7 @@ var RpcRouter = class {
     this.harnessRemote = harnessRemote;
     this.capabilities = capabilities;
     this.codex = codex;
-    this.cursor = cursor2;
+    this.acp = acp;
   }
   active = 0;
   async closePeerStreams() {
@@ -21022,7 +21022,7 @@ var RpcRouter = class {
       this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
-      this.cursor?.closeAll()
+      this.acp?.closeAll()
     ]);
   }
   async handle(message) {
@@ -21124,24 +21124,24 @@ var RpcRouter = class {
         return this.requireCodex().readTransfer(params);
       case "codex.app.transfer.close":
         return this.requireCodex().closeTransfer(params);
-      case "cursor.app.call":
-        return this.requireCursor().call(params);
-      case "cursor.app.respond":
-        return this.requireCursor().respond(params);
-      case "cursor.app.stream.open":
-        return this.requireCursor().openStream(params);
-      case "cursor.app.stream.close":
-        return this.requireCursor().closeStream(params);
-      case "cursor.app.transfer.open":
-        return this.requireCursor().openTransfer(params);
-      case "cursor.app.transfer.chunk":
-        return this.requireCursor().appendTransfer(params);
-      case "cursor.app.transfer.commit":
-        return this.requireCursor().commitTransfer(params);
-      case "cursor.app.transfer.read":
-        return this.requireCursor().readTransfer(params);
-      case "cursor.app.transfer.close":
-        return this.requireCursor().closeTransfer(params);
+      case "agent.acp.call":
+        return this.requireAcp().call(params);
+      case "agent.acp.respond":
+        return this.requireAcp().respond(params);
+      case "agent.acp.stream.open":
+        return this.requireAcp().openStream(params);
+      case "agent.acp.stream.close":
+        return this.requireAcp().closeStream(params);
+      case "agent.acp.transfer.open":
+        return this.requireAcp().openTransfer(params);
+      case "agent.acp.transfer.chunk":
+        return this.requireAcp().appendTransfer(params);
+      case "agent.acp.transfer.commit":
+        return this.requireAcp().commitTransfer(params);
+      case "agent.acp.transfer.read":
+        return this.requireAcp().readTransfer(params);
+      case "agent.acp.transfer.close":
+        return this.requireAcp().closeTransfer(params);
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
@@ -21164,11 +21164,11 @@ var RpcRouter = class {
     }
     return this.codex;
   }
-  requireCursor() {
-    if (this.cursor === void 0) {
-      throw new RpcError("FEATURE_NOT_SUPPORTED", "Cursor Remote is disabled or unavailable on this Host.");
+  requireAcp() {
+    if (this.acp === void 0) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "Agent ACP is disabled or unavailable on this Host.");
     }
-    return this.cursor;
+    return this.acp;
   }
 };
 function errorResponse2(requestId, error) {
@@ -25071,13 +25071,13 @@ function isActiveWriterMessage(message) {
   return message.toLowerCase().includes("active writer");
 }
 
-// src/cursor/domain.ts
+// src/acp/gateway.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { readdir as readdir3, realpath as realpath2, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir4 } from "node:os";
 import { basename as basename4, isAbsolute as isAbsolute4, join as join6, relative as relative2, resolve as resolve3 } from "node:path";
 
-// src/cursor/acp-server.ts
+// src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
 import { Buffer as Buffer4 } from "node:buffer";
 var ACP_REQUEST_TIMEOUT_MS = 6e4;
@@ -25319,7 +25319,7 @@ function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/cursor/method-policy.ts
+// src/acp/method-policy.ts
 var id2 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
 var mode = external_exports.enum(["agent", "plan", "ask"]);
@@ -25328,6 +25328,13 @@ var promptBlock = external_exports.object({
   text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
 var schemas2 = {
+  "initialize": external_exports.object({
+    protocolVersion: external_exports.number().int().positive().optional(),
+    clientInfo: external_exports.object({
+      name: external_exports.string().min(1).max(128).optional(),
+      version: external_exports.string().min(1).max(128).optional()
+    }).strict().optional()
+  }).strict(),
   "session/new": external_exports.object({
     cwd,
     mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
@@ -25347,20 +25354,20 @@ var schemas2 = {
     path: external_exports.string().min(1).max(4096)
   }).strict()
 };
-var CURSOR_APP_ALLOWLIST = Object.freeze(Object.keys(schemas2));
-function parseCursorCall(method, params) {
+var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
+function parseAcpCall(method, params) {
   if (!(method in schemas2)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The Cursor ACP method is not allowlisted for Remote.");
+    throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
   }
   const schema = schemas2[method];
   const parsed = schema.safeParse(params ?? {});
   if (!parsed.success) {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor ACP parameters are invalid.");
+    throw new RpcError("INVALID_MESSAGE", "The ACP parameters are invalid.");
   }
   return { method, params: parsed.data };
 }
 function sessionIdFromParams(method, params) {
-  if (method === "session/new") return void 0;
+  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList") return void 0;
   if (typeof params.sessionId === "string") return params.sessionId;
   return void 0;
 }
@@ -25368,7 +25375,7 @@ function isSessionMutation(method) {
   return method === "session/prompt" || method === "session/cancel";
 }
 
-// src/cursor/peer-bridge.ts
+// src/acp/peer-bridge.ts
 import { Buffer as Buffer5 } from "node:buffer";
 var streamOpenSchema4 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
@@ -25377,13 +25384,13 @@ var streamOpenSchema4 = external_exports.object({
 var streamCloseSchema4 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var transferOpenSchema4 = external_exports.object({
   transferId: external_exports.string().uuid(),
-  totalBytes: external_exports.number().int().positive().max(MAX_CURSOR_APP_TRANSFER_BYTES),
+  totalBytes: external_exports.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive()
 }).strict();
 var transferChunkSchema4 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative(),
-  data: external_exports.string().min(1).max(Math.ceil(CURSOR_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
+  data: external_exports.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
 }).strict();
 var transferIdSchema4 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
 var transferReadSchema4 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
@@ -25391,7 +25398,7 @@ var MAX_ACTIVE_STREAMS3 = 16;
 var MAX_ACTIVE_TRANSFERS3 = 2;
 var TRANSFER_IDLE_MS2 = 2 * 6e4;
 var INLINE_TRANSFER_RESPONSE_BYTES4 = 2 * 1024 * 1024;
-var CursorPeerBridge = class {
+var AcpPeerBridge = class {
   constructor(domain, context, publish, logger) {
     this.domain = domain;
     this.context = context;
@@ -25426,9 +25433,9 @@ var CursorPeerBridge = class {
   async openStream(input2) {
     this.requireOpen();
     const params = streamOpenSchema4.parse(input2);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Cursor stream id is already active.");
+    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The ACP stream id is already active.");
     if (this.streams.size >= MAX_ACTIVE_STREAMS3) {
-      throw new RpcError("RATE_LIMITED", "Too many Cursor streams are active for this connection.", void 0, true);
+      throw new RpcError("RATE_LIMITED", "Too many ACP streams are active for this connection.", void 0, true);
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId);
     this.streams.set(params.streamId, params.sessionId);
@@ -25443,14 +25450,14 @@ var CursorPeerBridge = class {
     this.requireOpen();
     this.pruneTransfers();
     const params = transferOpenSchema4.parse(input2);
-    if (params.totalChunks !== Math.ceil(params.totalBytes / CURSOR_APP_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError("INVALID_MESSAGE", "The Cursor transfer chunk count is invalid.");
+    if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk count is invalid.");
     }
     if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError("REQUEST_CONFLICT", "The Cursor transfer id is already active.");
+      throw new RpcError("REQUEST_CONFLICT", "The ACP transfer id is already active.");
     }
     if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
-      throw new RpcError("RATE_LIMITED", "Too many Cursor transfers are active.", void 0, true);
+      throw new RpcError("RATE_LIMITED", "Too many ACP transfers are active.", void 0, true);
     }
     this.incomingTransfers.set(params.transferId, {
       totalBytes: params.totalBytes,
@@ -25466,19 +25473,19 @@ var CursorPeerBridge = class {
     this.pruneTransfers();
     const params = transferChunkSchema4.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Cursor transfer is not active.");
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
       this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Cursor transfer chunks must arrive exactly once and in order.");
+      throw new RpcError("INVALID_MESSAGE", "ACP transfer chunks must arrive exactly once and in order.");
     }
     const chunk = decodeCanonicalBase644(params.data);
     const expectedBytes = Math.min(
-      CURSOR_APP_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * CURSOR_APP_TRANSFER_CHUNK_BYTES
+      AGENT_ACP_TRANSFER_CHUNK_BYTES,
+      transfer.totalBytes - params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES
     );
     if (chunk.byteLength !== expectedBytes) {
       this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "The Cursor transfer chunk size is invalid.");
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk size is invalid.");
     }
     transfer.chunks.push(chunk);
     transfer.receivedBytes += chunk.byteLength;
@@ -25490,22 +25497,22 @@ var CursorPeerBridge = class {
     this.pruneTransfers();
     const params = transferIdSchema4.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Cursor transfer is not active.");
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
     if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError("INVALID_MESSAGE", "The Cursor transfer is incomplete.");
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer is incomplete.");
     }
     let request;
     try {
       request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks4(transfer.chunks, transfer.totalBytes)));
     } catch {
-      throw new RpcError("INVALID_MESSAGE", "The Cursor transfer does not contain a valid request.");
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer does not contain a valid request.");
     }
     let response;
     try {
       response = await this.callDomain(request, false);
     } catch (error) {
-      this.logger?.warn("Cursor transfer call failed", {
+      this.logger?.warn("ACP transfer call failed", {
         method: safeMethod2(request),
         code: safeErrorCode3(error)
       });
@@ -25513,13 +25520,13 @@ var CursorPeerBridge = class {
     }
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES4) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_CURSOR_APP_TRANSFER_BYTES) {
+    if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Cursor response exceeds the bounded transfer limit.");
     }
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
       throw new RpcError("RATE_LIMITED", "Too many Cursor response transfers are active.", void 0, true);
     }
-    const totalChunks = Math.ceil(responseBytes.byteLength / CURSOR_APP_TRANSFER_CHUNK_BYTES);
+    const totalChunks = Math.ceil(responseBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES);
     this.outgoingTransfers.set(params.transferId, {
       bytes: responseBytes,
       totalChunks,
@@ -25538,8 +25545,8 @@ var CursorPeerBridge = class {
       this.outgoingTransfers.delete(params.transferId);
       throw new RpcError("INVALID_MESSAGE", "Cursor response chunks must be read exactly once and in order.");
     }
-    const start = params.index * CURSOR_APP_TRANSFER_CHUNK_BYTES;
-    const end = Math.min(start + CURSOR_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
+    const start = params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
+    const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
     transfer.nextIndex += 1;
     transfer.touchedAt = Date.now();
     return {
@@ -25560,11 +25567,11 @@ var CursorPeerBridge = class {
       const data = { streamId, frame };
       if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId);
-        await this.publish("cursor.app.stream.closed", { streamId, reason: "failed" });
-        this.logger?.warn("Cursor stream closed after oversized frame", { streamId });
+        await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" });
+        this.logger?.warn("ACP stream closed after oversized frame", { streamId });
         continue;
       }
-      await this.publish("cursor.app.frame", data);
+      await this.publish("agent.acp.frame", data);
     }
   }
   async failStreams(reason = "failed") {
@@ -25573,7 +25580,7 @@ var CursorPeerBridge = class {
     this.streams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("cursor.app.stream.closed", {
+    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
       streamId,
       reason
     }).catch(() => void 0)));
@@ -25585,7 +25592,7 @@ var CursorPeerBridge = class {
     this.streams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("cursor.app.stream.closed", {
+    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
       streamId,
       reason: "peer-disconnected"
     }).catch(() => void 0)));
@@ -25601,16 +25608,16 @@ var CursorPeerBridge = class {
     }
   }
   requireOpen() {
-    if (this.closed) throw new RpcError("CURSOR_CONNECTION_CLOSED", "The Cursor connection is closed.");
+    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
   }
 };
 function decodeCanonicalBase644(value) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor transfer chunk is not canonical base64.");
+    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
   const decoded = Buffer5.from(value, "base64");
   if (decoded.toString("base64") !== value) {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor transfer chunk is not canonical base64.");
+    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
   return decoded;
 }
@@ -25634,11 +25641,11 @@ function concatChunks4(chunks, totalBytes) {
   return output;
 }
 
-// src/cursor/domain.ts
+// src/acp/gateway.ts
 var APPROVAL_TTL_MS2 = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
-var CURSOR_DIRECTORY_ENTRY_LIMIT = 500;
-var CursorRemoteDomain = class {
+var ACP_DIRECTORY_ENTRY_LIMIT = 500;
+var AcpRemoteGateway = class {
   constructor(config, logger, createAcp = (binary, targetLogger) => new CursorAcpClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
     this.config = config;
     this.logger = logger;
@@ -25686,13 +25693,17 @@ var CursorRemoteDomain = class {
   }
   createPeer(context, publish) {
     if (!this.config.enabled) return void 0;
-    const bridge = new CursorPeerBridge(this, context, publish, this.logger);
+    const bridge = new AcpPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     return bridge;
   }
   async call(connectionId, input2) {
     const envelope = parseCallEnvelope2(input2);
-    const call = parseCursorCall(envelope.method, envelope.params);
+    const call = parseAcpCall(envelope.method, envelope.params);
+    if (call.method === "initialize") {
+      this.requireAcp();
+      return this.initializeResult(call.params);
+    }
     this.requireAcp();
     if (call.method === "dsh/directoryList") {
       return this.listDirectory(String(call.params.path));
@@ -25890,6 +25901,23 @@ var CursorRemoteDomain = class {
     }
     return this.acp;
   }
+  initializeResult(params) {
+    const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
+    return {
+      protocolVersion: requested,
+      agentInfo: {
+        name: "dsh-remote-acp",
+        version: PLUGIN_VERSION
+      },
+      backend: "cursor",
+      authMethods: [],
+      capabilities: {
+        loadSession: true,
+        promptTypes: ["text"],
+        methods: [...ACP_METHOD_ALLOWLIST]
+      }
+    };
+  }
   callUpstream(method, params) {
     return this.requireAcp().call(method, params);
   }
@@ -25933,7 +25961,7 @@ var CursorRemoteDomain = class {
     const entries = [];
     let truncated = false;
     for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
-      if (entries.length >= CURSOR_DIRECTORY_ENTRY_LIMIT) {
+      if (entries.length >= ACP_DIRECTORY_ENTRY_LIMIT) {
         truncated = true;
         break;
       }
@@ -26054,7 +26082,7 @@ var HostPluginRuntime = class {
     this.localGateway = localGateway;
     this.fileViewerHost = fileViewerHost;
     this.codex = new CodexRemoteDomain(config.codex, logger);
-    this.cursor = new CursorRemoteDomain(config.cursor, logger);
+    this.acp = new AcpRemoteGateway(config.cursor, logger);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
         this.apiProxy,
@@ -26078,7 +26106,7 @@ var HostPluginRuntime = class {
         context,
         (event, data) => send(createEvent(event, data))
       );
-      const cursor2 = this.cursor.createPeer(
+      const cursor2 = this.acp.createPeer(
         context,
         (event, data) => send(createEvent(event, data))
       );
@@ -26104,11 +26132,11 @@ var HostPluginRuntime = class {
   harnessVersion;
   closed = false;
   codex;
-  cursor;
+  acp;
   localCodexPeer;
   localCodexPublish = async () => void 0;
-  localCursorPeer;
-  localCursorPublish = async () => void 0;
+  localAcpPeer;
+  localAcpPublish = async () => void 0;
   async start() {
     if (this.closed) throw new Error("remote runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
@@ -26118,7 +26146,7 @@ var HostPluginRuntime = class {
       server: this.config.serverUrl ?? "not configured"
     });
     await this.codex.start();
-    await this.cursor.start();
+    await this.acp.start();
     if (this.serverApi !== void 0) {
       this.harnessVersion = await this.readHarnessVersion();
       this.serverApi.setHarnessVersion(this.harnessVersion);
@@ -26272,21 +26300,21 @@ var HostPluginRuntime = class {
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Codex stream is required.");
     return { closed: false, streamId };
   }
-  cursorStatus() {
-    return this.cursor.status();
+  acpStatus() {
+    return this.acp.status();
   }
-  cursorCall(input2) {
-    return this.requireLocalCursorPeer().call(input2);
+  acpCall(input2) {
+    return this.requireLocalAcpPeer().call(input2);
   }
-  cursorRespond(input2) {
-    return this.requireLocalCursorPeer().respond(input2);
+  acpRespond(input2) {
+    return this.requireLocalAcpPeer().respond(input2);
   }
-  cursorOpenStream(input2, publish) {
-    this.localCursorPublish = publish;
-    return this.requireLocalCursorPeer().openStream(input2);
+  acpOpenStream(input2, publish) {
+    this.localAcpPublish = publish;
+    return this.requireLocalAcpPeer().openStream(input2);
   }
-  async cursorCloseStream(input2) {
-    const peer = this.localCursorPeer;
+  async acpCloseStream(input2) {
+    const peer = this.localAcpPeer;
     if (peer !== void 0) return peer.closeStream(input2);
     const streamId = isPlainRecord(input2) && typeof input2.streamId === "string" ? input2.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Cursor stream is required.");
@@ -26299,10 +26327,10 @@ var HostPluginRuntime = class {
     await this.connections.close();
     await this.localCodexPeer?.closeAll();
     this.localCodexPeer = void 0;
-    await this.localCursorPeer?.closeAll();
-    this.localCursorPeer = void 0;
+    await this.localAcpPeer?.closeAll();
+    this.localAcpPeer = void 0;
     await this.codex.close();
-    await this.cursor.close();
+    await this.acp.close();
     this.logger.info("host runtime stopped");
   }
   diagnostics() {
@@ -26320,7 +26348,7 @@ var HostPluginRuntime = class {
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
       codex: this.codex.status(),
-      cursor: this.cursor.status()
+      acp: this.acp.status()
     };
   }
   createServerConnection(identity) {
@@ -26369,7 +26397,7 @@ var HostPluginRuntime = class {
     }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
-    if (this.cursor.isAvailable()) capabilities.push("cursor.acp.v1", "cursor.acp.transfer.v1");
+    if (this.acp.isAvailable()) capabilities.push("agent.acp.v1", "agent.acp.transfer.v1");
     return capabilities;
   }
   requireLocalCodexPeer() {
@@ -26388,20 +26416,20 @@ var HostPluginRuntime = class {
     this.localCodexPeer = peer;
     return peer;
   }
-  requireLocalCursorPeer() {
-    if (!this.cursor.isAvailable()) {
-      throw new RpcError("CURSOR_UNAVAILABLE", "Local Cursor ACP is disabled or unavailable on this Host.");
+  requireLocalAcpPeer() {
+    if (!this.acp.isAvailable()) {
+      throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
     }
-    if (this.localCursorPeer !== void 0) return this.localCursorPeer;
+    if (this.localAcpPeer !== void 0) return this.localAcpPeer;
     const identity = this.currentIdentity();
-    const peer = this.cursor.createPeer({
+    const peer = this.acp.createPeer({
       connectionId: `loopback:${identity.deviceId}`,
       peerDeviceId: identity.deviceId
-    }, (event, data) => this.localCursorPublish(event, data));
+    }, (event, data) => this.localAcpPublish(event, data));
     if (peer === void 0) {
-      throw new RpcError("CURSOR_UNAVAILABLE", "Local Cursor ACP is disabled or unavailable on this Host.");
+      throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
     }
-    this.localCursorPeer = peer;
+    this.localAcpPeer = peer;
     return peer;
   }
 };
@@ -26828,7 +26856,7 @@ function remoteStatusLines(target) {
   const status2 = runtime.hostStatus();
   const diagnostics = runtime.diagnostics();
   const codex = runtime.codexStatus();
-  const cursor2 = runtime.cursorStatus();
+  const cursor2 = runtime.acpStatus();
   const capabilities = new Set(diagnostics.capabilities);
   const connection = status2.online ? "online" : status2.reconnecting ? "reconnecting" : status2.accountRequired ? "authorization required" : "offline";
   return [
@@ -26840,7 +26868,7 @@ function remoteStatusLines(target) {
     `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : "disabled"}`,
-    `Cursor Remote: ${cursor2.enabled ? cursor2.state : "disabled"}`,
+    `Agent ACP: ${cursor2.enabled ? cursor2.state : "disabled"}`,
     "",
     "Commands: /remote login [github|zhihu] \xB7 /remote status \xB7 /remote logout"
   ];
@@ -27306,9 +27334,11 @@ function isPlainRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 export {
+  ACP_METHOD_ALLOWLIST,
+  AcpPeerBridge,
+  AcpRemoteGateway,
   ApiProxySwitch,
   CODEX_APP_ALLOWLIST,
-  CURSOR_APP_ALLOWLIST,
   ClientModeError,
   ClientModeRuntime,
   ClientSecureTransport,
@@ -27322,8 +27352,6 @@ export {
   ConnectionRejectedError,
   CursorAcpClient,
   CursorAcpError,
-  CursorPeerBridge,
-  CursorRemoteDomain,
   HARNESS_API_ALLOWLIST,
   HARNESS_REMOTE_ALLOWLIST,
   HOST_CAPABILITIES,

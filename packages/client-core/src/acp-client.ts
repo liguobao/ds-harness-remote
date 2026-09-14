@@ -1,35 +1,42 @@
 import type {
-  CursorAppFrameData,
-  CursorAppStreamClosedData,
-  CursorAppTransferCommitResult,
-  CursorAppTransferReadResult,
+  AgentAcpFrameData,
+  AgentAcpStreamClosedData,
+  AgentAcpTransferCommitResult,
+  AgentAcpTransferReadResult,
 } from '@dsh-remote/protocol'
 import {
-  CURSOR_APP_TRANSFER_CHUNK_BYTES,
-  MAX_CURSOR_APP_TRANSFER_BYTES,
+  AGENT_ACP_TRANSFER_CHUNK_BYTES,
+  MAX_AGENT_ACP_TRANSFER_BYTES,
 } from '@dsh-remote/protocol'
 import type { RemoteClientCore } from './index.js'
 import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
-export type CursorAgentBackend = 'cursor'
+export type AcpAgentBackend = 'cursor'
 
-export interface CursorRemoteSession {
+export interface AcpRemoteSession {
   sessionId: string
   cwd?: string
   mode?: 'agent' | 'plan' | 'ask'
 }
 
-export interface CursorStream {
+export interface AcpStream {
   streamId: string
   close(): Promise<void>
 }
 
-/** Shared Web/Android client for the independent Cursor ACP domain in Remote. */
-export class CursorRemoteClient {
+/** Shared Web/Android client for the generic Agent ACP domain in Remote. */
+export class AgentAcpClient {
   constructor(private readonly core: RemoteClientCore) {}
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
-    return this.core.rpc('cursor.app.call', { method, params }, signal)
+    return this.core.rpc('agent.acp.call', { method, params }, signal)
+  }
+
+  async initialize(
+    params: { protocolVersion?: number; clientInfo?: { name?: string; version?: string } } = {},
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return this.call('initialize', params, signal)
   }
 
   async respond(
@@ -38,21 +45,21 @@ export class CursorRemoteClient {
     result?: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    return this.core.rpc('cursor.app.respond', {
+    return this.core.rpc('agent.acp.respond', {
       requestHandle,
       decision,
       ...(result === undefined ? {} : { result }),
     }, signal)
   }
 
-  async createSession(cwd: string, mode?: 'agent' | 'plan' | 'ask', signal?: AbortSignal): Promise<CursorRemoteSession> {
+  async createSession(cwd: string, mode?: 'agent' | 'plan' | 'ask', signal?: AbortSignal): Promise<AcpRemoteSession> {
     const result = await this.call('session/new', {
       cwd,
       mcpServers: [],
       ...(mode === undefined ? {} : { mode }),
     }, signal)
     const sessionId = readString(result, 'sessionId')
-    if (sessionId === undefined) throw new RemoteGatewayError('INVALID_RESPONSE', 'Cursor session/new did not return sessionId.')
+    if (sessionId === undefined) throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session/new did not return sessionId.')
     return {
       sessionId,
       cwd,
@@ -77,21 +84,21 @@ export class CursorRemoteClient {
 
   async openStream(
     sessionId: string,
-    onFrame: (frame: CursorAppFrameData) => void,
-    onClosed?: (closed: CursorAppStreamClosedData) => void,
+    onFrame: (frame: AgentAcpFrameData) => void,
+    onClosed?: (closed: AgentAcpStreamClosedData) => void,
     signal?: AbortSignal,
-  ): Promise<CursorStream> {
+  ): Promise<AcpStream> {
     const streamId = createRemoteId()
     const unsubscribe = this.core.onEvent(event => {
-      if (event.event === 'cursor.app.frame' && isRecord(event.data) && event.data.streamId === streamId) {
-        onFrame(event.data as unknown as CursorAppFrameData)
+      if (event.event === 'agent.acp.frame' && isRecord(event.data) && event.data.streamId === streamId) {
+        onFrame(event.data as unknown as AgentAcpFrameData)
       }
-      if (event.event === 'cursor.app.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
-        onClosed?.(event.data as unknown as CursorAppStreamClosedData)
+      if (event.event === 'agent.acp.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
+        onClosed?.(event.data as unknown as AgentAcpStreamClosedData)
       }
     })
     try {
-      await this.core.rpc('cursor.app.stream.open', { streamId, sessionId }, signal)
+      await this.core.rpc('agent.acp.stream.open', { streamId, sessionId }, signal)
     } catch (error) {
       unsubscribe()
       throw error
@@ -100,40 +107,40 @@ export class CursorRemoteClient {
       streamId,
       close: async () => {
         unsubscribe()
-        await this.core.rpc('cursor.app.stream.close', { streamId }).catch(() => undefined)
+        await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
       },
     }
   }
 
   async transferCall(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const requestBytes = new TextEncoder().encode(JSON.stringify({ method, params }))
-    if (requestBytes.byteLength > MAX_CURSOR_APP_TRANSFER_BYTES) {
-      throw new RemoteGatewayError('REQUEST_TOO_LARGE', 'The Cursor transfer request exceeds the bounded limit.')
+    if (requestBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RemoteGatewayError('REQUEST_TOO_LARGE', 'The ACP transfer request exceeds the bounded limit.')
     }
     const transferId = createRemoteId()
-    const totalChunks = Math.ceil(requestBytes.byteLength / CURSOR_APP_TRANSFER_CHUNK_BYTES)
-    await this.core.rpc('cursor.app.transfer.open', {
+    const totalChunks = Math.ceil(requestBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES)
+    await this.core.rpc('agent.acp.transfer.open', {
       transferId,
       totalBytes: requestBytes.byteLength,
       totalChunks,
     }, signal)
     for (let index = 0; index < totalChunks; index += 1) {
-      const start = index * CURSOR_APP_TRANSFER_CHUNK_BYTES
-      const end = Math.min(start + CURSOR_APP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
-      await this.core.rpc('cursor.app.transfer.chunk', {
+      const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES
+      const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
+      await this.core.rpc('agent.acp.transfer.chunk', {
         transferId,
         index,
         data: bytesToCanonicalBase64(requestBytes.subarray(start, end)),
       }, signal)
     }
-    const commit = await this.core.rpc('cursor.app.transfer.commit', { transferId }, signal) as CursorAppTransferCommitResult
+    const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal) as AgentAcpTransferCommitResult
     if (commit.kind === 'inline') return commit.response
     const chunks: Uint8Array[] = []
     for (let index = 0; index < commit.totalChunks; index += 1) {
-      const part = await this.core.rpc('cursor.app.transfer.read', { transferId, index }, signal) as CursorAppTransferReadResult
+      const part = await this.core.rpc('agent.acp.transfer.read', { transferId, index }, signal) as AgentAcpTransferReadResult
       chunks.push(canonicalBase64ToBytes(part.data))
     }
-    await this.core.rpc('cursor.app.transfer.close', { transferId }).catch(() => undefined)
+    await this.core.rpc('agent.acp.transfer.close', { transferId }).catch(() => undefined)
     const bytes = concat(chunks, commit.totalBytes)
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   }
