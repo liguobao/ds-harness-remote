@@ -747,7 +747,9 @@ Host handshake 的 capability 例子：
   "harness.remote.transfer.v1",
   "fileviewer.read.v1",
   "codex.appserver.v1",
-  "codex.appserver.transfer.v1"
+  "codex.appserver.transfer.v1",
+  "cursor.acp.v1",
+  "cursor.acp.transfer.v1"
 ]
 ```
 
@@ -971,6 +973,22 @@ Host 必须调用 `fileViewerHost` 服务，让被选中的 File Viewer provider
 禁止 `readHead`（Client 以 offset 0 的 `readRange` 实现）、`openExternal`、写入、上传、删除、
 重命名、执行和任意 endpoint。Host 未安装 File Viewer、请求超限、provider 拒绝或返回异常时
 必须 fail closed。错误不得回显 Host 内部路径或原始 filesystem 异常。
+
+### Cursor ACP domain
+
+Cursor 是现有 Remote Plugin 内部的实验性可选领域，不是第二个 Plugin。Host 配置
+`cursor.enabled: true` 后，Plugin 才可使用 `cursor.binary`（默认 `agent`）启动
+`agent acp`（stdio JSON-RPC 2.0）。初始化与 `authenticate(methodId: cursor_login)`
+成功后，Host 才宣告 `cursor.acp.v1` 与 `cursor.acp.transfer.v1`。
+
+业务 RPC 固定为 `cursor.app.call|respond|stream.*|transfer.*`。`cursor.app.call`
+不是通用代理；编译期 allowlist 仅含 `session/new`、`session/load`、`session/prompt`、
+`session/cancel`、`dsh/directoryList`。`session/new` 强制 `mcpServers: []`，cwd 必须经
+`realpath` 确认为 Host 上已存在的绝对目录。Prompt 仅允许文本块。权限类上游请求经
+`cursor.app.respond` 回传（`allow-once` / `allow-always` / `reject-once` / `cancel`）。
+
+Desktop Virtual Harness 与 Android 投影可后续复用 Codex 同款“展示不迁移”模式；
+实现细节见 [Cursor Remote](cursor-remote.md)。
 
 ### Codex App Server domain
 

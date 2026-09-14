@@ -266,6 +266,7 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
   const status = runtime.hostStatus()
   const diagnostics = runtime.diagnostics()
   const codex = runtime.codexStatus()
+  const cursor = runtime.cursorStatus()
   const capabilities = new Set(diagnostics.capabilities)
   const connection = status.online
     ? 'online'
@@ -289,6 +290,7 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
         : 'unavailable'}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : 'disabled'}`,
+    `Cursor Remote: ${cursor.enabled ? cursor.state : 'disabled'}`,
     '',
     'Commands: /remote login [github|zhihu] · /remote status · /remote logout',
   ]

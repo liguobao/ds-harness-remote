@@ -30,6 +30,8 @@ import { loadNodeRtcFactory } from './werift-rtc.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { CodexRemoteDomain } from './codex/domain.js'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
+import { CursorRemoteDomain } from './cursor/domain.js'
+import type { CursorPeerBridge, PublishCursorFrame } from './cursor/peer-bridge.js'
 import { RpcError } from './safe-error.js'
 
 export interface HostConnectedClient {
@@ -60,8 +62,11 @@ export class HostPluginRuntime {
   private harnessVersion?: string
   private closed = false
   private readonly codex: CodexRemoteDomain
+  private readonly cursor: CursorRemoteDomain
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
+  private localCursorPeer?: CursorPeerBridge
+  private localCursorPublish: PublishCursorFrame = async () => undefined
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -72,6 +77,7 @@ export class HostPluginRuntime {
     private readonly fileViewerHost?: () => FileViewerHostServiceLike | undefined,
   ) {
     this.codex = new CodexRemoteDomain(config.codex, logger)
+    this.cursor = new CursorRemoteDomain(config.cursor, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === undefined
         ? undefined
@@ -99,6 +105,10 @@ export class HostPluginRuntime {
         context,
         (event, data) => send(createEvent(event, data)),
       )
+      const cursor = this.cursor.createPeer(
+        context,
+        (event, data) => send(createEvent(event, data)),
+      )
       return new RpcRouter(
         harnessApi,
         undefined,
@@ -107,6 +117,7 @@ export class HostPluginRuntime {
         harnessRemote,
         () => this.hostCapabilities(),
         codex,
+        cursor,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -123,6 +134,7 @@ export class HostPluginRuntime {
       server: this.config.serverUrl ?? 'not configured',
     })
     await this.codex.start()
+    await this.cursor.start()
     if (this.serverApi !== undefined) {
       this.harnessVersion = await this.readHarnessVersion()
       this.serverApi.setHarnessVersion(this.harnessVersion)
@@ -297,6 +309,31 @@ export class HostPluginRuntime {
     return { closed: false, streamId }
   }
 
+  cursorStatus(): ReturnType<CursorRemoteDomain['status']> {
+    return this.cursor.status()
+  }
+
+  cursorCall(input: unknown): Promise<unknown> {
+    return this.requireLocalCursorPeer().call(input)
+  }
+
+  cursorRespond(input: unknown): Promise<{ resolved: true }> {
+    return this.requireLocalCursorPeer().respond(input)
+  }
+
+  cursorOpenStream(input: unknown, publish: PublishCursorFrame): Promise<unknown> {
+    this.localCursorPublish = publish
+    return this.requireLocalCursorPeer().openStream(input)
+  }
+
+  async cursorCloseStream(input: unknown): Promise<unknown> {
+    const peer = this.localCursorPeer
+    if (peer !== undefined) return peer.closeStream(input)
+    const streamId = isPlainRecord(input) && typeof input.streamId === 'string' ? input.streamId : undefined
+    if (streamId === undefined) throw new RpcError('INVALID_MESSAGE', 'A Cursor stream is required.')
+    return { closed: false, streamId }
+  }
+
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
@@ -304,7 +341,10 @@ export class HostPluginRuntime {
     await this.connections.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined
+    await this.localCursorPeer?.closeAll()
+    this.localCursorPeer = undefined
     await this.codex.close()
+    await this.cursor.close()
     this.logger.info('host runtime stopped')
   }
 
@@ -323,6 +363,7 @@ export class HostPluginRuntime {
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
       codex: this.codex.status(),
+      cursor: this.cursor.status(),
     }
   }
 
@@ -379,6 +420,7 @@ export class HostPluginRuntime {
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
+    if (this.cursor.isAvailable()) capabilities.push('cursor.acp.v1', 'cursor.acp.transfer.v1')
     return capabilities
   }
 
@@ -396,6 +438,23 @@ export class HostPluginRuntime {
       throw new RpcError('CODEX_UNAVAILABLE', 'Local CodeX is disabled or unavailable on this Host.')
     }
     this.localCodexPeer = peer
+    return peer
+  }
+
+  private requireLocalCursorPeer(): CursorPeerBridge {
+    if (!this.cursor.isAvailable()) {
+      throw new RpcError('CURSOR_UNAVAILABLE', 'Local Cursor ACP is disabled or unavailable on this Host.')
+    }
+    if (this.localCursorPeer !== undefined) return this.localCursorPeer
+    const identity = this.currentIdentity()
+    const peer = this.cursor.createPeer({
+      connectionId: `loopback:${identity.deviceId}`,
+      peerDeviceId: identity.deviceId,
+    }, (event, data) => this.localCursorPublish(event, data))
+    if (peer === undefined) {
+      throw new RpcError('CURSOR_UNAVAILABLE', 'Local Cursor ACP is disabled or unavailable on this Host.')
+    }
+    this.localCursorPeer = peer
     return peer
   }
 }

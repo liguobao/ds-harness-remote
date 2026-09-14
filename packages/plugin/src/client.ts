@@ -213,6 +213,10 @@ interface PluginSettings {
     enabled?: boolean
     binary?: string
   }
+  cursor?: {
+    enabled?: boolean
+    binary?: string
+  }
 }
 
 interface PluginSettingsView {
@@ -268,6 +272,9 @@ const en = {
   codexRemote: 'Codex Remote',
   codexRemoteHint: 'Expose Codex projects through this Host. Restart DSH after changing this setting.',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
+  cursorRemote: 'Cursor Remote (experimental)',
+  cursorRemoteHint: 'Expose Cursor ACP (`agent acp`) through this Host. Requires local `agent login`. Restart DSH after changing this setting.',
+  cursorSaved: 'Cursor Remote setting saved. Restart DSH to apply it.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -481,6 +488,9 @@ const zh: Record<keyof typeof en, string> = {
   codexRemote: 'Codex Remote',
   codexRemoteHint: '通过这台 Host 提供 Codex 项目；修改后需重启 DSH 生效。',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
+  cursorRemote: 'Cursor Remote（实验性）',
+  cursorRemoteHint: '通过这台 Host 暴露 Cursor ACP（`agent acp`）。需本机完成 `agent login`。修改后需重启 DSH 生效。',
+  cursorSaved: 'Cursor Remote 设置已保存，重启 DSH 后生效。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -985,6 +995,7 @@ window.__ModuleLoader__.load({
       const [open, setOpen] = React.useState(false)
       const [serverUrl, setServerUrl] = React.useState('')
       const [codexEnabled, setCodexEnabled] = React.useState(true)
+      const [cursorEnabled, setCursorEnabled] = React.useState(false)
       const role = 'host' as const
       const [registrationCode, setRegistrationCode] = React.useState('')
       const [associations, setAssociations] = React.useState<Partial<Record<'host' | 'client', PluginAssociation>>>({})
@@ -992,6 +1003,7 @@ window.__ModuleLoader__.load({
       const [writable, setWritable] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
       const [codexBusy, setCodexBusy] = React.useState(false)
+      const [cursorBusy, setCursorBusy] = React.useState(false)
       const [reconnectBusy, setReconnectBusy] = React.useState(false)
       const [hostStatus, setHostStatus] = React.useState<RemoteStatus['host'] | undefined>(undefined)
       const [notice, setNotice] = React.useState<LocalizedMessage | undefined>(undefined)
@@ -1006,6 +1018,7 @@ window.__ModuleLoader__.load({
         setSettingsView(view)
         setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
         setCodexEnabled(view.config.codex?.enabled ?? true)
+        setCursorEnabled(view.config.cursor?.enabled ?? false)
         setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
         setWritable(view.writable)
         setLoaded(true)
@@ -1119,6 +1132,24 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const setCursorRemote = async (enabled: boolean): Promise<void> => {
+        const previous = cursorEnabled
+        setCursorEnabled(enabled)
+        setCursorBusy(true)
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.cursor.set', { enabled })
+          applyView(view)
+          setNotice({ key: 'cursorSaved' })
+        } catch (reason) {
+          setCursorEnabled(previous)
+          setError(messageOf(reason))
+        } finally {
+          setCursorBusy(false)
+        }
+      }
+
       const discard = (): void => {
         if (settingsView !== undefined) applyView(settingsView)
         setRegistrationCode('')
@@ -1135,6 +1166,17 @@ window.__ModuleLoader__.load({
           'aria-label': t('codexRemote'),
           checked: codexEnabled,
           onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
+        }))
+
+      const cursorSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+        React.createElement('div', null,
+          React.createElement('strong', null, t('cursorRemote')),
+          React.createElement('p', null, t('cursorRemoteHint'))),
+        React.createElement('input', {
+          type: 'checkbox', role: 'switch', disabled: busy || cursorBusy || !writable,
+          'aria-label': t('cursorRemote'),
+          checked: cursorEnabled,
+          onChange: (event: Event) => void setCursorRemote((event.target as HTMLInputElement).checked),
         }))
 
       return React.createElement('li', { className: `dshRemotePluginCard${open ? ' isOpen' : ''}` },
@@ -1181,6 +1223,7 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         codexSetting,
+        cursorSetting,
         React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
           React.createElement('div', null,
             React.createElement('strong', null, t('allowControlCurrentDevice')),
@@ -1243,6 +1286,7 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         codexSetting,
+        cursorSetting,
         React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
         !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },

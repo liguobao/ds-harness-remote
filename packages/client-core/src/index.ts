@@ -213,3 +213,4 @@ export type { EventPayload, RemoteEventName, RemoteTransport }
 export * from './remote-gateway.js'
 export * from './harness-alpha-client.js'
 export * from './codex-client.js'
+export * from './cursor-client.js'

@@ -11,6 +11,7 @@ import type { HarnessApiBridge } from './harness-api-bridge.js'
 import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { SafeLogger } from './logging.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
+import type { CursorPeerBridge } from './cursor/peer-bridge.js'
 import { RpcError, safeErrorCode } from './safe-error.js'
 
 export { RpcError } from './safe-error.js'
@@ -46,6 +47,15 @@ const apiMethods = new Set([
   'codex.app.transfer.commit',
   'codex.app.transfer.read',
   'codex.app.transfer.close',
+  'cursor.app.call',
+  'cursor.app.respond',
+  'cursor.app.stream.open',
+  'cursor.app.stream.close',
+  'cursor.app.transfer.open',
+  'cursor.app.transfer.chunk',
+  'cursor.app.transfer.commit',
+  'cursor.app.transfer.read',
+  'cursor.app.transfer.close',
 ])
 
 export const HOST_CAPABILITIES = [
@@ -56,6 +66,8 @@ export const HOST_CAPABILITIES = [
   'fileviewer.read.v1',
   'codex.appserver.v1',
   'codex.appserver.transfer.v1',
+  'cursor.acp.v1',
+  'cursor.acp.transfer.v1',
 ] as const
 
 export class RpcRouter {
@@ -69,6 +81,7 @@ export class RpcRouter {
     private readonly harnessRemote?: HarnessRemoteBridge,
     private readonly capabilities: () => readonly string[] = () => HOST_CAPABILITIES,
     private readonly codex?: CodexPeerBridge,
+    private readonly cursor?: CursorPeerBridge,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -76,6 +89,7 @@ export class RpcRouter {
       this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
+      this.cursor?.closeAll(),
     ])
   }
 
@@ -153,6 +167,15 @@ export class RpcRouter {
       case 'codex.app.transfer.commit': return this.requireCodex().commitTransfer(params)
       case 'codex.app.transfer.read': return this.requireCodex().readTransfer(params)
       case 'codex.app.transfer.close': return this.requireCodex().closeTransfer(params)
+      case 'cursor.app.call': return this.requireCursor().call(params)
+      case 'cursor.app.respond': return this.requireCursor().respond(params)
+      case 'cursor.app.stream.open': return this.requireCursor().openStream(params)
+      case 'cursor.app.stream.close': return this.requireCursor().closeStream(params)
+      case 'cursor.app.transfer.open': return this.requireCursor().openTransfer(params)
+      case 'cursor.app.transfer.chunk': return this.requireCursor().appendTransfer(params)
+      case 'cursor.app.transfer.commit': return this.requireCursor().commitTransfer(params)
+      case 'cursor.app.transfer.read': return this.requireCursor().readTransfer(params)
+      case 'cursor.app.transfer.close': return this.requireCursor().closeTransfer(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
   }
@@ -176,6 +199,13 @@ export class RpcRouter {
       throw new RpcError('FEATURE_NOT_SUPPORTED', 'Codex Remote is disabled or unavailable on this Host.')
     }
     return this.codex
+  }
+
+  private requireCursor(): CursorPeerBridge {
+    if (this.cursor === undefined) {
+      throw new RpcError('FEATURE_NOT_SUPPORTED', 'Cursor Remote is disabled or unavailable on this Host.')
+    }
+    return this.cursor
   }
 }
 

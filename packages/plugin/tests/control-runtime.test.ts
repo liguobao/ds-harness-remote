@@ -99,6 +99,12 @@ describe('PluginControlRuntime settings setup', () => {
       value: { config: { codex: { enabled: false, binary: '/opt/codex' } } },
     })
     expect(settings.get()).toMatchObject({ codex: { enabled: false, binary: '/opt/codex' } })
+
+    await expect(handler('settings.cursor.set', { enabled: true }, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { config: { cursor: { enabled: true, binary: 'agent' } } },
+    })
+    expect(settings.get()).toMatchObject({ cursor: { enabled: true, binary: 'agent' } })
   })
 
   it('exposes Host activity and starts a manual reconnect through loopback control', async () => {

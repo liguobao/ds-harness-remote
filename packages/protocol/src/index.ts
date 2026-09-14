@@ -9,6 +9,8 @@ export const MAX_SECURE_MESSAGE_BYTES = 4 * 1024 * 1024
 export const HARNESS_API_TRANSFER_CHUNK_BYTES = 512 * 1024
 /** Decoded bytes carried by one authenticated Codex domain transfer chunk. */
 export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
+/** Decoded bytes carried by one authenticated Cursor ACP domain transfer chunk. */
+export const CURSOR_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
 /**
  * Bounded transfer size for Harness image prompts. The upstream default admits
  * up to 200 MiB of source images; their base64 JSON envelope needs roughly
@@ -16,6 +18,7 @@ export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
  */
 export const MAX_HARNESS_API_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_CODEX_APP_TRANSFER_BYTES = 288 * 1024 * 1024
+export const MAX_CURSOR_APP_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_DEVICE_NAME_LENGTH = 128
 export const MAX_DEVICE_PLATFORM_LENGTH = 64
 export const MAX_DEVICE_VERSION_LENGTH = 64
@@ -115,6 +118,15 @@ export const rpcMethods = [
   'codex.app.transfer.commit',
   'codex.app.transfer.read',
   'codex.app.transfer.close',
+  'cursor.app.call',
+  'cursor.app.respond',
+  'cursor.app.stream.open',
+  'cursor.app.stream.close',
+  'cursor.app.transfer.open',
+  'cursor.app.transfer.chunk',
+  'cursor.app.transfer.commit',
+  'cursor.app.transfer.read',
+  'cursor.app.transfer.close',
 ] as const
 
 export const remoteEvents = [
@@ -124,6 +136,8 @@ export const remoteEvents = [
   'harness.remote.stream.closed',
   'codex.app.frame',
   'codex.app.stream.closed',
+  'cursor.app.frame',
+  'cursor.app.stream.closed',
 ] as const
 
 export const errorCodes = [
@@ -645,6 +659,67 @@ export type CodexAppTransferCommitResult =
   | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
 
 export interface CodexAppTransferReadResult {
+  transferId: string
+  index: number
+  data: string
+}
+
+/** Fixed allowlisted Cursor ACP call carried inside Remote. */
+export interface CursorAppCallParams {
+  method: string
+  params: unknown
+}
+
+export interface CursorAppRespondParams {
+  requestHandle: string
+  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel'
+  /** Optional structured answer for Cursor extension methods (ask_question / create_plan). */
+  result?: unknown
+}
+
+export interface CursorAppStreamOpenParams {
+  streamId: string
+  sessionId: string
+}
+
+export interface CursorAppStreamCloseParams {
+  streamId: string
+}
+
+export interface CursorAppFrameData {
+  streamId: string
+  frame: {
+    method: string
+    params: unknown
+  }
+}
+
+export interface CursorAppStreamClosedData {
+  streamId: string
+  reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected'
+}
+
+export interface CursorAppTransferOpenParams {
+  transferId: string
+  totalBytes: number
+  totalChunks: number
+}
+
+export interface CursorAppTransferChunkParams {
+  transferId: string
+  index: number
+  data: string
+}
+
+export interface CursorAppTransferCommitParams { transferId: string }
+export interface CursorAppTransferReadParams { transferId: string; index: number }
+export interface CursorAppTransferCloseParams { transferId: string }
+
+export type CursorAppTransferCommitResult =
+  | { kind: 'inline'; response: unknown }
+  | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
+
+export interface CursorAppTransferReadResult {
   transferId: string
   index: number
   data: string

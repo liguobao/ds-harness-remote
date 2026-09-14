@@ -1745,6 +1745,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "Expose Codex projects through this Host. Restart DSH after changing this setting.",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
+    cursorRemote: "Cursor Remote (experimental)",
+    cursorRemoteHint: "Expose Cursor ACP (`agent acp`) through this Host. Requires local `agent login`. Restart DSH after changing this setting.",
+    cursorSaved: "Cursor Remote setting saved. Restart DSH to apply it.",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -1956,6 +1959,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u63D0\u4F9B Codex \u9879\u76EE\uFF1B\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
+    cursorRemote: "Cursor Remote\uFF08\u5B9E\u9A8C\u6027\uFF09",
+    cursorRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u66B4\u9732 Cursor ACP\uFF08`agent acp`\uFF09\u3002\u9700\u672C\u673A\u5B8C\u6210 `agent login`\u3002\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
+    cursorSaved: "Cursor Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -2330,8 +2336,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       }
       function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+        let { t } = props, [open, setOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [cursorEnabled, setCursorEnabled] = React.useState(!1), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [cursorBusy, setCursorBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setCursorEnabled(view.config.cursor?.enabled ?? !1), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
             props.control("settings.get"),
@@ -2409,6 +2415,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
           } finally {
             setCodexBusy(!1);
           }
+        }, setCursorRemote = async (enabled) => {
+          let previous = cursorEnabled;
+          setCursorEnabled(enabled), setCursorBusy(!0), setError(void 0), setNotice(void 0);
+          try {
+            let view = await props.control("settings.cursor.set", { enabled });
+            applyView(view), setNotice({ key: "cursorSaved" });
+          } catch (reason) {
+            setCursorEnabled(previous), setError(messageOf(reason));
+          } finally {
+            setCursorBusy(!1);
+          }
         }, discard = () => {
           settingsView !== void 0 && applyView(settingsView), setRegistrationCode(""), setNotice(void 0), setError(void 0);
         }, codexSetting = React.createElement(
@@ -2427,6 +2444,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("codexRemote"),
             checked: codexEnabled,
             onChange: (event) => void setCodexRemote(event.target.checked)
+          })
+        ), cursorSetting = React.createElement(
+          "div",
+          { className: "dshRemoteAuthorizationSetting" },
+          React.createElement(
+            "div",
+            null,
+            React.createElement("strong", null, t("cursorRemote")),
+            React.createElement("p", null, t("cursorRemoteHint"))
+          ),
+          React.createElement("input", {
+            type: "checkbox",
+            role: "switch",
+            disabled: busy || cursorBusy || !writable,
+            "aria-label": t("cursorRemote"),
+            checked: cursorEnabled,
+            onChange: (event) => void setCursorRemote(event.target.checked)
           })
         );
         return React.createElement(
@@ -2491,6 +2525,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               codexSetting,
+              cursorSetting,
               React.createElement(
                 "div",
                 { className: "dshRemoteAuthorizationSetting" },
@@ -2573,6 +2608,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               codexSetting,
+              cursorSetting,
               React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
               writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
               React.createElement(
