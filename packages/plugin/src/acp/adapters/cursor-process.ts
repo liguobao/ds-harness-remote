@@ -4,6 +4,8 @@ import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
+/** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
+const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
 const MAX_ACP_LINE_BYTES = 288 * 1024 * 1024
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
@@ -86,9 +88,11 @@ export class CursorAcpClient implements CursorAcpLike {
 
   isReady(): boolean { return this.ready }
 
-  async call(method: string, params: unknown, timeoutMs = ACP_REQUEST_TIMEOUT_MS): Promise<unknown> {
+  async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not ready.')
-    return this.request(method, params, timeoutMs)
+    const budget = timeoutMs
+      ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
+    return this.request(method, params, budget)
   }
 
   async respond(id: string | number, result: unknown): Promise<void> {
@@ -251,7 +255,9 @@ export class CursorAcpClient implements CursorAcpLike {
     }
     if (typeof value.method !== 'string' || value.method.length === 0 || value.method.length > 160) return
     const params = value.params ?? {}
-    const inbound: CursorAcpInbound = typeof value.id === 'string' || typeof value.id === 'number'
+    // session/update is always a live notification; never treat it as an approval request.
+    const inbound: CursorAcpInbound = value.method !== 'session/update'
+      && (typeof value.id === 'string' || typeof value.id === 'number')
       ? { kind: 'request', id: value.id, method: value.method, params }
       : { kind: 'notification', method: value.method, params }
     for (const handler of this.inboundHandlers) handler(inbound)

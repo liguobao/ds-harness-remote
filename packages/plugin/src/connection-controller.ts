@@ -180,12 +180,16 @@ export class ConnectionController {
 
   private async sendTo(connectionId: string, channel: AuthenticatedPeerChannel, message: RemoteMessage): Promise<void> {
     const connection = this.active.get(connectionId)
-    if (connection === undefined || connection.channel !== channel) return
+    if (connection === undefined || connection.channel !== channel) {
+      throw new Error('peer channel is not active')
+    }
     await this.sendConnection(connection, message)
   }
 
   private async sendConnection(connection: ActiveConnection, message: RemoteMessage): Promise<void> {
-    if (!this.isActive(connection)) return
+    if (!this.isActive(connection)) {
+      throw new Error('peer channel is not active')
+    }
     try {
       await connection.channel.send(message)
     } catch (error) {
@@ -195,6 +199,7 @@ export class ConnectionController {
         reason: diagnosticReason(error),
       })
       await this.disconnect(connection)
+      throw error instanceof Error ? error : new Error('peer send failed', { cause: error })
     }
   }
 

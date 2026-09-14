@@ -25,6 +25,18 @@ import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
 const ACP_DIRECTORY_ENTRY_LIMIT = 500
+const MAX_BUFFERED_ACP_FRAMES = 200
+const ACP_FRAME_BUFFER_TTL_MS = 5 * 60_000
+const MAX_TURN_CATCH_UP_FRAMES = 120
+const CATCH_UP_SESSION_UPDATES = new Set([
+  'agent_thought_chunk',
+  'agent_thought',
+  'agent_message_chunk',
+  'agent_message',
+  'user_message_chunk',
+  'tool_call',
+  'tool_call_update',
+])
 
 interface PendingApproval {
   upstreamId: string | number
@@ -32,6 +44,12 @@ interface PendingApproval {
   sessionId: string
   method: string
   expiresAt: number
+}
+
+interface BufferedAcpFrame {
+  method: string
+  params: unknown
+  at: number
 }
 
 interface AcpDirectoryEntry {
@@ -69,6 +87,12 @@ export class AcpRemoteGateway {
   private closed = false
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
   private unavailableCode?: string
+  /** Keep ACP → Client fanout ordered; concurrent publish races Noise sends. */
+  private inboundChain: Promise<void> = Promise.resolve()
+  /** Catch-up buffer for turns that finish while the Client is reconnecting. */
+  private readonly recentFrames = new Map<string, BufferedAcpFrame[]>()
+  /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
+  private readonly turnCatchUp = new Map<string, Array<{ method: string; params: unknown }>>()
 
   constructor(
     readonly config: ResolvedCursorConfig,
@@ -158,7 +182,68 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId)
     }
 
+    // session/prompt blocks until the upstream turn ends. Returning that RPC
+    // only after completion prevents some Client transports from delivering
+    // interleaved agent.acp.frame events (Android stays on "正在回复" with no
+    // thought/text). Accept immediately and finish via stream updates.
+    if (call.method === 'session/prompt' && sessionId !== undefined) {
+      const ownerPeer = this.peers.get(connectionId)
+      if (ownerPeer !== undefined && !ownerPeer.hasStreamFor(sessionId)) {
+        this.logger?.warn('Cursor prompt started without an open ACP stream', {
+          sessionId: shortSessionId(sessionId),
+        })
+      }
+      this.turnCatchUp.set(sessionId, [])
+      void this.runPromptInBackground(sessionId, call.params)
+      return { accepted: true, stopReason: 'in_progress' }
+    }
+
     return sanitizeSessionResult(await this.callUpstream(call.method, call.params))
+  }
+
+  private async runPromptInBackground(sessionId: string, params: unknown): Promise<void> {
+    try {
+      const result = await this.callUpstream('session/prompt', params)
+      // Cursor emits final session/update lines before the JSON-RPC result.
+      // Those notifications are queued on inboundChain; drain it before we
+      // snapshot catch-up or the Client only sees an empty prompt_completed.
+      await this.inboundChain
+      const stopReason = isRecord(result) && typeof result.stopReason === 'string'
+        ? result.stopReason
+        : 'end_turn'
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
+      this.logger.info('Cursor prompt finished', {
+        sessionId: shortSessionId(sessionId),
+        stopReason,
+        catchUp: catchUp.length,
+      })
+      await this.publishToSession(sessionId, {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'prompt_completed',
+            stopReason,
+            ...(catchUp.length > 0 ? { catchUp } : {}),
+          },
+        },
+      })
+    } catch (error) {
+      this.logger?.warn('Cursor session/prompt failed', { code: errorCode(error) })
+      await this.inboundChain.catch(() => undefined)
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
+      await this.publishToSession(sessionId, {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'prompt_failed',
+            code: errorCode(error),
+            ...(catchUp.length > 0 ? { catchUp } : {}),
+          },
+        },
+      }).catch(() => undefined)
+    }
   }
 
   async respond(connectionId: string, input: unknown): Promise<{ resolved: true }> {
@@ -197,9 +282,39 @@ export class AcpRemoteGateway {
 
   /** Used by peer stream open to prove this connection may observe the session. */
   assertStreamable(connectionId: string, sessionId: string): void {
+    this.claimSession(connectionId, sessionId)
+  }
+
+  /**
+   * After a Client reconnect, session ownership may have been cleared with the
+   * old peer. Reclaim the in-memory ACP session for the new connection so
+   * stream open / prompt can resume and buffered frames can replay.
+   */
+  private claimSession(connectionId: string, sessionId: string): void {
     const owner = this.sessionOwners.get(sessionId)
+    if (owner === undefined) {
+      this.sessionOwners.set(sessionId, connectionId)
+      return
+    }
     if (owner !== connectionId) {
-      throw new RpcError('CURSOR_SESSION_NOT_FOUND', 'The Cursor session is not available to this connection.')
+      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this Cursor session.')
+    }
+  }
+
+  /** Replay frames buffered while no healthy peer could receive them. */
+  async replayBufferedFrames(connectionId: string, sessionId: string): Promise<void> {
+    const peer = this.peers.get(connectionId)
+    if (peer === undefined) return
+    this.pruneFrameBuffer(sessionId)
+    const buffered = this.recentFrames.get(sessionId) ?? []
+    if (buffered.length === 0) return
+    this.recentFrames.delete(sessionId)
+    this.logger.info('Replaying buffered ACP frames', {
+      sessionId: shortSessionId(sessionId),
+      count: buffered.length,
+    })
+    for (const frame of buffered) {
+      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params })
     }
   }
 
@@ -211,6 +326,8 @@ export class AcpRemoteGateway {
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
     this.sessionOwners.clear()
+    this.recentFrames.clear()
+    this.turnCatchUp.clear()
     this.approvals.clear()
     await this.disposeAcp(this.acp)
     this.acp = undefined
@@ -235,11 +352,19 @@ export class AcpRemoteGateway {
   private async launchAcpCandidate(binary: string): Promise<void> {
     const acp = this.createAcp(binary, this.logger)
     await acp.start()
-    this.unsubscribeInbound?.()
-    this.unsubscribeUnavailable?.()
-    this.unsubscribeInbound = acp.onInbound(message => { void this.handleInbound(message) })
-    this.unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(code) })
+    // Dispose the previous process first. disposeAcp() always clears the current
+    // inbound/unavailable unsubscribers; registering handlers before that would
+    // immediately drop them on first launch (this.acp is undefined) and leave
+    // session/update notifications undelivered while RPC still succeeds.
     await this.disposeAcp(this.acp)
+    this.unsubscribeInbound = acp.onInbound(message => {
+      this.inboundChain = this.inboundChain
+        .then(() => this.handleInbound(message))
+        .catch(error => {
+          this.logger.warn('ACP inbound fanout failed', { code: errorCode(error) })
+        })
+    })
+    this.unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(code) })
     this.acp = acp
     this.available = true
     this.state = 'ready'
@@ -248,7 +373,8 @@ export class AcpRemoteGateway {
   }
 
   private async handleInbound(message: CursorAcpInbound): Promise<void> {
-    if (message.kind === 'notification') {
+    // session/update is a stream notification even if a buggy agent attaches an id.
+    if (message.kind === 'notification' || message.method === 'session/update') {
       const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params)
       if (sessionId === undefined) return
       await this.publishToSession(sessionId, { method: message.method, params: message.params })
@@ -286,7 +412,63 @@ export class AcpRemoteGateway {
   }
 
   private async publishToSession(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
-    await Promise.all([...this.peers.values()].map(peer => peer.publishInbound(sessionId, frame)))
+    this.recordTurnCatchUp(sessionId, frame)
+    const ownerId = this.sessionOwners.get(sessionId)
+    const entries = [...this.peers.entries()]
+    if (entries.length === 0) {
+      this.bufferFrame(sessionId, frame)
+      return
+    }
+    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
+      try {
+        await peer.publishInbound(sessionId, frame)
+        return { connectionId, ok: true as const }
+      } catch {
+        return { connectionId, ok: false as const }
+      }
+    }))
+    const ownerDelivered = ownerId !== undefined
+      && deliveries.some(item => item.connectionId === ownerId && item.ok)
+    // Loopback peers resolve successfully while swallowing events. Only treat
+    // the session owner's delivery as proof the Remote Client received the frame.
+    if (ownerId !== undefined ? !ownerDelivered : deliveries.every(item => !item.ok)) {
+      this.bufferFrame(sessionId, frame)
+    }
+  }
+
+  private recordTurnCatchUp(sessionId: string, frame: { method: string; params: unknown }): void {
+    const list = this.turnCatchUp.get(sessionId)
+    if (list === undefined || frame.method !== 'session/update') return
+    const params = isRecord(frame.params) ? frame.params : undefined
+    const update = params !== undefined && isRecord(params.update) ? params.update : params
+    const kind = update !== undefined && typeof update.sessionUpdate === 'string'
+      ? update.sessionUpdate
+      : undefined
+    if (kind === undefined || !CATCH_UP_SESSION_UPDATES.has(kind)) return
+    list.push({ method: frame.method, params: frame.params })
+    while (list.length > MAX_TURN_CATCH_UP_FRAMES) list.shift()
+  }
+
+  private bufferFrame(sessionId: string, frame: { method: string; params: unknown }): void {
+    this.pruneFrameBuffer(sessionId)
+    const list = this.recentFrames.get(sessionId) ?? []
+    list.push({ method: frame.method, params: frame.params, at: Date.now() })
+    while (list.length > MAX_BUFFERED_ACP_FRAMES) list.shift()
+    this.recentFrames.set(sessionId, list)
+    this.logger.warn('Buffered ACP frame for later replay', {
+      sessionId: shortSessionId(sessionId),
+      method: frame.method,
+      buffered: list.length,
+    })
+  }
+
+  private pruneFrameBuffer(sessionId: string): void {
+    const list = this.recentFrames.get(sessionId)
+    if (list === undefined) return
+    const validAfter = Date.now() - ACP_FRAME_BUFFER_TTL_MS
+    const next = list.filter(frame => frame.at >= validAfter)
+    if (next.length === 0) this.recentFrames.delete(sessionId)
+    else this.recentFrames.set(sessionId, next)
   }
 
   private async handleUnavailable(code: string): Promise<void> {
@@ -365,7 +547,10 @@ export class AcpRemoteGateway {
     if (method === 'session/load') return
     const owner = this.sessionOwners.get(sessionId)
     if (owner === undefined) {
-      throw new RpcError('CURSOR_SESSION_NOT_FOUND', 'The Cursor session is not available to this connection.')
+      // Allow reclaim after the owning peer disconnected; the ACP process still
+      // holds the session.
+      this.sessionOwners.set(sessionId, connectionId)
+      return
     }
     if (owner !== connectionId && isSessionMutation(method)) {
       throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this Cursor session.')
@@ -373,10 +558,7 @@ export class AcpRemoteGateway {
   }
 
   private requireSessionOwner(connectionId: string, sessionId: string): void {
-    const owner = this.sessionOwners.get(sessionId)
-    if (owner !== connectionId) {
-      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this Cursor session.')
-    }
+    this.claimSession(connectionId, sessionId)
   }
 
   private async requireExistingDirectory(path: string): Promise<string> {
@@ -538,6 +720,19 @@ export function cursorBinaryCandidates(configured: string): string[] {
 function errorCode(error: unknown): string {
   if (error instanceof CursorAcpError || error instanceof RpcError) return error.code
   return 'CURSOR_UNAVAILABLE'
+}
+
+function shortSessionId(sessionId: string): string {
+  return sessionId.length <= 16 ? sessionId : `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`
+}
+
+function takeTurnCatchUp(
+  turnCatchUp: Map<string, Array<{ method: string; params: unknown }>>,
+  sessionId: string,
+): Array<{ method: string; params: unknown }> {
+  const list = turnCatchUp.get(sessionId) ?? []
+  turnCatchUp.delete(sessionId)
+  return list
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

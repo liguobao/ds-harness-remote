@@ -473,6 +473,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             },
           })),
           onClose: () => {
+            // Drop local Cursor/CodeX stream handles immediately. The underlying
+            // RemoteClientCore is already gone; keeping them makes the next
+            // prompt skip openStream and never receive agent.acp.frame events.
+            void closeActiveCodexStream(false)
+            void closeActiveCursorStream(false)
             if (get().connection.phase === 'connected' || get().connection.phase === 'reconnecting') {
               set({
                 connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed },
@@ -648,26 +653,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (session.backend === 'cursor') {
         await closeActiveCodexStream()
-        await closeActiveCursorStream()
-        const client = connection.requireCursor()
-        const nativeId = cursorNativeId(session)
-        const stream = await client.openStream(
-          nativeId,
-          frame => get().handleCursorFrame(frame),
-          closed => {
-            if (get().selectedSession?.sessionId !== session.sessionId) return
-            if (activeCursorStream?.streamId !== stream.streamId) return
-            activeCursorStream = undefined
-            set(state => ({
-              sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
-              selectedSession: state.selectedSession?.sessionId === session.sessionId
-                ? { ...state.selectedSession, running: false }
-                : state.selectedSession,
-              ...(closed.reason === 'failed' ? { error: zhCN.runtime.cursorUnavailable } : {}),
-            }))
-          },
-        )
-        activeCursorStream = stream
+        await ensureCursorStream(session)
         set(state => ({
           selectedSession: session,
           sessions: state.sessions.some(item => item.sessionId === session.sessionId)
@@ -1184,13 +1170,30 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } else if (session.backend === 'cursor') {
         if (images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
-        await connection.requireCursor().prompt(cursorNativeId(session), text)
+        // Always re-bind the ACP stream on the current RemoteClientCore before
+        // prompting. After WebRTC flaps / Metro reload the module-level handle
+        // can point at a dead core while RPC still works on a new one.
+        await ensureCursorStream(session)
         set(state => ({
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId
             ? { ...state.selectedSession, running: true }
             : state.selectedSession,
         }))
+        // Host may return immediately with stopReason=in_progress so frames can
+        // interleave; keep running until prompt_completed / failure.
+        const promptResult = await connection.requireCursor().prompt(cursorNativeId(session), text)
+        const inProgress = isRecord(promptResult)
+          && promptResult.accepted === true
+          && promptResult.stopReason === 'in_progress'
+        if (!inProgress) {
+          set(state => ({
+            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+            selectedSession: state.selectedSession?.sessionId === session.sessionId
+              ? { ...state.selectedSession, running: false }
+              : state.selectedSession,
+          }))
+        }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
       }
@@ -1441,11 +1444,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   handleCursorFrame(frame) {
     const session = get().selectedSession
     if (session === undefined || session.backend !== 'cursor') return
+    const update = isRecord(frame.frame.params)
+      ? (isRecord(frame.frame.params.update) ? frame.frame.params.update : frame.frame.params)
+      : undefined
+    const kind = update === undefined
+      ? undefined
+      : (typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined)
+    if (kind !== undefined) {
+      const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
+      // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
+      console.info('[dsh-remote] cursor frame:', kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
+    }
     set(state => ({
       messages: {
         ...state.messages,
         [session.sessionId]: applyCursorFrame(state.messages[session.sessionId] ?? [], session.sessionId, frame),
       },
+      ...(kind === 'prompt_completed' || kind === 'prompt_failed'
+        ? {
+            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+            selectedSession: state.selectedSession?.sessionId === session.sessionId
+              ? { ...state.selectedSession, running: false }
+              : state.selectedSession,
+            ...(kind === 'prompt_failed'
+              ? { error: zhCN.runtime.cursorUnavailable }
+              : {}),
+          }
+        : {}),
     }))
   },
 }))
@@ -1461,6 +1486,30 @@ async function closeActiveCursorStream(notifyRemote = true): Promise<void> {
   const stream = activeCursorStream
   activeCursorStream = undefined
   if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
+}
+
+/** Open (or refresh) the Cursor ACP event stream for the active session. */
+async function ensureCursorStream(session: RemoteSession): Promise<void> {
+  await closeActiveCursorStream()
+  const client = connection.requireCursor()
+  const nativeId = cursorNativeId(session)
+  const stream = await client.openStream(
+    nativeId,
+    frame => useAppStore.getState().handleCursorFrame(frame),
+    closed => {
+      if (useAppStore.getState().selectedSession?.sessionId !== session.sessionId) return
+      if (activeCursorStream?.streamId !== stream.streamId) return
+      activeCursorStream = undefined
+      useAppStore.setState(state => ({
+        sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+        selectedSession: state.selectedSession?.sessionId === session.sessionId
+          ? { ...state.selectedSession, running: false }
+          : state.selectedSession,
+        ...(closed.reason === 'failed' ? { error: zhCN.runtime.cursorUnavailable } : {}),
+      }))
+    },
+  )
+  activeCursorStream = stream
 }
 
 async function loadSavedCodexPermissions(hostDeviceId: string | undefined): Promise<Record<string, CodexPermissionPreset>> {

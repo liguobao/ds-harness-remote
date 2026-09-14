@@ -810,6 +810,8 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
   private closed = false
+  /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
+  private sendTail: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly tunnel: PendingTunnel,
@@ -828,6 +830,12 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   }
 
   async send(message: RemoteMessage): Promise<void> {
+    const run = this.sendTail.then(() => this.sendNow(message))
+    this.sendTail = run.catch(() => undefined)
+    return run
+  }
+
+  private async sendNow(message: RemoteMessage): Promise<void> {
     if (this.closed) throw new Error('secure channel is closed')
     const plaintextFrames = this.outgoing.encode(encodeMessage(message))
     try {

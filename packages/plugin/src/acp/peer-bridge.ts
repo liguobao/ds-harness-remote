@@ -109,7 +109,16 @@ export class AcpPeerBridge {
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId)
     this.streams.set(params.streamId, params.sessionId)
+    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId }
+  }
+
+  /** Whether this peer has at least one live stream observing the session. */
+  hasStreamFor(sessionId: string): boolean {
+    for (const target of this.streams.values()) {
+      if (target === sessionId) return true
+    }
+    return false
   }
 
   closeStream(input: unknown): { closed: true; streamId: string } {
@@ -238,19 +247,35 @@ export class AcpPeerBridge {
   }
 
   async publishInbound(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
-    if (this.closed) return
+    if (this.closed) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.')
     const streamIds = [...this.streams.entries()]
       .filter(([, targetSessionId]) => targetSessionId === sessionId)
       .map(([streamId]) => streamId)
-    for (const streamId of streamIds) {
-      const data: AgentAcpFrameData = { streamId, frame }
-      if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+    if (streamIds.length === 0) {
+      this.logger?.warn('Publishing ACP frame without an open stream; using session-scoped delivery', {
+        method: frame.method,
+      })
+    }
+    // Always address live frames by session id. Explicit stream ids are still
+    // tracked for interest/backpressure, but Clients match session-scoped
+    // delivery after reconnects when stream ids diverge.
+    const data: AgentAcpFrameData = { streamId: `session:${sessionId}`, frame }
+    if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+      for (const streamId of streamIds) {
         this.streams.delete(streamId)
-        await this.publish('agent.acp.stream.closed', { streamId, reason: 'failed' })
-        this.logger?.warn('ACP stream closed after oversized frame', { streamId })
-        continue
+        await this.publish('agent.acp.stream.closed', { streamId, reason: 'failed' }).catch(() => undefined)
       }
+      this.logger?.warn('ACP stream closed after oversized frame', { method: frame.method })
+      throw new RpcError('RESPONSE_TOO_LARGE', 'The ACP frame exceeds the secure channel limit.')
+    }
+    try {
       await this.publish('agent.acp.frame', data)
+    } catch (error) {
+      this.logger?.warn('ACP frame publish failed', {
+        method: frame.method,
+        code: safeErrorCode(error),
+      })
+      throw error
     }
   }
 

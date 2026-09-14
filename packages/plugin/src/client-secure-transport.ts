@@ -10,6 +10,8 @@ export class ClientSecureTransport implements RemoteTransport {
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
   private closed = false
+  /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
+  private sendTail: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly inner: SecureHandshakeTransport,
@@ -46,6 +48,12 @@ export class ClientSecureTransport implements RemoteTransport {
   }
 
   async send(data: Uint8Array): Promise<void> {
+    const run = this.sendTail.then(() => this.sendNow(data))
+    this.sendTail = run.catch(() => undefined)
+    return run
+  }
+
+  private async sendNow(data: Uint8Array): Promise<void> {
     const plaintextFrames = this.outgoing.encode(data)
     try {
       for (const plaintext of plaintextFrames) {

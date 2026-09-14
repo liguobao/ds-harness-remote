@@ -62,6 +62,10 @@ export function createCursorSession(input: {
   }
 }
 
+/** In-flight assistant bubble; must be renamed on prompt_completed so turns do not merge. */
+const CURSOR_ASSISTANT_LIVE_ID = 'cursor-assistant-live'
+let cursorAssistantSeq = 0
+
 export async function createCursorWorkspaceSession(
   client: AgentAcpClient,
   path: string,
@@ -102,7 +106,31 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
   if (kind === 'agent_message_chunk' || kind === 'agent_message') {
     const text = extractText(update)
     if (text === undefined || text.length === 0) return messages
-    return appendAssistantDelta(messages, sessionId, text, 'cursor-assistant-live')
+    return appendAssistantDelta(messages, sessionId, text, CURSOR_ASSISTANT_LIVE_ID)
+  }
+  if (kind === 'agent_thought_chunk' || kind === 'agent_thought') {
+    const text = extractText(update)
+    if (text === undefined || text.length === 0) return messages
+    return appendAssistantReasoningDelta(messages, sessionId, text, CURSOR_ASSISTANT_LIVE_ID)
+  }
+  if (kind === 'prompt_completed' || kind === 'prompt_failed') {
+    let next = messages
+    const live = next.find(item => item.kind === 'message' && item.id === CURSOR_ASSISTANT_LIVE_ID)
+    const hasLiveContent = live !== undefined
+      && live.kind === 'message'
+      && ((live.text?.length ?? 0) > 0 || (live.reasoning?.length ?? 0) > 0)
+    if (!hasLiveContent && Array.isArray(update.catchUp)) {
+      for (const item of update.catchUp) {
+        if (!isRecord(item) || typeof item.method !== 'string') continue
+        next = applyCursorFrame(next, sessionId, {
+          streamId: 'catch-up',
+          frame: { method: item.method, params: item.params },
+        })
+      }
+    }
+    // Retire the live id so the next turn opens a new left-side bubble instead
+    // of appending into the previous assistant message.
+    return finalizeAssistantLive(next)
   }
   if (kind === 'user_message_chunk') {
     const text = extractText(update)
@@ -197,6 +225,53 @@ function appendAssistantDelta(messages: ChatItem[], sessionId: string, text: str
     streaming: true,
     streamingPhase: 'text',
   }]
+}
+
+/** Map ACP `agent_thought_chunk` onto the same live assistant bubble as Harness reasoning. */
+function appendAssistantReasoningDelta(
+  messages: ChatItem[],
+  sessionId: string,
+  text: string,
+  id: string,
+): ChatItem[] {
+  const existing = messages.findIndex(item => item.kind === 'message' && item.id === id)
+  if (existing >= 0) {
+    const current = messages[existing] as ChatMessage
+    const copy = messages.slice()
+    copy[existing] = {
+      ...current,
+      reasoning: `${current.reasoning ?? ''}${text}`,
+      streaming: true,
+      streamingPhase: current.text ? 'text' : 'reasoning',
+    }
+    return copy
+  }
+  return [...messages, {
+    kind: 'message',
+    id,
+    sessionId,
+    role: 'assistant',
+    text: '',
+    reasoning: text,
+    createdAt: Date.now(),
+    streaming: true,
+    streamingPhase: 'reasoning',
+  }]
+}
+
+function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
+  let changed = false
+  const next = messages.map(item => {
+    if (item.kind !== 'message' || item.id !== CURSOR_ASSISTANT_LIVE_ID) return item
+    changed = true
+    return {
+      ...item,
+      id: `cursor-assistant:${++cursorAssistantSeq}`,
+      streaming: false,
+      streamingPhase: undefined,
+    }
+  })
+  return changed ? next : messages
 }
 
 function appendUserDelta(messages: ChatItem[], sessionId: string, text: string, id: string): ChatItem[] {

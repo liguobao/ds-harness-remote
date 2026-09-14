@@ -628,6 +628,23 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       const text = extractText(update)
       if (text === undefined || text.length === 0) return
       this.appendReasoningDelta(follow, text)
+      return
+    }
+    if (kind === 'prompt_completed' || kind === 'prompt_failed') {
+      const hasLiveContent = follow.stepOpen || follow.streamActive
+      if (!hasLiveContent && Array.isArray(update.catchUp)) {
+        for (const item of update.catchUp) {
+          if (!isRecord(item) || typeof item.method !== 'string') continue
+          const params = isRecord(item.params) ? item.params : {}
+          if (item.method === 'session/update') this.acceptSessionUpdate(follow, params)
+        }
+      }
+      if (session !== undefined) {
+        session.running = false
+        session.updatedAt = Date.now()
+        this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
+      }
+      this.closeFollowAfterRemoteStreamClosed(follow)
     }
   }
 

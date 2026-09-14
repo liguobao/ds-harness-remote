@@ -109,6 +109,21 @@ describe('RemoteClientCore', () => {
     await termination
   })
 
+  it('allows a per-call timeout longer than the client default', async () => {
+    vi.useFakeTimers()
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport, 1_000)
+    await client.connect()
+    const call = client.rpc('agent.acp.call', { method: 'session/prompt', params: {} }, undefined, 5_000)
+    const pending = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    await pending
+  })
+
   it('times out even when transport.send never settles', async () => {
     vi.useFakeTimers()
     const transport = new LoopbackTransport()

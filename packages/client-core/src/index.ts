@@ -62,7 +62,12 @@ export class RemoteClientCore {
     }
   }
 
-  async rpc<TResult = unknown, TParams = unknown>(method: string, params: TParams, signal?: AbortSignal): Promise<TResult> {
+  async rpc<TResult = unknown, TParams = unknown>(
+    method: string,
+    params: TParams,
+    signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
+  ): Promise<TResult> {
     if (signal?.aborted) throw rpcAbortedError(method, signal.reason)
 
     const request = createRpcRequest(method as RpcMethod, params)
@@ -70,9 +75,9 @@ export class RemoteClientCore {
       const timer = setTimeout(() => {
         this.rejectPending(
           request.id,
-          new RemoteClientError('RPC_TIMEOUT', `RPC ${method} timed out after ${this.timeoutMs}ms`),
+          new RemoteClientError('RPC_TIMEOUT', `RPC ${method} timed out after ${timeoutMs}ms`),
         )
-      }, this.timeoutMs)
+      }, timeoutMs)
       const pending: PendingCall = {
         method,
         resolve: resolve as (value: unknown) => void,

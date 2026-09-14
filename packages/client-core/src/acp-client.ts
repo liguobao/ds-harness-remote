@@ -13,6 +13,12 @@ import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
 export type AcpAgentBackend = 'cursor'
 
+/**
+ * `session/prompt` blocks until the upstream turn finishes. Keep this well above
+ * the default RemoteClientCore timeout (Android uses ~35s for ApiProxy).
+ */
+export const ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 60_000
+
 export interface AcpRemoteSession {
   sessionId: string
   cwd?: string
@@ -29,7 +35,8 @@ export class AgentAcpClient {
   constructor(private readonly core: RemoteClientCore) {}
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
-    return this.core.rpc('agent.acp.call', { method, params }, signal)
+    const timeoutMs = method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined
+    return this.core.rpc('agent.acp.call', { method, params }, signal, timeoutMs)
   }
 
   async initialize(
@@ -90,8 +97,10 @@ export class AgentAcpClient {
   ): Promise<AcpStream> {
     const streamId = createRemoteId()
     const unsubscribe = this.core.onEvent(event => {
-      if (event.event === 'agent.acp.frame' && isRecord(event.data) && event.data.streamId === streamId) {
-        onFrame(event.data as unknown as AgentAcpFrameData)
+      if (event.event === 'agent.acp.frame' && isRecord(event.data)) {
+        const data = event.data as unknown as AgentAcpFrameData
+        if (!frameMatchesSubscription(data, streamId, sessionId)) return
+        onFrame(data)
       }
       if (event.event === 'agent.acp.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
         onClosed?.(event.data as unknown as AgentAcpStreamClosedData)
@@ -152,6 +161,24 @@ function readString(value: unknown, key: string): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Match Host frames by explicit stream id or by ACP session id (fallback delivery). */
+function frameMatchesSubscription(
+  data: AgentAcpFrameData,
+  streamId: string,
+  sessionId: string,
+): boolean {
+  if (data.streamId === streamId) return true
+  if (data.streamId === sessionScopedStreamId(sessionId)) return true
+  const params = isRecord(data.frame.params) ? data.frame.params : undefined
+  if (params === undefined) return false
+  if (params.sessionId === sessionId) return true
+  return isRecord(params.update) && params.update.sessionId === sessionId
+}
+
+export function sessionScopedStreamId(sessionId: string): string {
+  return `session:${sessionId}`
 }
 
 function concat(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {

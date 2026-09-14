@@ -5158,13 +5158,15 @@ function isRecord(value) {
 }
 
 // ../client-core/dist/acp-client.js
+var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
   constructor(core) {
     this.core = core;
   }
   async call(method, params = {}, signal) {
-    return this.core.rpc("agent.acp.call", { method, params }, signal);
+    const timeoutMs = method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0;
+    return this.core.rpc("agent.acp.call", { method, params }, signal, timeoutMs);
   }
   async initialize(params = {}, signal) {
     return this.call("initialize", params, signal);
@@ -5206,8 +5208,11 @@ var AgentAcpClient = class {
   async openStream(sessionId, onFrame, onClosed, signal) {
     const streamId = createRemoteId();
     const unsubscribe = this.core.onEvent((event) => {
-      if (event.event === "agent.acp.frame" && isRecord2(event.data) && event.data.streamId === streamId) {
-        onFrame(event.data);
+      if (event.event === "agent.acp.frame" && isRecord2(event.data)) {
+        const data = event.data;
+        if (!frameMatchesSubscription(data, streamId, sessionId))
+          return;
+        onFrame(data);
       }
       if (event.event === "agent.acp.stream.closed" && isRecord2(event.data) && event.data.streamId === streamId) {
         onClosed?.(event.data);
@@ -5266,6 +5271,21 @@ function readString(value, key) {
 }
 function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function frameMatchesSubscription(data, streamId, sessionId) {
+  if (data.streamId === streamId)
+    return true;
+  if (data.streamId === sessionScopedStreamId(sessionId))
+    return true;
+  const params = isRecord2(data.frame.params) ? data.frame.params : void 0;
+  if (params === void 0)
+    return false;
+  if (params.sessionId === sessionId)
+    return true;
+  return isRecord2(params.update) && params.update.sessionId === sessionId;
+}
+function sessionScopedStreamId(sessionId) {
+  return `session:${sessionId}`;
 }
 function concat(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -5328,14 +5348,14 @@ var RemoteClientCore = class {
       throw error;
     }
   }
-  async rpc(method, params, signal) {
+  async rpc(method, params, signal, timeoutMs = this.timeoutMs) {
     if (signal?.aborted)
       throw rpcAbortedError(method, signal.reason);
     const request = createRpcRequest(method, params);
     const result = new Promise((resolve4, reject) => {
       const timer = setTimeout(() => {
-        this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${this.timeoutMs}ms`));
-      }, this.timeoutMs);
+        this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       const pending = {
         method,
         resolve: resolve4,
@@ -14050,6 +14070,8 @@ var ClientSecureTransport = class {
   incoming = new SecureMessageCodec();
   outgoing = new SecureMessageCodec();
   closed = false;
+  /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
+  sendTail = Promise.resolve();
   async connect() {
     this.closed = false;
     this.incoming.reset();
@@ -14078,6 +14100,11 @@ var ClientSecureTransport = class {
     }
   }
   async send(data) {
+    const run = this.sendTail.then(() => this.sendNow(data));
+    this.sendTail = run.catch(() => void 0);
+    return run;
+  }
+  async sendNow(data) {
     const plaintextFrames = this.outgoing.encode(data);
     try {
       for (const plaintext of plaintextFrames) {
@@ -18057,6 +18084,23 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       const text = extractText(update);
       if (text === void 0 || text.length === 0) return;
       this.appendReasoningDelta(follow, text);
+      return;
+    }
+    if (kind === "prompt_completed" || kind === "prompt_failed") {
+      const hasLiveContent = follow.stepOpen || follow.streamActive;
+      if (!hasLiveContent && Array.isArray(update.catchUp)) {
+        for (const item of update.catchUp) {
+          if (!isRecord7(item) || typeof item.method !== "string") continue;
+          const params2 = isRecord7(item.params) ? item.params : {};
+          if (item.method === "session/update") this.acceptSessionUpdate(follow, params2);
+        }
+      }
+      if (session !== void 0) {
+        session.running = false;
+        session.updatedAt = Date.now();
+        this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+      }
+      this.closeFollowAfterRemoteStreamClosed(follow);
     }
   }
   acceptApproval(follow, params, method) {
@@ -22136,11 +22180,15 @@ var ConnectionController = class {
   }
   async sendTo(connectionId, channel, message) {
     const connection = this.active.get(connectionId);
-    if (connection === void 0 || connection.channel !== channel) return;
+    if (connection === void 0 || connection.channel !== channel) {
+      throw new Error("peer channel is not active");
+    }
     await this.sendConnection(connection, message);
   }
   async sendConnection(connection, message) {
-    if (!this.isActive(connection)) return;
+    if (!this.isActive(connection)) {
+      throw new Error("peer channel is not active");
+    }
     try {
       await connection.channel.send(message);
     } catch (error) {
@@ -22150,6 +22198,7 @@ var ConnectionController = class {
         reason: diagnosticReason2(error)
       });
       await this.disconnect(connection);
+      throw error instanceof Error ? error : new Error("peer send failed", { cause: error });
     }
   }
   async disconnect(connection, code) {
@@ -23240,7 +23289,14 @@ var ServerNoiseChannel = class {
   incoming = new SecureMessageCodec();
   outgoing = new SecureMessageCodec();
   closed = false;
+  /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
+  sendTail = Promise.resolve();
   async send(message) {
+    const run = this.sendTail.then(() => this.sendNow(message));
+    this.sendTail = run.catch(() => void 0);
+    return run;
+  }
+  async sendNow(message) {
     if (this.closed) throw new Error("secure channel is closed");
     const plaintextFrames = this.outgoing.encode(encodeMessage(message));
     try {
@@ -26329,6 +26385,7 @@ import { basename as basename4, isAbsolute as isAbsolute4, join as join6, relati
 import { spawn as spawn3 } from "node:child_process";
 import { Buffer as Buffer4 } from "node:buffer";
 var ACP_REQUEST_TIMEOUT_MS = 6e4;
+var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
 var ACP_START_TIMEOUT_MS = 2e4;
 var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
@@ -26371,9 +26428,10 @@ var CursorAcpClient = class {
   isReady() {
     return this.ready;
   }
-  async call(method, params, timeoutMs = ACP_REQUEST_TIMEOUT_MS) {
+  async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
-    return this.request(method, params, timeoutMs);
+    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
+    return this.request(method, params, budget);
   }
   async respond(id3, result) {
     this.write({ jsonrpc: "2.0", id: id3, result });
@@ -26526,7 +26584,7 @@ var CursorAcpClient = class {
     }
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
-    const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
+    const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
     for (const handler of this.inboundHandlers) handler(inbound);
   }
   handleProcessFailure(code, cause) {
@@ -26687,7 +26745,15 @@ var AcpPeerBridge = class {
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId);
     this.streams.set(params.streamId, params.sessionId);
+    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
+  }
+  /** Whether this peer has at least one live stream observing the session. */
+  hasStreamFor(sessionId) {
+    for (const target of this.streams.values()) {
+      if (target === sessionId) return true;
+    }
+    return false;
   }
   closeStream(input2) {
     const params = streamCloseSchema4.parse(input2);
@@ -26809,17 +26875,30 @@ var AcpPeerBridge = class {
     return { closed, transferId: params.transferId };
   }
   async publishInbound(sessionId, frame) {
-    if (this.closed) return;
+    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
     const streamIds = [...this.streams.entries()].filter(([, targetSessionId]) => targetSessionId === sessionId).map(([streamId]) => streamId);
-    for (const streamId of streamIds) {
-      const data = { streamId, frame };
-      if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+    if (streamIds.length === 0) {
+      this.logger?.warn("Publishing ACP frame without an open stream; using session-scoped delivery", {
+        method: frame.method
+      });
+    }
+    const data = { streamId: `session:${sessionId}`, frame };
+    if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+      for (const streamId of streamIds) {
         this.streams.delete(streamId);
-        await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" });
-        this.logger?.warn("ACP stream closed after oversized frame", { streamId });
-        continue;
+        await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
       }
+      this.logger?.warn("ACP stream closed after oversized frame", { method: frame.method });
+      throw new RpcError("RESPONSE_TOO_LARGE", "The ACP frame exceeds the secure channel limit.");
+    }
+    try {
       await this.publish("agent.acp.frame", data);
+    } catch (error) {
+      this.logger?.warn("ACP frame publish failed", {
+        method: frame.method,
+        code: safeErrorCode3(error)
+      });
+      throw error;
     }
   }
   async failStreams(reason = "failed") {
@@ -26893,6 +26972,18 @@ function concatChunks4(chunks, totalBytes) {
 var APPROVAL_TTL_MS2 = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
 var ACP_DIRECTORY_ENTRY_LIMIT = 500;
+var MAX_BUFFERED_ACP_FRAMES = 200;
+var ACP_FRAME_BUFFER_TTL_MS = 5 * 6e4;
+var MAX_TURN_CATCH_UP_FRAMES = 120;
+var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
+  "agent_thought_chunk",
+  "agent_thought",
+  "agent_message_chunk",
+  "agent_message",
+  "user_message_chunk",
+  "tool_call",
+  "tool_call_update"
+]);
 var AcpRemoteGateway = class {
   constructor(config, logger, createAcp = (binary, targetLogger) => new CursorAcpClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
     this.config = config;
@@ -26913,6 +27004,12 @@ var AcpRemoteGateway = class {
   closed = false;
   state = "disabled";
   unavailableCode;
+  /** Keep ACP → Client fanout ordered; concurrent publish races Noise sends. */
+  inboundChain = Promise.resolve();
+  /** Catch-up buffer for turns that finish while the Client is reconnecting. */
+  recentFrames = /* @__PURE__ */ new Map();
+  /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
+  turnCatchUp = /* @__PURE__ */ new Map();
   async start() {
     if (this.closed) throw new RpcError("CURSOR_CLOSED", "The Cursor Remote domain is closed.");
     if (!this.config.enabled) return;
@@ -26978,7 +27075,57 @@ var AcpRemoteGateway = class {
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
     }
+    if (call.method === "session/prompt" && sessionId !== void 0) {
+      const ownerPeer = this.peers.get(connectionId);
+      if (ownerPeer !== void 0 && !ownerPeer.hasStreamFor(sessionId)) {
+        this.logger?.warn("Cursor prompt started without an open ACP stream", {
+          sessionId: shortSessionId(sessionId)
+        });
+      }
+      this.turnCatchUp.set(sessionId, []);
+      void this.runPromptInBackground(sessionId, call.params);
+      return { accepted: true, stopReason: "in_progress" };
+    }
     return sanitizeSessionResult(await this.callUpstream(call.method, call.params));
+  }
+  async runPromptInBackground(sessionId, params) {
+    try {
+      const result = await this.callUpstream("session/prompt", params);
+      await this.inboundChain;
+      const stopReason = isRecord17(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
+      this.logger.info("Cursor prompt finished", {
+        sessionId: shortSessionId(sessionId),
+        stopReason,
+        catchUp: catchUp.length
+      });
+      await this.publishToSession(sessionId, {
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "prompt_completed",
+            stopReason,
+            ...catchUp.length > 0 ? { catchUp } : {}
+          }
+        }
+      });
+    } catch (error) {
+      this.logger?.warn("Cursor session/prompt failed", { code: errorCode4(error) });
+      await this.inboundChain.catch(() => void 0);
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
+      await this.publishToSession(sessionId, {
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "prompt_failed",
+            code: errorCode4(error),
+            ...catchUp.length > 0 ? { catchUp } : {}
+          }
+        }
+      }).catch(() => void 0);
+    }
   }
   async respond(connectionId, input2) {
     const params = parseRespondEnvelope(input2);
@@ -27014,9 +27161,37 @@ var AcpRemoteGateway = class {
   }
   /** Used by peer stream open to prove this connection may observe the session. */
   assertStreamable(connectionId, sessionId) {
+    this.claimSession(connectionId, sessionId);
+  }
+  /**
+   * After a Client reconnect, session ownership may have been cleared with the
+   * old peer. Reclaim the in-memory ACP session for the new connection so
+   * stream open / prompt can resume and buffered frames can replay.
+   */
+  claimSession(connectionId, sessionId) {
     const owner = this.sessionOwners.get(sessionId);
+    if (owner === void 0) {
+      this.sessionOwners.set(sessionId, connectionId);
+      return;
+    }
     if (owner !== connectionId) {
-      throw new RpcError("CURSOR_SESSION_NOT_FOUND", "The Cursor session is not available to this connection.");
+      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
+    }
+  }
+  /** Replay frames buffered while no healthy peer could receive them. */
+  async replayBufferedFrames(connectionId, sessionId) {
+    const peer = this.peers.get(connectionId);
+    if (peer === void 0) return;
+    this.pruneFrameBuffer(sessionId);
+    const buffered = this.recentFrames.get(sessionId) ?? [];
+    if (buffered.length === 0) return;
+    this.recentFrames.delete(sessionId);
+    this.logger.info("Replaying buffered ACP frames", {
+      sessionId: shortSessionId(sessionId),
+      count: buffered.length
+    });
+    for (const frame of buffered) {
+      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
     }
   }
   async close() {
@@ -27027,6 +27202,8 @@ var AcpRemoteGateway = class {
     for (const peer of this.peers.values()) await peer.closeAll();
     this.peers.clear();
     this.sessionOwners.clear();
+    this.recentFrames.clear();
+    this.turnCatchUp.clear();
     this.approvals.clear();
     await this.disposeAcp(this.acp);
     this.acp = void 0;
@@ -27049,15 +27226,15 @@ var AcpRemoteGateway = class {
   async launchAcpCandidate(binary) {
     const acp = this.createAcp(binary, this.logger);
     await acp.start();
-    this.unsubscribeInbound?.();
-    this.unsubscribeUnavailable?.();
+    await this.disposeAcp(this.acp);
     this.unsubscribeInbound = acp.onInbound((message) => {
-      void this.handleInbound(message);
+      this.inboundChain = this.inboundChain.then(() => this.handleInbound(message)).catch((error) => {
+        this.logger.warn("ACP inbound fanout failed", { code: errorCode4(error) });
+      });
     });
     this.unsubscribeUnavailable = acp.onUnavailable((code) => {
       void this.handleUnavailable(code);
     });
-    await this.disposeAcp(this.acp);
     this.acp = acp;
     this.available = true;
     this.state = "ready";
@@ -27065,7 +27242,7 @@ var AcpRemoteGateway = class {
     this.restartAttempt = 0;
   }
   async handleInbound(message) {
-    if (message.kind === "notification") {
+    if (message.kind === "notification" || message.method === "session/update") {
       const sessionId2 = readSessionId(message.params) ?? readNestedSessionId(message.params);
       if (sessionId2 === void 0) return;
       await this.publishToSession(sessionId2, { method: message.method, params: message.params });
@@ -27101,7 +27278,55 @@ var AcpRemoteGateway = class {
     await this.publishToSession(sessionId, frame);
   }
   async publishToSession(sessionId, frame) {
-    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(sessionId, frame)));
+    this.recordTurnCatchUp(sessionId, frame);
+    const ownerId = this.sessionOwners.get(sessionId);
+    const entries = [...this.peers.entries()];
+    if (entries.length === 0) {
+      this.bufferFrame(sessionId, frame);
+      return;
+    }
+    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
+      try {
+        await peer.publishInbound(sessionId, frame);
+        return { connectionId, ok: true };
+      } catch {
+        return { connectionId, ok: false };
+      }
+    }));
+    const ownerDelivered = ownerId !== void 0 && deliveries.some((item) => item.connectionId === ownerId && item.ok);
+    if (ownerId !== void 0 ? !ownerDelivered : deliveries.every((item) => !item.ok)) {
+      this.bufferFrame(sessionId, frame);
+    }
+  }
+  recordTurnCatchUp(sessionId, frame) {
+    const list = this.turnCatchUp.get(sessionId);
+    if (list === void 0 || frame.method !== "session/update") return;
+    const params = isRecord17(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord17(params.update) ? params.update : params;
+    const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
+    if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
+    list.push({ method: frame.method, params: frame.params });
+    while (list.length > MAX_TURN_CATCH_UP_FRAMES) list.shift();
+  }
+  bufferFrame(sessionId, frame) {
+    this.pruneFrameBuffer(sessionId);
+    const list = this.recentFrames.get(sessionId) ?? [];
+    list.push({ method: frame.method, params: frame.params, at: Date.now() });
+    while (list.length > MAX_BUFFERED_ACP_FRAMES) list.shift();
+    this.recentFrames.set(sessionId, list);
+    this.logger.warn("Buffered ACP frame for later replay", {
+      sessionId: shortSessionId(sessionId),
+      method: frame.method,
+      buffered: list.length
+    });
+  }
+  pruneFrameBuffer(sessionId) {
+    const list = this.recentFrames.get(sessionId);
+    if (list === void 0) return;
+    const validAfter = Date.now() - ACP_FRAME_BUFFER_TTL_MS;
+    const next = list.filter((frame) => frame.at >= validAfter);
+    if (next.length === 0) this.recentFrames.delete(sessionId);
+    else this.recentFrames.set(sessionId, next);
   }
   async handleUnavailable(code) {
     this.available = false;
@@ -27173,17 +27398,15 @@ var AcpRemoteGateway = class {
     if (method === "session/load") return;
     const owner = this.sessionOwners.get(sessionId);
     if (owner === void 0) {
-      throw new RpcError("CURSOR_SESSION_NOT_FOUND", "The Cursor session is not available to this connection.");
+      this.sessionOwners.set(sessionId, connectionId);
+      return;
     }
     if (owner !== connectionId && isSessionMutation(method)) {
       throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
     }
   }
   requireSessionOwner(connectionId, sessionId) {
-    const owner = this.sessionOwners.get(sessionId);
-    if (owner !== connectionId) {
-      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
-    }
+    this.claimSession(connectionId, sessionId);
   }
   async requireExistingDirectory(path) {
     if (!isAbsolute4(path)) {
@@ -27315,6 +27538,14 @@ function cursorBinaryCandidates(configured) {
 function errorCode4(error) {
   if (error instanceof CursorAcpError || error instanceof RpcError) return error.code;
   return "CURSOR_UNAVAILABLE";
+}
+function shortSessionId(sessionId) {
+  return sessionId.length <= 16 ? sessionId : `${sessionId.slice(0, 8)}\u2026${sessionId.slice(-4)}`;
+}
+function takeTurnCatchUp(turnCatchUp, sessionId) {
+  const list = turnCatchUp.get(sessionId) ?? [];
+  turnCatchUp.delete(sessionId);
+  return list;
 }
 function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
