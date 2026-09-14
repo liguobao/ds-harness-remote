@@ -165,8 +165,8 @@ var util;
     return void 0;
   };
   util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
-  function joinValues(array3, separator = " | ") {
-    return array3.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
+  function joinValues(array4, separator = " | ") {
+    return array4.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
   util2.joinValues = joinValues;
   util2.jsonStringifyReplacer = (_, value) => {
@@ -5157,6 +5157,139 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ../client-core/dist/acp-client.js
+var AgentAcpClient = class {
+  core;
+  constructor(core) {
+    this.core = core;
+  }
+  async call(method, params = {}, signal) {
+    return this.core.rpc("agent.acp.call", { method, params }, signal);
+  }
+  async initialize(params = {}, signal) {
+    return this.call("initialize", params, signal);
+  }
+  async respond(requestHandle, decision, result, signal) {
+    return this.core.rpc("agent.acp.respond", {
+      requestHandle,
+      decision,
+      ...result === void 0 ? {} : { result }
+    }, signal);
+  }
+  async createSession(cwd2, mode2, signal) {
+    const result = await this.call("session/new", {
+      cwd: cwd2,
+      mcpServers: [],
+      ...mode2 === void 0 ? {} : { mode: mode2 }
+    }, signal);
+    const sessionId = readString(result, "sessionId");
+    if (sessionId === void 0)
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session/new did not return sessionId.");
+    return {
+      sessionId,
+      cwd: cwd2,
+      ...mode2 === void 0 ? {} : { mode: mode2 }
+    };
+  }
+  async prompt(sessionId, text, signal) {
+    return this.call("session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text }]
+    }, signal);
+  }
+  async cancel(sessionId, signal) {
+    return this.call("session/cancel", { sessionId }, signal);
+  }
+  async listDirectory(path, signal) {
+    return this.call("dsh/directoryList", { path }, signal);
+  }
+  async openStream(sessionId, onFrame, onClosed, signal) {
+    const streamId = createRemoteId();
+    const unsubscribe = this.core.onEvent((event) => {
+      if (event.event === "agent.acp.frame" && isRecord2(event.data) && event.data.streamId === streamId) {
+        onFrame(event.data);
+      }
+      if (event.event === "agent.acp.stream.closed" && isRecord2(event.data) && event.data.streamId === streamId) {
+        onClosed?.(event.data);
+      }
+    });
+    try {
+      await this.core.rpc("agent.acp.stream.open", { streamId, sessionId }, signal);
+    } catch (error) {
+      unsubscribe();
+      throw error;
+    }
+    return {
+      streamId,
+      close: async () => {
+        unsubscribe();
+        await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+      }
+    };
+  }
+  async transferCall(method, params, signal) {
+    const requestBytes = new TextEncoder().encode(JSON.stringify({ method, params }));
+    if (requestBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RemoteGatewayError("REQUEST_TOO_LARGE", "The ACP transfer request exceeds the bounded limit.");
+    }
+    const transferId = createRemoteId();
+    const totalChunks = Math.ceil(requestBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES);
+    await this.core.rpc("agent.acp.transfer.open", {
+      transferId,
+      totalBytes: requestBytes.byteLength,
+      totalChunks
+    }, signal);
+    for (let index = 0; index < totalChunks; index += 1) {
+      const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
+      const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength);
+      await this.core.rpc("agent.acp.transfer.chunk", {
+        transferId,
+        index,
+        data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
+      }, signal);
+    }
+    const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal);
+    if (commit.kind === "inline")
+      return commit.response;
+    const chunks = [];
+    for (let index = 0; index < commit.totalChunks; index += 1) {
+      const part = await this.core.rpc("agent.acp.transfer.read", { transferId, index }, signal);
+      chunks.push(canonicalBase64ToBytes(part.data));
+    }
+    await this.core.rpc("agent.acp.transfer.close", { transferId }).catch(() => void 0);
+    const bytes = concat(chunks, commit.totalBytes);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+};
+function readString(value, key) {
+  return isRecord2(value) && typeof value[key] === "string" ? value[key] : void 0;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function concat(chunks, totalBytes) {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+function bytesToCanonicalBase64(bytes) {
+  let binary = "";
+  for (const value of bytes)
+    binary += String.fromCharCode(value);
+  return btoa(binary);
+}
+function canonicalBase64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
 // ../client-core/dist/index.js
 var RemoteClientError = class extends Error {
   code;
@@ -6989,7 +7122,7 @@ function hexToBytes(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new Error("hex string expected, got unpadded hex of length " + hl);
-  const array3 = new Uint8Array(al);
+  const array4 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase16(hex.charCodeAt(hi));
     const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
@@ -6997,9 +7130,9 @@ function hexToBytes(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array3[ai] = n1 * 16 + n2;
+    array4[ai] = n1 * 16 + n2;
   }
-  return array3;
+  return array4;
 }
 function utf8ToBytes(str) {
   if (typeof str !== "string")
@@ -9324,7 +9457,7 @@ var SymmetricState = class {
     this.ck.set(this.h);
   }
   mixHash(data) {
-    this.h.set(this.H.hash(concat(this.h, data)).subarray(0, this.H.hashLen));
+    this.h.set(this.H.hash(concat2(this.h, data)).subarray(0, this.H.hashLen));
   }
   mixKey(inputKeyMaterial) {
     const [ck, temp] = this.H.hkdf(this.ck, inputKeyMaterial);
@@ -9379,7 +9512,7 @@ var SymmetricState = class {
     this.cipherstate = void 0;
   }
 };
-function concat(a, b) {
+function concat2(a, b) {
   const o = new Uint8Array(a.length + b.length);
   o.set(a, 0);
   o.set(b, a.length);
@@ -9706,7 +9839,7 @@ function hexToBytes2(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new RangeError("hex string expected, got unpadded hex of length " + hl);
-  const array3 = new Uint8Array(al);
+  const array4 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase162(hex.charCodeAt(hi));
     const n2 = asciiToBase162(hex.charCodeAt(hi + 1));
@@ -9714,9 +9847,9 @@ function hexToBytes2(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new RangeError('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array3[ai] = n1 * 16 + n2;
+    array4[ai] = n1 * 16 + n2;
   }
-  return array3;
+  return array4;
 }
 function concatBytes2(...arrays) {
   let sum = 0;
@@ -14118,14 +14251,14 @@ function requestSignal(req) {
 }
 function clientRequest(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
-  const record6 = value;
-  if (record6.type !== "client-request" || typeof record6.rpcId !== "string" || typeof record6.method !== "string") return void 0;
-  return { type: "client-request", rpcId: record6.rpcId, method: record6.method, payload: record6.payload };
+  const record7 = value;
+  if (record7.type !== "client-request" || typeof record7.rpcId !== "string" || typeof record7.method !== "string") return void 0;
+  return { type: "client-request", rpcId: record7.rpcId, method: record7.method, payload: record7.payload };
 }
 function rpcId(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return INVALID_REQUEST_RPC_ID;
-  const record6 = value;
-  return typeof record6.rpcId === "string" ? record6.rpcId : INVALID_REQUEST_RPC_ID;
+  const record7 = value;
+  return typeof record7.rpcId === "string" ? record7.rpcId : INVALID_REQUEST_RPC_ID;
 }
 function errorResponse(rpcId2, error) {
   return fullResponse(rpcId2, { ok: false, error });
@@ -14406,7 +14539,7 @@ function normalizeLegacyResponse(method, response) {
   };
 }
 function normalizeLegacyRequest(method, payload) {
-  if (!isRecord2(payload)) return payload;
+  if (!isRecord3(payload)) return payload;
   if (method === "agentPreset.read") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.select") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.copy") return replaceAgentPreset(payload, "from");
@@ -14421,14 +14554,14 @@ function replaceAgentPreset(payload, key) {
   return replacement === void 0 ? payload : { ...payload, [key]: replacement };
 }
 function replaceAgentPresetSettings(payload) {
-  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord2(payload.patch)) return payload;
+  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord3(payload.patch)) return payload;
   const patch = replaceAgentPreset(payload.patch, "default");
   return patch === payload.patch ? payload : { ...payload, patch };
 }
 function isRemoteDisconnect(error) {
   return error instanceof RemoteClientError && (error.code === "TRANSPORT_CLOSED" || error.code === "CLIENT_CLOSED");
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 var AsyncFrameQueue = class {
@@ -14500,7 +14633,7 @@ function normalizeLegacySessionGatewayValue(endpoint, value) {
   return value;
 }
 function normalizeFollowFrame(value) {
-  if (!isRecord3(value)) return value;
+  if (!isRecord4(value)) return value;
   if (value.type === "snapshot") {
     return {
       ...value,
@@ -14512,22 +14645,22 @@ function normalizeFollowFrame(value) {
   return normalizeEntry(value);
 }
 function normalizePage(value) {
-  if (!isRecord3(value)) return value;
+  if (!isRecord4(value)) return value;
   return { ...value, records: normalizeRecords(value.records) };
 }
 function normalizeRecords(value) {
   if (!Array.isArray(value)) return value;
   const records = [];
   let previousSeq;
-  for (const record6 of value) {
-    if (!isEventEntry(record6)) continue;
-    const seq = entrySeq(record6);
+  for (const record7 of value) {
+    if (!isEventEntry(record7)) continue;
+    const seq = entrySeq(record7);
     if (previousSeq !== void 0 && seq !== void 0 && seq > previousSeq + 1) {
       for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
-        records.push(createLegacyGapRecord(fillerSeq, record6));
+        records.push(createLegacyGapRecord(fillerSeq, record7));
       }
     }
-    records.push(normalizeEntry(record6));
+    records.push(normalizeEntry(record7));
     if (seq !== void 0) previousSeq = seq;
   }
   return records;
@@ -14557,10 +14690,10 @@ function eventTime(value) {
   return typeof value.event.time === "number" && Number.isSafeInteger(value.event.time) ? value.event.time : 0;
 }
 function isEventEntry(value) {
-  return isRecord3(value) && value.type === "event" && isRecord3(value.event);
+  return isRecord4(value) && value.type === "event" && isRecord4(value.event);
 }
 function normalizeHeader(value) {
-  if (!isRecord3(value)) return value;
+  if (!isRecord4(value)) return value;
   const next = {
     ...value,
     version: 3,
@@ -14569,7 +14702,7 @@ function normalizeHeader(value) {
   return next.agentPreset === "code" ? { ...next, agentPreset: "ptc" } : next;
 }
 function normalizeEvent(value) {
-  if (!isRecord3(value)) return value;
+  if (!isRecord4(value)) return value;
   let next = value;
   const type = normalizeEventType(value.type);
   if (type !== value.type) next = { ...next, type };
@@ -14589,7 +14722,7 @@ function normalizeEventType(value) {
   return value;
 }
 function normalizeEventData(type, value) {
-  if (!isRecord3(value)) return value;
+  if (!isRecord4(value)) return value;
   if (type === "request/header") return normalizeRequestHeaderData(value);
   if (type === "agent-preset/selected" && value.agentPreset === "code") return { ...value, agentPreset: "ptc" };
   if (type === "user/message") return normalizeMessage(value);
@@ -14602,7 +14735,7 @@ function normalizeEventData(type, value) {
   return value;
 }
 function normalizeRequestHeaderData(value) {
-  if (!isRecord3(value.header)) return value;
+  if (!isRecord4(value.header)) return value;
   const header = normalizeRequestHeader(value.header);
   return header === value.header ? value : { ...value, header };
 }
@@ -14618,7 +14751,7 @@ function normalizeRequestHeader(value) {
       changed = true;
       continue;
     }
-    if (key === "adapterDefaults" && isRecord3(field) && Object.keys(field).length === 0) {
+    if (key === "adapterDefaults" && isRecord4(field) && Object.keys(field).length === 0) {
       changed = true;
       continue;
     }
@@ -14627,12 +14760,12 @@ function normalizeRequestHeader(value) {
   return changed ? next : value;
 }
 function normalizeMessage(value) {
-  if (!isRecord3(value) || !isRecord3(value.source)) return value;
+  if (!isRecord4(value) || !isRecord4(value.source)) return value;
   if (value.source.kind !== "plugin" || value.source.plugin !== "tools-code-mode") return value;
   return { ...value, source: { ...value.source, plugin: "tools-ptc" } };
 }
 function normalizeSurfaceOp(value) {
-  if (!isRecord3(value) || value.op !== "replace") return value;
+  if (!isRecord4(value) || value.op !== "replace") return value;
   const { start, end, ...rest } = value;
   if (start === void 0 && end === void 0) return value;
   return {
@@ -14642,7 +14775,7 @@ function normalizeSurfaceOp(value) {
     ...end === void 0 ? {} : { endSeq: end }
   };
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isEventSeq(value) {
@@ -14824,20 +14957,20 @@ function routeStreamEvent2(event, streamId, queue) {
   const data = event.data;
   if (data.streamId !== streamId) return;
   if (data.reason === "failed") {
-    const failure2 = data.failure;
+    const failure3 = data.failure;
     queue.fail(remoteFailure({
-      code: typeof failure2?.code === "string" ? failure2.code : "internal",
-      message: typeof failure2?.message === "string" ? failure2.message : "The remote Harness stream failed.",
-      details: isRecord4(failure2?.details) ? failure2.details : {}
+      code: typeof failure3?.code === "string" ? failure3.code : "internal",
+      message: typeof failure3?.message === "string" ? failure3.message : "The remote Harness stream failed.",
+      details: isRecord5(failure3?.details) ? failure3.details : {}
     }));
   } else {
     queue.close();
   }
 }
 function parseRpcResult(value) {
-  if (!isRecord4(value)) throw new Error("The remote Host returned an invalid Gateway result.");
+  if (!isRecord5(value)) throw new Error("The remote Host returned an invalid Gateway result.");
   if (value.ok === true) return Object.hasOwn(value, "value") ? { ok: true, value: value.value } : { ok: true };
-  if (value.ok !== false || !isRecord4(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord4(value.error.details)) {
+  if (value.ok !== false || !isRecord5(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord5(value.error.details)) {
     throw new Error("The remote Host returned an invalid Gateway failure.");
   }
   return {
@@ -14845,11 +14978,11 @@ function parseRpcResult(value) {
     error: { code: value.error.code, message: value.error.message, details: value.error.details }
   };
 }
-function remoteFailure(failure2) {
-  return Object.assign(new Error(failure2.message), {
+function remoteFailure(failure3) {
+  return Object.assign(new Error(failure3.message), {
     isDSHRemoteError: true,
-    code: failure2.code,
-    details: failure2.details
+    code: failure3.code,
+    details: failure3.details
   });
 }
 function bytesToBase643(bytes) {
@@ -14871,7 +15004,7 @@ function base64ToBytes3(value) {
   if (bytesToBase643(bytes) !== value) throw new Error("The remote Host returned non-canonical Harness Remote transfer data.");
   return bytes;
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasErrorCode(error, code) {
@@ -15792,7 +15925,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
     } else if (event === "api-session/removed" && sessionId !== void 0) {
       this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord5(args[0])) {
+    } else if (event === "api-session/added" && isRecord6(args[0])) {
       const summary = args[0];
       this.broadcastRcHost({
         type: "host/session-added",
@@ -16177,7 +16310,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   createApiProxy() {
     const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord5(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
+      const payload = endpoint === "session.prompt" && isRecord6(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
       const result = await this.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
       return {
         rpcId: request.rpcId,
@@ -16702,7 +16835,7 @@ function collectImageBlocks(value, output = []) {
     for (const item of value) collectImageBlocks(item, output);
     return output;
   }
-  if (!isRecord5(value)) return output;
+  if (!isRecord6(value)) return output;
   if (value.type === "image") output.push(value);
   for (const [key, child] of Object.entries(value)) {
     if (key === "attachment") continue;
@@ -17032,7 +17165,7 @@ function codexPromptInput(content) {
   if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return void 0;
   const input2 = [];
   for (const value of content) {
-    if (!isRecord5(value)) return void 0;
+    if (!isRecord6(value)) return void 0;
     if (value.type === "text") {
       if (typeof value.text !== "string" || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return void 0;
       input2.push({ type: "text", text: value.text });
@@ -17285,12 +17418,12 @@ function errorCode(error) {
   return "code" in error && typeof error.code === "string" ? error.code : void 0;
 }
 function errorDetails(error) {
-  return "details" in error && isRecord5(error.details) ? error.details : {};
+  return "details" in error && isRecord6(error.details) ? error.details : {};
 }
 function record2(value) {
-  return isRecord5(value) ? value : {};
+  return isRecord6(value) ? value : {};
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function array(value) {
@@ -17359,6 +17492,1008 @@ function hashString(value) {
   return (hash >>> 0).toString(36);
 }
 var AsyncValueQueue2 = class {
+  constructor(signal) {
+    this.signal = signal;
+    this.onAbort = () => this.close();
+    signal.addEventListener("abort", this.onAbort, { once: true });
+    if (signal.aborted) this.close();
+  }
+  values = [];
+  waiters = [];
+  closed = false;
+  onAbort;
+  push(value) {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter === void 0) this.values.push(value);
+    else waiter({ done: false, value });
+  }
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.signal.removeEventListener("abort", this.onAbort);
+    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
+  }
+  iterate(dispose) {
+    const queue = this;
+    return {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield* queue;
+        } finally {
+          dispose();
+          queue.close();
+        }
+      }
+    };
+  }
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      if (this.values.length > 0) {
+        yield this.values.shift();
+        continue;
+      }
+      if (this.closed) return;
+      const next = await new Promise((resolve4) => this.waiters.push(resolve4));
+      if (next.done) return;
+      yield next.value;
+    }
+  }
+};
+
+// src/acp/virtual-harness.ts
+var CURSOR_SESSION_PREFIX = "cursor:";
+var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
+var CURSOR_PROVIDER = "cursor";
+var CURSOR_MODEL = "cursor";
+function acpCwdWorkspaceId(path) {
+  return `${CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
+}
+function createAcpWorkspaceView(path, title) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+  return {
+    workspaceId: acpCwdWorkspaceId(path),
+    path,
+    title: label,
+    sessionIds: [],
+    sessionCount: 0,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function discoverAcpVirtualWorkspaces(_client, _signal) {
+  return [];
+}
+var AcpVirtualHarness = class _AcpVirtualHarness {
+  constructor(client, host) {
+    this.client = client;
+    this.host = host;
+    this.api = this.createApiProxy();
+  }
+  api;
+  workspaceById = /* @__PURE__ */ new Map();
+  sessions = /* @__PURE__ */ new Map();
+  workspaceStreams = /* @__PURE__ */ new Set();
+  controlStreams = /* @__PURE__ */ new Set();
+  eventStreams = /* @__PURE__ */ new Map();
+  rcMuxStreams = /* @__PURE__ */ new Set();
+  rcHostStreams = /* @__PURE__ */ new Set();
+  follows = /* @__PURE__ */ new Set();
+  pendingApprovals = /* @__PURE__ */ new Map();
+  selectedWorkspaceId;
+  lastProjectionSeq = 0;
+  closed = false;
+  static remote(core, host) {
+    return new _AcpVirtualHarness(new AgentAcpClient(core), host);
+  }
+  async workspaces() {
+    return [...this.workspaceById.values()];
+  }
+  async selectWorkspace(workspaceId) {
+    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId);
+    if (workspace === void 0) throw new Error("The selected Cursor workspace is no longer available.");
+    this.workspaceById.set(workspace.workspaceId, workspace);
+    this.selectedWorkspaceId = workspace.workspaceId;
+    return workspace;
+  }
+  async selectOrCreateWorkspace(path) {
+    const trimmed = path.trim();
+    if (trimmed.length === 0) throw new Error("A Cursor working directory is required.");
+    const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
+    const workspace = existing ?? createAcpWorkspaceView(trimmed);
+    this.workspaceById.set(workspace.workspaceId, workspace);
+    this.selectedWorkspaceId = workspace.workspaceId;
+    return workspace;
+  }
+  async preferredSessionId() {
+    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const sessionIds = selected?.sessionIds ?? [];
+    for (let index = sessionIds.length - 1; index >= 0; index -= 1) {
+      const sessionId = sessionIds[index];
+      const session = this.sessions.get(sessionId);
+      if (session !== void 0 && !session.running) return sessionId;
+    }
+    return sessionIds.at(-1);
+  }
+  async invoke(request) {
+    const result = await this.dispatch(
+      `${request.namespace}/${request.method}`,
+      { args: request.args },
+      request.signal ?? new AbortController().signal
+    );
+    if (result.ok) return result.value;
+    throw Object.assign(new Error(result.error.message), {
+      isDSHRemoteError: true,
+      code: result.error.code,
+      details: result.error.details
+    });
+  }
+  async dispatch(endpoint, payload, signal) {
+    try {
+      const args = carrierArgs2(payload);
+      switch (endpoint) {
+        case "$events/result":
+          return business2(await this.answerRemoteEvent(args, signal));
+        case "workspace/list":
+          return business2(success2({
+            items: this.visibleWorkspaces().map(nativeWorkspace2),
+            archivedSessionIds: []
+          }));
+        case "workspace/create":
+          return business2(await this.createWorkspace(requestArg2(args)));
+        case "workspace/rename":
+          return business2(await this.renameWorkspace(requestArg2(args)));
+        case "workspace/delete":
+          return business2(failure2("workspace-read-only", "Cursor virtual Workspaces cannot be deleted from Desktop yet."));
+        case "workspace/insertBefore":
+          return business2({
+            workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId)
+          });
+        case "workspace/insertSessionBefore":
+          return business2(await this.workspaceForSession(requestArg2(args)));
+        case "workspace/archiveSession":
+          return business2(await this.archiveSession(requestArg2(args)));
+        case "session/list":
+          return business2(success2({ items: this.sessionSummaries() }));
+        case "session/search":
+          return business2(success2({ items: [], hasMore: false }));
+        case "session/create":
+          return business2(await this.createSession(requestArg2(args), signal));
+        case "session/fork":
+          return business2(failure2("bad-request", "Cursor Remote does not support session fork yet."));
+        case "session/history":
+          return business2(await this.sessionHistory(requestArg2(args)));
+        case "session/page":
+          return business2(await this.sessionPage(requestArg2(args)));
+        case "session/prompt":
+          return business2(await this.prompt(requestArg2(args), signal));
+        case "session/cancel":
+          return business2(await this.cancel(requestArg2(args), signal));
+        case "session/rename":
+          return business2(await this.renameSession(requestArg2(args)));
+        case "session/updateQueue":
+          return business2(failure2("queue-item-not-found", "Cursor does not expose a DSH inbox queue."));
+        case "session/attachment":
+          return business2(failure2("attachment-error", "Cursor Remote accepts text prompts only."));
+        case "session/modelCatalog":
+          return business2(success2(modelCatalog2()));
+        case "session/models": {
+          nativeAcpId(requiredString2(requestArg2(args).sessionId, "sessionId"));
+          return business2(success2({
+            current: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            routable: false,
+            groups: modelCatalog2().groups,
+            failures: []
+          }));
+        }
+        case "session/selectModel":
+          return business2(failure2("bad-request", "Cursor Remote does not expose model selection yet."));
+        case "session/canOpenWorkspacePath":
+          return business2(this.selectedWorkspaceId !== void 0);
+        case "session/openWorkspacePath":
+          return business2(failure2("bad-request", "Opening Host paths is unavailable in Cursor mode."));
+        case "host/describe":
+          return business2(success2(this.describeHost()));
+        case "host/listDirectory":
+        case "directoryPicker/list":
+          return business2(await this.listDirectory(requestArg2(args), signal));
+        case "skills/list":
+          return business2(success2({ items: [] }));
+        case "commands/list":
+          return business2([]);
+        case "commands/execute":
+          return business2(void 0);
+        default:
+          return fail2("method-not-found", `Cursor virtual Harness does not implement ${endpoint}.`);
+      }
+    } catch (error) {
+      return failFrom2(error);
+    }
+  }
+  async open(endpoint, payload, signal) {
+    const args = carrierArgs2(payload);
+    if (endpoint === "workspace/follow") return this.workspaceFollow(signal);
+    if (endpoint === "session/control") return this.sessionControl(signal);
+    if (endpoint === "session/follow") return this.sessionFollow(requestArg2(args), signal);
+    if (endpoint === "$events") return this.remoteEvents(signal);
+    throw Object.assign(new Error(`Cursor virtual Harness does not implement stream ${endpoint}.`), {
+      isDSHRemoteError: true,
+      code: "method-not-found",
+      details: {}
+    });
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    for (const stream of this.workspaceStreams) stream.close();
+    for (const stream of this.controlStreams) stream.close();
+    for (const stream of this.eventStreams.values()) stream.close();
+    for (const stream of this.rcMuxStreams) stream.close();
+    for (const stream of this.rcHostStreams) stream.close();
+    this.workspaceStreams.clear();
+    this.controlStreams.clear();
+    this.eventStreams.clear();
+    this.rcMuxStreams.clear();
+    this.rcHostStreams.clear();
+    const follows = [...this.follows];
+    this.follows.clear();
+    for (const follow of follows) {
+      follow.queue.close();
+      await follow.close?.().catch(() => void 0);
+    }
+    this.pendingApprovals.clear();
+  }
+  visibleWorkspaces() {
+    if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
+    const selected = this.workspaceById.get(this.selectedWorkspaceId);
+    if (selected === void 0) return [...this.workspaceById.values()];
+    return [
+      selected,
+      ...[...this.workspaceById.values()].filter((item) => item.workspaceId !== selected.workspaceId)
+    ];
+  }
+  async createWorkspace(request) {
+    const path = string2(request.path)?.trim();
+    if (path === void 0 || path.length === 0) return failure2("bad-request", "A Cursor working directory is required.");
+    const workspace = await this.selectOrCreateWorkspace(path);
+    this.publishWorkspaceBaseline();
+    return success2({ workspace: nativeWorkspace2(workspace), created: true });
+  }
+  async renameWorkspace(request) {
+    const workspaceId = requiredString2(request.workspaceId, "workspaceId");
+    const title = string2(request.title)?.trim();
+    const workspace = this.workspaceById.get(workspaceId);
+    if (workspace === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    if (title === void 0 || title.length === 0) return failure2("bad-request", "A Workspace name is required.");
+    const next = { ...workspace, title, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    this.workspaceById.set(workspaceId, next);
+    this.publishWorkspaceBaseline();
+    return success2({ workspace: nativeWorkspace2(next) });
+  }
+  async workspaceForSession(request) {
+    const sessionId = string2(request.sessionId);
+    const workspace = [...this.workspaceById.values()].find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
+    return workspace === void 0 ? failure2("workspace-not-found", "The Cursor virtual Workspace was not found.") : success2({ workspace: nativeWorkspace2(workspace) });
+  }
+  async archiveSession(request) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    this.sessions.delete(sessionId);
+    for (const [workspaceId, workspace] of this.workspaceById) {
+      if (!workspace.sessionIds.includes(sessionId)) continue;
+      const sessionIds = workspace.sessionIds.filter((id3) => id3 !== sessionId);
+      this.workspaceById.set(workspaceId, {
+        ...workspace,
+        sessionIds,
+        sessionCount: sessionIds.length,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    this.emitRemoteEvent("api-session/removed", [sessionId]);
+    this.publishWorkspaceBaseline();
+    return success2({ archivedSessionIds: [sessionId] });
+  }
+  async createSession(request, signal) {
+    const workspaceId = string2(request.workspaceId) ?? this.selectedWorkspaceId;
+    const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
+    const cwd2 = string2(request.cwd) ?? workspace?.path;
+    if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    const created = await this.client.createSession(cwd2, "agent", signal);
+    const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
+    this.attachSessionToWorkspace(cwd2, session.sessionId);
+    this.publishWorkspaceBaseline();
+    const seq = this.nextProjectionSeq();
+    this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
+    return success2({ sessionId: session.sessionId });
+  }
+  async prompt(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    const text = extractPromptText(array2(request.content));
+    if (text === void 0) return failure2("attachment-error", "Cursor Remote accepts text prompts only.");
+    await this.ensureFollow(session);
+    const userEvent = this.appendHistory(session, {
+      type: "user/message",
+      seq: session.events.length,
+      time: Date.now(),
+      data: { text },
+      surfaceOp: "append"
+    });
+    for (const follow of this.follows) {
+      if (follow.sessionId !== sessionId) continue;
+      follow.queue.push({ type: "event", event: { ...userEvent, seq: follow.nextSeq++ } });
+    }
+    session.blank = false;
+    session.running = true;
+    session.updatedAt = Date.now();
+    this.emitRemoteEvent("api-session/status", [sessionId, true]);
+    await this.client.prompt(session.acpSessionId, text, signal);
+    return success2({ accepted: true });
+  }
+  async cancel(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    await this.client.cancel(session.acpSessionId, signal);
+    session.running = false;
+    this.emitRemoteEvent("api-session/status", [sessionId, false]);
+    return success2({ accepted: true });
+  }
+  async renameSession(request) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const title = string2(request.title)?.trim();
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (title === void 0) return failure2("bad-request", "A Session title is required.");
+    session.title = title;
+    session.updatedAt = Date.now();
+    this.publishProjection(sessionId, "title", title);
+    return success2({ sessionId });
+  }
+  async sessionHistory(request) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    return success2(this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50));
+  }
+  async sessionPage(request) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    return success2(this.historyPage(session, optionalInteger2(request.beforeSeq), optionalPositiveInteger2(request.limit) ?? 50));
+  }
+  historyPage(session, beforeSeq, limit) {
+    const filtered = beforeSeq === void 0 ? session.events : session.events.filter((entry) => entry.event.seq < beforeSeq);
+    const records = filtered.slice(Math.max(0, filtered.length - limit));
+    const cursor2 = records[0]?.event.seq ?? -1;
+    return {
+      header: {
+        version: 1,
+        id: session.sessionId,
+        createdAt: session.createdAt,
+        cwd: session.cwd
+      },
+      cursor: cursor2,
+      nextTurn: 1,
+      records,
+      hasMore: filtered.length > records.length,
+      ...session.running ? { activeTurnId: "cursor-live" } : {}
+    };
+  }
+  describeHost() {
+    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    return {
+      version: "Cursor Remote",
+      cwd: workspace?.path ?? "",
+      home: workspace?.path ?? "",
+      provider: "Cursor",
+      model: CURSOR_MODEL,
+      attachedSessions: this.sessions.size,
+      canOpenPath: workspace !== void 0
+    };
+  }
+  async listDirectory(request, signal) {
+    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    if (workspace === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    const path = string2(request.path) ?? workspace.path;
+    return success2(await this.client.listDirectory(path, signal));
+  }
+  async answerRemoteEvent(args, signal) {
+    const eventId = string2(args.eventId);
+    const outcome = record3(args.outcome);
+    if (eventId === void 0) throw new Error("The Cursor approval result is missing its event id.");
+    const pending = this.pendingApprovals.get(eventId);
+    if (pending === void 0) return void 0;
+    this.pendingApprovals.delete(eventId);
+    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "allow-once" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "reject-once";
+    await this.client.respond(pending.requestHandle, decision, void 0, signal);
+    return void 0;
+  }
+  async workspaceFollow(signal) {
+    const queue = new AsyncValueQueue3(signal);
+    this.workspaceStreams.add(queue);
+    queue.push({
+      type: "baseline",
+      value: {
+        items: this.visibleWorkspaces().map(nativeWorkspace2),
+        archivedSessionIds: []
+      }
+    });
+    return queue.iterate(() => this.workspaceStreams.delete(queue));
+  }
+  async sessionControl(signal) {
+    const queue = new AsyncValueQueue3(signal);
+    this.controlStreams.add(queue);
+    queue.push({ type: "ready" });
+    return queue.iterate(() => this.controlStreams.delete(queue));
+  }
+  async remoteEvents(signal) {
+    const id3 = `cursor-events:${Date.now()}:${Math.random()}`;
+    const queue = new AsyncValueQueue3(signal);
+    this.eventStreams.set(id3, queue);
+    return queue.iterate(() => this.eventStreams.delete(id3));
+  }
+  async sessionFollow(request, signal) {
+    const sessionId = sessionIdFromAddress2(record3(request.address));
+    const session = this.sessions.get(sessionId);
+    if (session === void 0) throw new Error("The Cursor Session was not found.");
+    const history = this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50);
+    const queue = new AsyncValueQueue3(signal);
+    const follow = {
+      sessionId,
+      acpSessionId: session.acpSessionId,
+      queue,
+      nextSeq: Math.max(0, ...session.events.map((entry) => entry.event.seq)) + 1,
+      turn: 1,
+      stepOpen: session.running,
+      streamActive: false
+    };
+    this.follows.add(follow);
+    queue.push({
+      type: "snapshot",
+      header: history.header,
+      cursor: history.cursor,
+      records: history.records,
+      hasMore: history.hasMore,
+      projections: {
+        asOfSeq: history.cursor,
+        values: {
+          title: session.title ?? null,
+          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          modelSelection: {
+            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL }
+          },
+          imageLimits: {
+            maxImageBytes: 0,
+            maxImagesPerMessage: 0,
+            mediaTypes: []
+          }
+        }
+      }
+    });
+    try {
+      const stream = await this.client.openStream(
+        session.acpSessionId,
+        (frame) => this.acceptAcpFrame(follow, frame),
+        () => {
+          session.running = false;
+          this.emitRemoteEvent("api-session/status", [sessionId, false]);
+          this.closeFollowAfterRemoteStreamClosed(follow);
+        },
+        signal
+      );
+      follow.close = () => stream.close();
+    } catch (error) {
+      this.follows.delete(follow);
+      queue.close();
+      throw error;
+    }
+    return queue.iterate(() => {
+      this.follows.delete(follow);
+      void follow.close?.().catch(() => void 0);
+    });
+  }
+  async ensureFollow(session) {
+    if ([...this.follows].some((follow2) => follow2.sessionId === session.sessionId)) return;
+    const controller = new AbortController();
+    const queue = new AsyncValueQueue3(controller.signal);
+    const follow = {
+      sessionId: session.sessionId,
+      acpSessionId: session.acpSessionId,
+      queue,
+      nextSeq: Math.max(0, ...session.events.map((entry) => entry.event.seq)) + 1,
+      turn: 1,
+      stepOpen: false,
+      streamActive: false
+    };
+    this.follows.add(follow);
+    const stream = await this.client.openStream(
+      session.acpSessionId,
+      (frame) => this.acceptAcpFrame(follow, frame),
+      () => this.closeFollowAfterRemoteStreamClosed(follow)
+    );
+    follow.close = async () => {
+      controller.abort();
+      await stream.close();
+    };
+  }
+  acceptAcpFrame(follow, frame) {
+    const method = frame.frame.method;
+    const params = record3(frame.frame.params);
+    if (method === "session/update") {
+      this.acceptSessionUpdate(follow, params);
+      return;
+    }
+    if (method === "session/request_permission" || method === "cursor/ask_question" || method === "cursor/create_plan") {
+      this.acceptApproval(follow, params, method);
+    }
+  }
+  acceptSessionUpdate(follow, params) {
+    const update = isRecord7(params.update) ? params.update : params;
+    const kind = string2(update.sessionUpdate) ?? string2(update.type);
+    const session = this.sessions.get(follow.sessionId);
+    if (kind === "agent_message_chunk" || kind === "agent_message") {
+      const text = extractText(update);
+      if (text === void 0 || text.length === 0) return;
+      this.appendAssistantDelta(follow, text);
+      return;
+    }
+    if (kind === "tool_call" || kind === "tool_call_update") {
+      const toolName = string2(update.title) ?? string2(update.toolName) ?? string2(update.name) ?? "tool";
+      const status2 = string2(update.status);
+      this.pushEvent(follow, "tool/call", {
+        turn: follow.turn,
+        step: 1,
+        toolCallId: string2(update.toolCallId) ?? toolName,
+        toolName,
+        status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
+      });
+      if (session !== void 0) session.updatedAt = Date.now();
+      return;
+    }
+    if (kind === "agent_thought_chunk") {
+      const text = extractText(update);
+      if (text === void 0 || text.length === 0) return;
+      this.appendReasoningDelta(follow, text);
+    }
+  }
+  acceptApproval(follow, params, method) {
+    const requestHandle = string2(params.requestHandle);
+    if (requestHandle === void 0) return;
+    this.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
+    const toolName = method === "cursor/create_plan" ? string2(params.name) ?? "plan" : method === "cursor/ask_question" ? string2(params.title) ?? "question" : string2(params.toolName) ?? "permission";
+    const reason = method === "cursor/create_plan" ? string2(params.overview) ?? string2(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string2(params.reason);
+    this.emitApproval({
+      eventId: requestHandle,
+      agentId: follow.sessionId,
+      request: {
+        toolName,
+        ...reason === void 0 ? {} : { reason }
+      }
+    });
+  }
+  appendAssistantDelta(follow, delta) {
+    if (!follow.stepOpen) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    }
+    if (follow.blockIndex === void 0) {
+      follow.blockIndex = 0;
+      follow.streamActive = true;
+      this.pushEvent(follow, "assistant/chunk", {
+        turn: follow.turn,
+        step: 1,
+        chunk: { type: "block-start", index: 0, blockType: "text" }
+      });
+    }
+    this.pushEvent(follow, "assistant/chunk", {
+      turn: follow.turn,
+      step: 1,
+      chunk: { type: "text-delta", index: follow.blockIndex, text: delta }
+    });
+  }
+  appendReasoningDelta(follow, delta) {
+    if (!follow.stepOpen) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    }
+    const index = (follow.blockIndex ?? -1) + 1;
+    follow.blockIndex = index;
+    this.pushEvent(follow, "assistant/chunk", {
+      turn: follow.turn,
+      step: 1,
+      chunk: { type: "block-start", index, blockType: "reasoning" }
+    });
+    this.pushEvent(follow, "assistant/chunk", {
+      turn: follow.turn,
+      step: 1,
+      chunk: { type: "reasoning-delta", index, text: delta }
+    });
+  }
+  closeFollowAfterRemoteStreamClosed(follow) {
+    if (follow.streamActive && follow.blockIndex !== void 0) {
+      this.pushEvent(follow, "assistant/chunk", {
+        turn: follow.turn,
+        step: 1,
+        chunk: { type: "block-end", index: follow.blockIndex, block: { type: "text", text: "" } }
+      });
+      this.pushEvent(follow, "assistant/chunk", {
+        turn: follow.turn,
+        step: 1,
+        chunk: { type: "finish", reason: { kind: "stop" } }
+      });
+    }
+    follow.streamActive = false;
+    follow.stepOpen = false;
+    follow.blockIndex = void 0;
+  }
+  pushEvent(follow, type, data) {
+    const seq = follow.nextSeq++;
+    const event = {
+      type,
+      seq,
+      time: Date.now(),
+      data,
+      ...isSurfaceEvent2(type) ? { surfaceOp: "append" } : {}
+    };
+    const session = this.sessions.get(follow.sessionId);
+    if (session !== void 0) this.appendHistory(session, event);
+    follow.queue.push({ type: "event", event });
+    this.broadcastRcMux({
+      type: "session/event",
+      sessionId: follow.sessionId,
+      event
+    });
+    return seq;
+  }
+  appendHistory(session, event) {
+    const next = { ...event, seq: session.events.length };
+    session.events.push({ type: "event", event: next });
+    return next;
+  }
+  registerSession(acpSessionId, cwd2, title) {
+    const now = Date.now();
+    const session = {
+      sessionId: `${CURSOR_SESSION_PREFIX}${acpSessionId}`,
+      acpSessionId,
+      cwd: cwd2,
+      ...title === void 0 ? {} : { title },
+      blank: true,
+      running: false,
+      createdAt: now,
+      updatedAt: now,
+      events: []
+    };
+    this.sessions.set(session.sessionId, session);
+    return session;
+  }
+  attachSessionToWorkspace(cwd2, sessionId) {
+    const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2);
+    const sessionIds = [sessionId, ...workspace.sessionIds.filter((id3) => id3 !== sessionId)];
+    const next = {
+      ...workspace,
+      sessionIds,
+      sessionCount: sessionIds.length,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.workspaceById.set(next.workspaceId, next);
+    if (this.selectedWorkspaceId === void 0) this.selectedWorkspaceId = next.workspaceId;
+  }
+  sessionSummaries() {
+    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
+    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
+  }
+  sessionSummary(session, asOfSeq) {
+    return {
+      sessionId: session.sessionId,
+      running: session.running,
+      blank: session.blank,
+      cwd: session.cwd,
+      updatedAt: session.updatedAt,
+      projections: {
+        asOfSeq,
+        values: {
+          title: session.title ?? null,
+          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          modelSelection: {
+            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL }
+          },
+          imageLimits: {
+            maxImageBytes: 0,
+            maxImagesPerMessage: 0,
+            mediaTypes: []
+          }
+        }
+      }
+    };
+  }
+  publishWorkspaceBaseline() {
+    for (const queue of this.workspaceStreams) {
+      for (const workspace of this.visibleWorkspaces()) {
+        queue.push({ type: "upsert", workspace: nativeWorkspace2(workspace) });
+      }
+      queue.push({ type: "archived", archivedSessionIds: [] });
+    }
+  }
+  publishProjection(sessionId, key, value) {
+    const seq = this.nextProjectionSeq();
+    for (const queue of this.controlStreams) {
+      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq });
+    }
+  }
+  emitRemoteEvent(event, args) {
+    for (const queue of this.eventStreams.values()) queue.push({ type: "emit", event, args });
+    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
+    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
+      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
+    } else if (event === "api-session/removed" && sessionId !== void 0) {
+      this.broadcastRcHost({ type: "host/session-removed", sessionId });
+    } else if (event === "api-session/added" && isRecord7(args[0])) {
+      const summary = args[0];
+      this.broadcastRcHost({
+        type: "host/session-added",
+        sessionId: summary.sessionId,
+        blank: summary.blank === true,
+        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
+      });
+    }
+  }
+  emitApproval(input2) {
+    for (const queue of this.eventStreams.values()) queue.push({
+      type: "waterfall",
+      event: "approval/request",
+      eventId: input2.eventId,
+      agentId: input2.agentId,
+      request: input2.request
+    });
+    this.broadcastRcMux({
+      type: "approval/requested",
+      sessionId: input2.agentId,
+      approvalId: input2.eventId,
+      toolName: string2(input2.request.toolName) ?? "Cursor",
+      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
+    }, input2.eventId);
+  }
+  nextProjectionSeq() {
+    this.lastProjectionSeq += 1;
+    return this.lastProjectionSeq;
+  }
+  createApiProxy() {
+    const call = (endpoint) => async (request, signal) => {
+      const payload = endpoint === "session.prompt" && isRecord7(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
+      const result = await this.dispatch(rcEndpoint2(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
+      return {
+        rpcId: request.rpcId,
+        result: result.ok ? success2(result.value) : failure2(result.error.code, result.error.message, result.error.details)
+      };
+    };
+    return {
+      sessions: {
+        list: call("session.list"),
+        search: call("session.search"),
+        create: call("session.create"),
+        history: call("session.history"),
+        models: call("session.models"),
+        selectModel: call("session.selectModel"),
+        rename: call("session.rename"),
+        fork: call("session.fork"),
+        prompt: call("session.prompt"),
+        attachment: call("session.attachment"),
+        updateQueue: call("session.updateQueue"),
+        cancel: call("session.cancel")
+      },
+      workspace: {
+        list: call("workspace.list"),
+        create: call("workspace.create"),
+        rename: call("workspace.rename"),
+        delete: call("workspace.delete"),
+        insertBefore: call("workspace.insertBefore"),
+        insertSessionBefore: call("workspace.insertSessionBefore"),
+        archiveSession: call("workspace.archiveSession")
+      },
+      subagents: {},
+      host: {
+        describe: call("host.describe"),
+        listDirectory: call("host.listDirectory")
+      },
+      skills: { list: call("skills.list") },
+      agentPresets: {},
+      goals: {},
+      settings: {},
+      credentials: {},
+      llm: {},
+      events: {
+        mux: ((request, signal) => this.rcMux(request, signal)),
+        host: ((request, signal) => this.rcHost(request, signal))
+      },
+      downloads: {},
+      respond: async (message) => {
+        const pending = this.pendingApprovals.get(String(message.rpcId)) ?? [...this.pendingApprovals.values()].find((item) => item.requestHandle === String(message.rpcId));
+        if (pending === void 0) return { accepted: false, reason: "not-pending" };
+        const result = message.result;
+        const outcome = result.ok ? result.value : void 0;
+        const decision = outcome === "allowed-once" ? "allow-once" : outcome === "cancelled" ? "cancel" : "reject-once";
+        await this.client.respond(pending.requestHandle, decision);
+        this.pendingApprovals.delete(pending.requestHandle);
+        return { accepted: true };
+      }
+    };
+  }
+  async *rcMux(request, signal) {
+    const queue = new AsyncValueQueue3(signal);
+    this.rcMuxStreams.add(queue);
+    for (const session of this.sessions.values()) {
+      queue.push({
+        rpcId: `${String(request.rpcId)}:${session.sessionId}:subscribed`,
+        payload: { type: "session/subscribed", sessionId: session.sessionId, lastSeq: -1 }
+      });
+    }
+    try {
+      yield* queue;
+    } finally {
+      this.rcMuxStreams.delete(queue);
+      queue.close();
+    }
+  }
+  async *rcHost(_request, signal) {
+    const queue = new AsyncValueQueue3(signal);
+    this.rcHostStreams.add(queue);
+    try {
+      yield* queue;
+    } finally {
+      this.rcHostStreams.delete(queue);
+      queue.close();
+    }
+  }
+  broadcastRcMux(payload, rpcId2 = `cursor-mux:${Date.now()}:${Math.random()}`) {
+    for (const queue of this.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
+  }
+  broadcastRcHost(payload) {
+    const frame = { rpcId: `cursor-host:${Date.now()}:${Math.random()}`, payload };
+    for (const queue of this.rcHostStreams) queue.push(frame);
+  }
+};
+function recreateWorkspaceFromId(workspaceId) {
+  if (!workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) return void 0;
+  try {
+    const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length));
+    if (path.length === 0) return void 0;
+    return createAcpWorkspaceView(path);
+  } catch {
+    return void 0;
+  }
+}
+function nativeWorkspace2(view) {
+  return {
+    workspaceId: view.workspaceId,
+    path: view.path,
+    title: view.title,
+    sessionIds: view.sessionIds,
+    createdAt: view.createdAt,
+    updatedAt: view.updatedAt
+  };
+}
+function modelCatalog2() {
+  return {
+    default: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+    groups: [{
+      id: CURSOR_PROVIDER,
+      name: "Cursor",
+      models: [{ id: CURSOR_MODEL, name: "Cursor" }]
+    }]
+  };
+}
+function extractPromptText(content) {
+  const parts = content.flatMap((part) => {
+    const item = record3(part);
+    if (item.type === "text" && typeof item.text === "string") return [item.text];
+    return [];
+  });
+  const text = parts.join("");
+  return text.length === 0 ? void 0 : text;
+}
+function extractText(update) {
+  const content = update.content;
+  if (typeof content === "string") return content;
+  if (isRecord7(content) && typeof content.text === "string") return content.text;
+  if (Array.isArray(content)) {
+    const parts = content.map((part) => isRecord7(part) && typeof part.text === "string" ? part.text : void 0).filter((part) => part !== void 0);
+    return parts.length === 0 ? void 0 : parts.join("");
+  }
+  return typeof update.text === "string" ? update.text : void 0;
+}
+function summarizeQuestions(params) {
+  if (!Array.isArray(params.questions)) return void 0;
+  const lines = params.questions.map((question) => isRecord7(question) ? string2(question.prompt) : void 0).filter((line) => line !== void 0);
+  return lines.length === 0 ? void 0 : lines.join("\n");
+}
+function sessionIdFromAddress2(address) {
+  if (address.kind === "session") return requiredString2(address.sessionId, "sessionId");
+  return requiredString2(address.childSessionId, "childSessionId");
+}
+function nativeAcpId(sessionId) {
+  if (!sessionId.startsWith(CURSOR_SESSION_PREFIX) || sessionId.length === CURSOR_SESSION_PREFIX.length) {
+    throw new Error("The selected Session does not belong to Cursor.");
+  }
+  return sessionId.slice(CURSOR_SESSION_PREFIX.length);
+}
+function isSurfaceEvent2(type) {
+  return type === "assistant/chunk" || type === "user/message" || type === "tool/call" || type === "tool/result";
+}
+function carrierArgs2(payload) {
+  return record3(record3(payload).args);
+}
+function requestArg2(args) {
+  return record3(args.request ?? args._request ?? args);
+}
+function rcEndpoint2(endpoint) {
+  if (endpoint === "workspace.list") return "workspace/list";
+  return endpoint.replace(".", "/");
+}
+function success2(value) {
+  return { ok: true, value };
+}
+function failure2(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function business2(value) {
+  if (isRecord7(value) && value.ok === false && isRecord7(value.error)) {
+    return { ok: false, error: {
+      code: string2(value.error.code) ?? "internal",
+      message: string2(value.error.message) ?? "The Cursor virtual Harness request failed.",
+      details: isRecord7(value.error.details) ? value.error.details : {}
+    } };
+  }
+  if (isRecord7(value) && value.ok === true) return { ok: true, value: value.value };
+  return { ok: true, value };
+}
+function fail2(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function failFrom2(error) {
+  const source = error instanceof Error ? error : new Error(String(error));
+  const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
+  return fail2(code, source.message);
+}
+function record3(value) {
+  return isRecord7(value) ? value : {};
+}
+function isRecord7(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function array2(value) {
+  return Array.isArray(value) ? value : [];
+}
+function string2(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function integer2(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
+}
+function optionalInteger2(value) {
+  if (value === void 0) return void 0;
+  const parsed = integer2(value);
+  if (parsed === void 0) throw new Error("The Cursor History cursor is invalid.");
+  return parsed;
+}
+function optionalPositiveInteger2(value) {
+  const parsed = optionalInteger2(value);
+  if (parsed !== void 0 && parsed <= 0) throw new Error("The Cursor History page size is invalid.");
+  return parsed;
+}
+function requiredString2(value, field) {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`The Cursor ${field} is required.`);
+  return value;
+}
+var AsyncValueQueue3 = class {
   constructor(signal) {
     this.signal = signal;
     this.onAbort = () => this.close();
@@ -18036,7 +19171,7 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details = "details" in source && isRecord6(source.details) ? source.details : {};
+    const details = "details" in source && isRecord8(source.details) ? source.details : {};
     return { code, message: source.message, details };
   }
 };
@@ -18045,7 +19180,7 @@ function requestFromCarrier(endpoint, payload, signal) {
   if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error("The Harness Gateway endpoint is invalid.");
   }
-  if (!isRecord6(payload) || !isRecord6(payload.args)) {
+  if (!isRecord8(payload) || !isRecord8(payload.args)) {
     throw new Error("The Harness Gateway payload is invalid.");
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
@@ -18060,7 +19195,7 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
-function isRecord6(value) {
+function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -19147,6 +20282,7 @@ var ClientModeRuntime = class {
   connected;
   pendingWorkspaceSelection;
   codexVirtual;
+  cursorVirtual;
   proxySwitch;
   gatewaySwitch;
   codexStreams = /* @__PURE__ */ new Map();
@@ -19189,7 +20325,7 @@ var ClientModeRuntime = class {
       },
       remoteFeatures: this.connected?.features ?? remoteHostFeatures(),
       ...this.pendingWorkspaceSelection === void 0 ? {} : { workspaceSelection: { ...this.pendingWorkspaceSelection } },
-      backend: this.codexVirtual === void 0 ? "harness" : "codex",
+      backend: this.cursorVirtual !== void 0 ? "cursor" : this.codexVirtual === void 0 ? "harness" : "codex",
       hostAuthorizationAvailable: this.host !== void 0,
       ...this.host === void 0 ? {} : { host: this.host.hostStatus() }
     };
@@ -19258,6 +20394,7 @@ var ClientModeRuntime = class {
     this.connectionProgress = void 0;
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
     this.proxySwitch?.selectLocal();
     this.gatewaySwitch.selectLocal();
     await this.closeCodexStreams(previous?.client);
@@ -19279,6 +20416,7 @@ var ClientModeRuntime = class {
   async setMode(mode2, targetDeviceId, signal) {
     if (mode2 === "local") {
       await this.closeCodexVirtual();
+      await this.closeCursorVirtual();
       this.proxySwitch?.selectLocal();
       this.gatewaySwitch.selectLocal();
       const previous2 = this.connected;
@@ -19306,6 +20444,7 @@ var ClientModeRuntime = class {
     this.clearConnectionProgress(next.progressRunId);
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
     this.selectRemoteTarget(next);
     await this.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
@@ -19364,6 +20503,7 @@ var ClientModeRuntime = class {
       workspace = unwrapNativeResult(response);
     }
     await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
     this.selectRemoteTarget(remote, transport);
     const workspaceId = workspaceRecordId(workspace.workspace);
     this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
@@ -19397,6 +20537,7 @@ var ClientModeRuntime = class {
       throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
     }
     await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
     this.codexVirtual = virtual;
     this.selectCodexTarget(virtual, remote);
     const preferredSessionId = await virtual.preferredSessionId(signal);
@@ -19418,16 +20559,85 @@ var ClientModeRuntime = class {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
     this.assertLocalHarnessCarrierAvailable();
-    const result = record3(await new CodexRemoteClient(remote.client).request("project/create", {
+    const result = record4(await new CodexRemoteClient(remote.client).request("project/create", {
       name: remoteWorkspaceTitle(trimmedPath),
       roots: [{ path: trimmedPath }],
       idempotencyKey: uuidV7()
     }, signal));
-    const project = record3(result.project);
+    const project = record4(result.project);
     if (typeof project.id !== "string" || project.id.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "The Host returned an invalid CodeX project.");
     }
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal);
+  }
+  async listCursorWorkspaces(targetDeviceId, signal) {
+    const remote = await this.ensureConnected(targetDeviceId, signal);
+    remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
+    if (!remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    }
+    if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId) {
+      return this.cursorVirtual.workspaces();
+    }
+    return discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal);
+  }
+  async openCursorWorkspace(targetDeviceId, workspaceId, signal) {
+    const remote = await this.ensureConnected(targetDeviceId, signal);
+    remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
+    if (!remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    }
+    this.assertLocalHarnessCarrierAvailable();
+    const virtual = AcpVirtualHarness.remote(remote.client, {
+      deviceId: remote.target.deviceId,
+      name: remote.target.name
+    });
+    let workspace;
+    try {
+      workspace = await virtual.selectWorkspace(workspaceId);
+    } catch {
+      await virtual.close();
+      throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected Cursor workspace is no longer available.");
+    }
+    await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
+    this.cursorVirtual = virtual;
+    this.selectCursorTarget(virtual, remote);
+    const preferredSessionId = await virtual.preferredSessionId();
+    this.pendingWorkspaceSelection = {
+      targetDeviceId: remote.target.deviceId,
+      workspaceId: workspace.workspaceId,
+      backend: "cursor",
+      ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
+    };
+    this.logger.info("Cursor virtual workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
+    return { ...this.status(), workspace };
+  }
+  async createCursorWorkspace(targetDeviceId, path, signal) {
+    const trimmedPath = path.trim();
+    if (trimmedPath === "") throw new ClientModeError("INVALID_MESSAGE", "A Cursor project directory is required.");
+    const remote = await this.ensureConnected(targetDeviceId, signal);
+    remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
+    if (!remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    }
+    this.assertLocalHarnessCarrierAvailable();
+    const virtual = AcpVirtualHarness.remote(remote.client, {
+      deviceId: remote.target.deviceId,
+      name: remote.target.name
+    });
+    const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
+    await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
+    this.cursorVirtual = virtual;
+    this.selectCursorTarget(virtual, remote);
+    this.pendingWorkspaceSelection = {
+      targetDeviceId: remote.target.deviceId,
+      workspaceId: workspace.workspaceId,
+      backend: "cursor"
+    };
+    this.logger.info("Cursor virtual workspace created", { targetDeviceId: shortId(remote.target.deviceId) });
+    return { ...this.status(), workspace };
   }
   consumeWorkspaceSelection(selection) {
     const pending = this.pendingWorkspaceSelection;
@@ -19443,6 +20653,7 @@ var ClientModeRuntime = class {
     this.gatewaySwitch.selectLocal();
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
+    await this.closeCursorVirtual();
     await this.closeCodexStreams(this.connected?.client);
     await this.connected?.client.close().catch(() => void 0);
     this.connected = void 0;
@@ -19473,7 +20684,7 @@ var ClientModeRuntime = class {
   }
   async openCodexStream(payload, signal) {
     const remote = this.activeCodexRemote();
-    const value = record3(payload);
+    const value = record4(payload);
     if (typeof value.streamId !== "string" || value.streamId.length === 0 || value.streamId.length > 128 || typeof value.threadId !== "string" || value.threadId.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "A Codex stream and thread are required.");
     }
@@ -19505,10 +20716,10 @@ var ClientModeRuntime = class {
       }
     }
     stream.unsubscribe = remote.client.onEvent((event) => {
-      if (event.event === "codex.app.frame" && isRecord7(event.data) && event.data.streamId === value.streamId) {
+      if (event.event === "codex.app.frame" && isRecord9(event.data) && event.data.streamId === value.streamId) {
         this.appendCodexFrame(stream, event.data);
       }
-      if (event.event === "codex.app.stream.closed" && isRecord7(event.data) && event.data.streamId === value.streamId) {
+      if (event.event === "codex.app.stream.closed" && isRecord9(event.data) && event.data.streamId === value.streamId) {
         stream.closed = typeof event.data.reason === "string" ? event.data.reason : "closed";
         stream.wake();
       }
@@ -19535,7 +20746,7 @@ var ClientModeRuntime = class {
     stream.wake();
   };
   appendCodexFrame(stream, data) {
-    if (!isRecord7(data) || !isRecord7(data.frame) || typeof data.frame.method !== "string") return;
+    if (!isRecord9(data) || !isRecord9(data.frame) || typeof data.frame.method !== "string") return;
     if (stream.frames.length >= 256) {
       stream.closed = "overflow";
     } else {
@@ -19558,7 +20769,7 @@ var ClientModeRuntime = class {
     };
   }
   async nextCodexFrames(payload, signal) {
-    const value = record3(payload);
+    const value = record4(payload);
     if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
     const stream = this.codexStreams.get(value.streamId);
     if (stream === void 0) throw new ClientModeError("STREAM_NOT_FOUND", "The Codex stream is not open.");
@@ -19572,7 +20783,7 @@ var ClientModeRuntime = class {
     };
   }
   async closeCodexStream(payload) {
-    const value = record3(payload);
+    const value = record4(payload);
     if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
     const stream = this.codexStreams.get(value.streamId);
     if (stream === void 0) return { closed: false, streamId: value.streamId };
@@ -19624,6 +20835,20 @@ var ClientModeRuntime = class {
     const virtual = this.codexVirtual;
     this.codexVirtual = void 0;
     await virtual?.close();
+  }
+  async closeCursorVirtual() {
+    const virtual = this.cursorVirtual;
+    this.cursorVirtual = void 0;
+    await virtual?.close();
+  }
+  selectCursorTarget(virtual, remote) {
+    const target = { deviceId: remote.target.deviceId, name: remote.target.name };
+    if (this.gatewaySwitch.supportsCarrier()) {
+      this.gatewaySwitch.selectRemote(virtual, void 0, target);
+      return;
+    }
+    this.proxySwitch.selectRemote(virtual.api, target);
+    this.gatewaySwitch.selectRemote((request) => virtual.invoke(request), { execute: true, list: true }, target);
   }
   assertRemoteCompatible(remote) {
     this.selectHarnessRemoteTransport(remote);
@@ -19744,6 +20969,7 @@ var ClientModeRuntime = class {
         this.connectionProgress = void 0;
         this.pendingWorkspaceSelection = void 0;
         void this.closeCodexVirtual();
+        void this.closeCursorVirtual();
         this.proxySwitch?.selectLocal();
         this.gatewaySwitch.selectLocal();
         void connectedClient.close().catch(() => void 0);
@@ -19822,14 +21048,14 @@ var ClientModeRuntime = class {
       if (endpoint === "status") return ok2(await this.detailedStatus());
       if (endpoint === "devices") return ok2(await this.devices());
       if (endpoint === "client.account.login") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
         return ok2(await this.authorizeClientWithAccount(value.email, value.password));
       }
       if (endpoint === "client.account.qr.start") {
-        const value = record3(payload);
+        const value = record4(payload);
         const provider = value.provider ?? "zhihu";
         if (provider !== "zhihu" && provider !== "github") {
           throw new ClientModeError("INVALID_MESSAGE", "A supported OAuth provider is required.");
@@ -19837,14 +21063,14 @@ var ClientModeRuntime = class {
         return ok2(await this.startClientOAuthQrLogin(provider));
       }
       if (endpoint === "client.account.qr.poll") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.qrId !== "string" || value.qrId.length < 20) {
           throw new ClientModeError("INVALID_MESSAGE", "A QR login session is required.");
         }
         return ok2(await this.pollClientOAuthQrLogin(value.qrId));
       }
       if (endpoint === "directory.list") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
         return ok2(await this.listRemoteDirectory(
           value.targetDeviceId,
@@ -19853,45 +21079,64 @@ var ClientModeRuntime = class {
         ));
       }
       if (endpoint === "workspaces.list") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
         return ok2(await this.listRemoteWorkspaces(value.targetDeviceId, signal));
       }
       if (endpoint === "codex.workspaces.list") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
         return ok2(await this.listCodexWorkspaces(value.targetDeviceId, signal));
       }
       if (endpoint === "workspace.open") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and working directory are required.");
         }
         return ok2(await this.openRemoteWorkspace(value.targetDeviceId, value.path, signal));
       }
       if (endpoint === "codex.workspace.open") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX Workspace are required.");
         }
         return ok2(await this.openCodexWorkspace(value.targetDeviceId, value.workspaceId, signal));
       }
       if (endpoint === "codex.workspace.create") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX project directory are required.");
         }
         return ok2(await this.createCodexWorkspace(value.targetDeviceId, value.path, signal));
       }
+      if (endpoint === "cursor.workspaces.list") {
+        const value = record4(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal));
+      }
+      if (endpoint === "cursor.workspace.open") {
+        const value = record4(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor Workspace are required.");
+        }
+        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal));
+      }
+      if (endpoint === "cursor.workspace.create") {
+        const value = record4(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor project directory are required.");
+        }
+        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal));
+      }
       if (endpoint === "workspace.selection.consume") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and Workspace are required.");
         }
         return ok2(this.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...value.backend === "codex" ? { backend: "codex" } : {},
+          ...value.backend === "codex" || value.backend === "cursor" ? { backend: value.backend } : {},
           ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
         }));
       }
@@ -19900,7 +21145,7 @@ var ClientModeRuntime = class {
         return ok2(await this.callRemoteFileViewer(method, payload, signal));
       }
       if (endpoint === "codex.call") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.method !== "string" || !("params" in value)) {
           throw new ClientModeError("INVALID_MESSAGE", "A Codex method and params are required.");
         }
@@ -19924,7 +21169,7 @@ var ClientModeRuntime = class {
         return ok2({ supported: local || remoteSupported, local, remote: remoteSupported });
       }
       if (endpoint === "codex.respond") {
-        const value = record3(payload);
+        const value = record4(payload);
         const remote = this.activeCodexRemote();
         if (remote !== void 0) return ok2(await remote.client.rpc("codex.app.respond", value, signal));
         const host = this.requireLocalCodex();
@@ -19935,14 +21180,14 @@ var ClientModeRuntime = class {
       if (endpoint === "codex.stream.close") return ok2(await this.closeCodexStream(payload));
       if (endpoint === "host.account.login") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
         return ok2(await this.host.authorizeHostWithAccount(value.email, value.password));
       }
       if (endpoint === "host.authorization.set") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.enabled !== "boolean") {
           throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
         }
@@ -19950,20 +21195,20 @@ var ClientModeRuntime = class {
       }
       if (endpoint === "host.registration-code.submit") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record3(payload);
+        const value = record4(payload);
         if (typeof value.code !== "string" || value.code.trim() === "") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host registration code is required.");
         }
         return ok2(await this.host.authorizeHostWithCode(value.code));
       }
       if (endpoint === "mode.set") {
-        const value = record3(payload);
+        const value = record4(payload);
         if (value.mode !== "local" && value.mode !== "remote") throw new ClientModeError("INVALID_MESSAGE", "Mode must be local or remote.");
         return ok2(await this.setMode(value.mode, typeof value.targetDeviceId === "string" ? value.targetDeviceId : void 0, signal));
       }
       throw new ClientModeError("METHOD_NOT_FOUND", "The remote-mode control method does not exist.");
     } catch (error) {
-      return fail2(error);
+      return fail3(error);
     }
   }
   requireIdentity() {
@@ -20021,13 +21266,13 @@ function webrtcDiagnosticsLogFields(diagnostics) {
     ...diagnostics.selectedPath === void 0 ? {} : { rtcSelectedPath: diagnostics.selectedPath }
   };
 }
-function record3(value) {
+function record4(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   }
   return value;
 }
-function isRecord7(value) {
+function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function ok2(value) {
@@ -20052,11 +21297,11 @@ async function readRemoteWorkspaceBaseline(gateway, signal) {
   const iterator = source[Symbol.asyncIterator]();
   try {
     const first = await iterator.next();
-    if (first.done || !isRecord7(first.value) || first.value.type !== "baseline" || !isRecord7(first.value.value) || !Array.isArray(first.value.value.items)) {
+    if (first.done || !isRecord9(first.value) || first.value.type !== "baseline" || !isRecord9(first.value.value) || !Array.isArray(first.value.value.items)) {
       throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace baseline.");
     }
     return first.value.value.items.map((item) => {
-      if (!isRecord7(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
+      if (!isRecord9(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace row.");
       }
       return { workspaceId: item.workspaceId, path: item.path, title: item.title };
@@ -20087,7 +21332,7 @@ function remoteWorkspaceTitle(path) {
   const normalized = path.replace(/[\\/]+$/u, "");
   return normalized.split(/[\\/]+/u).filter(Boolean).at(-1) ?? path;
 }
-function fail2(error) {
+function fail3(error) {
   const source = error instanceof Error ? error : void 0;
   const remoteCode = source !== void 0 && "code" in source && typeof source.code === "string" ? source.code : source instanceof ClientModeError ? source.code : void 0;
   const retryable = source !== void 0 && "retryable" in source && typeof source.retryable === "boolean" ? source.retryable : source instanceof ClientModeError ? source.retryable : false;
@@ -20109,7 +21354,8 @@ function remoteHostFeatures(clientVersion) {
     fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
     apiProxy: true,
     remoteGateway: false,
-    codex: false
+    codex: false,
+    cursor: false
   };
 }
 async function probeRemoteHostFeatures(client, clientVersion) {
@@ -20121,7 +21367,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") return fallback;
     throw error;
   }
-  if (!isRecord7(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
+  if (!isRecord9(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned invalid transport capabilities.");
   }
   const capabilities = new Set(value.capabilities);
@@ -20129,12 +21375,13 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const remoteV1 = capabilities.has("harness.remote.v1");
   const remoteV3 = capabilities.has("harness.remote.v3");
   const codex = capabilities.has("codex.appserver.v1");
+  const cursor2 = capabilities.has("agent.acp.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor2) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -20143,7 +21390,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     apiProxy,
     remoteGateway,
     ...sessionFormat === void 0 ? {} : { sessionFormat },
-    codex
+    codex,
+    cursor: cursor2
   };
 }
 async function waitForCodexFrames(stream, signal) {
@@ -20254,24 +21502,24 @@ var IdentityStore = class {
     }
     if (!hasDevice) {
       const keys = generateKeyPair();
-      const record6 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-      await atomicJsonWrite(devicePath, record6, 384);
+      const record7 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+      await atomicJsonWrite(devicePath, record7, 384);
       await atomicTextWrite(keyPath, `${keys.privateKey}
 `, 384);
     }
     await assertPrivateMode(keyPath);
     try {
-      let record6 = identitySchema.parse(JSON.parse(await readFile2(devicePath, "utf8")));
+      let record7 = identitySchema.parse(JSON.parse(await readFile2(devicePath, "utf8")));
       const privateKey = (await readFile2(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
-      if (regenerated.publicKey !== record6.publicKey) {
+      if (regenerated.publicKey !== record7.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
-      if (record6.name !== deviceName) {
-        record6 = { ...record6, name: deviceName };
-        await atomicJsonWrite(devicePath, record6, 384);
+      if (record7.name !== deviceName) {
+        record7 = { ...record7, name: deviceName };
+        await atomicJsonWrite(devicePath, record7, 384);
       }
-      this.identity = { ...record6, privateKey, fingerprint: fingerprint(record6.publicKey) };
+      this.identity = { ...record7, privateKey, fingerprint: fingerprint(record7.publicKey) };
       await this.loadPeers();
       return this.identity;
     } catch (error) {
@@ -20413,10 +21661,10 @@ var ServerCredentialStore = class {
     return parsed.serverUrl === serverUrl && parsed.deviceId === deviceId ? parsed : void 0;
   }
   async save(credentials) {
-    const record6 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
-    await atomicWrite(this.path, `${JSON.stringify(record6, null, 2)}
+    const record7 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
+    await atomicWrite(this.path, `${JSON.stringify(record7, null, 2)}
 `);
-    return record6;
+    return record7;
   }
   async clear() {
     await rm2(this.path, { force: true });
@@ -20482,7 +21730,7 @@ var PluginControlRuntime = class {
       if (endpoint === "devices") return ok3([]);
       if (endpoint === "host.account.login") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record4(payload);
+        const value = record5(payload);
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
@@ -20490,23 +21738,23 @@ var PluginControlRuntime = class {
       }
       if (endpoint === "host.registration-code.submit") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record4(payload);
+        const value = record5(payload);
         if (typeof value.code !== "string" || value.code.trim() === "") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host registration code is required.");
         }
         return ok3(await this.host.authorizeHostWithCode(value.code));
       }
-      if (endpoint === "mode.set" && record4(payload).mode === "local") return ok3(this.hostOnlyStatus());
+      if (endpoint === "mode.set" && record5(payload).mode === "local") return ok3(this.hostOnlyStatus());
       throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is disabled by the plugin role.");
     } catch (error) {
-      return fail3(error);
+      return fail4(error);
     }
   }
   async configure(payload) {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const value = record4(payload);
+    const value = record5(payload);
     if (value.role !== "host" && value.role !== "client") {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
     }
@@ -20541,7 +21789,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const value = record4(payload);
+    const value = record5(payload);
     if (typeof value.serverUrl !== "string") {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
@@ -20554,7 +21802,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const role = record4(payload).role;
+    const role = record5(payload).role;
     if (role !== "host" && role !== "client") {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
     }
@@ -20570,7 +21818,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const enabled = record4(payload).enabled;
+    const enabled = record5(payload).enabled;
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Codex Remote enabled must be a boolean.");
     }
@@ -20586,7 +21834,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const enabled = record4(payload).enabled;
+    const enabled = record5(payload).enabled;
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Cursor Remote enabled must be a boolean.");
     }
@@ -20696,17 +21944,17 @@ function editableConfig(config) {
     }
   };
 }
-function isRecord8(value) {
+function isRecord10(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function record4(value) {
-  if (!isRecord8(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+function record5(value) {
+  if (!isRecord10(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
   return { ok: true, value };
 }
-function fail3(error) {
+function fail4(error) {
   const source = error instanceof Error ? error : void 0;
   const remoteCode = source !== void 0 && "code" in source && typeof source.code === "string" ? source.code : source instanceof ClientModeError ? source.code : void 0;
   return {
@@ -23316,7 +24564,7 @@ var HarnessRemoteBridge = class {
   }
   async pump(streamId, source, signal) {
     let reason = "completed";
-    let failure2;
+    let failure3;
     try {
       for await (const value of source) {
         if (signal.aborted) break;
@@ -23329,13 +24577,13 @@ var HarnessRemoteBridge = class {
       if (signal.aborted) reason = "cancelled";
     } catch (error) {
       reason = signal.aborted ? "cancelled" : "failed";
-      if (!signal.aborted) failure2 = this.gateway.failure(error);
+      if (!signal.aborted) failure3 = this.gateway.failure(error);
     } finally {
       this.streams.delete(streamId);
       await this.publish("harness.remote.stream.closed", {
         streamId,
         reason,
-        ...failure2 === void 0 ? {} : { failure: failure2 }
+        ...failure3 === void 0 ? {} : { failure: failure3 }
       }).catch(() => void 0);
     }
   }
@@ -23389,14 +24637,14 @@ function needsDirectoryFallback(result) {
   return code.includes("capability") || code === "directory-picker/unavailable" || code === "directory-picker-unavailable" || message.includes("browse capability") || message.includes("browser capability") || message.includes("brower capability") || message.includes("directory-picker-unavailable");
 }
 function requestArgs(payload) {
-  const root = record5(payload);
-  const args = isRecord9(root.args) ? root.args : root;
-  return record5(args.request ?? args._request ?? args);
+  const root = record6(payload);
+  const args = isRecord11(root.args) ? root.args : root;
+  return record6(args.request ?? args._request ?? args);
 }
-function record5(value) {
-  return isRecord9(value) ? value : {};
+function record6(value) {
+  return isRecord11(value) ? value : {};
 }
-function isRecord9(value) {
+function isRecord11(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -23590,7 +24838,7 @@ var CodexAppServerClient = class {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
       return;
     }
-    if (!isRecord10(value)) {
+    if (!isRecord12(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
       return;
     }
@@ -23635,12 +24883,12 @@ var CodexAppServerClient = class {
   }
 };
 function safeUpstreamError(value) {
-  if (!isRecord10(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  if (!isRecord12(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("active writer")) return "Codex thread already has an active writer.";
   return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
 }
-function isRecord10(value) {
+function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -24009,15 +25257,15 @@ function decodeCanonicalBase643(value) {
   }
   return decoded;
 }
-function isRecord11(value) {
+function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode2(error) {
-  if (isRecord11(error) && typeof error.code === "string") return error.code;
+  if (isRecord13(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod(input2) {
-  return isRecord11(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+  return isRecord13(input2) && typeof input2.method === "string" ? input2.method : "invalid";
 }
 function concatChunks3(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -24139,9 +25387,9 @@ var CodexRemoteDomain = class {
       const page = paginateCodexNativeHistory(
         projectCodexNativeHistory(thread, `codex:${threadId}`),
         {
-          beforeSeq: optionalInteger2(call.params.beforeSeq),
-          throughSeq: optionalInteger2(call.params.throughSeq),
-          maxMessages: optionalInteger2(call.params.maxMessages)
+          beforeSeq: optionalInteger3(call.params.beforeSeq),
+          throughSeq: optionalInteger3(call.params.throughSeq),
+          maxMessages: optionalInteger3(call.params.maxMessages)
         }
       );
       const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
@@ -24434,14 +25682,14 @@ var CodexRemoteDomain = class {
       await this.assertResultThreadAllowed(result);
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
-        result = { ...isRecord12(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+        result = { ...isRecord14(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
     await this.publishPermission(threadId, result);
     return result;
   }
   async publishPermission(threadId, value) {
-    const source = isRecord12(value) ? value : {};
+    const source = isRecord14(value) ? value : {};
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
     await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
   }
@@ -24537,11 +25785,11 @@ var CodexRemoteDomain = class {
         itemsView,
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      const pageResult = isRecord12(result) ? result : {};
-      for (const rawTurn of array2(pageResult.data)) {
-        if (!isRecord12(rawTurn)) continue;
+      const pageResult = isRecord14(result) ? result : {};
+      for (const rawTurn of array3(pageResult.data)) {
+        if (!isRecord14(rawTurn)) continue;
         const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
-        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array2(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array2(rawTurn.items));
+        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array3(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array3(rawTurn.items));
         turns.push({ ...rawTurn, items });
       }
       cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
@@ -24561,9 +25809,9 @@ var CodexRemoteDomain = class {
           sortDirection: "asc",
           ...cursor2 === void 0 ? {} : { cursor: cursor2 }
         });
-        const pageResult = isRecord12(result) ? result : {};
-        for (const entry of array2(pageResult.data)) {
-          if (isRecord12(entry) && entry.item !== void 0) items.push(entry.item);
+        const pageResult = isRecord14(result) ? result : {};
+        for (const entry of array3(pageResult.data)) {
+          if (isRecord14(entry) && entry.item !== void 0) items.push(entry.item);
         }
         cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
         if (cursor2 === void 0) break;
@@ -24627,7 +25875,7 @@ var CodexRemoteDomain = class {
     return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
   }
   resolveUpstreamApproval(params) {
-    if (!isRecord12(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
     }
@@ -24844,24 +26092,24 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ])];
 }
 function parseCallEnvelope(input2) {
-  if (!isRecord12(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
+  if (!isRecord14(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
   }
   return { method: input2.method, params: input2.params };
 }
 function parseRespond(input2) {
-  if (!isRecord12(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
+  if (!isRecord14(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
   }
   return input2;
 }
 function accountCanRun(result) {
-  if (!isRecord12(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord12(result.account);
+  if (!isRecord14(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord14(result.account);
 }
 function sanitizeAccount(result) {
-  if (!isRecord12(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord12(result.account) ? result.account : void 0;
+  if (!isRecord14(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord14(result.account) ? result.account : void 0;
   return {
     authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
     requiresOpenaiAuth: result.requiresOpenaiAuth === true,
@@ -24874,11 +26122,11 @@ function sanitizeAccount(result) {
   };
 }
 function sanitizeThreadList(result) {
-  if (!isRecord12(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   const data = result.data.flatMap((value) => {
-    if (!isRecord12(value) || typeof value.id !== "string") return [];
+    if (!isRecord14(value) || typeof value.id !== "string") return [];
     return [{
       id: value.id,
       ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
@@ -24890,7 +26138,7 @@ function sanitizeThreadList(result) {
       ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
       ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
       ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord12(value.status) ? { status: value.status } : {}
+      ...isRecord14(value.status) ? { status: value.status } : {}
     }];
   });
   return {
@@ -24900,18 +26148,18 @@ function sanitizeThreadList(result) {
   };
 }
 function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord12(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record6) => isRecord12(record6) ? record6 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record7) => isRecord14(record7) ? record7 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
-  if (!isRecord12(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  if (!isRecord14(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord12(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    const path = isRecord14(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
     return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -24925,7 +26173,7 @@ function sanitizeProject(value) {
   };
 }
 function sanitizeProjectList(result) {
-  if (!isRecord12(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
   }
   const data = result.data.flatMap((value) => sanitizeProject(value) ?? []);
@@ -24935,7 +26183,7 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project = isRecord12(result) ? sanitizeProject(result.project) : void 0;
+  const project = isRecord14(result) ? sanitizeProject(result.project) : void 0;
   if (project === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
@@ -24967,22 +26215,22 @@ function codexDirectoryCrumbs(root, path) {
   return crumbs2;
 }
 function extractThread(result) {
-  return isRecord12(result) && isRecord12(result.thread) ? result.thread : void 0;
+  return isRecord14(result) && isRecord14(result.thread) ? result.thread : void 0;
 }
 function extractTurnId(result) {
-  if (!isRecord12(result)) return void 0;
+  if (!isRecord14(result)) return void 0;
   if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord12(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  if (isRecord14(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
   return void 0;
 }
 function extractThreadId(params) {
-  if (!isRecord12(params)) return void 0;
+  if (!isRecord14(params)) return void 0;
   if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord12(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord12(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
 }
-function optionalInteger2(value) {
+function optionalInteger3(value) {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
 }
 function codexPermission(params, fallbackPreset) {
@@ -25021,13 +26269,13 @@ function mapCodexImageInputs(params) {
   return {
     ...params,
     input: params.input.map((value) => {
-      if (!isRecord12(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      if (!isRecord14(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
       return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
     })
   };
 }
 function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord12(params)) return { requestHandle };
+  if (!isRecord14(params)) return { requestHandle };
   const safe = { ...params };
   delete safe.proposedExecpolicyAmendment;
   delete safe.additionalPermissions;
@@ -25058,10 +26306,10 @@ function isProjectListFallbackError(error) {
 function canTryNextBinary(error) {
   return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
 }
-function isRecord12(value) {
+function isRecord14(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function array2(value) {
+function array3(value) {
   return Array.isArray(value) ? value : [];
 }
 function maskId(value) {
@@ -25262,7 +26510,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord13(value)) {
+    if (!isRecord15(value)) {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
       return;
     }
@@ -25307,7 +26555,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value) {
-  if (!isRecord13(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "Cursor ACP authentication failed.";
@@ -25315,7 +26563,7 @@ function safeUpstreamError2(value) {
   if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
   return "Cursor ACP rejected the request.";
 }
-function isRecord13(value) {
+function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -25621,15 +26869,15 @@ function decodeCanonicalBase644(value) {
   }
   return decoded;
 }
-function isRecord14(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error) {
-  if (isRecord14(error) && typeof error.code === "string") return error.code;
+  if (isRecord16(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod2(input2) {
-  return isRecord14(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+  return isRecord16(input2) && typeof input2.method === "string" ? input2.method : "invalid";
 }
 function concatChunks4(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -25840,7 +27088,7 @@ var AcpRemoteGateway = class {
         requestHandle,
         sessionId,
         upstreamMethod: message.method,
-        ...isRecord15(message.params) ? message.params : {}
+        ...isRecord17(message.params) ? message.params : {}
       }
     };
     if (owner !== void 0) {
@@ -25990,13 +27238,13 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input2) {
-  if (!isRecord15(input2) || typeof input2.method !== "string") {
+  if (!isRecord17(input2) || typeof input2.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input2.method, params: input2.params ?? {} };
 }
 function parseRespondEnvelope(input2) {
-  if (!isRecord15(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
+  if (!isRecord17(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
   }
   const decision = input2.decision;
@@ -26023,16 +27271,16 @@ function mapPermissionDecision(decision, method) {
   return { outcome: { outcome: "selected", optionId: decision } };
 }
 function readSessionId(value) {
-  if (!isRecord15(value)) return void 0;
+  if (!isRecord17(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord15(value)) return void 0;
-  if (isRecord15(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord17(value)) return void 0;
+  if (isRecord17(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord15(value)) return value;
+  if (!isRecord17(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
@@ -26068,7 +27316,7 @@ function errorCode4(error) {
   if (error instanceof CursorAcpError || error instanceof RpcError) return error.code;
   return "CURSOR_UNAVAILABLE";
 }
-function isRecord15(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

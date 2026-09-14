@@ -56,7 +56,25 @@ ds-harness-remote:
 | `packages/plugin/src/acp/adapter.ts` | backend adapter 契约 |
 | `packages/plugin/src/acp/adapters/cursor-process.ts` | Cursor `agent acp` stdio |
 | `packages/plugin/src/acp/adapters/cursor.ts` | Cursor adapter 工厂 |
-| `packages/client-core/src/acp-client.ts` | 共享 Client |
+| `packages/plugin/src/acp/virtual-harness.ts` | Desktop Virtual Harness（cwd → Workspace / Session / Composer） |
+| `packages/client-core/src/acp-client.ts` | 共享 Client（`AgentAcpClient`） |
+| `packages/plugin/src/client-runtime.ts` | 探测 `agent.acp.v1`、打开 Cursor Virtual Harness |
+| `packages/plugin/src/client.ts` | Remote 模态框列出 / 添加 Cursor 工作区 |
+
+## Desktop 使用
+
+1. Host：设置中开启 **Cursor ACP adapter**（`cursor.enabled`），完成本机 `agent login`，**重启 DSH**。
+2. Client：侧栏 Remote → 选择在线 Host → 在 **Cursor virtual workspace** 分组点 `+`，浏览并确认 Host 上已有绝对目录。
+3. 打开后复用原生 Workspace / Session / Composer；会话 id 形如 `cursor:<acpSessionId>`，不写入 DSH SessionStore。
+
+## Android Client
+
+内存投影（不写入 SessionStore）：
+
+1. 探测 Host capability `agent.acp.v1` 后启用 Cursor 工作区分组。
+2. 新建 Cursor workspace = 选择 Host 上已有绝对目录；会话经 `AgentAcpClient`（`agent.acp.*`）创建与流式更新。
+3. 文本 Prompt / cancel / approval（`allow-once` | `reject-once`）；暂不支持图片。
+4. Workspace backend id 仍为 `'cursor'`（仅 UI）；线协议为 `agent.acp.*`。
 
 ## 验证状态
 
@@ -65,6 +83,7 @@ ds-harness-remote:
 - [x] Client `initialize` 公共面（gateway 短路）
 - [x] 方法策略单测
 - [x] Desktop 设置开关 `settings.cursor.set`（adapter）
-- [ ] Desktop / Android Client 投影
+- [x] Desktop Virtual Harness（cwd workspace + session/prompt/stream/approval）
+- [x] Android Client 投影（`AgentAcpClient` / 内存 Cursor workspace）
 - [ ] Codex → ACP adapter
 - [ ] 真机跨机 E2E

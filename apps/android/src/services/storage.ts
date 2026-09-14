@@ -155,15 +155,15 @@ export function saveCollapsedWorkspaceIds(deviceId: string, workspaceIds: readon
   return collapsedWorkspacesWrite
 }
 
-export async function loadWorkspaceBackend(deviceId: string): Promise<'harness' | 'codex' | undefined> {
+export async function loadWorkspaceBackend(deviceId: string): Promise<'harness' | 'codex' | 'cursor' | undefined> {
   const stored = await readJson<{ byDevice?: Record<string, unknown> }>(KEYS.workspaceBackends)
   const value = stored?.byDevice?.[deviceId]
-  return value === 'harness' || value === 'codex' ? value : undefined
+  return value === 'harness' || value === 'codex' || value === 'cursor' ? value : undefined
 }
 
 let workspaceBackendsWrite = Promise.resolve()
 
-export function saveWorkspaceBackend(deviceId: string, backend: 'harness' | 'codex'): Promise<void> {
+export function saveWorkspaceBackend(deviceId: string, backend: 'harness' | 'codex' | 'cursor'): Promise<void> {
   workspaceBackendsWrite = workspaceBackendsWrite.catch(() => undefined).then(async () => {
     const stored = await readJson<{ byDevice?: Record<string, unknown> }>(KEYS.workspaceBackends)
     await writeJson(KEYS.workspaceBackends, {
