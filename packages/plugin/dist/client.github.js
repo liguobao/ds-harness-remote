@@ -1909,6 +1909,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClientDescription: "Connect once. Available anytime.",
     startSignIn: "Start sign-in",
     allowControlCurrentDevice: "Allow control of this device",
+    connectedClients: "Devices connected here",
+    remoteConnectionNav: "DeepSeek Remote",
+    remoteConnectionIntro: "See which Clients are currently linked to this Host.",
+    currentConnectedDevices: "Currently connected devices",
+    connectedDevicesDescription: "Clients that are controlling this Host right now.",
+    connectedClientCount: "{count} connected",
+    noConnectedClients: "No devices are currently connected to this Host.",
+    unknownDevice: "Unknown device",
+    hostControlRequired: "Turn on \u201CAllow control of this device\u201D to accept Client connections.",
     exitRemoteAccount: "Sign out",
     githubLogin: "GitHub QR",
     zhihuLogin: "Zhihu QR",
@@ -2116,6 +2125,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClientDescription: "\u4E00\u6B21\u8FDE\u63A5\uFF0C\u968F\u65F6\u53EF\u7528\u3002",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
     allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
+    connectedClients: "\u5DF2\u8FDE\u63A5\u5230\u6B64\u8BBE\u5907",
+    remoteConnectionNav: "DeepSeek \u8FDC\u7A0B\u8FDE\u63A5",
+    remoteConnectionIntro: "\u67E5\u770B\u5F53\u524D\u5DF2\u94FE\u63A5\u5230\u672C\u673A Host \u7684\u5BA2\u6237\u7AEF\u3002",
+    currentConnectedDevices: "\u5F53\u524D\u8FDE\u63A5\u7684\u8BBE\u5907",
+    connectedDevicesDescription: "\u6B63\u5728\u63A7\u5236\u6B64 Host \u7684\u5BA2\u6237\u7AEF\u3002",
+    connectedClientCount: "{count} \u53F0\u5DF2\u8FDE\u63A5",
+    noConnectedClients: "\u76EE\u524D\u6CA1\u6709\u8BBE\u5907\u8FDE\u63A5\u5230\u8FD9\u53F0\u4E3B\u673A\u3002",
+    unknownDevice: "\u672A\u77E5\u8BBE\u5907",
+    hostControlRequired: "\u5F00\u542F\u201C\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907\u201D\u540E\uFF0C\u624D\u80FD\u63A5\u53D7\u5BA2\u6237\u7AEF\u8FDE\u63A5\u3002",
     exitRemoteAccount: "\u9000\u51FA\u8D26\u53F7",
     githubLogin: "GitHub \u626B\u7801",
     zhihuLogin: "\u77E5\u4E4E\u626B\u7801",
@@ -2321,8 +2339,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
           polling = !1, pollTimer !== void 0 && window.clearTimeout(pollTimer), progressRun.current === runId && setProgress(void 0);
         }
       }
-      function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+      function RemoteConnectionSection(props) {
+        let { t } = props, [devicesOpen, setDevicesOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = (settingsView?.config.role === "client" ? associations.client : associations.host) ?? associations.host ?? associations.client, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, connectedClients = hostStatus?.connectedClients ?? [], deviceControlAuthorized = hostStatus?.authorized === !0, applyView = (view) => {
           setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
@@ -2337,15 +2355,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
         React.useEffect(() => {
           load().catch((reason) => setError(messageOf(reason)));
         }, []), React.useEffect(() => {
-          if (association === void 0) return;
           refreshHostStatus().catch(() => {
           });
           let timer = window.setInterval(() => {
             refreshHostStatus().catch(() => {
             });
-          }, 3e4);
+          }, 1500);
           return () => window.clearInterval(timer);
-        }, [association !== void 0]);
+        }, []);
         let save = async (event) => {
           if (event?.preventDefault(), !(!writable || !serverDirty)) {
             setBusy(!0), setNotice(void 0), setError(void 0);
@@ -2420,10 +2437,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
             checked: codexEnabled,
             onChange: (event) => void setCodexRemote(event.target.checked)
           })
-        );
-        return React.createElement(
-          "li",
-          { className: `dshRemotePluginCard${open ? " isOpen" : ""}` },
+        ), connectedDevices = React.createElement(
+          "div",
+          {
+            className: `dshRemotePluginCard${devicesOpen ? " isOpen" : ""}`
+          },
           React.createElement(
             "div",
             { className: "dshRemotePluginCardHeader" },
@@ -2432,150 +2450,182 @@ Minimum version required to store current data is: ` + bestVersion + `.
               {
                 type: "button",
                 className: "dshRemotePluginCardToggle",
-                "aria-expanded": open,
-                "aria-label": t(open ? "collapseSettings" : "expandSettings", { name: t("pluginTitle") }),
-                onClick: () => setOpen((current) => !current)
+                "aria-expanded": devicesOpen,
+                "aria-label": t(devicesOpen ? "collapseSettings" : "expandSettings", { name: t("currentConnectedDevices") }),
+                onClick: () => setDevicesOpen((current) => !current)
               },
               React.createElement(
                 "span",
                 { className: "dshRemotePluginCardHeading" },
-                React.createElement("strong", null, t("pluginTitle")),
-                React.createElement("span", null, t("pluginDescription"))
+                React.createElement("strong", null, t("currentConnectedDevices")),
+                React.createElement("span", null, t("connectedDevicesDescription"))
               ),
-              draftDirty ? React.createElement("span", { className: "dshRemotePluginCardStatus" }, t("unsaved")) : association === void 0 ? null : React.createElement("span", {
-                className: `dshRemotePluginCardStatus${connectionStatusClass(hostStatus)}`
-              }, hostStatus === void 0 ? t("associated") : connectionStatusLabel(hostStatus, t)),
+              React.createElement("span", {
+                className: `dshRemotePluginCardStatus${connectedClients.length > 0 ? " isOnline" : ""}`
+              }, t("connectedClientCount", { count: connectedClients.length })),
               React.createElement("span", { className: "dshRemotePluginCardChevron", "aria-hidden": !0 }, "\u2304")
             )
           ),
-          open ? React.createElement(
+          devicesOpen ? React.createElement(
             "div",
             { className: "dshRemotePluginCardBody" },
-            loaded ? association !== void 0 ? React.createElement(
+            deviceControlAuthorized ? connectedClients.length === 0 ? React.createElement("p", { className: "dshRemoteSettingsState" }, t("noConnectedClients")) : React.createElement("div", {
+              className: "dshRemoteClientList",
+              "aria-label": t("currentConnectedDevices")
+            }, ...connectedClients.map((client) => React.createElement(
               "div",
-              { className: "dshRemoteSettings" },
+              {
+                key: client.deviceId,
+                className: "dshRemoteClientRow"
+              },
               React.createElement(
-                "div",
-                { className: "dshRemoteSettingsTop" },
-                React.createElement(
-                  "div",
-                  { className: "dshRemoteAssociation" },
-                  React.createElement("span", null, t(association.account === void 0 ? "authorization" : "account")),
-                  React.createElement("strong", null, association.account ?? t("authorizationComplete")),
-                  React.createElement("p", null, association.account === void 0 ? serverUrl : t("authorizedOn", { role: "Remote", serverUrl }))
-                )
+                "span",
+                null,
+                React.createElement("strong", null, client.name.trim() === "" ? t("unknownDevice") : client.name),
+                React.createElement("small", null, [
+                  client.platform === void 0 ? void 0 : formatPlatform(client.platform),
+                  connectedClientModeLabel(client.mode, t)
+                ].filter(Boolean).join(" \xB7 "))
               ),
-              React.createElement(
-                "div",
-                { className: "dshRemoteField" },
-                React.createElement("label", { htmlFor: "dsh-remote-server-url-authorized" }, t("serverUrl")),
-                React.createElement("input", {
-                  id: "dsh-remote-server-url-authorized",
-                  type: "url",
-                  value: serverUrl,
-                  disabled: !0,
-                  required: !0,
-                  placeholder: "https://dsh.r2049.cn",
-                  onChange: (event) => {
-                    setServerUrl(event.target.value), setNotice(void 0);
-                  }
-                }),
-                React.createElement("p", null, t("serverUrlHint"))
-              ),
-              codexSetting,
-              React.createElement(
-                "div",
-                { className: "dshRemoteAuthorizationSetting" },
-                React.createElement(
-                  "div",
-                  null,
-                  React.createElement("strong", null, t("allowControlCurrentDevice")),
-                  React.createElement("p", null, t("thisMachineHost"))
-                ),
-                React.createElement("input", {
-                  type: "checkbox",
-                  role: "switch",
-                  disabled: busy,
-                  "aria-label": t("allowControlCurrentDevice"),
-                  checked: hostStatus?.authorized === !0,
-                  onChange: (event) => void setCurrentDeviceControl(event.target.checked)
-                })
-              ),
-              React.createElement(
-                "div",
-                { className: "dshRemoteConnection", "aria-live": "polite" },
-                React.createElement(
-                  "div",
-                  { className: "dshRemoteConnectionSummary" },
-                  React.createElement("span", null, t("connection")),
-                  React.createElement(
-                    "strong",
-                    null,
-                    React.createElement("span", {
-                      className: `dshRemoteConnectionDot${connectionStatusClass(hostStatus)}`,
-                      "aria-hidden": !0
-                    }),
-                    connectionStatusLabel(hostStatus, t)
-                  ),
-                  React.createElement("p", null, hostStatus === void 0 ? t("checkingConnection") : hostStatus.lastActiveAt === void 0 ? t("neverConnected") : t("lastActive", { time: formatLocalTime(hostStatus.lastActiveAt) }))
-                ),
-                React.createElement("button", {
-                  type: "button",
-                  className: "dshRemoteReconnect",
-                  disabled: reconnectBusy || hostStatus?.configured === !1,
-                  onClick: () => void reconnectHost()
-                }, t(reconnectBusy ? "reconnectingAction" : "reconnect"))
-              ),
-              hostStatus?.error === void 0 || hostStatus.online ? null : React.createElement("p", { className: "dshRemoteConnectionIssue", role: "status" }, connectionErrorMessage(hostStatus.error, t)),
-              writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
-              React.createElement(
-                "div",
-                { className: "dshRemoteSettingsFooter" },
-                error !== void 0 ? React.createElement("p", { className: "dshRemoteError", role: "alert" }, error) : notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, t(notice.key, notice.params)),
-                draftDirty ? React.createElement(
-                  React.Fragment,
-                  null,
-                  React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy, onClick: discard }, t("discard")),
-                  React.createElement("button", { type: "button", className: "dshRemoteSave", disabled: busy || !writable, onClick: () => void save() }, t(busy ? "saving" : "save"))
-                ) : React.createElement("button", {
-                  type: "button",
-                  className: "dshRemoteDiscard",
-                  disabled: busy || !writable,
-                  onClick: () => void logout()
-                }, t(busy ? "signingOut" : "signOut"))
-              )
-            ) : React.createElement(
-              "form",
-              { className: "dshRemoteSettings", noValidate: !0, onSubmit: (event) => void save(event) },
-              React.createElement(
-                "div",
-                { className: "dshRemoteField" },
-                React.createElement("label", { htmlFor: "dsh-remote-server-url" }, t("serverUrl")),
-                React.createElement("input", {
-                  id: "dsh-remote-server-url",
-                  type: "url",
-                  value: serverUrl,
-                  disabled: busy || !writable,
-                  required: !0,
-                  placeholder: "https://dsh.r2049.cn",
-                  onChange: (event) => {
-                    setServerUrl(event.target.value), setNotice(void 0);
-                  }
-                }),
-                React.createElement("p", null, t("serverUrlHint"))
-              ),
-              codexSetting,
-              React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
-              writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
-              React.createElement(
-                "div",
-                { className: "dshRemoteSettingsFooter" },
-                error !== void 0 ? React.createElement("p", { className: "dshRemoteError", role: "alert" }, error) : notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, t(notice.key, notice.params)),
-                React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy || !draftDirty, onClick: discard }, t("discard")),
-                React.createElement("button", { type: "submit", className: "dshRemoteSave", disabled: busy || !writable || !serverDirty }, t(busy ? "saving" : "save"))
-              )
-            ) : React.createElement("p", { className: "dshRemoteSettingsState" }, error ?? t("loadingSettings"))
+              React.createElement("small", { className: "dshRemoteClientOnline" }, t("connected"))
+            ))) : React.createElement("p", { className: "dshRemoteSettingsState" }, t("hostControlRequired"))
           ) : null
+        ), settingsBody = loaded ? association !== void 0 ? React.createElement(
+          "div",
+          { className: "dshRemoteSettings" },
+          React.createElement(
+            "div",
+            { className: "dshRemoteSettingsTop" },
+            React.createElement(
+              "div",
+              { className: "dshRemoteAssociation" },
+              React.createElement("span", null, t(association.account === void 0 ? "authorization" : "account")),
+              React.createElement("strong", null, association.account ?? t("authorizationComplete")),
+              React.createElement("p", null, association.account === void 0 ? serverUrl : t("authorizedOn", { role: "Remote", serverUrl }))
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "dshRemoteField" },
+            React.createElement("label", { htmlFor: "dsh-remote-server-url-authorized" }, t("serverUrl")),
+            React.createElement("input", {
+              id: "dsh-remote-server-url-authorized",
+              type: "url",
+              value: serverUrl,
+              disabled: !0,
+              required: !0,
+              placeholder: "https://dsh.r2049.cn",
+              onChange: (event) => {
+                setServerUrl(event.target.value), setNotice(void 0);
+              }
+            }),
+            React.createElement("p", null, t("serverUrlHint"))
+          ),
+          codexSetting,
+          React.createElement(
+            "div",
+            { className: "dshRemoteAuthorizationSetting" },
+            React.createElement(
+              "div",
+              null,
+              React.createElement("strong", null, t("allowControlCurrentDevice")),
+              React.createElement("p", null, t("thisMachineHost"))
+            ),
+            React.createElement("input", {
+              type: "checkbox",
+              role: "switch",
+              disabled: busy,
+              "aria-label": t("allowControlCurrentDevice"),
+              checked: hostStatus?.authorized === !0,
+              onChange: (event) => void setCurrentDeviceControl(event.target.checked)
+            })
+          ),
+          React.createElement(
+            "div",
+            { className: "dshRemoteConnection", "aria-live": "polite" },
+            React.createElement(
+              "div",
+              { className: "dshRemoteConnectionSummary" },
+              React.createElement("span", null, t("connection")),
+              React.createElement(
+                "strong",
+                null,
+                React.createElement("span", {
+                  className: `dshRemoteConnectionDot${connectionStatusClass(hostStatus)}`,
+                  "aria-hidden": !0
+                }),
+                connectionStatusLabel(hostStatus, t)
+              ),
+              React.createElement("p", null, hostStatus === void 0 ? t("checkingConnection") : hostStatus.lastActiveAt === void 0 ? t("neverConnected") : t("lastActive", { time: formatLocalTime(hostStatus.lastActiveAt) }))
+            ),
+            React.createElement("button", {
+              type: "button",
+              className: "dshRemoteReconnect",
+              disabled: reconnectBusy || hostStatus?.configured === !1,
+              onClick: () => void reconnectHost()
+            }, t(reconnectBusy ? "reconnectingAction" : "reconnect"))
+          ),
+          hostStatus?.error === void 0 || hostStatus.online ? null : React.createElement("p", { className: "dshRemoteConnectionIssue", role: "status" }, connectionErrorMessage(hostStatus.error, t)),
+          connectedDevices,
+          writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
+          React.createElement(
+            "div",
+            { className: "dshRemoteSettingsFooter" },
+            error !== void 0 ? React.createElement("p", { className: "dshRemoteError", role: "alert" }, error) : notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, t(notice.key, notice.params)),
+            draftDirty ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy, onClick: discard }, t("discard")),
+              React.createElement("button", { type: "button", className: "dshRemoteSave", disabled: busy || !writable, onClick: () => void save() }, t(busy ? "saving" : "save"))
+            ) : React.createElement("button", {
+              type: "button",
+              className: "dshRemoteDiscard",
+              disabled: busy || !writable,
+              onClick: () => void logout()
+            }, t(busy ? "signingOut" : "signOut"))
+          )
+        ) : React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(
+            "form",
+            { className: "dshRemoteSettings", noValidate: !0, onSubmit: (event) => void save(event) },
+            React.createElement(
+              "div",
+              { className: "dshRemoteField" },
+              React.createElement("label", { htmlFor: "dsh-remote-server-url" }, t("serverUrl")),
+              React.createElement("input", {
+                id: "dsh-remote-server-url",
+                type: "url",
+                value: serverUrl,
+                disabled: busy || !writable,
+                required: !0,
+                placeholder: "https://dsh.r2049.cn",
+                onChange: (event) => {
+                  setServerUrl(event.target.value), setNotice(void 0);
+                }
+              }),
+              React.createElement("p", null, t("serverUrlHint"))
+            ),
+            codexSetting,
+            React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
+            writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
+            React.createElement(
+              "div",
+              { className: "dshRemoteSettingsFooter" },
+              error !== void 0 ? React.createElement("p", { className: "dshRemoteError", role: "alert" }, error) : notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, t(notice.key, notice.params)),
+              React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy || !draftDirty, onClick: discard }, t("discard")),
+              React.createElement("button", { type: "submit", className: "dshRemoteSave", disabled: busy || !writable || !serverDirty }, t(busy ? "saving" : "save"))
+            )
+          ),
+          connectedDevices
+        ) : React.createElement("p", { className: "dshRemoteSettingsState" }, error ?? t("loadingSettings"));
+        return React.createElement(
+          "div",
+          { className: "dshRemoteSection" },
+          React.createElement("h2", { className: "dshRemoteSectionTitle" }, t("remoteConnectionNav")),
+          React.createElement("p", { className: "dshRemoteSectionIntro" }, t("remoteConnectionIntro")),
+          settingsBody
         );
       }
       function RemoteWorkspaceAction(props) {
@@ -3552,6 +3602,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           ".dshRemoteSectionHeading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.dshRemoteSectionTitle{min-width:0;display:flex;align-items:center;gap:10px}.dshRemoteSectionTitle>strong{font-size:14px}.dshRemoteSectionActions{display:flex;align-items:center;gap:14px}.dshRemoteSectionActions>button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px}.dshRemoteSectionActions>button:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}",
           ".dshRemoteCancelWorkspace{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 0;cursor:pointer}.dshRemoteCancelWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteCancelWorkspace:disabled{opacity:.5;cursor:default}",
           ".dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostList>button{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}",
+          '.dshRemoteSection{display:flex;flex-direction:column;gap:16px;max-width:720px}.dshRemoteSectionTitle{margin:0;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:500;line-height:24px}.dshRemoteSectionIntro{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemoteSection .dshRemotePluginCard{margin-top:8px}.dshRemoteSectionGroup{display:flex;flex-direction:column;gap:8px}.dshRemoteSectionGroupHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteSectionGroupTitle{margin:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:22px}.dshRemoteConnectedClients{display:flex;flex-direction:column;gap:8px;margin:4px 0 0}.dshRemoteConnectedHeading{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}.dshRemoteConnectedClients>p{margin:8px 0 0;color:var(--dsw-alias-label-secondary);font-size:13px}.dshRemoteClientList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemotePluginCardBody>.dshRemoteClientList{margin-top:4px;border-top:0}.dshRemotePluginCardBody>.dshRemoteSettingsState{padding:12px 0}.dshRemoteClientRow{min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteClientRow:last-child{border-bottom:0}.dshRemoteClientRow>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteClientRow strong{font-size:14px;font-weight:500}.dshRemoteClientRow small{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteClientOnline{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-state-success-primary)!important}.dshRemoteClientOnline::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}',
           '.dshRemoteProgress{display:flex;flex-direction:column;gap:8px;margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dshRemoteProgressHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteProgressHeader strong{font-size:13px;font-weight:600}.dshRemoteProgressHeader span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteProgressBar{height:6px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteProgressBar>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--dsw-alias-brand-primary);transform-origin:left center;transition:transform .22s ease-out}[dir="rtl"] .dshRemoteProgressBar>span{transform-origin:right center}.dshRemoteProgress p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.45}.dshRemoteProgressRoute{font-weight:500}.dshRemoteProgressRoute .isActive{color:var(--dsw-alias-state-success-primary);font-weight:700}.dshRemoteProgressRouteArrow{color:var(--dsw-alias-label-tertiary)}@media(prefers-reduced-motion:reduce){.dshRemoteProgressBar>span{transition:none}}',
           '.dshRemoteBrowser{display:flex;flex-direction:column}.dshRemoteCrumbs{display:flex;align-items:center;gap:4px;overflow:auto;padding:2px 0 10px}.dshRemoteCrumbs>button{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:5px 7px;border-radius:6px;cursor:pointer}.dshRemoteCrumbs>button:not(:last-child)::after{content:" /";color:var(--dsw-alias-label-tertiary)}.dshRemoteCrumbs>button:disabled{color:var(--dsw-alias-label-primary);font-weight:600}',
           ".dshRemoteWorkspaceLists{overflow:visible}",
@@ -3670,14 +3721,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
             control,
             preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github"
           })
-        }, RemoteWorkspaceAction)), ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
-          name: "settings.plugin.item",
-          key: "ds-harness-remote",
-          id: "ds-harness-remote",
-          order: 30,
+        }, RemoteWorkspaceAction)), ctx.slots.inject("settings.section", () => ctx.slots.register({
+          name: "settings.section",
+          id: "deepseek-remote",
+          order: 18,
+          label: () => t("remoteConnectionNav"),
           locale: localeNamespace,
           inject: () => ({ control })
-        }, RemotePluginOptions));
+        }, RemoteConnectionSection));
       }
       function isMissingControlRoute(reason) {
         return reason instanceof Error && reason.message.startsWith(`transport failure for ${CONTROL_RPC_PREFIX}/`) && (reason.message.endsWith(": HTTP 404") || reason.message.endsWith(": HTTP 405"));
@@ -3687,7 +3738,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }
       function formatPlatform(value) {
         let normalized = value.toLowerCase();
-        return normalized === "darwin" || normalized === "macos" ? "macOS" : normalized === "win32" || normalized === "windows" ? "Windows" : normalized === "linux" ? "Linux" : value;
+        return normalized === "darwin" || normalized === "macos" ? "macOS" : normalized === "win32" || normalized === "windows" ? "Windows" : normalized === "linux" ? "Linux" : normalized === "android" ? "Android" : value;
+      }
+      function connectedClientModeLabel(mode, t) {
+        return t(mode === "LAN" ? "remoteNetworkLan" : mode === "P2P" ? "remoteNetworkP2p" : mode === "TURN" ? "remoteNetworkTurn" : mode === "Relay" ? "remoteNetworkRelay" : "connected");
       }
       return module.exports.apply = apply, module.exports.inject = inject, module.exports;
     }

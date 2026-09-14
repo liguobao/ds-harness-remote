@@ -32,6 +32,13 @@ import { CodexRemoteDomain } from './codex/domain.js'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { RpcError } from './safe-error.js'
 
+export interface HostConnectedClient {
+  deviceId: string
+  name: string
+  platform?: string
+  mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+}
+
 export interface HostRemoteStatus {
   deviceId?: string
   configured: boolean
@@ -42,6 +49,7 @@ export interface HostRemoteStatus {
   account?: string
   authorized: boolean
   accountRequired: boolean
+  connectedClients: HostConnectedClient[]
 }
 
 export class HostPluginRuntime {
@@ -149,7 +157,20 @@ export class HostPluginRuntime {
       ...(authorization?.account === undefined ? {} : { account: authorization.account }),
       authorized: authorization !== undefined,
       accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED',
+      connectedClients: this.listConnectedClients(),
     }
+  }
+
+  private listConnectedClients(): HostConnectedClient[] {
+    return this.connections.connectedPeers().map(peer => {
+      const trusted = this.identities.trustedPeer(peer.deviceId)
+      return {
+        deviceId: peer.deviceId,
+        name: trusted?.name.trim() ?? '',
+        ...(trusted === undefined ? {} : { platform: trusted.platform }),
+        ...(peer.mode === undefined ? {} : { mode: peer.mode }),
+      }
+    })
   }
 
   localHarnessVersion(): string | undefined {

@@ -142,6 +142,12 @@ export interface HostAuthorizationControl {
     account?: string
     authorized: boolean
     accountRequired: boolean
+    connectedClients?: Array<{
+      deviceId: string
+      name: string
+      platform?: string
+      mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+    }>
   }
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>

@@ -20,6 +20,11 @@ export interface PeerConnectionContext {
   peerDeviceId: string
 }
 
+export interface ConnectedPeer {
+  deviceId: string
+  mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+}
+
 export type RpcRouterFactory = (
   context: PeerConnectionContext,
   send: (message: RemoteMessage) => Promise<void>,
@@ -100,7 +105,22 @@ export class ConnectionController {
   connectionCount(): number { return this.active.size }
 
   peerDeviceIds(): string[] {
-    return [...new Set([...this.active.values()].map(connection => connection.channel.peerDeviceId))]
+    return this.connectedPeers().map(peer => peer.deviceId)
+  }
+
+  connectedPeers(): ConnectedPeer[] {
+    const peers: ConnectedPeer[] = []
+    const seen = new Set<string>()
+    for (const connection of this.active.values()) {
+      const deviceId = connection.channel.peerDeviceId
+      if (seen.has(deviceId)) continue
+      seen.add(deviceId)
+      peers.push({
+        deviceId,
+        ...(connection.channel.mode === undefined ? {} : { mode: connection.channel.mode }),
+      })
+    }
+    return peers
   }
 
   peerDeviceId(): string | undefined {

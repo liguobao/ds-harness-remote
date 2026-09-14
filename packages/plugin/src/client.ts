@@ -70,6 +70,12 @@ interface RemoteStatus {
     account?: string
     authorized: boolean
     accountRequired: boolean
+    connectedClients?: Array<{
+      deviceId: string
+      name: string
+      platform?: string
+      mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+    }>
   }
 }
 
@@ -426,6 +432,15 @@ const en = {
   signInClientDescription: 'Connect once. Available anytime.',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
+  connectedClients: 'Devices connected here',
+  remoteConnectionNav: 'DeepSeek Remote',
+  remoteConnectionIntro: 'See which Clients are currently linked to this Host.',
+  currentConnectedDevices: 'Currently connected devices',
+  connectedDevicesDescription: 'Clients that are controlling this Host right now.',
+  connectedClientCount: '{count} connected',
+  noConnectedClients: 'No devices are currently connected to this Host.',
+  unknownDevice: 'Unknown device',
+  hostControlRequired: 'Turn on “Allow control of this device” to accept Client connections.',
   exitRemoteAccount: 'Sign out',
   githubLogin: 'GitHub QR',
   zhihuLogin: 'Zhihu QR',
@@ -635,6 +650,15 @@ const zh: Record<keyof typeof en, string> = {
   signInClientDescription: '一次连接，随时可用。',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
+  connectedClients: '已连接到此设备',
+  remoteConnectionNav: 'DeepSeek 远程连接',
+  remoteConnectionIntro: '查看当前已链接到本机 Host 的客户端。',
+  currentConnectedDevices: '当前连接的设备',
+  connectedDevicesDescription: '正在控制此 Host 的客户端。',
+  connectedClientCount: '{count} 台已连接',
+  noConnectedClients: '目前没有设备连接到这台主机。',
+  unknownDevice: '未知设备',
+  hostControlRequired: '开启“允许控制当前设备”后，才能接受客户端连接。',
   exitRemoteAccount: '退出账号',
   githubLogin: 'GitHub 扫码',
   zhihuLogin: '知乎扫码',
@@ -963,12 +987,12 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function RemotePluginOptions(props: {
+    function RemoteConnectionSection(props: {
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
       t: Translate
     }): unknown {
       const { t } = props
-      const [open, setOpen] = React.useState(false)
+      const [devicesOpen, setDevicesOpen] = React.useState(false)
       const [serverUrl, setServerUrl] = React.useState('')
       const [codexEnabled, setCodexEnabled] = React.useState(true)
       const role = 'host' as const
@@ -984,9 +1008,14 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState<string | undefined>(undefined)
       const [settingsView, setSettingsView] = React.useState<PluginSettingsView | undefined>(undefined)
       const persistedServerUrl = settingsView?.config.serverUrl ?? 'https://dsh.r2049.cn'
-      const association = associations.client ?? associations.host
+      // Prefer the configured plugin role (Desktop defaults to host), then fall back so
+      // Client-only OAuth/password login still unlocks the authorized settings surface.
+      const roleAssociation = settingsView?.config.role === 'client' ? associations.client : associations.host
+      const association = roleAssociation ?? associations.host ?? associations.client
       const serverDirty = settingsView !== undefined && serverUrl !== persistedServerUrl
       const draftDirty = serverDirty
+      const connectedClients = hostStatus?.connectedClients ?? []
+      const deviceControlAuthorized = hostStatus?.authorized === true
 
       const applyView = (view: PluginSettingsView): void => {
         setSettingsView(view)
@@ -1015,13 +1044,12 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
-        if (association === undefined) return
         void refreshHostStatus().catch(() => undefined)
         const timer = window.setInterval(() => {
           void refreshHostStatus().catch(() => undefined)
-        }, 30_000)
+        }, 1_500)
         return () => window.clearInterval(timer)
-      }, [association !== undefined])
+      }, [])
 
       const save = async (event?: Event): Promise<void> => {
         event?.preventDefault()
@@ -1123,120 +1151,146 @@ window.__ModuleLoader__.load({
           onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
         }))
 
-      return React.createElement('li', { className: `dshRemotePluginCard${open ? ' isOpen' : ''}` },
+      const connectedDevices = React.createElement('div', {
+        className: `dshRemotePluginCard${devicesOpen ? ' isOpen' : ''}`,
+      },
         React.createElement('div', { className: 'dshRemotePluginCardHeader' },
           React.createElement('button', {
             type: 'button',
             className: 'dshRemotePluginCardToggle',
-            'aria-expanded': open,
-            'aria-label': t(open ? 'collapseSettings' : 'expandSettings', { name: t('pluginTitle') }),
-            onClick: () => setOpen(current => !current),
+            'aria-expanded': devicesOpen,
+            'aria-label': t(devicesOpen ? 'collapseSettings' : 'expandSettings', { name: t('currentConnectedDevices') }),
+            onClick: () => setDevicesOpen(current => !current),
           },
           React.createElement('span', { className: 'dshRemotePluginCardHeading' },
-            React.createElement('strong', null, t('pluginTitle')),
-            React.createElement('span', null, t('pluginDescription'))),
-          draftDirty
-            ? React.createElement('span', { className: 'dshRemotePluginCardStatus' }, t('unsaved'))
-            : association === undefined ? null : React.createElement('span', {
-              className: `dshRemotePluginCardStatus${connectionStatusClass(hostStatus)}`,
-            }, hostStatus === undefined ? t('associated') : connectionStatusLabel(hostStatus, t)),
+            React.createElement('strong', null, t('currentConnectedDevices')),
+            React.createElement('span', null, t('connectedDevicesDescription'))),
+          React.createElement('span', {
+            className: `dshRemotePluginCardStatus${connectedClients.length > 0 ? ' isOnline' : ''}`,
+          }, t('connectedClientCount', { count: connectedClients.length })),
           React.createElement('span', { className: 'dshRemotePluginCardChevron', 'aria-hidden': true }, '⌄'))),
-        !open ? null : React.createElement('div', { className: 'dshRemotePluginCardBody' },
-          !loaded
-            ? React.createElement('p', { className: 'dshRemoteSettingsState' }, error ?? t('loadingSettings'))
-            : association !== undefined
-              ? React.createElement('div', { className: 'dshRemoteSettings' },
-        React.createElement('div', { className: 'dshRemoteSettingsTop' },
-          React.createElement('div', { className: 'dshRemoteAssociation' },
-            React.createElement('span', null, t(association.account === undefined ? 'authorization' : 'account')),
-            React.createElement('strong', null, association.account
-              ?? t('authorizationComplete')),
-            React.createElement('p', null, association.account === undefined
-              ? serverUrl
-              : t('authorizedOn', { role: 'Remote', serverUrl })))),
-        React.createElement('div', { className: 'dshRemoteField' },
-          React.createElement('label', { htmlFor: 'dsh-remote-server-url-authorized' }, t('serverUrl')),
-          React.createElement('input', {
-            id: 'dsh-remote-server-url-authorized',
-            type: 'url',
-            value: serverUrl,
-            disabled: true,
-            required: true,
-            placeholder: 'https://dsh.r2049.cn',
-            onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
-          }),
-          React.createElement('p', null, t('serverUrlHint'))),
-        codexSetting,
-        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-          React.createElement('div', null,
-            React.createElement('strong', null, t('allowControlCurrentDevice')),
-            React.createElement('p', null, t('thisMachineHost'))),
-          React.createElement('input', {
-            type: 'checkbox', role: 'switch', disabled: busy,
-            'aria-label': t('allowControlCurrentDevice'),
-            checked: hostStatus?.authorized === true,
-            onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
-          })),
-        React.createElement('div', { className: 'dshRemoteConnection', 'aria-live': 'polite' },
-          React.createElement('div', { className: 'dshRemoteConnectionSummary' },
-            React.createElement('span', null, t('connection')),
-            React.createElement('strong', null,
-              React.createElement('span', {
-                className: `dshRemoteConnectionDot${connectionStatusClass(hostStatus)}`,
-                'aria-hidden': true,
+        !devicesOpen ? null : React.createElement('div', { className: 'dshRemotePluginCardBody' },
+          !deviceControlAuthorized
+            ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('hostControlRequired'))
+            : connectedClients.length === 0
+              ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('noConnectedClients'))
+              : React.createElement('div', {
+                className: 'dshRemoteClientList',
+                'aria-label': t('currentConnectedDevices'),
+              }, ...connectedClients.map(client => React.createElement('div', {
+                key: client.deviceId,
+                className: 'dshRemoteClientRow',
+              }, React.createElement('span', null,
+                React.createElement('strong', null, client.name.trim() === '' ? t('unknownDevice') : client.name),
+                React.createElement('small', null, [
+                  client.platform === undefined ? undefined : formatPlatform(client.platform),
+                  connectedClientModeLabel(client.mode, t),
+                ].filter(Boolean).join(' · '))),
+              React.createElement('small', { className: 'dshRemoteClientOnline' }, t('connected')))))))
+
+      const settingsBody = !loaded
+        ? React.createElement('p', { className: 'dshRemoteSettingsState' }, error ?? t('loadingSettings'))
+        : association !== undefined
+          ? React.createElement('div', { className: 'dshRemoteSettings' },
+            React.createElement('div', { className: 'dshRemoteSettingsTop' },
+              React.createElement('div', { className: 'dshRemoteAssociation' },
+                React.createElement('span', null, t(association.account === undefined ? 'authorization' : 'account')),
+                React.createElement('strong', null, association.account
+                  ?? t('authorizationComplete')),
+                React.createElement('p', null, association.account === undefined
+                  ? serverUrl
+                  : t('authorizedOn', { role: 'Remote', serverUrl })))),
+            React.createElement('div', { className: 'dshRemoteField' },
+              React.createElement('label', { htmlFor: 'dsh-remote-server-url-authorized' }, t('serverUrl')),
+              React.createElement('input', {
+                id: 'dsh-remote-server-url-authorized',
+                type: 'url',
+                value: serverUrl,
+                disabled: true,
+                required: true,
+                placeholder: 'https://dsh.r2049.cn',
+                onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
               }),
-              connectionStatusLabel(hostStatus, t)),
-            React.createElement('p', null, hostStatus === undefined
-              ? t('checkingConnection')
-              : hostStatus.lastActiveAt === undefined
-                ? t('neverConnected')
-                : t('lastActive', { time: formatLocalTime(hostStatus.lastActiveAt) }))),
-          React.createElement('button', {
-            type: 'button',
-            className: 'dshRemoteReconnect',
-            disabled: reconnectBusy || hostStatus?.configured === false,
-            onClick: () => void reconnectHost(),
-          }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))),
-        hostStatus?.error === undefined || hostStatus.online
-          ? null
-          : React.createElement('p', { className: 'dshRemoteConnectionIssue', role: 'status' }, connectionErrorMessage(hostStatus.error, t)),
-        !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
-        React.createElement('div', { className: 'dshRemoteSettingsFooter' },
-          error !== undefined
-            ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
-            : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
-          draftDirty
-            ? React.createElement(React.Fragment, null,
-              React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy, onClick: discard }, t('discard')),
-              React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')))
-            : React.createElement('button', {
-              type: 'button',
-              className: 'dshRemoteDiscard',
-              disabled: busy || !writable,
-              onClick: () => void logout(),
-            }, t(busy ? 'signingOut' : 'signOut'))))
-              : React.createElement('form', { className: 'dshRemoteSettings', noValidate: true, onSubmit: (event: Event) => void save(event) },
-        React.createElement('div', { className: 'dshRemoteField' },
-          React.createElement('label', { htmlFor: 'dsh-remote-server-url' }, t('serverUrl')),
-          React.createElement('input', {
-            id: 'dsh-remote-server-url',
-            type: 'url',
-            value: serverUrl,
-            disabled: busy || !writable,
-            required: true,
-            placeholder: 'https://dsh.r2049.cn',
-            onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
-          }),
-          React.createElement('p', null, t('serverUrlHint'))),
-        codexSetting,
-        React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
-        !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
-        React.createElement('div', { className: 'dshRemoteSettingsFooter' },
-          error !== undefined
-            ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
-            : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
-          React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || !draftDirty, onClick: discard }, t('discard')),
-          React.createElement('button', { type: 'submit', className: 'dshRemoteSave', disabled: busy || !writable || !serverDirty }, t(busy ? 'saving' : 'save'))))))
+              React.createElement('p', null, t('serverUrlHint'))),
+            codexSetting,
+            React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+              React.createElement('div', null,
+                React.createElement('strong', null, t('allowControlCurrentDevice')),
+                React.createElement('p', null, t('thisMachineHost'))),
+              React.createElement('input', {
+                type: 'checkbox', role: 'switch', disabled: busy,
+                'aria-label': t('allowControlCurrentDevice'),
+                checked: hostStatus?.authorized === true,
+                onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
+              })),
+            React.createElement('div', { className: 'dshRemoteConnection', 'aria-live': 'polite' },
+              React.createElement('div', { className: 'dshRemoteConnectionSummary' },
+                React.createElement('span', null, t('connection')),
+                React.createElement('strong', null,
+                  React.createElement('span', {
+                    className: `dshRemoteConnectionDot${connectionStatusClass(hostStatus)}`,
+                    'aria-hidden': true,
+                  }),
+                  connectionStatusLabel(hostStatus, t)),
+                React.createElement('p', null, hostStatus === undefined
+                  ? t('checkingConnection')
+                  : hostStatus.lastActiveAt === undefined
+                    ? t('neverConnected')
+                    : t('lastActive', { time: formatLocalTime(hostStatus.lastActiveAt) }))),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteReconnect',
+                disabled: reconnectBusy || hostStatus?.configured === false,
+                onClick: () => void reconnectHost(),
+              }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))),
+            hostStatus?.error === undefined || hostStatus.online
+              ? null
+              : React.createElement('p', { className: 'dshRemoteConnectionIssue', role: 'status' }, connectionErrorMessage(hostStatus.error, t)),
+            connectedDevices,
+            !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
+            React.createElement('div', { className: 'dshRemoteSettingsFooter' },
+              error !== undefined
+                ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
+                : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
+              draftDirty
+                ? React.createElement(React.Fragment, null,
+                  React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy, onClick: discard }, t('discard')),
+                  React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')))
+                : React.createElement('button', {
+                  type: 'button',
+                  className: 'dshRemoteDiscard',
+                  disabled: busy || !writable,
+                  onClick: () => void logout(),
+                }, t(busy ? 'signingOut' : 'signOut'))))
+          : React.createElement(React.Fragment, null,
+            React.createElement('form', { className: 'dshRemoteSettings', noValidate: true, onSubmit: (event: Event) => void save(event) },
+              React.createElement('div', { className: 'dshRemoteField' },
+                React.createElement('label', { htmlFor: 'dsh-remote-server-url' }, t('serverUrl')),
+                React.createElement('input', {
+                  id: 'dsh-remote-server-url',
+                  type: 'url',
+                  value: serverUrl,
+                  disabled: busy || !writable,
+                  required: true,
+                  placeholder: 'https://dsh.r2049.cn',
+                  onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
+                }),
+                React.createElement('p', null, t('serverUrlHint'))),
+              codexSetting,
+              React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
+              !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
+              React.createElement('div', { className: 'dshRemoteSettingsFooter' },
+                error !== undefined
+                  ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
+                  : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
+                React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || !draftDirty, onClick: discard }, t('discard')),
+                React.createElement('button', { type: 'submit', className: 'dshRemoteSave', disabled: busy || !writable || !serverDirty }, t(busy ? 'saving' : 'save')))),
+            connectedDevices)
+
+      return React.createElement('div', { className: 'dshRemoteSection' },
+        React.createElement('h2', { className: 'dshRemoteSectionTitle' }, t('remoteConnectionNav')),
+        React.createElement('p', { className: 'dshRemoteSectionIntro' }, t('remoteConnectionIntro')),
+        settingsBody)
     }
 
     function RemoteWorkspaceAction(props: {
@@ -2400,6 +2454,7 @@ window.__ModuleLoader__.load({
         '.dshRemoteSectionHeading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.dshRemoteSectionTitle{min-width:0;display:flex;align-items:center;gap:10px}.dshRemoteSectionTitle>strong{font-size:14px}.dshRemoteSectionActions{display:flex;align-items:center;gap:14px}.dshRemoteSectionActions>button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px}.dshRemoteSectionActions>button:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}',
         '.dshRemoteCancelWorkspace{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 0;cursor:pointer}.dshRemoteCancelWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteCancelWorkspace:disabled{opacity:.5;cursor:default}',
         '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostList>button{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
+        '.dshRemoteSection{display:flex;flex-direction:column;gap:16px;max-width:720px}.dshRemoteSectionTitle{margin:0;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:500;line-height:24px}.dshRemoteSectionIntro{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemoteSection .dshRemotePluginCard{margin-top:8px}.dshRemoteSectionGroup{display:flex;flex-direction:column;gap:8px}.dshRemoteSectionGroupHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteSectionGroupTitle{margin:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:22px}.dshRemoteConnectedClients{display:flex;flex-direction:column;gap:8px;margin:4px 0 0}.dshRemoteConnectedHeading{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}.dshRemoteConnectedClients>p{margin:8px 0 0;color:var(--dsw-alias-label-secondary);font-size:13px}.dshRemoteClientList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemotePluginCardBody>.dshRemoteClientList{margin-top:4px;border-top:0}.dshRemotePluginCardBody>.dshRemoteSettingsState{padding:12px 0}.dshRemoteClientRow{min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteClientRow:last-child{border-bottom:0}.dshRemoteClientRow>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteClientRow strong{font-size:14px;font-weight:500}.dshRemoteClientRow small{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteClientOnline{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-state-success-primary)!important}.dshRemoteClientOnline::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}',
         '.dshRemoteProgress{display:flex;flex-direction:column;gap:8px;margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dshRemoteProgressHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteProgressHeader strong{font-size:13px;font-weight:600}.dshRemoteProgressHeader span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteProgressBar{height:6px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteProgressBar>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--dsw-alias-brand-primary);transform-origin:left center;transition:transform .22s ease-out}[dir="rtl"] .dshRemoteProgressBar>span{transform-origin:right center}.dshRemoteProgress p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.45}.dshRemoteProgressRoute{font-weight:500}.dshRemoteProgressRoute .isActive{color:var(--dsw-alias-state-success-primary);font-weight:700}.dshRemoteProgressRouteArrow{color:var(--dsw-alias-label-tertiary)}@media(prefers-reduced-motion:reduce){.dshRemoteProgressBar>span{transition:none}}',
         '.dshRemoteBrowser{display:flex;flex-direction:column}.dshRemoteCrumbs{display:flex;align-items:center;gap:4px;overflow:auto;padding:2px 0 10px}.dshRemoteCrumbs>button{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:5px 7px;border-radius:6px;cursor:pointer}.dshRemoteCrumbs>button:not(:last-child)::after{content:" /";color:var(--dsw-alias-label-tertiary)}.dshRemoteCrumbs>button:disabled{color:var(--dsw-alias-label-primary);font-weight:600}',
         '.dshRemoteWorkspaceLists{overflow:visible}',
@@ -2602,14 +2657,14 @@ window.__ModuleLoader__.load({
           preferredQrProvider: ctx.locale.getLocale().active === 'zh' ? 'zhihu' : 'github',
         }),
       }, RemoteWorkspaceAction))
-      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-        name: 'settings.plugin.item',
-        key: 'ds-harness-remote',
-        id: 'ds-harness-remote',
-        order: 30,
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: 'deepseek-remote',
+        order: 18,
+        label: () => t('remoteConnectionNav'),
         locale: localeNamespace,
         inject: () => ({ control }),
-      }, RemotePluginOptions))
+      }, RemoteConnectionSection))
     }
 
     function isMissingControlRoute(reason: unknown): boolean {
@@ -2625,7 +2680,19 @@ window.__ModuleLoader__.load({
       if (normalized === 'darwin' || normalized === 'macos') return 'macOS'
       if (normalized === 'win32' || normalized === 'windows') return 'Windows'
       if (normalized === 'linux') return 'Linux'
+      if (normalized === 'android') return 'Android'
       return value
+    }
+
+    function connectedClientModeLabel(
+      mode: 'LAN' | 'P2P' | 'TURN' | 'Relay' | undefined,
+      t: Translate,
+    ): string {
+      if (mode === 'LAN') return t('remoteNetworkLan')
+      if (mode === 'P2P') return t('remoteNetworkP2p')
+      if (mode === 'TURN') return t('remoteNetworkTurn')
+      if (mode === 'Relay') return t('remoteNetworkRelay')
+      return t('connected')
     }
 
     module.exports.apply = apply

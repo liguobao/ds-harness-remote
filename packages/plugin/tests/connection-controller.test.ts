@@ -37,6 +37,10 @@ describe('ConnectionController', () => {
 
     expect(controller.connectionCount()).toBe(2)
     expect(controller.peerDeviceIds()).toEqual(['client-phone', 'client-desktop'])
+    expect(controller.connectedPeers()).toEqual([
+      { deviceId: 'client-phone' },
+      { deviceId: 'client-desktop' },
+    ])
     expect(controller.peerDeviceId()).toBeUndefined()
     expect(phone.close).not.toHaveBeenCalled()
     expect(desktop.close).not.toHaveBeenCalled()

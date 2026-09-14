@@ -72,6 +72,10 @@ describe('HostPluginRuntime multi-Client routing', () => {
       activeConnections: 2,
     })
     expect(runtime.connections.peerDeviceIds()).toEqual(['client-phone', 'client-desktop'])
+    expect(runtime.hostStatus().connectedClients).toEqual([
+      { deviceId: 'client-phone', name: 'Phone', platform: 'android', mode: 'LAN' },
+      { deviceId: 'client-desktop', name: 'Laptop', platform: 'darwin', mode: 'P2P' },
+    ])
     expect(phone.sent()).not.toContainEqual(expect.objectContaining({ type: 'rpc.error' }))
     expect(desktop.sent()).not.toContainEqual(expect.objectContaining({ type: 'rpc.error' }))
 
@@ -107,10 +111,15 @@ function identities(): IdentityStore {
     privateKey: 'host-private-key',
     fingerprint: 'HOST',
   }
+  const peers = new Map([
+    ['client-phone', { deviceId: 'client-phone', name: 'Phone', platform: 'android' }],
+    ['client-desktop', { deviceId: 'client-desktop', name: 'Laptop', platform: 'darwin' }],
+  ])
   return {
     loadOrCreate: vi.fn(async () => identity),
     isTrusted: vi.fn(() => true),
-    listTrustedPeers: vi.fn(() => []),
+    listTrustedPeers: vi.fn(() => [...peers.values()]),
+    trustedPeer: vi.fn((deviceId: string) => peers.get(deviceId)),
   } as unknown as IdentityStore
 }
 
@@ -157,6 +166,7 @@ function fakeChannel(
     security: { protocol: 'Noise_IK_25519_ChaChaPoly_SHA256', connectionId, membershipId: 'membership-1' },
     peerDeviceId,
     peerIdentityKey: `key-${peerDeviceId}`,
+    mode: peerDeviceId === 'client-desktop' ? 'P2P' : 'LAN',
     send,
     close: vi.fn(async () => undefined),
     onMessage: vi.fn(next => { handler = next; return () => { handler = () => undefined } }),

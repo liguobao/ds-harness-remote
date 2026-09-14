@@ -4059,12 +4059,8 @@ var MAX_DEVICE_NAME_LENGTH = 128;
 var MAX_DEVICE_PLATFORM_LENGTH = 64;
 var MAX_DEVICE_VERSION_LENGTH = 64;
 var MAX_AUTH_TOKEN_LENGTH = 8 * 1024;
-var HOST_REGISTRATION_CODE_TTL_MS = 10 * 6e4;
 var MAX_ACTIVE_TRANSFERS_PER_DIRECTION = 2;
 var TRANSFER_IDLE_MS = 2 * 6e4;
-var MAX_RPC_TEXT_INPUT_BYTES = 64 * 1024;
-var MAX_FILEVIEWER_RANGE_BYTES = 512 * 1024;
-var MIN_REPLAY_WINDOW_MS = 15 * 6e4;
 var MAX_ALPHA_STREAMS_PER_CONNECTION = 16;
 var SECURE_FRAGMENT_MAGIC = new Uint8Array([68, 83, 72, 70]);
 var SECURE_FRAGMENT_VERSION = 1;
@@ -4123,52 +4119,6 @@ var rpcMethods = [
   "codex.app.transfer.read",
   "codex.app.transfer.close"
 ];
-var errorCodes = [
-  // Protocol / Version
-  "INVALID_MESSAGE",
-  "UNSUPPORTED_VERSION",
-  "CAPABILITY_NOT_SUPPORTED",
-  "METHOD_NOT_FOUND",
-  "METHOD_NOT_ALLOWED",
-  "REQUEST_CONFLICT",
-  "FRAME_TOO_LARGE",
-  "RATE_LIMITED",
-  // Auth / Device
-  "AUTH_REQUIRED",
-  "AUTH_INVALID",
-  "ACCOUNT_AUTH_REQUIRED",
-  "TOKEN_EXPIRED",
-  "DEVICE_NOT_FOUND",
-  "DEVICE_REVOKED",
-  "DEVICE_OWNERSHIP_REQUIRED",
-  "MEMBERSHIP_REQUIRED",
-  "PEER_IDENTITY_MISMATCH",
-  "HOST_REGISTRATION_CODE_NOT_FOUND",
-  "HOST_REGISTRATION_CODE_EXPIRED",
-  "HOST_REGISTRATION_CODE_CONSUMED",
-  // Connection / Transport
-  "HOST_OFFLINE",
-  "CONNECTION_NOT_FOUND",
-  "CONNECTION_FAILED",
-  "CONNECTION_REPLACED",
-  "P2P_FAILED",
-  "TURN_UNAVAILABLE",
-  "RELAY_UNAVAILABLE",
-  "SLOW_CONSUMER",
-  "SECURE_CHANNEL_FAILED",
-  // Harness
-  "HARNESS_UNAVAILABLE",
-  "HARNESS_VERSION_INCOMPATIBLE",
-  "RESPONSE_TOO_LARGE",
-  "SESSION_NOT_FOUND",
-  "SESSION_NOT_READY",
-  "AGENT_BUSY",
-  "PERMISSION_DENIED",
-  "PERMISSION_NOT_PENDING",
-  "RPC_TIMEOUT",
-  "FULL_RESYNC_REQUIRED",
-  "INTERNAL_ERROR"
-];
 var selectedTransports = ["lan", "p2p", "turn", "relay"];
 function normalizeSdpMLineIndex(value) {
   if (value === void 0)
@@ -4193,7 +4143,6 @@ function acceptNegotiatedCapabilities(offered, negotiated) {
 var rpcMethodSchema = external_exports.enum(rpcMethods);
 var messageTypeSchema = external_exports.enum(messageTypes);
 var controlFrameTypeSchema = external_exports.enum(controlFrameTypes);
-var errorCodeSchema = external_exports.enum(errorCodes);
 var uniqueStrings = (values) => new Set(values).size === values.length;
 var uniqueNumbers = (values) => new Set(values).size === values.length;
 var utf8Length = (value) => new TextEncoder().encode(value).byteLength;
@@ -4234,10 +4183,6 @@ var hostRegistrationCodeRequestSchema = external_exports.object({
   v: external_exports.literal(PROTOCOL_VERSION),
   code: external_exports.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/u),
   device: hostDeviceDescriptorSchema
-}).strict();
-var registerOwnedRoleRequestSchema = external_exports.object({
-  v: external_exports.literal(PROTOCOL_VERSION),
-  device: accountDeviceDescriptorSchema
 }).strict();
 var deviceRefreshRequestSchema = external_exports.object({
   deviceId: deviceIdSchema,
@@ -20779,7 +20724,21 @@ var ConnectionController = class {
     return this.active.size;
   }
   peerDeviceIds() {
-    return [...new Set([...this.active.values()].map((connection) => connection.channel.peerDeviceId))];
+    return this.connectedPeers().map((peer) => peer.deviceId);
+  }
+  connectedPeers() {
+    const peers = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const connection of this.active.values()) {
+      const deviceId = connection.channel.peerDeviceId;
+      if (seen.has(deviceId)) continue;
+      seen.add(deviceId);
+      peers.push({
+        deviceId,
+        ...connection.channel.mode === void 0 ? {} : { mode: connection.channel.mode }
+      });
+    }
+    return peers;
   }
   peerDeviceId() {
     const peers = this.peerDeviceIds();
@@ -25068,8 +25027,20 @@ var HostPluginRuntime = class {
       ...error === void 0 ? {} : { error },
       ...authorization?.account === void 0 ? {} : { account: authorization.account },
       authorized: authorization !== void 0,
-      accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED"
+      accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED",
+      connectedClients: this.listConnectedClients()
     };
+  }
+  listConnectedClients() {
+    return this.connections.connectedPeers().map((peer) => {
+      const trusted = this.identities.trustedPeer(peer.deviceId);
+      return {
+        deviceId: peer.deviceId,
+        name: trusted?.name.trim() ?? "",
+        ...trusted === void 0 ? {} : { platform: trusted.platform },
+        ...peer.mode === void 0 ? {} : { mode: peer.mode }
+      };
+    });
   }
   localHarnessVersion() {
     return this.harnessVersion;
