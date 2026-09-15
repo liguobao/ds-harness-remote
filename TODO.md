@@ -59,6 +59,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式
 - [x] inbound 订阅生命周期、`prompt_completed` catch-up、多轮气泡分离
 - [ ] 断线重连后 ACP stream 重建与会话 claim
+- [x] Android：重连保留 Cursor workspace/session，并自动 `stream.open`
 - [ ] Host 侧会话内可分页 History（不写 SessionStore）与 Android/Desktop 恢复
 - [ ] `session/load` / 会话列表与跨设备继续聊
 - [ ] 审批 / 提问真机矩阵与长工具轮次稳定性

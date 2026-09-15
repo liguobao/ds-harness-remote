@@ -87,6 +87,7 @@ ds-harness-remote:
 - [x] Android 真机：文本 Prompt、思考/正文流式帧、`prompt_completed` catch-up、多轮气泡分离
 - [ ] Desktop ↔ 异机 Client 完整 E2E（审批 / cancel / 长工具轮次）
 - [ ] 断线重连后 stream 重建与会话内 History 恢复
+- [x] Android：重连保留 Cursor 会话并自动重建 ACP stream
 - [ ] `session/load` 与跨设备会话列表体验
 
 ## 近期后续（不含 Codex→ACP）

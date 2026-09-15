@@ -430,7 +430,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   async connectDevice(device, options = {}) {
     const { config, identity } = get()
     if (config === undefined || identity === undefined) return false
-    set({
+    // Cursor sessions live only in Client memory (no Host catalog). Keep them
+    // across reconnect so the open chat and workspace list survive.
+    set(state => ({
       selectedDevice: device,
       connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
       connectionStage: 'authenticating',
@@ -439,10 +441,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       hostDescriptor: undefined,
       codexAvailable: false,
       cursorAvailable: false,
-      workspaces: [],
-      sessions: [],
+      workspaces: state.workspaces.filter(workspace => workspace.backend === 'cursor'),
+      sessions: state.sessions.filter(session => session.backend === 'cursor'),
+      archivedSessionIds: [],
+      sessionModels: undefined,
       error: undefined,
-    })
+    }))
     try {
       await closeActiveCodexStream(false)
       await closeActiveCursorStream(false)
@@ -512,13 +516,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
+        const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
+        const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions]
+        const selectedSession = state.selectedSession === undefined
+          ? undefined
+          : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
+            ?? (state.selectedSession.backend === 'cursor' ? state.selectedSession : undefined)
         return {
           hostDescriptor,
           codexAvailable: connection.hasCodex(),
           cursorAvailable: connection.hasCursor(),
-          workspaces: [...workspaceList.items, ...codexCatalog.workspaces],
+          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
-          sessions: [...sessions, ...codexSessions],
+          sessions: combinedSessions,
+          selectedSession,
           connectionStage: 'ready',
           connectionNetworkDetails,
           lastConnectedDeviceId: device.deviceId,
@@ -528,6 +540,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       })
       await saveLastConnectedDeviceId(device.deviceId)
+      // Re-bind ACP stream after the secure channel is back so live frames resume
+      // without requiring a fresh openSession tap.
+      const resumed = get().selectedSession
+      if (resumed?.backend === 'cursor' && connection.hasCursor()) {
+        await ensureCursorStream(resumed).catch(() => undefined)
+      }
       return true
     } catch (error) {
       await connection.close()
@@ -1507,6 +1525,14 @@ async function ensureCursorStream(session: RemoteSession): Promise<void> {
           : state.selectedSession,
         ...(closed.reason === 'failed' ? { error: zhCN.runtime.cursorUnavailable } : {}),
       }))
+      // Transport flaps can close the ACP stream while the secure channel is
+      // still up. Re-open so the next prompt does not miss live frames.
+      if (closed.reason === 'peer-disconnected') return
+      const phase = useAppStore.getState().connection.phase
+      if (phase !== 'connected') return
+      const current = useAppStore.getState().selectedSession
+      if (current?.sessionId !== session.sessionId || current.backend !== 'cursor') return
+      void ensureCursorStream(current).catch(() => undefined)
     },
   )
   activeCursorStream = stream
