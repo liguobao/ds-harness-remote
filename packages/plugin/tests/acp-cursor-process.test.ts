@@ -90,7 +90,7 @@ function fakeProcess(): {
 }
 
 function logger(): SafeLogger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger
 }
 
 async function flush(): Promise<void> {

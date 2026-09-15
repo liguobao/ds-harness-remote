@@ -9,7 +9,7 @@ function silentLogger(): SafeLogger {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  }
+  } as unknown as SafeLogger
 }
 
 function readyAcp(): CursorAcpLike {
