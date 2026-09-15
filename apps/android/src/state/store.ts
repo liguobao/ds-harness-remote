@@ -1468,7 +1468,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const kind = update === undefined
       ? undefined
       : (typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined)
-    if (kind !== undefined) {
+    if (kind !== undefined && update !== undefined) {
       const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
       // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
       console.info('[dsh-remote] cursor frame:', kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
