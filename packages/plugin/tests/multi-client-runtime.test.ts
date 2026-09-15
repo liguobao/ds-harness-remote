@@ -185,6 +185,7 @@ function config(): ResolvedConfig {
     logLevel: 'error',
     reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
     codex: { enabled: false, binary: 'codex' },
+    cursor: { enabled: false, binary: 'agent' },
   }
 }
 

@@ -9,6 +9,8 @@ export const MAX_SECURE_MESSAGE_BYTES = 4 * 1024 * 1024
 export const HARNESS_API_TRANSFER_CHUNK_BYTES = 512 * 1024
 /** Decoded bytes carried by one authenticated Codex domain transfer chunk. */
 export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
+/** Decoded bytes carried by one authenticated Agent ACP domain transfer chunk. */
+export const AGENT_ACP_TRANSFER_CHUNK_BYTES = 512 * 1024
 /**
  * Bounded transfer size for Harness image prompts. The upstream default admits
  * up to 200 MiB of source images; their base64 JSON envelope needs roughly
@@ -16,6 +18,7 @@ export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
  */
 export const MAX_HARNESS_API_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_CODEX_APP_TRANSFER_BYTES = 288 * 1024 * 1024
+export const MAX_AGENT_ACP_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_DEVICE_NAME_LENGTH = 128
 export const MAX_DEVICE_PLATFORM_LENGTH = 64
 export const MAX_DEVICE_VERSION_LENGTH = 64
@@ -115,6 +118,15 @@ export const rpcMethods = [
   'codex.app.transfer.commit',
   'codex.app.transfer.read',
   'codex.app.transfer.close',
+  'agent.acp.call',
+  'agent.acp.respond',
+  'agent.acp.stream.open',
+  'agent.acp.stream.close',
+  'agent.acp.transfer.open',
+  'agent.acp.transfer.chunk',
+  'agent.acp.transfer.commit',
+  'agent.acp.transfer.read',
+  'agent.acp.transfer.close',
 ] as const
 
 export const remoteEvents = [
@@ -124,6 +136,8 @@ export const remoteEvents = [
   'harness.remote.stream.closed',
   'codex.app.frame',
   'codex.app.stream.closed',
+  'agent.acp.frame',
+  'agent.acp.stream.closed',
 ] as const
 
 export const errorCodes = [
@@ -645,6 +659,67 @@ export type CodexAppTransferCommitResult =
   | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
 
 export interface CodexAppTransferReadResult {
+  transferId: string
+  index: number
+  data: string
+}
+
+/** Fixed allowlisted Agent ACP call carried inside Remote. */
+export interface AgentAcpCallParams {
+  method: string
+  params: unknown
+}
+
+export interface AgentAcpRespondParams {
+  requestHandle: string
+  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel'
+  /** Optional structured answer for backend extension methods (ask_question / create_plan). */
+  result?: unknown
+}
+
+export interface AgentAcpStreamOpenParams {
+  streamId: string
+  sessionId: string
+}
+
+export interface AgentAcpStreamCloseParams {
+  streamId: string
+}
+
+export interface AgentAcpFrameData {
+  streamId: string
+  frame: {
+    method: string
+    params: unknown
+  }
+}
+
+export interface AgentAcpStreamClosedData {
+  streamId: string
+  reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected'
+}
+
+export interface AgentAcpTransferOpenParams {
+  transferId: string
+  totalBytes: number
+  totalChunks: number
+}
+
+export interface AgentAcpTransferChunkParams {
+  transferId: string
+  index: number
+  data: string
+}
+
+export interface AgentAcpTransferCommitParams { transferId: string }
+export interface AgentAcpTransferReadParams { transferId: string; index: number }
+export interface AgentAcpTransferCloseParams { transferId: string }
+
+export type AgentAcpTransferCommitResult =
+  | { kind: 'inline'; response: unknown }
+  | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
+
+export interface AgentAcpTransferReadResult {
   transferId: string
   index: number
   data: string

@@ -49,6 +49,22 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [ ] 完善账号过期、`DEVICE_OWNERSHIP_REQUIRED` 和 legacy owner 的显式恢复体验
 - [x] transport 关闭后 pending unary/stream 立即返回稳定错误，并清理 timer 和 abort listener
 
+## Agent ACP / Cursor adapter（进行中，实验）
+
+通用 `agent.acp.*` gateway + Cursor `agent acp` adapter。技术说明见
+[docs/cursor-remote.md](docs/cursor-remote.md)。**暂不**推进 Codex→ACP adapter。
+
+- [x] Host gateway、capability、allowlist、Cursor stdio adapter
+- [x] Desktop Virtual Harness 与设置开关（默认关闭）
+- [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式
+- [x] inbound 订阅生命周期、`prompt_completed` catch-up、多轮气泡分离
+- [ ] 断线重连后 ACP stream 重建与会话 claim
+- [x] Android：重连保留 Cursor workspace/session，并自动 `stream.open`
+- [ ] Host 侧会话内可分页 History（不写 SessionStore）与 Android/Desktop 恢复
+- [ ] `session/load` / 会话列表与跨设备继续聊
+- [ ] 审批 / 提问真机矩阵与长工具轮次稳定性
+- [ ] Desktop ↔ 异机 Client 完整 E2E
+
 ## Codex Remote Session / History（已完成，实验发布）
 
 Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域。它在 Remote 工作区选择阶段

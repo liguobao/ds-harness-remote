@@ -1704,7 +1704,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       try {
         let value = JSON.parse(raw);
         if (typeof value.targetDeviceId != "string" || typeof value.workspaceId != "string") throw new Error("invalid");
-        if (value.backend !== void 0 && value.backend !== "harness" && value.backend !== "codex") throw new Error("invalid");
+        if (value.backend !== void 0 && value.backend !== "harness" && value.backend !== "codex" && value.backend !== "cursor") throw new Error("invalid");
         if (value.sessionId !== void 0 && typeof value.sessionId != "string") throw new Error("invalid");
         return value;
       } catch {
@@ -1745,6 +1745,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "Expose Codex projects through this Host. Restart DSH after changing this setting.",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
+    cursorRemote: "Cursor ACP adapter (experimental)",
+    cursorRemoteHint: "Enable the Cursor `agent acp` backend for the Agent ACP gateway. Requires local `agent login`. Restart DSH after changing this setting.",
+    cursorSaved: "Cursor ACP adapter setting saved. Restart DSH to apply it.",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -1848,11 +1851,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
     exitRemote: "Exit",
     addRemoteWorkspace: "Add remote workspace",
     addCodexWorkspace: "Add CodeX workspace",
+    addCursorWorkspace: "Add Cursor workspace",
     noCodexWorkspaces: "No CodeX workspaces yet.",
+    noCursorWorkspaces: "No Cursor workspaces yet. Add a project directory to start.",
     cancelAddWorkspace: "Cancel",
     confirmAddWorkspace: "Add and open",
     showAllWorkspaces: "Show all DSH workspaces",
     showAllCodexWorkspaces: "Show all CodeX workspaces",
+    showAllCursorWorkspaces: "Show all Cursor workspaces",
     remoteModeLabel: "Remote mode \xB7 {name}",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
@@ -1925,6 +1931,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     qrLoginExpired: "This QR code expired. Refresh it to continue.",
     refreshQrCode: "Refresh QR code",
     codexVirtualWorkspace: "CodeX virtual workspace",
+    cursorVirtualWorkspace: "Cursor virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
     pluginTitle: "DeepSeek \u8FDC\u7A0B\u8FDE\u63A5",
@@ -1956,6 +1963,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u63D0\u4F9B Codex \u9879\u76EE\uFF1B\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
+    cursorRemote: "Cursor ACP adapter\uFF08\u5B9E\u9A8C\u6027\uFF09",
+    cursorRemoteHint: "\u4E3A Agent ACP gateway \u542F\u7528 Cursor `agent acp` backend\u3002\u9700\u672C\u673A\u5B8C\u6210 `agent login`\u3002\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
+    cursorSaved: "Cursor ACP adapter \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -2059,11 +2069,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
     exitRemote: "\u9000\u51FA",
     addRemoteWorkspace: "\u6DFB\u52A0\u8FDC\u7A0B\u5DE5\u4F5C\u533A",
     addCodexWorkspace: "\u6DFB\u52A0 CodeX \u5DE5\u4F5C\u533A",
+    addCursorWorkspace: "\u6DFB\u52A0 Cursor \u5DE5\u4F5C\u533A",
     noCodexWorkspaces: "\u8FD8\u6CA1\u6709 CodeX \u5DE5\u4F5C\u533A\u3002",
+    noCursorWorkspaces: "\u8FD8\u6CA1\u6709 Cursor \u5DE5\u4F5C\u533A\u3002\u6DFB\u52A0\u9879\u76EE\u76EE\u5F55\u5373\u53EF\u5F00\u59CB\u3002",
     cancelAddWorkspace: "\u53D6\u6D88",
     confirmAddWorkspace: "\u786E\u8BA4\u5E76\u6253\u5F00",
     showAllWorkspaces: "\u663E\u793A\u5168\u90E8 DSH \u5DE5\u4F5C\u533A",
     showAllCodexWorkspaces: "\u663E\u793A\u5168\u90E8 CodeX \u5DE5\u4F5C\u533A",
+    showAllCursorWorkspaces: "\u663E\u793A\u5168\u90E8 Cursor \u5DE5\u4F5C\u533A",
     remoteModeLabel: "\u8FDC\u7A0B\u6A21\u5F0F \xB7 {name}",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
@@ -2136,6 +2149,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     qrLoginExpired: "\u4E8C\u7EF4\u7801\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002",
     refreshQrCode: "\u5237\u65B0\u4E8C\u7EF4\u7801",
     codexVirtualWorkspace: "CodeX \u5DE5\u4F5C\u533A",
+    cursorVirtualWorkspace: "Cursor \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
   }, defaultPreferredTransports = ["lan", "p2p", "turn", "relay"], controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
     constructor(message) {
@@ -2149,7 +2163,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       controlUnavailable: !0,
       connected: !1,
       transport: "Disconnected",
-      remoteFeatures: { commandList: !1, fileViewer: !1, codex: !1 },
+      remoteFeatures: { commandList: !1, fileViewer: !1, codex: !1, cursor: !1 },
       hostAuthorizationAvailable: !1
     };
   }
@@ -2330,8 +2344,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       }
       function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+        let { t } = props, [open, setOpen] = React.useState(!1), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [cursorEnabled, setCursorEnabled] = React.useState(!1), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [cursorBusy, setCursorBusy] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setCursorEnabled(view.config.cursor?.enabled ?? !1), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
             props.control("settings.get"),
@@ -2409,6 +2423,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
           } finally {
             setCodexBusy(!1);
           }
+        }, setCursorRemote = async (enabled) => {
+          let previous = cursorEnabled;
+          setCursorEnabled(enabled), setCursorBusy(!0), setError(void 0), setNotice(void 0);
+          try {
+            let view = await props.control("settings.cursor.set", { enabled });
+            applyView(view), setNotice({ key: "cursorSaved" });
+          } catch (reason) {
+            setCursorEnabled(previous), setError(messageOf(reason));
+          } finally {
+            setCursorBusy(!1);
+          }
         }, discard = () => {
           settingsView !== void 0 && applyView(settingsView), setRegistrationCode(""), setNotice(void 0), setError(void 0);
         }, codexSetting = React.createElement(
@@ -2427,6 +2452,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("codexRemote"),
             checked: codexEnabled,
             onChange: (event) => void setCodexRemote(event.target.checked)
+          })
+        ), cursorSetting = React.createElement(
+          "div",
+          { className: "dshRemoteAuthorizationSetting" },
+          React.createElement(
+            "div",
+            null,
+            React.createElement("strong", null, t("cursorRemote")),
+            React.createElement("p", null, t("cursorRemoteHint"))
+          ),
+          React.createElement("input", {
+            type: "checkbox",
+            role: "switch",
+            disabled: busy || cursorBusy || !writable,
+            "aria-label": t("cursorRemote"),
+            checked: cursorEnabled,
+            onChange: (event) => void setCursorRemote(event.target.checked)
           })
         );
         return React.createElement(
@@ -2491,6 +2533,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               codexSetting,
+              cursorSetting,
               React.createElement(
                 "div",
                 { className: "dshRemoteAuthorizationSetting" },
@@ -2573,6 +2616,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               codexSetting,
+              cursorSetting,
               React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
               writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
               React.createElement(
@@ -2587,7 +2631,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteWorkspaceAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState(props.preferredQrProvider), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState(props.preferredQrProvider), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
           open || setDevicesOpen(!1);
         }, [open]), React.useEffect(() => {
@@ -2683,7 +2727,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           disabled: busy,
           onClick: () => selectLoginMethod(provider)
         }, t(provider === "github" ? "githubLogin" : "zhihuLogin")), selectHost = async (host) => {
-          setBusy(!0), setError(void 0), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1);
+          setBusy(!0), setError(void 0), setCodexWorkspaces([]), setCursorWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1);
           try {
             let result = await runConnectHostProgress(
               status?.preferredTransports,
@@ -2697,13 +2741,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   targetDeviceId: host.deviceId
                 }), nextCodexWorkspaces = await props.control("codex.workspaces.list", {
                   targetDeviceId: host.deviceId
+                }).catch(() => []), nextCursorWorkspaces = await props.control("cursor.workspaces.list", {
+                  targetDeviceId: host.deviceId
                 }).catch(() => []), nextStatus = await props.control("status").catch(() => {
                 });
-                return nextStatus !== void 0 && setStatus(nextStatus), { workspaces: nextWorkspaces, codexWorkspaces: nextCodexWorkspaces, status: nextStatus };
+                return nextStatus !== void 0 && setStatus(nextStatus), {
+                  workspaces: nextWorkspaces,
+                  codexWorkspaces: nextCodexWorkspaces,
+                  cursorWorkspaces: nextCursorWorkspaces,
+                  status: nextStatus
+                };
               },
               (result2) => connectedProgress(result2.status)
             );
-            setWorkspaces(result.workspaces), setCodexWorkspaces(result.codexWorkspaces), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setSelectedHost(host), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+            setWorkspaces(result.workspaces), setCodexWorkspaces(result.codexWorkspaces), setCursorWorkspaces(result.cursorWorkspaces), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setSelectedHost(host), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -2717,7 +2768,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 targetDeviceId: selectedHost.deviceId,
                 ...nextPath === void 0 ? {} : { path: nextPath }
               });
-              setDirectory(listing), setCodexWorkspaceId(void 0), setPath(listing.path);
+              setDirectory(listing), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(listing.path);
             } catch (reason) {
               setError(messageOf(reason));
             } finally {
@@ -2725,25 +2776,25 @@ Minimum version required to store current data is: ` + bestVersion + `.
             }
           }
         }, startAddingWorkspace = (backend) => {
-          setAddingWorkspace(!0), setWorkspaceBackend(backend), setCodexWorkspaceId(void 0), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setDirectory(void 0), setPath(""), browseDirectory();
+          setAddingWorkspace(!0), setWorkspaceBackend(backend), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setDirectory(void 0), setPath(""), browseDirectory();
         }, cancelAddingWorkspace = () => {
-          setAddingWorkspace(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath("");
+          setAddingWorkspace(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setDirectory(void 0), setPath("");
         }, refreshRemote = async () => {
           setBusy(!0), setNotice(void 0), setError(void 0);
           try {
             let nextStatus = await props.control("status");
             if (setStatus(nextStatus), !nextStatus.available) {
-              setDevices([]), setNeedsAuthorization(!1), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+              setDevices([]), setNeedsAuthorization(!1), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
               return;
             }
             try {
               let nextDevices = await props.control("devices");
               if (setDevices(nextDevices), setNeedsAuthorization(!1), selectedHost !== void 0) {
                 let nextSelectedHost = nextDevices.find((device) => device.deviceId === selectedHost.deviceId);
-                nextSelectedHost === void 0 ? (setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : setSelectedHost(nextSelectedHost);
+                nextSelectedHost === void 0 ? (setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : setSelectedHost(nextSelectedHost);
               }
             } catch {
-              setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+              setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
             }
           } catch (reason) {
             setError(messageOf(reason));
@@ -2751,7 +2802,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setBusy(!1);
           }
         }, show = async () => {
-          setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setOpen(!0), await refreshRemote();
+          setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setOpen(!0), await refreshRemote();
         };
         React.useEffect(() => {
           if (!open || selectedHost !== void 0) return;
@@ -2762,7 +2813,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           return () => window.clearInterval(timer);
         }, [open, selectedHost]);
         let chooseAnotherHost = () => {
-          setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
+          setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
         }, signInClient = async () => {
           if (!(email.trim() === "" || password === "")) {
             setBusy(!0), setError(void 0);
@@ -2800,8 +2851,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setBusy(!1);
           }
         }, openWorkspace = async (selection) => {
-          let targetBackend = selection?.backend ?? workspaceBackend, targetPath = (selection?.path ?? path).trim(), targetCodexWorkspaceId = selection?.backend === "codex" ? selection.workspaceId : selection === void 0 ? codexWorkspaceId : void 0, createWorkspace = selection === void 0 && addingWorkspace;
-          if (!(selectedHost === void 0 || targetPath === "" || !createWorkspace && targetBackend === "codex" && targetCodexWorkspaceId === void 0)) {
+          let targetBackend = selection?.backend ?? workspaceBackend, targetPath = (selection?.path ?? path).trim(), targetCodexWorkspaceId = selection?.backend === "codex" ? selection.workspaceId : selection === void 0 ? codexWorkspaceId : void 0, targetCursorWorkspaceId = selection?.backend === "cursor" ? selection.workspaceId : selection === void 0 ? cursorWorkspaceId : void 0, createWorkspace = selection === void 0 && addingWorkspace;
+          if (!(selectedHost === void 0 || targetPath === "" || !createWorkspace && targetBackend === "codex" && targetCodexWorkspaceId === void 0 || !createWorkspace && targetBackend === "cursor" && targetCursorWorkspaceId === void 0 && targetPath === "")) {
             setBusy(!0), setError(void 0);
             try {
               let nextStatus = await (targetBackend === "codex" ? createWorkspace ? props.control("codex.workspace.create", {
@@ -2810,6 +2861,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
               }) : props.control("codex.workspace.open", {
                 targetDeviceId: selectedHost.deviceId,
                 workspaceId: targetCodexWorkspaceId
+              }) : targetBackend === "cursor" ? createWorkspace || targetCursorWorkspaceId === void 0 ? props.control("cursor.workspace.create", {
+                targetDeviceId: selectedHost.deviceId,
+                path: targetPath
+              }) : props.control("cursor.workspace.open", {
+                targetDeviceId: selectedHost.deviceId,
+                workspaceId: targetCursorWorkspaceId
               }) : props.control("workspace.open", {
                 targetDeviceId: selectedHost.deviceId,
                 path: targetPath
@@ -2819,7 +2876,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               setError(messageOf(reason)), setBusy(!1);
             }
           }
-        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
+        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, cursorAvailable = status?.remoteFeatures?.cursor === !0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
           formatPlatform(selectedHost.platform),
           selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
           selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion })
@@ -3123,7 +3180,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     React.createElement(
                       "div",
                       { className: "dshRemoteSectionHeading dshRemoteWorkspaceHeading" },
-                      React.createElement("strong", null, t(addingWorkspace ? workspaceBackend === "codex" ? "addCodexWorkspace" : "addRemoteWorkspace" : "existingWorkspaces")),
+                      React.createElement("strong", null, t(addingWorkspace ? workspaceBackend === "codex" ? "addCodexWorkspace" : workspaceBackend === "cursor" ? "addCursorWorkspace" : "addRemoteWorkspace" : "existingWorkspaces")),
                       addingWorkspace ? React.createElement("button", {
                         type: "button",
                         className: "dshRemoteCancelWorkspace",
@@ -3185,7 +3242,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                               className: workspaceBackend === "harness" && path === workspace.path ? "isSelected" : "",
                               "aria-pressed": workspaceBackend === "harness" && path === workspace.path,
                               onClick: () => {
-                                setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(workspace.path);
+                                setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(workspace.path);
                               },
                               onDoubleClick: () => void openWorkspace({ backend: "harness", path: workspace.path })
                             },
@@ -3244,7 +3301,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                             className: workspaceBackend === "codex" && codexWorkspaceId === workspace.workspaceId ? "isSelected" : "",
                             "aria-pressed": workspaceBackend === "codex" && codexWorkspaceId === workspace.workspaceId,
                             onClick: () => {
-                              setWorkspaceBackend("codex"), setCodexWorkspaceId(workspace.workspaceId), setPath(workspace.path);
+                              setWorkspaceBackend("codex"), setCodexWorkspaceId(workspace.workspaceId), setCursorWorkspaceId(void 0), setPath(workspace.path);
                             },
                             onDoubleClick: () => void openWorkspace({
                               backend: "codex",
@@ -3263,6 +3320,68 @@ Minimum version required to store current data is: ` + bestVersion + `.
                           "aria-controls": codexWorkspaceListId,
                           "aria-label": t("showAllCodexWorkspaces"),
                           onClick: () => setShowAllCodexWorkspaces(!0)
+                        }, React.createElement("span", { "aria-hidden": !0 }, "\u2026"))
+                      ),
+                      !cursorAvailable && cursorWorkspaces.length === 0 ? null : React.createElement(
+                        "section",
+                        { className: "dshRemoteCodexWorkspaceGroup" },
+                        React.createElement(
+                          "div",
+                          {
+                            id: cursorWorkspaceHeadingId,
+                            className: "dshRemoteWorkspaceSourceHeading"
+                          },
+                          React.createElement(
+                            "span",
+                            { className: "dshRemoteWorkspaceSourceText" },
+                            React.createElement("strong", null, t("cursorVirtualWorkspace"))
+                          ),
+                          cursorAvailable ? React.createElement("button", {
+                            type: "button",
+                            className: "dshRemoteAddWorkspace",
+                            disabled: busy,
+                            title: t("addCursorWorkspace"),
+                            "aria-label": t("addCursorWorkspace"),
+                            onClick: () => startAddingWorkspace("cursor")
+                          }, React.createElement("svg", {
+                            className: "dshRemoteAddWorkspaceIcon",
+                            viewBox: "0 0 16 16",
+                            "aria-hidden": !0,
+                            focusable: !1
+                          }, React.createElement("path", { d: "M8 3v10M3 8h10", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" }))) : null
+                        ),
+                        React.createElement("div", {
+                          id: cursorWorkspaceListId,
+                          className: "dshRemoteDirectoryList dshRemoteCodexWorkspaceList",
+                          "aria-labelledby": cursorWorkspaceHeadingId
+                        }, visibleCursorWorkspaces.length === 0 ? React.createElement("p", null, t("noCursorWorkspaces")) : visibleCursorWorkspaces.map((workspace) => React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === "cursor" && cursorWorkspaceId === workspace.workspaceId ? "isSelected" : "",
+                            "aria-pressed": workspaceBackend === "cursor" && cursorWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend("cursor"), setCursorWorkspaceId(workspace.workspaceId), setCodexWorkspaceId(void 0), setPath(workspace.path);
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: "cursor",
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId
+                            })
+                          },
+                          React.createElement("img", { className: "dshRemoteWorkspaceIcon", src: deepSeekWorkspaceIcon, alt: "", "aria-hidden": !0 }),
+                          React.createElement("span", null, workspace.title),
+                          React.createElement("small", null, `${workspace.path} \xB7 ${workspace.sessionCount}`)
+                        ))),
+                        cursorWorkspaces.length <= 3 || showAllCursorWorkspaces ? null : React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteWorkspaceMore",
+                          disabled: busy,
+                          "aria-controls": cursorWorkspaceListId,
+                          "aria-label": t("showAllCursorWorkspaces"),
+                          onClick: () => setShowAllCursorWorkspaces(!0)
                         }, React.createElement("span", { "aria-hidden": !0 }, "\u2026"))
                       )
                     ),
@@ -3457,7 +3576,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, [status?.mode]), React.useEffect(() => (document.documentElement.classList.toggle(
           "dshRemoteCodexTargetActive",
           status?.mode === "remote" && status.backend === "codex"
-        ), () => document.documentElement.classList.remove("dshRemoteCodexTargetActive")), [status?.mode, status?.backend]), React.useEffect(() => {
+        ), document.documentElement.classList.toggle(
+          "dshRemoteCursorTargetActive",
+          status?.mode === "remote" && status.backend === "cursor"
+        ), () => {
+          document.documentElement.classList.remove("dshRemoteCodexTargetActive"), document.documentElement.classList.remove("dshRemoteCursorTargetActive");
+        }), [status?.mode, status?.backend]), React.useEffect(() => {
           if (!routeOpen) return;
           let closeOnEscape = (event) => {
             event.key === "Escape" && setRouteOpen(!1);
@@ -3700,8 +3824,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();
             if (!workspacesReady(workspaceSnapshot) || !workspaceSnapshot.items.some((workspace) => workspace.workspaceId === pending.workspaceId)) return;
             let sessionSnapshot = ctx.sessions.list.getSnapshot();
-            if (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
-            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
+            if ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
+            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
               disposed || (ctx.sessions.open(sessionId), window.sessionStorage.removeItem(pendingWorkspaceSelectionKey), await control("workspace.selection.consume", pending).catch(() => {
               }));
             }).catch((reason) => {

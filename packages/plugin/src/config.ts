@@ -21,9 +21,19 @@ export interface Config {
     enabled?: boolean
     binary?: string
   }
+  /** Optional Cursor ACP domain carried by the existing authenticated Remote Plugin. */
+  cursor?: {
+    enabled?: boolean
+    binary?: string
+  }
 }
 
 export interface ResolvedCodexConfig {
+  enabled: boolean
+  binary: string
+}
+
+export interface ResolvedCursorConfig {
   enabled: boolean
   binary: string
 }
@@ -42,6 +52,7 @@ export interface ResolvedConfig {
     jitter: number
   }
   codex: ResolvedCodexConfig
+  cursor: ResolvedCursorConfig
 }
 
 /** Cordis-facing configuration shape; runtime bounds are enforced by resolveConfig. */
@@ -61,6 +72,10 @@ export const Config: s<Config> = s.object({
     }),
   ]),
   codex: s.object({
+    enabled: s.boolean(),
+    binary: s.string(),
+  }),
+  cursor: s.object({
     enabled: s.boolean(),
     binary: s.string(),
   }),
@@ -84,6 +99,10 @@ const configSchema = z.object({
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   reconnect: reconnectSchema.optional(),
   codex: z.object({
+    enabled: z.boolean().optional(),
+    binary: z.string().trim().min(1).max(4096).optional(),
+  }).strict().optional(),
+  cursor: z.object({
     enabled: z.boolean().optional(),
     binary: z.string().trim().min(1).max(4096).optional(),
   }).strict().optional(),
@@ -115,6 +134,11 @@ export function resolveConfig(input: Config = {}, env: NodeJS.ProcessEnv = proce
     codex: {
       enabled: parsed.codex?.enabled ?? true,
       binary: parsed.codex?.binary ?? 'codex',
+    },
+    cursor: {
+      // Experimental: off by default until Host has `agent login` / API key ready.
+      enabled: parsed.cursor?.enabled ?? false,
+      binary: parsed.cursor?.binary ?? 'agent',
     },
   }
 }
