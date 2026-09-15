@@ -1462,13 +1462,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   handleCursorFrame(frame) {
     const session = get().selectedSession
     if (session === undefined || session.backend !== 'cursor') return
-    const update = isRecord(frame.frame.params)
-      ? (isRecord(frame.frame.params.update) ? frame.frame.params.update : frame.frame.params)
-      : undefined
-    const kind = update === undefined
+    const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
+    const update = params === undefined
       ? undefined
-      : (typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined)
-    if (kind !== undefined && update !== undefined) {
+      : (isRecord(params.update) ? params.update : params)
+    let kind: string | undefined
+    if (update !== undefined && typeof update.sessionUpdate === 'string') {
+      kind = update.sessionUpdate
       const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
       // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
       console.info('[dsh-remote] cursor frame:', kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
