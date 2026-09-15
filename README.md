@@ -178,6 +178,17 @@ requires Host confirmation; sending a prompt preserves the session's current pol
 Codex is enabled by default and can be turned off in the DeepSeek Remote settings card. Advanced
 configuration and implementation notes live in [Codex Remote technical notes](docs/codex-remote.md).
 
+## Experimental Agent ACP / Cursor workspaces
+
+Remote can also open Host-local Cursor Agent sessions through a backend-neutral Agent ACP gateway
+(`agent.acp.*`). Desktop reuses the native Workspace / Session / Composer shell; Android uses an
+in-memory Cursor workspace projection. Text prompts, streaming thought/message updates, cancel, and
+one-shot approvals are supported; image prompts are not.
+
+The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
+`agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:
+[Agent ACP / Cursor adapter notes](docs/cursor-remote.md).
+
 ## End-to-end encryption
 
 Harness business traffic is encrypted on the Client and decrypted only by the selected Host using
@@ -205,6 +216,7 @@ validation status.
 - Optional File Viewer access is limited to authenticated, encrypted range reads and continues to enforce provider root and locator authorization.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
 - Codex Remote is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
+- Agent ACP / Cursor is optional and off by default; it follows the same encrypted Host permission boundary and a fixed method allowlist.
 - Removing a device revokes its credentials, membership, and active Remote connections.
 
 ## Compatibility
@@ -235,6 +247,7 @@ Typert clients still reject Session V3 Hosts before switching the native UI or m
 - [Plugin guide](packages/plugin/README.md)
 - [dsh-TUI Remote guide](docs/dsh-tui.md)
 - [Codex Remote technical notes](docs/codex-remote.md)
+- [Agent ACP / Cursor adapter notes](docs/cursor-remote.md)
 - [Documentation index](docs/README.md)
 - [End-to-end encryption](docs/end-to-end-encryption.md)
 - [Network and transport](docs/network.md)

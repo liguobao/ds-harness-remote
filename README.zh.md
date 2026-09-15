@@ -165,6 +165,16 @@ Web 和 Desktop 的审批控件显示所选 Codex 会话经 Host 确认的模式
 Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。高级配置和实现细节见
 [Codex Remote 技术说明](docs/codex-remote.md)。
 
+## 实验性 Agent ACP / Cursor 工作区
+
+Remote 也可通过后端无关的 Agent ACP gateway（`agent.acp.*`）打开 Host 本机的 Cursor Agent 会话。
+Desktop 复用原生 Workspace / Session / Composer；Android 使用内存中的 Cursor 工作区投影。支持文本
+Prompt、思考/正文流式更新、中断与一次性审批；暂不支持图片 Prompt。
+
+Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.enabled`，在 Host 完成本机
+`agent login`（或配置 `CURSOR_API_KEY`）后重启 DSH。细节见
+[Agent ACP / Cursor adapter 技术说明](docs/cursor-remote.md)。
+
 ## 端到端加密
 
 Harness 业务流量在 Client 加密，只能由选定的 Host 解密，固定使用
@@ -189,6 +199,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - 可选 File Viewer 只通过已认证、已加密的分块读取访问文件，并继续执行 provider 根目录与 locator 授权。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote 是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
+- Agent ACP / Cursor 是可选功能且默认关闭；遵循同一加密 Host 权限边界与固定方法白名单。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
 
 ## 版本兼容
@@ -217,6 +228,7 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.13` 会在 Host 暴�
 - [插件说明](packages/plugin/README.md)
 - [dsh-TUI Remote 使用指南](docs/dsh-tui.md)
 - [Codex Remote 技术说明](docs/codex-remote.md)
+- [Agent ACP / Cursor adapter 技术说明](docs/cursor-remote.md)
 - [文档索引](docs/README.md)
 - [端到端加密](docs/end-to-end-encryption.md)
 - [网络与传输](docs/network.md)

@@ -12,13 +12,12 @@ ACP Client
   -> 已认证 Remote channel（agent.acp.*）
   -> Host ACP gateway
   -> Cursor `agent acp` adapter（本阶段）
-  -> Codex App Server adapter（后续）
 ```
 
 - 公共 capability / RPC：`agent.acp.v1`、`agent.acp.*`
 - Host 配置键 `cursor.enabled` / `cursor.binary` 只控制 **Cursor adapter**，不是线协议名
 - 按 Remote connection 隔离；编译期固定 allowlist；未授权 method fail closed
-- 现有 `codex.app.*` 保持不变
+- 现有 `codex.app.*` 保持不变；**暂不**把 Codex 迁到 ACP adapter
 
 ## 公共方法（allowlist）
 
@@ -85,5 +84,14 @@ ds-harness-remote:
 - [x] Desktop 设置开关 `settings.cursor.set`（adapter）
 - [x] Desktop Virtual Harness（cwd workspace + session/prompt/stream/approval）
 - [x] Android Client 投影（`AgentAcpClient` / 内存 Cursor workspace）
-- [ ] Codex → ACP adapter
-- [ ] 真机跨机 E2E
+- [x] Android 真机：文本 Prompt、思考/正文流式帧、`prompt_completed` catch-up、多轮气泡分离
+- [ ] Desktop ↔ 异机 Client 完整 E2E（审批 / cancel / 长工具轮次）
+- [ ] 断线重连后 stream 重建与会话内 History 恢复
+- [ ] `session/load` 与跨设备会话列表体验
+
+## 近期后续（不含 Codex→ACP）
+
+1. Android / Desktop：transport 抖动后自动 `stream.open` + `claimSession`
+2. Host 侧按 session 保留可分页的展示用 History（不写 DSH SessionStore）
+3. 审批 / 提问 UI 与 `agent.acp.respond` 真机矩阵
+4. 跨机长时间稳定性与 WebRTC/Relay 丢帧回归
