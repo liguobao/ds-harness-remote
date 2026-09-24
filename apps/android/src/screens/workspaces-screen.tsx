@@ -44,6 +44,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   const [renameTarget, setRenameTarget] = useState<WorkspaceView | undefined>(undefined)
   const [actionsTarget, setActionsTarget] = useState<WorkspaceView | undefined>(undefined)
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [allSessionsWorkspaceKeys, setAllSessionsWorkspaceKeys] = useState<ReadonlySet<string>>(() => new Set())
   const [focusedWorkspaceKey, setFocusedWorkspaceKey] = useState<string | undefined>(undefined)
   const scrollRef = useRef<ScrollView>(null)
   const workspaceOffsets = useRef(new Map<string, number>())
@@ -65,6 +66,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
     setActiveBackend(initialWorkspaceBackend(workspaces, codexAvailable))
     setSearchQuery('')
     setCollapsedWorkspaceIds(new Set())
+    setAllSessionsWorkspaceKeys(new Set())
     collapsedLoaded.current = false
     if (deviceId === undefined) return () => { cancelled = true }
     void loadWorkspaceBackend(deviceId).then(backend => {
@@ -156,6 +158,13 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
     // Skipping the write until the stored snapshot is in keeps a fast toggle from
     // saving a set that has not loaded yet and dropping the rest.
     if (deviceId !== undefined && collapsedLoaded.current) void saveCollapsedWorkspaceIds(deviceId, [...next])
+    return next
+  })
+
+  const loadAllSessions = (workspaceKey: string) => setAllSessionsWorkspaceKeys(current => {
+    if (current.has(workspaceKey)) return current
+    const next = new Set(current)
+    next.add(workspaceKey)
     return next
   })
 
@@ -311,6 +320,8 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                 return session === undefined ? [] : [session]
               })
               const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
+              const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
+              const visibleWorkspaceSessions = showAllSessions ? workspaceSessions : workspaceSessions.slice(0, 3)
               const collapsed = collapsedWorkspaceIds.has(workspaceKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
               const favorited = favoriteKeys.has(workspaceKey)
               return (
@@ -366,28 +377,41 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                   </View>
                   {!collapsed && (workspaceSessions.length === 0
                     ? <Pressable onPress={() => void createInWorkspace(workspace.workspaceId)} style={styles.noSessions}><Text style={styles.noSessionsText}>{zhCN.workspaces.noSessions}</Text></Pressable>
-                    : workspaceSessions.map(session => {
-                        const opening = busy === `session:${session.sessionId}`
-                        return <Pressable
-                          key={session.sessionId}
-                          accessibilityRole="button"
-                          accessibilityState={{ busy: opening, disabled: busy !== undefined && !opening }}
-                          disabled={busy !== undefined}
-                          onPress={() => void open(session)}
-                          style={({ pressed }) => [styles.sessionRow, pressed && styles.workspaceRowPressed, busy !== undefined && !opening && styles.disabled]}
-                        >
-                          {opening
-                            ? <ActivityIndicator size="small" color={colors.primary} />
-                            : session.backend === 'codex'
-                              ? <Code2 size={17} color={colors.muted} />
-                              : <MessageSquareText size={17} color={colors.muted} />}
-                          <View style={styles.sessionCopy}>
-                          <Text style={styles.sessionTitle} numberOfLines={1}>{resolveSessionTitle(session)}</Text>
-                            <Text style={styles.sessionMeta}>{session.running ? zhCN.status.running : relativeTime(session.updatedAt)}</Text>
-                          </View>
-                          <ChevronRight size={17} color={colors.subtle} />
-                        </Pressable>
-                      }))}
+                    : <>
+                        {visibleWorkspaceSessions.map(session => {
+                          const opening = busy === `session:${session.sessionId}`
+                          return <Pressable
+                            key={session.sessionId}
+                            accessibilityRole="button"
+                            accessibilityState={{ busy: opening, disabled: busy !== undefined && !opening }}
+                            disabled={busy !== undefined}
+                            onPress={() => void open(session)}
+                            style={({ pressed }) => [styles.sessionRow, pressed && styles.workspaceRowPressed, busy !== undefined && !opening && styles.disabled]}
+                          >
+                            {opening
+                              ? <ActivityIndicator size="small" color={colors.primary} />
+                              : session.backend === 'codex'
+                                ? <Code2 size={17} color={colors.muted} />
+                                : <MessageSquareText size={17} color={colors.muted} />}
+                            <View style={styles.sessionCopy}>
+                              <Text style={styles.sessionTitle} numberOfLines={1}>{resolveSessionTitle(session)}</Text>
+                              <Text style={styles.sessionMeta}>{session.running ? zhCN.status.running : relativeTime(session.updatedAt)}</Text>
+                            </View>
+                            <ChevronRight size={17} color={colors.subtle} />
+                          </Pressable>
+                        })}
+                        {!showAllSessions && workspaceSessions.length > visibleWorkspaceSessions.length && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={zhCN.workspaces.loadAllSessions}
+                            onPress={() => loadAllSessions(workspaceKey)}
+                            style={({ pressed }) => [styles.loadAllSessions, pressed && styles.workspaceRowPressed]}
+                          >
+                            <Text style={styles.loadAllSessionsText}>{zhCN.workspaces.loadAllSessions}</Text>
+                            <ChevronDown size={17} color={colors.primary} />
+                          </Pressable>
+                        )}
+                      </>)}
                 </View>
               )
             })}</View>}
@@ -788,6 +812,8 @@ function createStyles(colors: ThemeColors) {
   sessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
   noSessions: { minHeight: 48, marginLeft: 50, justifyContent: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   noSessionsText: { ...type.small, color: colors.primary },
+  loadAllSessions: { minHeight: 48, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  loadAllSessionsText: { ...type.smallStrong, color: colors.primary },
   primaryArea: { marginTop: spacing.xxl },
   backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },

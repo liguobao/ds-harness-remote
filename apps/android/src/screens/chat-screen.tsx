@@ -281,11 +281,7 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
             <IconButton label={zhCN.tools.files} icon={Folder} onPress={() => setToolsMode('files')} disabled={!connected} />
             <IconButton label={zhCN.tools.terminal} icon={Terminal} onPress={() => setToolsMode('terminal')} disabled={!connected} />
           </>}
-          {!connected
-            ? <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />
-            : canStop
-              ? <IconButton label={zhCN.chat.stop} icon={CircleStop} onPress={() => void stopSession()} disabled={stopping} />
-              : undefined}
+          {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
       <View style={styles.sessionControls}>
