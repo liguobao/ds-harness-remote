@@ -4076,22 +4076,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
             statusFeed,
             preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github"
           })
-        }, RemoteWorkspaceAction));
-        let registerSettingsItem = (slotName) => {
-          try {
-            ctx.slots.inject(slotName, () => ctx.slots.register({
-              name: slotName,
-              label: () => t("pluginTitle"),
-              key: "ds-harness-remote",
-              id: "ds-harness-remote",
-              order: 30,
-              locale: localeNamespace,
-              inject: () => ({ control, statusFeed })
-            }, RemotePluginOptions));
-          } catch {
-          }
-        };
-        registerSettingsItem("plugins.item"), registerSettingsItem("settings.plugin.item"), ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
+        }, RemoteWorkspaceAction)), ctx.slots.inject("plugins.row.config", () => ctx.slots.register({
+          name: "plugins.row.config",
+          key: "ds-harness-remote#ds-harness-remote",
+          locale: localeNamespace,
+          inject: () => ({ control, statusFeed })
+        }, RemotePluginOptions)), ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
           name: "plugins.bundle.config",
           key: "ds-harness-remote",
           locale: localeNamespace,

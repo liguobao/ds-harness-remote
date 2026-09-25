@@ -1,5 +1,7 @@
 import type {
+  LegacyWireStreamOpen,
   LocalTypertGateway,
+  Rc1WireStreamOpen,
   RemoteTypertGatewayTarget,
   TypertGatewayLike,
   TypertGatewayRequest,
@@ -10,10 +12,24 @@ type RemoteInvoke = (request: TypertGatewayRequest) => Promise<unknown>
 type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TypertRpcResult>
 type CarrierOpen = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<AsyncIterable<unknown>>
 
+/**
+ * dsh 0.1.7-rc.1 private carrier dispatcher:
+ * `openWireStream(endpoint, payload, uplink, peer, signal, control)`. The public
+ * `wireStream.open` omits `control`; both move the signal out of the third slot.
+ */
+type Rc1OpenWireStream = (
+  endpoint: string,
+  payload: unknown,
+  uplink: AsyncIterable<unknown>,
+  peer: unknown,
+  signal: AbortSignal,
+  control: AbortController,
+) => Promise<AsyncIterable<unknown>>
+
 interface RuntimeGateway extends TypertGatewayLike {
   // Alpha Connection adapters call these prototype methods dynamically.
   dispatchRpc?: CarrierDispatch
-  openWireStream?: CarrierOpen
+  openWireStream?: CarrierOpen | Rc1OpenWireStream
 }
 
 const REMOTE_COMMAND_METHODS = ['execute', 'list'] as const
@@ -35,7 +51,7 @@ export class TypertGatewaySwitch {
   private readonly localStream?: NonNullable<TypertGatewayLike['stream']>
   private readonly originalDispatch?: CarrierDispatch
   private readonly localDispatch?: CarrierDispatch
-  private readonly originalOpen?: CarrierOpen
+  private readonly originalOpen?: CarrierOpen | Rc1OpenWireStream
   private readonly localOpen?: CarrierOpen
   private remoteInvoke?: RemoteInvoke
   private remoteTarget?: RemoteTypertGatewayTarget
@@ -52,7 +68,7 @@ export class TypertGatewaySwitch {
     this.originalDispatch = this.runtime.dispatchRpc
     this.localDispatch = this.runtime.dispatchRpc?.bind(gateway)
     this.originalOpen = this.runtime.openWireStream
-    this.localOpen = this.runtime.openWireStream?.bind(gateway) ?? gateway.wireStream?.open.bind(gateway.wireStream)
+    this.localOpen = createLocalOpen(gateway, this.runtime)
   }
 
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
@@ -103,9 +119,18 @@ export class TypertGatewaySwitch {
         : this.remoteTarget.dispatch(endpoint, payload, signal)
     }
     if (this.originalOpen !== undefined) {
-      this.runtime.openWireStream = (endpoint, payload, signal) => this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)
-        ? this.localOpen!(endpoint, payload, signal)
-        : this.remoteTarget.open(endpoint, payload, signal)
+      const open = this.originalOpen
+      const rc1 = usesRc1Arity(open)
+      this.runtime.openWireStream = (...callArgs: unknown[]) => {
+        const endpoint = callArgs[0] as string
+        if (this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)) {
+          return rc1
+            ? Reflect.apply(open, this.runtime, callArgs) as Promise<AsyncIterable<unknown>>
+            : (open as CarrierOpen).call(this.runtime, endpoint, callArgs[1], callArgs[2] as AbortSignal)
+        }
+        const signal = (rc1 ? callArgs[4] : callArgs[2]) as AbortSignal | undefined
+        return this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal)
+      }
     }
     this.installed = true
   }
@@ -158,6 +183,59 @@ export class TypertGatewaySwitch {
     const details = 'details' in source && isRecord(source.details) ? source.details : {}
     return { code, message: source.message, details }
   }
+}
+
+/**
+ * dsh 0.1.7-rc.1 moved the cancellation signal from the third parameter to the
+ * fifth; legacy releases keep `(endpoint, payload, signal)`.
+ * @param open - carrier opener captured from the running release.
+ * @returns whether the opener follows the rc.1 argument order.
+ */
+function usesRc1Arity(open: { readonly length: number }): boolean {
+  return open.length >= 5
+}
+
+/** An uplink nobody sends on, so a read-only stream opens without buffering. */
+function endedUplink(): AsyncIterable<unknown> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      return { next: () => Promise.resolve({ done: true, value: undefined }) }
+    },
+  }
+}
+
+/** Controller aborted with the logical stream so the rc.1 carrier owns one lifetime. */
+function linkControl(signal: AbortSignal): AbortController {
+  const control = new AbortController()
+  if (signal.aborted) control.abort(signal.reason)
+  else signal.addEventListener('abort', () => control.abort(signal.reason), { once: true })
+  return control
+}
+
+/**
+ * Adapt the running release's carrier opener to the plugin's 3-argument
+ * `(endpoint, payload, signal)` seam without leaking the argument displacement.
+ * @param gateway - official Gateway whose public `wireStream` is the fallback.
+ * @param runtime - Gateway object owning the private `openWireStream` dispatcher.
+ * @returns a local opener that carries the signal to the release's signal slot.
+ */
+function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): CarrierOpen | undefined {
+  const open = runtime.openWireStream
+  if (open !== undefined) {
+    return usesRc1Arity(open)
+      ? (endpoint, payload, signal) => (open as Rc1OpenWireStream)
+        .call(runtime, endpoint, payload, endedUplink(), undefined, signal, linkControl(signal))
+      : (endpoint, payload, signal) => (open as CarrierOpen).call(runtime, endpoint, payload, signal)
+  }
+  const wire = gateway.wireStream
+  if (wire === undefined) return undefined
+  const wireOpen = wire.open
+  if (usesRc1Arity(wireOpen)) {
+    const rc1 = wireOpen as Rc1WireStreamOpen
+    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), undefined, signal)
+  }
+  const legacy = wireOpen as LegacyWireStreamOpen
+  return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal)
 }
 
 function requestFromCarrier(endpoint: string, payload: unknown, signal: AbortSignal): TypertGatewayRequest {

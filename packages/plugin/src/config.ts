@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 
@@ -50,7 +51,19 @@ export interface ResolvedConfig {
   acp?: { enabled: boolean; backends: Array<{ id:string; enabled:boolean; command:string; args:string[]; cwd?:string }> }
 }
 
-/** Cordis-facing configuration shape; runtime bounds are enforced by resolveConfig. */
+/** The entry's volatile Cordis config: one stable reference for the whole section. */
+export type EntryConfig = Volatile<Config>
+
+/** Config accepted by {@link resolveConfig}: the composition seed or a live snapshot. */
+export type ConfigInput = Config | VolatileSnapshot<Config>
+
+/**
+ * Schemastery schema for the plugin entry. The whole section is `.volatile()`
+ * (DSH 0.1.7-rc.1, DSH-0.1.7-RC1-04): the Loader hands `apply` a single live
+ * reference whose `.get()` always returns the latest committed value, and the
+ * settings service persists edits in the active profile's `cordis.patch.yml`
+ * under this entry id. The namespace-registration API was removed in rc.1.
+ */
 export const Config: s<Config> = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
@@ -73,7 +86,7 @@ export const Config: s<Config> = s.object({
     binary: s.string(),
   }),
   acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id:s.string(), enabled:s.boolean(), command:s.string(), args:s.array(s.string()), cwd:s.string() })) }),
-})
+}).volatile() as unknown as s<Config>
 
 const reconnectSchema = z.union([
   z.boolean(),
@@ -101,7 +114,7 @@ const configSchema = z.object({
   acp: z.object({ enabled:z.boolean().optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
 }).strict()
 
-export function resolveConfig(input: Config = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
+export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const parsed = configSchema.parse(input)
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER

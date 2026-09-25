@@ -1,8 +1,7 @@
 import { hostname } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
-import { resolveConfig, type Config, type ResolvedConfig } from './config.js'
+import { resolveConfig, type Config, type ConfigInput, type ResolvedConfig } from './config.js'
 import {
   ClientModeError,
   type ClientModeRuntime,
@@ -30,12 +29,28 @@ export interface PluginAssociation {
   account?: string
 }
 
+/**
+ * Live read/write face of the plugin's profile-owned entry Config.
+ *
+ * DSH 0.1.7-rc.1 (DSH-0.1.7-RC1-04) removed the settings-namespace registry
+ * and its scope type: the entry's editable fields are a single
+ * `.volatile()` Cordis Config, read through `.get()`, and writes go to
+ * `ctx.settings.replace(entryId, section)` (persisted in the active profile's
+ * `cordis.patch.yml` under the entry id).
+ */
+export interface PluginSettingsBinding {
+  /** The current config, read from the entry's live volatile reference. */
+  get(): ConfigInput
+  /** Replace the entry's editable fields in the active profile. */
+  replace(section: Config): Promise<void>
+}
+
 /** Loopback-only control plane shared by Local/Remote switching and plugin setup. */
 export class PluginControlRuntime {
   constructor(
     private readonly config: ResolvedConfig,
     private readonly identityDirectory: string,
-    private readonly settings: SettingsScope<Config> | undefined,
+    private readonly settings: PluginSettingsBinding | undefined,
     private readonly client: ClientModeRuntime | undefined,
     private readonly host: HostAuthorizationControl | undefined,
   ) {}
@@ -213,9 +228,11 @@ export class PluginControlRuntime {
   private async setAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const value = record(payload)
-    if (typeof value.backend !== 'string' || typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'ACP backend and enabled are required.')
+    const backend = value.backend
+    const enabled = value.enabled
+    if (typeof backend !== 'string' || typeof enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'ACP backend and enabled are required.')
     const current = resolveConfig(this.settings.get())
-    const backends = current.acp?.backends.map(item => item.id === value.backend ? { ...item, enabled: value.enabled } : item) ?? []
+    const backends = current.acp?.backends.map(item => item.id === backend ? { ...item, enabled } : item) ?? []
     await this.settings.replace({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
     return this.settingsView()
   }

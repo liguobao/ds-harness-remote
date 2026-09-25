@@ -137,6 +137,75 @@ describe('TypertGatewaySwitch', () => {
     expect(remote.dispatch).not.toHaveBeenCalled()
     expect(remote.open).not.toHaveBeenCalled()
   })
+  it('carries the signal to the rc.1 fifth slot and never as the third argument (P0-2)', async () => {
+    const calls: unknown[][] = []
+    // A real six-parameter function keeps `.length === 6` so the switch detects the rc.1 arity.
+    function rc1Open(
+      endpoint: string,
+      payload: unknown,
+      uplink: AsyncIterable<unknown>,
+      peer: unknown,
+      signal: AbortSignal,
+      control: AbortController,
+    ): Promise<AsyncIterable<unknown>> {
+      calls.push([endpoint, payload, uplink, peer, signal, control])
+      return Promise.resolve((async function* () { yield 'rc1-open' })())
+    }
+    const gateway = {
+      invoke: vi.fn(async () => 'local-invoke'),
+      dispatchRpc: vi.fn(async () => ({ ok: true as const, value: 'local-dispatch' })),
+      openWireStream: rc1Open,
+      wireStream: {
+        open: async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => (async function* () { yield 'rc1-wire' })(),
+        failure: () => ({ code: 'internal', message: 'failed', details: {} }),
+      },
+    }
+    const remote = {
+      invoke: vi.fn(async () => 'remote-invoke'),
+      dispatch: vi.fn(async () => ({ ok: true as const, value: 'remote-dispatch' })),
+      open: vi.fn(async () => (async function* () { yield 'remote-open' })()),
+    }
+    const target = new TypertGatewaySwitch(gateway)
+    const alwaysLocal = target.local()
+    target.install()
+    target.selectRemote(remote)
+
+    const signal = new AbortController().signal
+    await expect(values(await alwaysLocal.open('$events', { args: {} }, signal))).resolves.toEqual(['rc1-open'])
+    expect(calls).toHaveLength(1)
+    const args = calls[0]!
+    expect(typeof (args[2] as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator]).toBe('function')
+    expect(args[3]).toBeUndefined()
+    expect(args[4]).toBe(signal)
+    expect(args[5]).toBeInstanceOf(AbortController)
+
+    // The public carrier wrapper receives the same rc.1 argument order from the mux.
+    calls.length = 0
+    const muxSignal = new AbortController().signal
+    const uplink = (async function* () {})()
+    await expect(values(await gateway.openWireStream('$events', { args: {} }, uplink, undefined, muxSignal, new AbortController())))
+      .resolves.toEqual(['remote-open'])
+    expect(remote.open).toHaveBeenCalledWith('$events', { args: {} }, muxSignal)
+  })
+
+  it('keeps the legacy three-argument carrier contract for older Hosts', async () => {
+    const legacy = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => (
+      async function* () { yield 'legacy-open' }
+    )())
+    const gateway = {
+      invoke: vi.fn(async () => 'local-invoke'),
+      dispatchRpc: vi.fn(async () => ({ ok: true as const, value: 'local-dispatch' })),
+      openWireStream: legacy,
+      wireStream: { open: legacy, failure: () => ({ code: 'internal', message: 'failed', details: {} }) },
+    }
+    const target = new TypertGatewaySwitch(gateway)
+    const alwaysLocal = target.local()
+    target.install()
+
+    const signal = new AbortController().signal
+    await expect(values(await alwaysLocal.open('session/follow', { args: {} }, signal))).resolves.toEqual(['legacy-open'])
+    expect(legacy).toHaveBeenCalledWith('session/follow', { args: {} }, signal)
+  })
 })
 
 async function values(source: AsyncIterable<unknown>): Promise<unknown[]> {

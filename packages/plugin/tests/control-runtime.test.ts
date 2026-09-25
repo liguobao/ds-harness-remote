@@ -2,12 +2,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostAuthorizationControl, HostConnectionHandle } from '../src/client-runtime.js'
 import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
-import { PluginControlRuntime } from '../src/control-runtime.js'
+import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { serverStorageDirectory } from '../src/identity-store.js'
 
 const directories: string[] = []
@@ -66,7 +65,7 @@ describe('PluginControlRuntime settings setup', () => {
 
   it('updates the Server address without creating a separate authorization', async () => {
     const directory = await temporaryDirectory()
-    const settings = settingsScope({
+    const settings = settingsBinding({
       serverUrl: 'https://old.example.com',
       role: 'client',
       codex: { enabled: true, binary: '/opt/codex' },
@@ -138,7 +137,7 @@ describe('PluginControlRuntime settings setup', () => {
 
   it('authorizes a Host before saving its Server and role without persisting the password', async () => {
     const directory = await temporaryDirectory()
-    const settings = settingsScope({ serverUrl: 'https://old.example.com', role: 'client' })
+    const settings = settingsBinding({ serverUrl: 'https://old.example.com', role: 'client' })
     const calls: Array<{ url: string; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
@@ -216,7 +215,7 @@ describe('PluginControlRuntime settings setup', () => {
 
   it('authorizes a Client with its site account and persists only device credentials', async () => {
     const directory = await temporaryDirectory()
-    const settings = settingsScope({})
+    const settings = settingsBinding({})
     const calls: Array<{ url: string; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
@@ -260,7 +259,7 @@ describe('PluginControlRuntime settings setup', () => {
 
   it('authorizes a Host with a website-generated one-time registration code', async () => {
     const directory = await temporaryDirectory()
-    const settings = settingsScope({})
+    const settings = settingsBinding({})
     const calls: Array<{ url: string; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(input), init })
@@ -322,13 +321,11 @@ function register(runtime: PluginControlRuntime) {
   return handler
 }
 
-function settingsScope(initial: Config): SettingsScope<Config> {
+function settingsBinding(initial: Config): PluginSettingsBinding {
   let value = structuredClone(initial)
   return {
     get: () => structuredClone(value),
-    watch: () => () => undefined,
-    update: async patch => { value = { ...value, ...patch } },
-    replace: async section => { value = structuredClone(section as Config) },
+    replace: async section => { value = structuredClone(section) },
   }
 }
 
