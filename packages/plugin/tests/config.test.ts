@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeServerUrl, resolveConfig } from '../src/config.js'
+import { normalizeServerUrl, resolveConfig, withVolatileSchema } from '../src/config.js'
 
 describe('plugin config', () => {
   it('applies safe defaults', () => {
@@ -36,5 +36,20 @@ describe('plugin config', () => {
 
   it('rejects an inverted reconnect range', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
+  })
+
+  it('keeps old DSH hosts importable when Schemastery has no volatile mode', () => {
+    const plain = { kind: 'plain' }
+    expect(withVolatileSchema(plain)).toBe(plain)
+  })
+
+  it('marks the schema live when the host exposes volatile mode', () => {
+    const marked = { kind: 'volatile' }
+    const schema = {
+      volatile() {
+        return marked
+      },
+    }
+    expect(withVolatileSchema(schema)).toBe(marked)
   })
 })

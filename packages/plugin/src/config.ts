@@ -58,13 +58,14 @@ export type EntryConfig = Volatile<Config>
 export type ConfigInput = Config | VolatileSnapshot<Config>
 
 /**
- * Schemastery schema for the plugin entry. The whole section is `.volatile()`
- * (DSH 0.1.7-rc.1, DSH-0.1.7-RC1-04): the Loader hands `apply` a single live
- * reference whose `.get()` always returns the latest committed value, and the
- * settings service persists edits in the active profile's `cordis.patch.yml`
- * under this entry id. The namespace-registration API was removed in rc.1.
+ * Schemastery schema for the plugin entry. On DSH 0.1.7-rc.1 and newer the
+ * whole section is `.volatile()` (DSH-0.1.7-RC1-04): the Loader hands `apply`
+ * a single live reference whose `.get()` always returns the latest committed
+ * value, and the settings service persists edits in the active profile's
+ * `cordis.patch.yml` under this entry id. On older hosts the helper above keeps
+ * the plain schema required by the namespace-registration API.
  */
-export const Config: s<Config> = s.object({
+const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
@@ -86,7 +87,22 @@ export const Config: s<Config> = s.object({
     binary: s.string(),
   }),
   acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id:s.string(), enabled:s.boolean(), command:s.string(), args:s.array(s.string()), cwd:s.string() })) }),
-}).volatile() as unknown as s<Config>
+})
+
+/**
+ * Mark the entry as live-editable when the host Schemastery supports the
+ * 0.1.7 volatile schema mode. Older DSH releases ship an earlier Schemastery
+ * where the method does not exist; their settings registry expects the plain
+ * schema and must still be able to import the plugin without throwing.
+ */
+export function withVolatileSchema<T>(schema: T): T {
+  const volatile = (schema as { volatile?: unknown }).volatile
+  return typeof volatile === 'function'
+    ? (volatile as (this: T) => T).call(schema)
+    : schema
+}
+
+export const Config: s<Config> = withVolatileSchema(entryConfigSchema) as unknown as s<Config>
 
 const reconnectSchema = z.union([
   z.boolean(),

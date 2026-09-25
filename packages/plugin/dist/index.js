@@ -18163,7 +18163,7 @@ function safeMessage(error) {
 import { hostname } from "node:os";
 import s from "@deepseek-ai/schemastery";
 var DEFAULT_REMOTE_SERVER_URL = "https://dsh.r2049.cn";
-var Config = s.object({
+var entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(["host", "client", "both"]),
   serverUrl: s.string(),
@@ -18185,7 +18185,12 @@ var Config = s.object({
     binary: s.string()
   }),
   acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id: s.string(), enabled: s.boolean(), command: s.string(), args: s.array(s.string()), cwd: s.string() })) })
-}).volatile();
+});
+function withVolatileSchema(schema) {
+  const volatile = schema.volatile;
+  return typeof volatile === "function" ? volatile.call(schema) : schema;
+}
+var Config = withVolatileSchema(entryConfigSchema);
 var reconnectSchema = external_exports.union([
   external_exports.boolean(),
   external_exports.object({

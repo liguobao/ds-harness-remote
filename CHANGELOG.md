@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixes startup on DeepSeek Harness `0.1.6` and earlier hosts. The plugin now feature-detects Schemastery’s `volatile()` schema mode instead of calling the 0.1.7-only method unconditionally, so the legacy settings registry can load the plugin and persist the onboarding acknowledgement normally.
+
 ## 0.4.17 - 2026-09-22
 
 - Fixes the CodeX workspace terminal in Remote sessions. The Host now answers the official `terminal/*` contract for `codex:<threadId>` scopes: `environment` carries `scrollback`, `shells` uses `{path,args,name}`, `list`/`create`/snapshot/state carry the full `WebTerminalInfo` with `controllerId`, mutations resolve to void, `retain` acknowledges with `retained`, and `follow` opens with a snapshot followed by `sequence + 1` output. The shell starts through the Host `subprocess` service (PTY) when available and falls back to a plain pipe otherwise; recovery screens replay a bounded output journal.
