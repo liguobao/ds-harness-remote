@@ -716,7 +716,7 @@ export class ClientModeRuntime {
       this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
       return
     }
-    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target)
+    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client, remote.harnessVersion).api, target)
     this.gatewaySwitch.selectRemote(request => invokeRemoteCommand(remote.client, request), {
       execute: true,
       list: remote.features.commandList,
@@ -728,6 +728,7 @@ export class ClientModeRuntime {
     return new RemoteTypertGateway(
       remote.client,
       localSessionGeneration === 'v3' && remote.features.sessionFormat !== 3 ? 'legacy-to-v3' : undefined,
+      remote.harnessVersion,
     )
   }
 

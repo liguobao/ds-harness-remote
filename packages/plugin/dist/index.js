@@ -14780,9 +14780,13 @@ var AGENT_PRESET_SETTINGS_NS = "agent-presets";
 var LEGACY_AGENT_PRESET_ALIASES = {
   code: "ptc"
 };
+var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
+var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
+var WELCOME_NOTICE_VERSION = "2026-08-13.1";
 var RemoteHarnessApiProxy = class {
-  constructor(client) {
+  constructor(client, harnessVersion) {
     this.client = client;
+    this.harnessVersion = harnessVersion;
     const call = (method) => (request, signal) => this.call(method, request, signal);
     this.api = {
       sessions: {
@@ -14864,6 +14868,8 @@ var RemoteHarnessApiProxy = class {
     };
   }
   api;
+  legacyWelcomeAcknowledged = false;
+  settingsDescribeValue;
   async call(method, request, signal) {
     const params = {
       method,
@@ -14875,7 +14881,18 @@ var RemoteHarnessApiProxy = class {
     if (String(response.rpcId) !== String(request.rpcId) || typeof response.result !== "object" || response.result === null) {
       throw new Error("The remote Host returned an invalid Harness API response.");
     }
-    return normalizeLegacyResponse(method, response);
+    const normalized = normalizeLegacyResponse(method, response);
+    return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized);
+  }
+  normalizeLegacyWelcomeSettings(method, payload, response) {
+    if (!isLegacyRemoteHost(this.harnessVersion)) return response;
+    if (method === "settings.describe" && response.result.ok && isRecord2(response.result.value)) {
+      this.settingsDescribeValue = response.result.value;
+      return this.legacyWelcomeAcknowledged ? patchWelcomeDescribe(response) : response;
+    }
+    if (method !== "settings.mutate" || !isWelcomeNoticeRequest(payload)) return response;
+    this.legacyWelcomeAcknowledged = true;
+    return patchWelcomeMutate(this.settingsDescribeValue ?? { namespaces: [] }, response.rpcId);
   }
   async callTransferred(encoded, signal) {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -14999,6 +15016,45 @@ function replaceAgentPresetSettings(payload) {
   if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord2(payload.patch)) return payload;
   const patch = replaceAgentPreset(payload.patch, "default");
   return patch === payload.patch ? payload : { ...payload, patch };
+}
+function isLegacyRemoteHost(version) {
+  if (version === void 0) return false;
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim());
+  return match !== null && Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
+}
+function isWelcomeNoticeRequest(payload) {
+  if (!isRecord2(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
+  return payload.ops.some((operation) => isRecord2(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
+}
+function patchWelcomeDescribe(response) {
+  if (!response.result.ok || !isRecord2(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      value: {
+        ...response.result.value,
+        namespaces: response.result.value.namespaces.map((namespace) => {
+          if (!isRecord2(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+          const value = isRecord2(namespace.value) ? namespace.value : {};
+          return { ...namespace, value: { ...value, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
+        })
+      }
+    }
+  };
+}
+function patchWelcomeMutate(value, rpcId2) {
+  const response = {
+    rpcId: rpcId2,
+    result: { ok: true, value: { ...value, namespaces: [] } }
+  };
+  const namespaces = Array.isArray(value.namespaces) ? value.namespaces : [];
+  response.result.value.namespaces = namespaces.map((namespace) => {
+    if (!isRecord2(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+    const current = isRecord2(namespace.value) ? namespace.value : {};
+    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
+  });
+  return response;
 }
 function isRemoteDisconnect(error) {
   return error instanceof RemoteClientError && (error.code === "TRANSPORT_CLOSED" || error.code === "CLIENT_CLOSED");
@@ -15226,10 +15282,14 @@ function isEventSeq(value) {
 
 // src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
+var WELCOME_NOTICE_NAMESPACE2 = "ui-settings-general";
+var WELCOME_NOTICE_FIELD2 = "welcomeNoticeVersion";
+var WELCOME_NOTICE_VERSION2 = "2026-08-13.1";
 var RemoteTypertGateway2 = class {
-  constructor(client, compatibility) {
+  constructor(client, compatibility, harnessVersion) {
     this.client = client;
     this.compatibility = compatibility;
+    this.harnessVersion = harnessVersion;
   }
   async invoke(request) {
     const result = await this.dispatch(
@@ -15255,10 +15315,28 @@ var RemoteTypertGateway2 = class {
       }
     }
     const result = parseRpcResult(response);
+    const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result);
+    if (settingsResult !== void 0) return settingsResult;
     if (result.ok && this.compatibility === "legacy-to-v3") {
       return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) };
     }
     return result;
+  }
+  legacyWelcomeAcknowledged = false;
+  settingsDescribeValue;
+  /** DSH <=0.1.6 cannot persist the 0.1.7 welcome acknowledgement remotely. */
+  normalizeLegacyWelcomeSettings(endpoint, payload, result) {
+    if (!isLegacyRemoteHost2(this.harnessVersion)) return void 0;
+    if (endpoint === "settings/describe" && result.ok && isRecord4(result.value)) {
+      this.settingsDescribeValue = result.value;
+      return this.legacyWelcomeAcknowledged ? { ...result, value: patchWelcomeDescribe2(result.value) } : void 0;
+    }
+    if (endpoint !== "settings/mutate" || !isRecord4(payload) || !isRecord4(payload.args)) return void 0;
+    const args = payload.args;
+    if (args.ns !== WELCOME_NOTICE_NAMESPACE2 || !isWelcomeNoticeOperation(args.ops)) return void 0;
+    const value = patchWelcomeDescribe2(this.settingsDescribeValue ?? { namespaces: [] });
+    this.legacyWelcomeAcknowledged = true;
+    return { ok: true, value };
   }
   async open(endpoint, payload, signal) {
     const streamId = uuidV7();
@@ -15465,6 +15543,24 @@ function isRecord4(value) {
 }
 function hasErrorCode(error, code) {
   return error instanceof Error && "code" in error && error.code === code;
+}
+function isLegacyRemoteHost2(version) {
+  if (version === void 0) return false;
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim());
+  if (match === null) return false;
+  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
+}
+function isWelcomeNoticeOperation(value) {
+  return Array.isArray(value) && value.some((operation) => isRecord4(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD2 && operation.value === WELCOME_NOTICE_VERSION2);
+}
+function patchWelcomeDescribe2(value) {
+  if (!Array.isArray(value.namespaces)) return value;
+  const namespaces = value.namespaces.map((namespace) => {
+    if (!isRecord4(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE2) return namespace;
+    const current = isRecord4(namespace.value) ? namespace.value : {};
+    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD2]: WELCOME_NOTICE_VERSION2 } };
+  });
+  return { ...value, namespaces };
 }
 
 // src/codex/permissions.ts
@@ -20421,7 +20517,7 @@ var ClientModeRuntime = class {
       this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target2);
       return;
     }
-    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target2);
+    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client, remote.harnessVersion).api, target2);
     this.gatewaySwitch.selectRemote((request) => invokeRemoteCommand(remote.client, request), {
       execute: true,
       list: remote.features.commandList
@@ -20431,7 +20527,8 @@ var ClientModeRuntime = class {
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
     return new RemoteTypertGateway2(
       remote.client,
-      localSessionGeneration === "v3" && remote.features.sessionFormat !== 3 ? "legacy-to-v3" : void 0
+      localSessionGeneration === "v3" && remote.features.sessionFormat !== 3 ? "legacy-to-v3" : void 0,
+      remote.harnessVersion
     );
   }
   selectCodexTarget(virtual, remote) {
