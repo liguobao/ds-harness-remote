@@ -2,7 +2,9 @@
 
 ## 0.4.18 - 2026-09-26
 
-- Fixes startup on DeepSeek Harness `0.1.6` and earlier hosts. The plugin now feature-detects Schemastery’s `volatile()` schema mode instead of calling the 0.1.7-only method unconditionally, so the legacy settings registry can load the plugin and persist the onboarding acknowledgement normally.
+- Primarily improves compatibility with DeepSeek Harness `0.1.7-rc.1`: the plugin handles the Volatile settings entry, updated Typert stream-open signature, workspace file change/read payloads, and the new byte response shape while retaining the `0.1.6` settings path.
+- Keeps the legacy `0.1.6-alpha.2` Host path working, including onboarding acknowledgement handling when the older settings registry rejects the new welcome field.
+- Thanks to [HuanLinOTO](https://github.com/HuanLinOTO) for the `0.1.7-rc.1` compatibility work and the accompanying fixes.
 
 ## 0.4.17 - 2026-09-22
 

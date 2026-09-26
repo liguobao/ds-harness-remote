@@ -216,7 +216,8 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
 本插件不提供旧 RPC 的适配层或 wire format 翻译。
 
-Plugin `0.4.18` 同时兼容 DeepSeek Harness `dsh-v0.1.1-rc.2` 与
+Plugin `0.4.18` 主要用于兼容 DeepSeek Harness `dsh-v0.1.7-rc.1`，同时保留
+`dsh-v0.1.6-alpha.2` 及更早版本的 settings 兼容路径；它也兼容 `dsh-v0.1.1-rc.2` 与
 `dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
 Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` 与 `dsh-v0.1.6-alpha.1` 的 Session V3
 官方 Typert Remote Gateway——`0.1.6` 上报的 patch 为 `6`，会选中同一个 Session V3
