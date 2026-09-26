@@ -184,7 +184,11 @@ export class CodexWorkspaceBridge {
         return { ok: true, value: { path, entries: result, truncated: entries.length > 500 } }
       }
       const info = await stat(target)
-      if (endpoint === 'workspaceFiles/stat') return { ok: true, value: { path, type: info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other', size: info.size, modifiedAt: info.mtimeMs } }
+      const absolutePath = target
+      const version = `${info.mtimeMs}:${info.size}`
+      if (endpoint === 'workspaceFiles/stat') {
+        return { ok: true, value: { absolutePath, version, bytes: info.size } }
+      }
       if (!info.isFile()) throw new RpcError('CODEX_WORKSPACE_INVALID_PATH', 'The requested workspace path is not a file.')
       const offset = readOffset(args)
       const limit = readLimit(args)
@@ -192,7 +196,17 @@ export class CodexWorkspaceBridge {
       if (bytes.byteLength > MAX_READ_BYTES) throw new RpcError('CODEX_WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
       if (endpoint === 'workspaceFiles/readBytes') {
         const slice = bytes.subarray(offset, Math.min(offset + limit, bytes.length))
-        return { ok: true, value: { path, offset, bytes: slice.toString('base64'), eof: offset + slice.length >= bytes.length } }
+        return {
+          ok: true,
+          value: {
+            absolutePath,
+            version,
+            bytes: bytes.length,
+            offset,
+            data: slice.toString('base64'),
+            eof: offset + slice.length >= bytes.length,
+          },
+        }
       }
       const text = bytes.toString('utf8')
       const slice = text.slice(offset, offset + limit)
@@ -499,5 +513,17 @@ function argsOf(payload: unknown): Record<string, unknown> { const value = isRec
 function isRecord(value: unknown): value is Record<string, any> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 function stringId(value: unknown): string { if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) throw new RpcError('INVALID_MESSAGE', 'The terminal identifier is invalid.'); return value }
 function bounded(value: unknown, fallback: number, max: number): number { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? Math.min(value, max) : fallback }
-function readOffset(args: Record<string, unknown>): number { const range = isRecord(args.range) ? args.range : args; return typeof range.offset === 'number' && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0 }
-function readLimit(args: Record<string, unknown>): number { const range = isRecord(args.range) ? args.range : args; return typeof range.limit === 'number' && Number.isInteger(range.limit) && range.limit > 0 ? Math.min(range.limit, MAX_READ_BYTES) : MAX_READ_BYTES }
+function byteOrLineRange(args: Record<string, unknown>): Record<string, unknown> {
+  const options = isRecord(args.options) ? args.options : undefined
+  if (options !== undefined && isRecord(options.range)) return options.range
+  return isRecord(args.range) ? args.range : args
+}
+function readOffset(args: Record<string, unknown>): number {
+  const range = byteOrLineRange(args)
+  return typeof range.offset === 'number' && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0
+}
+function readLimit(args: Record<string, unknown>): number {
+  const range = byteOrLineRange(args)
+  const value = typeof range.length === 'number' ? range.length : range.limit
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES
+}

@@ -215,9 +215,10 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
+      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-        : await this.gateway.dispatch(params.endpoint, params.payload, signal)
+        : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -373,7 +374,7 @@ export class HarnessRemoteBridge {
     let source: AsyncIterable<unknown>
     try {
       source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
-        ?? await this.gateway.open(params.endpoint, params.payload, controller.signal)
+        ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal)
       controller.signal.throwIfAborted()
     } catch (error) {
       this.streams.delete(params.streamId)
@@ -443,6 +444,40 @@ export class HarnessRemoteBridge {
     for (const [id, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id)
     for (const [id, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id)
   }
+}
+
+/**
+ * DSH 0.1.7 changed workspaceFiles/changes from a Session-wide feed to a
+ * target-scoped feed that requires `path`. Older Web/Client bundles still
+ * open the Session-wide form. Keep that request working on a 0.1.7 Host by
+ * watching the workspace root; the legacy client continues filtering frames
+ * by the file it has opened. Do not add the field to older Hosts, whose
+ * generated Typert schema rejects unknown arguments.
+ */
+function normalizeWorkspaceChangesPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+  if (endpoint !== 'workspaceFiles/changes' || !requiresWorkspaceChangePath(harnessVersion)) return payload
+  if (!isRecord(payload) || !isRecord(payload.args) || Object.hasOwn(payload.args, 'path')) return payload
+  return { ...payload, args: { ...payload.args, path: '.' } }
+}
+
+/**
+ * DSH 0.1.7 nests the byte range under `options`, while older clients send
+ * it directly on the request args. Keep the translation Host-version gated:
+ * older generated descriptors reject the new `options` field.
+ */
+function normalizeWorkspaceRequestPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+  if (endpoint !== 'workspaceFiles/readBytes' || !requiresWorkspaceChangePath(harnessVersion)) return payload
+  if (!isRecord(payload) || !isRecord(payload.args)) return payload
+  const args = payload.args
+  if (!Object.hasOwn(args, 'range') || Object.hasOwn(args, 'options')) return payload
+  const { range, ...rest } = args
+  return { ...payload, args: { ...rest, options: { range } } }
+}
+
+function requiresWorkspaceChangePath(version: string | undefined): boolean {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
+  if (match === null) return false
+  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) >= 7
 }
 
 async function dispatchCommandForHost(

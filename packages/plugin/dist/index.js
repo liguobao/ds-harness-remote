@@ -24242,7 +24242,8 @@ var HarnessRemoteBridge = class {
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);
     try {
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, params.payload, signal);
+      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -24388,7 +24389,7 @@ var HarnessRemoteBridge = class {
     this.streams.set(params.streamId, { controller });
     let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, params.payload, controller.signal);
+      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal);
       controller.signal.throwIfAborted();
     } catch (error) {
       this.streams.delete(params.streamId);
@@ -24454,6 +24455,24 @@ var HarnessRemoteBridge = class {
     for (const [id4, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id4);
   }
 };
+function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
+  if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
+  if (!isRecord10(payload) || !isRecord10(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  return { ...payload, args: { ...payload.args, path: "." } };
+}
+function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
+  if (endpoint !== "workspaceFiles/readBytes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
+  if (!isRecord10(payload) || !isRecord10(payload.args)) return payload;
+  const args = payload.args;
+  if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
+  const { range, ...rest } = args;
+  return { ...payload, args: { ...rest, options: { range } } };
+}
+function requiresWorkspaceChangePath(version) {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? "");
+  if (match === null) return false;
+  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) >= 7;
+}
 async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) {
   const parsed = commandExecutePayloadSchema.parse(payload);
   const legacyPayload = {
@@ -26408,7 +26427,11 @@ var CodexWorkspaceBridge = class {
         return { ok: true, value: { path, entries: result, truncated: entries.length > 500 } };
       }
       const info = await stat5(target2);
-      if (endpoint === "workspaceFiles/stat") return { ok: true, value: { path, type: info.isDirectory() ? "directory" : info.isFile() ? "file" : "other", size: info.size, modifiedAt: info.mtimeMs } };
+      const absolutePath = target2;
+      const version = `${info.mtimeMs}:${info.size}`;
+      if (endpoint === "workspaceFiles/stat") {
+        return { ok: true, value: { absolutePath, version, bytes: info.size } };
+      }
       if (!info.isFile()) throw new RpcError("CODEX_WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
       const offset = readOffset(args);
       const limit = readLimit(args);
@@ -26416,7 +26439,17 @@ var CodexWorkspaceBridge = class {
       if (bytes.byteLength > MAX_READ_BYTES) throw new RpcError("CODEX_WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       if (endpoint === "workspaceFiles/readBytes") {
         const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
-        return { ok: true, value: { path, offset, bytes: slice2.toString("base64"), eof: offset + slice2.length >= bytes.length } };
+        return {
+          ok: true,
+          value: {
+            absolutePath,
+            version,
+            bytes: bytes.length,
+            offset,
+            data: slice2.toString("base64"),
+            eof: offset + slice2.length >= bytes.length
+          }
+        };
       }
       const text = bytes.toString("utf8");
       const slice = text.slice(offset, offset + limit);
@@ -26741,13 +26774,19 @@ function stringId(value) {
 function bounded(value, fallback, max) {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, max) : fallback;
 }
+function byteOrLineRange(args) {
+  const options = isRecord14(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord14(options.range)) return options.range;
+  return isRecord14(args.range) ? args.range : args;
+}
 function readOffset(args) {
-  const range = isRecord14(args.range) ? args.range : args;
+  const range = byteOrLineRange(args);
   return typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
 }
 function readLimit(args) {
-  const range = isRecord14(args.range) ? args.range : args;
-  return typeof range.limit === "number" && Number.isInteger(range.limit) && range.limit > 0 ? Math.min(range.limit, MAX_READ_BYTES) : MAX_READ_BYTES;
+  const range = byteOrLineRange(args);
+  const value = typeof range.length === "number" ? range.length : range.limit;
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES;
 }
 
 // src/service.ts

@@ -117,6 +117,100 @@ describe('HarnessRemoteBridge', () => {
     ])
   })
 
+  it('adds the 0.1.7 workspace root to legacy file-change subscriptions', async () => {
+    const open = vi.fn(async () => (async function* () {
+      yield { kind: 'ready' }
+    })())
+    const bridge = new HarnessRemoteBridge(
+      gateway({ open }),
+      vi.fn(async () => undefined),
+      undefined,
+      '0.1.7-rc.1',
+    )
+
+    await expect(bridge.openStream({
+      streamId: 'file-changes-017',
+      endpoint: 'workspaceFiles/changes',
+      payload: { args: { workspaceFileScopeId: 'session-1' } },
+    })).resolves.toEqual({ opened: true, streamId: 'file-changes-017' })
+    expect(open).toHaveBeenCalledWith(
+      'workspaceFiles/changes',
+      { args: { workspaceFileScopeId: 'session-1', path: '.' } },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('does not add the 0.1.7 path field to legacy Hosts', async () => {
+    const open = vi.fn(async () => (async function* () {
+      yield { kind: 'ready' }
+    })())
+    const bridge = new HarnessRemoteBridge(
+      gateway({ open }),
+      vi.fn(async () => undefined),
+      undefined,
+      '0.1.6-alpha.2',
+    )
+
+    await bridge.openStream({
+      streamId: 'file-changes-016',
+      endpoint: 'workspaceFiles/changes',
+      payload: { args: { workspaceFileScopeId: 'session-1' } },
+    })
+    expect(open).toHaveBeenCalledWith(
+      'workspaceFiles/changes',
+      { args: { workspaceFileScopeId: 'session-1' } },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('nests readBytes ranges for a 0.1.7 Host', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
+    const bridge = new HarnessRemoteBridge(
+      gateway({ dispatch }),
+      vi.fn(async () => undefined),
+      undefined,
+      '0.1.7-rc.1',
+    )
+
+    await bridge.call({
+      endpoint: 'workspaceFiles/readBytes',
+      payload: {
+        args: {
+          workspaceFileScopeId: 'session-1',
+          path: '/tmp/a.bin',
+          range: { offset: 0, length: 1024 },
+        },
+      },
+    })
+    expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', {
+      args: {
+        workspaceFileScopeId: 'session-1',
+        path: '/tmp/a.bin',
+        options: { range: { offset: 0, length: 1024 } },
+      },
+    }, expect.any(AbortSignal))
+  })
+
+  it('keeps the legacy readBytes range shape for older Hosts', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
+    const bridge = new HarnessRemoteBridge(
+      gateway({ dispatch }),
+      vi.fn(async () => undefined),
+      undefined,
+      '0.1.6-alpha.2',
+    )
+    const payload = {
+      args: {
+        workspaceFileScopeId: 'session-1',
+        path: '/tmp/a.bin',
+        range: { offset: 0, length: 1024 },
+      },
+    }
+
+    await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload })
+    expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', payload, expect.any(AbortSignal))
+  })
+
   it('normalizes alpha stream failures without exposing the original error', async () => {
     const publish = vi.fn(async () => undefined)
     const bridge = new HarnessRemoteBridge(gateway({
