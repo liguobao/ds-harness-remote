@@ -76,7 +76,7 @@ Follow [Quick start](#quick-start) to sign in. See the [installation guide](docs
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.17
+dsh plugin --profile web add -w ds-harness-remote@0.4.18
 ```
 
 `-w` targets the profile's own workspace root. It is required on pnpm below 11, which
@@ -233,7 +233,7 @@ Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
 `ApiProxy` or the v0.1.2 Typert Remote Gateway, and this plugin does not provide
 an adapter or wire-format translation for the old RPC surface.
 
-Plugin `0.4.17` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
+Plugin `0.4.18` supports DeepSeek Harness `dsh-v0.1.1-rc.2` through the legacy
 official `ApiProxy`, and `dsh-v0.1.2-alpha.1`–`rc.1` through the
 official Typert Remote Gateway. It also supports
 `dsh-v0.1.5-rc.1` and `dsh-v0.1.6-alpha.1` Session V3 through the official Typert Remote
@@ -245,7 +245,7 @@ Remote Web/Desktop and the Android app also normalize released sessions that
 still report the retired `code` agent preset to `ptc`, so old sessions can
 resume on `dsh-v0.1.5-rc.1` or `dsh-v0.1.6-alpha.1` without changing DeepSeek Harness itself.
 
-Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.17` selects the legacy
+Desktop endpoints must use a compatible Harness carrier. Plugin `0.4.18` selects the legacy
 ApiProxy path for rc.2 Hosts when that Host exposes it, and Session V3 Desktop clients can open
 legacy v0.1.2 Typert Remote Hosts through Remote-side history and event normalization. Legacy
 Typert clients still reject Session V3 Hosts before switching the native UI or mutating a Workspace.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.18 - 2026-09-26
 
 - Fixes startup on DeepSeek Harness `0.1.6` and earlier hosts. The plugin now feature-detects Schemastery’s `volatile()` schema mode instead of calling the 0.1.7-only method unconditionally, so the legacy settings registry can load the plugin and persist the onboarding acknowledgement normally.
 

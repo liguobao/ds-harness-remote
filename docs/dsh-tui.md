@@ -18,7 +18,7 @@ DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插�
 安装到同一个 profile：
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.17
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.18
 ```
 
 ## 2. 启动前挂载 Remote carrier
@@ -132,7 +132,7 @@ TUI 会显示二维码，并在二维码下方显示可点击的授权 URL：
 如果希望先在普通终端中完成登录，可以使用配套 CLI：
 
 ```sh
-npm install -g ds-harness-remote@0.4.17
+npm install -g ds-harness-remote@0.4.18
 ds-harness-remote login github
 ds-harness-remote status
 dsh-tui
