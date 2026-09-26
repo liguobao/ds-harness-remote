@@ -76,7 +76,7 @@ irm https://dsh.r2049.cn/app/install.ps1 | iex
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.18
+dsh plugin --profile web add -w ds-harness-remote@0.4.19
 ```
 
 `-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
@@ -216,7 +216,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
 本插件不提供旧 RPC 的适配层或 wire format 翻译。
 
-Plugin `0.4.18` 主要用于兼容 DeepSeek Harness `dsh-v0.1.7-rc.1`，同时保留
+Plugin `0.4.19` 主要用于兼容 DeepSeek Harness `dsh-v0.1.7-rc.1`，同时保留
 `dsh-v0.1.6-alpha.2` 及更早版本的 settings 兼容路径；它也兼容 `dsh-v0.1.1-rc.2` 与
 `dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
 Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` 与 `dsh-v0.1.6-alpha.1` 的 Session V3
@@ -228,7 +228,7 @@ Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的
 agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 或 `dsh-v0.1.6-alpha.1`
 上恢复，而无需修改 DeepSeek Harness 本身。
 
-Desktop 两端必须使用兼容的 Harness carrier。`0.4.18` 会在 Host 暴露 rc.2 ApiProxy 时
+Desktop 两端必须使用兼容的 Harness carrier。`0.4.19` 会在 Host 暴露 rc.2 ApiProxy 时
 选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
 打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
 前拒绝 Session V3 Host。

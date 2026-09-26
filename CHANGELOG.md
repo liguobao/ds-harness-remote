@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.19 - 2026-09-27
+
+- Refreshes the published npm package README and release metadata to match the repository's current 0.4.18 feature set, compatibility range, self-hosted Server scope, and installation commands.
+
 ## 0.4.18 - 2026-09-26
 
 - Primarily improves compatibility with DeepSeek Harness `0.1.7-rc.1`: the plugin handles the Volatile settings entry, updated Typert stream-open signature, workspace file change/read payloads, and the new byte response shape while retaining the `0.1.6` settings path.

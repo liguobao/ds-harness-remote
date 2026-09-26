@@ -9,7 +9,7 @@ if (-not $dshAdminPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Ad
 $installRoot = if ($env:DSH_INSTALL_DIR) { [IO.Path]::GetFullPath($env:DSH_INSTALL_DIR) } else { Join-Path $env:LOCALAPPDATA 'dsh-remote' }
 $nodeVersion = if ($env:NODE_VERSION) { $env:NODE_VERSION } else { '22.14.0' }
 $dshVersion = if ($env:DSH_VERSION) { $env:DSH_VERSION } else { 'latest' }
-$remoteVersion = if ($env:REMOTE_VERSION) { $env:REMOTE_VERSION } else { '0.4.18' }
+$remoteVersion = if ($env:REMOTE_VERSION) { $env:REMOTE_VERSION } else { '0.4.19' }
 $fileViewerVersion = if ($env:FILE_VIEWER_VERSION) { $env:FILE_VIEWER_VERSION } else { 'latest' }
 $dshProfile = if ($env:DSH_PROFILE) { $env:DSH_PROFILE } else { 'web' }
 $registry = if ($env:NPM_REGISTRY) { $env:NPM_REGISTRY } else { 'https://registry.npmmirror.com' }
