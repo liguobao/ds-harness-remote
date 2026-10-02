@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
@@ -126,6 +127,20 @@ export class CodexRemoteDomain {
       state: this.state,
       restartAttempt: this.restartAttempt,
       ...(this.unavailableCode === undefined ? {} : { error: this.unavailableCode }),
+    }
+  }
+
+  /** Resolve a thread cwd for Host-owned workspace/terminal carriers. */
+  async resolveThreadWorkspace(connectionId: string, threadId: string): Promise<string | undefined> {
+    if (!this.peers.has(connectionId)) throw new RpcError('CODEX_THREAD_UNAVAILABLE', 'The CodeX thread is not available on this connection.')
+    try {
+      const known = await this.readKnownThread(threadId)
+      return known.cwd
+    } catch (error) {
+      if (error instanceof RpcError && error.code === 'CODEX_THREAD_NOT_ALLOWED') {
+        throw new RpcError('CODEX_THREAD_UNAVAILABLE', 'The CodeX thread is not available.')
+      }
+      throw new RpcError('CODEX_THREAD_UNAVAILABLE', 'The CodeX thread is not available.')
     }
   }
 
@@ -993,7 +1008,28 @@ export function codexBinaryCandidates(
   userHome: string = homedir(),
 ): string[] {
   if (configured !== 'codex' || hostPlatform !== 'darwin') return [configured]
+
+  const bundledCandidates = [
+    '/Applications/ChatGPT.app',
+    join(userHome, 'Applications', 'ChatGPT.app'),
+  ].flatMap(chatGptApp => {
+    const codexCli = join(chatGptApp, 'Contents', 'Resources', 'codex-cli')
+    try {
+      const manifest = JSON.parse(readFileSync(join(codexCli, 'codex-package.json'), 'utf8')) as unknown
+      if (!isRecord(manifest) || typeof manifest.entrypoint !== 'string' || manifest.entrypoint.length === 0) {
+        return []
+      }
+      const candidate = join(codexCli, manifest.entrypoint)
+      if (!existsSync(candidate)) return []
+      accessSync(candidate, constants.X_OK)
+      return [candidate]
+    } catch {
+      return []
+    }
+  })
+
   return [...new Set([
+    ...bundledCandidates,
     '/Applications/ChatGPT.app/Contents/Resources/codex',
     join(userHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
     configured,

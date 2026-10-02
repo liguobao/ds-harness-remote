@@ -7,21 +7,21 @@ const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'ima
 const DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u
 
 /** Fold a native history event window into ordered chat items. */
-export function foldHistory(events: HistoryEntry[], sessionId: string): ChatItem[] {
+export function foldHistory(events: HistoryEntry[], sessionId: string, captureContext = false): ChatItem[] {
   let items: ChatItem[] = []
   for (const entry of events) {
-    items = applyNativeEvent(items, entry.event, sessionId, entry.view)
+    items = applyNativeEvent(items, entry.event, sessionId, entry.view, captureContext)
   }
   return items
 }
 
 /** Apply one live mux frame to the current chat items. */
-export function applyMuxFrame(current: ChatItem[], frame: MuxStreamFrame): ChatItem[] {
+export function applyMuxFrame(current: ChatItem[], frame: MuxStreamFrame, captureContext = false): ChatItem[] {
   const payload = frame.payload
   if (payload.type === 'session/event' && isRecord(payload.event)) {
     const sessionId = stringValue(payload.sessionId)
     if (sessionId === undefined) return current
-    return applyNativeEvent(current, payload.event as NativeSessionEvent, sessionId, historyView(payload.view))
+    return applyNativeEvent(current, payload.event as NativeSessionEvent, sessionId, historyView(payload.view), captureContext)
   }
   if (payload.type === 'approval/requested') {
     return addApproval(current, payload as unknown as UnknownRecord, frame.rpcId)
@@ -38,6 +38,20 @@ export function applyMuxFrame(current: ChatItem[], frame: MuxStreamFrame): ChatI
   return current
 }
 
+/**
+ * Project the Harness turn lifecycle carried by a mux frame into the session
+ * list state. The message reducer intentionally ignores lifecycle events, but
+ * the UI still needs `turn/end` to clear its generating indicator after a
+ * completed or cancelled turn.
+ */
+export function sessionRunningForMuxFrame(frame: MuxStreamFrame): boolean | undefined {
+  const payload = frame.payload
+  if (payload.type !== 'session/event' || payload.event === undefined) return undefined
+  if (payload.event.type === 'turn/start') return true
+  if (payload.event.type === 'turn/end') return false
+  return undefined
+}
+
 /** Route one aggregated mux frame into the message bucket owned by its session. */
 export function applyMuxFrameToMessages(
   current: Record<string, ChatItem[]>,
@@ -47,11 +61,57 @@ export function applyMuxFrameToMessages(
   if (sessionId === undefined) return current
   return {
     ...current,
-    [sessionId]: applyMuxFrame(current[sessionId] ?? [], frame),
+    [sessionId]: applyMuxFrame(current[sessionId] ?? [], frame, true),
   }
 }
 
 function applyNativeEvent(
+  current: ChatItem[], event: NativeSessionEvent, sessionId: string, view?: HistoryEntry['view'], captureContext = false,
+): ChatItem[] {
+  const contextEvent = event.type === 'system/message' || event.type === 'developer/message' || (event.type === 'user/message' && !isHumanUserMessage(event.data))
+  const next = captureContext && contextEvent
+    ? current.some(item => item.id === messageId(event.data)) ? current : [...current, {
+        kind: 'message' as const, id: messageId(event.data), sessionId, role: 'system' as const,
+        context: event.type !== 'system/message', text: messageText(event.data), createdAt: event.time,
+      }]
+    : reduceNativeEvent(current, event, sessionId, view)
+  const time = typeof event.time === 'number' && Number.isFinite(event.time) && event.time > 0 ? event.time : undefined
+  const usage = nativeUsage(event.data)
+  return next.map(item => current.includes(item) ? item : {
+    ...item,
+    ...(Number.isSafeInteger(event.seq) && event.seq >= 0 ? { nativeSeq: event.seq } : {}),
+    ...(time === undefined ? {} : { createdAt: time, nativeTime: time }),
+    ...(replyGroup(event.data) === undefined ? {} : { turn: replyGroup(event.data) }),
+    ...(item.kind === 'message' && usage !== undefined ? { usage } : {}),
+  })
+}
+
+function nativeUsage(data: UnknownRecord): ChatMessage['usage'] {
+  const records = Array.isArray(data.stream) ? data.stream : []
+  const last = [...records].reverse().find(row => isRecord(row) && row.type === 'chunk' && isRecord(row.chunk) && row.chunk.type === 'usage')
+  const value = data.usage ?? (isRecord(last) && isRecord(last.chunk) ? last.chunk.usage : undefined)
+  if (!isRecord(value)) return undefined
+  const count = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0
+  if (!count(value.inputTokens) || !count(value.outputTokens)) return undefined
+  const usage: NonNullable<ChatMessage['usage']> = { inputTokens: value.inputTokens, outputTokens: value.outputTokens }
+  for (const key of ['totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+    if (value[key] === undefined) continue
+    if (!count(value[key])) return undefined
+    usage[key] = value[key]
+  }
+  if (usage.reasoningTokens !== undefined && usage.reasoningTokens > usage.outputTokens) return undefined
+  const knownPrompt = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+  if (!Number.isSafeInteger(knownPrompt)) return undefined
+  if (usage.totalTokens !== undefined && (usage.totalTokens < knownPrompt + usage.outputTokens
+    || (usage.cacheReadTokens !== undefined && usage.cacheWriteTokens !== undefined && usage.totalTokens !== knownPrompt + usage.outputTokens))) return undefined
+  if (usage.totalTokens === undefined && usage.cacheReadTokens !== undefined && usage.cacheWriteTokens !== undefined) {
+    const total = knownPrompt + usage.outputTokens
+    if (Number.isSafeInteger(total)) usage.totalTokens = total
+  }
+  return usage
+}
+
+function reduceNativeEvent(
   current: ChatItem[],
   event: NativeSessionEvent,
   sessionId: string,
@@ -115,6 +175,7 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   const finalReasoning = hasVisibleMessageText(reasoning)
     ? reasoning
     : streamed?.kind === 'message' ? streamed.reasoning : undefined
+  const group = replyGroup(data) ?? (streamed?.kind === 'message' ? streamed.replyGroup : undefined)
   if (!hasVisibleMessageText(finalText) && !hasVisibleMessageText(finalReasoning ?? '')) {
     // Native assistant messages may contain only tool/content metadata. They
     // are not chat text and must not leave an empty avatar/"Remote" row.
@@ -123,6 +184,7 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   }
   const message: ChatMessage = {
     kind: 'message', id, sessionId, role: 'assistant', text: finalText, createdAt: now(data),
+    ...(group === undefined ? {} : { replyGroup: group }),
     ...(finalReasoning === undefined ? {} : { reasoning: finalReasoning }),
   }
   if (streamingIndex >= 0) {
@@ -152,6 +214,7 @@ function applyAssistantChunk(
     if (!hasVisibleMessageText(delta)) return current
     return [...current, {
       kind: 'message', id: streamId, sessionId, role: 'assistant',
+      ...(replyGroup(data) === undefined ? {} : { replyGroup: replyGroup(data) }),
       text: chunk.type === 'text-delta' ? delta : '',
       ...(chunk.type === 'reasoning-delta' ? { reasoning: delta } : {}),
       streaming: true,
@@ -525,6 +588,11 @@ function historyView(value: unknown): HistoryEntry['view'] | undefined {
 function stepKey(event: NativeSessionEvent): string {
   const data = isRecord(event.data) ? event.data : {}
   return `${keyPart(data.turn)}:${keyPart(data.step)}`
+}
+
+function replyGroup(data: UnknownRecord): string | undefined {
+  const turn = data.turn
+  return typeof turn === 'string' || typeof turn === 'number' ? String(turn) : undefined
 }
 
 function now(data: UnknownRecord): number {

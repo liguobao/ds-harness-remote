@@ -28,12 +28,17 @@ const AGENT_PRESET_SETTINGS_NS = 'agent-presets'
 const LEGACY_AGENT_PRESET_ALIASES: Record<string, string> = {
   code: 'ptc',
 }
+const WELCOME_NOTICE_NAMESPACE = 'ui-settings-general'
+const WELCOME_NOTICE_FIELD = 'welcomeNoticeVersion'
+const WELCOME_NOTICE_VERSION = '2026-08-13.1'
 
 /** ApiProxy-compatible face that preserves the native Harness envelopes over Remote RPC. */
 export class RemoteHarnessApiProxy {
   readonly api: ApiProxy
+  private legacyWelcomeAcknowledged = false
+  private settingsDescribeValue?: Record<string, unknown>
 
-  constructor(private readonly client: RemoteClientCore) {
+  constructor(private readonly client: RemoteClientCore, private readonly harnessVersion?: string) {
     const call = (method: string): NativeCall => (request, signal) => this.call(method, request, signal)
     this.api = {
       sessions: {
@@ -128,7 +133,22 @@ export class RemoteHarnessApiProxy {
     if (String(response.rpcId) !== String(request.rpcId) || typeof response.result !== 'object' || response.result === null) {
       throw new Error('The remote Host returned an invalid Harness API response.')
     }
-    return normalizeLegacyResponse(method, response)
+    const normalized = normalizeLegacyResponse(method, response)
+    return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized)
+  }
+
+  private normalizeLegacyWelcomeSettings(method: string, payload: unknown, response: NativeResponse): NativeResponse {
+    if (!isLegacyRemoteHost(this.harnessVersion)) return response
+    if (method === 'settings.describe' && response.result.ok && isRecord(response.result.value)) {
+      this.settingsDescribeValue = response.result.value
+      return this.legacyWelcomeAcknowledged ? patchWelcomeDescribe(response) : response
+    }
+    if (method !== 'settings.mutate' || !isWelcomeNoticeRequest(payload)) return response
+    this.legacyWelcomeAcknowledged = true
+    // Older Hosts reject the 0.1.7 onboarding field before returning a usable
+    // settings snapshot. Treat the acknowledgement as client-local in that
+    // case; a later describe is patched when one becomes available.
+    return patchWelcomeMutate(this.settingsDescribeValue ?? { namespaces: [] }, response.rpcId)
   }
 
   private async callTransferred(
@@ -275,6 +295,54 @@ function replaceAgentPresetSettings(payload: Record<string, unknown>): Record<st
   if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord(payload.patch)) return payload
   const patch = replaceAgentPreset(payload.patch, 'default')
   return patch === payload.patch ? payload : { ...payload, patch }
+}
+
+function isLegacyRemoteHost(version: string | undefined): boolean {
+  if (version === undefined) return false
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim())
+  return match !== null && Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7
+}
+
+function isWelcomeNoticeRequest(payload: unknown): boolean {
+  if (!isRecord(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false
+  return payload.ops.some(operation => isRecord(operation)
+    && operation.op === 'set'
+    && Array.isArray(operation.path)
+    && operation.path.length === 1
+    && operation.path[0] === WELCOME_NOTICE_FIELD
+    && operation.value === WELCOME_NOTICE_VERSION)
+}
+
+function patchWelcomeDescribe(response: NativeResponse): NativeResponse {
+  if (!response.result.ok || !isRecord(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      value: {
+        ...response.result.value,
+        namespaces: response.result.value.namespaces.map(namespace => {
+          if (!isRecord(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace
+          const value = isRecord(namespace.value) ? namespace.value : {}
+          return { ...namespace, value: { ...value, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } }
+        }),
+      },
+    },
+  }
+}
+
+function patchWelcomeMutate(value: Record<string, unknown>, rpcId: NativeResponse['rpcId']): NativeResponse {
+  const response = {
+    rpcId,
+    result: { ok: true as const, value: { ...value, namespaces: [] as unknown[] } },
+  }
+  const namespaces = Array.isArray(value.namespaces) ? value.namespaces : []
+  response.result.value.namespaces = namespaces.map(namespace => {
+    if (!isRecord(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace
+    const current = isRecord(namespace.value) ? namespace.value : {}
+    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } }
+  })
+  return response
 }
 
 function isRemoteDisconnect(error: unknown): boolean {

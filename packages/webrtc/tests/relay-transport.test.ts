@@ -45,6 +45,7 @@ class FakeWebSocket {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   FakeWebSocket.latest = undefined
@@ -177,6 +178,60 @@ describe('RelayTransport control handshake', () => {
 })
 
 describe('AdaptiveTransport capability negotiation', () => {
+  it('records heartbeat diagnostics and replies to ping', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-29T01:00:00.000Z'))
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport()
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.relay'] }))
+    await Promise.resolve()
+    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+    await connecting
+
+    vi.setSystemTime(new Date('2026-09-29T01:00:05.000Z'))
+    socket.receive(createControlFrame('ping', { nonce: 'heartbeat-1' }))
+
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({
+      type: 'pong',
+      payload: { nonce: 'heartbeat-1' },
+    })
+    await expect(transport.connectionDetails()).resolves.toMatchObject({
+      heartbeatIntervalMs: 25_000,
+      lastControlReceivedAt: Date.parse('2026-09-29T01:00:05.000Z'),
+      lastControlSentAt: Date.parse('2026-09-29T01:00:05.000Z'),
+    })
+  })
+
+  it('updates receive activity for an ordinary control frame', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-29T02:00:00.000Z'))
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport()
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.relay'] }))
+    await Promise.resolve()
+    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+    await connecting
+    const before = await transport.connectionDetails()
+
+    vi.setSystemTime(new Date('2026-09-29T02:00:07.000Z'))
+    socket.receive(createControlFrame('transport.selected', {
+      connectionId: 'connection-1',
+      targetDeviceId: 'client-1',
+      transport: 'relay',
+    }))
+
+    await expect(transport.connectionDetails()).resolves.toMatchObject({
+      lastControlReceivedAt: Date.parse('2026-09-29T02:00:07.000Z'),
+      lastControlSentAt: before.lastControlSentAt,
+    })
+  })
+
   it('requests only transports present in hello.ack capabilities', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const transport = new AdaptiveTransport('wss://remote.example/ws/v1/connect', {

@@ -6,6 +6,7 @@ import {
   type RpcRequestPayload,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
+import type { LoopbackHost } from './loopback-host.js'
 import type { RemoteFileViewerBridge } from './file-viewer-bridge.js'
 import type { HarnessApiBridge } from './harness-api-bridge.js'
 import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
@@ -37,6 +38,7 @@ const apiMethods = new Set([
   'harness.remote.transfer.close',
   'harness.remote.stream.open',
   'harness.remote.stream.close',
+  'loopback.call',
   'fileviewer.call',
   'codex.app.call',
   'codex.app.respond',
@@ -82,9 +84,11 @@ export class RpcRouter {
     private readonly capabilities: () => readonly string[] = () => HOST_CAPABILITIES,
     private readonly codex?: CodexPeerBridge,
     private readonly acp?: AcpPeerBridge,
+    private readonly loopback?: LoopbackHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
+    this.loopback?.closeAll()
     await Promise.all([
       this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
@@ -152,6 +156,10 @@ export class RpcRouter {
       case 'harness.remote.transfer.close': return this.requireRemoteGateway().closeTransfer(params)
       case 'harness.remote.stream.open': return this.requireRemoteGateway().openStream(params)
       case 'harness.remote.stream.close': return this.requireRemoteGateway().closeStream(params)
+      case 'loopback.call': {
+        if (this.loopback === undefined) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Loopback preview is unavailable on this Host.')
+        return this.loopback.call(params)
+      }
       case 'fileviewer.call': {
         if (this.fileViewer === undefined) {
           throw new RpcError('FILE_VIEWER_UNAVAILABLE', 'The Remote Host does not have DSH File Viewer available.')

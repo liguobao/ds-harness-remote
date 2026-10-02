@@ -7,7 +7,8 @@ import {
   shouldUseRemoteFileViewer,
   type RemoteFileContentProvider,
 } from './remote-file-content-provider.js'
-import { CONTROL_RPC_PREFIX } from './control-route.js'
+import { CONTROL_RPC_PREFIX, STATUS_STREAM_PATH } from './control-route.js'
+import { createStatusFeed, type StatusFeed } from './status-stream.js'
 
 declare global {
   interface Window {
@@ -57,7 +58,7 @@ interface RemoteStatus {
     phase: 'checking-host' | 'authorizing-peer' | 'probing' | 'connected'
     activeTransports?: RemoteTransportPreference[]
   }
-  remoteFeatures?: { commandList: boolean; fileViewer: boolean; codex?: boolean; cursor?: boolean }
+  remoteFeatures?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean; cursor?: boolean }
   network?: RemoteNetworkDetails
   hostAuthorizationAvailable: boolean
   host?: {
@@ -208,6 +209,9 @@ interface PluginSettings {
   enabled?: boolean
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
+  terminal?: { enabled?: boolean }
+  hostControl?: { enabled?: boolean }
+  loopback?: { ports?: number[] }
   forceRelay?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
   reconnect?: boolean | {
@@ -224,15 +228,17 @@ interface PluginSettings {
     enabled?: boolean
     binary?: string
   }
+  acp?: { enabled?: boolean; backends?: Array<{ id: string; enabled?: boolean; command?: string; args?: string[]; cwd?: string }> }
 }
 
 interface PluginSettingsView {
   config: PluginSettings
   deviceName: string
   writable: boolean
-  applies: 'restart'
+  applies: 'live' | 'restart'
   association?: PluginAssociation
   associations?: Partial<Record<'host' | 'client', PluginAssociation>>
+  acpAvailability?: Record<string, boolean>
 }
 
 interface PluginAssociation {
@@ -250,6 +256,18 @@ interface PluginConfigureResult {
 const localeNamespace = 'ds-harness-remote'
 
 const en = {
+  terminalRemote: 'Remote terminal',
+  terminalRemoteHint: 'Allow trusted Remote devices to run an interactive shell as this Host user. On by default; independent of Agent approvals. Toggling saves and applies immediately.',
+  terminalRemoteUnavailable: 'Remote terminal is unavailable. Enable Remote terminal in the Host Remote settings; the switch applies immediately.',
+  previewPorts: 'Remote preview ports',
+  previewPortsHint: 'Allow specific Host ports (1024–65535), separated by commas. Empty disables preview. HTTP, WebSocket and hot reload are supported.',
+  developmentSave: 'Save access settings',
+  developmentSaved: 'Remote preview ports saved. Changes apply immediately.',
+  terminalSaved: 'Remote terminal setting saved. Applies immediately.',
+  previewOpen: 'Preview service',
+  previewPort: 'Host port',
+  previewLocalOnly: 'Preview requires Desktop or a browser connected to Harness on this computer.',
+
   pluginTitle: 'DeepSeek Remote',
   pluginDescription: 'Connect once. Available anytime.',
   expandSettings: 'Show settings: {name}',
@@ -273,6 +291,8 @@ const en = {
   saving: 'Saving…',
   signOut: 'Sign out',
   signingOut: 'Signing out…',
+  hostName: 'Host name',
+  deviceId: 'Device ID',
   serverUrl: 'Server URL',
   serverUrlHint: 'HTTPS origin used for account authorization and encrypted relay.',
   serverSaved: 'Server address saved. Restart DSH to apply it.',
@@ -324,6 +344,8 @@ const en = {
   reconnectingAction: 'Reconnecting…',
   reconnectStarted: 'Reconnect requested.',
   connectionAuthorizationExpired: 'Authorization expired. Sign out and authorize this Host again.',
+  connectionReplaced: 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting.',
+  connectionCredentialsBusy: 'Credential refresh is locked. Stop other instances. After a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.',
   connectionDeviceRevoked: 'This Host was revoked on the Server. Sign out and authorize it again.',
   connectionOwnershipRequired: 'The Server no longer recognizes this Host as an owned device.',
   connectionRateLimited: 'The Server is receiving too many requests. Automatic retry will continue.',
@@ -343,6 +365,7 @@ const en = {
   remoteEntry: 'Remote',
   remoteTitle: 'Open a remote workspace',
   remoteDescription: 'Choose one of your Hosts, then select a working directory. The Harness interface stays on this device.',
+  starProject: 'Star us on GitHub — your support matters to this project',
   chooseHost: 'Host',
   chooseDirectory: 'Working directory',
   selectHostHint: 'Select an online Host to browse its directories.',
@@ -449,7 +472,20 @@ const en = {
   signInClientDescription: 'Connect once. Available anytime.',
   startSignIn: 'Start sign-in',
   allowControlCurrentDevice: 'Allow control of this device',
+  allowControlDevice: 'Allow control of device',
   connectedClientCount: '{count} connected',
+  checkAcp: 'Check ACP',
+  checkingAcp: 'Checking ACP…',
+  acpAvailable: 'ACP available',
+  acpUnavailable: 'ACP unavailable',
+  acpHint: 'Connect compatible coding agents through the Agent Client Protocol.',
+  acpCheckPassed: 'Check passed',
+  acpCheckFailed: 'Check failed',
+  addAcp: 'Add ACP',
+  acpName: 'Service name',
+  acpCommand: 'Command',
+  acpArguments: 'Arguments',
+  removeAcp: 'Remove',
   currentConnectedDevices: 'Currently connected devices',
   noConnectedClients: 'No devices are currently connected to this Host.',
   unknownDevice: 'Unknown device',
@@ -470,6 +506,18 @@ const en = {
 } as const
 
 const zh: Record<keyof typeof en, string> = {
+  terminalRemote: '远程终端',
+  terminalRemoteHint: '允许受信任的 Remote 设备以此 Host 用户身份运行交互式 Shell。默认开启，独立于 Agent 审批；切换后立即保存并生效。',
+  terminalRemoteUnavailable: '远程终端不可用。请在 Host 的 Remote 设置中开启「远程终端」，开关会立即生效。',
+  previewPorts: '远程预览端口',
+  previewPortsHint: '填写允许访问的 Host 端口（1024–65535），以逗号分隔。留空禁用预览；支持 HTTP、WebSocket 和热更新。',
+  developmentSave: '保存访问设置',
+  developmentSaved: '远程预览端口已保存，立即生效。',
+  terminalSaved: '远程终端设置已保存，立即生效。',
+  previewOpen: '预览服务',
+  previewPort: 'Host 端口',
+  previewLocalOnly: '预览需要 Desktop，或连接到本机 Harness 的浏览器。',
+
   pluginTitle: 'DeepSeek 远程连接',
   pluginDescription: '一次连接，随时可用。',
   expandSettings: '展开设置：{name}',
@@ -493,6 +541,8 @@ const zh: Record<keyof typeof en, string> = {
   saving: '保存中…',
   signOut: '退出授权',
   signingOut: '正在退出…',
+  hostName: '主机名称',
+  deviceId: '设备 ID',
   serverUrl: 'Server 地址',
   serverUrlHint: '用于账号授权和加密中继的 HTTPS 地址。',
   serverSaved: 'Server 地址已保存，重启 DSH 后生效。',
@@ -544,6 +594,8 @@ const zh: Record<keyof typeof en, string> = {
   reconnectingAction: '正在重连…',
   reconnectStarted: '已发起重连。',
   connectionAuthorizationExpired: '授权已失效，请退出授权后重新连接此 Host。',
+  connectionReplaced: '另一实例正在使用此 Host 身份。请停止该实例，或使用独立的 DSH_HOME 后重新连接。',
+  connectionCredentialsBusy: '凭据刷新被锁定，请停止其他实例。若此前异常退出，请停止所有实例后移除 server-credentials.json.refresh-lock 并重新授权。',
   connectionDeviceRevoked: '此 Host 已在 Server 上被撤销，请退出授权后重新连接。',
   connectionOwnershipRequired: 'Server 已不再将此 Host 识别为当前账号的设备。',
   connectionRateLimited: 'Server 请求过多，插件将继续自动重试。',
@@ -563,6 +615,7 @@ const zh: Record<keyof typeof en, string> = {
   remoteEntry: 'Remote',
   remoteTitle: '打开远端工作区',
   remoteDescription: '选择想要连接主机和工作目录。',
+  starProject: '欢迎点个 Star，你的支持对项目很重要',
   chooseHost: '主机',
   chooseDirectory: '工作目录',
   selectHostHint: '选择一台在线主机以浏览其目录。',
@@ -669,7 +722,20 @@ const zh: Record<keyof typeof en, string> = {
   signInClientDescription: '一次连接，随时可用。',
   startSignIn: '开始登录',
   allowControlCurrentDevice: '允许控制当前设备',
+  allowControlDevice: '允许控制设备',
   connectedClientCount: '{count} 台已连接',
+  checkAcp: '检测 ACP',
+  checkingAcp: '正在检测 ACP…',
+  acpAvailable: 'ACP 可用',
+  acpUnavailable: 'ACP 不可用',
+  acpHint: '通过 Agent Client Protocol 连接兼容的编码 Agent。',
+  acpCheckPassed: '检测通过',
+  acpCheckFailed: '检测失败',
+  addAcp: '添加 ACP',
+  acpName: '服务名称',
+  acpCommand: '启动命令',
+  acpArguments: '命令参数',
+  removeAcp: '移除',
   currentConnectedDevices: '当前连接的设备',
   noConnectedClients: '目前没有设备连接到这台主机。',
   unknownDevice: '未知设备',
@@ -722,7 +788,7 @@ function controlRouteUnavailableStatus(): RemoteStatus {
     controlUnavailable: true,
     connected: false,
     transport: 'Disconnected',
-    remoteFeatures: { commandList: false, fileViewer: false, codex: false, cursor: false },
+    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, cursor: false },
     hostAuthorizationAvailable: false,
   }
 }
@@ -873,6 +939,8 @@ function connectionErrorMessage(code: string, t: Translate): string {
   if (code === 'ACCOUNT_AUTH_REQUIRED' || code === 'AUTH_INVALID' || code === 'TOKEN_EXPIRED') {
     return t('connectionAuthorizationExpired')
   }
+  if (code === 'CONNECTION_REPLACED') return t('connectionReplaced')
+  if (code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
   if (code === 'DEVICE_REVOKED') return t('connectionDeviceRevoked')
   if (code === 'DEVICE_OWNERSHIP_REQUIRED') return t('connectionOwnershipRequired')
   if (code === 'RATE_LIMITED') return t('connectionRateLimited')
@@ -907,6 +975,11 @@ window.__ModuleLoader__.load({
       useMemo<T>(factory: () => T, deps: unknown[]): T
       useRef<T>(initial: T): { current: T }
       useState<T>(initial: T | (() => T)): [T, (value: T | ((previous: T) => T)) => void]
+      useSyncExternalStore<T>(
+        subscribe: (onStoreChange: () => void) => () => void,
+        getSnapshot: () => T,
+        getServerSnapshot?: () => T,
+      ): T
     }
     const inject = [
       'connection', 'slots', 'locale', 'workspaces', 'sessions',
@@ -1004,23 +1077,39 @@ window.__ModuleLoader__.load({
 
     function RemotePluginOptions(props: {
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
+      statusFeed: StatusFeed<RemoteStatus>
       t: Translate
+      view?: 'summary' | 'page'
     }): unknown {
       const { t } = props
-      const [open, setOpen] = React.useState(false)
+      const [open, setOpen] = React.useState(props.view === 'page')
       const [serverUrl, setServerUrl] = React.useState('')
       const [codexEnabled, setCodexEnabled] = React.useState(true)
       const [cursorEnabled, setCursorEnabled] = React.useState(false)
+      const [portsBusy, setPortsBusy] = React.useState(false)
+      const [previewPorts, setPreviewPorts] = React.useState('')
       const role = 'host' as const
       const [registrationCode, setRegistrationCode] = React.useState('')
       const [associations, setAssociations] = React.useState<Partial<Record<'host' | 'client', PluginAssociation>>>({})
       const [loaded, setLoaded] = React.useState(false)
       const [writable, setWritable] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
+      const [terminalEnabled, setTerminalEnabled] = React.useState(false)
+      const [terminalBusy, setTerminalBusy] = React.useState(false)
       const [codexBusy, setCodexBusy] = React.useState(false)
       const [cursorBusy, setCursorBusy] = React.useState(false)
+      const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
+      const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
+      const [acpChecking, setAcpChecking] = React.useState<Record<string, boolean>>({})
+      const [acpCheckResults, setAcpCheckResults] = React.useState<Record<string, boolean | undefined>>({})
+      const [addingAcp, setAddingAcp] = React.useState(false)
+      const [acpName, setAcpName] = React.useState('')
+      const [acpCommand, setAcpCommand] = React.useState('')
+      const [acpArguments, setAcpArguments] = React.useState('acp')
       const [reconnectBusy, setReconnectBusy] = React.useState(false)
       const [hostStatus, setHostStatus] = React.useState<RemoteStatus['host'] | undefined>(undefined)
+      const [hostName, setHostName] = React.useState('')
+      const [hostDeviceId, setHostDeviceId] = React.useState('')
       const [notice, setNotice] = React.useState<LocalizedMessage | undefined>(undefined)
       const [error, setError] = React.useState<string | undefined>(undefined)
       const [settingsView, setSettingsView] = React.useState<PluginSettingsView | undefined>(undefined)
@@ -1034,6 +1123,10 @@ window.__ModuleLoader__.load({
         setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
         setCodexEnabled(view.config.codex?.enabled ?? true)
         setCursorEnabled(view.config.cursor?.enabled ?? false)
+        setTerminalEnabled(view.config.terminal?.enabled ?? true)
+        setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
+        setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
+        setAcpAvailability(view.acpAvailability ?? {})
         setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
         setWritable(view.writable)
         setLoaded(true)
@@ -1046,10 +1139,8 @@ window.__ModuleLoader__.load({
         ])
         applyView(view)
         setHostStatus(status?.host)
-      }
-
-      const refreshHostStatus = async (): Promise<void> => {
-        setHostStatus((await props.control<RemoteStatus>('status')).host)
+        setHostName(status?.deviceName ?? '')
+        setHostDeviceId(status?.host?.deviceId ?? '')
       }
 
       React.useEffect(() => {
@@ -1057,12 +1148,14 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
+        // The pushed status keeps this Host account line current; it replaces
+        // the periodic unary status read this card used to perform.
         if (association === undefined) return
-        void refreshHostStatus().catch(() => undefined)
-        const timer = window.setInterval(() => {
-          void refreshHostStatus().catch(() => undefined)
-        }, 30_000)
-        return () => window.clearInterval(timer)
+        return props.statusFeed.subscribe(status => {
+          setHostStatus(status.host)
+          setHostName(status.deviceName ?? '')
+          setHostDeviceId(status.host?.deviceId ?? '')
+        })
       }, [association !== undefined])
 
       const save = async (event?: Event): Promise<void> => {
@@ -1165,12 +1258,119 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const setTerminalRemote = async (enabled: boolean): Promise<void> => {
+        const previous = terminalEnabled
+        const portsDraft = previewPorts
+        setTerminalEnabled(enabled)
+        setTerminalBusy(true)
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.development.set', { terminalEnabled: enabled })
+          applyView(view)
+          setPreviewPorts(portsDraft)
+          setNotice({ key: 'terminalSaved' })
+        } catch (reason) {
+          setTerminalEnabled(previous)
+          setError(messageOf(reason))
+        } finally {
+          setTerminalBusy(false)
+        }
+      }
+
+      const savePreviewPorts = async (): Promise<void> => {
+        setPortsBusy(true)
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          const ports = previewPorts.trim() === '' ? [] : previewPorts.split(/[,，]/).map(value => Number(value.trim()))
+          const view = await props.control<PluginSettingsView>('settings.development.set', { ports })
+          applyView(view)
+          setNotice({ key: 'developmentSaved' })
+        } catch (reason) {
+          setError(messageOf(reason))
+        } finally {
+          setPortsBusy(false)
+        }
+      }
+
+      const checkAcp = async (backend: string): Promise<void> => {
+        setAcpChecking(current => ({ ...current, [backend]: true }))
+        setAcpCheckResults(current => ({ ...current, [backend]: undefined }))
+        setError(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.get')
+          applyView(view)
+          const available = view.acpAvailability?.[backend] === true
+          if (!available) {
+            const disabledView = await props.control<PluginSettingsView>('settings.acp.set', { backend, enabled: false })
+            applyView(disabledView)
+          }
+          setAcpCheckResults(current => ({ ...current, [backend]: available }))
+          setNotice({ key: available ? 'acpAvailable' : 'acpUnavailable' })
+          window.setTimeout(() => setAcpCheckResults(current => ({ ...current, [backend]: undefined })), 5_000)
+        } catch (reason) {
+          setError(messageOf(reason))
+        } finally {
+          setAcpChecking(current => ({ ...current, [backend]: false }))
+        }
+      }
+
+      const addAcp = async (): Promise<void> => {
+        setBusy(true)
+        setError(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.acp.add', {
+            id: acpName.trim(), command: acpCommand.trim(), args: acpArguments.trim() === '' ? [] : acpArguments.trim().split(/\s+/),
+          })
+          applyView(view)
+          setAddingAcp(false)
+          setAcpName('')
+          setAcpCommand('')
+          setAcpArguments('acp')
+        } catch (reason) {
+          setError(messageOf(reason))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const removeAcp = async (backend: string): Promise<void> => {
+        setBusy(true)
+        setError(undefined)
+        try {
+          const view = await props.control<PluginSettingsView>('settings.acp.remove', { id: backend })
+          applyView(view)
+        } catch (reason) {
+          setError(messageOf(reason))
+        } finally {
+          setBusy(false)
+        }
+      }
+
       const discard = (): void => {
         if (settingsView !== undefined) applyView(settingsView)
         setRegistrationCode('')
         setNotice(undefined)
         setError(undefined)
       }
+
+      const developmentSetting = React.createElement('section', { className: 'dshRemoteDevelopmentSettings' },
+        React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+          React.createElement('div', null, React.createElement('strong', null, t('terminalRemote')),
+            React.createElement('p', null, t('terminalRemoteHint'))),
+          React.createElement('input', { type: 'checkbox', role: 'switch', checked: terminalEnabled,
+            disabled: busy || terminalBusy || !writable, 'aria-label': t('terminalRemote'),
+            onChange: (event: Event) => void setTerminalRemote((event.target as HTMLInputElement).checked) })),
+        React.createElement('div', { className: 'dshRemotePathField' },
+          React.createElement('span', null, t('previewPorts')),
+          React.createElement('div', { className: 'dshRemotePortsRow' },
+            React.createElement('input', { value: previewPorts, maxLength: 128, disabled: !writable,
+              placeholder: '3000, 5173', 'aria-label': t('previewPorts'),
+              onChange: (event: Event) => setPreviewPorts((event.target as HTMLInputElement).value) }),
+            React.createElement('button', { type: 'button', disabled: portsBusy || terminalBusy || !writable,
+              onClick: () => void savePreviewPorts() }, t('developmentSave'))),
+          React.createElement('small', null, t('previewPortsHint'))))
 
       const codexSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
         React.createElement('div', null,
@@ -1194,7 +1394,30 @@ window.__ModuleLoader__.load({
           onChange: (event: Event) => void setCursorRemote((event.target as HTMLInputElement).checked),
         }))
 
-      return React.createElement('li', { className: `dshRemotePluginCard${open ? ' isOpen' : ''}` },
+      const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
+        React.createElement('summary', null,
+          React.createElement('div', { className: 'dshRemoteAcpSummaryText' },
+            React.createElement('strong', null, 'ACP Agent backends'),
+            React.createElement('p', null, t('acpHint')))),
+        React.createElement('div', { className: 'dshRemoteAcpList' }, acpBackends.map(item => React.createElement('div', { key: item.id, className: 'dshRemoteAuthorizationSetting' },
+          React.createElement('span', null, item.id),
+          React.createElement('span', { className: 'dshRemoteAcpCheckCell' },
+            React.createElement('a', { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? ' isChecking' : acpCheckResults[item.id] === undefined ? '' : acpCheckResults[item.id] ? ' isPassed' : ' isFailed'}`, onClick: (event: Event) => { event.preventDefault(); void checkAcp(item.id) } },
+              acpChecking[item.id] ? t('checkingAcp') : acpCheckResults[item.id] === undefined ? t('checkAcp') : t(acpCheckResults[item.id] ? 'acpCheckPassed' : 'acpCheckFailed'))),
+          ['codex', 'cursor', 'kimi'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
+          React.createElement('input', { type: 'checkbox', role: 'switch', checked: item.enabled && acpAvailability[item.id] === true, disabled: busy || !writable || !acpAvailability[item.id],
+            onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason)))
+          }))),
+          addingAcp ? React.createElement('div', { className: 'dshRemoteAcpAddForm' },
+            React.createElement('input', { value: acpName, placeholder: t('acpName'), 'aria-label': t('acpName'), onChange: (event: Event) => setAcpName((event.target as HTMLInputElement).value) }),
+            React.createElement('input', { value: acpCommand, placeholder: t('acpCommand'), 'aria-label': t('acpCommand'), onChange: (event: Event) => setAcpCommand((event.target as HTMLInputElement).value) }),
+            React.createElement('input', { value: acpArguments, placeholder: t('acpArguments'), 'aria-label': t('acpArguments'), onChange: (event: Event) => setAcpArguments((event.target as HTMLInputElement).value) }),
+            React.createElement('button', { type: 'button', disabled: busy || acpName.trim() === '' || acpCommand.trim() === '', onClick: () => void addAcp() }, t('addAcp')))
+          : React.createElement('a', { href: '#add-acp', className: 'dshRemoteAcpAddLink', onClick: (event: Event) => { event.preventDefault(); setAddingAcp(true) } }, t('addAcp'))))
+
+      if (props.view === 'summary') return React.createElement('span', null, t('pluginDescription'))
+
+      return React.createElement(props.view === 'page' ? 'div' : 'li', { className: `dshRemotePluginCard${open ? ' isOpen' : ''}${props.view === 'page' ? ' dshRemotePluginModern' : ''}` },
         React.createElement('div', { className: 'dshRemotePluginCardHeader' },
           React.createElement('button', {
             type: 'button',
@@ -1225,6 +1448,13 @@ window.__ModuleLoader__.load({
             React.createElement('p', null, association.account === undefined
               ? serverUrl
               : t('authorizedOn', { role: 'Remote', serverUrl })))),
+        React.createElement('div', { className: 'dshRemoteHostIdentity' },
+          React.createElement('div', null,
+            React.createElement('span', null, t('hostName')),
+            React.createElement('strong', null, hostName || '—')),
+          React.createElement('div', null,
+            React.createElement('span', null, t('deviceId')),
+            React.createElement('code', null, hostDeviceId || '—'))),
         React.createElement('div', { className: 'dshRemoteField' },
           React.createElement('label', { htmlFor: 'dsh-remote-server-url-authorized' }, t('serverUrl')),
           React.createElement('input', {
@@ -1237,8 +1467,10 @@ window.__ModuleLoader__.load({
             onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
           }),
           React.createElement('p', null, t('serverUrlHint'))),
+        developmentSetting,
         codexSetting,
         cursorSetting,
+        acpSetting,
         React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
           React.createElement('div', null,
             React.createElement('strong', null, t('allowControlCurrentDevice')),
@@ -1274,13 +1506,15 @@ window.__ModuleLoader__.load({
           : React.createElement('p', { className: 'dshRemoteConnectionIssue', role: 'status' }, connectionErrorMessage(hostStatus.error, t)),
         !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
-          error !== undefined
-            ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
-            : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
+          React.createElement('p', {
+            className: error !== undefined ? 'dshRemoteError' : 'dshRemoteNotice',
+            role: error !== undefined ? 'alert' : 'status',
+          }, error ?? (notice === undefined ? '' : t(notice.key, notice.params))),
           draftDirty
             ? React.createElement(React.Fragment, null,
               React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy, onClick: discard }, t('discard')),
-              React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')))
+              React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || !writable, onClick: () => void save() }, t(busy ? 'saving' : 'save')),
+              React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || !writable, onClick: () => void logout() }, t(busy ? 'signingOut' : 'signOut')))
             : React.createElement('button', {
               type: 'button',
               className: 'dshRemoteDiscard',
@@ -1288,6 +1522,13 @@ window.__ModuleLoader__.load({
               onClick: () => void logout(),
             }, t(busy ? 'signingOut' : 'signOut'))))
               : React.createElement('form', { className: 'dshRemoteSettings', noValidate: true, onSubmit: (event: Event) => void save(event) },
+        React.createElement('div', { className: 'dshRemoteHostIdentity' },
+          React.createElement('div', null,
+            React.createElement('span', null, t('hostName')),
+            React.createElement('strong', null, hostName || '—')),
+          React.createElement('div', null,
+            React.createElement('span', null, t('deviceId')),
+            React.createElement('code', null, hostDeviceId || '—'))),
         React.createElement('div', { className: 'dshRemoteField' },
           React.createElement('label', { htmlFor: 'dsh-remote-server-url' }, t('serverUrl')),
           React.createElement('input', {
@@ -1300,14 +1541,17 @@ window.__ModuleLoader__.load({
             onChange: (event: Event) => { setServerUrl((event.target as HTMLInputElement).value); setNotice(undefined) },
           }),
           React.createElement('p', null, t('serverUrlHint'))),
+        developmentSetting,
         codexSetting,
         cursorSetting,
+        acpSetting,
         React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
         !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
         React.createElement('div', { className: 'dshRemoteSettingsFooter' },
-          error !== undefined
-            ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)
-            : notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, t(notice.key, notice.params)),
+          React.createElement('p', {
+            className: error !== undefined ? 'dshRemoteError' : 'dshRemoteNotice',
+            role: error !== undefined ? 'alert' : 'status',
+          }, error ?? (notice === undefined ? '' : t(notice.key, notice.params))),
           React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || !draftDirty, onClick: discard }, t('discard')),
           React.createElement('button', { type: 'submit', className: 'dshRemoteSave', disabled: busy || !writable || !serverDirty }, t(busy ? 'saving' : 'save'))))))
     }
@@ -1315,6 +1559,7 @@ window.__ModuleLoader__.load({
     function RemoteWorkspaceAction(props: {
       wide: boolean
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
+      statusFeed: StatusFeed<RemoteStatus>
       preferredQrProvider: OAuthProvider
       t: Translate
     }): unknown {
@@ -1323,6 +1568,9 @@ window.__ModuleLoader__.load({
       const [status, setStatus] = React.useState<RemoteStatus | undefined>(undefined)
       const [devices, setDevices] = React.useState<RemoteDevice[]>([])
       const [selectedHost, setSelectedHost] = React.useState<RemoteDevice | undefined>(undefined)
+      // The Host being connected right now: its row stays visible as a collapsed
+      // summary so the progress panel below it is on screen without scrolling.
+      const [connectingHost, setConnectingHost] = React.useState<RemoteDevice | undefined>(undefined)
       const [workspaces, setWorkspaces] = React.useState<RemoteWorkspaceView[]>([])
       const [codexWorkspaces, setCodexWorkspaces] = React.useState<CodexWorkspaceView[]>([])
       const [cursorWorkspaces, setCursorWorkspaces] = React.useState<CursorWorkspaceView[]>([])
@@ -1345,6 +1593,7 @@ window.__ModuleLoader__.load({
       const [needsAuthorization, setNeedsAuthorization] = React.useState(false)
       const [email, setEmail] = React.useState('')
       const [password, setPassword] = React.useState('')
+      const [loginServerUrl, setLoginServerUrl] = React.useState('https://dsh.r2049.cn')
       const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(props.preferredQrProvider)
       const [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(false)
       const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
@@ -1394,6 +1643,12 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
       }, [])
+
+      React.useEffect(() => {
+        if (status?.serverUrl !== undefined && loginServerUrl === 'https://dsh.r2049.cn') {
+          setLoginServerUrl(status.serverUrl)
+        }
+      }, [status?.serverUrl])
 
       React.useEffect(() => {
         const remoteActive = status?.mode === 'remote'
@@ -1523,6 +1778,7 @@ window.__ModuleLoader__.load({
       const selectHost = async (host: RemoteDevice): Promise<void> => {
         setBusy(true)
         setError(undefined)
+        setConnectingHost(host)
         setCodexWorkspaces([])
         setCursorWorkspaces([])
         setShowAllWorkspaces(false)
@@ -1573,6 +1829,9 @@ window.__ModuleLoader__.load({
         } catch (reason) {
           setError(messageOf(reason))
         } finally {
+          // A failed attempt expands the full Host list again; a successful one
+          // is represented by `selectedHost`.
+          setConnectingHost(undefined)
           setBusy(false)
         }
       }
@@ -1701,11 +1960,11 @@ window.__ModuleLoader__.load({
       }
 
       React.useEffect(() => {
+        // While the host picker lists Hosts, the pushed status keeps the Host
+        // account line and the connection progress current; the subscription
+        // replays the latest status immediately.
         if (!open || selectedHost !== undefined) return
-        const timer = window.setInterval(() => {
-          void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
-        }, 1_500)
-        return () => window.clearInterval(timer)
+        return props.statusFeed.subscribe(setStatus)
       }, [open, selectedHost])
 
       const chooseAnotherHost = (): void => {
@@ -1726,11 +1985,16 @@ window.__ModuleLoader__.load({
       }
 
       const signInClient = async (): Promise<void> => {
-        if (email.trim() === '' || password === '') return
+        if (email.trim() === '' || password === '' || loginServerUrl.trim() === '') return
         setBusy(true)
         setError(undefined)
         try {
-          await props.control('client.account.login', { email: email.trim(), password })
+          await props.control('settings.configure', {
+            role: 'client',
+            serverUrl: loginServerUrl.trim(),
+            email: email.trim(),
+            password,
+          })
           setDevices(await props.control<RemoteDevice[]>('devices'))
           setStatus(await props.control<RemoteStatus>('status'))
           setNeedsAuthorization(false)
@@ -1859,15 +2123,15 @@ window.__ModuleLoader__.load({
         ? React.createElement('div', {
           className: `dshRemoteConnectedMenu${devicesOpen ? ' isOpen' : ''}`,
         },
-          React.createElement('button', {
-            type: 'button',
+          React.createElement('a', {
+            href: connectedCount > 0 ? '#connected-devices' : undefined,
             className: `dshRemoteConnectedCount${connectedCount > 0 ? ' isOnline isInteractive' : ''}`,
-            disabled: connectedCount === 0,
             'aria-expanded': connectedCount > 0 ? devicesOpen : undefined,
             'aria-haspopup': connectedCount > 0 ? 'dialog' : undefined,
             title: connectedCountLabel,
             'aria-label': connectedCountLabel,
-            onClick: () => {
+            onClick: (event: Event) => {
+              event.preventDefault()
               if (connectedCount === 0) return
               setDevicesOpen(current => !current)
             },
@@ -1875,6 +2139,7 @@ window.__ModuleLoader__.load({
           devicesOpen && connectedCount > 0
             ? React.createElement('div', {
               className: 'dshRemoteConnectedPanel',
+              id: 'connected-devices',
               role: 'dialog',
               'aria-label': t('currentConnectedDevices'),
             },
@@ -1896,6 +2161,10 @@ window.__ModuleLoader__.load({
               ))
             : null)
         : null
+
+      // While a Host is connecting only that row stays listed, so the progress
+      // panel below the list is visible without scrolling past every device.
+      const listedHosts = connectingHost === undefined ? devices : [connectingHost]
 
       return React.createElement(React.Fragment, null,
         React.createElement('div', { className: `dshRemoteSidebarEntry${status?.mode === 'remote' ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}` },
@@ -1935,8 +2204,15 @@ window.__ModuleLoader__.load({
           'aria-label': selectedHost?.name ?? t('remoteTitle'),
         },
           React.createElement('header', { className: 'dshRemotePageHeader' },
-            React.createElement('div', { className: 'dshRemotePageIntro' },
-              React.createElement('strong', null, selectedHost?.name ?? t('remoteTitle')),
+              React.createElement('div', { className: 'dshRemotePageIntro' },
+              React.createElement('div', { className: 'dshRemotePageTitleRow' },
+                React.createElement('strong', null, selectedHost?.name ?? t('remoteTitle')),
+                selectedHost === undefined ? React.createElement('a', {
+                  className: 'dshRemoteStarLink',
+                  href: 'https://github.com/liguobao/ds-harness-remote',
+                  target: '_blank',
+                  rel: 'noreferrer',
+                }, t('starProject')) : null),
               React.createElement('p', null, selectedHostDetails ?? t('remoteDescription'))),
             React.createElement('div', { className: 'dshRemotePageActions' },
               selectedHost === undefined ? null : React.createElement('button', {
@@ -1946,7 +2222,6 @@ window.__ModuleLoader__.load({
                 title: t('backToHosts'),
                 onClick: chooseAnotherHost,
               }, t('backToHosts')),
-              connectedMenu,
               React.createElement('button', {
                 type: 'button',
                 className: 'dshRemotePageRefresh',
@@ -2010,6 +2285,10 @@ window.__ModuleLoader__.load({
                       'aria-labelledby': 'dsh-remote-password-tab',
                     },
                       React.createElement('input', {
+                        type: 'url', value: loginServerUrl, disabled: busy, autoComplete: 'url', placeholder: t('serverUrl'),
+                        'aria-label': t('serverUrl'), onChange: (event: Event) => setLoginServerUrl((event.target as HTMLInputElement).value),
+                      }),
+                      React.createElement('input', {
                         type: 'email', value: email, disabled: busy, autoComplete: 'username', placeholder: t('account'),
                         'aria-label': t('account'), onChange: (event: Event) => setEmail((event.target as HTMLInputElement).value),
                       }),
@@ -2017,30 +2296,31 @@ window.__ModuleLoader__.load({
                         type: 'password', value: password, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
                         'aria-label': t('password'), onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
                       }),
-                      React.createElement('button', { type: 'button', disabled: busy || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')))) : null,
+                      React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')))) : null,
                 needsAuthorization ? null : React.createElement(React.Fragment, null,
                 selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading' },
                     React.createElement('div', { className: 'dshRemoteSectionTitle' },
                       React.createElement('strong', null, t('chooseHost')),
                       status?.hostAuthorizationAvailable ? React.createElement('div', { className: 'dshRemoteHostControlToggle' },
-                        React.createElement('span', null, t('allowControlCurrentDevice')),
+                        React.createElement('span', null, t('allowControlDevice')),
                         React.createElement('input', {
                           type: 'checkbox', role: 'switch', disabled: busy,
-                          'aria-label': t('allowControlCurrentDevice'),
+                          'aria-label': t('allowControlDevice'),
                           checked: status.host?.authorized === true,
                           onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                         })) : null,
-                      React.createElement('button', {
-                        type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
-                        onClick: () => void logoutRemote(),
-                      }, t('exitRemoteAccount')))),
-                  React.createElement('div', { className: 'dshRemoteHostList' }, devices.length === 0
+                      connectedMenu)),
+                  React.createElement('div', {
+                    className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
+                    'aria-busy': connectingHost === undefined ? undefined : true,
+                  }, listedHosts.length === 0
                       ? React.createElement('p', null, busy ? t('checkingConnection') : t('noRemoteHosts'))
-                      : devices.map(device => React.createElement('button', {
+                      : listedHosts.map(device => React.createElement('button', {
                         type: 'button',
                         key: device.deviceId,
                         disabled: busy || !device.online,
+                        'aria-current': connectingHost?.deviceId === device.deviceId ? 'true' : undefined,
                         onClick: () => void selectHost(device),
                       }, React.createElement('span', null,
                         React.createElement('strong', null, device.name),
@@ -2051,7 +2331,15 @@ window.__ModuleLoader__.load({
                         ].filter(Boolean).join(' · '))),
                       React.createElement('small', null, t(device.online ? 'online' : 'offline')))))) : null,
                 React.createElement(RemoteProgressView, { progress, t }),
-                selectedHost === undefined ? React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint'))
+                selectedHost === undefined
+                  ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
+                    React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
+                    React.createElement('footer', { className: 'dshRemoteAccountFooter' },
+                      React.createElement('span', null, status?.host?.account ?? t('account')),
+                      React.createElement('button', {
+                        type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                        onClick: () => void logoutRemote(),
+                      }, t('exitRemoteAccount')))) : null)
                   : React.createElement('section', { className: 'dshRemoteBrowser', 'aria-label': t('chooseDirectory') },
                     React.createElement('div', { className: 'dshRemoteSectionHeading dshRemoteWorkspaceHeading' },
                       React.createElement('strong', null, t(addingWorkspace
@@ -2230,6 +2518,7 @@ window.__ModuleLoader__.load({
     function RemoteModeAction(props: {
       wide: boolean
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
+      statusFeed: StatusFeed<RemoteStatus>
       t: Translate
     }): unknown {
       const { t } = props
@@ -2266,12 +2555,11 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
+        // While the chooser is open the pushed status keeps the Host account
+        // line and the connection progress current; the subscription replays
+        // the latest status immediately, so no initial read is needed.
         if (!open) return
-        void refreshStatus()
-        const timer = window.setInterval(() => {
-          void refreshStatus()
-        }, 1500)
-        return () => window.clearInterval(timer)
+        return props.statusFeed.subscribe(setStatus)
       }, [open])
 
       const switchMode = async (mode: 'local' | 'remote', targetDeviceId?: string): Promise<void> => {
@@ -2422,27 +2710,17 @@ window.__ModuleLoader__.load({
 
     function RemoteSessionHeaderAction(props: {
       control: <T>(endpoint: string, payload?: unknown) => Promise<T>
+      statusFeed: StatusFeed<RemoteStatus>
       t: Translate
     }): unknown {
       const { t } = props
-      const [status, setStatus] = React.useState<RemoteStatus | undefined>(undefined)
+      const status = React.useSyncExternalStore(
+        props.statusFeed.subscribe,
+        props.statusFeed.getSnapshot,
+        props.statusFeed.getSnapshot,
+      )
       const [busy, setBusy] = React.useState(false)
       const [routeOpen, setRouteOpen] = React.useState(false)
-
-      React.useEffect(() => {
-        let active = true
-        const refresh = (): void => {
-          void props.control<RemoteStatus>('status').then(next => {
-            if (active) setStatus(next)
-          }).catch(() => undefined)
-        }
-        refresh()
-        const timer = window.setInterval(refresh, 1_500)
-        return () => {
-          active = false
-          window.clearInterval(timer)
-        }
-      }, [])
 
       React.useEffect(() => {
         if (status?.mode !== 'remote') return
@@ -2654,6 +2932,16 @@ window.__ModuleLoader__.load({
         'html.dshRemoteTargetActive button[aria-label="添加工作区"],html.dshRemoteTargetActive button[aria-label="Add workspace"]{display:none!important}',
         'html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="指令"],html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="Commands"]{display:none!important}',
         '[data-dsh-remote-hidden-action]{display:none!important}',
+        // The 0.1.6 right sidebar occupies the same shell header area as the
+        // remote status strip. Hide the strip while that sidebar is expanded;
+        // the sidebar itself remains the active context for terminal/files.
+        ':has([data-sidebar-right-open]) .dshRemoteSessionHeader{display:none!important}',
+        // TerminalRecovery renders a retry action in the conversation header.
+        // A failed remote terminal is reported when its tab is opened/closed;
+        // keeping this background recovery action out of the top-left header
+        // avoids overlapping the session controls.
+        '[title^="恢复终端失败"],[title^="Terminal recovery failed"]{display:none!important}',
+        '.dshRemoteTerminalUnavailable{box-sizing:border-box;margin:12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);font-size:13px;line-height:1.5}',
         '.dshRemoteModeButton{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:8px}.dshRemoteModeButton:is(button){cursor:pointer}',
         '.dshRemoteModeButton:is(button):hover{background:var(--dsw-alias-interactive-bg-hover)}',
         '.dshRemoteSidebarEntry{box-sizing:border-box;position:relative;min-width:0;display:block;overflow:hidden}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:100%;min-width:0}.dshRemoteSidebarEntry.isWide{width:calc(100% + 8px);height:34px;margin:4px -4px}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{height:34px;min-height:34px;padding:6px 48px 6px 10px;border-radius:12px}.dshRemoteSidebarEntry.isRail{width:36px;height:54px}.dshRemoteSidebarEntry.isRail .dshRemoteModeButton{width:36px;height:36px;min-height:36px;justify-content:center;gap:0;margin:8px 0 10px;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isActive .dshRemoteModeButton{color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteSidebarLabel{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteExitLink{position:absolute;top:50%;right:10px;transform:translateY(-50%);white-space:nowrap;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:20px;cursor:pointer}.dshRemoteExitLink:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default;text-decoration:none}',
@@ -2664,15 +2952,24 @@ window.__ModuleLoader__.load({
         '.dshRemotePage{width:min(720px,100%);max-height:min(760px,calc(100vh - 40px));display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:14px;overflow:hidden;animation:dshRemotePageIn .18s cubic-bezier(.25,1,.5,1)}',
         '.dshRemotePageHeader{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:14px 24px;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemotePageIntro{min-width:0;flex:1}.dshRemotePageHeader strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;line-height:1.4}.dshRemotePageHeader p{min-width:0;max-width:70ch;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5}.dshRemotePageActions{flex:0 0 auto;display:flex;align-items:center;gap:4px}.dshRemotePageActions>button{height:40px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;border:0;border-radius:8px;background:transparent;color:inherit;line-height:1;cursor:pointer}.dshRemotePageActions>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemotePageActions>button:disabled{opacity:.45;cursor:default}.dshRemotePageBack,.dshRemotePageRefresh{min-width:48px;padding:0 10px;font:inherit;font-size:13px}.dshRemotePageBack{color:var(--dsw-alias-label-secondary)!important}.dshRemotePageClose{width:40px;padding:0;font-size:24px}',
         '.dshRemotePageBody{padding:24px;overflow:auto;display:flex;flex-direction:column;gap:24px}.dshRemotePageBody button{font:inherit;color:inherit}',
+        '.dshRemotePageTitleRow{display:flex;align-items:center;gap:10px;min-width:0}.dshRemotePageTitleRow>strong{min-width:0;flex:0 1 auto}.dshRemoteStarLink{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;text-decoration:none}.dshRemoteStarLink:hover{color:var(--dsw-alias-label-primary);text-decoration:underline;text-underline-offset:3px}.dshRemoteStarLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px;border-radius:3px}',
         '.dshRemoteSectionHeading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.dshRemoteSectionTitle{min-width:0;display:flex;align-items:center;gap:10px}.dshRemoteSectionTitle>strong{font-size:14px}.dshRemoteSectionActions{display:flex;align-items:center;gap:14px}.dshRemoteSectionActions>button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px}.dshRemoteSectionActions>button:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}',
+        '.dshRemoteSectionTitle{flex:1}.dshRemoteSectionTitle>.dshRemoteConnectedMenu{margin-left:auto}',
+        '.dshRemoteAcpSetting{display:block!important;width:100%;padding:0}.dshRemoteAcpSetting>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;cursor:pointer;list-style:none}.dshRemoteAcpSetting>summary::-webkit-details-marker{display:none}.dshRemoteAcpSetting>summary::after{content:"⌄";color:var(--dsw-alias-label-secondary);transition:transform .18s ease-out}.dshRemoteAcpSetting[open]>summary::after{transform:rotate(180deg)}.dshRemoteAcpSummaryText{min-width:0}.dshRemoteAcpSummaryText strong{display:block}.dshRemoteAcpSummaryText p{margin:4px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.4}.dshRemoteAcpCheckLink{grid-column:2;grid-row:1;color:var(--dsw-alias-brand-primary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpCheckLink:hover{color:var(--dsw-alias-label-primary)}.dshRemoteAcpCheckResult{grid-column:3;grid-row:1;font-size:11px;line-height:1.4;white-space:nowrap}.dshRemoteAcpCheckResult.isPassed{color:var(--dsw-alias-state-success-primary)}.dshRemoteAcpCheckResult.isFailed{color:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpList{display:flex;flex-direction:column;gap:0;margin-top:12px;padding-top:0;border-top:0}.dshRemoteAcpList>.dshRemoteAuthorizationSetting{display:grid;width:100%;grid-template-columns:minmax(0,1fr) auto auto auto auto;align-items:center;column-gap:18px;line-height:1.4}.dshRemoteAcpList>.dshRemoteAuthorizationSetting>span:first-child{min-width:0;line-height:1.4}.dshRemoteAcpList>.dshRemoteAuthorizationSetting>input{grid-column:4;grid-row:1}',
+        '.dshRemoteAcpAddLink{align-self:flex-start;margin-top:12px;color:var(--dsw-alias-brand-primary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpAddForm{display:grid;grid-template-columns:minmax(100px,.8fr) minmax(140px,1fr) minmax(100px,1fr) auto;gap:8px;margin-top:12px}.dshRemoteAcpAddForm input{min-width:0;height:34px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:inherit;padding:0 10px}.dshRemoteAcpAddForm button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);padding:0 12px;cursor:pointer;font:inherit;font-size:12px}.dshRemoteAcpAddForm button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAcpRemoveLink{grid-column:3;grid-row:1;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpRemoveLink:hover{color:var(--dsw-alias-state-danger-primary)}',
+        '.dshRemoteAcpCheckResult.isPassed,.dshRemoteAcpCheckResult.isFailed{color:var(--dsw-alias-label-secondary)}',
+        '.dshRemoteAcpList>.dshRemoteAuthorizationSetting{grid-template-columns:minmax(0,1fr) 190px 40px 56px;column-gap:18px}.dshRemoteAcpCheckCell{grid-column:2;display:flex;align-items:center;gap:10px;min-width:0}.dshRemoteAcpCheckLink,.dshRemoteAcpRemoveLink{justify-self:start}.dshRemoteAcpCheckResult{position:static}',
+        '.dshRemoteAcpCheckLink.isPassed{color:var(--dsw-alias-state-success-primary)}.dshRemoteAcpCheckLink.isFailed{color:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpCheckLink.isChecking{color:var(--dsw-alias-label-secondary)}',
         '.dshRemoteCancelWorkspace{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 0;cursor:pointer}.dshRemoteCancelWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteCancelWorkspace:disabled{opacity:.5;cursor:default}',
-        '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostList>button{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
+        '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2);max-height:296px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.dshRemoteHostList.isCollapsed{max-height:none;overflow-y:visible}.dshRemoteHostList>button{min-height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button[aria-current="true"]{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
         '.dshRemoteConnectedMenu{position:relative;flex:0 0 auto;margin-right:4px}.dshRemoteConnectedCount{appearance:none;display:inline-flex;align-items:center;justify-content:center;height:22px;border:0;border-radius:999px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.04) inset;padding:0 10px;font:inherit;font-size:11px;font-weight:500;line-height:17px;white-space:nowrap;cursor:default}.dshRemoteConnectedCount.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemoteConnectedCount.isInteractive{cursor:pointer}.dshRemoteConnectedCount.isInteractive:hover{filter:brightness(1.08)}.dshRemoteConnectedCount:disabled{opacity:1;cursor:default}.dshRemoteConnectedCount:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteConnectedPanel{position:absolute;top:calc(100% + 8px);right:0;z-index:4;width:min(320px,calc(100vw - 48px));max-height:min(280px,40vh);overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.28);padding:10px 12px}.dshRemoteConnectedPanelTitle{display:block;margin:0 0 6px;color:var(--dsw-alias-label-primary);font-size:12px;font-weight:600}.dshRemoteClientList{display:flex;flex-direction:column}.dshRemoteClientRow{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteClientRow:last-child{border-bottom:0}.dshRemoteClientRow>span{min-width:0;display:flex;flex-direction:column;gap:2px}.dshRemoteClientRow strong{font-size:13px;font-weight:500}.dshRemoteClientRow small{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteClientOnline{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-state-success-primary)!important}.dshRemoteClientOnline::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}',
+        '.dshRemoteConnectedCount{height:auto;border-radius:0;background:transparent;box-shadow:none;padding:0 4px;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 45%,transparent);text-underline-offset:3px}.dshRemoteConnectedCount.isInteractive:hover{filter:none;text-decoration-color:currentColor}.dshRemoteConnectedCount:focus-visible{outline-offset:3px;border-radius:3px}',
         '.dshRemoteProgress{display:flex;flex-direction:column;gap:8px;margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dshRemoteProgressHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteProgressHeader strong{font-size:13px;font-weight:600}.dshRemoteProgressHeader span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteProgressBar{height:6px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteProgressBar>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--dsw-alias-brand-primary);transform-origin:left center;transition:transform .22s ease-out}[dir="rtl"] .dshRemoteProgressBar>span{transform-origin:right center}.dshRemoteProgress p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.45}.dshRemoteProgressRoute{font-weight:500}.dshRemoteProgressRoute .isActive{color:var(--dsw-alias-state-success-primary);font-weight:700}.dshRemoteProgressRouteArrow{color:var(--dsw-alias-label-tertiary)}@media(prefers-reduced-motion:reduce){.dshRemoteProgressBar>span{transition:none}}',
         '.dshRemoteBrowser{display:flex;flex-direction:column}.dshRemoteCrumbs{display:flex;align-items:center;gap:4px;overflow:auto;padding:2px 0 10px}.dshRemoteCrumbs>button{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:5px 7px;border-radius:6px;cursor:pointer}.dshRemoteCrumbs>button:not(:last-child)::after{content:" /";color:var(--dsw-alias-label-tertiary)}.dshRemoteCrumbs>button:disabled{color:var(--dsw-alias-label-primary);font-weight:600}',
         '.dshRemoteWorkspaceLists{overflow:visible}',
         '.dshRemoteDirectoryList{min-height:72px;display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteDirectoryList>button{min-height:52px;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:8px 4px;cursor:pointer}.dshRemoteDirectoryList>button:hover,.dshRemoteDirectoryList>button.isSelected{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteDirectoryList>button.isSelected{color:var(--dsw-alias-label-primary)}.dshRemoteDirectoryList>button>span:first-child,.dshRemoteDirectoryList>button>.dshRemoteWorkspaceIcon{grid-row:1/3}.dshRemoteWorkspaceIcon{box-sizing:border-box;width:22px;height:22px;align-self:center;object-fit:contain}.dshRemoteWorkspaceIcon.isGpt{border-radius:6px}.dshRemoteDirectoryList>button>span:not(:first-child),.dshRemoteDirectoryList>button>small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteDirectoryList>button>small{grid-column:2;color:var(--dsw-alias-label-secondary)}.dshRemoteDirectoryList>p,.dshRemoteHint{margin:12px 0;color:var(--dsw-alias-label-secondary);font-size:13px}',
         '.dshRemoteAddWorkspace{box-sizing:border-box;width:40px;height:40px;display:inline-grid;place-items:center;flex:0 0 auto;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;cursor:pointer}.dshRemoteAddWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAddWorkspace:disabled{opacity:.5;cursor:default}.dshRemoteAddWorkspaceIcon{width:20px;height:20px}.dshRemoteCodexWorkspaceGroup{margin-top:16px}.dshRemoteWorkspaceSourceHeading{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 4px 7px}.dshRemoteWorkspaceSourceText{min-width:0;display:flex;flex-direction:column;gap:2px}.dshRemoteWorkspaceSourceText>strong{font-size:13px}.dshRemoteWorkspaceSourceText>small{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteCodexWorkspaceList{min-height:0}.dshRemoteDirectoryList>.dshRemoteWorkspaceMore,.dshRemoteCodexWorkspaceGroup>.dshRemoteWorkspaceMore{box-sizing:border-box;width:100%;min-height:48px;display:flex;align-items:center;justify-content:center;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);padding:8px 4px;text-align:center;font-size:16px;cursor:pointer}.dshRemoteWorkspaceMore>span{display:block;line-height:1;transform:translateY(-2px)}.dshRemoteWorkspaceMore:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:transparent}.dshRemoteWorkspaceMore:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteWorkspaceMore:disabled{opacity:.5;cursor:default}',
+        '.dshRemotePreviewAction,.dshRemotePreviewForm{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemotePreviewForm input{width:90px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);padding:6px}.dshRemotePreviewForm [role=alert]{max-width:360px;white-space:normal}.dshRemoteDevelopmentSettings{margin:16px 0}.dshRemoteDevelopmentSettings .dshRemotePathField{margin:8px 0}.dshRemoteDevelopmentSettings .dshRemotePortsRow{display:flex;gap:8px;align-items:stretch}.dshRemoteDevelopmentSettings .dshRemotePortsRow>input{flex:1;min-width:0;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteDevelopmentSettings button{min-height:36px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:6px 12px;white-space:nowrap}',
         '.dshRemoteFolderBrowser{margin-top:14px}.dshRemoteFolderBrowser>p,.dshRemoteFolderList>p{margin:12px 0;color:var(--dsw-alias-label-secondary);font-size:13px}.dshRemoteFolderList{max-height:260px;overflow:auto;border-block:1px solid var(--dsw-alias-border-l2)}.dshRemoteFolderList>button{width:100%;min-height:42px;display:flex;align-items:center;gap:9px;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:7px 6px;text-align:left;cursor:pointer}.dshRemoteFolderList>button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteFolderBrowser>small{display:block;margin-top:8px;color:var(--dsw-alias-state-warn-label)}',
         '.dshRemotePathField{display:flex;flex-direction:column;gap:6px;margin-top:20px}.dshRemotePathField>span{font-size:13px;font-weight:600}.dshRemotePathField>input{min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemotePathField>small{color:var(--dsw-alias-label-secondary)}',
         '.dshRemoteOpenBar{position:sticky;bottom:-96px;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:20px;padding:14px 0;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteOpenBar>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteOpenBar span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteOpenBar strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.dshRemoteOpenBar>button,.dshRemoteEnable>button{min-height:40px;flex:0 0 auto;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}.dshRemoteOpenBar>button:disabled,.dshRemoteEnable>button:disabled{opacity:.5;cursor:default}',
@@ -2682,7 +2979,7 @@ window.__ModuleLoader__.load({
         '.dshRemoteQrLogin{width:min(440px,100%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0 2px;text-align:center}.dshRemoteQrLogin img,.dshRemoteQrPlaceholder{box-sizing:border-box;width:200px;height:200px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:#fff;padding:8px}.dshRemoteQrOpen{display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none}.dshRemoteQrOpen:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrOpen:hover img{border-color:var(--dsw-alias-label-dimmed)}.dshRemoteQrOpen:focus-visible{border-radius:12px;outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}.dshRemoteQrPlaceholder{display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary)}.dshRemoteQrLogin>strong{font-size:14px}.dshRemoteQrLogin>p{max-width:48ch;margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}.dshRemoteQrLogin>.dshRemoteServiceAddress{margin-top:2px;color:var(--dsw-alias-label-tertiary)}.dshRemoteServiceAddress>a{color:var(--dsw-alias-label-secondary);text-decoration:none}.dshRemoteServiceAddress>a:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrLogin>button,.dshRemoteClientLogin>.dshRemoteLoginSwitch{min-height:32px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;font:inherit;font-size:12px;cursor:pointer}.dshRemoteQrLogin>button:hover,.dshRemoteClientLogin>.dshRemoteLoginSwitch:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteClientLogin>.dshRemoteLoginSwitch{align-self:flex-start;background:transparent;color:var(--dsw-alias-label-secondary);padding-left:0}',
         '.dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;gap:10px;overflow:hidden;white-space:nowrap}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>span{flex:0 0 auto;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:400}.dshRemoteLoginTabs{box-sizing:border-box;width:100%}.dshRemoteLoginTabs>button{min-width:0;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:300px;min-height:300px}.dshRemoteClientLogin{align-items:stretch;padding-top:16px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}.dshRemoteQrLogin{padding-top:12px}',
         '.dshRemoteHostControlToggle{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:nowrap;cursor:default}.dshRemoteHostControlToggle>input{appearance:none;box-sizing:border-box;position:relative;width:32px;height:18px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteHostControlToggle>input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteHostControlToggle>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteHostControlToggle>input:checked::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteHostControlToggle>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteHostControlToggle>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteHostControlToggle>input,.dshRemoteHostControlToggle>input::after{transition:none}}',
-        '.dshRemoteAccountExit{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px;line-height:1.5;white-space:nowrap}.dshRemoteAccountExit:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteAccountExit:disabled{opacity:.5;cursor:default;text-decoration:none}',
+        '.dshRemoteAccountFooter{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:14px;color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteAccountExit{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px;line-height:1.5;white-space:nowrap}.dshRemoteAccountExit:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteAccountExit:disabled{opacity:.5;cursor:default;text-decoration:none}',
         '.dshRemoteLocalLink{align-self:flex-start;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 0;cursor:pointer}.dshRemoteLocalLink:hover{color:var(--dsw-alias-label-primary)}',
         '@keyframes dshRemotePageIn{from{opacity:0;transform:translateY(6px) scale(.99)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.dshRemotePage{animation:none}}@media(max-width:620px){.dshRemoteBackdrop{padding:12px}.dshRemotePage{max-height:calc(100vh - 24px)}.dshRemotePageHeader{gap:8px;padding:12px 16px}.dshRemotePage.hasSelectedHost .dshRemotePageBack{max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSectionHeading{align-items:flex-start;flex-direction:column;gap:8px}.dshRemoteWorkspaceHeading{align-items:center;flex-direction:row}.dshRemoteSectionActions{width:100%;justify-content:space-between}.dshRemotePageBody{padding:20px 16px}.dshRemoteOpenBar{align-items:flex-end}.dshRemoteOpenBar>button{min-height:48px}}',
         '.dshRemoteBackdrop{position:fixed;inset:0;z-index:1000;background:var(--dsw-alias-bg-mask-3);display:grid;place-items:center;padding:20px}',
@@ -2695,10 +2992,12 @@ window.__ModuleLoader__.load({
         '.dshRemoteHostAccount{display:grid;gap:8px;border-top:1px solid var(--dsw-alias-border-l3);padding-top:12px}.dshRemoteHostAccount p{margin:0;color:var(--dsw-alias-label-secondary);font-size:13px}',
         '.dshRemoteLogin{display:grid;grid-template-columns:1fr 1fr;gap:8px}.dshRemoteLogin button{grid-column:1/-1}',
         '.dshRemotePluginCard{list-style:none;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;transition:border-color .16s,background .16s}',
+        '.dshRemotePluginModern{box-sizing:border-box;width:100%;max-width:768px;box-shadow:none}.dshRemotePluginModern>.dshRemotePluginCardHeader{display:none}.dshRemotePluginModern>.dshRemotePluginCardBody{border-top:0;margin:0;padding:8px 20px}',
         '.dshRemotePluginCard:hover{border-color:var(--dsw-alias-label-dimmed)}.dshRemotePluginCard.isOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}',
         '.dshRemotePluginCardHeader{display:flex;align-items:center}.dshRemotePluginCardToggle{appearance:none;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;display:flex;align-items:center;gap:12px;padding:14px 16px}.dshRemotePluginCardToggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
         '.dshRemotePluginCardHeading{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.dshRemotePluginCardHeading>strong{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.dshRemotePluginCardHeading>span{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemotePluginCardStatus{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.dshRemotePluginCardStatus.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemotePluginCardStatus.isReconnecting{color:var(--dsw-alias-state-warn-label)}.dshRemotePluginCardStatus.isOffline{color:var(--dsw-alias-state-error-primary)}.dshRemotePluginCardChevron{color:var(--dsw-alias-label-tertiary);font-size:18px;line-height:14px;transition:transform .16s}.dshRemotePluginCard.isOpen .dshRemotePluginCardChevron{transform:rotate(180deg)}',
         '.dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:720px}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}',
+        '.dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}',
         '.dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
         '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
         '.dshRemoteAssociation{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}.dshRemoteAssociation>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteAssociation p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}',
@@ -2757,6 +3056,17 @@ window.__ModuleLoader__.load({
         if (!result.ok) throw new Error(result.error?.message ?? t('remoteRequestFailed'))
         return result.value as T
       }
+      // One pushed status stream feeds every Host-status render in this page.
+      // Hosts without the event stream keep answering the unary status control
+      // call, which the feed itself polls at the interval this replaced.
+      const statusFeed = createStatusFeed<RemoteStatus>({
+        url: STATUS_STREAM_PATH,
+        readStatus: () => control<RemoteStatus>('status'),
+        onFallback: reason => {
+          console.warn('ds-harness-remote: status event stream unavailable, polling status instead:', reason)
+        },
+      })
+      ctx.effect(() => () => statusFeed.close(), 'ds-harness-remote: status stream')
       ctx.effect(() => {
         let disposed = false
         let unsubscribeWorkspaces: (() => void) | undefined
@@ -2814,51 +3124,43 @@ window.__ModuleLoader__.load({
         const viewer = fileViewerContext.get<FileViewerClientServiceLike>('fileViewer')
         if (viewer === undefined) return
         fileViewerContext.effect(() => {
-          let active = true
           let unregister: (() => void) | undefined
           let latestSaveAsAllowed = false
           let latestSaveAsMaxBytes = REMOTE_FILE_SAVE_AS_MAX_BYTES
-          const sync = async (): Promise<void> => {
-            try {
-              const status = await control<RemoteStatus>('status')
-              if (!active) return
-              const supported = shouldUseRemoteFileViewer(status)
-              latestSaveAsAllowed = shouldAllowRemoteFileSaveAs(status)
-              latestSaveAsMaxBytes = remoteFileSaveAsMaxBytes(status)
-              if (supported && unregister === undefined) {
-                unregister = viewer.registerContentProvider(createRemoteFileContentProvider(
-                  (endpoint, payload) => control(endpoint, payload),
-                  { saveAsAllowed: () => latestSaveAsAllowed, saveAsMaxBytes: () => latestSaveAsMaxBytes },
-                ))
-              } else if (!supported && unregister !== undefined) {
-                unregister()
-                unregister = undefined
-                latestSaveAsAllowed = false
-                latestSaveAsMaxBytes = REMOTE_FILE_SAVE_AS_MAX_BYTES
-              }
-            } catch {
-              // Keep the last known registration while the loopback control
-              // route is temporarily unavailable. Remote calls still fail
-              // closed at the authenticated Host bridge.
+          // The pushed status decides whether the remote content provider stays
+          // registered; an unreadable status keeps the last known registration
+          // and remote calls still fail closed at the authenticated Host bridge.
+          const unsubscribe = statusFeed.subscribe(status => {
+            const supported = shouldUseRemoteFileViewer(status)
+            latestSaveAsAllowed = shouldAllowRemoteFileSaveAs(status)
+            latestSaveAsMaxBytes = remoteFileSaveAsMaxBytes(status)
+            if (supported && unregister === undefined) {
+              unregister = viewer.registerContentProvider(createRemoteFileContentProvider(
+                (endpoint, payload) => control(endpoint, payload),
+                { saveAsAllowed: () => latestSaveAsAllowed, saveAsMaxBytes: () => latestSaveAsMaxBytes },
+              ))
+            } else if (!supported && unregister !== undefined) {
+              unregister()
+              unregister = undefined
+              latestSaveAsAllowed = false
+              latestSaveAsMaxBytes = REMOTE_FILE_SAVE_AS_MAX_BYTES
             }
-          }
-          void sync()
-          const timer = window.setInterval(() => { void sync() }, 1_500)
+          })
           return () => {
-            active = false
-            window.clearInterval(timer)
+            unsubscribe()
             unregister?.()
           }
         }, 'ds-harness-remote: remote file viewer provider')
       })
       ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en }), 'ds-harness-remote: dictionaries')
       ctx.effect(installStyle, 'ds-harness-remote: client styles')
+      ctx.effect(() => installTerminalAvailabilityNotice(statusFeed, t), 'ds-harness-remote: terminal availability notice')
       ctx.slots.inject('shell.overlay', () => ctx.slots.register({
         name: 'shell.overlay',
         id: 'ds-harness-remote-global-context',
         order: 20,
         locale: localeNamespace,
-        inject: () => ({ control }),
+        inject: () => ({ control, statusFeed }),
       }, RemoteSessionHeaderAction))
       ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
         name: 'sidebar.footer.action',
@@ -2867,16 +3169,30 @@ window.__ModuleLoader__.load({
         locale: localeNamespace,
         inject: () => ({
           control,
+          statusFeed,
           preferredQrProvider: ctx.locale.getLocale().active === 'zh' ? 'zhihu' : 'github',
         }),
       }, RemoteWorkspaceAction))
-      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-        name: 'settings.plugin.item',
-        key: 'ds-harness-remote',
-        id: 'ds-harness-remote',
-        order: 30,
+      // rc.1 Plugins-page configuration surfaces. `plugins.item` is reserved
+      // for the official settings companion packages (the Plugins page renders
+      // its registrants inside the Official group, so a third-party card there
+      // reads as an official plugin) — a bundle's configuration belongs in the
+      // two config slots below instead.
+      // Row-scoped: keyed `<package>#<row id>` from the bundle's own patch
+      // (`cordis.patch.yml` row `ds-harness-remote`).
+      ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+        name: 'plugins.row.config',
+        key: 'ds-harness-remote#ds-harness-remote',
         locale: localeNamespace,
-        inject: () => ({ control }),
+        inject: () => ({ control, statusFeed }),
+      }, RemotePluginOptions))
+      // Bundle-scoped: installed-bundle details resolve configuration by
+      // package name.
+      ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+        name: 'plugins.bundle.config',
+        key: 'ds-harness-remote',
+        locale: localeNamespace,
+        inject: () => ({ control, statusFeed }),
       }, RemotePluginOptions))
     }
 
@@ -2884,6 +3200,34 @@ window.__ModuleLoader__.load({
       return reason instanceof Error
         && reason.message.startsWith(`transport failure for ${CONTROL_RPC_PREFIX}/`)
         && (reason.message.endsWith(': HTTP 404') || reason.message.endsWith(': HTTP 405'))
+    }
+
+    function installTerminalAvailabilityNotice(
+      feed: StatusFeed<RemoteStatus>,
+      t: Translate,
+    ): () => void {
+      let latest: RemoteStatus | undefined
+      let notice: HTMLElement | undefined
+      const update = (): void => {
+        const terminal = document.querySelector<HTMLElement>('[data-sidebar-terminal]')
+        const unavailable = latest?.mode === 'remote' && latest.remoteFeatures?.terminal !== true
+        if (!terminal || !unavailable) {
+          notice?.remove()
+          notice = undefined
+          return
+        }
+        if (notice !== undefined && notice.isConnected) return
+        notice = document.createElement('div')
+        notice.className = 'dshRemoteTerminalUnavailable'
+        notice.setAttribute('role', 'alert')
+        notice.textContent = t('terminalRemoteUnavailable')
+        terminal.prepend(notice)
+      }
+      const unsubscribe = feed.subscribe(status => { latest = status; update() })
+      const observer = new MutationObserver(update)
+      observer.observe(document.body, { childList: true, subtree: true })
+      update()
+      return () => { unsubscribe(); observer.disconnect(); notice?.remove() }
     }
 
     function messageOf(reason: unknown): string { return reason instanceof Error ? reason.message : String(reason) }

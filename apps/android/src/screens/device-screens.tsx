@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, ShieldCheck } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, ShieldCheck, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession } from '../types'
+import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
+import { workspaceStableKey } from '../lib/workspace-key'
 import {
   Button,
   EmptyState,
@@ -22,37 +23,102 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveSessionDisplayTitle } from './session-title'
 
-export function DevicesScreen({ onDevice, onBack }: {
+export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   onDevice: (device: RemoteDevice) => void
   onBack?: () => void
+  onMore?: () => void
+  onShortcut?: (shortcut: WorkspaceShortcut) => void
 }) {
   const devices = useAppStore(state => state.devices)
+  const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
+  const recentWorkspaces = useAppStore(state => state.recentWorkspaces)
+  const removeFavoriteWorkspace = useAppStore(state => state.removeFavoriteWorkspace)
+  const connectedDevice = useAppStore(state => state.selectedDevice)
+  const connectedWorkspaces = useAppStore(state => state.workspaces)
   const refreshing = useAppStore(state => state.refreshing)
   const refresh = useAppStore(state => state.refreshDevices)
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const isHome = onBack === undefined
+
+  const shortcutDeviceName = (shortcut: WorkspaceShortcut) =>
+    devices.find(device => device.deviceId === shortcut.deviceId)?.name ?? shortcut.deviceName
+
+  // Prefer the live title once this phone is connected to the owning host.
+  const shortcutTitle = (shortcut: WorkspaceShortcut) => {
+    if (connectedDevice?.deviceId !== shortcut.deviceId) return shortcut.title
+    return connectedWorkspaces
+      .find(workspace => workspaceStableKey(workspace, connectedDevice.platform) === shortcut.key)
+      ?.title ?? shortcut.title
+  }
+
+  // Shortcuts are a home-screen surface; the secondary device page stays focused.
+  const favorites = isHome
+    ? [...favoriteWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
+    : []
+  const recents = isHome
+    ? [...recentWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
+    : []
+  // With nothing saved yet, fall back to the workspaces visited most recently.
+  const showingFavorites = favorites.length > 0
+  const shortcuts = showingFavorites ? favorites : recents
 
   return (
     <View style={styles.flex}>
       <TopBar
-        title={onBack === undefined ? 'DSH Remote' : zhCN.devices.myDevices}
+        title={isHome ? 'DSH Remote' : zhCN.devices.myDevices}
         onBack={onBack}
+        action={isHome && onMore !== undefined
+          ? <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
+          : undefined}
       />
       <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
-        {onBack === undefined && (
-          <View style={styles.pageHeading}>
-            <View>
-              <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
-              <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
-            </View>
-            <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
-          </View>
-        )}
-        {onBack !== undefined && (
-          <View style={styles.pageHeading}>
-            <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
-            <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
-          </View>
-        )}
+        {isHome
+          ? <>
+              {shortcuts.length > 0 && onShortcut !== undefined && (
+                <View>
+                  <SectionTitle>{showingFavorites ? zhCN.devices.favorites : zhCN.devices.recent}</SectionTitle>
+                  <View style={styles.favoriteLinks}>
+                    {shortcuts.map(shortcut => (
+                      <View key={`${shortcut.deviceId}:${shortcut.key}`} style={styles.favoriteRow}>
+                        <Pressable
+                          accessibilityRole="link"
+                          accessibilityLabel={showingFavorites
+                            ? zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))
+                            : zhCN.devices.openRecent(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
+                          onPress={() => onShortcut(shortcut)}
+                          style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
+                        >
+                          <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
+                          <Text style={styles.favoriteLinkMeta} numberOfLines={1}>· {shortcutDeviceName(shortcut)}</Text>
+                        </Pressable>
+                        {showingFavorites && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
+                            hitSlop={8}
+                            onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
+                            style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
+                          >
+                            <X size={16} color={colors.muted} />
+                          </Pressable>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+              <SectionTitle action={<RefreshAction refreshing={refreshing} onPress={() => void refresh()} />}>
+                {zhCN.devices.myDevices}
+              </SectionTitle>
+            </>
+          : <View style={styles.pageHeading}>
+              <View>
+                <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
+                <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
+              </View>
+              <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
+            </View>}
 
         {refreshing && devices.length === 0
           ? <LoadingRows />
@@ -75,6 +141,11 @@ export function DevicesScreen({ onDevice, onBack }: {
                 />
               ))}</View>}
       </Screen>
+      {isHome && (
+        <View style={styles.homeFooter}>
+          <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
+        </View>
+      )}
     </View>
   )
 }
@@ -97,6 +168,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const [attempt, setAttempt] = useState(0)
   const [stuck, setStuck] = useState(false)
   const launchedAttempt = useRef(-1)
+  const completedAttempt = useRef(-1)
   const leaving = useRef(false)
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
@@ -105,23 +177,31 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const styles = useThemedStyles(createStyles)
 
   useEffect(() => {
+    const current = useAppStore.getState()
+    if (current.selectedDevice?.deviceId === device.deviceId && current.connection.phase === 'connected') {
+      if (completedAttempt.current !== attempt) {
+        completedAttempt.current = attempt
+        onConnectedRef.current()
+      }
+      return
+    }
+    if (current.selectedDevice?.deviceId === device.deviceId
+      && (current.connection.phase === 'connecting' || current.connection.phase === 'reconnecting')) return
     if (launchedAttempt.current === attempt) return
     launchedAttempt.current = attempt
     let active = true
-    const current = useAppStore.getState()
-    if (current.selectedDevice?.deviceId === device.deviceId && current.connection.phase === 'connected') {
-      onConnectedRef.current()
-      return
-    }
     void connect(device).then(async connected => {
       if (!connected) return
       // Match the Plugin hand-off: let assistive technology and the visible
       // progress state announce completion before replacing this screen.
       await new Promise(resolve => setTimeout(resolve, 220))
-      if (active && !leaving.current) onConnectedRef.current()
+      if (active && !leaving.current && completedAttempt.current !== attempt) {
+        completedAttempt.current = attempt
+        onConnectedRef.current()
+      }
     })
     return () => { active = false }
-  }, [attempt, connect, device])
+  }, [attempt, connect, connection.phase, device, selectedDevice?.deviceId])
 
   const currentStage = connectionStage ?? 'authenticating'
   const selectedProbe = probeTransportForMode(connection.stats.mode)
@@ -387,7 +467,7 @@ export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSe
       <TopBar
         title={zhCN.sessions.title}
         onBack={onBack}
-        action={<IconButton label={zhCN.sessions.new} icon={CirclePlus} onPress={() => void createSession()} disabled={creating} />}
+        action={<IconButton label={zhCN.sessions.new} icon={CirclePlus} tint={colors.primary} onPress={() => void createSession()} disabled={creating} />}
       />
       <Screen>
         <View style={styles.pageHeading}>
@@ -559,6 +639,16 @@ function createStyles(colors: ThemeColors) {
   pageHeading: { paddingTop: spacing.xxl, paddingBottom: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { ...type.title, color: colors.ink },
   subtitle: { ...type.small, color: colors.muted, marginTop: 2 },
+  homeFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md },
+  homeFooterText: { ...type.small, color: colors.muted, textAlign: 'center' },
+  favoriteLinks: { gap: spacing.xxs },
+  favoriteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Two fixed columns so the "· machine" text starts at the same x on every row.
+  favoriteLink: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
+  favoriteRemove: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
+  favoriteLinkPressed: { opacity: 0.6 },
+  favoriteLinkText: { ...type.bodyStrong, color: colors.primary, textDecorationLine: 'underline', flexGrow: 2, flexShrink: 1, flexBasis: 0 },
+  favoriteLinkMeta: { ...type.caption, color: colors.muted, flexGrow: 1, flexShrink: 1, flexBasis: 0 },
   connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
   connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
   connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },

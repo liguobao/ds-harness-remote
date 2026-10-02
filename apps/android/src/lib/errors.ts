@@ -53,3 +53,10 @@ export function friendlyError(error: unknown): string {
 export function isRpcTimeoutError(error: unknown): boolean {
   return error instanceof Error && /timed?\s*out|timeout/i.test(error.message)
 }
+
+/** A request can race with the transport closing while Android resumes. */
+export function isRecoverableTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as Error & { code?: unknown }).code
+  return code === 'TRANSPORT_CLOSED' || code === 'CLIENT_CLOSED'
+}

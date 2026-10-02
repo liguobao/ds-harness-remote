@@ -7,6 +7,25 @@ import {
 } from '../src/codex/virtual-harness.js'
 
 describe('CodexVirtualHarness', () => {
+  it('forwards CodeX workspace files and terminal calls to the Host carrier', async () => {
+    const client = fakeCodex()
+    const hostCarrier = {
+      invoke: vi.fn(async () => undefined),
+      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
+      open: vi.fn(async () => (async function* () { yield { type: 'ready' } })()),
+    }
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'legacy', hostCarrier)
+    const signal = new AbortController().signal
+    await expect(target.dispatch('workspaceFiles/list', { args: { workspaceFileScopeId: 'codex:thr_1', path: '.' } }, signal))
+      .resolves.toEqual({ ok: true, value: { endpoint: 'workspaceFiles/list' } })
+    await expect(target.dispatch('terminal/environment', { args: { agentId: 'codex:thr_1' } }, signal))
+      .resolves.toEqual({ ok: true, value: { endpoint: 'terminal/environment' } })
+    const stream = await target.open('terminal/follow', { args: { agentId: 'codex:thr_1', id: 't1' } }, signal)
+    await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
+    expect(hostCarrier.open).toHaveBeenCalledWith('terminal/follow', expect.anything(), signal)
+    await target.close()
+  })
+
   it('groups visible CodeX threads into virtual DSH workspaces and sessions', async () => {
     const client = fakeCodex()
 

@@ -107,6 +107,7 @@ describe('Remote CLI', () => {
         bindIdentity: vi.fn(),
         authenticate: vi.fn(),
         revokeCurrentDevice: vi.fn(),
+        authorizeHostWithCode: vi.fn(),
       }),
     })).resolves.toBe(1)
 
@@ -143,6 +144,7 @@ describe('Remote CLI', () => {
         bindIdentity: vi.fn(),
         authenticate: vi.fn(),
         revokeCurrentDevice: revoke,
+        authorizeHostWithCode: vi.fn(),
       }),
     })).resolves.toBe(0)
 

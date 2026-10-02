@@ -25,12 +25,12 @@ afterEach(async () => {
 
 describe('ClientModeRuntime Host account control', () => {
   it('uses a conservative compatibility profile for legacy and unknown Hosts', () => {
-    expect(remoteHostFeatures()).toEqual({ commandList: false, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
-    expect(remoteHostFeatures('not-semver')).toEqual({ commandList: false, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
-    expect(remoteHostFeatures('0.3.15')).toEqual({ commandList: false, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
-    expect(remoteHostFeatures('0.3.16')).toEqual({ commandList: true, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
-    expect(remoteHostFeatures('v0.3.17')).toEqual({ commandList: true, fileViewer: true, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
-    expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({ commandList: true, fileViewer: true, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures()).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures('not-semver')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures('0.3.15')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures('0.3.16')).toEqual({ commandList: true, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures('v0.3.17')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
+    expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false })
   })
 
   it('prefers encrypted Host capability discovery while retaining the legacy fallback', async () => {
@@ -42,6 +42,7 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(probeRemoteHostFeatures(alphaClient as never, '0.3.15')).resolves.toEqual({
       commandList: true,
       fileViewer: false,
+      terminal: false,
       apiProxy: false,
       remoteGateway: true,
       codex: true,
@@ -54,6 +55,7 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.11')).resolves.toEqual({
       commandList: true,
       fileViewer: false,
+      terminal: false,
       apiProxy: false,
       remoteGateway: true,
       sessionFormat: 3,
@@ -67,6 +69,7 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.19')).resolves.toEqual({
       commandList: false,
       fileViewer: false,
+      terminal: false,
       apiProxy: false,
       remoteGateway: false,
       codex: true,
@@ -81,6 +84,7 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(probeRemoteHostFeatures(legacyClient as never, '0.3.17')).resolves.toEqual({
       commandList: true,
       fileViewer: true,
+      terminal: false,
       apiProxy: true,
       remoteGateway: false,
       codex: false,
@@ -750,6 +754,36 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
+  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('does not list devices when the local Host authorization is %s', async error => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-auth-'))
+    directories.push(directory)
+    const listDevices = vi.fn(async () => [])
+    const host = {
+      hostStatus: vi.fn(() => ({
+        configured: true,
+        online: false,
+        reconnecting: false,
+        error,
+        authorized: true,
+        accountRequired: true,
+      })),
+    } as unknown as HostAuthorizationControl
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn(), listDevices } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+      host,
+    )
+    await runtime.start()
+
+    await expect(runtime.devices()).rejects.toMatchObject({ code: error })
+    expect(listDevices).not.toHaveBeenCalled()
+    await runtime.close()
+  })
+
   it('pins Host identity from an account-authorized device detail and rejects key replacement', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-trust-'))
     directories.push(directory)
@@ -794,6 +828,8 @@ describe('ClientModeRuntime Host account control', () => {
 
 function config(): ResolvedConfig {
   return {
+    terminal: { enabled: false },
+    loopback: { ports: [] },
     enabled: true,
     role: 'both',
     serverUrl: 'https://dsh.r2049.cn',

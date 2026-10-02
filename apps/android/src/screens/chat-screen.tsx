@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Alert,
   Animated,
+  BackHandler,
   FlatList,
   Image,
   Keyboard,
@@ -19,21 +21,34 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, ImagePlus, Images, RefreshCw, Send, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
-import { useAppStore } from '../state/store'
+import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import Svg, { Path } from 'react-native-svg'
+import { OfficialMenuIcons } from '../ui/official-menu-icons'
+import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
-import type { ApprovalActivity, ChatImage, ChatItem, ChatMessage, ImageAttachmentLimits, ImageMediaType, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail } from '../types'
+import { chatSections, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
+import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
+import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
+import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+import { KeyboardInset } from '../ui/keyboard-inset'
+import { sessionPermissions } from '../services/session-permissions'
+import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts, type CustomPrompt } from '../services/storage'
+import type { SkillEntry } from '../services/session-tools'
+import { SessionToolsPanel } from './session-tools-panel'
+import { MessageActions } from './message-actions'
+import { ChatTrajectory } from './chat-trajectory'
 import { resolveSessionDisplayTitle } from './session-title'
+import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
 
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
 
-export function ChatScreen({ onBack }: { onBack: () => void }) {
+export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
   const session = useAppStore(state => state.selectedSession)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
@@ -52,28 +67,157 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   const loadOlderHistory = useAppStore(state => state.loadOlderHistory)
   const selectModel = useAppStore(state => state.selectModel)
   const selectPermission = useAppStore(state => state.selectPermission)
+  const loadAgentPresets = useAppStore(state => state.loadAgentPresets)
+  const selectAgentPreset = useAppStore(state => state.selectAgentPreset)
+  const createSession = useAppStore(state => state.createSession)
+  const archiveSession = useAppStore(state => state.archiveSession)
+  const workspaces = useAppStore(state => state.workspaces)
+  const sessions = useAppStore(state => state.sessions)
+  const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
+  const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
+  const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const [draft, setDraft] = useState('')
+  const [trajectory, setTrajectory] = useState(false)
+
+  // Web-style blue marks: `/` commands and `@` references render in accent blue.
+  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const [images, setImages] = useState<PromptImage[]>([])
   const [pickingImages, setPickingImages] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [modePickerOpen, setModePickerOpen] = useState(false)
   const [permissionPickerOpen, setPermissionPickerOpen] = useState(false)
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
+  const [toolPickerOpen, setToolPickerOpen] = useState(false)
+  const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  const [promptsPickerOpen, setPromptsPickerOpen] = useState(false)
+  const [customPrompts, setCustomPrompts] = useState<readonly CustomPrompt[]>()
+  const [promptEditing, setPromptEditing] = useState<CustomPrompt | 'new' | null>(null)
+  const [promptsManagerOpen, setPromptsManagerOpen] = useState(false)
+  const [promptsLoading, setPromptsLoading] = useState(false)
+  const promptsLoadingRef = useRef(false)
+  const promptMutatedRef = useRef(false)
+  // `/` command and `@` reference popover state anchored to the composer cursor.
+  const [mentionType, setMentionType] = useState<MentionType | null>(null)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [selection, setSelection] = useState({ start: 0, end: 0 })
+  const composerInputRef = useRef<TextInput>(null)
+  const keyboardVisibleRef = useRef(false)
+  const draftRef = useRef('')
+  const selectionRef = useRef({ start: 0, end: 0 })
+  /** Start index of the active `/` / `@` trigger inside the draft. */
+  const mentionSpanRef = useRef(0)
+  const [skillCatalog, setSkillCatalog] = useState<SkillEntry[]>()
+  const [skillCatalogFailed, setSkillCatalogFailed] = useState(false)
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState<WorkspaceFileRef[]>()
+  const [fileListFailed, setFileListFailed] = useState(false)
+  const skillRequestedRef = useRef<string | undefined>(undefined)
+  const filesRequestedRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    keyboardVisibleRef.current = Keyboard.isVisible()
+    const shown = Keyboard.addListener('keyboardDidShow', () => { keyboardVisibleRef.current = true })
+    const hidden = Keyboard.addListener('keyboardDidHide', () => { keyboardVisibleRef.current = false })
+    return () => { shown.remove(); hidden.remove() }
+  }, [])
+  const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
+  const [permissionError, setPermissionError] = useState<string>()
+  const [permissionRevision, setPermissionRevision] = useState(0)
+  const [permissionLoading, setPermissionLoading] = useState(false)
+  const inlinePermissionOptions = session?.projections?.values?.permissions
+  useEffect(() => {
+    setPermissionOptions(undefined)
+    setPermissionError(undefined)
+    setPermissionLoading(false)
+    if (session === undefined || session.backend === 'codex' || connection.phase !== 'connected') return
+    const projected = sessionPermissions(session)
+    if (projected === undefined || projected.options.length > 0) return
+    const controller = new AbortController()
+    setPermissionLoading(true)
+    void Promise.resolve().then(() => requireSessionTools().permissionOptions(controller.signal))
+      .then(options => { if (!controller.signal.aborted) setPermissionOptions(options) })
+      .catch(() => { if (!controller.signal.aborted) setPermissionError(zhCN.tools.permissionUnavailable) })
+      .finally(() => { if (!controller.signal.aborted) setPermissionLoading(false) })
+    return () => controller.abort()
+  }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
+  useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
+  // 「工具访问」→「提示词」列表：连接后加载一次（内置三条 + 本地保存的自定义条目）。
+  useEffect(() => {
+    if (connection.phase !== 'connected') return
+    if (customPrompts !== undefined || promptsLoadingRef.current) return
+    promptsLoadingRef.current = true
+    setPromptsLoading(true)
+    let cancelled = false
+    void loadCustomPrompts()
+      .then(items => {
+        if (cancelled || promptMutatedRef.current) return
+        setCustomPrompts(items)
+      })
+      .finally(() => {
+        promptsLoadingRef.current = false
+        if (!cancelled) setPromptsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connection.phase, customPrompts])
+  // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
+  useEffect(() => {
+    if (connection.phase !== 'connected' || session?.backend === 'codex') return
+    if (useAppStore.getState().agentPresetOptions !== undefined) return
+    void loadAgentPresets()
+  }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
+  // `/` 技能目录与 `@` 文件树按会话懒加载一次；未拉取成功时技能分组回落到内置技能。
+  useEffect(() => {
+    setSkillCatalog(undefined)
+    setSkillCatalogFailed(false)
+    setWorkspaceFileRefs(undefined)
+    setFileListFailed(false)
+    skillRequestedRef.current = undefined
+    filesRequestedRef.current = undefined
+    setMentionType(null)
+  }, [session?.sessionId])
+  useEffect(() => {
+    const sessionId = session?.sessionId
+    if (mentionType === null || sessionId === undefined) return
+    if (session?.backend === 'codex' || connection.phase !== 'connected') return
+    if (mentionType === 'command' && skillCatalog === undefined && skillRequestedRef.current !== sessionId) {
+      skillRequestedRef.current = sessionId
+      void Promise.resolve().then(() => requireSessionTools().listSkills(sessionId))
+        .then(rows => { if (skillRequestedRef.current === sessionId) setSkillCatalog(rows) })
+        .catch(() => { if (skillRequestedRef.current === sessionId) setSkillCatalogFailed(true) })
+    }
+    if (mentionType === 'context' && workspaceFileRefs === undefined && filesRequestedRef.current !== sessionId) {
+      filesRequestedRef.current = sessionId
+      void loadWorkspaceFileRefs(sessionId)
+        .then(rows => { if (filesRequestedRef.current === sessionId) setWorkspaceFileRefs(rows) })
+        .catch(() => { if (filesRequestedRef.current === sessionId) setFileListFailed(true) })
+    }
+  }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
-  const listRef = useRef<FlatList<ChatItem>>(null)
+  const [newSessionPending, setNewSessionPending] = useState(false)
+  const listRef = useRef<FlatList<ChatSection>>(null)
   const lastStreamingScrollAt = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
+  const scrollAnimatedRef = useRef(false)
+  const laidOutSessionRef = useRef<string | undefined>(undefined)
   /** Keep the viewport on the latest turn until the user scrolls away. */
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
-  const visibleMessages = useMemo(() => messages.filter(item =>
-    item.kind !== 'message'
-      || hasVisibleMessageText(item.text)
+  const visibleMessages = useMemo(() => mergeReplyReasoning(messages).filter(item =>
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && (
+      hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
-      || (item.images?.length ?? 0) > 0), [messages])
+      || (item.images?.length ?? 0) > 0))), [messages])
+  const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
     : undefined
   const sessionId = session?.sessionId
+  const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
+    || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -82,11 +226,55 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
     listRef.current?.scrollToEnd({ animated })
   }, [])
 
+  // FlatList can report several content-size changes while markdown rows are
+  // measuring. Coalesce those reports into one native scroll command so the
+  // initial render does not monopolize the JS responder queue.
+  const scheduleScrollToBottom = useCallback((animated: boolean) => {
+    scrollAnimatedRef.current = scrollAnimatedRef.current || animated
+    if (scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const shouldAnimate = scrollAnimatedRef.current
+      scrollAnimatedRef.current = false
+      scrollToBottom(shouldAnimate)
+    })
+  }, [scrollToBottom])
+
   // Entering a session (or switching sessions) should land on the latest turn.
   useEffect(() => {
+    setTrajectory(false)
     pinToBottomRef.current = true
     initialPinRef.current = true
+    laidOutSessionRef.current = undefined
   }, [sessionId])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = null
+    scrollAnimatedRef.current = false
+  }, [])
+
+  // A sheet or picker owns the user's next touch. Cancel a queued list jump
+  // as soon as it opens so a streaming update cannot move the responder under
+  // the panel.
+  useEffect(() => {
+    if (!panelOpen || scrollFrameRef.current === null) return
+    cancelAnimationFrame(scrollFrameRef.current)
+    scrollFrameRef.current = null
+    scrollAnimatedRef.current = false
+  }, [panelOpen])
+
+  // Let the first layout frame finish before jumping to the end. This keeps
+  // the top bar and Android back dispatch responsive while a large history
+  // page is being mounted, without relying on the deprecated InteractionManager.
+  useEffect(() => {
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (!pinToBottomRef.current && !initialPinRef.current) return
+    const timer = setTimeout(() => {
+      if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom(false)
+    }, 32)
+    return () => clearTimeout(timer)
+  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   // Loading older history prepends above the viewport — do not yank to the end.
   useEffect(() => {
@@ -98,57 +286,165 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   // Scroll when a brand-new item is appended. Streaming deltas keep the same
   // item id, so this fires once per assistant step instead of once per chunk.
   useEffect(() => {
-    if (visibleMessages.length === 0 || historyLoadingOlder) return
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
-    requestAnimationFrame(() => scrollToBottom(initialPinRef.current ? false : true))
-  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    scheduleScrollToBottom(initialPinRef.current ? false : true)
+  }, [visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
 
   // While an assistant message is streaming, its text grows on every chunk.
   // Following it with animated scrolls piles up animation frames on the JS
   // thread (freezing back navigation and the keyboard). Snap to the end at
   // most ~10 Hz instead, without animation.
   useEffect(() => {
-    if (visibleMessages.length === 0 || lastContentVersion === undefined || historyLoadingOlder) return
+    if (panelOpen || visibleMessages.length === 0 || lastContentVersion === undefined || historyLoadingOlder) return
     if (!pinToBottomRef.current) return
     const now = Date.now()
     if (now - lastStreamingScrollAt.current < 100) return
     lastStreamingScrollAt.current = now
-    requestAnimationFrame(() => scrollToBottom(false))
-  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, scrollToBottom])
+    scheduleScrollToBottom(false)
+  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom])
 
-  const onListContentSizeChange = useCallback(() => {
-    // FlatList often mounts before variable-height markdown finishes laying
-    // out; scroll again whenever content grows while we still want the bottom.
-    if (visibleMessages.length === 0 || historyLoadingOlder) return
-    if (!pinToBottomRef.current && !initialPinRef.current) return
-    scrollToBottom(false)
-  }, [visibleMessages.length, historyLoadingOlder, scrollToBottom])
+  const onListLayout = useCallback(() => {
+    // A session switch can render the list before its viewport and markdown
+    // rows have measured. Defer one extra frame so the initial jump reaches
+    // the actual end rather than the pre-layout content height.
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (laidOutSessionRef.current === sessionId) return
+    laidOutSessionRef.current = sessionId
+    scheduleScrollToBottom(false)
+  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     const atBottom = distanceFromEnd <= 80
     pinToBottomRef.current = atBottom
-    if (!atBottom) initialPinRef.current = false
   }, [])
 
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
-  const renderChatItem = useCallback(({ item }: { item: ChatItem }) => (
-    <ChatItemView item={item} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
-  ), [busy, respondApproval, respondQuestion])
+  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
+    ? <ChatProcessGroup items={item.items} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
+  [busy, respondApproval, respondQuestion])
+
+  // Keep chat's back action at the top of the Android responder stack. The
+  // navigator also handles back globally, but a freshly mounted FlatList can
+  // otherwise win the first dispatch while its cells are being measured.
+  const onBackRef = useRef(onBack)
+  onBackRef.current = onBack
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (plusMenuOpen) {
+        Keyboard.dismiss()
+        setPlusMenuOpen(false)
+        return true
+      }
+      if (modelPickerOpen) {
+        setModelPickerOpen(false)
+        return true
+      }
+      if (modePickerOpen) {
+        setModePickerOpen(false)
+        return true
+      }
+      if (permissionPickerOpen) {
+        setPermissionPickerOpen(false)
+        return true
+      }
+      if (workspacePickerOpen) {
+        setWorkspacePickerOpen(false)
+        return true
+      }
+      if (toolPickerOpen) {
+        setToolPickerOpen(false)
+        return true
+      }
+      if (promptEditing !== null) {
+        setPromptEditing(null)
+        setPromptsManagerOpen(true)
+        return true
+      }
+      if (promptsManagerOpen) {
+        setPromptsManagerOpen(false)
+        setPromptsPickerOpen(true)
+        return true
+      }
+      if (promptsPickerOpen) {
+        setPromptsPickerOpen(false)
+        return true
+      }
+      if (toolsMode !== undefined) {
+        setToolsMode(undefined)
+        return true
+      }
+      if (trajectory) { setTrajectory(false); return true }
+      if (keyboardVisibleRef.current || Keyboard.isVisible()) {
+        Keyboard.dismiss()
+        return true
+      }
+      Keyboard.dismiss()
+      onBackRef.current()
+      return true
+    })
+    return () => subscription.remove()
+  }, [modePickerOpen, modelPickerOpen, permissionPickerOpen, plusMenuOpen, toolPickerOpen, toolsMode, workspacePickerOpen, trajectory, promptsPickerOpen, promptsManagerOpen, promptEditing])
+
+  const skillItems: MentionItem[] = useMemo(() => (skillCatalog ?? []).map(row => ({
+    id: `skill:${row.name}`,
+    icon: OfficialMenuIcons.skill,
+    title: row.name,
+    description: row.modelInvocable ? row.description : `${zhCN.mention.skillUserOnly} · ${row.description}`,
+    onPress: () => insertMentionText(`/${row.name} `),
+  })), [skillCatalog])
+  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
+  const sessionItems: MentionItem[] = useMemo(() => sessions.filter(item => item.sessionId !== session?.sessionId && item.backend !== 'codex')
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(item => {
+      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
+      return {
+        id: item.sessionId,
+        icon: OfficialMenuIcons.referenceSession,
+        title,
+        description: owner === undefined ? zhCN.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
+        meta: relativeTime(item.updatedAt),
+        onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
+      }
+    }), [session?.sessionId, sessions, workspaces])
+  const fileItems: MentionItem[] = useMemo(() => (workspaceFileRefs ?? []).map(ref => {
+    const isDir = ref.kind === 'directory'
+    const Icon = isDir ? OfficialMenuIcons.referenceFolder : OfficialMenuIcons.referenceFile
+    return {
+      id: ref.path,
+      icon: Icon,
+      title: ref.path,
+      onPress: () => { const mention = fileMentionText(ref.path, isDir); if (mention !== undefined) insertMentionText(mention) },
+    }
+  }), [workspaceFileRefs])
 
   if (session === undefined) return null
 
   const submit = async () => {
+    if (!connected || permissionSelecting) return
     const text = draft.trim()
     if (text.length === 0 && images.length === 0) return
     const submittedImages = images
-    setDraft('')
+    applyDraft('')
     setImages([])
+    setMentionType(null)
+    selectionRef.current = { start: 0, end: 0 }
+    setSelection({ start: 0, end: 0 })
     if (!await sendMessage(text, submittedImages)) {
-      setDraft(text)
+      applyDraft(draft)
       setImages(submittedImages)
+      Alert.alert(zhCN.messageActions.failed, useAppStore.getState().error ?? zhCN.messageActions.unavailable)
+    } else {
+      const result = useAppStore.getState().commandResult
+      if (result?.sessionId === session.sessionId && useAppStore.getState().selectedSession?.sessionId === session.sessionId) {
+        Alert.alert(zhCN.mention.commandSection, result.text)
+        useAppStore.setState({ commandResult: undefined })
+      }
     }
   }
 
@@ -186,7 +482,65 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  const runQuickPrompt = (prompt: string) => void sendMessage(prompt)
+  const takePhoto = async () => {
+    const limits = sessionImageLimits(session)
+    const remaining = limits === undefined ? 0 : Math.max(0, limits.maxImagesPerMessage - images.length)
+    if (limits !== undefined && remaining === 0) {
+      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(limits.maxImagesPerMessage))
+      return
+    }
+    setPickingImages(true)
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync()
+      if (!permission.granted) {
+        Alert.alert(zhCN.chat.cameraPermissionTitle, zhCN.chat.cameraPermissionBody)
+        return
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+        base64: true,
+      })
+      if (result.canceled) return
+      const picked = result.assets.map(promptImageFromAsset)
+      const next = [...images, ...picked]
+      const problem = validatePromptImages(next, limits)
+      if (problem !== undefined) {
+        Alert.alert(zhCN.chat.imageLimitTitle, problem)
+        return
+      }
+      setImages(next)
+    } catch {
+      Alert.alert(zhCN.chat.imagePickerFailedTitle, zhCN.chat.imagePickerFailedBody)
+    } finally {
+      setPickingImages(false)
+    }
+  }
+
+
+  const openPlusMenu = () => {
+    // The composer TextInput often still owns focus when the user taps +.
+    // Dismissing the IME first gives the transparent Modal the full window and
+    // keeps its sheet (including the close target) out of the keyboard's touch
+    // region on Android.
+    Keyboard.dismiss()
+    setPlusMenuOpen(true)
+  }
+
+  const closePlusMenu = () => {
+    Keyboard.dismiss()
+    setPlusMenuOpen(false)
+  }
+
+  const handleBack = () => {
+    Keyboard.dismiss()
+    if (trajectory) {
+      setTrajectory(false)
+      return
+    }
+    onBack()
+  }
 
   const pickModel = async (group: ModelProviderGroup, model: ModelCatalogModel, reasoningEffort?: string) => {
     setModelPickerOpen(false)
@@ -212,12 +566,24 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
+  const currentAgentPresetId = session.agentPreset ?? agentPresetOptions?.find(option => option.isDefault)?.id
+  const currentWorkspace = workspaces.find(workspace => workspace.sessionIds.includes(session.sessionId))
+  const workspaceLabel = currentWorkspace?.title ?? zhCN.chat.workspaceNone
+  const currentPresetRow = agentPresetOptions?.find(option => option.id === currentAgentPresetId)
+  const modeLabel = currentAgentPresetId === undefined
+    ? zhCN.chat.modeDefault
+    : currentPresetRow === undefined
+      ? builtinPresetName(currentAgentPresetId) ?? currentAgentPresetId
+      : agentPresetName(currentPresetRow)
+
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const connected = connection.phase === 'connected' && !reconnectingSession
-  const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running)
+  const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
+  const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
-  const showGenerating = (busy === 'send-message' || session.running) && !messages.some(isActiveChatItem)
-  const permissions = sessionPermissions(session)
+  const replyActive = busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem
+  const projectedPermissions = sessionPermissions(session)
+  const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
   const currentPermission = permissions?.options.find(option => option.value === permissions.currentValue)
   const currentModel = sessionModels?.groups
     .find(group => group.id === sessionModels.current.provider)
@@ -229,6 +595,130 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
   const currentModelLabel = currentEffortName === undefined
     ? currentModelName
     : `${currentModelName} · ${currentEffortName}`
+
+  const pickMode = async (preset: string) => {
+    setModePickerOpen(false)
+    if (preset === session.agentPreset) return
+    const applied = await selectAgentPreset(preset)
+    if (!applied) {
+      Alert.alert(
+        zhCN.chat.modeLockedTitle,
+        session.blank ? zhCN.chat.modeSelectFailedBody : zhCN.chat.modeLockedBody,
+      )
+    }
+  }
+
+  const pickToolMode = (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => {
+    setToolPickerOpen(false)
+    if (mode === 'trajectory') {
+      setTrajectory(value => !value)
+      return
+    }
+    if (mode === 'prompts') {
+      setPromptsPickerOpen(true)
+      return
+    }
+    setToolsMode(mode)
+  }
+
+  const startNewSession = async () => {
+    if (newSessionPending || busy !== undefined) return
+    setNewSessionPending(true)
+    try {
+      const created = await createSession(currentWorkspace?.workspaceId)
+      if (created) {
+        onNewSession?.()
+      } else {
+        Alert.alert(zhCN.chat.newChatFailedTitle, zhCN.chat.newChatFailedBody)
+      }
+    } finally {
+      setNewSessionPending(false)
+    }
+  }
+
+  const sendPrompt = async (prompt: CustomPrompt) => {
+    setPromptsPickerOpen(false)
+    const ok = await sendMessage(prompt.text)
+    if (ok) AccessibilityInfo.announceForAccessibility(zhCN.chat.toolPromptSent(prompt.title))
+    else Alert.alert(zhCN.chat.toolPromptSendFailed, zhCN.chat.toolPromptSendFailed)
+  }
+
+  const persistPrompts = async (next: readonly CustomPrompt[]): Promise<boolean> => {
+    if (promptsLoading) return false
+    promptMutatedRef.current = true
+    const previous = customPrompts ?? BUILT_IN_PROMPTS
+    setCustomPrompts(next)
+    // Built-ins are re-seeded on every load, so a deleted one only stays gone
+    // when its id is recorded; edited built-ins keep their id and are saved as
+    // overrides inside `next`.
+    const removed = BUILT_IN_PROMPTS
+      .filter(item => !next.some(prompt => prompt.id === item.id))
+      .map(item => item.id)
+    try {
+      await saveCustomPrompts(next, removed)
+      return true
+    } catch {
+      setCustomPrompts(previous)
+      Alert.alert(zhCN.chat.toolPromptSaveFailedTitle, zhCN.chat.toolPromptSaveFailedBody)
+      return false
+    }
+  }
+
+  const savePromptEdit = async (title: string, text: string) => {
+    if (promptsLoading) return
+    const editing = promptEditing
+    const trimmedTitle = title.trim()
+    const trimmedText = text.trim()
+    if (trimmedTitle === '' || trimmedText === '') return
+    const current = customPrompts ?? BUILT_IN_PROMPTS
+    let ok = false
+    if (editing === 'new') {
+      ok = await persistPrompts([...current, { id: `prompt-${Date.now()}`, title: trimmedTitle, text: trimmedText }])
+    } else if (editing !== null) {
+      ok = await persistPrompts(current.map(item => item.id === editing.id ? { ...item, title: trimmedTitle, text: trimmedText } : item))
+    }
+    if (ok) {
+      setPromptEditing(null)
+      setPromptsManagerOpen(true)
+    }
+  }
+
+  const deletePrompt = async (prompt: CustomPrompt) => {
+    if (promptsLoading) return
+    const current = customPrompts ?? BUILT_IN_PROMPTS
+    await persistPrompts(current.filter(item => item.id !== prompt.id))
+  }
+
+  const sessionBlank = visibleMessages.length === 0 && session.blank !== false
+
+  const moveSessionToWorkspace = async (workspace: WorkspaceView) => {
+    const previousId = session.sessionId
+    const opened = await createSession(workspace.workspaceId)
+    if (!opened) {
+      Alert.alert(zhCN.chat.moveFailedTitle, zhCN.chat.moveFailedBody)
+      return
+    }
+    // A blank conversation carries nothing to lose: recreate it inside the
+    // chosen workspace and archive the old placeholder so it reads as a move.
+    if (sessionBlank) await archiveSession(previousId)
+  }
+
+  const pickWorkspace = (workspace: WorkspaceView) => {
+    setWorkspacePickerOpen(false)
+    if (workspace.sessionIds.includes(session.sessionId)) return
+    if (sessionBlank) {
+      void moveSessionToWorkspace(workspace)
+      return
+    }
+    Alert.alert(
+      zhCN.chat.moveStartedTitle,
+      zhCN.chat.moveStartedBody(workspace.title),
+      [
+        { text: zhCN.common.cancel, style: 'cancel' },
+        { text: zhCN.chat.moveStartedConfirm, onPress: () => void moveSessionToWorkspace(workspace) },
+      ],
+    )
+  }
 
   const pickPermission = (preset: string) => {
     setPermissionPickerOpen(false)
@@ -244,35 +734,118 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
       )
     } else apply()
   }
+
+  const applyDraft = (next: string) => {
+    draftRef.current = next
+    setDraft(next)
+  }
+
+  const closeMention = () => setMentionType(null)
+
+  const updateMention = (text: string, cursor: number) => {
+    const detected = detectMention(text, cursor)
+    if (detected === undefined) {
+      setMentionType(null)
+      return
+    }
+    mentionSpanRef.current = detected.start
+    setMentionQuery(detected.query)
+    setMentionType(detected.type)
+  }
+
+  /** Insert the picked command or reference text at the trigger span, keeping the caret behind it (web composer grammar). */
+  const insertMentionText = (text: string) => {
+    const start = mentionSpanRef.current
+    const end = selectionRef.current.end
+    const current = draftRef.current
+    const next = current.slice(0, start) + text + current.slice(end)
+    const cursor = start + text.length
+    applyDraft(next)
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    setMentionType(null)
+    composerInputRef.current?.focus()
+  }
+
+  const onChangeText = (next: string) => {
+    if (next === draftRef.current) return
+    // Keep the tracked caret in step with the edit so the controlled selection
+    // never yanks the cursor; onSelectionChange refines it right afterwards.
+    const delta = next.length - draftRef.current.length
+    applyDraft(next)
+    const cursor = Math.max(0, Math.min(next.length, selectionRef.current.end + delta))
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    updateMention(next, cursor)
+  }
+
+  const onSelectionChange = (event: { nativeEvent: { selection: { start: number; end: number } } }) => {
+    const next = event.nativeEvent.selection
+    if (next.start === selectionRef.current.start && next.end === selectionRef.current.end) return
+    selectionRef.current = next
+    setSelection(next)
+    if (next.start === next.end) updateMention(draftRef.current, next.end)
+  }
+
+  const runSessionExport = () => {
+    setMentionType(null)
+    const sessionId = session.sessionId
+    void Promise.resolve().then(() => requireSessionTools().executeCommand(sessionId, '/export'))
+      .then(result => {
+        Alert.alert(zhCN.mention.exportTitle, result.text ?? (result.kind === 'success' ? zhCN.mention.exportTriggered : zhCN.mention.exportFailed))
+      })
+      .catch((error: unknown) => {
+        Alert.alert(zhCN.mention.exportTitle, error instanceof Error && error.message.length > 0 ? error.message : zhCN.mention.exportFailed)
+      })
+  }
+
+  // 「/」菜单：添加 / 指令 / 技能 三组，动作按 DeepSeek Harness Web 端绑定。
+  const commandAddItems: MentionItem[] = [
+    { id: 'file', icon: OfficialMenuIcons.file, title: zhCN.mention.file, description: zhCN.mention.fileDescription, onPress: () => insertMentionText('/file ') },
+    { id: 'goal', icon: OfficialMenuIcons.goal, title: zhCN.mention.goal, description: zhCN.mention.goalDescription, onPress: () => insertMentionText('/goal ') },
+    { id: 'plan', icon: OfficialMenuIcons.plan, title: zhCN.mention.plan, description: zhCN.mention.planDescription, onPress: () => insertMentionText('/plan ') },
+    { id: 'feedback', icon: OfficialMenuIcons.feedback, title: zhCN.mention.feedback, description: zhCN.mention.feedbackDescription, onPress: () => insertMentionText('/feedback ') },
+  ]
+  const commandControlItems: MentionItem[] = [
+    { id: 'compact', icon: OfficialMenuIcons.compact, title: zhCN.mention.compact, description: zhCN.mention.compactDescription, onPress: () => insertMentionText('/compact') },
+    { id: 'permission', icon: OfficialMenuIcons.permission, title: zhCN.mention.permission, description: zhCN.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
+    { id: 'model', icon: OfficialMenuIcons.model, title: zhCN.mention.model, description: zhCN.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
+    { id: 'export', icon: OfficialMenuIcons.export, title: zhCN.mention.export, description: zhCN.mention.exportDescription, onPress: runSessionExport },
+  ]
+  const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
+  const mentionGroups: MentionGroup[] = mentionType === 'command'
+    ? [
+        { key: 'add', title: zhCN.mention.addSection, items: filterByQuery(commandAddItems, mentionQuery, mentionTexts).slice(0, 20) },
+        { key: 'commands', title: zhCN.mention.commandSection, items: filterByQuery(commandControlItems, mentionQuery, mentionTexts).slice(0, 20) },
+        {
+          key: 'skills',
+          title: zhCN.mention.skillSection,
+          items: skillCatalog === undefined && skillCatalogFailed
+            ? []
+            : filterByQuery(skillItems, mentionQuery, mentionTexts).slice(0, 20),
+        },
+      ]
+    : mentionType === 'context'
+      ? [
+          { key: 'sessions', title: zhCN.mention.sessionSection, items: filterByQuery(sessionItems, mentionQuery, mentionTexts).slice(0, 20) },
+          {
+            key: 'files',
+            title: zhCN.mention.fileSection,
+            items: fileListFailed ? [] : filterByQuery(fileItems, mentionQuery, mentionTexts).slice(0, 30),
+          },
+        ]
+      : []
   return (
-    <ChatKeyboardInset>
+    <KeyboardInset>
       <TopBar
         title={sessionTitle(session)}
-        onBack={onBack}
-        action={!connected
-          ? <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />
-          : canStop
-            ? <IconButton label={zhCN.chat.stop} icon={CircleStop} onPress={() => void stopSession()} disabled={stopping} />
-            : undefined}
+        titleLines={2}
+        onBack={handleBack}
+        action={<>
+          <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
+          {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
+        </>}
       />
-
-      <View style={styles.sessionControls}>
-        {sessionModels !== undefined && (
-          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.selectModel} onPress={() => setModelPickerOpen(true)} style={styles.modelChip}>
-            <Sparkles size={14} color={colors.primary} />
-            <Text style={styles.modelChipText} numberOfLines={1}>{currentModelLabel}</Text>
-            {modelSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
-          </Pressable>
-        )}
-        {permissions !== undefined && (
-          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.approvalModeLabel(currentPermission?.name ?? permissions.currentValue)} accessibilityState={{ disabled: permissionSelecting || canStop, busy: permissionSelecting }} disabled={permissionSelecting || canStop} onPress={() => setPermissionPickerOpen(true)} style={[styles.permissionChip, (permissionSelecting || canStop) && styles.permissionChipDisabled]}>
-            <ShieldAlert size={14} color={colors.primary} />
-            <Text style={styles.modelChipText} numberOfLines={1}>{currentPermission?.name ?? permissions.currentValue}</Text>
-            {permissionSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
-          </Pressable>
-        )}
-      </View>
-
       {!connected && (
         <View style={styles.connectionBanner} accessibilityRole="alert">
           <View style={styles.connectionDot} />
@@ -280,22 +853,29 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
         </View>
       )}
 
-      <FlatList
+      {trajectory ? <ChatTrajectory key={session.sessionId} items={messages} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
+        key={session.sessionId}
         style={styles.list}
         contentContainerStyle={[styles.listContent, visibleMessages.length === 0 && styles.emptyList]}
-        data={visibleMessages}
-        keyExtractor={item => item.id}
+        data={visibleSections}
+        keyExtractor={item => item.key}
         renderItem={renderChatItem}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={16}
+        windowSize={7}
+        removeClippedSubviews
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        onContentSizeChange={onListContentSizeChange}
+        keyboardDismissMode="on-drag"
+        onLayout={onListLayout}
         onScroll={onListScroll}
         scrollEventThrottle={16}
         onScrollBeginDrag={() => {
           initialPinRef.current = false
+          Keyboard.dismiss()
         }}
-        ListEmptyComponent={<WelcomeMessage backend={session.backend} />}
+        ListEmptyComponent={<WelcomeMessage />}
         ListHeaderComponent={historyHasMore ? (
           <Pressable
             accessibilityRole="button"
@@ -309,41 +889,20 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
               : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
           </Pressable>
         ) : undefined}
-        ListFooterComponent={showGenerating ? <GeneratingIndicator /> : undefined}
-      />
+      />}
 
+      {mentionType !== null && (
+        <Pressable
+          style={styles.mentionBackdrop}
+          onPress={() => { closeMention(); Keyboard.dismiss() }}
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.common.close}
+        />
+      )}
       <View style={styles.composerWrap}>
-        {session.backend === 'codex' && <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
-          contentContainerStyle={styles.quickActions}
-        >
-          {([
-            [zhCN.chat.quickCheckChanges, zhCN.chat.quickCheckChangesPrompt],
-            [zhCN.chat.quickCommit, zhCN.chat.quickCommitPrompt],
-            [zhCN.chat.quickViewScreenshot, zhCN.chat.quickViewScreenshotPrompt],
-          ] as const).map(([label, prompt]) => (
-            <Pressable
-              key={label}
-              accessibilityRole="link"
-              accessibilityLabel={label}
-              accessibilityState={{ disabled: !connected || permissionSelecting || busy !== undefined }}
-              disabled={!connected || permissionSelecting || busy !== undefined}
-              onPress={() => runQuickPrompt(prompt)}
-              hitSlop={6}
-              style={styles.quickAction}
-            >
-              {({ pressed }) => <Text style={[
-                styles.quickActionText,
-                (!connected || permissionSelecting || busy !== undefined) && styles.quickActionDisabled,
-                pressed && connected && !permissionSelecting && busy === undefined && styles.quickActionPressed,
-              ]}>{label}</Text>}
-            </Pressable>
-          ))}
-        </ScrollView>}
+
         {images.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageTray}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
               <View key={`${image.uri}:${index}`} style={styles.imagePreviewWrap}>
                 <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" />
@@ -359,62 +918,98 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
             ))}
           </ScrollView>
         )}
-        <View style={styles.composer}>
-          {session.backend !== 'cursor' && <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={zhCN.chat.addImages}
-            accessibilityState={{ disabled: !connected || pickingImages || busy === 'send-message' || permissionSelecting }}
-            disabled={!connected || pickingImages || busy === 'send-message' || permissionSelecting}
-            onPress={() => void pickImages()}
-            style={({ pressed }) => [styles.attachButton, pressed && styles.attachPressed]}
+        {replyActive && (
+          <View
+            accessible
+            accessibilityLabel={stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : zhCN.chat.generating}
+            accessibilityLiveRegion="polite"
+            style={styles.replyStatus}
           >
-            {pickingImages
-              ? <ActivityIndicator size="small" color={colors.primary} />
-              : <ImagePlus size={20} color={connected ? colors.primary : colors.disabled} />}
-          </Pressable>}
-          <TextInput
-            accessibilityLabel={session.backend === 'codex'
-              ? zhCN.chat.codexMessageLabel
-              : session.backend === 'cursor'
-                ? zhCN.chat.cursorMessageLabel
-                : zhCN.chat.messageLabel}
-            style={styles.composerInput}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={session.backend === 'codex'
-              ? zhCN.chat.codexPlaceholder
-              : session.backend === 'cursor'
-                ? zhCN.chat.cursorPlaceholder
-                : zhCN.chat.placeholder}
-            placeholderTextColor={colors.muted}
-            multiline
-            maxLength={12_000}
-            editable={connected && !permissionSelecting}
-            selectionColor={colors.accent}
-          />
-          {canStop
-            ? <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={zhCN.chat.stop}
-                accessibilityState={{ disabled: stopping, busy: stopping }}
-                disabled={stopping}
-                onPress={() => void stopSession()}
-                style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
-              >
-                {stopping
-                  ? <ActivityIndicator size="small" color={colors.white} />
-                  : <CircleStop size={20} color={colors.white} />}
+            <Text style={styles.replyStatusText}>{stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : zhCN.chat.generating}</Text>
+            {!stopping && <ReplyStatusDots />}
+          </View>
+        )}
+        <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
+          {mentionType !== null && (
+            <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={zhCN.mention.noMatches} />
+          )}
+        <View style={styles.composerCard}>
+          <View style={styles.composerInputWrap}>
+            {/* Native attributed text keeps references blue without an opaque Android value layer. */}
+            <TextInput
+              ref={composerInputRef}
+              accessibilityLabel={session.backend === 'codex'
+                ? zhCN.chat.codexMessageLabel
+                : session.backend === 'cursor'
+                  ? zhCN.chat.cursorMessageLabel
+                  : zhCN.chat.messageLabel}
+              style={styles.composerInput}
+              onChangeText={onChangeText}
+              onSelectionChange={onSelectionChange}
+
+              selection={selection}
+              placeholder={session.backend === 'codex'
+                ? zhCN.chat.codexPlaceholder
+                : session.backend === 'cursor'
+                  ? zhCN.chat.cursorPlaceholder
+                  : zhCN.chat.placeholder}
+              placeholderTextColor={colors.muted}
+              multiline
+              maxLength={12_000}
+              editable={connected && !permissionSelecting}
+              selectionColor={colors.accent}
+              cursorColor={colors.accent}
+            >
+              <Text>{draftSegments.map((segment, index) => <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>)}</Text>
+            </TextInput>
+          </View>
+          <View style={styles.composerControls}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.moreActions}
+              accessibilityState={{ disabled: !connected || permissionSelecting }}
+              disabled={!connected || permissionSelecting}
+              onPress={openPlusMenu}
+              hitSlop={8}
+              style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, (!connected || permissionSelecting) && styles.plusDisabled]}
+            >
+              <Plus size={20} color={connected ? colors.ink : colors.disabled} />
+            </Pressable>
+            <View style={styles.composerSpacer} />
+            {sessionModels !== undefined && (
+              <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.selectModel} onPress={() => setModelPickerOpen(true)} style={styles.modelChip}>
+                <Sparkles size={14} color={colors.primary} />
+                <Text style={styles.modelChipText} numberOfLines={1}>{currentModelLabel}</Text>
+                {modelSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
               </Pressable>
-            : <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={zhCN.chat.send}
-                accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
-                disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
-                onPress={() => void submit()}
-                style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
-              >
-                <Send size={19} color={colors.white} />
-              </Pressable>}
+            )}
+              </Pressable>
+            )}
+            {canStop
+              ? <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.chat.stop}
+                  accessibilityState={{ disabled: stopping, busy: stopping }}
+                  disabled={stopping}
+                  onPress={() => void stopSession()}
+                  style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
+                >
+                  {stopping
+                    ? <ActivityIndicator size="small" color={colors.white} />
+                    : <CircleStop size={20} color={colors.white} />}
+                </Pressable>
+              : <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.chat.send}
+                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
+                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
+                  onPress={() => void submit()}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                >
+                  <ArrowUp size={20} color={colors.white} />
+                </Pressable>}
+          </View>
+        </View>
         </View>
         <Text style={styles.composerHint}>
           {session.backend === 'codex'
@@ -425,54 +1020,211 @@ export function ChatScreen({ onBack }: { onBack: () => void }) {
         </Text>
       </View>
 
+      <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu}>
+        <ModalSurface onClose={closePlusMenu}>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={closePlusMenu} /></View>
+            {session.backend !== 'cursor' && (
+              <View style={styles.plusCardRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.chat.takePhoto}
+                  accessibilityState={{ disabled: pickingImages }}
+                  disabled={pickingImages}
+                  onPress={() => { closePlusMenu(); void takePhoto() }}
+                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
+                >
+                  <Camera size={22} color={colors.primary} />
+                  <Text style={styles.plusCardText}>{zhCN.chat.takePhoto}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.chat.photos}
+                  accessibilityState={{ disabled: pickingImages }}
+                  disabled={pickingImages}
+                  onPress={() => { closePlusMenu(); void pickImages() }}
+                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
+                >
+                  <Images size={22} color={colors.primary} />
+                  <Text style={styles.plusCardText}>{zhCN.chat.photos}</Text>
+                </Pressable>
+              </View>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.openWorkspaces}
+              onPress={() => { closePlusMenu(); setWorkspacePickerOpen(true) }}
+              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
+            >
+              <Folder size={20} color={colors.primary} />
+              <Text style={styles.plusMenuOptionText}>{zhCN.chat.openWorkspaces}</Text>
+              <View style={styles.plusMenuOptionValue}>
+                <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{workspaceLabel}</Text>
+                <ChevronRight size={16} color={colors.muted} />
+              </View>
+            </Pressable>
+            {session.backend !== 'codex' && session.backend !== 'cursor' && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.selectMode}
+                accessibilityState={{ disabled: agentPresetSelecting }}
+                disabled={agentPresetSelecting}
+                onPress={() => { closePlusMenu(); setModePickerOpen(true) }}
+                style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, agentPresetSelecting && styles.plusMenuOptionDisabled]}
+              >
+                <Layers size={20} color={colors.primary} />
+                <Text style={styles.plusMenuOptionText}>{zhCN.chat.mode}</Text>
+                <View style={styles.plusMenuOptionValue}>
+                  {agentPresetSelecting
+                    ? <ActivityIndicator size="small" color={colors.muted} />
+                    : <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{modeLabel}</Text>}
+                  <ChevronRight size={16} color={colors.muted} />
+                </View>
+              </Pressable>
+            )}
+            {session.backend !== 'codex' && session.backend !== 'cursor' && connected && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.toolAccess}
+                onPress={() => { closePlusMenu(); setToolPickerOpen(true) }}
+                style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
+              >
+                <Terminal size={20} color={colors.primary} />
+                <Text style={styles.plusMenuOptionText}>{zhCN.chat.toolAccess}</Text>
+                <ChevronRight size={16} color={colors.muted} />
+              </Pressable>
+            )}
+            {permissions !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.approvalMode}
+                accessibilityState={{ disabled: permissionSelecting || canStop }}
+                disabled={permissionSelecting || canStop}
+                onPress={() => { closePlusMenu(); setPermissionPickerOpen(true) }}
+                style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, (permissionSelecting || canStop) && styles.plusMenuOptionDisabled]}
+              >
+                <ShieldAlert size={20} color={colors.primary} />
+                <Text style={styles.plusMenuOptionText}>{zhCN.chat.approvalMode}</Text>
+                <View style={styles.plusMenuOptionValue}>
+                  {permissionSelecting
+                    ? <ActivityIndicator size="small" color={colors.muted} />
+                    : <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{permissionDisplayName(permissions.currentValue, currentPermission?.name)}</Text>}
+                  <ChevronRight size={16} color={colors.muted} />
+                </View>
+              </Pressable>
+            )}
+        </ModalSurface>
+      </Modal>
+
       <ModelPicker
         visible={modelPickerOpen}
         models={sessionModels}
         onClose={() => setModelPickerOpen(false)}
         onPick={pickModel}
       />
-      <PermissionPicker visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
-    </ChatKeyboardInset>
+      {toolsMode !== undefined && connected && (
+        <SessionToolsPanel
+          key={`${session.sessionId}:${toolsMode}`}
+          mode={toolsMode}
+          sessionId={session.sessionId}
+          onClose={() => setToolsMode(undefined)}
+        />
+      )}
+      <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
+      <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
+      <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
+      <ToolAccessPicker visible={toolPickerOpen} trajectory={trajectory} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+      <PromptsPicker
+        visible={promptsPickerOpen}
+        prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        onClose={() => setPromptsPickerOpen(false)}
+        onPick={prompt => void sendPrompt(prompt)}
+        onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
+      />
+      <PromptsManager
+        visible={promptsManagerOpen}
+        prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
+        onClose={() => setPromptsManagerOpen(false)}
+        onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
+        onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
+        onDelete={prompt => {
+          Alert.alert(zhCN.chat.toolPromptDeleteTitle(prompt.title), zhCN.chat.toolPromptDeleteBody, [
+            { text: zhCN.common.cancel, style: 'cancel' },
+            { text: zhCN.common.delete, style: 'destructive', onPress: () => void deletePrompt(prompt) },
+          ])
+        }}
+      />
+      <PromptEditor
+        visible={promptEditing !== null}
+        prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
+        promptsLoading={promptsLoading}
+        onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
+        onClose={() => setPromptEditing(null)}
+        onSave={(title, text) => void savePromptEdit(title, text)}
+      />
+    </KeyboardInset>
   )
 }
 
-function ChatKeyboardInset({ children }: { children: ReactNode }) {
+
+function ModePicker({ visible, options, current, loading, selecting, onClose, onPick }: {
+  visible: boolean
+  options?: AgentPresetOption[]
+  current?: string
+  loading: boolean
+  selecting: boolean
+  onClose: () => void
+  onPick: (preset: string) => void
+}) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const insets = useSafeAreaInsets()
-  const { height: windowHeight } = useWindowDimensions()
-  const [keyboardCover, setKeyboardCover] = useState(0)
-
-  useEffect(() => {
-    // Edge-to-edge Android often keeps the RN root full-screen even with
-    // adjustResize, so KeyboardAvoidingView under-pads and the IME toolbar
-    // clips the composer. Measure the real covered band from screenY.
-    const show = Keyboard.addListener('keyboardDidShow', event => {
-      setKeyboardCover(Math.max(0, windowHeight - event.endCoordinates.screenY))
-    })
-    const hide = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardCover(0)
-    })
-    return () => {
-      show.remove()
-      hide.remove()
-    }
-  }, [windowHeight])
-
-  // App shell already reserved insets.bottom below this tree; subtract it so
-  // we clear the IME without double-counting the gesture/nav inset. When
-  // adjustResize already shrank the window, cover≈0 and this is a no-op.
-  const paddingBottom = keyboardCover > 0
-    ? Math.max(0, keyboardCover - insets.bottom) + spacing.sm
-    : 0
-
+  const listMaxHeight = usePickerListMaxHeight()
   return (
-    <View style={[styles.flex, paddingBottom > 0 ? { paddingBottom } : null]}>
-      {children}
-    </View>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+          <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+          <ScrollView
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={styles.modalListContent}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {options === undefined || options.length === 0 ? (
+              loading
+                ? <View style={styles.modeLoading}><ActivityIndicator color={colors.primary} /></View>
+                : <Text style={styles.modelFailures}>{zhCN.chat.modeLoadFailed}</Text>
+            ) : options.map(option => {
+              const isCurrent = option.id === current
+              const broken = option.broken !== undefined
+              const description = agentPresetDescription(option)
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isCurrent, disabled: selecting || broken }}
+                  disabled={selecting || broken}
+                  onPress={() => onPick(option.id)}
+                  style={[styles.permissionOption, isCurrent && styles.modelOptionCurrent, (selecting || broken) && styles.plusMenuOptionDisabled]}
+                >
+                  <View style={styles.permissionOptionCopy}>
+                    <Text style={styles.permissionOptionName}>{agentPresetName(option)}</Text>
+                    {description !== undefined && <Text style={styles.permissionOptionDescription}>{description}</Text>}
+                  </View>
+                  {isCurrent && <Check size={16} color={colors.primary} />}
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+      </ModalSurface>
+    </Modal>
   )
 }
 
-function PermissionPicker({ visible, permissions, onClose, onPick }: {
+function PermissionPicker({ visible, permissions, onClose, onPick, loading, error, onRetry }: {
+  loading: boolean
+  error?: string
+  onRetry: () => void
   visible: boolean
   permissions?: PermissionSelect
   onClose: () => void
@@ -484,8 +1236,7 @@ function PermissionPicker({ visible, permissions, onClose, onPick }: {
   if (permissions === undefined) return null
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
           <ScrollView
             style={{ maxHeight: listMaxHeight }}
@@ -493,121 +1244,307 @@ function PermissionPicker({ visible, permissions, onClose, onPick }: {
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
           >
+            {loading && <ActivityIndicator color={colors.primary} />}
+            {error && <View><Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text><Button label={zhCN.tools.retry} onPress={onRetry} /></View>}
             {permissions.options.filter(option => option.value !== 'custom').map(option => {
               const current = option.value === permissions.currentValue
               return (
                 <Pressable key={option.value} accessibilityRole="button" accessibilityState={{ selected: current }} onPress={() => onPick(option.value)} style={[styles.permissionOption, current && styles.modelOptionCurrent]}>
-                  <View style={styles.permissionOptionCopy}><Text style={styles.permissionOptionName}>{option.name}</Text>{option.description !== undefined && <Text style={styles.permissionOptionDescription}>{option.description}</Text>}</View>
+                  <View style={styles.permissionOptionCopy}><Text style={styles.permissionOptionName}>{permissionDisplayName(option.value, option.name)}</Text>{permissionDisplayDescription(option.value, option.description) !== undefined && <Text style={styles.permissionOptionDescription}>{permissionDisplayDescription(option.value, option.description)}</Text>}</View>
                   {current && <Check size={16} color={colors.primary} />}
                 </Pressable>
               )
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+      </ModalSurface>
     </Modal>
   )
 }
 
-function sessionPermissions(session: RemoteSession): PermissionSelect | undefined {
-  const value = session.projections?.values?.permissions
-  if (typeof value !== 'object' || value === null) return undefined
-  const source = value as { currentValue?: unknown; options?: unknown }
-  if (typeof source.currentValue !== 'string' || !Array.isArray(source.options)) return undefined
-  const options = source.options.flatMap(option => {
-    if (typeof option !== 'object' || option === null) return []
-    const item = option as { value?: unknown; name?: unknown; description?: unknown }
-    if (typeof item.value !== 'string' || typeof item.name !== 'string') return []
-    return [{ value: item.value, name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
-  })
-  return { currentValue: source.currentValue, options }
+
+function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend, busy, onClose, onPick, onManage }: {
+  visible: boolean
+  workspaces: WorkspaceView[]
+  currentSessionId: string
+  sessionBackend?: WorkspaceView['backend']
+  busy?: string
+  onClose: () => void
+  onPick: (workspace: WorkspaceView) => void
+  onManage?: () => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  const options = workspaces.filter(workspace => (workspace.backend ?? 'harness') === (sessionBackend ?? 'harness'))
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+          <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectWorkspace}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+          <Text style={styles.pickerHint}>{zhCN.chat.moveSessionHint}</Text>
+          <ScrollView
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={styles.modalListContent}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {options.length === 0 ? (
+              <View style={styles.pickerEmpty}>
+                <Text style={styles.permissionOptionName}>{zhCN.chat.workspacePickerEmptyTitle}</Text>
+                <Text style={styles.permissionOptionDescription}>{zhCN.chat.workspacePickerEmptyBody}</Text>
+                {onManage !== undefined && <Button label={zhCN.chat.manageWorkspaces} onPress={() => { onClose(); onManage() }} />}
+              </View>
+            ) : options.map(workspace => {
+              const isCurrent = workspace.sessionIds.includes(currentSessionId)
+              return (
+                <Pressable
+                  key={workspace.workspaceId}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isCurrent, disabled: busy !== undefined }}
+                  disabled={busy !== undefined}
+                  onPress={() => onPick(workspace)}
+                  style={[styles.permissionOption, isCurrent && styles.modelOptionCurrent, busy !== undefined && styles.plusMenuOptionDisabled]}
+                >
+                  <View style={styles.permissionOptionCopy}>
+                    <Text style={styles.permissionOptionName}>{workspace.title}</Text>
+                    <Text style={styles.permissionOptionDescription} numberOfLines={1}>{workspace.path}</Text>
+                  </View>
+                  {isCurrent && <Check size={16} color={colors.primary} />}
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
 }
 
-const IMAGE_MEDIA_TYPES: readonly ImageMediaType[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-
-function sessionImageLimits(session: RemoteSession): ImageAttachmentLimits | undefined {
-  const value = session.projections?.values?.imageLimits
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const limits = value as Partial<ImageAttachmentLimits>
-  if (!positiveNumber(limits.maxImageBytes)
-    || !positiveNumber(limits.maxImagesPerMessage)
-    || !positiveNumber(limits.maxMessageImageBytes)
-    || !positiveNumber(limits.maxImagePixels)
-    || !positiveNumber(limits.maxImageDimension)
-    || !Array.isArray(limits.mediaTypes)) return undefined
-  const mediaTypes = limits.mediaTypes.filter((mediaType): mediaType is ImageMediaType =>
-    typeof mediaType === 'string' && IMAGE_MEDIA_TYPES.includes(mediaType as ImageMediaType))
-  if (mediaTypes.length === 0) return undefined
-  return {
-    maxImageBytes: limits.maxImageBytes,
-    maxImagesPerMessage: limits.maxImagesPerMessage,
-    maxMessageImageBytes: limits.maxMessageImageBytes,
-    maxImagePixels: limits.maxImagePixels,
-    maxImageDimension: limits.maxImageDimension,
-    mediaTypes,
-  }
+function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
+  visible: boolean
+  trajectory: boolean
+  onClose: () => void
+  onPick: (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  const options = [
+    { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
+    { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
+    { id: 'trajectory' as const, icon: ListTree, name: zhCN.trajectory.title, description: trajectory ? zhCN.trajectory.close : zhCN.trajectory.open },
+    { id: 'prompts' as const, icon: OfficialMenuIcons.sliders, name: zhCN.chat.toolPrompts, description: zhCN.chat.toolPromptsDescription },
+  ]
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+          <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+          <ScrollView
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={styles.modalListContent}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {options.map(option => {
+              const Icon = option.icon
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  onPress={() => onPick(option.id)}
+                  style={({ pressed }) => [styles.permissionOption, pressed && styles.plusMenuOptionPressed]}
+                >
+                  <Icon size={20} color={colors.primary} />
+                  <View style={styles.permissionOptionCopy}>
+                    <Text style={styles.permissionOptionName}>{option.name}</Text>
+                    <Text style={styles.permissionOptionDescription}>{option.description}</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.muted} />
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
 }
 
-function promptImageFromAsset(asset: ImagePicker.ImagePickerAsset): PromptImage {
-  if (asset.base64 === undefined || asset.base64 === null || asset.base64.length === 0) {
-    throw new Error('missing-image-data')
-  }
-  const mediaType = imageMediaType(asset.mimeType, asset.fileName ?? asset.uri)
-  if (mediaType === undefined) throw new Error('unsupported-image-type')
-  return {
-    uri: asset.uri,
-    mediaType,
-    data: asset.base64,
-    bytes: decodedBase64Bytes(asset.base64),
-    width: asset.width,
-    height: asset.height,
-    ...(asset.fileName === undefined || asset.fileName === null ? {} : { name: asset.fileName.split(/[\\/]/).at(-1)?.slice(0, 255) }),
-  }
+function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
+  visible: boolean
+  prompts: readonly CustomPrompt[]
+  onClose: () => void
+  onPick: (prompt: CustomPrompt) => void
+  onManage: () => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{zhCN.chat.toolPrompts}</Text>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView
+          style={{ maxHeight: Math.max(140, listMaxHeight - 56) }}
+          contentContainerStyle={styles.modalListContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          {prompts.length === 0 ? (
+            <View style={styles.pickerEmpty}>
+              <Text style={styles.permissionOptionName}>{zhCN.chat.toolPromptEmptyTitle}</Text>
+              <Text style={styles.permissionOptionDescription}>{zhCN.chat.toolPromptEmptyBody}</Text>
+            </View>
+          ) : prompts.map(prompt => (
+            <Pressable
+              key={prompt.id}
+              accessibilityRole="button"
+              accessibilityLabel={prompt.title}
+              onPress={() => onPick(prompt)}
+              style={({ pressed }) => [styles.permissionOption, pressed && styles.plusMenuOptionPressed]}
+            >
+              <View style={styles.permissionOptionCopy}>
+                <Text style={styles.permissionOptionName}>{prompt.title}</Text>
+                <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
+              </View>
+              <ChevronRight size={16} color={colors.muted} />
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.chat.toolPromptEdit}
+          onPress={onManage}
+          style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
+        >
+          <Text style={styles.effortRowLabel}>{zhCN.chat.toolPromptEdit}</Text>
+          <View style={styles.plusMenuOptionValue}>
+            <ChevronRight size={16} color={colors.muted} />
+          </View>
+        </Pressable>
+      </ModalSurface>
+    </Modal>
+  )
 }
 
-function validatePromptImages(images: PromptImage[], limits?: ImageAttachmentLimits): string | undefined {
-  if (limits === undefined) return undefined
-  if (images.length > limits.maxImagesPerMessage) return zhCN.chat.tooManyImages(limits.maxImagesPerMessage)
-  let totalBytes = 0
-  for (const image of images) {
-    const label = image.name ?? zhCN.chat.unnamedImage
-    if (!limits.mediaTypes.includes(image.mediaType)) return zhCN.chat.unsupportedImage(label)
-    if (image.bytes > limits.maxImageBytes) return zhCN.chat.imageTooLarge(label, formatBytes(limits.maxImageBytes))
-    if (image.width > limits.maxImageDimension || image.height > limits.maxImageDimension) {
-      return zhCN.chat.imageDimensionsTooLarge(label, limits.maxImageDimension)
-    }
-    if (image.width * image.height > limits.maxImagePixels) return zhCN.chat.imagePixelsTooLarge(label)
-    totalBytes += image.bytes
-  }
-  return totalBytes > limits.maxMessageImageBytes
-    ? zhCN.chat.imagesTooLarge(formatBytes(limits.maxMessageImageBytes))
-    : undefined
+function PromptsManager({ visible, prompts, promptsLoading, onBack, onClose, onAdd, onEdit, onDelete }: {
+  visible: boolean
+  prompts: readonly CustomPrompt[]
+  promptsLoading?: boolean
+  onBack: () => void
+  onClose: () => void
+  onAdd: () => void
+  onEdit: (prompt: CustomPrompt) => void
+  onDelete: (prompt: CustomPrompt) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>{zhCN.chat.toolPromptEdit}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <IconButton label={zhCN.chat.toolPromptAdd} icon={Plus} tint={colors.primary} onPress={onAdd} disabled={promptsLoading} />
+            <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          </View>
+        </View>
+        <ScrollView
+          style={{ maxHeight: listMaxHeight }}
+          contentContainerStyle={styles.modalListContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+          {prompts.length === 0 ? (
+            <View style={styles.pickerEmpty}>
+              <Text style={styles.permissionOptionName}>{zhCN.chat.toolPromptEmptyTitle}</Text>
+              <Text style={styles.permissionOptionDescription}>{zhCN.chat.toolPromptEmptyBody}</Text>
+            </View>
+          ) : prompts.map(prompt => (
+            <View key={prompt.id} style={[styles.permissionOption, { paddingRight: 4 }]}>
+              <View style={styles.permissionOptionCopy}>
+                <Text style={styles.permissionOptionName}>{prompt.title}</Text>
+                <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
+              </View>
+              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={Pencil} onPress={() => onEdit(prompt)} dense disabled={promptsLoading} />
+              <IconButton label={zhCN.common.delete} icon={Trash2} onPress={() => onDelete(prompt)} dense disabled={promptsLoading} />
+            </View>
+          ))}
+        </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
 }
 
-function imageMediaType(mimeType: string | undefined, name: string): ImageMediaType | undefined {
-  const normalized = mimeType?.toLowerCase()
-  if (IMAGE_MEDIA_TYPES.includes(normalized as ImageMediaType)) return normalized as ImageMediaType
-  const extension = name.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
-  if (extension === 'png') return 'image/png'
-  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
-  if (extension === 'webp') return 'image/webp'
-  if (extension === 'gif') return 'image/gif'
-  return undefined
-}
-
-function decodedBase64Bytes(value: string): number {
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
-  return Math.floor(value.length * 3 / 4) - padding
-}
-
-function positiveNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-}
-
-function formatBytes(bytes: number): string {
-  return bytes >= 1024 * 1024
-    ? `${Math.floor(bytes / (1024 * 1024))} MB`
-    : `${Math.floor(bytes / 1024)} KB`
+function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose, onSave }: {
+  visible: boolean
+  prompt?: CustomPrompt
+  promptsLoading?: boolean
+  onBack: () => void
+  onClose: () => void
+  onSave: (title: string, text: string) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  useEffect(() => {
+    if (!visible) return
+    setTitle(prompt?.title ?? '')
+    setText(prompt?.text ?? '')
+  }, [visible, prompt?.id])
+  const canSave = title.trim().length > 0 && text.trim().length > 0 && !promptsLoading
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <View style={styles.modalHeaderCopy}>
+            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <Text style={styles.modalTitle} numberOfLines={1}>
+              {prompt === undefined ? zhCN.chat.toolPromptAdd : zhCN.chat.toolPromptEditTitle(prompt.title)}
+            </Text>
+          </View>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView style={{ maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">
+          <Text style={styles.promptInputLabel}>{zhCN.chat.toolPromptTitlePlaceholder}</Text>
+          <TextInput
+            accessibilityLabel={zhCN.chat.toolPromptTitlePlaceholder}
+            placeholder={zhCN.chat.toolPromptTitlePlaceholder}
+            placeholderTextColor={colors.muted}
+            value={title}
+            onChangeText={setTitle}
+            style={styles.promptInput}
+          />
+          <Text style={[styles.promptInputLabel, { marginTop: 12 }]}>{zhCN.chat.toolPromptTextPlaceholder}</Text>
+          <TextInput
+            accessibilityLabel={zhCN.chat.toolPromptTextPlaceholder}
+            placeholder={zhCN.chat.toolPromptTextPlaceholder}
+            placeholderTextColor={colors.muted}
+            value={text}
+            onChangeText={setText}
+            multiline
+            style={[styles.promptInput, styles.promptTextArea]}
+          />
+        </ScrollView>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.chat.toolPromptSave}
+          disabled={!canSave}
+          onPress={() => onSave(title, text)}
+          style={({ pressed }) => [styles.effortRow, { justifyContent: 'center', backgroundColor: canSave ? colors.primary : colors.surface, marginTop: 12 }, pressed && canSave && styles.plusMenuOptionPressed]}
+        >
+          <Check size={16} color={canSave ? colors.surface : colors.disabled} />
+          <Text style={[styles.effortRowLabel, { color: canSave ? colors.surface : colors.disabled, marginLeft: 6 }]}>{zhCN.chat.toolPromptSave}</Text>
+        </Pressable>
+      </ModalSurface>
+    </Modal>
+  )
 }
 
 function ModelPicker({ visible, models, onClose, onPick }: {
@@ -619,55 +1556,51 @@ function ModelPicker({ visible, models, onClose, onPick }: {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
-  const [effortTarget, setEffortTarget] = useState<{
-    group: ModelProviderGroup
-    model: ModelCatalogModel
-  }>()
+  const [effortView, setEffortView] = useState(false)
   useEffect(() => {
-    if (!visible) setEffortTarget(undefined)
+    if (!visible) setEffortView(false)
   }, [visible])
   if (models === undefined) return null
-  const selectedEffort = effortTarget !== undefined
-    && models.current.provider === effortTarget.group.id
-    && models.current.model === effortTarget.model.id
-    ? models.current.reasoningEffort ?? effortTarget.model.reasoning?.defaultEffort
-    : undefined
+  const currentGroup = models.groups.find(group => group.id === models.current.provider)
+  const currentModel = currentGroup?.models.find(model => model.id === models.current.model)
+  const efforts = currentModel?.reasoning?.efforts ?? []
+  const activeEffortId = models.current.reasoningEffort ?? currentModel?.reasoning?.defaultEffort
+  const activeEffort = efforts.find(effort => effort.id === activeEffortId)
+  const showEffortRow = !effortView && efforts.length > 0
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={event => event.stopPropagation()}>
+      <ModalSurface onClose={onClose}>
           <View style={styles.modalHeader}>
             <View style={styles.modalHeaderCopy}>
-              {effortTarget !== undefined && (
-                <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={() => setEffortTarget(undefined)} />
+              {effortView && (
+                <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={() => setEffortView(false)} />
               )}
               <Text style={styles.modalTitle} numberOfLines={1}>
-                {effortTarget === undefined ? zhCN.chat.selectModel : zhCN.chat.selectReasoningEffort}
+                {effortView ? zhCN.chat.reasoningEffort : zhCN.chat.selectModel}
               </Text>
             </View>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
           </View>
           <ScrollView
-            style={{ maxHeight: listMaxHeight }}
+            style={{ maxHeight: showEffortRow ? Math.max(140, listMaxHeight - 56) : listMaxHeight }}
             contentContainerStyle={styles.modalListContent}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
           >
-            {effortTarget === undefined ? (
+            {!effortView ? (
               <>
                 {models.groups.map(group => (
                   <View key={group.id} style={styles.modelGroupBlock}>
                     <Text style={styles.modelGroupTitle}>{group.name}</Text>
                     {group.models.map(model => {
                       const current = models.current.provider === group.id && models.current.model === model.id
-                      const hasEfforts = (model.reasoning?.efforts.length ?? 0) > 0
                       return (
                         <Pressable
                           key={model.id}
                           accessibilityRole="button"
                           accessibilityState={{ selected: current }}
                           onPress={() => {
-                            if (hasEfforts) setEffortTarget({ group, model })
+                            if (current) onPick(group, model, models.current.reasoningEffort)
                             else onPick(group, model)
                           }}
                           style={[styles.modelOption, current && styles.modelOptionCurrent]}
@@ -676,7 +1609,6 @@ function ModelPicker({ visible, models, onClose, onPick }: {
                             <Text style={styles.modelOptionName} numberOfLines={1}>{model.name}</Text>
                           </View>
                           {current && <Check size={16} color={colors.primary} />}
-                          {hasEfforts && <ChevronRight size={16} color={colors.muted} />}
                         </Pressable>
                       )
                     })}
@@ -688,15 +1620,19 @@ function ModelPicker({ visible, models, onClose, onPick }: {
               </>
             ) : (
               <>
-                {effortTarget.model.reasoning?.efforts.map(effort => {
-                  const current = selectedEffort === effort.id
+                {efforts.map(effort => {
+                  const current = activeEffortId === effort.id
                   return (
                     <Pressable
                       key={effort.id}
                       accessibilityRole="button"
                       accessibilityState={{ selected: current }}
                       accessibilityLabel={zhCN.chat.reasoningEffortLabel(effort.name)}
-                      onPress={() => onPick(effortTarget.group, effortTarget.model, effort.id)}
+                      onPress={() => {
+                        if (currentGroup !== undefined && currentModel !== undefined) {
+                          onPick(currentGroup, currentModel, effort.id)
+                        }
+                      }}
                       style={[styles.modelOption, current && styles.modelOptionCurrent]}
                     >
                       <View style={styles.modelOptionCopy}>
@@ -709,16 +1645,145 @@ function ModelPicker({ visible, models, onClose, onPick }: {
               </>
             )}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+          {showEffortRow && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.reasoningEffort}
+              onPress={() => setEffortView(true)}
+              style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
+            >
+              <Text style={styles.effortRowLabel}>{zhCN.chat.reasoningEffort}</Text>
+              <View style={styles.plusMenuOptionValue}>
+                <Text style={styles.effortRowValue} numberOfLines={1}>{activeEffort?.name ?? zhCN.chat.reasoningEffortDefault}</Text>
+                <ChevronRight size={16} color={colors.muted} />
+              </View>
+            </Pressable>
+          )}
+      </ModalSurface>
     </Modal>
   )
 }
 
+/**
+ * Keep the dismiss target behind the sheet instead of nesting Pressables.
+ * Android's responder negotiation can otherwise let the backdrop consume a
+ * child press, which makes every option in a transparent modal look inert.
+ */
+export function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View style={styles.modalBackdrop} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={zhCN.common.close}
+        onPress={onClose}
+        pointerEvents="box-only"
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.modalSheet} pointerEvents="box-none">{children}</View>
+    </View>
+  )
+}
+
 /** Keep the picker sheet within ~70% of the screen while letting long catalogs scroll. */
-function usePickerListMaxHeight(): number {
+export function usePickerListMaxHeight(): number {
   const { height } = useWindowDimensions()
   return Math.max(180, Math.round(height * 0.7) - 96)
+}
+
+interface WorkspaceFileRef {
+  path: string
+  kind: 'file' | 'directory'
+}
+
+/** Shallow workspace tree for the `@` file menu: root entries plus one directory level. */
+async function loadWorkspaceFileRefs(sessionId: string): Promise<WorkspaceFileRef[]> {
+  const tools = requireSessionTools()
+  const refs: WorkspaceFileRef[] = []
+  const root = await tools.listFiles(sessionId, '')
+  const directories = root.entries.filter(entry => entry.type === 'directory' && !entry.name.startsWith('.'))
+  for (const entry of root.entries) {
+    if (entry.name.startsWith('.')) continue
+    refs.push({ path: entry.name, kind: entry.type === 'directory' ? 'directory' : 'file' })
+  }
+  await Promise.all(directories.slice(0, 12).map(async directory => {
+    try {
+      const listing = await tools.listFiles(sessionId, directory.name)
+      for (const entry of listing.entries) {
+        if (entry.name.startsWith('.')) continue
+        refs.push({ path: `${directory.name}/${entry.name}`, kind: entry.type === 'directory' ? 'directory' : 'file' })
+      }
+    } catch {
+      // Unreadable directories are simply absent from the menu.
+    }
+  }))
+  return refs
+}
+
+
+
+function relativeTime(timestamp: number): string {
+  const delta = Math.max(0, Date.now() - timestamp)
+  if (delta < 60_000) return zhCN.time.justNow
+  if (delta < 3_600_000) return zhCN.time.minutesAgo(Math.floor(delta / 60_000))
+  if (delta < 86_400_000) return zhCN.time.hoursAgo(Math.floor(delta / 3_600_000))
+  return new Date(timestamp).toLocaleDateString(zhCN.time.locale)
+}
+
+/** Resolve image dimensions for files that arrive without picker metadata (document picker). */
+function imageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(uri, (width, height) => resolve({ width, height }), reject)
+  })
+}
+
+/** Official built-in mode copy, mirroring the DSH client "ui-agent-preset" locales. */
+function builtinPresetName(id: string): string | undefined {
+  switch (id) {
+    case 'standard': return zhCN.chat.presetStandardName
+    case 'ptc': return zhCN.chat.presetPtcName
+    case 'minimal': return zhCN.chat.presetMinimalName
+    case 'cordis': return zhCN.chat.presetCordisName
+    default: return undefined
+  }
+}
+
+function builtinPresetDescription(id: string): string | undefined {
+  switch (id) {
+    case 'standard': return zhCN.chat.presetStandardDescription
+    case 'ptc': return zhCN.chat.presetPtcDescription
+    case 'minimal': return zhCN.chat.presetMinimalDescription
+    case 'cordis': return zhCN.chat.presetCordisDescription
+    default: return undefined
+  }
+}
+
+/** Host roster name, with official Chinese copy for the built-in presets. */
+function agentPresetName(option: AgentPresetOption): string {
+  return builtinPresetName(option.id) ?? option.name ?? option.id
+}
+
+function agentPresetDescription(option: AgentPresetOption): string | undefined {
+  return builtinPresetDescription(option.id) ?? option.description
+}
+
+/** Official Chinese copy for the permission presets (DSH "ui-permission-presets"). */
+function permissionDisplayName(value: string, fallback?: string): string {
+  switch (value) {
+    case 'read-only': return zhCN.chat.permissionReadOnly
+    case 'workspace-write': return zhCN.chat.permissionWorkspaceWrite
+    case 'danger-full-access': return zhCN.chat.permissionFullAccess
+    default: return fallback ?? value
+  }
+}
+
+function permissionDisplayDescription(value: string, fallback?: string): string | undefined {
+  switch (value) {
+    case 'read-only': return zhCN.chat.permissionReadOnlyDescription
+    case 'workspace-write': return zhCN.chat.permissionWorkspaceWriteDescription
+    case 'danger-full-access': return zhCN.chat.permissionFullAccessDescription
+    default: return fallback
+  }
 }
 
 function sessionTitle(session: RemoteSession): string {
@@ -728,27 +1793,80 @@ function sessionTitle(session: RemoteSession): string {
   return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
 }
 
-const ChatItemView = memo(function ChatItemView({ item, busyAction, onApproval, onQuestion }: {
+/** Match the Web turn disclosure: process first, final answer always visible. */
+const ChatProcessGroup = memo(function ChatProcessGroup({ items, busyAction, onApproval, onQuestion }: {
+  items: ChatItem[]
+  busyAction?: string
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const [open, setOpen] = useState(false)
+  const last = items.at(-1)
+  const running = items.some(isActiveChatItem)
+  const pendingDecision = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
+  const hasAnswer = !running && last?.kind === 'message' && last.role === 'assistant'
+    && (hasVisibleMessageText(last.text) || (last.images?.length ?? 0) > 0)
+  const failed = !hasAnswer && last?.kind === 'tool' && last.state === 'failed'
+  const answer = hasAnswer && !failed ? last : undefined
+  const processItems = answer === undefined ? items : items.slice(0, -1)
+  const answerReasoning = answer?.kind === 'message' && hasVisibleMessageText(answer.reasoning ?? '') ? answer : undefined
+  const hasDetails = processItems.length > 0 || answerReasoning !== undefined
+  if (!hasDetails && answer !== undefined) return <MessageBubble item={answer} compact />
+  const alwaysOpen = failed || pendingDecision || (!running && answer === undefined)
+  const expanded = alwaysOpen || open
+  const summaryItem = [...processItems, ...(answerReasoning === undefined ? [] : [answerReasoning])].at(-1)
+  const summary = running
+    ? summaryItem?.kind === 'tool' ? compactActivityText(summaryItem.summary ?? summaryItem.arguments)
+      : summaryItem?.kind === 'message' ? compactActivityText(summaryItem.reasoning)
+        : undefined
+    : undefined
+  const label = running ? zhCN.chat.processRunning : failed ? zhCN.chat.failed : zhCN.chat.completed
+  return <View style={styles.processGroup}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ expanded, disabled: alwaysOpen || !hasDetails }}
+      disabled={alwaysOpen || !hasDetails}
+      onPress={() => setOpen(value => !value)}
+      style={({ pressed }) => [styles.processHeader, pressed && styles.reasoningHeaderPressed]}
+    >
+      <Sparkles size={16} color={running ? colors.accent : colors.muted} />
+      <Text style={[styles.reasoningLabel, running && styles.reasoningLabelActive]}>{label}</Text>
+      {summary !== undefined && <Text style={styles.reasoningPreview} numberOfLines={1}>{summary}</Text>}
+      {hasDetails && !alwaysOpen && (expanded ? <ChevronDown size={17} color={colors.muted} /> : <ChevronRight size={17} color={colors.muted} />)}
+    </Pressable>
+    {expanded && <View style={styles.processBody}>
+      {processItems.map(item => <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+      {answerReasoning !== undefined && <ReasoningDisclosure key={`${answerReasoning.id}:reasoning`} item={answerReasoning} />}
+    </View>}
+    {answer !== undefined && <MessageBubble item={answer} compact />}
+  </View>
+})
+
+const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion }: {
   item: ChatItem
   busyAction?: string
+  compact: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
 }) {
   if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
-  if (item.kind === 'tool') return <ToolRow item={item} />
-  if (item.role === 'assistant'
+  if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
+  if (!compact && item.role === 'assistant'
     && !hasVisibleMessageText(item.text)
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} />
+  return <MessageBubble item={item} compact={compact} />
 })
 
-function MessageBubble({ item }: { item: ChatMessage }) {
+function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
-  const showReasoning = remote && hasVisibleMessageText(item.reasoning ?? '')
+  const showReasoning = !compact && remote && hasVisibleMessageText(item.reasoning ?? '')
   const showText = hasVisibleMessageText(item.text)
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
@@ -781,6 +1899,7 @@ function MessageBubble({ item }: { item: ChatMessage }) {
             <StreamingCursor />
           </View>
         )}
+        {!item.streaming && showText && <MessageActions item={item} />}
       </View>
     )
   }
@@ -836,13 +1955,13 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
   )
 }
 
-function ToolRow({ item }: { item: ToolActivity }) {
+function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [expanded, setExpanded] = useState(false)
   const stateText = item.state === 'running' ? zhCN.status.running : item.state === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const detail = compactActivityText(item.summary ?? item.arguments)
-  const hasDetail = item.callDetail !== undefined || item.resultDetail !== undefined
+  const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
       <Pressable
@@ -1020,35 +2139,24 @@ function QuestionCard({ item, busy, onRespond }: {
   )
 }
 
-function WelcomeMessage({ backend }: { backend?: 'harness' | 'codex' | 'cursor' }) {
+function WelcomeMessage() {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const title = backend === 'codex'
-    ? zhCN.chat.codexWelcomeTitle
-    : backend === 'cursor'
-      ? zhCN.chat.cursorWelcomeTitle
-      : zhCN.chat.welcomeTitle
-  const body = backend === 'codex'
-    ? zhCN.chat.codexWelcomeBody
-    : backend === 'cursor'
-      ? zhCN.chat.cursorWelcomeBody
-      : zhCN.chat.welcomeBody
   return (
     <View style={styles.welcome}>
-      <View style={styles.welcomeIcon}><Bot size={25} color={colors.primary} /></View>
-      <Text style={styles.welcomeTitle}>{title}</Text>
-      <Text style={styles.welcomeBody}>{body}</Text>
-    </View>
-  )
-}
-
-function GeneratingIndicator() {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  return (
-    <View style={styles.generatingIndicator} accessibilityRole="progressbar" accessibilityLabel={zhCN.chat.generating}>
-      <ActivityIndicator size="small" color={colors.accent} />
-      <Text style={styles.generatingText}>{zhCN.chat.generating}</Text>
+      <Svg
+        width={76}
+        height={(76 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+        viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+      >
+        <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+      </Svg>
+      <View style={styles.welcomeRow}>
+        <Text style={styles.welcomeSlogan}>{zhCN.chat.welcomeSlogan}</Text>
+        <View style={styles.welcomeBadge}>
+          <Text style={styles.welcomeBadgeText}>{zhCN.chat.welcomeBadge}</Text>
+        </View>
+      </View>
     </View>
   )
 }
@@ -1069,6 +2177,51 @@ function StreamingCursor() {
   return <Animated.View style={[styles.streamingCursor, { opacity }]} accessibilityLabel={zhCN.chat.generating} />
 }
 
+function ReplyStatusDots() {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const progress = useRef(new Animated.Value(0)).current
+  const [reduceMotion, setReduceMotion] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    void AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
+      if (mounted) setReduceMotion(enabled)
+    })
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
+    return () => {
+      mounted = false
+      subscription.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const animation = Animated.loop(Animated.timing(progress, {
+      toValue: 3,
+      duration: 900,
+      useNativeDriver: true,
+    }))
+    animation.start()
+    return () => animation.stop()
+  }, [progress, reduceMotion])
+
+  return (
+    <View style={styles.replyDots} importantForAccessibility="no-hide-descendants">
+      {[0, 1, 2].map(index => (
+        <Animated.Text
+          key={index}
+          style={[styles.replyDot, { color: colors.accent, opacity: reduceMotion ? 1 : progress.interpolate({
+              inputRange: [index, index + 0.5, index + 1],
+              outputRange: [0.25, 1, 0.25],
+              extrapolate: 'clamp',
+            }) }]}
+        >·</Animated.Text>
+      ))}
+    </View>
+  )
+}
+
 function isActiveChatItem(item: ChatItem): boolean {
   if (item.kind === 'message') return item.streaming === true
   if (item.kind === 'tool') return item.state === 'running'
@@ -1079,19 +2232,23 @@ function isActiveChatItem(item: ChatItem): boolean {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  sessionControls: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  modelChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 8, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },
-  permissionChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 8, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
+  modelChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },
+  permissionChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.primarySoft },
   permissionChipDisabled: { opacity: 0.52 },
   modelChipText: { ...type.smallStrong, color: colors.ink, flexShrink: 1 },
   olderButton: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   olderText: { ...type.smallStrong, color: colors.primary },
   modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
-  modalSheet: { maxHeight: '70%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
+  // Keep the sheet above the full-screen dismiss target on Android. Without an
+  // explicit stacking order, the transparent backdrop can win hit testing on
+  // some RN/Android combinations even though it is rendered first.
+  modalSheet: { zIndex: 1, elevation: 1, maxHeight: '70%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
   modalHeaderCopy: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   modalTitle: { ...type.heading, color: colors.ink, flexShrink: 1 },
   modalListContent: { paddingBottom: spacing.xs },
+  pickerHint: { ...type.caption, color: colors.muted, marginBottom: spacing.sm },
+  pickerEmpty: { paddingVertical: spacing.md, gap: spacing.sm, alignItems: 'flex-start' },
   modelGroupBlock: { marginBottom: spacing.md },
   modelGroupTitle: { ...type.caption, color: colors.muted, textTransform: 'uppercase', marginBottom: spacing.xs },
   modelOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginBottom: spacing.xs },
@@ -1134,8 +2291,9 @@ function createStyles(colors: ThemeColors) {
   reasoningPreview: { ...type.small, color: colors.muted, flex: 1 },
   activitySeparator: { ...type.small, color: colors.subtle },
   reasoningBody: { backgroundColor: colors.surface, padding: spacing.sm, marginHorizontal: spacing.xs, marginBottom: spacing.xs, borderRadius: radius.sm },
-  generatingIndicator: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, marginVertical: spacing.xs },
-  generatingText: { ...type.small, color: colors.muted },
+  processGroup: { alignSelf: 'stretch' },
+  processHeader: { minHeight: 48, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  processBody: { paddingLeft: spacing.xs, gap: spacing.xxs },
   streamingCursor: { width: 7, height: 16, backgroundColor: colors.accent, borderRadius: 2, marginTop: 3 },
   toolCard: { borderRadius: radius.md, overflow: 'hidden' },
   toolCardExpanded: { backgroundColor: colors.surface },
@@ -1176,28 +2334,54 @@ function createStyles(colors: ThemeColors) {
   optionDotChosen: { borderColor: colors.accent, backgroundColor: colors.accent },
   optionLabel: { ...type.small, color: colors.ink, flex: 1 },
   welcome: { alignItems: 'center', paddingHorizontal: spacing.xl },
-  welcomeIcon: { width: 52, height: 52, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
-  welcomeTitle: { ...type.heading, color: colors.ink },
-  welcomeBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs, maxWidth: 340 },
-  composerWrap: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
-  quickActions: { gap: spacing.md, paddingHorizontal: spacing.xxs, paddingBottom: spacing.xs },
-  quickAction: { minHeight: 32, justifyContent: 'center' },
-  quickActionText: { ...type.smallStrong, color: colors.primary },
-  quickActionPressed: { opacity: 0.6 },
-  quickActionDisabled: { color: colors.disabled },
+  welcomeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  welcomeSlogan: { ...type.heading, color: colors.ink },
+  welcomeBadge: { borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, paddingHorizontal: spacing.sm, paddingVertical: 3, marginTop: 2 },
+  welcomeBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
+  mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
+  composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
+
+  replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
+  replyStatusText: { ...type.caption, color: colors.accent },
+  replyDots: { flexDirection: 'row', alignItems: 'center', marginLeft: -spacing.xs },
+  replyDot: { ...type.caption, fontSize: 18, lineHeight: 18, fontWeight: '700' },
   imageTray: { gap: spacing.xs, paddingBottom: spacing.xs },
   imagePreviewWrap: { width: 72, height: 72 },
   imagePreview: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong },
   removeImageButton: { position: 'absolute', right: -3, top: -3, width: 24, height: 24, borderRadius: radius.pill, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
-  composer: { minHeight: 52, maxHeight: 144, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, flexDirection: 'row', alignItems: 'flex-end', paddingLeft: spacing.sm, paddingRight: 5, paddingVertical: 5 },
-  attachButton: { width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  attachPressed: { backgroundColor: colors.primarySoft },
-  composerInput: { ...type.body, color: colors.ink, flex: 1, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingLeft: spacing.xs },
-  sendButton: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  composerCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: colors.background, paddingHorizontal: spacing.xs, paddingTop: spacing.xxs, paddingBottom: spacing.xs, gap: spacing.xxs },
+  composerControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: 2 },
+  composerSpacer: { flex: 1 },
+  // Keep the actual target at the Android 48dp minimum. hitSlop is not
+  // reliable when a control sits inside a clipped/native text-input surface.
+  plusButton: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
+  plusPressed: { opacity: 0.7 },
+  plusDisabled: { opacity: 0.52 },
+  plusMenuOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, marginBottom: spacing.xs },
+  plusMenuOptionPressed: { backgroundColor: colors.surfaceStrong },
+  plusMenuOptionDisabled: { opacity: 0.5 },
+  plusMenuOptionText: { ...type.body, color: colors.ink, flex: 1 },
+  plusCardRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
+  plusCard: { flex: 1, minHeight: 76, alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.xxs, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  plusCardText: { ...type.smallStrong, color: colors.ink },
+  plusMenuOptionValue: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  plusMenuOptionValueText: { ...type.small, color: colors.muted, flexShrink: 1 },
+  modeLoading: { paddingVertical: spacing.lg, alignItems: 'center' },
+  effortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, marginTop: spacing.xs },
+  effortRowLabel: { ...type.smallStrong, color: colors.ink },
+  effortRowValue: { ...type.small, color: colors.muted, flexShrink: 1 },
+  composerInputWrap: { position: 'relative' },
+
+  composerInput: { ...type.body, color: colors.ink, minHeight: 40, maxHeight: 126, paddingVertical: 8, paddingHorizontal: spacing.sm, textAlignVertical: 'top' },
+
+  sendButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendPressed: { backgroundColor: colors.primaryPressed },
-  stopButton: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
+  stopButton: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
   stopPressed: { opacity: 0.78 },
   sendDisabled: { backgroundColor: colors.disabled },
   composerHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: 5 },
+  promptInputLabel: { ...type.caption, color: colors.muted, marginBottom: 4, marginTop: 4 },
+  promptInput: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.ink, paddingHorizontal: spacing.sm, paddingVertical: 8, ...type.body, minHeight: 40 },
+  promptTextArea: { minHeight: 88, textAlignVertical: 'top' },
   })
 }

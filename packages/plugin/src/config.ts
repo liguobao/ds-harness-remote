@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 
@@ -9,6 +10,9 @@ export interface Config {
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
   deviceName?: string
+  terminal?: { enabled?: boolean }
+  hostControl?: { enabled?: boolean }
+  loopback?: { ports?: number[] }
   forceRelay?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
   reconnect?: boolean | {
@@ -26,6 +30,7 @@ export interface Config {
     enabled?: boolean
     binary?: string
   }
+  acp?: { enabled?: boolean; backends?: Array<{ id:string; enabled?: boolean; command?: string; args?: string[]; cwd?: string }>; backend?: string; command?: string; args?: string[]; cwd?: string }
 }
 
 export interface ResolvedCodexConfig {
@@ -51,16 +56,36 @@ export interface ResolvedConfig {
     maxDelayMs: number
     jitter: number
   }
+  terminal: { enabled: boolean }
+  hostControl?: { enabled: boolean }
+  loopback: { ports: number[] }
   codex: ResolvedCodexConfig
   cursor: ResolvedCursorConfig
+  acp?: { enabled: boolean; backends: Array<{ id:string; enabled:boolean; command:string; args:string[]; cwd?:string }> }
 }
 
-/** Cordis-facing configuration shape; runtime bounds are enforced by resolveConfig. */
-export const Config: s<Config> = s.object({
+/** The entry's volatile Cordis config: one stable reference for the whole section. */
+export type EntryConfig = Volatile<Config>
+
+/** Config accepted by {@link resolveConfig}: the composition seed or a live snapshot. */
+export type ConfigInput = Config | VolatileSnapshot<Config>
+
+/**
+ * Schemastery schema for the plugin entry. On DSH 0.1.7-rc.1 and newer the
+ * whole section is `.volatile()` (DSH-0.1.7-RC1-04): the Loader hands `apply`
+ * a single live reference whose `.get()` always returns the latest committed
+ * value, and the settings service persists edits in the active profile's
+ * `cordis.patch.yml` under this entry id. On older hosts the helper above keeps
+ * the plain schema required by the namespace-registration API.
+ */
+const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
   deviceName: s.string(),
+  terminal: s.object({ enabled: s.boolean() }),
+  hostControl: s.object({ enabled: s.boolean() }),
+  loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
   reconnect: s.union([
@@ -79,7 +104,23 @@ export const Config: s<Config> = s.object({
     enabled: s.boolean(),
     binary: s.string(),
   }),
+  acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id:s.string(), enabled:s.boolean(), command:s.string(), args:s.array(s.string()), cwd:s.string() })) }),
 })
+
+/**
+ * Mark the entry as live-editable when the host Schemastery supports the
+ * 0.1.7 volatile schema mode. Older DSH releases ship an earlier Schemastery
+ * where the method does not exist; their settings registry expects the plain
+ * schema and must still be able to import the plugin without throwing.
+ */
+export function withVolatileSchema<T>(schema: T): T {
+  const volatile = (schema as { volatile?: unknown }).volatile
+  return typeof volatile === 'function'
+    ? (volatile as (this: T) => T).call(schema)
+    : schema
+}
+
+export const Config: s<Config> = withVolatileSchema(entryConfigSchema) as unknown as s<Config>
 
 const reconnectSchema = z.union([
   z.boolean(),
@@ -95,6 +136,9 @@ const configSchema = z.object({
   role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
+  terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+  hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+  loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   reconnect: reconnectSchema.optional(),
@@ -106,9 +150,10 @@ const configSchema = z.object({
     enabled: z.boolean().optional(),
     binary: z.string().trim().min(1).max(4096).optional(),
   }).strict().optional(),
+  acp: z.object({ enabled:z.boolean().optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
 }).strict()
 
-export function resolveConfig(input: Config = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
+export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const parsed = configSchema.parse(input)
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
@@ -123,6 +168,9 @@ export function resolveConfig(input: Config = {}, env: NodeJS.ProcessEnv = proce
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
     deviceName: parsed.deviceName ?? hostname(),
+    hostControl: { enabled: parsed.hostControl?.enabled ?? true },
+    terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },
+    loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     logLevel: parsed.logLevel ?? 'info',
     reconnect: {
@@ -140,6 +188,7 @@ export function resolveConfig(input: Config = {}, env: NodeJS.ProcessEnv = proce
       enabled: parsed.cursor?.enabled ?? false,
       binary: parsed.cursor?.binary ?? 'agent',
     },
+    acp: { enabled: parsed.acp?.enabled ?? true, backends: [...new Set(['codex','cursor','kimi',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? ['acp'], ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },
   }
 }
 

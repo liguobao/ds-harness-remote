@@ -17,11 +17,13 @@ import {
   TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
+import { TerminalPolicy, TERMINAL_CALLS, TERMINAL_STREAMS } from './terminal-policy.js'
 import { harnessSessionGeneration } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
 import { listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
+import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
 
 type PublishRemoteFrame = (
   event: 'harness.remote.frame' | 'harness.remote.stream.closed',
@@ -123,6 +125,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'messageFeedback/list',
   'messageFeedback/put',
   'pluginInventory/list',
+  'permissionPresets/catalog',
   'session/attachment',
   'session/cancel',
   'session/canOpenWorkspacePath',
@@ -134,6 +137,9 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'session/modelCatalog',
   'session/page',
   'session/prompt',
+  'session/projections',
+  'session/initializeDefaultModel',
+  'session/workspacePathApplications',
   'session/rename',
   'session/search',
   'session/selectModel',
@@ -147,6 +153,15 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'subagents/interruptByParent',
   'subagents/list',
   'subagents/prompt',
+  'workspaceFiles/list',
+  'workspaceFiles/stat',
+  'workspaceFiles/read',
+  'workspaceFiles/readBytes',
+  'workspaceFiles/readAll',
+  'workspaceFiles/readRelated',
+  'workspaceFiles/changes',
+  'officeToPdf/render',
+  'officeToPdf/generation',
   'workspace/archiveSession',
   'workspace/create',
   'workspace/delete',
@@ -154,6 +169,10 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspace/insertBefore',
   'workspace/insertSessionBefore',
   'workspace/rename',
+  'workspace/unarchiveSession',
+  'workspace/initializeDefault',
+  'workspace/pinSession',
+  'workspace/unpinSession',
 ] as const
 
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
@@ -169,20 +188,44 @@ export class HarnessRemoteBridge {
     private readonly publish: PublishRemoteFrame,
     private readonly logger?: SafeLogger,
     private readonly harnessVersion?: string,
+    private readonly terminal = new TerminalPolicy(() => false, "", new Map()),
+    private readonly codexWorkspace?: CodexWorkspaceBridge,
   ) {}
 
   async call(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
     this.assertAllowed(params.endpoint)
+    if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
+    if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
+      const args = requestArgs(params.payload)
+      if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {
+        throw new RpcError('PERMISSION_DENIED', 'Remote access settings can only be changed locally on the Host.')
+      }
+    }
+    const reservation = params.endpoint.startsWith('terminal/') ? this.terminal.check(params.endpoint, params.payload) : undefined
+    let codexResult: TypertRpcResult | undefined
+    if (this.codexWorkspace !== undefined) {
+      try {
+        codexResult = await this.codexWorkspace.call(params.endpoint, params.payload, AbortSignal.timeout(60_000))
+      } catch (error) {
+        // A failed allocation must release the device ownership it reserved.
+        if (reservation !== undefined) {
+          this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
+        }
+        throw error
+      }
+    }
+    if (codexResult !== undefined) return reservation === undefined ? codexResult : this.terminal.result(params.endpoint, params.payload, codexResult, reservation)
     if (params.endpoint === 'session/canOpenWorkspacePath') {
       return { ok: true, value: true }
     }
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
+      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-        : await this.gateway.dispatch(params.endpoint, params.payload, signal)
+        : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -190,8 +233,9 @@ export class HarnessRemoteBridge {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
       })
-      return result
+      return reservation === undefined ? result : this.terminal.result(params.endpoint, params.payload, result, reservation)
     } catch (error) {
+      if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
       if (params.endpoint === 'directoryPicker/list') {
         const result = await this.directoryList(params.payload, signal)
         this.logger?.debug('harness remote call ok', {
@@ -325,13 +369,25 @@ export class HarnessRemoteBridge {
   async openStream(input: unknown): Promise<{ opened: true; streamId: string }> {
     const params = streamOpenSchema.parse(input) as HarnessRemoteStreamOpenParams
     this.assertAllowed(params.endpoint)
+    if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
+    if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
+    if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)
     if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The Harness Remote stream is already open.')
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError('RATE_LIMITED', 'Too many Harness Remote streams are open.', undefined, true)
     }
     const controller = new AbortController()
-    const source = await this.gateway.open(params.endpoint, params.payload, controller.signal)
     this.streams.set(params.streamId, { controller })
+    let source: AsyncIterable<unknown>
+    try {
+      source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
+        ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal)
+      controller.signal.throwIfAborted()
+    } catch (error) {
+      this.streams.delete(params.streamId)
+      controller.abort()
+      throw error
+    }
     void this.pump(params.streamId, source, controller.signal)
     return { opened: true, streamId: params.streamId }
   }
@@ -352,10 +408,11 @@ export class HarnessRemoteBridge {
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     for (const [, stream] of streams) stream.controller.abort(reason)
+    await this.codexWorkspace?.closeAll()
   }
 
   private assertAllowed(endpoint: string): void {
-    if (!allowedEndpoints.has(endpoint)) {
+    if (!allowedEndpoints.has(endpoint) && !TERMINAL_CALLS.has(endpoint) && !TERMINAL_STREAMS.has(endpoint)) {
       throw new RpcError('METHOD_NOT_ALLOWED', 'The requested Harness Remote endpoint is not allowed.')
     }
     if (endpoint === '$events' && !this.gateway.supportsCarrier) {
@@ -394,6 +451,55 @@ export class HarnessRemoteBridge {
     for (const [id, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id)
     for (const [id, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id)
   }
+}
+
+/**
+ * DSH 0.1.7 changed workspaceFiles/changes from a Session-wide feed to a
+ * target-scoped feed that requires `path`. Older Web/Client bundles still
+ * open the Session-wide form. Keep that request working on a 0.1.7 Host by
+ * watching the workspace root; the legacy client continues filtering frames
+ * by the file it has opened. Do not add the field to older Hosts, whose
+ * generated Typert schema rejects unknown arguments.
+ */
+function normalizeWorkspaceChangesPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+  if (endpoint !== 'workspaceFiles/changes' || !requiresWorkspaceChangePath(harnessVersion)) return payload
+  if (!isRecord(payload) || !isRecord(payload.args) || Object.hasOwn(payload.args, 'path')) return payload
+  return { ...payload, args: { ...payload.args, path: '.' } }
+}
+
+/**
+ * DSH 0.1.7 nests the byte range under `options`, while older clients send
+ * it directly on the request args. Keep the translation Host-version gated:
+ * older generated descriptors reject the new `options` field.
+ */
+function normalizeWorkspaceRequestPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+  if (!isRecord(payload) || !isRecord(payload.args)) return payload
+  const args = payload.args
+  if (endpoint === 'workspaceFiles/readBytes' && requiresWorkspaceChangePath(harnessVersion)) {
+    if (!Object.hasOwn(args, 'range') || Object.hasOwn(args, 'options')) return payload
+    const { range, ...rest } = args
+    return { ...payload, args: { ...rest, options: { range } } }
+  }
+  // DSH 0.2 removes the first-use naming request; accept a legacy client
+  // payload while keeping the generated 0.2 endpoint's zero-argument shape.
+  if (endpoint === 'workspace/initializeDefault' && isDshV02OrNewer(harnessVersion) && Object.hasOwn(args, 'request')) {
+    const { request: _request, ...rest } = args
+    return { ...payload, args: rest }
+  }
+  return payload
+}
+
+function isDshV02OrNewer(version: string | undefined): boolean {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
+  if (match === null) return false
+  return Number(match[1]) === 0 && Number(match[2]) >= 2
+}
+
+function requiresWorkspaceChangePath(version: string | undefined): boolean {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
+  if (match === null) return false
+  return Number(match[1]) === 0
+    && ((Number(match[2]) === 1 && Number(match[3]) >= 7) || Number(match[2]) === 2)
 }
 
 async function dispatchCommandForHost(

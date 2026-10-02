@@ -36,6 +36,7 @@ interface CliHostApi {
   bindIdentity(identity: HostIdentity): void
   authenticate(identity?: HostIdentity): Promise<ServerCredentials>
   revokeCurrentDevice(): Promise<void>
+  authorizeHostWithCode(identity: HostIdentity, code: string): Promise<DeviceAuthorization>
 }
 
 export interface RemoteCliDependencies {
@@ -69,6 +70,7 @@ export async function runCli(
   const [command, ...rest] = args
   try {
     if (command === 'login') return await login(rest, runtime)
+    if (command === 'register') return await register(rest, runtime)
     if (command === 'status') return await status(rest, runtime)
     if (command === 'logout') return await logout(rest, runtime)
     if (command === 'help' || command === '--help' || command === '-h' || command === undefined) {
@@ -81,6 +83,16 @@ export async function runCli(
     if (error instanceof CliUsageError) write(runtime.stderr, `\n${helpText()}`)
     return error instanceof CliUsageError ? 2 : 1
   }
+}
+
+async function register(args: readonly string[], runtime: CliRuntime): Promise<number> {
+  if (args.length !== 1 || args[0] === undefined || args[0].trim() === '') {
+    throw new CliUsageError('Usage: ds-harness-remote register <server-token>')
+  }
+  const context = await hostContext(runtime)
+  await context.api.authorizeHostWithCode(context.identity, args[0])
+  write(runtime.stdout, 'Remote Host registration complete. Restart dsh-tui to bring the Remote Host online.\n')
+  return 0
 }
 
 async function login(args: readonly string[], runtime: CliRuntime): Promise<number> {
@@ -316,6 +328,7 @@ function helpText(): string {
   return [
     'Usage:',
     '  ds-harness-remote login [github|zhihu]',
+    '  ds-harness-remote register <server-token>',
     '  ds-harness-remote status',
     '  ds-harness-remote logout',
     '',

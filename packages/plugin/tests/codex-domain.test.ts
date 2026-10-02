@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,11 +21,15 @@ afterEach(async () => {
 
 describe('CodexRemoteDomain', () => {
   it('discovers the ChatGPT-bundled Codex only for the default macOS command', () => {
-    expect(codexBinaryCandidates('codex', 'darwin', '/Users/tester')).toEqual([
-      '/Applications/ChatGPT.app/Contents/Resources/codex',
-      '/Users/tester/Applications/ChatGPT.app/Contents/Resources/codex',
-      'codex',
-    ])
+    const candidates = codexBinaryCandidates('codex', 'darwin', '/Users/tester')
+    expect(candidates).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
+    expect(candidates).toContain('/Users/tester/Applications/ChatGPT.app/Contents/Resources/codex')
+    expect(candidates.at(-1)).toBe('codex')
+    const bundled = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
+    if (existsSync(bundled)) {
+      expect(candidates[0]).toBe(bundled)
+      expect(candidates.indexOf(bundled)).toBeLessThan(candidates.indexOf('/Applications/ChatGPT.app/Contents/Resources/codex'))
+    }
     expect(codexBinaryCandidates('/custom/codex', 'darwin', '/Users/tester')).toEqual(['/custom/codex'])
     expect(codexBinaryCandidates('codex', 'linux', '/home/tester')).toEqual(['codex'])
   })

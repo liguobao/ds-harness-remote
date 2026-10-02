@@ -49,6 +49,9 @@ packages/plugin/src/
   typert-gateway-switch.ts    alpha Gateway unary/stream/event 目标切换
   client-runtime.ts           Desktop Client runtime
   control-runtime.ts          loopback-only 设置与账号授权控制面
+  control-route.ts            loopback control 的 HTTP/RPC 路由与信任校验
+  control-stream.ts           loopback status 事件流（SSE）与变更采样
+  status-stream.ts            Web 侧 status 推送订阅与 unary 轮询降级
   client-secure-transport.ts  Client Noise IK
   client.ts                   Desktop Web client face
   logging.ts                  脱敏日志
@@ -172,6 +175,20 @@ Desktop UI 不提供 Client 模式切换。侧边栏始终只有一个 Remote �
 - 选择已有 Workspace，或浏览远端目录后调用 `workspace.create`；
 - Remote 激活后显示独立顶部 Header、连接链路、端到端加密说明和退出链接。
 
+### Loopback status 推送
+
+Harness Web UI 内的 Host 状态不轮询 unary `status`：
+
+- Host 在 `/ds-harness-remote/status.events` 暴露 `text/event-stream`；连接建立后先推送一次完整
+  status，之后仅在采样值变化时推送新帧，空闲时只发 SSE comment 保活，重连后首帧仍是完整 status；
+- 采样只存在于 Host 进程内且仅在有订阅者时运行，浏览器侧不存在固定间隔的 status 调用；
+- 事件流与 unary `status` 共用同一个读取实现，推送值与轮询结果不会分叉；
+- 老 Host 只提供 POST RPC 通道或无 Web server prefix 路由时返回非 2xx，浏览器按 SSE 永久失败
+  处理并退回原来的 1.5s unary `status` 读取；老 Client 行为不变，因此无需版本协商。
+
+Remote 连接进度（单次 `mode.set` 动作内）与账号二维码登录（用户交互流程）仍按各自节奏读取
+`status`。
+
 ## 6. 安全连接
 
 业务桥只在以下条件全部成立后可见：
@@ -205,5 +222,7 @@ alpha 的 eventId/clientId 关联由官方 Gateway 验证。状态按 `connectio
 - Local/Remote switch 可逆，远端断开回落 Local。
 - File Viewer 只允许 stat/list/受限 range read，超限和未安装依赖 fail closed。
 - Host/Client account token 与 device token 隔离，主机匹配码单次消费，refresh single-flight。
+- loopback status 事件流首帧即完整 status、仅在变化时推送、空闲保活、客户端断开后停止采样，
+  并且事件流不可用时降级到 unary `status`、不会在可用时读取 unary `status`。
 
 Android 和 VS Code Client 使用相同 rc.2 ApiProxy / v0.1.2 Typert Remote capability 探测；其 UI 和生命周期独立，不构成 Desktop Plugin 的组件兼容要求。

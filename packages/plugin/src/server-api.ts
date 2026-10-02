@@ -3,7 +3,7 @@ import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { HostIdentity } from './identity-store.js'
-import type { ServerCredentialStore, ServerCredentials } from './server-credentials.js'
+import { ServerCredentialsBusyError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
 import { normalizeServerUrl } from './config.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -85,6 +85,12 @@ export class HostServerApi {
       method: this.credentials.authorizationMethod,
       ...(this.credentials.account === undefined ? {} : { account: this.credentials.account }),
     }
+  }
+
+  /** Check the persisted device credential without issuing or refreshing one. */
+  async hasStoredAuthorization(): Promise<boolean> {
+    const identity = this.requireIdentity()
+    return await this.store.load(this.baseUrl, identity.deviceId) !== undefined
   }
 
   async clearAuthorization(): Promise<void> {
@@ -235,22 +241,51 @@ export class HostServerApi {
     return this.credentials
   }
 
-  async refreshCredentials(): Promise<ServerCredentials> {
+  async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken): Promise<ServerCredentials> {
     const identity = this.requireIdentity()
-    const stored = await this.store.load(this.baseUrl, identity.deviceId)
-    if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity)
-    const tokens = await this.publicRequest<TokenPair>('/api/v1/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ deviceId: identity.deviceId, refreshToken: stored.refreshToken }),
+    this.credentials = await this.withRefreshLock(async () => {
+      // Another process may have rotated the token while we waited for the lock.
+      const stored = await this.store.load(this.baseUrl, identity.deviceId)
+      if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity)
+      if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 30_000) {
+        return stored
+      }
+      return this.rotateCredentials(identity, stored)
     })
-    this.credentials = await this.store.save({
+    return this.credentials
+  }
+
+  private async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await this.store.withRefreshLock(operation)
+    } catch (error) {
+      if (error instanceof ServerCredentialsBusyError) {
+        throw new ServerApiError(error.code, error.message, false)
+      }
+      throw error
+    }
+  }
+
+  private async rotateCredentials(identity: HostIdentity, stored: ServerCredentials): Promise<ServerCredentials> {
+    let tokens: TokenPair
+    try {
+      tokens = await this.publicRequest<TokenPair>('/api/v1/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ deviceId: identity.deviceId, refreshToken: stored.refreshToken }),
+      })
+    } catch (error) {
+      if (error instanceof ServerApiError) {
+        throw new ServerApiError(error.code, error.message, error.retryable, error.status, 'credential_refresh')
+      }
+      throw error
+    }
+    return this.store.save({
       serverUrl: this.baseUrl,
       deviceId: identity.deviceId,
       authorizationMethod: stored.authorizationMethod,
       ...(stored.account === undefined ? {} : { account: stored.account }),
       ...validateTokens(tokens),
     })
-    return this.credentials
   }
 
   async listDevices(): Promise<ServerHostDevice[]> {
@@ -282,21 +317,13 @@ export class HostServerApi {
   }
 
   private async loadOrIssue(identity: HostIdentity): Promise<ServerCredentials> {
-    const stored = await this.store.load(this.baseUrl, identity.deviceId)
-    if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now() + 30_000) {
-      return this.register(identity)
-    }
-    if (stored.accessTokenExpiresAt > Date.now() + 30_000) return stored
-    const tokens = await this.publicRequest<TokenPair>('/api/v1/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ deviceId: identity.deviceId, refreshToken: stored.refreshToken }),
-    })
-    return this.store.save({
-      serverUrl: this.baseUrl,
-      deviceId: identity.deviceId,
-      authorizationMethod: stored.authorizationMethod,
-      ...(stored.account === undefined ? {} : { account: stored.account }),
-      ...validateTokens(tokens),
+    return this.withRefreshLock(async () => {
+      const stored = await this.store.load(this.baseUrl, identity.deviceId)
+      if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now() + 30_000) {
+        return this.register(identity)
+      }
+      if (stored.accessTokenExpiresAt > Date.now() + 30_000) return stored
+      return this.rotateCredentials(identity, stored)
     })
   }
 
@@ -414,6 +441,7 @@ export class ServerApiError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly status?: number,
+    readonly phase?: 'credential_refresh',
   ) { super(message) }
 }
 

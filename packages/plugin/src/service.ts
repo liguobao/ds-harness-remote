@@ -1,3 +1,5 @@
+import { LoopbackHost } from './loopback-host.js'
+import { TerminalPolicy } from './terminal-policy.js'
 import { randomUUID } from 'node:crypto'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { createEvent } from '@dsh-remote/protocol'
@@ -29,10 +31,13 @@ import type { LocalTypertGateway } from './typert-gateway-contract.js'
 import { loadNodeRtcFactory } from './werift-rtc.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { CodexRemoteDomain } from './codex/domain.js'
+import { AcpGateway, StdioAcpAdapter } from './acp.js'
+import { execFileSync } from 'node:child_process'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { AcpRemoteGateway } from './acp/gateway.js'
 import type { AcpPeerBridge, PublishAcpFrame } from './acp/peer-bridge.js'
 import { RpcError } from './safe-error.js'
+import { CodexWorkspaceBridge, CodexWorkspaceState, type RemoteTerminalSpawner } from './codex-workspace-bridge.js'
 
 export interface HostConnectedClient {
   deviceId: string
@@ -56,6 +61,10 @@ export interface HostRemoteStatus {
 
 export class HostPluginRuntime {
   readonly connections: ConnectionController
+  private readonly terminalOwners = new Map<string, string>()
+  private readonly loopbackHosts = new Set<LoopbackHost>()
+  private terminalEnabled: boolean
+  private loopbackPorts: readonly number[]
   private identity?: HostIdentity
   private readonly serverApi?: HostServerApi
   private serverConnection?: HostServerConnection
@@ -63,6 +72,7 @@ export class HostPluginRuntime {
   private closed = false
   private readonly codex: CodexRemoteDomain
   private readonly acp: AcpRemoteGateway
+  private readonly codexWorkspaceState = new CodexWorkspaceState()
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
   private localAcpPeer?: AcpPeerBridge
@@ -75,7 +85,11 @@ export class HostPluginRuntime {
     private readonly logger: SafeLogger,
     private readonly localGateway?: LocalTypertGateway,
     private readonly fileViewerHost?: () => FileViewerHostServiceLike | undefined,
+    /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
+    private readonly terminalSpawner?: RemoteTerminalSpawner,
   ) {
+    this.terminalEnabled = config.terminal.enabled
+    this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.acp = new AcpRemoteGateway(config.cursor, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
@@ -95,6 +109,13 @@ export class HostPluginRuntime {
             (event, data) => send(createEvent(event, data)),
             this.logger,
             this.harnessVersion,
+            new TerminalPolicy(() => this.terminalEnabled, context.peerDeviceId, this.terminalOwners),
+            new CodexWorkspaceBridge(
+              (threadId, signal) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+              () => this.terminalEnabled,
+              this.codexWorkspaceState,
+              this.terminalSpawner,
+            ),
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(
@@ -118,11 +139,29 @@ export class HostPluginRuntime {
         () => this.hostCapabilities(),
         codex,
         cursor,
+        // Handles and their lifetime belong to this connection; only policy is shared.
+        this.createLoopbackHost(),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
       this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory))
     }
+  }
+
+  setTerminalEnabled(enabled: boolean): void {
+    this.terminalEnabled = enabled
+  }
+
+  setLoopbackPorts(ports: readonly number[]): void {
+    this.loopbackPorts = [...ports]
+    for (const loopback of this.loopbackHosts) loopback.setPorts(this.loopbackPorts)
+  }
+
+  private createLoopbackHost(): LoopbackHost {
+    let loopback: LoopbackHost
+    loopback = new LoopbackHost(() => this.loopbackPorts, () => this.loopbackHosts.delete(loopback))
+    this.loopbackHosts.add(loopback)
+    return loopback
   }
 
   async start(): Promise<void> {
@@ -171,6 +210,10 @@ export class HostPluginRuntime {
       accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED',
       connectedClients: this.listConnectedClients(),
     }
+  }
+
+  async hasStoredAuthorization(): Promise<boolean> {
+    return this.serverApi?.hasStoredAuthorization() ?? false
   }
 
   private listConnectedClients(): HostConnectedClient[] {
@@ -409,12 +452,14 @@ export class HostPluginRuntime {
 
   private hostCapabilities(): string[] {
     const capabilities: string[] = []
+    if (this.loopbackPorts.length > 0) capabilities.push('loopback.http-ws.v1')
     if (this.localGateway?.supportsCarrier === true) {
       capabilities.push(
         harnessSessionGeneration(this.harnessVersion) === 'v3' ? 'harness.remote.v3' : 'harness.remote.v1',
         'harness.remote.transfer.v1',
       )
     }
+    if (this.localGateway?.supportsCarrier && this.terminalEnabled) capabilities.push('harness.terminal.v1')
     if (this.apiProxy !== undefined) {
       capabilities.push('harness.api.v1', 'harness.api.transfer.v1')
     }
@@ -422,6 +467,10 @@ export class HostPluginRuntime {
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
     if (this.acp.isAvailable()) capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
     return capabilities
+  }
+
+  private acpAvailable(command: string): boolean {
+    try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
   }
 
   private requireLocalCodexPeer(): CodexPeerBridge {

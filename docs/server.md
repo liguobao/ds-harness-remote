@@ -2,20 +2,13 @@
 
 状态：Draft v0.1
 日期：2026-08-15
-实现状态：**当前仓库只保留设计与互操作契约；runtime 位于独立 Server 仓库**
+实现状态：**完整站点位于独立 Server 仓库；本仓库 `apps/server` 提供最小自部署子集。**
 
 ## 0. 仓库边界（规范性）
 
-本文必须保留，用于约束 Plugin、Client 与独立 Server 项目的互操作行为；但它不授权在当前仓库实现 Server。
+本文保留完整 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现最小自部署版本，其运行方式与支持的 API 见 [最小 Server 说明](../apps/server/README.zh.md)。
 
-当前仓库禁止新增 Server 源码、FastAPI runtime、数据库模型/迁移、Server tests、Admin 后端、Server Docker image 和部署目录。Server 应在独立仓库或独立交付物中实现，并以本文和 [protocol.md](protocol.md) 为契约。
-
-当前仓库可以实现的 Server 相关内容仅限：
-
-- Client/Plugin 使用的协议类型与校验器
-- Mock Host、Mock Transport 或测试 fixture
-- 针对外部 Server 的互操作测试客户端
-- Server/Protocol 设计文档
+最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量单账号和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
 
 ## 1. 定位
 

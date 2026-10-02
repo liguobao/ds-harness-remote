@@ -6,6 +6,7 @@ packages/plugin/dist/*
 !packages/plugin/dist/index.js
 !packages/plugin/dist/client.github.js
 .turbo/
+.local/
 .vite/
 __pycache__/
 *.pyc
@@ -18,3 +19,7 @@ __pycache__/
 .DS_Store
 .codegraph/
 artifacts/
+*.tgz
+
+# Minimal self-hosted Server credentials and local state
+apps/server/data/

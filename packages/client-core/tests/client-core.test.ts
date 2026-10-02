@@ -210,6 +210,31 @@ describe('RemoteClientCore', () => {
 
     transport.push(encodeMessage(createRpcResponse(request.id, { late: true })))
   })
+
+  it('applies a per-call deadline while ordinary calls keep the client-wide one', async () => {
+    vi.useFakeTimers()
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport, 1_000)
+    await client.connect()
+    const ordinary = client.rpc('harness.remote.call', {})
+    const ordinaryTermination = expect(ordinary).rejects.toMatchObject({
+      name: 'RemoteClientError',
+      code: 'RPC_TIMEOUT',
+      message: 'RPC harness.remote.call timed out after 1000ms',
+    })
+    const extended = client.rpc('harness.remote.call', {}, undefined, { timeoutMs: 5_000 })
+    const extendedTermination = expect(extended).rejects.toMatchObject({
+      name: 'RemoteClientError',
+      code: 'RPC_TIMEOUT',
+      message: 'RPC harness.remote.call timed out after 5000ms',
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await ordinaryTermination
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    await extendedTermination
+  })
 })
 
 describe('Remote Host feature probing', () => {
@@ -298,6 +323,177 @@ describe('RemoteTypertGateway', () => {
     transport.push(encodeMessage(createRpcResponse(request.id, { ok: true, value: { items: [] } })))
 
     await expect(call).resolves.toEqual({ items: [] })
+  })
+
+  it('keeps a per-call deadline across the bounded transfer retry and bounds the cleanup close', async () => {
+    const calls: Array<{ method: string; options?: unknown }> = []
+    const rpc = vi.fn(async (method: string, _params: unknown, _signal?: unknown, options?: unknown) => {
+      calls.push({ method, options })
+      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+      if (method === 'harness.remote.transfer.commit') return { kind: 'inline', response: { ok: true, value: 'converted' } }
+      if (method === 'harness.remote.transfer.close') return { closed: true }
+      return { accepted: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client).call(
+      'officeToPdf/render',
+      { args: {} },
+      undefined,
+      { timeoutMs: 120_000 },
+    )).resolves.toBe('converted')
+
+    expect(calls.map(call => call.method)).toEqual([
+      'harness.remote.call',
+      'harness.remote.transfer.open',
+      'harness.remote.transfer.chunk',
+      'harness.remote.transfer.commit',
+      'harness.remote.transfer.close',
+    ])
+    expect(calls.slice(0, 4).map(call => call.options)).toEqual([
+      { timeoutMs: 120_000 },
+      { timeoutMs: 120_000 },
+      { timeoutMs: 120_000 },
+      { timeoutMs: 120_000 },
+    ])
+    const cleanup = calls[4]?.options as { timeoutMs: number } | undefined
+    expect(cleanup?.timeoutMs).toBeGreaterThan(0)
+    expect(cleanup?.timeoutMs).toBeLessThanOrEqual(5_000)
+  })
+
+  it('does not replay a cancelled transferred call and releases the caller once the close is bounded', async () => {
+    vi.useFakeTimers()
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport, 35_000)
+    const gateway = new RemoteTypertGateway(client)
+    const flush = () => vi.advanceTimersByTimeAsync(0)
+    const sentMessage = (index: number) => JSON.parse(new TextDecoder().decode(transport.sent[index]!))
+    await client.connect()
+    const controller = new AbortController()
+    const call = gateway.call('officeToPdf/render', { args: {} }, controller.signal, { timeoutMs: 120_000 })
+    const termination = expect(call).rejects.toMatchObject({ code: 'RPC_ABORTED' })
+
+    const direct = sentMessage(0)
+    transport.push(encodeMessage(createRpcError(direct.id, 'RESPONSE_TOO_LARGE', 'too large')))
+    await flush()
+    const open = sentMessage(1)
+    expect(open.payload).toMatchObject({ method: 'harness.remote.transfer.open' })
+    transport.push(encodeMessage(createRpcResponse(open.id, { opened: true })))
+    await flush()
+    const chunk = sentMessage(2)
+    expect(chunk.payload).toMatchObject({ method: 'harness.remote.transfer.chunk' })
+    transport.push(encodeMessage(createRpcResponse(chunk.id, { accepted: true })))
+    await flush()
+    expect(sentMessage(3).payload).toMatchObject({ method: 'harness.remote.transfer.commit' })
+
+    controller.abort()
+    await flush()
+
+    const close = JSON.parse(new TextDecoder().decode(transport.sent.at(-1)!))
+    expect(close.payload).toMatchObject({
+      method: 'harness.remote.transfer.close',
+      params: { transferId: open.payload.params.transferId },
+    })
+    const calls = transport.sent.map(data => JSON.parse(new TextDecoder().decode(data)).payload.method)
+    expect(calls.filter(method => method === 'harness.remote.call')).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    await termination
+  })
+
+  it('rejects an oversized transferred response before allocating it', async () => {
+    const methods: string[] = []
+    let transferId = ''
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      methods.push(method)
+      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+      if (method === 'harness.remote.transfer.open') {
+        transferId = (params as { transferId: string }).transferId
+        return { opened: true }
+      }
+      if (method === 'harness.remote.transfer.commit') {
+        return { kind: 'chunked', transferId, totalBytes: 100 * 1024 * 1024, totalChunks: 200 }
+      }
+      return { accepted: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client).call(
+      'officeToPdf/render',
+      { args: {} },
+      undefined,
+      { timeoutMs: 120_000, maxResponseBytes: 12 * 1024 * 1024 },
+    )).rejects.toMatchObject({
+      code: 'RESPONSE_TOO_LARGE',
+      details: { totalBytes: 100 * 1024 * 1024, maxResponseBytes: 12 * 1024 * 1024 },
+    })
+    expect(methods).not.toContain('harness.remote.transfer.read')
+    expect(methods).toContain('harness.remote.transfer.close')
+  })
+
+  it('finishes a transferred response inside the requested limit', async () => {
+    let transferId = ''
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+      if (method === 'harness.remote.transfer.open') {
+        transferId = (params as { transferId: string }).transferId
+        return { opened: true }
+      }
+      if (method === 'harness.remote.transfer.commit') {
+        return { kind: 'chunked', transferId, totalBytes: 11, totalChunks: 1 }
+      }
+      if (method === 'harness.remote.transfer.read') return { transferId, index: 0, data: btoa('{"ok":true}') }
+      return { accepted: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client).call(
+      'officeToPdf/render',
+      { args: {} },
+      undefined,
+      { maxResponseBytes: 1024 },
+    )).resolves.toBeUndefined()
+  })
+
+  it('refuses an invalid transfer response limit instead of silently uncapping it', async () => {
+    const rpc = vi.fn(async (method: string) => {
+      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+      return { opened: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+
+    for (const maxResponseBytes of [Number.POSITIVE_INFINITY, 0, -1, 1.5]) {
+      await expect(new RemoteTypertGateway(client).call(
+        'officeToPdf/render',
+        { args: {} },
+        undefined,
+        { maxResponseBytes },
+      )).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+    }
+    expect(rpc).toHaveBeenCalledTimes(4)
+  })
+
+  it('rejects an invalid transferred descriptor before reading it', async () => {
+    let transferId = ''
+    const methods: string[] = []
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      methods.push(method)
+      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+      if (method === 'harness.remote.transfer.open') {
+        transferId = (params as { transferId: string }).transferId
+        return { opened: true }
+      }
+      if (method === 'harness.remote.transfer.commit') {
+        return { kind: 'chunked', transferId, totalBytes: 11.5, totalChunks: 1 }
+      }
+      return { accepted: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+
+    await expect(new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }))
+      .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+    expect(methods).not.toContain('harness.remote.transfer.read')
   })
 
   it('routes Remote stream frames and closes the stream on iterator return', async () => {

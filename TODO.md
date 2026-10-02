@@ -1,9 +1,9 @@
 # TODO
 
-本清单按 2026-09-10 的兼容方向维护：Harness v0.1.1 rc.2 使用官方 ApiProxy，
-v0.1.2 alpha.1–rc.1 使用既有 Typert Remote Gateway，v0.1.5 rc.1 作为 Session V3
-兼容目标。Android 与 VS Code Client 通过 capability 探测兼容这些 Host carrier；Server、Remote Web 和 Admin 只在独立
-Server 仓库实现。
+本清单按 2026-09-29 的兼容方向维护：Harness v0.1.1 rc.2 使用官方 ApiProxy，
+v0.1.2 alpha.1–rc.1 使用既有 Typert Remote Gateway，v0.1.5 rc.1 / v0.1.6 alpha.1 / v0.2.0 rc.1 作为 Session V3
+兼容目标。Android 与 VS Code Client 通过 capability 探测兼容这些 Host carrier；完整 Server、Remote Web 和 Admin 在独立
+Server 仓库实现；本仓库 `apps/server` 另提供最小单账号 Relay Server。
 
 Desktop 已使用独立 Remote 工作区入口：本地选择账号下的 Host 与远端 Workspace，或通过
 只读目录浏览添加 Workspace，随后复用原生 Harness UI。当前实现已跑通真实设备、Web→Host
@@ -14,6 +14,9 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## 已完成基线
 
+- [x] Issue #70：Plugin 刷新跨进程互斥、握手恢复单次重试、重复 Host 连接停止抢占及授权恢复提示
+- [ ] Issue #70：Windows 双实例与异常退出遗留锁的实机回归（已有进程级锁与状态机测试）
+
 - [x] pnpm monorepo、共享 Protocol/Crypto/Transport/Client Core
 - [x] Host 账号密码/主机匹配码接入、Client 账号接入、device token rotation 与按 Server/角色隔离的身份状态
 - [x] 同账号 membership、受保护 peer descriptor 与本地 pinned trust 双重授权
@@ -22,7 +25,8 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI
 - [x] Host ApiProxy allowlist bridge、mux/host stream 与后台 Local/Remote ApiProxy switch
 - [x] Harness v0.1.2 alpha.1–rc.1 Typert Remote unary/stream/event carrier、固定 endpoint allowlist、加密 capability 探测与 legacy ApiProxy 激活兼容
-- [x] Harness v0.1.5 rc.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
+- [x] Harness v0.1.5 rc.1 / v0.2.0 rc.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
+- [x] 升级官方依赖到 `dsh-v0.2.0-rc.1`，修正 0.2.0 版本判断、Workspace payload 与原生 UI allowlist，并完成 Plugin 核心回归测试
 - [x] Android 与 VS Code Client 按 Host capability 在 rc.2 ApiProxy 和 v0.1.2 Typert Remote 之间选择数据面
 - [x] Remote 模态框、主机自过滤、OS/Harness/Plugin 版本展示、远端 Workspace 与目录选择
 - [x] Remote Header、LAN/P2P/TURN/Relay 链路、端到端加密状态与退出入口
@@ -35,11 +39,15 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P0：Plugin 可用链路
 
+- [ ] Windows 用户目录 WinSW 安装实机回归：管理员权限预检/账户密码、独立 Node、旧登录任务迁移、重启后 Host/CodeX、失败重试与卸载保留凭证（含 ARM64 .NET wrapper）
+
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
 - [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval
 - [x] 分别用 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 跑通双机 Workspace/Session/Prompt/approval E2E，并验证混合代际在 mutation 前拒绝
 - [ ] 用 `dsh-v0.1.2-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval E2E 与长期稳定性回归
 - [ ] 用 `dsh-v0.1.5-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E 与长期稳定性回归
+- [x] 用独立 `dsh-v0.1.6-alpha.1` 实例跑通 Web → Host 主链路（Plugin 树加载、Host identity、Codex 域与 client bundle 下发）
+- [ ] 用 `dsh-v0.1.6-alpha.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E 与长期稳定性回归
 - [x] 用两台真实 Harness + 外部 Server 跑通同账号授权、选择 Remote、创建/继续会话
 - [x] 验证原生 mux/host stream、approval/question respond 与断线关闭行为
 - [x] 用手机 Web 与电脑 Web 同时连接一个真实 Host，验证并发操作、同设备重连和流隔离
@@ -101,7 +109,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
 - [ ] 完成 Noise 实现独立安全审查、长期连接 rekey 与断线密钥清理策略
-- [ ] 增加协议与加密 golden vectors
+- [ ] 增加剩余协议 golden vectors
+- [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
 - [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证
 
@@ -175,8 +184,8 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 ## 不在本仓库实现
 
-- Server、Remote Web、Admin runtime 及其数据库、队列和部署代码
-- Shell、PTY、绕过 dsh-file-viewer provider 的任意文件访问、文件写入、远程桌面或通用 Harness tool RPC
+- 完整多账号 Server、Remote Web、Admin runtime 及其数据库、队列和部署代码（`apps/server` 最小自部署版本除外）
+- 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的原生 terminal 和受限 loopback 预览除外
 - 绕过 ApiProxy allowlist 的 Cordis service 反射
 
 ## 第一版完成标准
@@ -189,3 +198,27 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [x] 连接断开后旧 stream/answer 失效并安全回落 Local
 - [ ] Relay capture 无法解密 payload，篡改、重放和 identity mismatch 被拒绝
 - [x] 核心 check/test/build 与 Bundle 校验通过
+
+## 最小自部署 Server
+
+- [x] 环境变量单账号、登录/状态页、持久化设备凭据、Control/加密 Relay 转发
+- [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
+
+## 原生侧栏与开发预览（2026-09-20）
+
+- [x] alpha.2 官方只读文件树/预览 API allowlist、默认开启且可在详细 Remote 设置中关闭的原生终端开关
+- [x] 终端按设备归属、连接 attachment 校验；禁止 Remote 修改插件自身访问设置
+- [x] 白名单 IPv4 loopback HTTP/WebSocket 通道与独立本机预览 origin
+- [x] Relay 背压、串行加密发送、有界 stream 消费队列
+- [ ] Windows/Linux 真机、跨机高延迟 Relay、大输出终端、多设备回归
+- [ ] 真实应用复杂 HMR、硬编码 localhost、Cookie/CSP 和浏览器兼容性回归
+- [ ] Remote Web / Android / VS Code 预览入口（需独立方案，不复用本机 preview URL）
+
+## Android native session tools (2026-09-21)
+
+- [x] 兼容旧版内嵌 permissions.options 与新版 permissionPresets/catalog，补齐 Host 只读 allowlist
+- [x] Harness 会话工作区目录浏览、UTF-8 分页只读预览；不支持的 Host 显示更新提示
+- [x] Android 本地 xterm 终端、创建/恢复/结束、归属与输入权隔离、序号检查和断线不重放
+- [ ] 真机验证新旧 DSH 权限切换、Host 热开启/关闭终端、跨机重连、Windows 路径与 shell、长输出、IME/TalkBack/大字体
+- [ ] Android 图片/PDF/Office 只读预览真实 Host 与真机验收：大文件、转换超时/字体缺失、取消与断线、内存峰值、分页缩放
+- [ ] PDF 文本选择与 TalkBack 验收（当前已有受限文本叠层，真机未验证）

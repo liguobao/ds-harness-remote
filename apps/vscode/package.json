@@ -4,7 +4,7 @@
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
   "icon": "media/icon.png",
-  "version": "0.4.13",
+  "version": "0.4.17",
   "private": true,
   "license": "MIT",
   "repository": {

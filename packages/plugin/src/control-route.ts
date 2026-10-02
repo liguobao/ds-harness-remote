@@ -4,6 +4,12 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 /** Namespaced loopback RPC prefix shared by the Host runtime and browser UI. */
 export const CONTROL_RPC_PREFIX = '/ds-harness-remote'
 
+/** Loopback control endpoint carrying the status event stream. */
+export const STATUS_STREAM_ENDPOINT = 'status.events'
+
+/** Full URL path of the loopback status event stream. */
+export const STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`
+
 const ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
 const INVALID_REQUEST_RPC_ID = 'invalid-request'
 
@@ -32,20 +38,32 @@ export type ControlRouteHandler = (
   signal: AbortSignal,
 ) => Promise<RpcResult<unknown>>
 
+/** Long-lived loopback response owner for the status event stream. */
+export interface ControlStatusStreamLike {
+  handle(response: ServerResponse): Promise<void>
+  close(): void
+}
+
 export function registerControlRoute(
   connection: HostConnectionHandleLike,
   handler: ControlRouteHandler,
   webServer?: HostWebServerLike,
+  statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
   if (webServer !== undefined && connection.requestRejection !== undefined) {
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
-      handler: (req, res) => handleControlRequest(connection, handler, req, res),
+      handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream),
     })
-    return async () => { await dispose() }
+    return async () => {
+      statusStream?.close()
+      await dispose()
+    }
   }
 
+  // A plain RPC channel owns POST only, so the browser falls back to unary
+  // status reads on hosts that do not expose the Web server route.
   return connection.rpc.handle(CONTROL_RPC_PREFIX, handler, {
     authority: 'loopback',
   })
@@ -56,6 +74,7 @@ async function handleControlRequest(
   handler: ControlRouteHandler,
   req: IncomingMessage,
   res: ServerResponse,
+  statusStream?: ControlStatusStreamLike,
 ): Promise<void> {
   const rejection = connection.requestRejection?.(req)
   if (rejection !== undefined) {
@@ -65,6 +84,10 @@ async function handleControlRequest(
   }
 
   const endpoint = endpointFromPath(CONTROL_RPC_PREFIX, new URL(req.url ?? '/', 'http://dsh.internal').pathname)
+  if (req.method === 'GET' && endpoint === STATUS_STREAM_ENDPOINT && statusStream !== undefined) {
+    await statusStream.handle(res)
+    return
+  }
   if (req.method !== 'POST' || endpoint === undefined) {
     writeText(res, 404, 'not found')
     return

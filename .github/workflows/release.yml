@@ -81,6 +81,19 @@ jobs:
           cd release-assets
           sha256sum *.tgz > SHA256SUMS.txt
 
+      - name: Build and package browser extension
+        run: |
+          NODE_ENV=production pnpm --dir apps/browser build
+          mkdir -p release-assets/browser-extension
+          cd apps/browser
+          zip -qr "$GITHUB_WORKSPACE/release-assets/dsh-remote-browser-${GITHUB_REF_NAME}.zip" \
+            manifest.json popup.html styles.css media dist
+
+      - name: Update release checksums
+        run: |
+          cd release-assets
+          sha256sum *.tgz *.zip > SHA256SUMS.txt
+
       - name: Publish npm plugin
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -175,6 +188,9 @@ jobs:
 
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build
+
+      - name: Bundle local Android renderers
+        run: pnpm --dir apps/android run build:renderers
 
       - name: Generate Android project
         run: pnpm --dir apps/android exec expo prebuild --platform android --no-install

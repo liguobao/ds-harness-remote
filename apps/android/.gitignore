@@ -42,3 +42,6 @@ yarn-error.*
 
 # build artifacts
 *.apk
+
+# Locally bundled terminal and PDF renderers
+src/generated/

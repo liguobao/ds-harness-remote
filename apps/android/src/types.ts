@@ -97,6 +97,21 @@ export interface WorkspaceList {
   archivedSessionIds: string[]
 }
 
+/** Locally remembered workspace shortcut: a favorite, or a recently visited workspace. */
+export interface WorkspaceShortcut {
+  deviceId: string
+  /** Host name snapshot so the link still renders while the device is offline. */
+  deviceName: string
+  /** Durable identity from `workspaceStableKey`; survives CodeX project id changes. */
+  key: string
+  workspaceId: string
+  backend: AgentBackend
+  title: string
+  path: string
+  /** When this shortcut was recorded: favorited time, or last visit for recent items. */
+  addedAt: number
+}
+
 export interface DirectoryEntry {
   name: string
   path: string
@@ -178,6 +193,15 @@ export interface PermissionPresetOption {
   description?: string
 }
 
+/** One agent-preset (mode) roster row from the Host. */
+export interface AgentPresetOption {
+  id: string
+  isDefault: boolean
+  name?: string
+  description?: string
+  broken?: string
+}
+
 export interface PermissionSelect {
   currentValue: string
   options: PermissionPresetOption[]
@@ -200,18 +224,27 @@ export interface ChatItemBase {
   id: string
   sessionId: string
   createdAt: number
+  /** Authoritative event coordinates; absent on optimistic/non-timestamped frames. */
+  nativeSeq?: number
+  nativeTime?: number
+  turn?: string
 }
 
 export interface ChatMessage extends ChatItemBase {
   kind: 'message'
   role: 'user' | 'assistant' | 'system'
   text: string
+  /** Native turn identifier used to merge multiple reasoning segments in one reply. */
+  replyGroup?: string
   reasoning?: string
   images?: ChatImage[]
   streaming?: boolean
   streamingPhase?: 'reasoning' | 'text'
   /** Native session.prompt rpcId used to reconcile an optimistic user message. */
   requestRpcId?: string
+  context?: boolean
+  feedback?: 'positive' | 'negative'
+  usage?: { inputTokens: number; outputTokens: number; totalTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
 }
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'

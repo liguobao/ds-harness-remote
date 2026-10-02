@@ -103,7 +103,10 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string): 
     const key = `${prefix}:${index}`
     if (token.type === 'text') output.push(token.content)
     else if (token.type === 'softbreak' || token.type === 'hardbreak') output.push('\n')
-    else if (token.type === 'code_inline') output.push(<Text key={key} style={styles.inlineCode}>{token.content}</Text>)
+    else if (token.type === 'code_inline') {
+      const isMention = token.content.startsWith('/') || token.content.startsWith('@')
+      output.push(<Text key={key} style={[styles.inlineCode, isMention && styles.mentionCode]}>{token.content}</Text>)
+    }
     else if (token.type === 'image') {
       const alt = token.content || token.children?.map(child => child.content).join('') || '图片'
       output.push(<Text key={key} style={styles.imageAlt}>{`[${alt}]`}</Text>)
@@ -156,6 +159,7 @@ function createStyles(colors: ThemeColors) {
     strike: { textDecorationLine: 'line-through' },
     link: { color: colors.primary, textDecorationLine: 'underline' },
     inlineCode: { fontFamily: 'monospace', fontSize: 14, color: colors.ink, backgroundColor: colors.surfaceStrong },
+    mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 4, paddingHorizontal: 4 },
     imageAlt: { color: colors.muted, fontStyle: 'italic' },
     codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.surface, padding: spacing.sm, marginBottom: spacing.sm },
     code: { fontFamily: 'monospace', fontSize: 13, lineHeight: 20, color: colors.ink },

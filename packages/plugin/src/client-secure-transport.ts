@@ -1,5 +1,6 @@
+import { SerialSend } from '@dsh-remote/webrtc'
 import { NoiseIkSession, createNoisePrologue } from '@dsh-remote/crypto'
-import { SecureMessageCodec } from '@dsh-remote/protocol'
+import { SecureMessageCodec, MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 import type { RemoteTransport, SecureHandshakeTransport } from '@dsh-remote/webrtc'
 import type { HostIdentity, TrustedPeer } from './identity-store.js'
 
@@ -10,8 +11,7 @@ export class ClientSecureTransport implements RemoteTransport {
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
   private closed = false
-  /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
-  private sendTail: Promise<void> = Promise.resolve()
+  private readonly sends = new SerialSend()
 
   constructor(
     private readonly inner: SecureHandshakeTransport,
@@ -48,17 +48,13 @@ export class ClientSecureTransport implements RemoteTransport {
   }
 
   async send(data: Uint8Array): Promise<void> {
-    const run = this.sendTail.then(() => this.sendNow(data))
-    this.sendTail = run.catch(() => undefined)
-    return run
-  }
-
-  private async sendNow(data: Uint8Array): Promise<void> {
-    const plaintextFrames = this.outgoing.encode(data)
+    if (data.byteLength > MAX_SECURE_MESSAGE_BYTES) throw new Error('Secure message exceeds the reassembly limit.')
+    const noise = this.requireNoise()
     try {
-      for (const plaintext of plaintextFrames) {
-        await this.inner.send(this.requireNoise().encrypt(plaintext))
-      }
+      await this.sends.run(data.byteLength, async () => {
+        if (this.closed || this.noise !== noise) throw new Error('Secure transport replaced')
+        for (const plaintext of this.outgoing.encode(data)) await this.inner.send(noise.encrypt(plaintext))
+      })
     } catch (error) {
       await this.close().catch(() => undefined)
       throw error

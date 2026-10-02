@@ -3,7 +3,7 @@
 状态：Draft v0.2（首版发布前，不保留旧业务 RPC 兼容）
 日期：2026-09-10
 协议版本：`1`
-实现状态：**当前仓库必须实现 Client/Plugin 侧协议；Server 侧由独立项目实现**
+实现状态：**当前仓库实现 Client/Plugin 侧协议与最小单账号 Relay Server；完整 Server 由独立项目实现**
 
 ## 0. 文档地位与仓库边界（规范性）
 
@@ -15,7 +15,7 @@
 - Plugin 的 rc.2 ApiProxy tunnel、v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 Typert Remote tunnel、加密、重连和 capability 行为
 - Mock Host/Client 与协议 conformance fixtures
 
-当前仓库不负责实现 Server REST API、WebSocket Hub、数据库、Admin 或部署。本文出现的 Server endpoint 和行为用于约束独立 Server 项目，不表示应在当前仓库创建 Server 代码。
+`apps/server` 实现本文的单账号注册/刷新、设备发现、Control 与 Relay 子集；范围见 [最小 Server](../apps/server/README.md)。其余多账号、主机匹配码、Browser 授权、WebRTC/TURN 与 Admin 能力仍属于独立 Server，不得把未实现的能力声明为可用。
 
 任何与本文不一致的示例代码都视为未完成实现，不能反向修改协议语义。当前尚未发布，
 旧 Android 业务 RPC 明确不兼容；首版发布后破坏兼容性的变更必须提升协议版本。
@@ -558,6 +558,11 @@ channel 内按 messageId 重组，最多接受 4 MiB 的完整消息和 8 个并
 
 每方向维护独立 nonce/counter。重复、过旧、认证失败、超限或连接不匹配 frame 必须关闭 secure channel。达到 Noise 实现建议的消息/字节阈值时 rekey 或重建 connection。
 
+`fixtures/crypto/v1/noise-ik.json` 固定双方 static key、ephemeral private key、prologue、握手消息、
+传输密文和 counter。其他实现必须产生相同的无填充 base64url 输出。
+这些输出是 protocol v1 的 compatibility baseline。实现或依赖升级不得直接重写该向量。
+有意改变 wire output 时必须发布新协议版本和新向量。
+
 TLS/WSS 保护到 Server 的链路，但不能替代本节 E2EE。
 
 ## 13. Relay frame
@@ -773,7 +778,7 @@ carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、
 | `0.3.24–0.3.36` / rc.2 | `harness.api.v1` | 支持 | provider 存在时支持 | `harness.api.transfer.v1` |
 | `0.4.x` / rc.2 | capability 探测返回 `harness.api.v1` | 支持 | provider 存在时支持 | `harness.api.transfer.v1` |
 | `0.4.x` / v0.1.2 alpha.1–rc.1 | capability 探测返回 `harness.remote.v1` | 支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
-| `0.4.12+` / v0.1.5 rc.1 | capability 探测返回 `harness.remote.v3` | 支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
+| `0.4.12+` / v0.1.5 rc.1 与 v0.1.6 alpha.1 | capability 探测返回 `harness.remote.v3` | 支持 | provider 存在时支持 | `harness.remote.transfer.v1` |
 
 未知版本按 `0.3.15` 之前的能力处理。未来 Server 暴露 Host capability 后，应优先使用
 capability，`clientVersion` 仅保留为旧 Server 的兼容路径。
@@ -943,6 +948,75 @@ permission id、decision enum 或额外响应状态机。
 `{ endpoint, payload }`，并再次经过同一固定 endpoint allowlist；它不能绕过 Gateway 或
 扩展可调用业务面。直接调用若收到 `RESPONSE_TOO_LARGE`，Client 必须以相同请求自动重试一次
 该分块路径；其他错误不得触发隐式重试。
+
+新版 DSH 0.1.6 的 `permissions` Session 投影仅保留 `currentValue`；选项通过官方
+`permissionPresets/catalog`（`{ args: {} }`）读取，返回 `{ options: [{ value, name, description? }] }`。
+Host 固定 allowlist 仅增加该只读 endpoint；预设切换继续使用官方 `commands/execute`。
+旧版投影自带 `options` 时继续使用原选项。catalog 不可用时不得猜测选项或提升权限。
+
+### Native sidebar: read-only files and Host-configurable terminal
+
+Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传输；不新增 Harness wire format。
+固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
+`officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
+注意：上游 `list` / `changes` 限于工作区；文件读取遵循 Session 文件系统权限，允许工作区外的已授权文件，
+不能把“只读”表述成“只能读取 cwd 内文件”。旧 `fileviewer.read.v1` 仍使用 provider 授权。
+对 `codex:<threadId>` scope，Host 使用 CodeX thread 当前 `cwd` 作为独立根目录，并额外拒绝根目录之外的路径；
+该映射不改变 Harness Session 的既有工作区权限。CodeX 终端同样按 thread 建立独立 context。
+
+`terminal.enabled` 默认 true。Host 本地开关切换即保存并更新拦截，在后续加密 capability 探测中宣告 `harness.terminal.v1`。
+只允许 unary `terminal/environment|shells|list|create|write|resize|rename|close` 与 stream
+`terminal/follow|retain`；不允许 wildcard、exec、spawn 或改变官方终端语义。
+关闭时，任何终端调用都返回 `TERMINAL_DISABLED`，提示用户在 Host 本地开启开关后重试。
+这个提示不能用于一般登录/连接失败。开关是对受信任 Remote 设备的 Shell 授权，不是 Agent 审批：
+终端继承 Host 执行环境系统用户权限，cwd 不是 filesystem sandbox。
+
+Host 生命周期内记录 `(sessionId, terminalId) -> authenticated deviceId`，最多 256 个归属记录；
+Client 不能接管本地创建或其它设备的终端。list 仅返回本设备归属；write/resize 还必须命中当前连接
+建立的 attachment。断开结束 follow/retain，不重放 write；重新连接通过官方快照恢复已保留的终端。
+进程回收遵循上游保留/空闲策略，Host 重启不恢复进程。终端关闭成功移除归属。
+
+Host 访问设置禁止由 Remote `settings/update|replace|mutate` 修改（命名空间
+`ds-harness-remote`、`dsh-remote`，包括 legacy ApiProxy）；只能通过 Host 本地设置入口修改。
+加密发送串行化，队列最多 8 MiB / 256 消息；Relay 等待 WebSocket 缓冲回落至 512 KiB，
+最多等待 10 秒，失败关闭通道。Client stream 队列最多 4 MiB / 256 帧，超限终止流并要求恢复。
+这些上限不保证终端每一行输出都可保留；恢复使用上游有界屏幕快照。
+
+### Restricted loopback preview
+
+Capability `loopback.http-ws.v1`，唯一方法 `loopback.call`，schema 和共享类型在
+`packages/protocol/src/loopback.ts`。所有请求必须经已有 membership + trusted identity + Noise 通道。
+Host `loopback.ports` 是本地配置的端口白名单，默认空，最多 16 个，范围 1024–65535；在 Host 本地保存后立即生效，无需重启。
+撤销端口时 Host 必须关闭所有连接中该端口已有的 HTTP/WebSocket 句柄，包括等待响应或握手的请求，
+结束挂起的读取并丢弃该句柄缓存的数据；仍被允许的端口不受影响。重新允许端口后必须新建句柄，不能恢复已撤销的句柄。
+目标固定 IPv4 `127.0.0.1`，不接受 hostname、URL、DNS、CONNECT、TLS 或任意 TCP 通道。
+请求 HTTP body 允许 POST/PUT 等开发服务操作；这不是只读文件通道，授权端口意味着允许与该服务交互。
+
+请求为以下严格对象：
+
+- `{op:"describe"}` → `{ports:number[]}`。
+- `{op:"http.open", id:UUID, port, path, method, headers:[name,value][], body?:base64}` → `{status,headers}`。
+- `{op:"http.read", id}` → `{data:base64,done:boolean}`，按需读取最多 64 KiB，一次仅一个在途 read。
+- `{op:"ws.open", id, port, path, headers, protocols:string[]}` → `{protocol:string}`。
+- `{op:"ws.send", id, data:base64, binary:boolean}` → `{sent:true}`；按顺序发送，不重放。
+- `{op:"ws.read", id}` → `{messages:[{data,binary}],closed:boolean}`，最多等待 20 秒；仅一个在途 read。
+- `{op:"close", id}` → `{closed:true}`，幂等清理 HTTP/WS handle。
+
+handle 按加密连接隔离；最多 16 个。HTTP 头等待 20 秒，请求体最大 1 MiB，响应最多 64 MiB；
+WS 单消息最大 256 KiB、待消费队列最大 1 MiB / 256 消息。60 秒没有 RPC 活动回收 handle；
+断线清理全部 handle。禁止 Host 自动跟随 HTTP 或 WS 重定向；不记录 headers/body/URL 查询内容。
+
+Client Plugin 在本机 `127.0.0.1` 的随机端口创建代理，每个 Host 端口使用独立随机
+`dsh-<192-bit secret>.localhost` origin。必须验证完整 Host 与有值的 Origin，拒绝 service worker 注册，
+移除 hop-by-hop headers、Cookie Domain 和跨 origin 重定向。上游 Origin 按已授权目标重写，
+HTTP 请求/响应和 WS 消息在端到端加密通道中传输，Relay 只处理密文。
+浏览器→本机代理与 Host→loopback 服务是本机 HTTP/WS，不宣称这两段是 TLS。
+
+第一版入口是 Desktop / 浏览器连接本机 Harness 时的 Remote Header「预览服务」，输入授权端口后
+打开原生 Browser tab；相对资源路径与使用当前 origin 的 HMR WebSocket 可正常转发。
+硬编码远端 localhost 地址、外部重定向、HTTPS upstream、远程 Web preview gateway、Android/VS Code
+预览 UI 不在本版范围。浏览器必须支持 `.localhost` 的 loopback 解析；预览域名是临时访问凭据，
+退出 Remote 或断线关闭监听器。普通公网网页仍由原生侧栏浏览器直接访问。
 
 ### File Viewer read bridge
 
@@ -1314,7 +1388,7 @@ Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。�
 2. Membership、双方账号一致性、Host/Client 本机 pinned peer 和 connection identity key 绑定必须同时成立。
 3. Remote RPC/Event 不以明文经过或落盘到 Server。
 4. TLS/WSS 不能替代 Noise secure channel。
-5. Client 不能请求通用 shell/filesystem RPC 绕过 Harness。
+5. Client 不能请求通用 shell/filesystem RPC 绕过 Harness；显式开启的原生 terminal 与 loopback 例外遵循下述独立边界。
 6. Permission 只能映射 Harness 当前 request，默认 fail closed。
 7. `harness.api.call.method`、`harness.remote.call.endpoint` 与 `codex.app.call.method` 必须命中各自编译期固定 allowlist；禁止通过对象反射、Typert/Cordis registry、service 名或任意 endpoint 扩权。
 8. 当前 Harness v1 只允许 Remote `allow_once`/`deny`，不得伪造 session grant。
@@ -1357,3 +1431,29 @@ UI 排版、静态说明和 Admin 普通筛选不属于协议 conformance。
 - Server 只解析 control envelope，不解析 relay plaintext。
 - Host ApiProxy bridge allowlist 与真实 Harness API 一致。
 - Web/Host/Mock Host 至少两两互操作。
+
+### CodeX Session workspace and terminal scope
+
+A Remote `workspaceFileScopeId` or terminal `agentId` may identify either a Harness
+Session or a CodeX Session. CodeX sessions use the form `codex:<threadId>` and are
+resolved by the Host; they are never looked up as Harness agents. The Host obtains
+the current CodeX thread `cwd`, creates an independent workspace-file scope and
+terminal context per thread, and applies the same path normalization, realpath,
+symlink, size, terminal ownership, and Remote settings checks as Harness sessions.
+A CodeX scope cannot access paths outside that thread's `cwd`; invalid, ended, or
+cwd-less threads return stable `CODEX_SESSION_INVALID`, `CODEX_THREAD_UNAVAILABLE`,
+or `CODEX_WORKSPACE_UNAVAILABLE` errors. Server transport only forwards encrypted
+RPC and does not perform this mapping or authorization.
+
+CodeX terminals reuse the official `terminal/*` semantics unchanged: `environment`
+returns `{cwd,maxInputBytes,maxCols,maxRows,scrollback}`, `shells` returns
+`{path,args,name}`, and `list` / `create` / every snapshot and state `info` carry the
+official `WebTerminalInfo` including `controllerId`. `write|resize|rename|close`
+resolve to void, `retain` acknowledges with `{type:"retained"}` without taking input
+ownership, and `follow` starts with `{type:"snapshot",sequence,screen,info}` followed
+by `{type:"output",sequence,data}` where each `sequence` is exactly the previous one
+plus one. The Host starts the shell through its `subprocess` service (PTY, containment,
+process-range termination) when that service is available and falls back to a plain
+pipe otherwise. This carrier has no terminal emulator, so `screen` is a bounded raw
+output journal replayed into the client emulator, prefixed with a reset when the
+journal was truncated.

@@ -36,6 +36,11 @@ interface PendingCall {
   removeAbort?: () => void
 }
 
+/** Per-call override for endpoints that legitimately outlive the client-wide deadline. */
+export interface RemoteRpcOptions {
+  timeoutMs?: number
+}
+
 export class RemoteClientCore {
   private readonly pending = new Map<string, PendingCall>()
   private readonly eventHandlers = new Set<(event: EventPayload) => void>()
@@ -66,10 +71,11 @@ export class RemoteClientCore {
     method: string,
     params: TParams,
     signal?: AbortSignal,
-    timeoutMs = this.timeoutMs,
+    options?: RemoteRpcOptions | number,
   ): Promise<TResult> {
     if (signal?.aborted) throw rpcAbortedError(method, signal.reason)
 
+    const timeoutMs = typeof options === 'number' ? options : callTimeoutMs(this.timeoutMs, options)
     const request = createRpcRequest(method as RpcMethod, params)
     const result = new Promise<TResult>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -206,6 +212,12 @@ function rpcAbortedError(method: string, reason: unknown): RemoteClientError {
     `RPC ${method} was aborted`,
     reason === undefined ? undefined : { cause: reason },
   )
+}
+
+function callTimeoutMs(fallback: number, options: RemoteRpcOptions | undefined): number {
+  const timeoutMs = options?.timeoutMs
+  if (typeof timeoutMs !== 'number') return fallback
+  return Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2_147_483_647 ? timeoutMs : fallback
 }
 
 function transportSendError(error: unknown): Error {

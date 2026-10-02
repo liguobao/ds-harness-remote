@@ -259,14 +259,15 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   if (!visible) return null
 
   return (
-    <View style={styles.homeMenuLayer}>
+    <View style={styles.homeMenuLayer} pointerEvents="box-none">
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.common.close}
         onPress={onClose}
+        pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={styles.homeMenuCard}>
+      <View accessibilityRole="menu" style={styles.homeMenuCard} pointerEvents="box-none">
         {onDevices !== undefined && (
           <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
         )}
@@ -556,7 +557,7 @@ function createStyles(colors: ThemeColors) {
   settingsLinkUrl: { ...type.caption, color: colors.primary },
   homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
-  homeMenuCard: { position: 'absolute', top: 56, right: spacing.sm, width: 236, paddingHorizontal: spacing.xs, borderRadius: radius.lg, backgroundColor: colors.surface, elevation: 8, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.14, shadowRadius: 14 },
+  homeMenuCard: { position: 'absolute', top: 56, right: spacing.sm, width: 236, paddingHorizontal: spacing.xs, borderRadius: radius.lg, backgroundColor: colors.surface, zIndex: 1, elevation: 8, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.14, shadowRadius: 14 },
   homeMenuRow: { minHeight: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   homeMenuRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   homeMenuRowPressed: { opacity: 0.68 },

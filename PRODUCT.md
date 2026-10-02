@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Developers who run DeepSeek Harness on more than one workstation or server and want their local Harness UI—or Android—to control a paired remote Harness without opening a remote shell.
+Developers who run DeepSeek Harness on more than one workstation or server and want their local Harness UI—or Android—to control a paired remote Harness with optional, explicitly enabled terminal and development-service preview access.
 
 ## Product Purpose
 
@@ -14,9 +14,9 @@ DSH Remote is a secure remote control surface for DeepSeek Harness. The Plugin e
 
 ## Repository Boundary
 
-This repository implements the dual-role Harness Plugin, its Web client face, Android, shared protocol/crypto/transport packages, and mock interoperability tools. It does not implement the DSH Remote Server, Remote Web, Admin backend, Server database, migrations, or deployment.
+This repository implements the dual-role Harness Plugin, its Web client face, Android, shared protocol/crypto/transport packages, and mock interoperability tools. It also includes a minimal single-account Relay Server in `apps/server`. The full Remote Web, Admin backend, Server database and migrations remain outside this repository.
 
-The Server design and Remote Protocol remain first-class specifications in `docs/server.md` and `docs/protocol.md`. A separate Server project must implement Server, Remote Web, and Admin as one site and conform to those documents; their presence in this repository does not authorize adding that runtime or frontend code here.
+The Server design and Remote Protocol remain first-class specifications in `docs/server.md` and `docs/protocol.md`. The separate Server project implements the full Server, Remote Web and Admin site. The minimal self-hosted subset is documented in `apps/server/README.md`.
 
 ## Brand Personality
 

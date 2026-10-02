@@ -8,11 +8,18 @@ import {
   type HarnessApiTransferCommitResult,
   type HarnessApiTransferReadResult,
 } from '@dsh-remote/protocol'
-import type { RemoteClientCore } from './index.js'
+import type { RemoteClientCore, RemoteRpcOptions } from './index.js'
 
 const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
 const REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16] as const
 const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
+// A cancelled call is never replayed; cleanup must not wait out the default deadline.
+const TRANSFER_CLOSE_TIMEOUT_MS = 5_000
+
+/** Gateway call options; `maxResponseBytes` caps what a transferred response may allocate locally. */
+export interface RemoteGatewayOptions extends RemoteRpcOptions {
+  maxResponseBytes?: number
+}
 
 export interface RemoteHostFeatures {
   commandList: boolean
@@ -126,8 +133,13 @@ export class RemoteTypertGateway {
     throw remoteFailure(result.error)
   }
 
-  async call<T = unknown>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> {
-    const result = await this.dispatch<T>(endpoint, payload, signal)
+  async call<T = unknown>(
+    endpoint: string,
+    payload: unknown,
+    signal?: AbortSignal,
+    options?: RemoteGatewayOptions,
+  ): Promise<T> {
+    const result = await this.dispatch<T>(endpoint, payload, signal, options)
     if (result.ok) return result.value as T
     throw remoteFailure(result.error)
   }
@@ -136,19 +148,20 @@ export class RemoteTypertGateway {
     endpoint: string,
     payload: unknown,
     signal?: AbortSignal,
+    options?: RemoteGatewayOptions,
   ): Promise<RemoteGatewayResult<T>> {
     const request = { endpoint, payload }
     const encoded = new TextEncoder().encode(JSON.stringify(request))
     let response: unknown
     const activeSignal = signal ?? new AbortController().signal
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES) {
-      response = await this.callTransferred(encoded, activeSignal)
+      response = await this.callTransferred(encoded, activeSignal, options)
     } else {
       try {
-        response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal)
+        response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, options)
       } catch (error) {
         if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
-        response = await this.callTransferred(encoded, activeSignal)
+        response = await this.callTransferred(encoded, activeSignal, options)
       }
     }
     return parseRpcResult<T>(response)
@@ -222,10 +235,15 @@ export class RemoteTypertGateway {
     }
   }
 
-  private async callTransferred(encoded: Uint8Array, signal: AbortSignal): Promise<unknown> {
+  private async callTransferred(
+    encoded: Uint8Array,
+    signal: AbortSignal,
+    options?: RemoteGatewayOptions,
+  ): Promise<unknown> {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'The Harness Remote request exceeds the transfer limit.')
     }
+    const maxResponseBytes = transferResponseLimit(options)
     const transferId = createRemoteId()
     const totalChunks = Math.ceil(encoded.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES)
     let opened = false
@@ -234,7 +252,7 @@ export class RemoteTypertGateway {
         transferId,
         totalBytes: encoded.byteLength,
         totalChunks,
-      }, signal)
+      }, signal, options)
       opened = true
       for (let index = 0; index < totalChunks; index += 1) {
         const start = index * HARNESS_API_TRANSFER_CHUNK_BYTES
@@ -243,19 +261,31 @@ export class RemoteTypertGateway {
           transferId,
           index,
           data: bytesToBase64(chunk),
-        }, signal)
+        }, signal, options)
       }
       const committed = await this.client.rpc<HarnessApiTransferCommitResult>(
         'harness.remote.transfer.commit',
         { transferId },
         signal,
+        options,
       )
       if (committed.kind === 'inline') return committed.response
-      if (committed.transferId !== transferId
+      if (committed.kind !== 'chunked'
+        || committed.transferId !== transferId
+        || !Number.isSafeInteger(committed.totalBytes)
         || committed.totalBytes <= 0
         || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES
+        || !Number.isSafeInteger(committed.totalChunks)
         || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
         throw new RemoteGatewayError('INVALID_MESSAGE', 'The remote Host returned an invalid Harness Remote transfer descriptor.')
+      }
+      // Checked before allocating: an oversized response must not reserve hundreds of megabytes.
+      if (maxResponseBytes !== undefined && committed.totalBytes > maxResponseBytes) {
+        throw new RemoteGatewayError(
+          'RESPONSE_TOO_LARGE',
+          'The remote Harness response exceeds the requested transfer limit.',
+          { totalBytes: committed.totalBytes, maxResponseBytes },
+        )
       }
       const responseBytes = new Uint8Array(committed.totalBytes)
       let offset = 0
@@ -264,6 +294,7 @@ export class RemoteTypertGateway {
           'harness.remote.transfer.read',
           { transferId, index },
           signal,
+          options,
         )
         if (result.transferId !== transferId || result.index !== index) {
           throw new RemoteGatewayError('INVALID_MESSAGE', 'The remote Host returned an out-of-order Harness Remote transfer chunk.')
@@ -278,7 +309,12 @@ export class RemoteTypertGateway {
       }
       return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(responseBytes)) as unknown
     } finally {
-      if (opened) await this.client.rpc('harness.remote.transfer.close', { transferId }).catch(() => undefined)
+      // Best-effort and bounded: the close may go out while unwinding an abort.
+      if (opened) {
+        await this.client.rpc('harness.remote.transfer.close', { transferId }, undefined, {
+          timeoutMs: TRANSFER_CLOSE_TIMEOUT_MS,
+        }).catch(() => undefined)
+      }
     }
   }
 }
@@ -384,6 +420,15 @@ function parseRpcResult<T>(value: unknown): RemoteGatewayResult<T> {
 
 function remoteFailure(failure: RemoteGatewayFailure): RemoteGatewayError {
   return new RemoteGatewayError(failure.code, failure.message, failure.details)
+}
+
+function transferResponseLimit(options: RemoteGatewayOptions | undefined): number | undefined {
+  const maxResponseBytes = options?.maxResponseBytes
+  if (maxResponseBytes === undefined) return undefined
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new RemoteGatewayError('INVALID_MESSAGE', 'The requested Harness transfer response limit is invalid.')
+  }
+  return Math.min(maxResponseBytes, MAX_HARNESS_API_TRANSFER_BYTES)
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

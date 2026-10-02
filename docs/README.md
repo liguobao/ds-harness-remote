@@ -10,32 +10,26 @@
 - `protocol`、`crypto`、`webrtc`、`client-core`、`ui` 等共享包
 - 用于客户端和插件联调的 Mock Host
 
-本仓库**不实现 DSH Remote Server**。禁止在本仓库中新增：
+本仓库另提供 [最小自部署 Server](../apps/server/README.zh.md)：单账号环境变量鉴权、设备注册与凭据、Control/Relay，以及登录和设备状态页。
 
-- `apps/server`、`apps/server-web` 或其他 Server/Admin 后端源码目录
-- `apps/web` 或其他 Remote Web 前端源码目录
-- FastAPI、SQLAlchemy、Alembic、SQLite Server runtime
-- Server migration、Server test、Server Docker image 或 Server deployment 目录
-- Admin 后端或 Server 托管的 React 站点
-
-Server、Remote Web 和 Admin 由独立 Server 项目作为同一站点实现。本仓库保留 Server
-设计和协议，用于约束 Plugin Host/Client 与外部服务；Android Client 复用同一
-Control/Relay，以及 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Session V3 Typert Remote contract。
+完整多账号 Server、Remote Web 会话 UI 和 Admin 仍在独立 Server 项目实现；这里的最小版本复用相同协议子集，保持独立进程，不扩展为完整站点。
 
 ## 权威文档
 
-- [Server 设计说明](server.md)：定义外部 Server 的职责、API、安全边界、数据模型和部署要求；只做设计，不授权在本仓库实现。
+- [Server 设计说明](server.md)：定义外部 Server 的职责、API、安全边界、数据模型和部署要求；完整站点设计；最小自部署子集见上述运行文档。
 - [Host Plugin 接入指南](plugin-integration.md)：定义账号登录、Host 授权注册、设备凭证轮换、WebSocket 和本地状态隔离要求。
 - [Remote Protocol v1](protocol.md)：定义 Host、Server、Client 的线协议，是本仓库 Plugin、Client 和共享协议包的实现依据。
 - [产品与功能设计](design/README.md)：定义 Plugin、Client 和共享基础能力。
 
 ## 主题说明
 
+- [自动安装指南](installation.zh.md)（[English](installation.md)）：安装命令、Windows 独立运行环境、服务账户、目录配置与卸载。
 - [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、ApiProxy/Typert carrier 兼容与排障。
 - [Codex Remote 技术说明](codex-remote.md)：说明 Codex 工作区展示、数据边界、配置、安全限制和当前验证状态。
 - [Cursor Remote / Agent ACP](cursor-remote.md)：说明 #65 Agent ACP gateway、Cursor adapter、allowlist 与配置。
 - [端到端加密](end-to-end-encryption.md)：解释 Noise IK、设备身份固定、密钥生命周期、Server 可见元数据、重放保护与安全边界。
 - [网络与传输](network.md)：解释出站连接、Control/Data plane、LAN/P2P/TURN/Relay 选路、NAT、降级、断线恢复与当前验证状态。
+- [版本兼容说明](compatibility.zh.md)（[English](compatibility.md)）：记录 Plugin 与各版本 DeepSeek Harness 的 carrier、Session 和 Desktop 兼容范围。
 
 ## 阅读路径
 
@@ -48,3 +42,5 @@ Control/Relay，以及 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Sessi
 - **跟踪尚未完成的工作**：读[开发任务](../TODO.md)。
 
 文档优先级：`protocol.md` 的线协议约束高于示例代码；Server 设计发生变化时必须同步检查协议兼容性和版本号。
+
+2026-09-20 原生侧栏扩展：官方文件树/只读预览、默认开启且可在详细 Remote 设置中关闭的终端，以及受限 loopback HTTP/WebSocket 预览，配置与边界见根 README，线协议见 `protocol.md`。完整 Server 仍只转发密文，不代理预览 HTTP 明文。

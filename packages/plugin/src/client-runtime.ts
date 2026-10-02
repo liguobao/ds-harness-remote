@@ -1,3 +1,4 @@
+import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { CodexAppFrameData, CodexAppStreamClosedData } from '@dsh-remote/protocol'
 import { AgentAcpClient, CodexRemoteClient, RemoteClientCore } from '@dsh-remote/client-core'
@@ -40,6 +41,7 @@ import {
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { RemoteFileViewerEndpoint } from './file-viewer-contract.js'
 import { loadNodeRtcFactory, type WeriftFactoryOptions } from './werift-rtc.js'
+import { safeErrorCode } from './safe-error.js'
 
 interface ConnectedRemote {
   client: RemoteClientCore
@@ -54,6 +56,7 @@ interface ConnectedRemote {
 export interface RemoteHostFeatures {
   commandList: boolean
   fileViewer: boolean
+  terminal: boolean
   apiProxy: boolean
   remoteGateway: boolean
   sessionFormat?: 3
@@ -74,6 +77,13 @@ const REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16] as const
 const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
 const DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
 const DIRECT_LAN_PROGRESS_DISPLAY_MS = 1_400
+const HOST_AUTHORIZATION_ERRORS = new Set([
+  'ACCOUNT_AUTH_REQUIRED',
+  'AUTH_INVALID',
+  'DEVICE_OWNERSHIP_REQUIRED',
+  'DEVICE_REVOKED',
+  'TOKEN_EXPIRED',
+])
 
 type TransportAttempt = 'direct' | 'turn' | 'relay'
 
@@ -138,6 +148,8 @@ export interface HostConnectionHandle {
 }
 
 export interface HostAuthorizationControl {
+  setTerminalEnabled?(enabled: boolean): void
+  setLoopbackPorts?(ports: readonly number[]): void
   hostStatus(): {
     deviceId?: string
     configured: boolean
@@ -155,6 +167,7 @@ export interface HostAuthorizationControl {
       mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
     }>
   }
+  hasStoredAuthorization?(): Promise<boolean>
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>
   localHarnessVersion?(): string | undefined
@@ -173,6 +186,7 @@ export interface HostAuthorizationControl {
 }
 
 export class ClientModeRuntime {
+  private preview?: LoopbackPreview
   private identity?: HostIdentity
   private connected?: ConnectedRemote
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
@@ -209,6 +223,34 @@ export class ClientModeRuntime {
       deviceId: shortId(this.identity.deviceId),
       fingerprint: this.identity.fingerprint,
     })
+    // A previously authorized Client should make the local Host controllable
+    // on startup as well. Do not register an anonymous Client just to probe:
+    // only persisted Client credentials opt into this default.
+    if (this.config.hostControl?.enabled !== false
+      && this.host !== undefined
+      && this.server.hasStoredAuthorization !== undefined) {
+      try {
+        if (await this.server.hasStoredAuthorization()
+          && (this.host.hasStoredAuthorization === undefined || !await this.host.hasStoredAuthorization())) {
+          await this.authorizeHostByDefault()
+        }
+      } catch (error) {
+        this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
+      }
+    }
+  }
+
+  async authorizeHostByDefault(): Promise<void> {
+    try {
+      if (this.host === undefined) return
+      if (this.config.hostControl?.enabled === false) return
+      if (this.host.hostStatus().authorized) return
+      if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
+      const credentials = await this.server.authenticate(this.requireIdentity())
+      await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
+    } catch (error) {
+      this.logger.warn('automatic Host authorization failed', { code: safeErrorCode(error) })
+    }
   }
 
   registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -251,6 +293,11 @@ export class ClientModeRuntime {
     }
   }
 
+  private async closePreview(): Promise<void> {
+    const preview = this.preview; this.preview = undefined
+    await preview?.close()
+  }
+
   private async detailedStatus(): Promise<Record<string, unknown>> {
     const connected = this.connected
     if (connected === undefined || this.identity === undefined) return this.status()
@@ -275,6 +322,7 @@ export class ClientModeRuntime {
   }
 
   async devices(): Promise<RemoteDeviceView[]> {
+    this.assertHostAuthorizationForDeviceDiscovery()
     this.requireIdentity()
     const serverDevices = await this.server.listDevices()
     const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
@@ -283,6 +331,23 @@ export class ClientModeRuntime {
       const presence = await this.server.presenceFor(device.deviceId).catch(() => ({ online: false }))
       return { ...device, ...presence }
     }))
+  }
+
+  /**
+   * Device discovery is exposed through the local app control route. When this
+   * installation also runs a Host, keep that route closed after the Host's
+   * Server credential has become terminally invalid. The Client credential can
+   * remain usable for a short time after a revoke, so checking only
+   * `ClientServerApi.listDevices()` would otherwise leak the device directory
+   * from a Host that the user has already been told to re-authorize.
+   */
+  private assertHostAuthorizationForDeviceDiscovery(): void {
+    const status = this.host?.hostStatus()
+    if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return
+    const message = status.error === 'DEVICE_REVOKED'
+      ? 'The local Host was revoked on the Server. Sign out and authorize this Host again.'
+      : 'The local Host authorization is no longer valid. Sign out and authorize this Host again.'
+    throw new ClientModeError(status.error, message)
   }
 
   async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {
@@ -295,6 +360,7 @@ export class ClientModeRuntime {
       this.server.bindIdentity(this.identity)
       authorization = await this.server.authorizeWithAccount(this.identity, email, password)
     }
+    await this.authorizeHostByDefault()
     this.logger.info('Client account authorized')
     return authorization
   }
@@ -311,6 +377,7 @@ export class ClientModeRuntime {
       return this.identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
+    if (result.status === 'complete') await this.authorizeHostByDefault()
     return result
   }
 
@@ -322,6 +389,7 @@ export class ClientModeRuntime {
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
     this.proxySwitch?.selectLocal()
+    await this.closePreview()
     this.gatewaySwitch.selectLocal()
     await this.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
@@ -346,6 +414,7 @@ export class ClientModeRuntime {
       await this.closeCodexVirtual()
       await this.closeCursorVirtual()
       this.proxySwitch?.selectLocal()
+      await this.closePreview()
       this.gatewaySwitch.selectLocal()
       const previous = this.connected
       this.connected = undefined
@@ -368,6 +437,7 @@ export class ClientModeRuntime {
       throw error
     }
     const previous = this.connected
+    await this.closePreview()
     this.connected = next
     this.clearConnectionProgress(next.progressRunId)
     this.pendingWorkspaceSelection = undefined
@@ -465,7 +535,7 @@ export class ClientModeRuntime {
     const virtual = CodexVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    }, harnessSessionGeneration(this.host?.localHarnessVersion?.()))
+    }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway(remote.client))
     let workspace: CodexVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId, signal)
@@ -604,9 +674,11 @@ export class ClientModeRuntime {
   }
 
   async close(): Promise<void> {
+    await this.closePreview()
     if (this.closed) return
     this.closed = true
     this.proxySwitch?.selectLocal()
+    await this.closePreview()
     this.gatewaySwitch.selectLocal()
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
@@ -796,7 +868,7 @@ export class ClientModeRuntime {
       this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
       return
     }
-    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client).api, target)
+    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client, remote.harnessVersion).api, target)
     this.gatewaySwitch.selectRemote(request => invokeRemoteCommand(remote.client, request), {
       execute: true,
       list: remote.features.commandList,
@@ -808,6 +880,7 @@ export class ClientModeRuntime {
     return new RemoteTypertGateway(
       remote.client,
       localSessionGeneration === 'v3' && remote.features.sessionFormat !== 3 ? 'legacy-to-v3' : undefined,
+      remote.harnessVersion,
     )
   }
 
@@ -969,6 +1042,7 @@ export class ClientModeRuntime {
       )
       connectedClient.onClose(() => {
         if (this.connected?.client !== connectedClient) return
+        void this.closePreview()
         this.connected = undefined
         this.connectionProgress = undefined
         this.pendingWorkspaceSelection = undefined
@@ -1018,6 +1092,7 @@ export class ClientModeRuntime {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
     const next = await this.connect(targetDeviceId, signal)
     const previous = this.connected
+    await this.closePreview()
     this.connected = next
     this.clearConnectionProgress(next.progressRunId)
     await previous?.client.close().catch(() => undefined)
@@ -1084,6 +1159,12 @@ export class ClientModeRuntime {
           throw new ClientModeError('INVALID_MESSAGE', 'A QR login session is required.')
         }
         return ok(await this.pollClientOAuthQrLogin(value.qrId))
+      }
+      if (endpoint === 'preview.open') {
+        const remote = this.activeRemote()
+        if (remote === undefined) throw new ClientModeError('TRANSPORT_CLOSED', 'Connect to a Remote Host first.')
+        this.preview ??= new LoopbackPreview(remote.client)
+        return ok(await this.preview.open(record(payload).port as number))
       }
       if (endpoint === 'directory.list') {
         const value = record(payload)
@@ -1402,6 +1483,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
   return {
     commandList: isVersionAtLeast(clientVersion, REMOTE_COMMAND_LIST_MIN_VERSION),
     fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
+    terminal: false,
     apiProxy: true,
     remoteGateway: false,
     codex: false,
@@ -1429,6 +1511,7 @@ export async function probeRemoteHostFeatures(
   const apiProxy = capabilities.has('harness.api.v1')
   const remoteV1 = capabilities.has('harness.remote.v1')
   const remoteV3 = capabilities.has('harness.remote.v3')
+  const terminal = capabilities.has('harness.terminal.v1')
   const codex = capabilities.has('codex.appserver.v1')
   const cursor = capabilities.has('agent.acp.v1')
   if (remoteV1 && remoteV3) {
@@ -1442,6 +1525,7 @@ export async function probeRemoteHostFeatures(
   return {
     commandList: remoteGateway || (apiProxy && fallback.commandList),
     fileViewer: capabilities.has('fileviewer.read.v1'),
+    terminal,
     apiProxy,
     remoteGateway,
     ...(sessionFormat === undefined ? {} : { sessionFormat }),

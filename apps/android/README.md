@@ -73,6 +73,7 @@ NODE_ENV=production pnpm --filter @dsh-remote/android build
 pnpm dlx expo-doctor@latest
 
 cd apps/android
+pnpm run prepare:workspace
 pnpm exec expo prebuild --platform android
 cd android
 ./gradlew assembleDebug
@@ -89,6 +90,26 @@ src/
   ui/        tokens and reusable mobile components
 ```
 
-The UI does not expose shell, filesystem, or arbitrary tool RPCs. Every Harness action goes through
-the Host's fixed ApiProxy or Typert Remote allowlist, and every CodeX action goes through the separate
-fixed App Server method schemas; Host policy remains authoritative.
+Harness conversations expose **Files** and **Terminal** from the conversation title bar through the Host's fixed official Typert allowlist, requiring the native APIs in DSH 0.1.6-alpha.2 or later. Files lists workspace directories and previews UTF-8 text in 200-line pages without mutations; its title-bar Back returns from a file to its directory and closes the panel only at the workspace root, and refresh stays in the title bar. PNG/JPEG/GIF/WebP images and PDFs use bounded `workspaceFiles/stat` / `readBytes` reads, with size, offset, version, and content validation. DOC/DOCX/XLS/XLSX/PPT/PPTX use the Host's existing `officeToPdf` service, when available, and the same PDF viewer. The app allows up to 8 MiB per binary preview and 50 MiB per Office source. Unsupported binary formats are not opened as text; HTML and SVG are never executed.
+
+PDF.js is pinned and bundled into a local, navigation-blocked WebView with no external resources, PDF scripts, links, forms, or downloads. Documents stay in memory: there is no app-managed plaintext file cache or external viewer handoff. Only one page is rendered at a time with a bounded canvas. Office conversions get a longer client request timeout, but Host limits still apply. Large conversion responses use the existing transfer carrier; mobile limits do not change the Host conversion limits. Encrypted PDFs and text selection in the PDF canvas are not supported. The bounded text overlay is best-effort; TalkBack still needs device validation. External CMaps and WebAssembly decoders are not bundled, so some legacy CJK PDFs or JPEG2000 images may render incompletely. Missing Host fonts are shown as a layout warning. Images are capped at 8192 pixels per side and 16 million pixels total. Closing or navigating away cancels pending reads and discards preview state.
+
+Terminal uses a locally bundled xterm renderer in a navigation-blocked WebView; no CDN is used.
+Enable Remote terminal on the Host first. It runs as the Host user, independently of Agent approval.
+Each attachment obtains fresh input ownership, recovers a bounded screen snapshot, and stops input
+after loss of ownership or connection. Uncertain writes and queued input are never replayed. Closing
+the panel releases its follow/retention streams; ending a terminal explicitly terminates it. Host
+idle reclamation still applies.
+
+Permission options come from the legacy Session projection or the new `permissionPresets/catalog`
+endpoint. Missing catalogs remain an error, never a reason to assume a permissive preset. Update the
+Host Remote plugin as well as the app to use new catalogs. CodeX keeps its existing separate controls.
+
+Run `pnpm run prepare:workspace` before invoking Gradle directly: it generates the ignored local
+terminal and PDF renderers from pinned xterm and PDF.js packages via `build:renderers`. CI and release
+APK jobs run the generators explicitly. Rebuild the APK to include both offline renderers.
+The WebView native dependency requires a new APK; a JavaScript-only update to an old APK is insufficient.
+
+Arbitrary tool RPCs remain unavailable. CodeX actions use separate fixed App Server schemas; Host
+policy remains authoritative. Native keyboard, TalkBack, and cross-device regression need real-device
+validation for this addition.

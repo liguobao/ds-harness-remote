@@ -1,5 +1,130 @@
 # Changelog
 
+## 0.4.27 - 2026-09-30
+
+- Fixes Harness version discovery for globally installed DSH CLI symlinks, so Hosts running `dsh 0.2.0-rc.2` report their Harness version again.
+- Keeps the DeepSeek Harness 0.2.0 Desktop shell lookup and its version-gated workspace compatibility paths intact.
+- Isolates development-service preview HTTP/WebSocket resources per Client and closes connections immediately when their ports are revoked, without affecting other allowed previews.
+- Adds regression coverage for npm CLI symlinks and the `0.2.0-rc.2` Session V3 profile.
+- Advances the Android app to `0.4.27` (`versionCode 38`) alongside the Plugin release.
+
+## 0.4.26 - 2026-09-30
+
+- Improves the Android conversation composer and adds more actions to the conversation menu.
+- Adds transport heartbeat diagnostics and Noise IK golden-vector coverage for easier connection troubleshooting and protocol maintenance.
+- Fixes the Windows uninstall path when optional plugins are missing, and keeps the committed Host bundle aligned with the merged release state.
+- Advances the Android app to `0.4.26` (`versionCode 37`) alongside the Plugin release.
+
+## 0.4.25 - 2026-09-29
+
+- Desktop Remote Web and Android now merge multiple reasoning and plan segments from the same assistant turn into one default-collapsed analysis section. The answer remains visible, and tapping the section expands the complete reasoning.
+- Both clients preserve tool activity rows while grouping Harness turns and CodeX turns consistently by their native turn identifiers.
+- Advances the Android app to `0.4.25` (`versionCode 36`) alongside the Plugin release.
+
+## 0.4.24 - 2026-09-29
+
+- Fixes Harness version detection on the DeepSeek Harness 0.2.0 Desktop shell. When the running entrypoint is `@deepseek-ai/dsh-desktop-host` inside `app.asar`, the Host now resolves the `@deepseek-ai/dsh` package through the entrypoint's module scope instead of relying on the ancestor chain only, so it reports `harnessVersion` again.
+- Restores the version-gated workspace compatibility paths on 0.2.0 Hosts, fixing the Remote Web file-change subscription and byte-range reads (legacy `workspaceFiles/changes` root-path injection, `workspaceFiles/readBytes` range nesting under `options`, and the 0.2 default-Workspace request shape).
+- Advances the Android app to `0.4.24` (`versionCode 35`) alongside the Plugin release.
+
+## 0.4.23 - 2026-09-29
+
+- Upgrades the official DeepSeek Harness development baseline to `dsh-v0.2.0-rc.1` and publishes peer ranges for the new `0.2.0-rc.1` package line.
+- Keeps Session V3 selection and the 0.1.7 workspace payload adaptations correct on `0.2.0-rc.1`, including command attachments and byte-range reads.
+- Extends the authenticated fixed allowlist for the 0.2.0 native UI (`session/projections`, workspace application lookup, default workspace initialization, and session pinning).
+- Advances the Android app to `0.4.23` (`versionCode 34`) alongside the Plugin release.
+
+## 0.4.22 - 2026-09-28
+
+- Fixes the latest Typert Remote provider-directory request by preserving the required plain-object `args` payload.
+- Tightens the Typert gateway request type to match the current Remote contract and adds regression coverage for empty provider-directory calls.
+- Advances the Android app to `0.4.22` (`versionCode 33`) alongside the Plugin release.
+
+## 0.4.21 - 2026-09-28
+
+- Updates Remote Web model configuration compatibility for DeepSeek Harness 0.1.7; the provider-directory payload regression in that release is fixed in 0.4.22.
+- Adds one-time Host registration installers and the `ds-harness-remote register <server-token>` CLI command; the token installers enable the Host terminal setting for the registered service.
+
+## 0.4.20 - 2026-09-27
+
+- Restores the Remote settings page's sign-out action in both clean and unsaved states.
+- Shows the local Host name and device ID in Remote settings.
+- Includes localized package metadata for the DSH plugin manager.
+
+## 0.4.19 - 2026-09-27
+
+- Refreshes the published npm package README and release metadata to match the repository's current 0.4.18 feature set, compatibility range, self-hosted Server scope, and installation commands.
+
+## 0.4.18 - 2026-09-26
+
+- Primarily improves compatibility with DeepSeek Harness `0.1.7-rc.1`: the plugin handles the Volatile settings entry, updated Typert stream-open signature, workspace file change/read payloads, and the new byte response shape while retaining the `0.1.6` settings path.
+- Keeps the legacy `0.1.6-alpha.2` Host path working, including onboarding acknowledgement handling when the older settings registry rejects the new welcome field.
+- Thanks to [HuanLinOTO](https://github.com/HuanLinOTO) for the `0.1.7-rc.1` compatibility work and the accompanying fixes.
+
+## 0.4.17 - 2026-09-22
+
+- Fixes the CodeX workspace terminal in Remote sessions. The Host now answers the official `terminal/*` contract for `codex:<threadId>` scopes: `environment` carries `scrollback`, `shells` uses `{path,args,name}`, `list`/`create`/snapshot/state carry the full `WebTerminalInfo` with `controllerId`, mutations resolve to void, `retain` acknowledges with `retained`, and `follow` opens with a snapshot followed by `sequence + 1` output. The shell starts through the Host `subprocess` service (PTY) when available and falls back to a plain pipe otherwise; recovery screens replay a bounded output journal.
+- Routes CodeX virtual Harness file and terminal requests from Desktop clients through the authenticated Host carrier, so remote CodeX sessions can use the Host workspace files and terminal APIs.
+- Collapses the Host list on the Remote page while a Host is connecting, so the progress panel is on screen, and limits the list to five rows with internal scrolling.
+
+## 0.4.16
+
+- Restores the Remote settings card border and rounded corners in Harness 0.1.6, adds inner spacing, and limits the card width.
+
+## 0.4.15
+
+- Adds the native workspace file tree and read-only previews for Harness `0.1.6-alpha.2`.
+- Adds remote terminals and development-service previews, enabled locally on the Host with settings that apply immediately. Previews currently require Desktop or a browser connected to a local Harness.
+- Adds a single-account self-hosted relay with Docker deployment files, plus refreshed landing, login, and device-status pages. Remote Web conversations are not included.
+- Adds macOS/Linux and Windows Host installation scripts and a downloadable Chrome/Edge extension ZIP.
+- Fixes Host authorization recovery and repeated connection replacement between instances (#70).
+- Switches Desktop Host status to live updates, reducing polling.
+
+## 0.4.14
+
+- Adds configurable ACP (Agent Client Protocol) IDE backends. The Plugin carries a
+  backend-neutral `AcpGateway` plus a stdio JSON-RPC adapter, exposes the
+  `agent.acp.v1` capability with bounded prompt and update limits, and lets the
+  Remote settings surface enable, add, and probe backends (Codex, Cursor, Kimi,
+  or a custom command). ACP is enabled by default but gated on an availability
+  check, so a missing CLI reports `not installed` instead of failing the Host.
+- Shows Host-side connected Clients in the Remote host picker as a
+  `{count} connected` pill next to Refresh, with a dropdown that lists the peers
+  and their platform, instead of a standalone settings card.
+- Adds experimental DeepSeek Harness `dsh-v0.1.6-alpha.1` support to the Plugin
+  and its Host/Remote carriers. `0.1.6` builds report patch `6`, so they already
+  select the established v0.1.5 Session V3 Typert Remote Gateway profile and need
+  no additional wire-format adapter or version branch.
+- Extends the DSH peer dependency matrix to `>=0.1.5-alpha.1` and drops the
+  `0.1.5-rc.1` upper bound, so the `0.1.6` line resolves as supported instead of
+  being rejected by peer validation. The range is intentionally left open-ended.
+- Moves the Plugin development, type-check, and test baseline to
+  `@deepseek-ai/dsh-*@0.1.6-alpha.1`.
+- Verifies the Web → Host main path against a standalone
+  `dsh-v0.1.6-alpha.1` instance running the local Plugin build. Cross-machine,
+  CodeX, Android, VS Code, and WebRTC coverage on `0.1.6` is outside this
+  verification set and stays tracked in `TODO.md`.
+- Selects the command attachment field by Host version, so `dsh-commands` 0.1.2
+  (`images`) and the newer attachment field both round-trip image prompts.
+- Publishes the `harnessCapabilities` constant from protocol §17, documents the
+  control extensions, marks `webrtcEnabled` as an implementation extension, and
+  adds the `HARNESS_VERSION_INCOMPATIBLE` and `RESPONSE_TOO_LARGE` error codes.
+- Android: opens on the device list titled `DSH Remote` instead of connecting to
+  the remembered Host on launch (`resolveAutoConnectDevice` is kept but no longer
+  routed), adds per-host workspace favorites shown as home-screen links that
+  connect and open the workspace's latest conversation, falls back to the three
+  most recently visited workspaces while Favorites is empty, shows the device and
+  transport as the workspaces header with back navigation, and aligns assistant
+  activity, reasoning, and answer text on one left edge.
+- Android: offers the conversation quick actions (review changes, commit,
+  review screenshot) in Harness conversations as well as CodeX ones, stops icon
+  buttons from painting solid black interiors in the light theme (the plus showed
+  up as a filled black circle) with the create buttons now using the accent tint,
+  and keeps the remembered workspace collapse when a home-screen shortcut opens
+  the list.
+- Advances the Plugin, VS Code extension, and Android app to `0.4.14`
+  (`versionCode 31`).
+
 ## 0.4.13
 
 - Registers the Remote loopback control route directly on the DSH web server

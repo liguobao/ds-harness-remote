@@ -93,8 +93,22 @@ assert.doesNotMatch(
 
 const clientBundle = readFileSync(join(root, 'packages/plugin/dist/client.github.js'), 'utf8')
 assert.match(clientBundle, /window\.__ModuleLoader__\.load/, 'browser client entry must register with the DSH module loader')
+assert.match(clientBundle, /status\.events/, 'browser client must open the Host status event stream')
+assert.match(clientBundle, /new EventSource/, 'browser client must push-render Host status through EventSource')
+assert.match(clientBundle, /useSyncExternalStore/, 'browser client must render Host status from the pushed stream')
+assert.doesNotMatch(
+  clientBundle,
+  /setInterval\(refresh/,
+  'browser client must not poll the loopback status endpoint on a fixed interval',
+)
 assert.match(clientBundle, /localeNamespace\s*=\s*"ds-harness-remote"/, 'browser client locale namespace must use the canonical plugin id')
-assert.match(clientBundle, /settings\.plugin\.item/, 'browser client must contribute its options inside Plugin configuration')
+assert.match(clientBundle, /plugins\.row\.config/, 'browser client must contribute its options to the RC1 plugin row config surface')
+assert.match(clientBundle, /plugins\.bundle\.config/, 'browser client must keep contributing to the installed-bundle config surface')
+assert.doesNotMatch(
+  clientBundle,
+  /settings\.plugin\.item/,
+  'browser client must not target the settings.plugin.item slot retired in DSH 0.1.7-rc.1',
+)
 assert.ok(
   clientBundle.includes('DeepSeek 远程连接') || clientBundle.includes('DeepSeek \\u8FDC\\u7A0B\\u8FDE\\u63A5'),
   'browser client must expose the Chinese plugin name',

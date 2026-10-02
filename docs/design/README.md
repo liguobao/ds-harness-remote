@@ -7,7 +7,7 @@
 本目录定义当前仓库内以 rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Session V3 Typert Remote Gateway 为 Harness 业务面、以可选 File Viewer bridge 为只读预览面的双角色 Desktop Plugin、Android/VS Code Client 和共享基础包的产品与功能。
 Android 与 VS Code 已接入同一双 carrier Client Core，但仍需真实设备和 Extension Host E2E 验证。
 
-Server 的设计约束以 [../server.md](../server.md) 为准，Host/Server/Client 的线协议以 [../protocol.md](../protocol.md) 为准，Host 的账号登录与授权注册流程见 [../plugin-integration.md](../plugin-integration.md)。这些文档必须保留，但 Server 由独立项目实现，不得在当前仓库创建 Server 源码或部署目录。
+Server 的设计约束以 [../server.md](../server.md) 为准，Host/Server/Client 的线协议以 [../protocol.md](../protocol.md) 为准，Host 的账号登录与授权注册流程见 [../plugin-integration.md](../plugin-integration.md)。这些文档必须保留；完整 Server 由独立项目实现，本仓库 `apps/server` 另提供[最小自部署版本](../../apps/server/README.zh.md)。
 
 ## 项目清单
 
@@ -20,9 +20,9 @@ Server 的设计约束以 [../server.md](../server.md) 为准，Host/Server/Clie
 
 ## 不在当前仓库实现
 
-- DSH Remote Server runtime
+- 完整多账号 DSH Remote Server runtime（`apps/server` 最小自部署版本除外）
 - Remote Web、Server Admin 后端与托管站点
-- Server 数据库、迁移、测试与部署
+- 完整 Server 的数据库、迁移与部署
 - TURN/Coturn 部署
 
 这些能力的预期行为仍由 `server.md` 和 `protocol.md` 约束，供独立 Server 项目实现与互操作验收。

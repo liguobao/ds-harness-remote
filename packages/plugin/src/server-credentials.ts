@@ -22,6 +22,31 @@ export class ServerCredentialStore {
 
   constructor(directory: string) { this.path = join(directory, 'server-credentials.json') }
 
+  /** Serialize the complete read/refresh/write transaction across processes.
+   * Never steal an old lock: a suspended owner may still consume a one-use token.
+   * After a crash, stop all instances before removing the orphaned lock.
+   */
+  async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
+    const lock = `${this.path}.refresh-lock`
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+    const deadline = Date.now() + 15_000
+    for (;;) {
+      try {
+        await mkdir(lock, { mode: 0o700 })
+        break
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error
+        if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+    }
+    try {
+      return await operation()
+    } finally {
+      await rm(lock, { recursive: true })
+    }
+  }
+
   async load(serverUrl: string, deviceId: string): Promise<ServerCredentials | undefined> {
     if (!(await exists(this.path))) return undefined
     await assertPrivateMode(this.path)
@@ -47,6 +72,13 @@ export class ServerCredentialStore {
 
 export class ServerCredentialsInvalidError extends Error {
   readonly code = 'SERVER_CREDENTIALS_INVALID'
+}
+
+export class ServerCredentialsBusyError extends Error {
+  readonly code = 'SERVER_CREDENTIALS_BUSY'
+  constructor() {
+    super('Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.')
+  }
 }
 
 async function atomicWrite(path: string, contents: string): Promise<void> {

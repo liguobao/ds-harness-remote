@@ -287,6 +287,17 @@ Content-Type: application/json
 
 Server 每次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值；旧 token 重用会撤销整个 token family。不要并发刷新，同一设备应使用 single-flight/互斥锁。
 
+Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁，在获得锁后重新
+读取凭据，串行执行读取、刷新与原子落盘。等待 15 秒仍未获得锁时返回
+`SERVER_CREDENTIALS_BUSY`，不按锁龄抢占。进程异常退出后，应停止所有共享该目录的实例，
+移除遗留锁并重新授权，避免重用可能已被 Server 消耗的 refresh token。
+刷新失败日志只标记 `phase: credential_refresh` 与错误码，不记录响应正文或 token。
+
+同一 deviceId 只保留一个控制连接。收到 `4003` 时 Plugin 进入 `CONNECTION_REPLACED`
+并停止自动重连；同时运行的 Host 应使用独立 `DSH_HOME` 并分别授权。
+收到 `4002` 时，Plugin 使用被拒绝的 access token 对照锁内最新凭据，必要时刷新，
+随后重试握手一次；新凭据仍被拒绝时停止恢复，成功完成握手才重置恢复预算。
+
 建议在 access token 到期前 60 秒刷新。收到 `TOKEN_EXPIRED` 可刷新后重试一次；收到 `AUTH_INVALID` 或 `DEVICE_REVOKED` 应停止自动重试，清理设备凭证并提示用户重新登录/接入。
 
 ## 7. 建立 WebSocket
@@ -318,8 +329,11 @@ wss://dsh.r2049.cn/ws/v1/connect
 ```
 
 Host 在启动时优先调用本机 rc.2 `ApiProxy.host.describe` 读取 `version`；alpha 不提供
-ApiProxy，或旧 Harness 返回已知占位值/不提供该方法时，从当前 `@deepseek-ai/dsh` 运行包读取版本。读取成功时，Host 在设备注册
-descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。两种读取都失败时省略字段，不能
+ApiProxy，或旧 Harness 返回已知占位值/不提供该方法时，从当前运行入口定位 `@deepseek-ai/dsh`
+运行包读取版本：CLI/dsh-TUI 入口位于该包根目录之下，沿入口祖先链查找；0.2.0 Desktop 由
+`app.asar` 内的 `@deepseek-ai/dsh-desktop-host` 入口拉起、Harness 包是其兄弟目录，则按入口的
+模块作用域解析 `@deepseek-ai/dsh/package.json`。读取成功时，Host 在设备注册
+descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。读取都失败时省略字段，不能
 阻止控制连接。Server 对缺失字段保留已有值。
 
 连接建立后 5 秒内未发送合法 `hello` 会被关闭。成功响应 `hello.ack`：
@@ -427,3 +441,7 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 - Noise handshake secret 或解密后的业务 payload。
 
 可以记录经过截断或哈希处理的 deviceId、connectionId、错误码和连接阶段。生产环境必须校验证书，不允许“忽略 TLS 错误”。
+
+## 最小自部署 Server
+
+本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。

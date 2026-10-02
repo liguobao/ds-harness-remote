@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MessageSquareText, MoreVertical, Pencil, Search, Sparkles, Trash2, X } from 'lucide-react-native'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MessageSquareText, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -8,14 +8,19 @@ import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+import { workspaceStableKey } from '../lib/workspace-key'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { resolveSessionDisplayTitle } from './session-title'
 
-export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
+const FAVORITE_HIGHLIGHT_MS = 2400
+
+export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focusWorkspaceKey }: {
   onBack?: () => void
   onSession: (session: RemoteSession) => void
   onDeviceInfo: () => void
   onMore?: () => void
+  /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
+  focusWorkspaceKey?: string
 }) {
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
@@ -28,6 +33,8 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
   const workspaceRename = useAppStore(state => state.workspaceRename)
   const workspaceDelete = useAppStore(state => state.workspaceDelete)
   const workspaceMove = useAppStore(state => state.workspaceMove)
+  const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
+  const toggleFavoriteWorkspace = useAppStore(state => state.toggleFavoriteWorkspace)
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const createSession = useAppStore(state => state.createSession)
   const openSession = useAppStore(state => state.openSession)
@@ -38,6 +45,19 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
   const [renameTarget, setRenameTarget] = useState<WorkspaceView | undefined>(undefined)
   const [actionsTarget, setActionsTarget] = useState<WorkspaceView | undefined>(undefined)
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [allSessionsWorkspaceKeys, setAllSessionsWorkspaceKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const [focusedWorkspaceKey, setFocusedWorkspaceKey] = useState<string | undefined>(undefined)
+  const scrollRef = useRef<ScrollView>(null)
+  const workspaceOffsets = useRef(new Map<string, number>())
+  const pendingScrollKey = useRef<string | undefined>(undefined)
+  const focusApplied = useRef(false)
+  /**
+   * Keys a home-screen shortcut revealed. They stay expanded for this screen
+   * without rewriting the collapsed set the user actually chose.
+   */
+  const revealedKeys = useRef<readonly string[]>([])
+  /** Guards saves so an unloaded (empty) set can never overwrite the stored one. */
+  const collapsedLoaded = useRef(false)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
@@ -47,20 +67,34 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
     setActiveBackend(initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable))
     setSearchQuery('')
     setCollapsedWorkspaceIds(new Set())
+    setAllSessionsWorkspaceKeys(new Set())
+    collapsedLoaded.current = false
     if (deviceId === undefined) return () => { cancelled = true }
     void loadWorkspaceBackend(deviceId).then(backend => {
+      // A home-screen shortcut owns the visible tab on the first render.
       if (
         !cancelled
+        && !focusApplied.current
         && backend !== undefined
         && (backend !== 'codex' || codexAvailable)
         && (backend !== 'cursor' || cursorAvailable)
       ) setActiveBackend(backend)
     })
     void loadCollapsedWorkspaceIds(deviceId).then(workspaceIds => {
-      if (!cancelled) setCollapsedWorkspaceIds(new Set(workspaceIds))
+      if (cancelled) return
+      const next = new Set(workspaceIds)
+      // The stored snapshot still applies to every other workspace, so entering
+      // through a shortcut no longer forgets the remembered collapse state.
+      for (const key of revealedKeys.current) next.delete(key)
+      collapsedLoaded.current = true
+      setCollapsedWorkspaceIds(next)
     })
     return () => { cancelled = true }
   }, [selectedDevice?.deviceId, codexAvailable, cursorAvailable])
+
+  const favoriteKeys = new Set(favoriteWorkspaces
+    .filter(favorite => favorite.deviceId === selectedDevice?.deviceId)
+    .map(favorite => favorite.key))
 
   const selectBackend = (backend: 'harness' | 'codex' | 'cursor') => {
     setActiveBackend(backend)
@@ -68,14 +102,59 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
     if (deviceId !== undefined) void saveWorkspaceBackend(deviceId, backend)
   }
 
+  const scrollToWorkspace = (key: string) => {
+    const offset = workspaceOffsets.current.get(key)
+    if (offset === undefined) {
+      pendingScrollKey.current = key
+      return
+    }
+    scrollRef.current?.scrollTo({ y: Math.max(0, offset - spacing.sm), animated: true })
+  }
+
+  // A tapped home-screen shortcut opens this screen with a workspace to reveal.
+  useEffect(() => {
+    if (focusWorkspaceKey === undefined || focusApplied.current) return
+    const workspace = workspaces.find(item => workspaceStableKey(item, selectedDevice?.platform) === focusWorkspaceKey)
+    if (workspace === undefined) {
+      if (workspaces.length === 0) return
+      focusApplied.current = true
+      useAppStore.setState({ error: zhCN.workspaces.favoriteUnavailable })
+      return
+    }
+    focusApplied.current = true
+    const backend = workspace.backend === 'codex' ? 'codex' : 'harness'
+    setSearchQuery('')
+    if (backend !== activeBackend) selectBackend(backend)
+    // Revealing is in-memory only: persisting here used to save a set that had
+    // not loaded yet, which erased the remembered collapse list for this Host.
+    revealedKeys.current = [focusWorkspaceKey, workspace.workspaceId]
+    setCollapsedWorkspaceIds(current => {
+      const next = new Set(current)
+      for (const key of revealedKeys.current) next.delete(key)
+      return next
+    })
+    setFocusedWorkspaceKey(focusWorkspaceKey)
+    scrollToWorkspace(focusWorkspaceKey)
+  }, [activeBackend, focusWorkspaceKey, selectedDevice?.deviceId, selectedDevice?.platform, workspaces])
+
+  useEffect(() => {
+    if (focusedWorkspaceKey === undefined) return
+    const timer = setTimeout(() => setFocusedWorkspaceKey(undefined), FAVORITE_HIGHLIGHT_MS)
+    return () => clearTimeout(timer)
+  }, [focusedWorkspaceKey])
+
   useEffect(() => {
     if (activeBackend === 'codex' && !codexAvailable) setActiveBackend('harness')
     if (activeBackend === 'cursor' && !cursorAvailable) setActiveBackend('harness')
   }, [activeBackend, codexAvailable, cursorAvailable])
 
+  const toggleFavorite = (workspace: WorkspaceView) => {
+    void toggleFavoriteWorkspace(workspace)
+  }
+
   const toggleWorkspace = (workspace: WorkspaceView) => setCollapsedWorkspaceIds(current => {
     const next = new Set(current)
-    const key = workspaceCollapseKey(workspace, selectedDevice?.platform)
+    const key = workspaceStableKey(workspace, selectedDevice?.platform)
     if (next.has(key) || next.has(workspace.workspaceId)) {
       next.delete(key)
       // Remove the pre-path-key value when migrating an existing install.
@@ -84,7 +163,16 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
       next.add(key)
     }
     const deviceId = selectedDevice?.deviceId
-    if (deviceId !== undefined) void saveCollapsedWorkspaceIds(deviceId, [...next])
+    // Skipping the write until the stored snapshot is in keeps a fast toggle from
+    // saving a set that has not loaded yet and dropping the rest.
+    if (deviceId !== undefined && collapsedLoaded.current) void saveCollapsedWorkspaceIds(deviceId, [...next])
+    return next
+  })
+
+  const loadAllSessions = (workspaceKey: string) => setAllSessionsWorkspaceKeys(current => {
+    if (current.has(workspaceKey)) return current
+    const next = new Set(current)
+    next.add(workspaceKey)
     return next
   })
 
@@ -150,20 +238,20 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
   return (
     <View style={styles.flex}>
       <TopBar
-        title={zhCN.workspaces.title}
-        subtitle={deviceSubtitle}
-        onSubtitlePress={onDeviceInfo}
+        title={deviceSubtitle}
+        titleLines={2}
+        onTitlePress={onDeviceInfo}
         onBack={onBack}
         action={(
           <View style={styles.topBarActions}>
-            <IconButton label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />
+            <IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />
             {onMore !== undefined && (
-              <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
+              <IconButton dense label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
             )}
           </View>
         )}
       />
-      <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
+      <Screen scrollRef={scrollRef} refreshing={refreshing} onRefresh={() => void refresh()}>
         {showBackendTabs && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">
           <Pressable
             accessibilityRole="tab"
@@ -250,10 +338,24 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
                 const session = sessions.find(item => item.sessionId === sessionId)
                 return session === undefined ? [] : [session]
               })
-              const collapseKey = workspaceCollapseKey(workspace, selectedDevice?.platform)
-              const collapsed = collapsedWorkspaceIds.has(collapseKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
+              const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
+              const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
+              const visibleWorkspaceSessions = showAllSessions ? workspaceSessions : workspaceSessions.slice(0, 3)
+              const collapsed = collapsedWorkspaceIds.has(workspaceKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
+              const favorited = favoriteKeys.has(workspaceKey)
               return (
-                <View key={workspace.workspaceId} style={styles.workspaceGroup}>
+                <View
+                  key={workspace.workspaceId}
+                  style={[styles.workspaceGroup, focusedWorkspaceKey === workspaceKey && styles.workspaceGroupFocused]}
+                  onLayout={event => {
+                    const offset = event.nativeEvent.layout.y
+                    workspaceOffsets.current.set(workspaceKey, offset)
+                    if (pendingScrollKey.current === workspaceKey) {
+                      pendingScrollKey.current = undefined
+                      scrollRef.current?.scrollTo({ y: Math.max(0, offset - spacing.sm), animated: true })
+                    }
+                  }}
+                >
                   <View style={styles.workspaceRow}>
                     <Pressable
                       accessibilityRole="button"
@@ -281,35 +383,58 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore }: {
                         ? <ChevronRight size={18} color={colors.subtle} />
                         : <ChevronDown size={18} color={colors.subtle} />}
                     </Pressable>
-                    <IconButton label={zhCN.workspaces.newSessionIn(workspace.title)} icon={CirclePlus} onPress={() => void createInWorkspace(workspace.workspaceId)} />
-                    {workspace.backend !== 'codex' && <IconButton label={zhCN.workspaces.options} icon={MoreVertical} onPress={() => setActionsTarget(workspace)} />}
+                    <View style={styles.workspaceRowActions}>
+                      <IconButton
+                        dense
+                        label={favorited ? zhCN.workspaces.removeFavorite(workspace.title) : zhCN.workspaces.addFavorite(workspace.title)}
+                        icon={Star}
+                        tint={favorited ? colors.primary : colors.subtle}
+                        fill={favorited ? colors.primary : 'none'}
+                        onPress={() => toggleFavorite(workspace)}
+                      />
+                      <IconButton dense label={zhCN.workspaces.newSessionIn(workspace.title)} icon={CirclePlus} tint={colors.primary} onPress={() => void createInWorkspace(workspace.workspaceId)} />
+                      {workspace.backend !== 'codex' && <IconButton dense label={zhCN.workspaces.options} icon={MoreVertical} onPress={() => setActionsTarget(workspace)} />}
+                    </View>
                   </View>
                   {!collapsed && (workspaceSessions.length === 0
                     ? <Pressable onPress={() => void createInWorkspace(workspace.workspaceId)} style={styles.noSessions}><Text style={styles.noSessionsText}>{zhCN.workspaces.noSessions}</Text></Pressable>
-                    : workspaceSessions.map(session => {
-                        const opening = busy === `session:${session.sessionId}`
-                        return <Pressable
-                          key={session.sessionId}
-                          accessibilityRole="button"
-                          accessibilityState={{ busy: opening, disabled: busy !== undefined && !opening }}
-                          disabled={busy !== undefined}
-                          onPress={() => void open(session)}
-                          style={({ pressed }) => [styles.sessionRow, pressed && styles.workspaceRowPressed, busy !== undefined && !opening && styles.disabled]}
-                        >
-                          {opening
-                            ? <ActivityIndicator size="small" color={colors.primary} />
-                            : session.backend === 'codex'
-                              ? <Code2 size={17} color={colors.muted} />
-                              : session.backend === 'cursor'
-                                ? <Sparkles size={17} color={colors.muted} />
-                                : <MessageSquareText size={17} color={colors.muted} />}
-                          <View style={styles.sessionCopy}>
-                          <Text style={styles.sessionTitle} numberOfLines={1}>{resolveSessionTitle(session)}</Text>
-                            <Text style={styles.sessionMeta}>{session.running ? zhCN.status.running : relativeTime(session.updatedAt)}</Text>
-                          </View>
-                          <ChevronRight size={17} color={colors.subtle} />
-                        </Pressable>
-                      }))}
+                    : <>
+                        {visibleWorkspaceSessions.map(session => {
+                          const opening = busy === `session:${session.sessionId}`
+                          return <Pressable
+                            key={session.sessionId}
+                            accessibilityRole="button"
+                            accessibilityState={{ busy: opening, disabled: busy !== undefined && !opening }}
+                            disabled={busy !== undefined}
+                            onPress={() => void open(session)}
+                            style={({ pressed }) => [styles.sessionRow, pressed && styles.workspaceRowPressed, busy !== undefined && !opening && styles.disabled]}
+                          >
+                            {opening
+                              ? <ActivityIndicator size="small" color={colors.primary} />
+                              : session.backend === 'codex'
+                                ? <Code2 size={17} color={colors.muted} />
+                                : session.backend === 'cursor'
+                                  ? <Sparkles size={17} color={colors.muted} />
+                                  : <MessageSquareText size={17} color={colors.muted} />}
+                            <View style={styles.sessionCopy}>
+                              <Text style={styles.sessionTitle} numberOfLines={1}>{resolveSessionTitle(session)}</Text>
+                              <Text style={styles.sessionMeta}>{session.running ? zhCN.status.running : relativeTime(session.updatedAt)}</Text>
+                            </View>
+                            <ChevronRight size={17} color={colors.subtle} />
+                          </Pressable>
+                        })}
+                        {!showAllSessions && workspaceSessions.length > visibleWorkspaceSessions.length && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={zhCN.workspaces.loadAllSessions}
+                            onPress={() => loadAllSessions(workspaceKey)}
+                            style={({ pressed }) => [styles.loadAllSessions, pressed && styles.workspaceRowPressed]}
+                          >
+                            <Text style={styles.loadAllSessionsText}>{zhCN.workspaces.loadAllSessions}</Text>
+                            <ChevronDown size={17} color={colors.primary} />
+                          </Pressable>
+                        )}
+                      </>)}
                 </View>
               )
             })}</View>}
@@ -371,8 +496,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
   const styles = useThemedStyles(createStyles)
   return (
     <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.workspaceActionHeading}>
               <Text style={styles.sheetTitle}>{zhCN.workspaces.options}</Text>
@@ -389,8 +513,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
             </View>
             <Button label={zhCN.workspaces.delete} icon={Trash2} variant="danger" onPress={onDelete} disabled={busy} />
           </View>
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
   )
 }
@@ -409,13 +532,6 @@ function workspaceParentPath(path: string): string {
   if (parentSegments.length === 0) return normalized.startsWith('/') ? '/' : path
   const rootPrefix = normalized.startsWith('/') ? '/' : ''
   return `${rootPrefix}${parentSegments.join('/')}`
-}
-
-/** CodeX project ids can change when its catalog falls back to thread cwd; the authority path remains stable. */
-function workspaceCollapseKey(workspace: WorkspaceView, platform?: string): string {
-  if (workspace.backend !== 'codex') return workspace.workspaceId
-  const normalized = workspace.path.replace(/\\/gu, '/').replace(/\/+$/u, '') || '/'
-  return `codex:path:${platform === 'win32' ? normalized.toLocaleLowerCase() : normalized}`
 }
 
 function relativeTime(timestamp: number): string {
@@ -445,14 +561,15 @@ function initialWorkspaceBackend(
   return 'harness'
 }
 
+/** Compact connection type for the workspace header: the transport name, not its description. */
 function workspaceConnectionStatus(phase: ConnectionPhase, mode: string | undefined): string {
   if (phase === 'connecting' || phase === 'reconnecting') return zhCN.status.waiting
   if (phase === 'offline') return zhCN.status.offline
   if (phase !== 'connected') return zhCN.status.disconnected
-  if (mode === 'LAN') return zhCN.status.lan
-  if (mode === 'P2P' || mode === 'WebRTC') return zhCN.status.p2p
-  if (mode === 'TURN') return zhCN.status.turn
-  if (mode === 'Relay') return zhCN.status.relay
+  if (mode === 'LAN') return zhCN.devices.connectionProbeDetails.lan
+  if (mode === 'P2P' || mode === 'WebRTC') return zhCN.devices.connectionProbeDetails.p2p
+  if (mode === 'TURN') return zhCN.devices.connectionProbeDetails.turn
+  if (mode === 'Relay') return zhCN.devices.connectionProbeDetails.relay
   return zhCN.status.online
 }
 
@@ -489,11 +606,16 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, initia
     onCreated(workspace)
   }
 
+  const openBrowser = () => {
+    // Do not leave the path editor's IME covering the directory picker Modal.
+    Keyboard.dismiss()
+    setBrowseOpen(true)
+  }
+
   return (
     <>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+        <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{zhCN.workspaces.create}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -564,7 +686,7 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, initia
                 autoCorrect={false}
                 editable={!busy}
               />
-              <Button label={zhCN.workspaces.browse} variant="secondary" onPress={() => setBrowseOpen(true)} disabled={busy} />
+              <Button label={zhCN.workspaces.browse} variant="secondary" onPress={openBrowser} disabled={busy} />
             </View>
             <Text style={styles.fieldHint}>{
               backend === 'codex'
@@ -574,8 +696,7 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, initia
                   : zhCN.workspaces.directoryHint
             }</Text>
             <Button label={zhCN.workspaces.create} onPress={() => void create()} loading={busy} disabled={path.trim().length === 0} />
-          </Pressable>
-        </Pressable>
+        </WorkspaceModalSurface>
       </Modal>
       <DirectoryBrowserModal
         visible={browseOpen}
@@ -608,8 +729,7 @@ function RenameWorkspaceModal({ target, busy, onClose, onRename }: {
 
   return (
     <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.renameTitle}</Text>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -624,8 +744,7 @@ function RenameWorkspaceModal({ target, busy, onClose, onRename }: {
             editable={!busy}
           />
           <Button label={zhCN.workspaces.saveName} onPress={() => void rename()} loading={busy} disabled={title.trim().length === 0} />
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
   )
 }
@@ -669,8 +788,7 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.browserSheet} onPress={event => event.stopPropagation()}>
+      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.browserSheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.chooseFolder}</Text>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
@@ -688,7 +806,7 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
             ))}
           </View>
           {error !== undefined && <Text style={styles.errorText}>{error}</Text>}
-          <ScrollView style={styles.browserList}>
+          <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList}>
             {loading
               ? <Text style={styles.loadingText}>{zhCN.workspaces.loadingDirectory}</Text>
               : entries.length === 0
@@ -719,16 +837,40 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
               onPress={() => { if (listing !== undefined) onChoose(listing.path) }}
             />
           </View>
-        </Pressable>
-      </Pressable>
+      </WorkspaceModalSurface>
     </Modal>
+  )
+}
+
+/**
+ * Keep the outside dismiss target separate from the sheet content. Nested
+ * Pressables negotiate the Android responder between the backdrop and the
+ * first child, which can make rows and close buttons intermittently inert.
+ */
+function WorkspaceModalSurface({ onClose, backdropStyle, sheetStyle, children }: {
+  onClose: () => void
+  backdropStyle: StyleProp<ViewStyle>
+  sheetStyle: StyleProp<ViewStyle>
+  children: ReactNode
+}) {
+  return (
+    <View style={backdropStyle} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={zhCN.common.close}
+        onPress={onClose}
+        pointerEvents="box-only"
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[sheetStyle, { zIndex: 1, elevation: 1 }]} pointerEvents="box-none">{children}</View>
+    </View>
   )
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  topBarActions: { flexDirection: 'row', alignItems: 'center' },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   contentTop: { marginTop: spacing.md },
   backendTabs: { flexDirection: 'row', padding: spacing.xxs, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, marginBottom: spacing.md },
   backendTab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs },
@@ -738,8 +880,9 @@ function createStyles(colors: ThemeColors) {
   searchField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.sm, marginBottom: spacing.lg },
   searchInput: { flex: 1, ...type.body, color: colors.ink, paddingVertical: spacing.sm },
   clearSearch: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
-  workspaceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  workspaceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
+  workspaceRowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   workspaceRowPressed: { opacity: 0.7 },
   disabled: { opacity: 0.55 },
   workspaceIcon: { width: 38, height: 38, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
@@ -748,12 +891,15 @@ function createStyles(colors: ThemeColors) {
   workspacePath: { ...type.caption, color: colors.muted, fontFamily: 'monospace', writingDirection: 'ltr' },
   workspaceMeta: { ...type.caption, color: colors.muted },
   workspaceGroup: { marginBottom: spacing.lg, backgroundColor: colors.surface, borderRadius: radius.lg, paddingHorizontal: spacing.sm },
+  workspaceGroupFocused: { borderWidth: 1, borderColor: colors.primary },
   sessionRow: { minHeight: 58, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   sessionCopy: { flex: 1 },
   sessionTitle: { ...type.smallStrong, color: colors.ink },
   sessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
   noSessions: { minHeight: 48, marginLeft: 50, justifyContent: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   noSessionsText: { ...type.small, color: colors.primary },
+  loadAllSessions: { minHeight: 48, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  loadAllSessionsText: { ...type.smallStrong, color: colors.primary },
   primaryArea: { marginTop: spacing.xxl },
   backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },

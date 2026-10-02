@@ -293,6 +293,60 @@ describe('HostServerApi', () => {
     })
   })
 
+  it('serializes expired-token refresh across independent API/store instances', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-refresh-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const store = new ServerCredentialStore(directory)
+    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
+      authorizationMethod: 'owned_device', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
+    const fetchMock = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 75))
+      return json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }))
+    }) as unknown as typeof fetch
+    const first = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+    const second = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+    const results = await Promise.all([first.authenticate(identity), second.authenticate(identity)])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(results.map(result => result.accessToken)).toEqual(['rotated-access-value', 'rotated-access-value'])
+    expect(results[1]?.authorizationMethod).toBe('owned_device')
+  })
+
+  it('shares a rotation between explicit handshake recovery and authenticate', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-recovery-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const store = new ServerCredentialStore(directory)
+    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
+      authorizationMethod: 'account', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
+    const fetchMock = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 75))
+      return json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }))
+    }) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+    api.bindIdentity(identity)
+    const results = await Promise.all([
+      api.refreshCredentials('access-token-value'), api.authenticate(identity),
+      api.refreshCredentials('access-token-value'),
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(results.every(result => result.accessToken === 'rotated-access-value')).toBe(true)
+  })
+
+  it('preserves refresh rejection and releases the lock without retrying the token', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-rejected-refresh-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const store = new ServerCredentialStore(directory)
+    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
+      authorizationMethod: 'account', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
+    const fetchMock = vi.fn(async () => errorJson('AUTH_INVALID', 'refresh token reuse detected', 401)) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+    await expect(api.authenticate(identity)).rejects.toMatchObject({ code: 'AUTH_INVALID', phase: 'credential_refresh', retryable: false })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await expect(stat(join(directory, 'server-credentials.json.refresh-lock'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('registers the local remote-mode identity as a client device', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-client-'))
     directories.push(directory)

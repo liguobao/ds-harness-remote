@@ -471,7 +471,7 @@ describe('HarnessApiBridge remote settings scope', () => {
       method: 'settings.mutate',
       rpcId: 'config-4',
       payload: { ns: 'ds-harness-remote', ops: [{ op: 'set', path: ['serverUrl'], value: 'https://evil.example' }] },
-    })).resolves.toMatchObject({ rpcId: 'config-4', result: { ok: true } })
+    })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
 
     await expect(bridge.call({
       method: 'settings.update',

@@ -9,22 +9,17 @@
   &nbsp;·&nbsp;
   <a href="docs/README.md">文档</a>
   &nbsp;·&nbsp;
-  <strong>下载：</strong>
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Windows</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">macOS</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/dsh-desktop/releases/latest">Linux</a>
-  &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
+  <a href="apps/server/README.zh.md">自部署</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote">GitHub</a>
+  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
   &nbsp;·&nbsp;
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
 </p>
@@ -35,80 +30,93 @@
 
 无论使用哪台设备，都可以回到同一个 Harness 会话。Harness 始终运行在工作电脑上，原有的工作区、工具和项目配置保持不变。Remote 只是通往这个工作环境的另一个窗口。
 
+Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插件管理器使用这个固定版本：
+
+`ds-harness-remote@0.4.27`
+
 ## 主要特性
 
 - 从另一台设备继续活跃会话，查看最新进展
-- 发送新指令、调整任务方向，并在 Harness `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1`–`rc.1` 或 `dsh-v0.1.5-rc.1` 中使用图片 Prompt
+- 发送新指令、调整任务方向，并在 `dsh-v0.1.1-rc.2` 至 `dsh-v0.2.0-rc.2` 范围内的受支持 Harness 版本中使用图片 Prompt
 - 在支持实时会话控制的客户端中回答问题、处理权限请求
+- 支持 DeepSeek Harness 桌面版，并可使用固定版本的 Remote 插件
 - 打开同一账号下另一台已授权电脑上的 Workspace
 - 复用 Harness 原生界面，不另外维护一套桌面会话 UI
-- 两端 Harness 都安装可选 `dsh-file-viewer` 插件时，可以预览远端文件
 - 可将纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile 作为 Host，并通过 GitHub 或知乎终端二维码授权
 - Harness 主机无需开放公网监听端口。你可以从任意可上网的地方，通过双向端到端加密链路安全连接
+- 通过 Harness 原生侧栏提供工作区文件、只读预览、终端和已授权本机开发服务预览
 
 ## 安装
 
-### 方式 A：DSH Desktop
+### 支持 DeepSeek Harness 桌面版
 
-在 Windows、macOS 或 Linux 上安装 [DSH Desktop](https://github.com/liguobao/dsh-desktop)。
-DSH Desktop 已默认集成并启用 Remote，无需另行安装插件。
+Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
 
-### 方式 B：已有 DSH 环境
+`ds-harness-remote@0.4.27`
+
+### dsh-TUI Host
+
+将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
+[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
+
+### 命令行安装
 
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add ds-harness-remote@0.4.13
+dsh plugin --profile web add -w ds-harness-remote@0.4.27
 ```
+
+`-w` 表示加到 profile 自身的 workspace root；pnpm 低于 11 时不加会直接报
+`ERR_PNPM_ADDING_TO_ROOT`。
 
 安装后请重启 Harness。
 
 不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
 
-### 方式 C：dsh-TUI Host
+### Android 客户端
 
-Remote 可以在纯终端 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile 中作为 Host
-运行，不再依赖 Desktop 浏览器的 `connection` 服务。先把插件安装进 TUI profile：
+从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 Android APK。
+
+使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
+
+### 自动安装（后台服务）
+
+将 Remote Host 安装为后台服务。服务管理、登录、目录配置和卸载方式见[安装指南](docs/installation.zh.md)。
+
+macOS / Linux：
 
 ```sh
-dsh plugin --profile dsh-tui add ds-harness-remote@0.4.13
+curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ```
 
-启动 dsh-TUI 后，使用原生 Slash Command：
+Windows PowerShell（以管理员身份运行）：
 
-```text
-/remote                    # 查看 Host 实时状态
-/remote login              # 默认使用知乎二维码登录
-/remote login github
-/remote status
-/remote logout
+```powershell
+$installer = "$env:TEMP\install.ps1"
+Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
+& $installer
 ```
-
-`/remote login` 会打开 TUI 原生的二维码场景，二维码下方显示可点击的授权 URL；省略平台时默认
-使用知乎，也支持 GitHub。Host 控制默认开启，`/remote logout` 会撤销 Host 并轮换本地设备身份。
-目前不开放 Host 配置，固定使用 `https://dsh.r2049.cn`。子命令和登录平台均支持 Tab 补全。
-`/remote` Host 管理入口支持 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1`–`rc.1` 和
-`dsh-v0.1.5-rc.1` 的 TUI
-profile；只有官方 Harness carrier 可用时，才会公布对应的 Remote Workspace 能力。
-
-完整兼容矩阵、rc.2 ApiProxy 挂载、状态字段和排障方式见
-[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
 
 ## 快速开始
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
 2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。新的账号密码用户可从 [Remote Web](https://dsh.r2049.cn/app/register) 注册，当前邀请要求以站点页面为准。
-3. 为当前机器启用远端控制。
-4. 在另一台设备上打开 DSH Desktop、Remote Web 或 Android 客户端，并登录同一账号。
+3. Host 启动后默认允许控制当前机器，远程终端也默认开启；需要时可在详细 Remote 设置中关闭远程终端。
+4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
-公开服务目前使用托管的 Remote 中继，尚未提供受支持的自建中继方案。
+公开服务使用托管的 Remote 中继；单账号自建可使用仓库内的[最小 Server](apps/server/README.zh.md)，其 Web 页面仅提供设备状态。
+
+## 最小自部署 Server
+
+仓库内的 [`apps/server`](apps/server/README.zh.md) 提供可独立运行的单账号 Relay Server。通过 `DSH_SERVER_ACCOUNT`、`DSH_SERVER_PASSWORD` 配置账号密码；Web 提供登录和设备状态。Host 与客户端填写同一 Server 地址并使用该账号登录，设备凭据在重启后保留。
 
 ## 界面截图
 
 ### 桌面端
 
-在 Remote 设置中启用**允许控制当前设备**，即可将当前电脑作为 Host。
+Host 启动后默认允许控制当前设备，当前电脑即可作为 Host。远程终端默认开启，也可在详细 Remote 设置中关闭。
 
 在另一台电脑上选择在线 Host，然后打开它的 Workspace。
 
@@ -124,10 +132,14 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 
 ### Android
 
-从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 Android APK。
-
 使用已有账号登录 Android 客户端，选择可用电脑并打开 Workspace，然后通过文字或图片 Prompt 继续会话。
 会话工具栏也可以切换当前模型，并选择该模型声明的思考程度。
+
+Harness 会话的「文件」（工作区文件夹浏览、UTF-8 文本分页只读预览）和「终端」入口位于会话标题栏，需要 DSH `0.1.6-alpha.2` 或更新版本（含 `0.1.7-rc.1` 与 `0.2.0-rc.2`）的原生接口及更新后的 Remote Host 插件。远程终端默认开启，可在 Host 的详细 Remote 设置中关闭。终端面板只列出现有终端，仅标题栏「＋」才会新建；Android 从 Host 快照恢复本设备归属的终端，断线不重放输入。文件面板的返回在文件内回到所在目录，仅在根目录关闭工具，刷新同样位于标题栏。CodeX 会话不提供这些原生工具。
+
+权限选择器兼容旧版会话内选项与新版 DSH 0.1.6 的独立 `permissionPresets/catalog`。Host Remote 插件也需要更新；不支持的 Host 会显示更新提示，不会凭空补出权限选项。
+
+Android 文件预览还支持 PNG/JPEG/GIF/WebP 图片和 PDF；Host 提供 `officeToPdf` 时可查看 DOC/DOCX/XLS/XLSX/PPT/PPTX。二进制预览上限为 8 MiB（Office 源文件为 50 MiB）。PDF 使用本地打包的渲染器，不依赖 CDN、外部查看器或文件导出；未知二进制类型不会当作文本打开。文件访问仍只读，并由官方 Session 文件系统授权；原生真机与跨设备预览验收尚待完成。
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
@@ -180,7 +192,7 @@ Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.en
 Harness 业务流量在 Client 加密，只能由选定的 Host 解密，固定使用
 `Noise_IK_25519_ChaChaPoly_SHA256`。连接必须同时通过同账号 membership 与本地固定的设备
 identity key 校验。服务端可以协调连接并看到必要的网络元数据，但不能读取会话消息、Prompt、
-工具输出、Workspace 路径或 File Viewer 内容。握手、密钥生命周期、可见元数据、重放保护和
+工具输出、Workspace 路径或 远端文件内容。握手、密钥生命周期、可见元数据、重放保护和
 安全边界详见[端到端加密](docs/end-to-end-encryption.md)。
 
 ## 网络与传输
@@ -194,34 +206,12 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 
 - 会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
 - Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
-- Remote 不开放直接 Shell、PTY、通用工具 RPC 或远程桌面。Harness 工具仍可以在 Host 上修改文件或运行命令，并继续受 Harness 原有权限控制。
+- 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
-- 可选 File Viewer 只通过已认证、已加密的分块读取访问文件，并继续执行 provider 根目录与 locator 授权。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote 是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
 - Agent ACP / Cursor 是可选功能且默认关闭；遵循同一加密 Host 权限边界与固定方法白名单。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
-
-## 版本兼容
-
-**破坏性更新声明：** Plugin `0.4.1` 已移除早期实验性的 Remote 业务 RPC
-（`sessions.*`、`session.*`、`permissions.respond`、`sync.from`）。Harness
-会话流量现在只通过官方 rc.2 `ApiProxy` 或 v0.1.2 Typert Remote Gateway 承载；
-本插件不提供旧 RPC 的适配层或 wire format 翻译。
-
-Plugin `0.4.13` 同时兼容 DeepSeek Harness `dsh-v0.1.1-rc.2` 与
-`dsh-v0.1.2-alpha.1`–`rc.1`：rc.2 继续使用官方 legacy `ApiProxy`，v0.1.2 使用官方
-Typert Remote Gateway；另外支持 `dsh-v0.1.5-rc.1` Session V3 官方 Typert Remote
-Gateway。运行 rc.2 的 `0.4.13` Client 仍可通过 legacy capability 降级连接旧 rc.2 Host。
-
-Remote Web/Desktop 和 Android App 还会把已发布旧会话中仍然上报的已退役 `code`
-agent preset 归一为 `ptc`，因此旧会话可以在 `dsh-v0.1.5-rc.1` 上恢复，而无需修改
-DeepSeek Harness 本身。
-
-Desktop 两端必须使用兼容的 Harness carrier。`0.4.13` 会在 Host 暴露 rc.2 ApiProxy 时
-选择 legacy ApiProxy 路径，Session V3 Desktop Client 也可以通过 Remote 侧的历史与事件归一化
-打开 legacy v0.1.2 Typert Remote Host。legacy Typert Client 仍会在切换原生 UI 或修改 Workspace
-前拒绝 Session V3 Host。
 
 ## 文档
 
@@ -234,12 +224,23 @@ Desktop 两端必须使用兼容的 Harness carrier。`0.4.13` 会在 Host 暴�
 - [网络与传输](docs/network.md)
 - [远程协议](docs/protocol.md)
 - [开发进度与路线图](TODO.md)
+- 版本兼容详情见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 
 - 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（已适配 Remote，参见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)）
 - 友情链接：[LINUX DO 社区](https://linux.do/)
 - 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=liguobao%2Fds-harness-remote&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=liguobao/ds-harness-remote&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## 项目声明与商标
 

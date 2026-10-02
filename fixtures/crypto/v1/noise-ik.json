@@ -1,0 +1,85 @@
+{
+  "fixtureFormat": "dsh-remote.noise-vectors",
+  "fixtureFormatVersion": 1,
+  "protocolVersion": 1,
+  "suite": "Noise_IK_25519_ChaChaPoly_SHA256",
+  "encoding": "base64url-no-padding",
+  "vectors": [
+    {
+      "name": "noise-ik-v1-deterministic",
+      "staticKeys": {
+        "initiator": {
+          "privateKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "publicKey": "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8"
+        },
+        "responder": {
+          "privateKey": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+          "publicKey": "NYBy1jZYgNGu6jKa35EhODhR7SGijjt16WXQ0s0WYlQ"
+        }
+      },
+      "ephemeralPrivateKeys": {
+        "initiator": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+        "responder": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
+      },
+      "prologue": {
+        "connectionId": "noise-vector-connection",
+        "hostDeviceId": "noise-vector-host",
+        "clientDeviceId": "noise-vector-client",
+        "bytes": "RFNILVJFTU9URQB2PTEAY29ubmVjdGlvbj1ub2lzZS12ZWN0b3ItY29ubmVjdGlvbgBob3N0PW5vaXNlLXZlY3Rvci1ob3N0AGNsaWVudD1ub2lzZS12ZWN0b3ItY2xpZW50"
+      },
+      "handshake": {
+        "message1": {
+          "sender": "initiator",
+          "payload": "Y2xpZW50LWluaXQ",
+          "message": "eaYx7t4b-cmPEgMs3q3Q56B5OY_HhriMyEbsia-FpRp-kjJIiJmQmwjR-nKoDj1SL3vwITlzJcTi-x6Vk919oaRIWCFMjsMQmpXAzkidWgV1MTVaK2PLopKyb8sR-tY1Foz-zbR5aoVUwtc"
+        },
+        "message2": {
+          "sender": "responder",
+          "payload": "aG9zdC1hY2s",
+          "message": "Z13VdO13iTELPS52gfN5C0ZsdzsVIf7PNld5WDcepS_C2QNpZJIbEbA4SFnxGH_ZLHRrScqJPg8"
+        }
+      },
+      "countersAfterHandshake": {
+        "initiatorSending": "0",
+        "initiatorReceiving": "0",
+        "responderSending": "0",
+        "responderReceiving": "0"
+      },
+      "transport": [
+        {
+          "sender": "initiator",
+          "plaintext": "Y2xpZW50IHRyYW5zcG9ydCAw",
+          "ciphertext": "sG_tz-hUa8eiulwCZPVQoe-Pg0FsJ-AN7VvOtq724CfMNw",
+          "countersAfter": {
+            "initiatorSending": "1",
+            "initiatorReceiving": "0",
+            "responderSending": "0",
+            "responderReceiving": "1"
+          }
+        },
+        {
+          "sender": "responder",
+          "plaintext": "aG9zdCB0cmFuc3BvcnQgMA",
+          "ciphertext": "7CXuhyRZeDoDWOw3AhC6OyqK3Nc6WcuWWlxcBluZ-vA",
+          "countersAfter": {
+            "initiatorSending": "1",
+            "initiatorReceiving": "1",
+            "responderSending": "1",
+            "responderReceiving": "1"
+          }
+        },
+        {
+          "sender": "initiator",
+          "plaintext": "Y2xpZW50IHRyYW5zcG9ydCAx",
+          "ciphertext": "YL7rVvuJNGzziHSdDihBUtjcQqjUB2SkqwdfybPbcSqPAQ",
+          "countersAfter": {
+            "initiatorSending": "2",
+            "initiatorReceiving": "1",
+            "responderSending": "1",
+            "responderReceiving": "2"
+          }
+        }
+      ]
+    }
+  ]
+}

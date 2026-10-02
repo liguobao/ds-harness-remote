@@ -223,6 +223,22 @@ export class RemoteApiProxy {
         : {})
   }
 
+  async messageFeedbackList(_sessionId: string): Promise<Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }>> {
+    throw new ApiProxyError('UNSUPPORTED', 'Message feedback requires a Host with the official messageFeedback Typert API.')
+  }
+
+  async messageFeedbackPut(_sessionId: string, _messageId: string, _rating: 'positive' | 'negative'): Promise<{ messageId: string; rating: 'positive' | 'negative'; version: string }> {
+    // rc.2 ApiProxy has no messageFeedback API; do not invent a dot endpoint.
+    throw new ApiProxyError('UNSUPPORTED', 'Message feedback requires a Host with the official messageFeedback Typert API.')
+  }
+
+  async sessionFork(sessionId: string, atSeq: number): Promise<{ sessionId: string }> {
+    if (!Number.isSafeInteger(atSeq) || atSeq < 0) throw new ApiProxyError('INVALID_MESSAGE', 'Invalid fork boundary.')
+    const result = await this.call<{ sessionId: string }>('session.fork', { sessionId, atSeq })
+    if (typeof result?.sessionId !== 'string' || result.sessionId.length === 0) throw new ApiProxyError('INVALID_MESSAGE', 'Invalid fork result.')
+    return result
+  }
+
   async sessionModels(sessionId: string): Promise<SessionModels> {
     const result = await this.call<SessionModels>('session.models', { sessionId })
     if (!Array.isArray(result.groups) || typeof result.current?.provider !== 'string' || typeof result.current?.model !== 'string') {
@@ -244,6 +260,13 @@ export class RemoteApiProxy {
     return result.selected
   }
 
+  async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    const execution = await this.call<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands.execute', { agentId: sessionId, line, images: [] })
+    if (execution === undefined) throw new ApiProxyError('UNSUPPORTED', 'Unknown or unavailable Host command.')
+    if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new ApiProxyError('INVALID_MESSAGE', 'Invalid command result.')
+    return execution.result
+  }
+
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(preset)) {
       throw new ApiProxyError('INVALID_MESSAGE', 'Harness returned an invalid permission preset.')
@@ -253,6 +276,35 @@ export class RemoteApiProxy {
     } | undefined>('commands.execute', { agentId: sessionId, line: `/permission ${preset}`, images: [] })
     if (execution === undefined) throw new ApiProxyError('UNSUPPORTED', 'The Host does not provide the permission command.')
     if (execution.result.kind === 'error') throw new ApiProxyError('COMMAND_FAILED', execution.result.text ?? 'The Host rejected the permission preset.')
+  }
+
+  /** Read the Host's agent-preset (mode) roster for the mode picker. */
+  async agentPresetList(): Promise<{ presets: Array<{ id: string; isDefault: boolean; name?: string; description?: string; broken?: string }> }> {
+    const result = await this.call<{ presets?: unknown }>('agentPreset.list', {})
+    const rows = Array.isArray(result.presets) ? result.presets : []
+    return {
+      presets: rows.flatMap(row => {
+        if (typeof row !== 'object' || row === null) return []
+        const record = row as Record<string, unknown>
+        if (typeof record.id !== 'string' || record.id.length === 0) return []
+        return [{
+          id: record.id,
+          isDefault: record.isDefault === true,
+          ...(typeof record.name === 'string' ? { name: record.name } : {}),
+          ...(typeof record.description === 'string' ? { description: record.description } : {}),
+          ...(typeof record.broken === 'string' ? { broken: record.broken } : {}),
+        }]
+      }),
+    }
+  }
+
+  /** Select the agent preset (mode) of a session that has not started its first turn. */
+  async agentPresetSelect(sessionId: string, agentPreset: string): Promise<string> {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(agentPreset)) {
+      throw new ApiProxyError('INVALID_MESSAGE', 'Harness returned an invalid agent preset.')
+    }
+    const committed = await this.call<unknown>('agentPreset.select', { agentId: sessionId, agentPreset })
+    return typeof committed === 'string' && committed.length > 0 ? committed : agentPreset
   }
 
   async sessionHistory(sessionId: string, beforeSeq?: number, maxMessages = 60): Promise<SessionHistoryPage> {

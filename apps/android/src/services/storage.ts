@@ -3,15 +3,19 @@ import * as Application from 'expo-application'
 import * as Crypto from 'expo-crypto'
 import * as Device from 'expo-device'
 import * as SecureStore from 'expo-secure-store'
-import { isLanguagePreference, type LanguagePreference } from '../locales/i18n'
+import { isLanguagePreference, strings, type LanguagePreference } from '../locales/i18n'
+import type { Messages } from '../locales/types'
+import enUS from '../locales/en-US'
+import zhCN from '../locales/zh-CN'
 import { isThemePreference, type ThemePreference } from '../ui/theme'
-import type { CodexPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig } from '../types'
+import type { AgentBackend, CodexPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 const KEYS = {
   config: 'dshremote.server.v1',
   identity: 'dshremote.identity.v1',
   credentials: 'dshremote.credentials.v1',
   trustedHosts: 'dshremote.trusted-hosts.v1',
+  /** Remembered host for `resolveAutoConnectDevice`; boot routing no longer consumes it. */
   lastConnectedDeviceId: 'dshremote.last-connected-device.v1',
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
@@ -19,6 +23,9 @@ const KEYS = {
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
   workspaceBackends: 'dshremote.workspace-backends.v1',
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
+  favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
+  recentWorkspaces: 'dshremote.recent-workspaces.v1',
+  customPrompts: 'dshremote.custom-prompts.v1',
 } as const
 
 const secureOptions: SecureStore.SecureStoreOptions = {
@@ -103,6 +110,31 @@ export async function saveLastConnectedDeviceId(deviceId: string): Promise<void>
 
 export async function clearLastConnectedDeviceId(): Promise<void> {
   await SecureStore.deleteItemAsync(KEYS.lastConnectedDeviceId, secureOptions)
+}
+
+export async function loadFavoriteWorkspaces(): Promise<WorkspaceShortcut[]> {
+  return loadWorkspaceShortcuts(KEYS.favoriteWorkspaces)
+}
+
+export async function saveFavoriteWorkspaces(items: readonly WorkspaceShortcut[]): Promise<void> {
+  await writeJson(KEYS.favoriteWorkspaces, { items })
+}
+
+export async function loadRecentWorkspaces(): Promise<WorkspaceShortcut[]> {
+  return loadWorkspaceShortcuts(KEYS.recentWorkspaces)
+}
+
+export async function saveRecentWorkspaces(items: readonly WorkspaceShortcut[]): Promise<void> {
+  await writeJson(KEYS.recentWorkspaces, { items })
+}
+
+async function loadWorkspaceShortcuts(key: string): Promise<WorkspaceShortcut[]> {
+  const stored = await readJson<{ items?: unknown }>(key)
+  if (!Array.isArray(stored?.items)) return []
+  return stored.items.flatMap(item => {
+    const shortcut = workspaceShortcut(item)
+    return shortcut === undefined ? [] : [shortcut]
+  })
 }
 
 export async function loadTransportPreference(): Promise<import('../types').TransportPreference> {
@@ -227,6 +259,136 @@ function codexPermissionPreset(value: unknown): CodexPermissionPreset | undefine
   return value === 'workspace-write' || value === 'danger-full-access' ? value : undefined
 }
 
+function workspaceShortcut(value: unknown): WorkspaceShortcut | undefined {
+  if (!isRecord(value)) return undefined
+  const { deviceId, deviceName, key, workspaceId, backend, title, path, addedAt } = value
+  if (typeof deviceId !== 'string' || deviceId.trim() === '') return undefined
+  if (typeof key !== 'string' || key.trim() === '') return undefined
+  if (typeof workspaceId !== 'string' || typeof title !== 'string' || typeof path !== 'string') return undefined
+  return {
+    deviceId,
+    deviceName: typeof deviceName === 'string' ? deviceName : '',
+    key,
+    workspaceId,
+    backend: agentBackend(backend),
+    title,
+    path,
+    addedAt: typeof addedAt === 'number' && Number.isFinite(addedAt) ? addedAt : 0,
+  }
+}
+
+function agentBackend(value: unknown): AgentBackend {
+  return value === 'codex' ? 'codex' : 'harness'
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+/** A user-managed quick prompt shown under 「工具访问」→「提示词」. */
+export interface CustomPrompt {
+  id: string
+  title: string
+  text: string
+}
+
+function customPrompt(value: unknown): CustomPrompt | undefined {
+  if (!isRecord(value)) return undefined
+  const { id, title, text } = value
+  if (typeof id !== 'string' || id.trim() === '') return undefined
+  if (typeof title !== 'string' || typeof text !== 'string') return undefined
+  if (title.trim() === '' || text.trim() === '') return undefined
+  return { id, title, text }
+}
+
+const BUILT_IN_IDS = new Set<string>(['builtin-check-changes', 'builtin-commit', 'builtin-view-screenshot'])
+
+export function getBuiltInPrompts(messages?: Messages): readonly CustomPrompt[] {
+  const msg = messages ?? strings
+  return [
+    {
+      id: 'builtin-check-changes',
+      title: msg.chat.quickCheckChanges,
+      text: msg.chat.quickCheckChangesPrompt,
+    },
+    {
+      id: 'builtin-commit',
+      title: msg.chat.quickCommit,
+      text: msg.chat.quickCommitPrompt,
+    },
+    {
+      id: 'builtin-view-screenshot',
+      title: msg.chat.quickViewScreenshot,
+      text: msg.chat.quickViewScreenshotPrompt,
+    },
+  ]
+}
+
+export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = Object.freeze(getBuiltInPrompts(zhCN))
+
+const factoryZhBuiltIns = getBuiltInPrompts(zhCN)
+const factoryEnBuiltIns = getBuiltInPrompts(enUS)
+
+function isFactoryDefaultBuiltIn(prompt: CustomPrompt): boolean {
+  const zh = factoryZhBuiltIns.find(item => item.id === prompt.id)
+  if (zh !== undefined && prompt.title === zh.title && prompt.text === zh.text) {
+    return true
+  }
+  const en = factoryEnBuiltIns.find(item => item.id === prompt.id)
+  if (en !== undefined && prompt.title === en.title && prompt.text === en.text) {
+    return true
+  }
+  return false
+}
+
+function isBuiltInPrompt(id: string): boolean {
+  return BUILT_IN_IDS.has(id)
+}
+
+/**
+ * Saved prompts. `items` is the full list the user sees — including built-in
+ * entries whose title or body was edited, so those edits survive a restart.
+ * `removed` records the ids the user deleted, which is the only way to tell a
+ * deleted built-in from one that was never seeded.
+ */
+export async function loadCustomPrompts(): Promise<CustomPrompt[]> {
+  const stored = await readJson<{ items?: unknown; removed?: unknown }>(KEYS.customPrompts)
+  const saved: CustomPrompt[] = Array.isArray(stored?.items)
+    ? stored.items.flatMap(item => {
+      const prompt = customPrompt(item)
+      return prompt === undefined ? [] : [prompt]
+    })
+    : []
+  const removed = new Set(Array.isArray(stored?.removed)
+    ? stored.removed.filter((id): id is string => typeof id === 'string')
+    : [])
+  const savedById = new Map(saved.map(item => [item.id, item]))
+  // Built-ins lead the list; an edited built-in keeps its factory id, so the
+  // saved entry wins over the shipped seed if customized. If unedited,
+  // materialize using the current active strings from i18n.
+  const activeBuiltIns = getBuiltInPrompts()
+  const builtIns = activeBuiltIns
+    .filter(item => !removed.has(item.id))
+    .map(item => {
+      const savedItem = savedById.get(item.id)
+      if (savedItem === undefined || isFactoryDefaultBuiltIn(savedItem)) {
+        return item
+      }
+      return savedItem
+    })
+  const custom = saved.filter(item => !isBuiltInPrompt(item.id) && !removed.has(item.id))
+  return [...builtIns, ...custom]
+}
+
+let customPromptsWrite = Promise.resolve()
+
+export function saveCustomPrompts(items: readonly CustomPrompt[], removed: readonly string[] = []): Promise<void> {
+  const snapshot = {
+    items: [...items],
+    removed: [...removed],
+  }
+  const nextWrite = customPromptsWrite.then(async () => {
+    await writeJson(KEYS.customPrompts, snapshot)
+  })
+  customPromptsWrite = nextWrite.catch(() => undefined)
+  return nextWrite
 }

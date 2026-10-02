@@ -20,12 +20,16 @@ import type {
 } from './typert-gateway-contract.js'
 
 const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
+const WELCOME_NOTICE_NAMESPACE = 'ui-settings-general'
+const WELCOME_NOTICE_FIELD = 'welcomeNoticeVersion'
+const WELCOME_NOTICE_VERSION = '2026-08-13.1'
 
 /** Client-side alpha Gateway carrier over the authenticated Remote channel. */
 export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: RemoteClientCore,
     private readonly compatibility?: SessionFormatCompatibility,
+    private readonly harnessVersion?: string,
   ) {}
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
@@ -43,6 +47,9 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     payload: unknown,
     signal: AbortSignal,
   ): Promise<TypertRpcResult> {
+    // The Remote Gateway contract requires a single plain-object `args` field.
+    // Keep the payload unchanged here: converting it to positional arrays makes
+    // current Hosts reject even empty calls such as `llm/listProviders`.
     const request = { endpoint, payload }
     const encoded = new TextEncoder().encode(JSON.stringify(request))
     let response: unknown
@@ -57,10 +64,33 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       }
     }
     const result = parseRpcResult(response)
+    const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result)
+    if (settingsResult !== undefined) return settingsResult
     if (result.ok && this.compatibility === 'legacy-to-v3') {
       return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) }
     }
     return result
+  }
+
+  private legacyWelcomeAcknowledged = false
+  private settingsDescribeValue?: Record<string, unknown>
+
+  /** DSH <=0.1.6 cannot persist the 0.1.7 welcome acknowledgement remotely. */
+  private normalizeLegacyWelcomeSettings(endpoint: string, payload: unknown, result: TypertRpcResult): TypertRpcResult | undefined {
+    if (!isLegacyRemoteHost(this.harnessVersion)) return undefined
+    if (endpoint === 'settings/describe' && result.ok && isRecord(result.value)) {
+      this.settingsDescribeValue = result.value
+      return this.legacyWelcomeAcknowledged ? { ...result, value: patchWelcomeDescribe(result.value) } : undefined
+    }
+    if (endpoint !== 'settings/mutate' || !isRecord(payload) || !isRecord(payload.args)) return undefined
+    const args = payload.args
+    if (args.ns !== WELCOME_NOTICE_NAMESPACE || !isWelcomeNoticeOperation(args.ops)) return undefined
+    // Older Hosts reject the 0.1.7 onboarding field before returning a usable
+    // settings snapshot. Treat the acknowledgement as client-local in that
+    // case; a later describe is patched when one becomes available.
+    const value = patchWelcomeDescribe(this.settingsDescribeValue ?? { namespaces: [] })
+    this.legacyWelcomeAcknowledged = true
+    return { ok: true, value }
   }
 
   async open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
@@ -169,7 +199,8 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
 }
 
 class AsyncValueQueue implements AsyncIterable<unknown> {
-  private readonly values: unknown[] = []
+  private readonly values: Array<{ value: unknown; bytes: number }> = []
+  private bytes = 0
   private readonly waiters: Array<(result: IteratorResult<unknown>) => void> = []
   private closed = false
   private error?: Error
@@ -177,8 +208,15 @@ class AsyncValueQueue implements AsyncIterable<unknown> {
   push(value: unknown): void {
     if (this.closed) return
     const waiter = this.waiters.shift()
-    if (waiter === undefined) this.values.push(value)
-    else waiter({ done: false, value })
+    if (waiter !== undefined) { waiter({ done: false, value }); return }
+    const bytes = new TextEncoder().encode(JSON.stringify(value) ?? '').byteLength
+    if (this.values.length >= 256 || this.bytes + bytes > 4 * 1024 * 1024) {
+      this.values.length = 0; this.bytes = 0
+      this.fail(new RemoteClientError('TRANSPORT_CLOSED', 'Remote stream consumer is too slow; reconnect to recover.'))
+      return
+    }
+    this.bytes += bytes
+    this.values.push({ value, bytes })
   }
 
   close(): void {
@@ -196,7 +234,9 @@ class AsyncValueQueue implements AsyncIterable<unknown> {
   async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
     while (true) {
       if (this.values.length > 0) {
-        yield this.values.shift()
+        const entry = this.values.shift()!
+        this.bytes -= entry.bytes
+        yield entry.value
         continue
       }
       if (this.closed) {
@@ -287,4 +327,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasErrorCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code
+}
+
+function isLegacyRemoteHost(version: string | undefined): boolean {
+  if (version === undefined) return false
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim())
+  if (match === null) return false
+  return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7
+}
+
+function isWelcomeNoticeOperation(value: unknown): boolean {
+  return Array.isArray(value) && value.some(operation => (
+    isRecord(operation)
+      && operation.op === 'set'
+      && Array.isArray(operation.path)
+      && operation.path.length === 1
+      && operation.path[0] === WELCOME_NOTICE_FIELD
+      && operation.value === WELCOME_NOTICE_VERSION
+  ))
+}
+
+function patchWelcomeDescribe(value: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(value.namespaces)) return value
+  const namespaces = value.namespaces.map(namespace => {
+    if (!isRecord(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace
+    const current = isRecord(namespace.value) ? namespace.value : {}
+    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } }
+  })
+  return { ...value, namespaces }
 }

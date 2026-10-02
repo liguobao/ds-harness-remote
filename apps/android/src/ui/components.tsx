@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode, RefObject } from 'react'
 import {
   ActivityIndicator,
   Pressable,
@@ -16,17 +16,19 @@ import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 
-export function Screen({ children, scroll = true, refreshing = false, onRefresh }: {
+export function Screen({ children, scroll = true, refreshing = false, onRefresh, scrollRef }: {
   children: ReactNode
   scroll?: boolean
   refreshing?: boolean
   onRefresh?: () => void
+  scrollRef?: RefObject<ScrollView | null>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   if (!scroll) return <View style={styles.screen}>{children}</View>
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={styles.screenContent}
       keyboardShouldPersistTaps="handled"
@@ -48,25 +50,41 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh 
   )
 }
 
-export function TopBar({ title, subtitle, onSubtitlePress, onBack, action }: {
+export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack, action, titleLines = 1 }: {
   title: string
   subtitle?: string
   onSubtitlePress?: () => void
+  onTitlePress?: () => void
   onBack?: () => void
   action?: ReactNode
+  /** Set above 1 when the title carries structured text that may not fit one line. */
+  titleLines?: number
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const hasSubtitle = subtitle !== undefined && subtitle.length > 0
+  const tallerBar = hasSubtitle || titleLines > 1
   return (
-    <View style={[styles.topBar, hasSubtitle && styles.topBarWithSubtitle]}>
+    <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle]}>
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
-          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} />
+          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} hitSlop={12} />
         )}
       </View>
       <View style={styles.topBarTitles}>
-        <Text style={styles.topBarTitle} numberOfLines={1}>{title}</Text>
+        {onTitlePress === undefined
+          ? <Text style={styles.topBarTitle} numberOfLines={titleLines}>{title}</Text>
+          : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={title}
+              onPress={onTitlePress}
+              hitSlop={4}
+              style={({ pressed }) => [styles.topBarTitleRow, pressed && styles.iconButtonPressed]}
+            >
+              <Text style={styles.topBarTitle} numberOfLines={titleLines}>{title}</Text>
+            </Pressable>
+          )}
         {hasSubtitle && (
           onSubtitlePress === undefined
             ? <Text style={styles.topBarSubtitle} numberOfLines={1}>{subtitle}</Text>
@@ -89,11 +107,24 @@ export function TopBar({ title, subtitle, onSubtitlePress, onBack, action }: {
   )
 }
 
-export function IconButton({ label, icon: Icon, onPress, disabled = false }: {
+export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop }: {
   label: string
-  icon: LucideIcon
+  icon: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
   onPress: () => void
   disabled?: boolean
+  /** Overrides the default `ink` glyph color, e.g. to mark an active toggle. */
+  tint?: string
+  /**
+   * Fills closed icon paths; defaults to `none`. Passing an undefined `fill`
+   * through to lucide would clobber its `fill: none` default, and
+   * `react-native-svg` then falls back to the SVG spec default of black, which
+   * paints solid interiors in the light theme.
+   */
+  fill?: string
+  /** Tighter 40dp box for rows with several trailing actions; hitSlop keeps a 48dp target. */
+  dense?: boolean
+  /** Optional larger touch expansion for controls placed at screen edges. */
+  hitSlop?: number
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -102,11 +133,16 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false }: {
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      hitSlop={8}
+      hitSlop={hitSlop ?? (dense ? 4 : 8)}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed, disabled && styles.disabled]}
+      style={({ pressed }) => [
+        styles.iconButton,
+        dense && styles.iconButtonDense,
+        pressed && styles.iconButtonPressed,
+        disabled && styles.disabled,
+      ]}
     >
-      <Icon size={21} color={colors.ink} strokeWidth={2} />
+      <Icon size={dense ? 20 : 21} color={tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={2} />
     </Pressable>
   )
 }
@@ -317,9 +353,11 @@ function createStyles(colors: ThemeColors) {
     topBarTrailing: { justifyContent: 'flex-end' },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 1 },
     topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink },
+    topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+    iconButtonDense: { width: 40, height: 40 },
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
     button: { minHeight: 50, paddingHorizontal: spacing.lg, borderRadius: radius.md, flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
     buttonPressed: { opacity: 0.82 },

@@ -55,6 +55,18 @@ export interface HarnessRemoteSession {
   }
 }
 
+export interface HarnessAgentPresetRow {
+  id: string
+  isDefault: boolean
+  name?: string
+  description?: string
+  broken?: string
+}
+
+export interface HarnessAgentPresetRoster {
+  presets: HarnessAgentPresetRow[]
+}
+
 export interface HarnessWorkspaceView {
   workspaceId: string
   path: string
@@ -226,6 +238,29 @@ export class HarnessAlphaClient {
     return result
   }
 
+  async messageFeedbackList(sessionId: string): Promise<Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }>> {
+    const result = await this.callValue<{ items: Array<{ messageId: string; rating: 'positive' | 'negative'; version: string }> }>('messageFeedback/list', { request: { sessionId } })
+    if (!Array.isArray(result?.items) || result.items.some(item => typeof item?.messageId !== 'string' || typeof item.version !== 'string' || (item.rating !== 'positive' && item.rating !== 'negative'))) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid feedback list.')
+    return result.items
+  }
+
+  async messageFeedbackPut(sessionId: string, messageId: string, rating: 'positive' | 'negative'): Promise<{ messageId: string; rating: 'positive' | 'negative'; version: string }> {
+    type Feedback = { messageId: string; rating: 'positive' | 'negative'; version: string }
+    const list = () => this.messageFeedbackList(sessionId)
+    const previous = (await list()).find(item => item.messageId === messageId)
+    const result = await this.callValue<Feedback>('messageFeedback/put', { request: { sessionId, messageId, rating, ifVersion: previous?.version ?? null } })
+    const saved = (await list()).find(item => item.messageId === messageId)
+    if (saved?.rating !== rating || typeof saved.version !== 'string' || saved.version !== result?.version) throw new RemoteGatewayError('INVALID_MESSAGE', 'Message feedback could not be verified.')
+    return saved
+  }
+
+  async sessionFork(sessionId: string, atSeq: number): Promise<{ sessionId: string }> {
+    if (!Number.isSafeInteger(atSeq) || atSeq < 0) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid fork boundary.')
+    const result = await this.callValue<{ sessionId: string }>('session/fork', { request: { sessionId, atSeq } })
+    if (typeof result?.sessionId !== 'string' || result.sessionId.length === 0) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid fork result.')
+    return result
+  }
+
   async sessionModels(sessionId: string): Promise<HarnessSessionModels> {
     const catalog = await this.callValue<{
       default: HarnessModelSelection
@@ -265,17 +300,50 @@ export class HarnessAlphaClient {
     return result.selected
   }
 
+  async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    const execution = await this.callValue<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands/execute', {
+      agentId: sessionId, line, ...(this.host.sessionFormat === 3 ? { submittedAttachments: [] } : { images: [] }),
+    })
+    if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'Unknown or unavailable Host command.')
+    if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid command result.')
+    return execution.result
+  }
+
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(preset)) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'Harness returned an invalid permission preset.')
     }
-    const execution = await this.callValue<{
-      result: { kind: 'success' | 'error'; text?: string }
-    } | undefined>('commands/execute', { agentId: sessionId, line: `/permission ${preset}`, images: [] })
-    if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'The Host does not provide the permission command.')
-    if (execution.result.kind === 'error') {
-      throw new RemoteGatewayError('COMMAND_FAILED', execution.result.text ?? 'The Host rejected the permission preset.')
+    const result = await this.sessionExecuteCommand(sessionId, `/permission ${preset}`)
+    if (result.kind === 'error') {
+      throw new RemoteGatewayError('COMMAND_FAILED', result.text ?? 'The Host rejected the permission preset.')
     }
+  }
+
+  /** Read the Host's agent-preset (mode) roster for the mode picker. */
+  async agentPresetList(): Promise<HarnessAgentPresetRoster> {
+    const result = await this.callValue<{ presets?: unknown }>('agentPresets/list', {})
+    const rows = Array.isArray(result.presets) ? result.presets : []
+    return {
+      presets: rows.flatMap(row => {
+        if (!isRecord(row) || typeof row.id !== 'string' || row.id.length === 0) return []
+        return [{
+          id: row.id,
+          isDefault: row.isDefault === true,
+          ...(typeof row.name === 'string' ? { name: row.name } : {}),
+          ...(typeof row.description === 'string' ? { description: row.description } : {}),
+          ...(typeof row.broken === 'string' ? { broken: row.broken } : {}),
+        }]
+      }),
+    }
+  }
+
+  /** Select the agent preset (mode) of a session that has not started its first turn. */
+  async agentPresetSelect(sessionId: string, agentPreset: string): Promise<string> {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(agentPreset)) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'Harness returned an invalid agent preset.')
+    }
+    const committed = await this.callValue<unknown>('agentPresets/select', { agentId: sessionId, agentPreset })
+    return typeof committed === 'string' && committed.length > 0 ? committed : agentPreset
   }
 
   async sessionHistory(sessionId: string, beforeSeq?: number, maxMessages = 60): Promise<HarnessSessionHistoryPage> {
@@ -872,7 +940,13 @@ function modelSelectionFromValue(value: unknown): HarnessModelSelection | undefi
 
 function clientTimeZone(): string | undefined {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    // The Host only accepts UTC or an IANA "Area/Location" name. Devices that
+    // report a bare abbreviation (e.g. "GMT") are rejected at prompt time, so
+    // omit the field and let the Host fall back to its own default.
+    if (typeof zone !== 'string' || zone.length === 0) return undefined
+    if (zone === 'UTC') return zone
+    return /^[A-Za-z_]+\/[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)?$/.test(zone) ? zone : undefined
   } catch {
     return undefined
   }

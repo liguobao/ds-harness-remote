@@ -4,6 +4,54 @@ import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
 
 describe('RemoteTypertGateway', () => {
+  it('preserves the plain-object args required by the current Typert Remote contract', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => {
+      expect(params).toMatchObject({
+        endpoint: 'settings/mutate',
+        payload: {
+          args: {
+            ns: 'llm-pi-ai',
+            ops: [{ op: 'set', path: ['profiles', 'custom'], value: { model: 'm' } }],
+            expectedRevision: 4,
+          },
+        },
+      })
+      return { ok: true, value: { revision: 5 } }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    await expect(new RemoteTypertGateway(client).dispatch('settings/mutate', {
+      args: {
+        ns: 'llm-pi-ai',
+        ops: [{ op: 'set', path: ['profiles', 'custom'], value: { model: 'm' } }],
+        expectedRevision: 4,
+      },
+    }, new AbortController().signal)).resolves.toEqual({ ok: true, value: { revision: 5 } })
+  })
+
+  it('preserves object-shaped discovery arguments unchanged', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => {
+      expect(params.payload.args).toEqual({ settingsNs: 'llm-pi-ai', provider: 'custom', baseURL: 'https://gateway.example/v1' })
+      return { ok: true, value: { models: [] } }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    await new RemoteTypertGateway(client).dispatch('llm/discoverModels', {
+      args: { settingsNs: 'llm-pi-ai', provider: 'custom', baseURL: 'https://gateway.example/v1' },
+    }, new AbortController().signal)
+  })
+
+  it('keeps an empty provider-directory args object instead of sending an array', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => {
+      expect(params).toMatchObject({ endpoint: 'llm/listProviders', payload: { args: {} } })
+      return { ok: true, value: [] }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    await expect(new RemoteTypertGateway(client).dispatch(
+      'llm/listProviders',
+      { args: {} },
+      new AbortController().signal,
+    )).resolves.toEqual({ ok: true, value: [] })
+  })
+
   it('retries an oversized direct response through the bounded transfer path', async () => {
     const methods: string[] = []
     const rpc = vi.fn(async (method: string, params: unknown) => {
@@ -33,6 +81,58 @@ describe('RemoteTypertGateway', () => {
       'harness.remote.transfer.commit',
       'harness.remote.transfer.close',
     ])
+  })
+
+  it('keeps the welcome acknowledgement local for pre-0.1.7 Hosts', async () => {
+    const rpc = vi.fn(async (method: string): Promise<any> => {
+      if (method === 'harness.remote.call') {
+        return {
+          ok: false,
+          error: { code: 'settings/unknown-field', message: 'unknown field', details: {} },
+        }
+      }
+      return { accepted: true }
+    })
+    const client = { rpc } as unknown as RemoteClientCore
+    const gateway = new RemoteTypertGateway(client, undefined, '0.1.6-alpha.2')
+    // The describe result is cached so a rejected old Host write can be folded
+    // into the same namespace view the settings UI already loaded.
+    rpc.mockImplementationOnce(async () => ({
+      ok: true,
+      value: {
+        writable: true,
+        namespaces: [{ ns: 'ui-settings-general', value: {}, revision: 1 }],
+      },
+    }))
+    await gateway.dispatch('settings/describe', { args: {} }, new AbortController().signal)
+    await expect(gateway.dispatch('settings/mutate', {
+      args: {
+        ns: 'ui-settings-general',
+        ops: [{ op: 'set', path: ['welcomeNoticeVersion'], value: '2026-08-13.1' }],
+      },
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        namespaces: [{ ns: 'ui-settings-general', value: { welcomeNoticeVersion: '2026-08-13.1' } }],
+      },
+    })
+  })
+
+  it('acknowledges the welcome notice when the legacy Host has no describe snapshot', async () => {
+    const rpc = vi.fn(async (): Promise<any> => ({
+      ok: false,
+      error: { code: 'settings/unknown-field', message: 'unknown field', details: {} },
+    }))
+    const gateway = new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore, undefined, '0.1.6-alpha.2')
+    await expect(gateway.dispatch('settings/mutate', {
+      args: {
+        ns: 'ui-settings-general',
+        ops: [{ op: 'set', path: ['welcomeNoticeVersion'], value: '2026-08-13.1' }],
+      },
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: { namespaces: [] },
+    })
   })
 
   it('preserves an explicit undefined stream item before the terminal event', async () => {

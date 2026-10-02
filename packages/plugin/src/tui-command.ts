@@ -281,6 +281,12 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
     `Device: ${status.deviceId ?? 'not initialized'}`,
     `Authorization: ${status.authorized ? status.account === undefined ? 'logged in' : `logged in (${status.account})` : 'logged out'}`,
     `Server connection: ${connection}`,
+    ...(status.error === undefined ? [] : [`Connection error: ${status.error}`]),
+    ...(status.error === 'CONNECTION_REPLACED'
+      ? ['Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting.']
+      : status.error === 'SERVER_CREDENTIALS_BUSY'
+        ? ['Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again.']
+        : status.accountRequired ? ['Authorize again with /remote login [github|zhihu].'] : []),
     `Harness Remote API: ${capabilities.has('harness.api.v1')
       ? 'available (ApiProxy)'
       : capabilities.has('harness.remote.v3')

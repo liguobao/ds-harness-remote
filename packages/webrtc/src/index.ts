@@ -1,3 +1,4 @@
+import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
   PROTOCOL_VERSION,
   acceptNegotiatedCapabilities,
@@ -88,6 +89,7 @@ export class RelayTransport extends BaseTransport {
   async send(data: Uint8Array): Promise<void> {
     if (this.socket?.readyState !== WebSocket.OPEN) throw new Error('relay transport is not connected')
     if (this.connectionId === undefined) throw new Error('relay connection has not been authorized')
+    await waitForRelayCapacity(this.socket)
     this.sendControl('relay', {
       connectionId: this.connectionId,
       targetDeviceId: this.options.targetDeviceId,
@@ -235,3 +237,7 @@ export class RelayTransport extends BaseTransport {
     this.handshakeTimer = undefined
   }
 }
+
+export { waitForRelayCapacity } from './websocket-backpressure.js'
+
+export { SerialSend } from './serial-send.js'

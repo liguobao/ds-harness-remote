@@ -17,7 +17,7 @@ import {
   type AppLanguage,
   type LanguagePreference,
 } from '../locales/i18n'
-import { friendlyError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
+import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import {
   loginFlow,
@@ -27,8 +27,9 @@ import {
   githubOAuthLoginChannel,
   type LoginOutcome,
 } from '../services/login'
-import type { RedirectLoginMethod } from '../types'
+import type { ChatMessage, RedirectLoginMethod } from '../types'
 import { createNativeRpcId } from '../services/api-proxy'
+import { forkMessage } from '../services/message-actions'
 import {
   codexItemsToChat,
   codexPermissionPreset,
@@ -56,22 +57,27 @@ import { reconcileTrustedDevices } from '../services/device-directory'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
 import { resolveAutoConnectDevice } from '../lib/auto-connect'
+import { workspaceStableKey } from '../lib/workspace-key'
 import {
   clearLocalData,
   clearCodexPermissionPresets,
   clearDeviceCredentials,
   clearLastConnectedDeviceId,
   forgetHost,
+  loadFavoriteWorkspaces,
   loadLastConnectedDeviceId,
   loadOrCreateIdentity,
   loadLanguagePreference,
   loadCodexPermissionPresets,
+  loadRecentWorkspaces,
   loadServerConfig,
   loadThemePreference,
   loadTransportPreference,
   loadTrustedHosts,
+  saveFavoriteWorkspaces,
   saveLanguagePreference,
   saveLastConnectedDeviceId,
+  saveRecentWorkspaces,
   saveCodexPermissionPreset,
   saveServerConfig,
   saveThemePreference,
@@ -80,6 +86,7 @@ import {
 } from '../services/storage'
 import type { ThemePreference } from '../ui/theme'
 import type {
+  AgentPresetOption,
   ChatItem,
   CodexPermissionPreset,
   ConnectionProbeTransport,
@@ -87,6 +94,7 @@ import type {
   ConnectionStage,
   ConnectionSnapshot,
   DeviceIdentity,
+  WorkspaceShortcut,
   HistoryEntry,
   HostDescriptor,
   ModelSelection,
@@ -100,7 +108,13 @@ import type {
   WorkspaceList,
   WorkspaceView,
 } from '../types'
-import { foldHistory, applyMuxFrameToMessages } from './event-reducer'
+import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
+import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
+
+function applyFeedback(items: ChatItem[], ratings?: Map<string, ChatMessage['feedback']>): ChatItem[] {
+  return ratings === undefined ? items : items.map(item => item.kind === 'message'
+    ? { ...item, feedback: ratings.get(item.id) } : item)
+}
 
 type BootPhase = 'loading' | 'ready' | 'error'
 type AuthPhase = 'idle' | 'authenticating' | 'complete' | 'error'
@@ -120,13 +134,20 @@ interface AppState {
   codexAvailable: boolean
   cursorAvailable: boolean
   workspaces: WorkspaceView[]
+  favoriteWorkspaces: WorkspaceShortcut[]
+  /** Newest first; the home screen falls back to these when Favorites is empty. */
+  recentWorkspaces: WorkspaceShortcut[]
   archivedSessionIds: string[]
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   messages: Record<string, ChatItem[]>
+  feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels
   modelSelecting: boolean
   permissionSelecting: boolean
+  agentPresetOptions?: AgentPresetOption[]
+  agentPresetLoading: boolean
+  agentPresetSelecting: boolean
   historyHasMore: boolean
   historyLoadingOlder: boolean
   oldestLoadedSeq?: number
@@ -140,9 +161,13 @@ interface AppState {
   refreshing: boolean
   busyAction?: string
   error?: string
+  commandResult?: { sessionId: string; text: string }
   /** Remembered host from the last successful connect (persisted). */
   lastConnectedDeviceId?: string
-  /** Set during bootstrap when that host is trusted + online; consumed by the navigator. */
+  /**
+   * Set during bootstrap when that host is trusted + online. Retained for the
+   * auto-connect entry point; boot routing currently lands on the device list.
+   */
   pendingAutoConnectDeviceId?: string
   /** True when credentials are invalid and the UI should show the sign-in screen. */
   reauthRequired: boolean
@@ -164,6 +189,8 @@ interface AppState {
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
   sendMessage(text: string, images?: PromptImage[]): Promise<boolean>
+  forkChatMessage(message: ChatMessage): Promise<boolean>
+  rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>): Promise<void>
@@ -171,11 +198,18 @@ interface AppState {
   archiveSession(sessionId: string): Promise<boolean>
   selectModel(selection: ModelSelection): Promise<boolean>
   selectPermission(preset: string): Promise<boolean>
+  loadAgentPresets(): Promise<boolean>
+  selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
   workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
+  /** Toggle the home-screen shortcut for a workspace; resolves to its new favorited state. */
+  toggleFavoriteWorkspace(workspace: WorkspaceView): Promise<boolean>
+  removeFavoriteWorkspace(deviceId: string, key: string): Promise<boolean>
+  /** Open the most recently updated conversation of a saved workspace; undefined when it has none. */
+  openFavoriteWorkspaceSession(key: string): Promise<RemoteSession | undefined>
   hostListDirectory(path?: string): Promise<import('../types').DirectoryListing | undefined>
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
@@ -196,6 +230,9 @@ const disconnected: ConnectionSnapshot = {
 }
 
 const connection = new AndroidRemoteConnection()
+
+/** Only exposes the authenticated native carrier of the current connection. */
+export const requireSessionTools = () => connection.requireSessionTools()
 let activeCodexStream: CodexStream | undefined
 let activeCodexTimeline: CodexTimelineState | undefined
 let activeCursorStream: AcpStream | undefined
@@ -209,17 +246,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   codexAvailable: false,
   cursorAvailable: false,
   workspaces: [],
+  favoriteWorkspaces: [],
+  recentWorkspaces: [],
   archivedSessionIds: [],
   sessions: [],
   messages: {},
+  feedbackBySession: {},
   modelSelecting: false,
   permissionSelecting: false,
+  agentPresetOptions: undefined,
+  agentPresetLoading: false,
+  agentPresetSelecting: false,
   historyHasMore: false,
   historyLoadingOlder: false,
   transportPreference: 'auto',
   languagePreference: 'system',
   language: getActiveLanguage(),
   themePreference: 'system',
+  // Keep process rows available on a fresh install; their own disclosures
+  // start closed so the conversation still opens at the answer.
   authPhase: 'idle',
   refreshing: false,
   reauthRequired: false,
@@ -227,12 +272,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   async bootstrap() {
     set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
     try {
-      const [config, identity, transportPreference, languagePreference, themePreference, lastConnectedDeviceId] = await Promise.all([
+      const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
         loadServerConfig(),
         loadOrCreateIdentity(),
         loadTransportPreference(),
         loadLanguagePreference(),
         loadThemePreference(),
+        loadFavoriteWorkspaces(),
+        loadRecentWorkspaces(),
         loadLastConnectedDeviceId(),
       ])
       const language = applyLanguagePreference(languagePreference)
@@ -244,12 +291,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         languagePreference,
         language,
         themePreference,
+        favoriteWorkspaces,
+        recentWorkspaces,
         lastConnectedDeviceId,
       })
       let pendingAutoConnectDeviceId: string | undefined
       if (config !== undefined) {
         await get().refreshDevices()
         if (!get().reauthRequired) {
+          // Resolved but intentionally not routed on boot: the home screen is the
+          // device list, and connecting stays an explicit user choice.
           pendingAutoConnectDeviceId = resolveAutoConnectDevice(get().devices, lastConnectedDeviceId)?.deviceId
         }
       }
@@ -572,7 +623,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async reconnect(options = {}) {
     const device = get().selectedDevice
-    if (device === undefined || get().connection.phase === 'connecting') return false
+    const phase = get().connection.phase
+    if (device === undefined || phase === 'connecting' || phase === 'reconnecting') return false
     set(state => ({ connection: { ...state.connection, phase: 'reconnecting', error: undefined } }))
     return get().connectDevice(device, options)
   },
@@ -649,7 +701,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
         )
         activeCodexStream = stream
-        const items = foldHistory(history.events, session.sessionId)
+        const items = foldHistory(history.events, session.sessionId, true)
         const nextSession = {
           ...sessionWithPermission,
           ...read.session,
@@ -690,13 +742,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       await closeActiveCodexStream()
       await closeActiveCursorStream()
-      const history = await connection.requireProxy().sessionHistory(session.sessionId)
-      const items = foldHistory(history.events, session.sessionId)
+      const [history, feedback] = await Promise.all([
+        connection.requireProxy().sessionHistory(session.sessionId),
+        // Older carriers may not expose feedback; history must remain usable.
+        connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
+      ])
+      const ratings = feedback === undefined ? undefined : new Map(feedback.map(row => [row.messageId, row.rating]))
+      const items = foldHistory(history.events, session.sessionId, true)
       set(state => ({
         selectedSession: session,
+        historyLoadingOlder: false,
+        feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
         messages: {
           ...state.messages,
-          [session.sessionId]: mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
+          [session.sessionId]: applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []), ratings),
         },
         historyHasMore: history.hasMore,
         oldestLoadedSeq: oldestSeq(history.events),
@@ -706,9 +765,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     try {
       await load()
+      await rememberRecentWorkspace(session)
       return true
     } catch (error) {
-      if (isRpcTimeoutError(error)) {
+      if (isRpcTimeoutError(error) || isRecoverableTransportError(error)) {
         // session.history is read-only, so it is safe to recover the stale
         // path with a fresh Relay-only connection and retry exactly once.
         // Mutating ApiProxy calls deliberately do not use this path because a
@@ -717,6 +777,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (recovered) {
           try {
             await load()
+            await rememberRecentWorkspace(session)
             return true
           } catch (retryError) {
             set({ busyAction: undefined, error: friendlyError(retryError) })
@@ -726,6 +787,39 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ busyAction: undefined })
         return false
       }
+      set({ busyAction: undefined, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async forkChatMessage(message) {
+    if (get().connection.phase !== 'connected' || get().busyAction !== undefined || get().selectedSession?.backend === 'codex') return false
+    set({ busyAction: `fork:${message.id}`, error: undefined })
+    try {
+      const result = await forkMessage(message, connection.requireProxy())
+      set({ sessions: result.sessions, workspaces: result.workspaces, busyAction: undefined })
+      return await get().openSession(result.session)
+    } catch (error) {
+      set({ busyAction: undefined, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async rateMessage(message, rating) {
+    if (get().connection.phase !== 'connected' || get().busyAction !== undefined || get().selectedSession?.backend === 'codex' || message.streaming) return false
+    set({ busyAction: `feedback:${message.id}`, error: undefined })
+    try {
+      const saved = await connection.requireProxy().messageFeedbackPut(message.sessionId, message.id, rating)
+      set(state => ({ busyAction: undefined,
+        feedbackBySession: state.feedbackBySession[message.sessionId] === undefined ? state.feedbackBySession : {
+          ...state.feedbackBySession,
+          [message.sessionId]: new Map(state.feedbackBySession[message.sessionId]).set(message.id, saved.rating),
+        },
+        messages: { ...state.messages,
+        [message.sessionId]: (state.messages[message.sessionId] ?? []).map(item => item.id === message.id && item.kind === 'message' ? { ...item, feedback: saved.rating } : item),
+      } }))
+      return true
+    } catch (error) {
       set({ busyAction: undefined, error: friendlyError(error) })
       return false
     }
@@ -777,7 +871,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
       const sessions = await proxy.sessionList()
-      set({ sessions, busyAction: undefined })
+      set(state => ({
+        sessions,
+        busyAction: undefined,
+        ...(workspace === undefined ? {} : {
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? { ...item, sessionIds: [sessionId, ...item.sessionIds.filter(id => id !== sessionId)] }
+            : item),
+        }),
+      }))
       const created = sessions.find(session => session.sessionId === sessionId)
       if (created === undefined) return false
       return get().openSession(created)
@@ -829,6 +931,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         archivedSessionIds,
         sessions,
         busyAction: undefined,
+        workspaces: state.workspaces.map(workspace => ({
+          ...workspace,
+          sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
+        })),
         selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
         sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
       }))
@@ -906,6 +1012,43 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true
     } catch (error) {
       set({ permissionSelecting: false, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async loadAgentPresets() {
+    if (get().connection.phase !== 'connected') return false
+    if (get().agentPresetLoading) return false
+    set({ agentPresetLoading: true, error: undefined })
+    try {
+      const roster = await connection.requireProxy().agentPresetList()
+      set({ agentPresetOptions: [...roster.presets], agentPresetLoading: false })
+      return true
+    } catch (error) {
+      set({ agentPresetLoading: false, error: friendlyError(error) })
+      return false
+    }
+  },
+
+  async selectAgentPreset(preset) {
+    const session = get().selectedSession
+    if (session === undefined || get().connection.phase !== 'connected') return false
+    if (session.backend === 'codex') return false
+    set({ agentPresetSelecting: true, error: undefined })
+    try {
+      const committed = await connection.requireProxy().agentPresetSelect(session.sessionId, preset)
+      set(state => {
+        const update = (item: RemoteSession): RemoteSession =>
+          item.sessionId === session.sessionId ? { ...item, agentPreset: committed } : item
+        return {
+          sessions: state.sessions.map(update),
+          selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+          agentPresetSelecting: false,
+        }
+      })
+      return true
+    } catch (error) {
+      set({ agentPresetSelecting: false, error: friendlyError(error) })
       return false
     }
   },
@@ -1030,6 +1173,61 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  async toggleFavoriteWorkspace(workspace) {
+    const device = get().selectedDevice
+    if (device === undefined) return false
+    const key = workspaceStableKey(workspace, device.platform)
+    const current = get().favoriteWorkspaces
+    const existing = current.some(item => item.deviceId === device.deviceId && item.key === key)
+    const next = existing
+      ? current.filter(item => !(item.deviceId === device.deviceId && item.key === key))
+      : [...current, {
+          deviceId: device.deviceId,
+          deviceName: device.name,
+          key,
+          workspaceId: workspace.workspaceId,
+          backend: workspace.backend === 'codex' ? 'codex' as const : 'harness' as const,
+          title: workspace.title,
+          path: workspace.path,
+          addedAt: Date.now(),
+        }]
+    try {
+      await saveFavoriteWorkspaces(next)
+    } catch (error) {
+      set({ error: friendlyError(error) })
+      return existing
+    }
+    set({ favoriteWorkspaces: next })
+    await Haptics.notificationAsync(existing
+      ? Haptics.NotificationFeedbackType.Warning
+      : Haptics.NotificationFeedbackType.Success)
+    return !existing
+  },
+
+  async removeFavoriteWorkspace(deviceId, key) {
+    const current = get().favoriteWorkspaces
+    const next = current.filter(item => !(item.deviceId === deviceId && item.key === key))
+    if (next.length === current.length) return false
+    try {
+      await saveFavoriteWorkspaces(next)
+    } catch (error) {
+      set({ error: friendlyError(error) })
+      return false
+    }
+    set({ favoriteWorkspaces: next })
+    return true
+  },
+
+  async openFavoriteWorkspaceSession(key) {
+    const state = get()
+    if (state.connection.phase !== 'connected') return undefined
+    const workspace = state.workspaces.find(item => workspaceStableKey(item, state.selectedDevice?.platform) === key)
+    if (workspace === undefined) return undefined
+    const session = latestWorkspaceSession(state.sessions, workspace)
+    if (session === undefined) return undefined
+    return await state.openSession(session) ? session : undefined
+  },
+
   async hostListDirectory(path) {
     if (get().connection.phase !== 'connected') return undefined
     try {
@@ -1053,19 +1251,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       const page = session.backend === 'codex'
         ? await readCodexHistoryPage(connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
         : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60)
-      const items = foldHistory(page.events, session.sessionId)
+      const items = foldHistory(page.events, session.sessionId, true)
       const older = oldestSeq(page.events)
       set(state => ({
         messages: {
           ...state.messages,
-          [session.sessionId]: prependHistory(items, state.messages[session.sessionId] ?? []),
+          [session.sessionId]: applyFeedback(prependHistory(items, state.messages[session.sessionId] ?? []), session.backend === 'codex' ? undefined : state.feedbackBySession[session.sessionId]),
         },
-        historyHasMore: page.hasMore,
-        oldestLoadedSeq: older ?? state.oldestLoadedSeq,
-        historyLoadingOlder: false,
+        ...(state.selectedSession?.sessionId === session.sessionId ? {
+          historyHasMore: page.hasMore,
+          oldestLoadedSeq: older ?? state.oldestLoadedSeq,
+          historyLoadingOlder: false,
+        } : {}),
       }))
     } catch (error) {
-      set({ historyLoadingOlder: false, error: friendlyError(error) })
+      set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { historyLoadingOlder: false, error: friendlyError(error) } : {})
     }
   },
 
@@ -1111,9 +1312,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async sendMessage(input, images = []) {
+    set({ commandResult: undefined })
     const session = get().selectedSession
     const text = input.trim()
     if (session === undefined || (text.length === 0 && images.length === 0)) return false
+    if (session.backend !== 'codex' && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
+      set({ busyAction: 'command', error: undefined })
+      try {
+        // Commands are not prompts: never fabricate an optimistic user turn.
+        if (images.length > 0) throw new Error(zhCN.messageActions.unavailable)
+        const result = await connection.requireProxy().sessionExecuteCommand(session.sessionId, text)
+        if (result.kind === 'error') throw new Error(result.text ?? zhCN.messageActions.failed)
+        set({ busyAction: undefined, commandResult: result.text?.trim()
+          ? { sessionId: session.sessionId, text: result.text } : undefined })
+        return true
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    }
     const requestRpcId = createNativeRpcId()
     const optimistic: ChatItem = {
       kind: 'message',
@@ -1214,6 +1431,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
+        // Keep the sending state until the Host event stream confirms that
+        // execution has actually started. `session.prompt` only acknowledges
+        // receipt, so clearing busyAction here briefly re-enables the quick
+        // actions before the first assistant/tool event arrives.
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        return true
       }
       set({ busyAction: undefined })
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -1333,8 +1556,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       await clearCodexPermissionPresets(deviceId)
       const clearedLast = get().lastConnectedDeviceId === deviceId
       if (clearedLast) await clearLastConnectedDeviceId()
+      const favoriteWorkspaces = get().favoriteWorkspaces.filter(item => item.deviceId !== deviceId)
+      if (favoriteWorkspaces.length !== get().favoriteWorkspaces.length) {
+        await saveFavoriteWorkspaces(favoriteWorkspaces)
+      }
+      const recentWorkspaces = get().recentWorkspaces.filter(item => item.deviceId !== deviceId)
+      if (recentWorkspaces.length !== get().recentWorkspaces.length) {
+        await saveRecentWorkspaces(recentWorkspaces)
+      }
       set(state => ({
         devices: state.devices.filter(device => device.deviceId !== deviceId),
+        favoriteWorkspaces,
+        recentWorkspaces,
         lastConnectedDeviceId: clearedLast ? undefined : state.lastConnectedDeviceId,
         pendingAutoConnectDeviceId: state.pendingAutoConnectDeviceId === deviceId
           ? undefined
@@ -1409,6 +1642,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ themePreference })
   },
 
+
   syncSystemLocales(localeTags) {
     const language = updateSystemLocales(localeTags)
     if (language !== get().language) set({ language })
@@ -1429,9 +1663,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleMuxFrame(frame) {
-    set(state => ({
-      messages: applyMuxFrameToMessages(state.messages, frame),
-    }))
+    set(state => {
+      const sessionId = frame.payload.sessionId
+      const running = sessionRunningForMuxFrame(frame)
+      const releasePrompt = state.busyAction === 'send-message'
+        && sessionId !== undefined
+        && state.selectedSession?.sessionId === sessionId
+        && (isHarnessPromptStarted(frame) || running !== undefined)
+      const updateRunning = (session: RemoteSession): RemoteSession => (
+        sessionId !== undefined && running !== undefined && session.sessionId === sessionId
+          ? { ...session, running }
+          : session
+      )
+      return {
+        messages: applyMuxFrameToMessages(state.messages, frame),
+        ...(sessionId === undefined || running === undefined ? {} : {
+          sessions: state.sessions.map(updateRunning),
+          selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
+        }),
+        ...(releasePrompt ? { busyAction: undefined } : {}),
+      }
+    })
   },
 
   handleCodexFrame(frame) {
@@ -1584,71 +1836,72 @@ function withActiveCodexTurn(timeline: CodexTimelineState, activeTurnId: string 
   }
 }
 
-function findApproval(messages: Record<string, ChatItem[]>, itemId: string) {
-  for (const items of Object.values(messages)) {
-    const found = items.find(item => item.kind === 'approval' && item.id === itemId)
-    if (found !== undefined && found.kind === 'approval') return found
+/**
+ * `session.prompt` acknowledges enqueueing only. Keep the local sending state
+ * until a meaningful event from that session proves that the turn has begun.
+ */
+function isHarnessPromptStarted(frame: MuxStreamFrame): boolean {
+  const payload = frame.payload
+  if (payload.type === 'approval/requested' || payload.type === 'question/requested') return true
+  if (payload.type !== 'session/event' || payload.event === undefined) return false
+  const event = payload.event
+  if (event.type === 'assistant/message' || event.type === 'tool/call' || event.type === 'tool/result') return true
+  if (event.type !== 'assistant/chunk') return false
+  const chunk = event.data.chunk
+  if (typeof chunk !== 'object' || chunk === null) return false
+  const value = chunk as Record<string, unknown>
+  if (value.type === 'text-delta' || value.type === 'reasoning-delta') {
+    return typeof value.text === 'string' && value.text.length > 0
   }
-  return undefined
+  return value.type === 'tool-call-delta'
+    && (typeof value.argumentsDelta !== 'string' || value.argumentsDelta.length > 0)
 }
 
-function findQuestion(messages: Record<string, ChatItem[]>, itemId: string) {
-  for (const items of Object.values(messages)) {
-    const found = items.find(item => item.kind === 'question' && item.id === itemId)
-    if (found !== undefined && found.kind === 'question') return found
+/** Number of recently visited workspaces kept for the home-screen fallback list. */
+const RECENT_WORKSPACE_LIMIT = 3
+
+/**
+ * Remember the workspace a session was opened from. Favorites take precedence on
+ * the home screen, so this list is the fallback shown while Favorites is empty.
+ */
+async function rememberRecentWorkspace(session: RemoteSession): Promise<void> {
+  const state = useAppStore.getState()
+  const device = state.selectedDevice
+  const workspace = state.workspaces.find(item => item.sessionIds.includes(session.sessionId))
+  if (device === undefined || workspace === undefined) return
+  const key = workspaceStableKey(workspace, device.platform)
+  const entry: WorkspaceShortcut = {
+    deviceId: device.deviceId,
+    deviceName: device.name,
+    key,
+    workspaceId: workspace.workspaceId,
+    backend: workspace.backend === 'codex' ? 'codex' : 'harness',
+    title: workspace.title,
+    path: workspace.path,
+    addedAt: Date.now(),
   }
-  return undefined
-}
-
-function mapApprovalOutcome(
-  messages: Record<string, ChatItem[]>,
-  itemId: string,
-  outcome: 'allowed-once' | 'rejected',
-): Record<string, ChatItem[]> {
-  return mapItems(messages, item => item.kind === 'approval' && item.id === itemId
-    ? { ...item, outcome }
-    : item)
-}
-
-function mapQuestionAnswered(
-  messages: Record<string, ChatItem[]>,
-  itemId: string,
-): Record<string, ChatItem[]> {
-  return mapItems(messages, item => item.kind === 'question' && item.id === itemId
-    ? { ...item, outcome: 'answered' as const }
-    : item)
-}
-
-function mapItems(
-  messages: Record<string, ChatItem[]>,
-  map: (item: ChatItem) => ChatItem,
-): Record<string, ChatItem[]> {
-  return Object.fromEntries(Object.entries(messages).map(([sessionId, items]) => [sessionId, items.map(map)]))
-}
-
-function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[]): ChatItem[] {
-  const liveById = new Map(live.map(item => [item.id, item]))
-  const historyIds = new Set(history.map(item => item.id))
-  return [
-    ...history.map(item => liveById.get(item.id) ?? item),
-    ...live.filter(item => !historyIds.has(item.id)),
-  ]
-}
-
-/** Prepend an older history page in front of the current chat items, deduplicated by id. */
-function prependHistory(older: ChatItem[], current: ChatItem[]): ChatItem[] {
-  const currentIds = new Set(current.map(item => item.id))
-  return [...older.filter(item => !currentIds.has(item.id)), ...current]
-}
-
-/** Smallest event seq in a history page; drives the next `session.history` beforeSeq. */
-function oldestSeq(events: HistoryEntry[]): number | undefined {
-  let oldest: number | undefined
-  for (const entry of events) {
-    const seq = entry.event.seq
-    if (Number.isSafeInteger(seq)) oldest = oldest === undefined ? seq : Math.min(oldest, seq)
+  const next = [
+    entry,
+    ...state.recentWorkspaces.filter(item => !(item.deviceId === device.deviceId && item.key === key)),
+  ].slice(0, RECENT_WORKSPACE_LIMIT)
+  try {
+    await saveRecentWorkspaces(next)
+  } catch {
+    // The shortcut list is a convenience; a storage failure must not fail the visit.
+    return
   }
-  return oldest
+  useAppStore.setState({ recentWorkspaces: next })
+}
+
+/** Most recently updated conversation inside a workspace; undefined when it has none yet. */
+function latestWorkspaceSession(sessions: RemoteSession[], workspace: WorkspaceView): RemoteSession | undefined {
+  let latest: RemoteSession | undefined
+  for (const sessionId of workspace.sessionIds) {
+    const session = sessions.find(item => item.sessionId === sessionId)
+    if (session === undefined) continue
+    if (latest === undefined || session.updatedAt > latest.updatedAt) latest = session
+  }
+  return latest
 }
 
 /** Best-effort model catalog load; a failure must not block opening the session. */
@@ -1719,9 +1972,9 @@ async function finalizeLogin(
 
 function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'workspaces' |
-  'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
-  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired'> {
+  'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult'> {
   return {
     config: undefined,
     account: undefined,
@@ -1734,10 +1987,14 @@ function initialData(): Pick<AppState,
     codexAvailable: false,
     cursorAvailable: false,
     workspaces: [],
+    favoriteWorkspaces: [],
+    recentWorkspaces: [],
     archivedSessionIds: [],
     sessions: [],
     selectedSession: undefined,
     messages: {},
+    feedbackBySession: {},
+    commandResult: undefined,
     sessionModels: undefined,
     modelSelecting: false,
     permissionSelecting: false,

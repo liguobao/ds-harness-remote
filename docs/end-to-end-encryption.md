@@ -81,7 +81,7 @@ Client                    Server                         Host
 Noise transport plaintext 承载 Remote RPC/Event envelope，以及 envelope 内的官方 Harness 数据面：
 
 - rc.2 的官方 `ApiProxy` call、respond、mux/host stream；
-- v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 的官方 Typert Remote call、stream 与 event carrier；
+- v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 的官方 Typert Remote call、stream 与 event carrier；
 - Prompt、回复、问题与 permission 响应；
 - Workspace、Session、模型与设置操作的数据；
 - 图片 Prompt 的有界分块；
@@ -125,7 +125,8 @@ Noise 单条 transport message 有 65,535 bytes 上限。编码后的业务消�
 - **连接关闭**：销毁 Noise session、清理接收/发送状态和未完成分片；重新连接会重新握手。
 - **设备撤销**：撤销 device credential 与 membership，并关闭活动 Remote connection。再次授权被撤销角色时需要新的受信任身份流程。
 
-长期连接 rekey、跨实现 golden vectors 和独立密码安全审查仍在路线图中。在这些工作完成前，项目不额外宣称协议规范之外的长期密钥安全性质。
+`fixtures/crypto/v1/noise-ik.json` 提供 Noise IK 跨实现 golden vector。
+长期连接 rekey 和独立密码安全审查仍在路线图中。在这些工作完成前，项目不额外宣称协议规范之外的长期密钥安全性质。
 
 ## 8. TLS、WebRTC 与 Noise 的关系
 
