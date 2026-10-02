@@ -983,8 +983,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                 {modelSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
               </Pressable>
             )}
-              </Pressable>
-            )}
             {canStop
               ? <Pressable
                   accessibilityRole="button"
