@@ -33,6 +33,10 @@ describe('plugin config', () => {
     expect(resolveConfig({ cursor: { enabled: true } }, {})).toMatchObject({
       cursor: { enabled: true, binary: 'agent' },
     })
+    expect(resolveConfig({ acp: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: 'agent' },
+      acp: { enabled: true },
+    })
     expect(resolveConfig({ cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' } }, {})).toMatchObject({
       cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' },
     })

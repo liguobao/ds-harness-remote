@@ -19610,11 +19610,10 @@ function resolveConfig(input2 = {}, env = process.env) {
       binary: parsed.codex?.binary ?? "codex"
     },
     cursor: {
-      // Experimental: off by default until Host has `agent login` / API key ready.
-      enabled: parsed.cursor?.enabled ?? false,
+      enabled: parsed.cursor?.enabled ?? parsed.acp?.enabled ?? false,
       binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
     },
-    acp: { enabled: parsed.acp?.enabled ?? true, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
+    acp: { enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
       const d = parsed.acp?.backends?.find((x) => x.id === id5);
       const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
       return { id: id5, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? { codex: "codex", cursor: "agent", kimi: "kimi", antigravity: "agy" }[id5] ?? id5, args: d?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]), ...d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {} };
