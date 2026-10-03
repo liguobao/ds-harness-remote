@@ -1,12 +1,14 @@
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  parseRemoteWorkspaceTypes,
   type EventPayload,
   type HarnessRemoteFrameData,
   type HarnessRemoteStreamClosedData,
   type HarnessTransportDescription,
   type HarnessApiTransferCommitResult,
   type HarnessApiTransferReadResult,
+  type RemoteWorkspaceTypeDescription,
 } from '@dsh-remote/protocol'
 import type { RemoteClientCore, RemoteRpcOptions } from './index.js'
 
@@ -30,6 +32,7 @@ export interface RemoteHostFeatures {
   sessionFormat?: 3
   remoteTransfer: boolean
   capabilities: readonly string[]
+  workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
 }
 
 export interface RemoteGatewayFailure {
@@ -107,6 +110,7 @@ export async function probeRemoteHostFeatures(
   if (!apiProxy && !remoteGateway) {
     throw new RemoteGatewayError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
+  const workspaceTypes = isRecord(value) && 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
   return {
     commandList: remoteGateway || (apiProxy && fallback.commandList),
     fileViewer: capabilities.has('fileviewer.read.v1'),
@@ -116,6 +120,7 @@ export async function probeRemoteHostFeatures(
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
     remoteTransfer: capabilities.has('harness.remote.transfer.v1'),
     capabilities: description.capabilities,
+    ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }
 }
 

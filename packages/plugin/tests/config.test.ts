@@ -11,6 +11,7 @@ describe('plugin config', () => {
       forceRelay: false,
       reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
       codex: { enabled: true, binary: 'codex' },
+      cursor: { enabled: false, binary: 'agent' },
     })
     expect(resolveConfig({}, { DSH_REMOTE_TERMINAL_ENABLED: 'false' }).terminal.enabled).toBe(false)
   })
@@ -26,6 +27,19 @@ describe('plugin config', () => {
       codex: { enabled: true, binary: '/opt/codex/bin/codex' },
     })
     expect(() => resolveConfig({ codex: { enabled: true, allowedRoots: ['/workspace'] } } as never)).toThrow()
+  })
+
+  it('keeps Cursor ACP opt-in and accepts an explicit binary', () => {
+    expect(resolveConfig({ cursor: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: 'agent' },
+    })
+    expect(resolveConfig({ acp: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' },
+    })
   })
 
   it('rejects insecure non-local servers and embedded credentials', () => {

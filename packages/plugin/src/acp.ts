@@ -32,6 +32,7 @@ export const DEFAULT_ACP_IDES: readonly AcpIdeConfig[] = [
   { id: 'codex', command: 'codex', args: ['acp'] },
   { id: 'cursor', command: 'agent', args: ['acp'] },
   { id: 'kimi', command: 'kimi', args: ['acp'] },
+  { id: 'antigravity', command: 'agy', args: ['--input-format', 'stream-json', '--output-format', 'stream-json'] },
 ]
 
 /** JSON-RPC stdio bridge for ACP agents (Cursor/Kimi/CodeX). */

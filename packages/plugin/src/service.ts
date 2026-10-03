@@ -2,7 +2,7 @@ import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
 import { randomUUID } from 'node:crypto'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { createEvent } from '@dsh-remote/protocol'
+import { createEvent, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
@@ -34,6 +34,8 @@ import { CodexRemoteDomain } from './codex/domain.js'
 import { AcpGateway, StdioAcpAdapter } from './acp.js'
 import { execFileSync } from 'node:child_process'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
+import { AcpRemoteGateway } from './acp/gateway.js'
+import type { AcpPeerBridge, PublishAcpFrame } from './acp/peer-bridge.js'
 import { RpcError } from './safe-error.js'
 import { CodexWorkspaceBridge, CodexWorkspaceState, type RemoteTerminalSpawner } from './codex-workspace-bridge.js'
 
@@ -69,9 +71,12 @@ export class HostPluginRuntime {
   private harnessVersion?: string
   private closed = false
   private readonly codex: CodexRemoteDomain
+  private readonly acp: AcpRemoteGateway
   private readonly codexWorkspaceState = new CodexWorkspaceState()
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
+  private localAcpPeer?: AcpPeerBridge
+  private localAcpPublish: PublishAcpFrame = async () => undefined
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -86,6 +91,7 @@ export class HostPluginRuntime {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
+    this.acp = new AcpRemoteGateway(config.cursor, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === undefined
         ? undefined
@@ -120,8 +126,10 @@ export class HostPluginRuntime {
         context,
         (event, data) => send(createEvent(event, data)),
       )
-      const adapters = (config.acp?.backends ?? []).filter(item => item.enabled && this.acpAvailable(item.command)).map(item => new StdioAcpAdapter(item))
-      const acp = config.acp?.enabled && adapters.length > 0 ? new AcpGateway(adapters) : undefined
+      const cursor = this.acp.createPeer(
+        context,
+        (event, data) => send(createEvent(event, data)),
+      )
       return new RpcRouter(
         harnessApi,
         undefined,
@@ -130,9 +138,10 @@ export class HostPluginRuntime {
         harnessRemote,
         () => this.hostCapabilities(),
         codex,
-        acp,
+        cursor,
         // Handles and their lifetime belong to this connection; only policy is shared.
         this.createLoopbackHost(),
+        () => this.hostWorkspaceTypes(),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -165,6 +174,7 @@ export class HostPluginRuntime {
       server: this.config.serverUrl ?? 'not configured',
     })
     await this.codex.start()
+    await this.acp.start()
     if (this.serverApi !== undefined) {
       this.harnessVersion = await this.readHarnessVersion()
       this.serverApi.setHarnessVersion(this.harnessVersion)
@@ -343,6 +353,31 @@ export class HostPluginRuntime {
     return { closed: false, streamId }
   }
 
+  acpStatus(): ReturnType<AcpRemoteGateway['status']> {
+    return this.acp.status()
+  }
+
+  acpCall(input: unknown): Promise<unknown> {
+    return this.requireLocalAcpPeer().call(input)
+  }
+
+  acpRespond(input: unknown): Promise<{ resolved: true }> {
+    return this.requireLocalAcpPeer().respond(input)
+  }
+
+  acpOpenStream(input: unknown, publish: PublishAcpFrame): Promise<unknown> {
+    this.localAcpPublish = publish
+    return this.requireLocalAcpPeer().openStream(input)
+  }
+
+  async acpCloseStream(input: unknown): Promise<unknown> {
+    const peer = this.localAcpPeer
+    if (peer !== undefined) return peer.closeStream(input)
+    const streamId = isPlainRecord(input) && typeof input.streamId === 'string' ? input.streamId : undefined
+    if (streamId === undefined) throw new RpcError('INVALID_MESSAGE', 'A Cursor stream is required.')
+    return { closed: false, streamId }
+  }
+
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
@@ -350,7 +385,10 @@ export class HostPluginRuntime {
     await this.connections.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined
+    await this.localAcpPeer?.closeAll()
+    this.localAcpPeer = undefined
     await this.codex.close()
+    await this.acp.close()
     this.logger.info('host runtime stopped')
   }
 
@@ -368,7 +406,9 @@ export class HostPluginRuntime {
       peerDeviceIds: this.connections.peerDeviceIds().map(shortId),
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
+      workspaceTypes: this.hostWorkspaceTypes(),
       codex: this.codex.status(),
+      acp: this.acp.status(),
     }
   }
 
@@ -427,8 +467,45 @@ export class HostPluginRuntime {
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
-    if (this.config.acp?.enabled) for (const item of this.config.acp.backends) if (item.enabled && this.acpAvailable(item.command)) capabilities.push(`agent.acp.v1.${item.id}`)
+    if (this.acp.isAvailable()) {
+      capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
+      for (const backend of this.acp.availableBackends()) {
+        capabilities.push(`agent.acp.${backend}.v1`)
+      }
+    }
     return capabilities
+  }
+
+  private hostWorkspaceTypes(): RemoteWorkspaceTypeDescription[] {
+    const types: RemoteWorkspaceTypeDescription[] = []
+    if (this.codex.isAvailable()) {
+      types.push({
+        id: 'codex',
+        name: 'CodeX',
+        capability: 'codex.appserver.v1',
+        available: true,
+      })
+    }
+    if (this.acp.isAvailable()) {
+      for (const backend of this.acp.availableBackends()) {
+        if (backend === 'cursor') {
+          types.push({
+            id: 'cursor',
+            name: 'Cursor',
+            capability: 'agent.acp.cursor.v1',
+            available: true,
+          })
+        } else if (backend === 'antigravity') {
+          types.push({
+            id: 'antigravity',
+            name: 'Antigravity',
+            capability: 'agent.acp.antigravity.v1',
+            available: true,
+          })
+        }
+      }
+    }
+    return types
   }
 
   private acpAvailable(command: string): boolean {
@@ -449,6 +526,23 @@ export class HostPluginRuntime {
       throw new RpcError('CODEX_UNAVAILABLE', 'Local CodeX is disabled or unavailable on this Host.')
     }
     this.localCodexPeer = peer
+    return peer
+  }
+
+  private requireLocalAcpPeer(): AcpPeerBridge {
+    if (!this.acp.isAvailable()) {
+      throw new RpcError('CURSOR_UNAVAILABLE', 'Local Agent ACP is disabled or unavailable on this Host.')
+    }
+    if (this.localAcpPeer !== undefined) return this.localAcpPeer
+    const identity = this.currentIdentity()
+    const peer = this.acp.createPeer({
+      connectionId: `loopback:${identity.deviceId}`,
+      peerDeviceId: identity.deviceId,
+    }, (event, data) => this.localAcpPublish(event, data))
+    if (peer === undefined) {
+      throw new RpcError('CURSOR_UNAVAILABLE', 'Local Agent ACP is disabled or unavailable on this Host.')
+    }
+    this.localAcpPeer = peer
     return peer
   }
 }

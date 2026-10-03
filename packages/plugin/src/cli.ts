@@ -154,7 +154,8 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
   }
 
   const identities = runtime.createIdentityStore({ directory, env: runtime.env })
-  const identity = await identities.loadOrCreate(hostname())
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
+  const identity = await identities.loadOrCreate(deviceName)
   const store = new ServerCredentialStore(directory)
   const stored = await store.load(serverUrl, identity.deviceId)
   lines.push(`Device: ${identity.name} (${identity.deviceId})`)
@@ -192,7 +193,7 @@ async function logout(args: readonly string[], runtime: CliRuntime): Promise<num
     return 0
   }
 
-  const deviceName = hostname()
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
   const identities = runtime.createIdentityStore({ directory, env: runtime.env })
   const identity = await identities.loadOrCreate(deviceName)
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
@@ -220,7 +221,7 @@ async function hostContext(runtime: CliRuntime): Promise<{
   const serverUrl = selectedServer()
   const root = new IdentityStore({ env: runtime.env }).directory
   const directory = serverStorageDirectory(root, serverUrl, 'host')
-  const deviceName = hostname()
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
   const identities = runtime.createIdentityStore({ directory, env: runtime.env })
   const identity = await identities.loadOrCreate(deviceName)
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))

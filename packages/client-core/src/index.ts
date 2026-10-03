@@ -71,11 +71,11 @@ export class RemoteClientCore {
     method: string,
     params: TParams,
     signal?: AbortSignal,
-    options?: RemoteRpcOptions,
+    options?: RemoteRpcOptions | number,
   ): Promise<TResult> {
     if (signal?.aborted) throw rpcAbortedError(method, signal.reason)
 
-    const timeoutMs = callTimeoutMs(this.timeoutMs, options)
+    const timeoutMs = typeof options === 'number' ? options : callTimeoutMs(this.timeoutMs, options)
     const request = createRpcRequest(method as RpcMethod, params)
     const result = new Promise<TResult>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -230,3 +230,4 @@ export type { EventPayload, RemoteEventName, RemoteTransport }
 export * from './remote-gateway.js'
 export * from './harness-alpha-client.js'
 export * from './codex-client.js'
+export * from './acp-client.js'

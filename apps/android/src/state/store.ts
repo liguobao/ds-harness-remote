@@ -4,9 +4,11 @@ import {
   createCodexTimelineState,
   projectCodexThread,
   reduceCodexTimelineFrame,
+  type AcpStream,
   type CodexStream,
   type CodexTimelineState,
 } from '@dsh-remote/client-core'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import {
   applyLanguagePreference,
   getActiveLanguage,
@@ -44,6 +46,14 @@ import {
   updateCodexSession,
   withCodexPermission,
 } from '../services/codex'
+import {
+  applyCursorFrame,
+  createAntigravitySession,
+  createAntigravityWorkspace,
+  createCursorSession,
+  createCursorWorkspace,
+  cursorNativeId,
+} from '../services/cursor'
 import { AndroidRemoteConnection } from '../services/connection'
 import { reconcileTrustedDevices } from '../services/device-directory'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
@@ -124,6 +134,8 @@ interface AppState {
   connectionNetworkDetails?: ConnectionNetworkDetails
   hostDescriptor?: HostDescriptor
   codexAvailable: boolean
+  cursorAvailable: boolean
+  antigravityAvailable: boolean
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
   /** Newest first; the home screen falls back to these when Favorites is empty. */
@@ -192,7 +204,7 @@ interface AppState {
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
-  workspaceCreate(path: string, backend?: 'harness' | 'codex'): Promise<WorkspaceView | undefined>
+  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
@@ -212,6 +224,7 @@ interface AppState {
   clearError(): void
   handleMuxFrame(frame: MuxStreamFrame): void
   handleCodexFrame(frame: { method: string; params: unknown }): void
+  handleCursorFrame(frame: AgentAcpFrameData): void
 }
 
 const disconnected: ConnectionSnapshot = {
@@ -225,6 +238,7 @@ const connection = new AndroidRemoteConnection()
 export const requireSessionTools = () => connection.requireSessionTools()
 let activeCodexStream: CodexStream | undefined
 let activeCodexTimeline: CodexTimelineState | undefined
+let activeCursorStream: AcpStream | undefined
 const codexModelSelections = new Map<string, ModelSelection>()
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -233,6 +247,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   connection: disconnected,
   connectionProbeOrder: [],
   codexAvailable: false,
+  cursorAvailable: false,
+  antigravityAvailable: false,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],
@@ -438,9 +454,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
-        const combinedSessions = [...sessions, ...codexSessions]
+        const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
+        const antigravityWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'antigravity')
+        const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
+        const antigravitySessions = state.sessions.filter(session => session.backend === 'antigravity')
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
         return {
-          workspaces: [...workspaceList.items, ...codexWorkspaces],
+          workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,
           selectedSession: state.selectedSession === undefined
@@ -467,7 +487,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   async connectDevice(device, options = {}) {
     const { config, identity } = get()
     if (config === undefined || identity === undefined) return false
-    set({
+    // Cursor sessions live only in Client memory (no Host catalog). Keep them
+    // across reconnect so the open chat and workspace list survive.
+    set(state => ({
       selectedDevice: device,
       connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
       connectionStage: 'authenticating',
@@ -475,12 +497,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       connectionNetworkDetails: undefined,
       hostDescriptor: undefined,
       codexAvailable: false,
-      workspaces: [],
-      sessions: [],
+      cursorAvailable: false,
+      antigravityAvailable: false,
+      workspaces: state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity'),
+      sessions: state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity'),
+      archivedSessionIds: [],
+      sessionModels: undefined,
       error: undefined,
-    })
+    }))
     try {
       await closeActiveCodexStream(false)
+      await closeActiveCursorStream(false)
       const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
       const preference = get().transportPreference
       const forceRelay = options.forceRelay === true || preference === 'relay'
@@ -508,10 +535,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             },
           })),
           onClose: () => {
+            // Drop local Cursor/CodeX stream handles immediately. The underlying
+            // RemoteClientCore is already gone; keeping them makes the next
+            // prompt skip openStream and never receive agent.acp.frame events.
+            void closeActiveCodexStream(false)
+            void closeActiveCursorStream(false)
             if (get().connection.phase === 'connected' || get().connection.phase === 'reconnecting') {
               set({
                 connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed },
                 codexAvailable: false,
+                cursorAvailable: false,
+                antigravityAvailable: false,
               })
             }
           },
@@ -541,12 +575,24 @@ export const useAppStore = create<AppState>((set, get) => ({
             ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
+        const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
+        const antigravityWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'antigravity')
+        const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
+        const antigravitySessions = state.sessions.filter(session => session.backend === 'antigravity')
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
+        const selectedSession = state.selectedSession === undefined
+          ? undefined
+          : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
+            ?? (state.selectedSession.backend === 'cursor' || state.selectedSession.backend === 'antigravity' ? state.selectedSession : undefined)
         return {
           hostDescriptor,
           codexAvailable: connection.hasCodex(),
-          workspaces: [...workspaceList.items, ...codexCatalog.workspaces],
+          cursorAvailable: connection.hasCursor(),
+          antigravityAvailable: connection.hasAntigravity(),
+          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
-          sessions: [...sessions, ...codexSessions],
+          sessions: combinedSessions,
+          selectedSession,
           connectionStage: 'ready',
           connectionNetworkDetails,
           lastConnectedDeviceId: device.deviceId,
@@ -556,6 +602,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       })
       await saveLastConnectedDeviceId(device.deviceId)
+      // Re-bind ACP stream after the secure channel is back so live frames resume
+      // without requiring a fresh openSession tap.
+      const resumed = get().selectedSession
+      if ((resumed?.backend === 'cursor' && connection.hasCursor()) || (resumed?.backend === 'antigravity' && connection.hasAntigravity())) {
+        await ensureCursorStream(resumed).catch(() => undefined)
+      }
       return true
     } catch (error) {
       await connection.close()
@@ -567,6 +619,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: message },
         codexAvailable: false,
+        cursorAvailable: false,
+        antigravityAvailable: false,
         error: message,
       })
       return false
@@ -600,6 +654,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async disconnect() {
     await closeActiveCodexStream(false)
+    await closeActiveCursorStream(false)
     await connection.close()
     codexModelSelections.clear()
     set({
@@ -610,6 +665,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedDevice: undefined,
       hostDescriptor: undefined,
       codexAvailable: false,
+      cursorAvailable: false,
       workspaces: [],
       archivedSessionIds: [],
       sessions: [],
@@ -626,6 +682,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const load = async () => {
       if (session.backend === 'codex') {
         await closeActiveCodexStream()
+        await closeActiveCursorStream()
         const client = connection.requireCodex()
         const threadId = codexThreadId(session)
         const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
@@ -676,7 +733,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         void refreshCodexModels(session.sessionId)
         return
       }
+      if (session.backend === 'cursor' || session.backend === 'antigravity') {
+        await closeActiveCodexStream()
+        await ensureCursorStream(session)
+        set(state => ({
+          selectedSession: session,
+          sessions: state.sessions.some(item => item.sessionId === session.sessionId)
+            ? state.sessions.map(item => item.sessionId === session.sessionId ? session : item)
+            : [session, ...state.sessions],
+          messages: {
+            ...state.messages,
+            [session.sessionId]: state.messages[session.sessionId] ?? [],
+          },
+          sessionModels: undefined,
+          historyHasMore: false,
+          oldestLoadedSeq: undefined,
+          busyAction: undefined,
+        }))
+        return
+      }
       await closeActiveCodexStream()
+      await closeActiveCursorStream()
       const [history, feedback] = await Promise.all([
         connection.requireProxy().sessionHistory(session.sessionId),
         // Older carriers may not expose feedback; history must remain usable.
@@ -783,6 +860,46 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return get().openSession(created)
       }
+      if (workspace?.backend === 'cursor') {
+        const created = await connection.requireCursor().createSession(workspace.path, 'agent', 'cursor')
+        const session = createCursorSession({
+          acpSessionId: created.sessionId,
+          cwd: workspace.path,
+          title: workspace.title,
+        })
+        set(state => ({
+          sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? {
+                ...item,
+                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                updatedAt: new Date().toISOString(),
+              }
+            : item),
+          busyAction: undefined,
+        }))
+        return get().openSession(session)
+      }
+      if (workspace?.backend === 'antigravity') {
+        const created = await connection.requireAntigravity().createSession(workspace.path, 'agent', 'antigravity')
+        const session = createAntigravitySession({
+          acpSessionId: created.sessionId,
+          cwd: workspace.path,
+          title: workspace.title,
+        })
+        set(state => ({
+          sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? {
+                ...item,
+                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                updatedAt: new Date().toISOString(),
+              }
+            : item),
+          busyAction: undefined,
+        }))
+        return get().openSession(session)
+      }
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
       const sessions = await proxy.sessionList()
@@ -818,6 +935,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             ...workspace,
             sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
           })),
+          busyAction: undefined,
+          selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
+          sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
+        }))
+        return true
+      }
+      if (session?.backend === 'cursor' || session?.backend === 'antigravity') {
+        if (get().selectedSession?.sessionId === sessionId) await closeActiveCursorStream()
+        set(state => ({
+          sessions: state.sessions.filter(item => item.sessionId !== sessionId),
+          workspaces: state.workspaces.map(workspace => ({
+            ...workspace,
+            sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
+          })),
+          messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => id !== sessionId)),
           busyAction: undefined,
           selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
           sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
@@ -957,8 +1089,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().connection.phase !== 'connected') return false
     set({ busyAction: `rename-workspace:${workspaceId}`, error: undefined })
     try {
-      if (get().workspaces.find(item => item.workspaceId === workspaceId)?.backend === 'codex') {
+      const target = get().workspaces.find(item => item.workspaceId === workspaceId)
+      if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
+      }
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity') {
+        const nextTitle = title.trim()
+        if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
+        set(state => ({
+          workspaces: state.workspaces.map(item => item.workspaceId === workspaceId
+            ? { ...item, title: nextTitle, updatedAt: new Date().toISOString() }
+            : item),
+          busyAction: undefined,
+        }))
+        return true
       }
       const proxy = connection.requireProxy()
       const workspace = await proxy.workspaceRename(workspaceId, title)
@@ -977,8 +1121,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().connection.phase !== 'connected') return false
     set({ busyAction: `delete-workspace:${workspaceId}`, error: undefined })
     try {
-      if (get().workspaces.find(item => item.workspaceId === workspaceId)?.backend === 'codex') {
+      const target = get().workspaces.find(item => item.workspaceId === workspaceId)
+      if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
+      }
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity') {
+        const sessionIds = new Set(target.sessionIds)
+        const selected = get().selectedSession
+        if (selected !== undefined && sessionIds.has(selected.sessionId)) {
+          await closeActiveCursorStream()
+        }
+        set(state => ({
+          workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
+          sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
+          messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => !sessionIds.has(id))),
+          selectedSession: state.selectedSession !== undefined && sessionIds.has(state.selectedSession.sessionId)
+            ? undefined
+            : state.selectedSession,
+          sessionModels: state.selectedSession !== undefined && sessionIds.has(state.selectedSession.sessionId)
+            ? undefined
+            : state.sessionModels,
+          busyAction: undefined,
+        }))
+        return true
       }
       const proxy = connection.requireProxy()
       await proxy.workspaceDelete(workspaceId)
@@ -1001,9 +1166,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().connection.phase !== 'connected') return false
     set({ busyAction: `move-workspace:${workspaceId}`, error: undefined })
     try {
-      if (get().workspaces.find(item => item.workspaceId === workspaceId)?.backend === 'codex'
-        || beforeWorkspaceId !== undefined && get().workspaces.find(item => item.workspaceId === beforeWorkspaceId)?.backend === 'codex') {
+      const target = get().workspaces.find(item => item.workspaceId === workspaceId)
+      const before = beforeWorkspaceId === undefined
+        ? undefined
+        : get().workspaces.find(item => item.workspaceId === beforeWorkspaceId)
+      if (target?.backend === 'codex' || before?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
+      }
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || before?.backend === 'cursor' || before?.backend === 'antigravity') {
+        set(state => {
+          const items = state.workspaces.slice()
+          const from = items.findIndex(item => item.workspaceId === workspaceId)
+          if (from < 0) return { busyAction: undefined }
+          const [workspace] = items.splice(from, 1)
+          if (workspace === undefined) return { busyAction: undefined }
+          const to = beforeWorkspaceId === undefined
+            ? items.length
+            : items.findIndex(item => item.workspaceId === beforeWorkspaceId)
+          items.splice(to < 0 ? items.length : to, 0, workspace)
+          return { workspaces: items, busyAction: undefined }
+        })
+        return true
       }
       const proxy = connection.requireProxy()
       const workspaceIds = await proxy.workspaceInsertBefore(workspaceId, beforeWorkspaceId)
@@ -1011,7 +1194,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         workspaces: [
           ...workspaceIds.flatMap(id => byId.get(id) === undefined ? [] : [byId.get(id)!]),
-          ...get().workspaces.filter(item => item.backend === 'codex'),
+          ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity'),
         ],
         busyAction: undefined,
       })
@@ -1091,6 +1274,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
+    if (session.backend === 'cursor') {
+      set({ historyHasMore: false, historyLoadingOlder: false })
+      return
+    }
     set({ historyLoadingOlder: true })
     try {
       const page = session.backend === 'codex'
@@ -1117,10 +1304,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async workspaceCreate(path, backend = 'harness') {
     if (get().connection.phase !== 'connected') return undefined
-    set({ busyAction: backend === 'codex' ? 'create-codex-workspace' : 'create-workspace', error: undefined })
+    set({
+      busyAction: backend === 'codex'
+        ? 'create-codex-workspace'
+        : backend === 'cursor'
+          ? 'create-cursor-workspace'
+          : backend === 'antigravity'
+            ? 'create-antigravity-workspace'
+            : 'create-workspace',
+      error: undefined,
+    })
     try {
       if (backend === 'codex') {
         const workspace = await createCodexWorkspace(connection.requireCodex(), path, createNativeRpcId())
+        set(state => ({
+          workspaces: [...state.workspaces.filter(item => item.workspaceId !== workspace.workspaceId), workspace],
+          busyAction: undefined,
+        }))
+        return workspace
+      }
+      if (backend === 'cursor') {
+        if (!connection.hasCursor()) throw new Error(zhCN.runtime.cursorUnavailable)
+        const workspace = createCursorWorkspace(path)
+        set(state => ({
+          workspaces: [...state.workspaces.filter(item => item.workspaceId !== workspace.workspaceId), workspace],
+          busyAction: undefined,
+        }))
+        return workspace
+      }
+      if (backend === 'antigravity') {
+        if (!connection.hasAntigravity()) throw new Error(zhCN.runtime.antigravityUnavailable)
+        const workspace = createAntigravityWorkspace(path)
         set(state => ({
           workspaces: [...state.workspaces.filter(item => item.workspaceId !== workspace.workspaceId), workspace],
           busyAction: undefined,
@@ -1232,6 +1446,35 @@ export const useAppStore = create<AppState>((set, get) => ({
               : state.selectedSession,
           }))
         }
+      } else if (session.backend === 'cursor' || session.backend === 'antigravity') {
+        if (images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
+        // Always re-bind the ACP stream on the current RemoteClientCore before
+        // prompting. After WebRTC flaps / Metro reload the module-level handle
+        // can point at a dead core while RPC still works on a new one.
+        await ensureCursorStream(session)
+        set(state => ({
+          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true } : item),
+          selectedSession: state.selectedSession?.sessionId === session.sessionId
+            ? { ...state.selectedSession, running: true }
+            : state.selectedSession,
+        }))
+        // Host may return immediately with stopReason=in_progress so frames can
+        // interleave; keep running until prompt_completed / failure.
+        const acpClient = session.backend === 'antigravity'
+          ? connection.requireAntigravity()
+          : connection.requireCursor()
+        const promptResult = await acpClient.prompt(cursorNativeId(session), text)
+        const inProgress = isRecord(promptResult)
+          && promptResult.accepted === true
+          && promptResult.stopReason === 'in_progress'
+        if (!inProgress) {
+          set(state => ({
+            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+            selectedSession: state.selectedSession?.sessionId === session.sessionId
+              ? { ...state.selectedSession, running: false }
+              : state.selectedSession,
+          }))
+        }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
         // Keep the sending state until the Host event stream confirms that
@@ -1277,6 +1520,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (turnId === undefined) throw new Error(zhCN.runtime.codexTurnUnavailable)
         await client.interrupt(threadId, turnId)
+      } else if (session.backend === 'cursor' || session.backend === 'antigravity') {
+        const acpClient = session.backend === 'antigravity'
+          ? connection.requireAntigravity()
+          : connection.requireCursor()
+        await acpClient.cancel(cursorNativeId(session))
+        set(state => ({
+          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+          selectedSession: state.selectedSession?.sessionId === session.sessionId
+            ? { ...state.selectedSession, running: false }
+            : state.selectedSession,
+        }))
       } else {
         await connection.requireProxy().sessionCancel(session.sessionId)
       }
@@ -1297,6 +1551,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
       if (session?.backend === 'codex') {
         await connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
+      } else if (session?.backend === 'cursor' || session?.backend === 'antigravity') {
+        const acpClient = session.backend === 'antigravity'
+          ? connection.requireAntigravity()
+          : connection.requireCursor()
+        await acpClient.respond(
+          item.approvalId,
+          outcome === 'allowed-once' ? 'allow-once' : 'reject-once',
+        )
       } else {
         if (item.frameRpcId === undefined) throw new Error(zhCN.runtime.openSessionFirst)
         await connection.requireProxy().respondApproval(item.frameRpcId, item.sessionId, item.approvalId, outcome)
@@ -1443,6 +1705,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,
+        cursorAvailable: false,
       })
     }
   },
@@ -1499,6 +1762,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     })
   },
+
+  handleCursorFrame(frame) {
+    const session = get().selectedSession
+    if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity')) return
+    const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
+    const update = params === undefined
+      ? undefined
+      : (isRecord(params.update) ? params.update : params)
+    let kind: string | undefined
+    if (update !== undefined && typeof update.sessionUpdate === 'string') {
+      kind = update.sessionUpdate
+      const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
+      // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
+      console.info('[dsh-remote] acp frame:', session.backend, kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
+    }
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [session.sessionId]: applyCursorFrame(state.messages[session.sessionId] ?? [], session.sessionId, frame),
+      },
+      ...(kind === 'prompt_completed' || kind === 'prompt_failed'
+        ? {
+            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+            selectedSession: state.selectedSession?.sessionId === session.sessionId
+              ? { ...state.selectedSession, running: false }
+              : state.selectedSession,
+            ...(kind === 'prompt_failed'
+              ? { error: session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
+              : {}),
+          }
+        : {}),
+    }))
+  },
 }))
 
 async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
@@ -1506,6 +1802,46 @@ async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
   activeCodexStream = undefined
   activeCodexTimeline = undefined
   if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
+}
+
+async function closeActiveCursorStream(notifyRemote = true): Promise<void> {
+  const stream = activeCursorStream
+  activeCursorStream = undefined
+  if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
+}
+
+/** Open (or refresh) the ACP event stream for the active session. */
+async function ensureCursorStream(session: RemoteSession): Promise<void> {
+  await closeActiveCursorStream()
+  const client = session.backend === 'antigravity'
+    ? connection.requireAntigravity()
+    : connection.requireCursor()
+  const nativeId = cursorNativeId(session)
+  const stream = await client.openStream(
+    nativeId,
+    frame => useAppStore.getState().handleCursorFrame(frame),
+    closed => {
+      if (useAppStore.getState().selectedSession?.sessionId !== session.sessionId) return
+      if (activeCursorStream?.streamId !== stream.streamId) return
+      activeCursorStream = undefined
+      useAppStore.setState(state => ({
+        sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+        selectedSession: state.selectedSession?.sessionId === session.sessionId
+          ? { ...state.selectedSession, running: false }
+          : state.selectedSession,
+        ...(closed.reason === 'failed' ? { error: session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+      }))
+      // Transport flaps can close the ACP stream while the secure channel is
+      // still up. Re-open so the next prompt does not miss live frames.
+      if (closed.reason === 'peer-disconnected') return
+      const phase = useAppStore.getState().connection.phase
+      if (phase !== 'connected') return
+      const current = useAppStore.getState().selectedSession
+      if (current?.sessionId !== session.sessionId || (current.backend !== 'cursor' && current.backend !== 'antigravity')) return
+      void ensureCursorStream(current).catch(() => undefined)
+    },
+  )
+  activeCursorStream = stream
 }
 
 async function loadSavedCodexPermissions(hostDeviceId: string | undefined): Promise<Record<string, CodexPermissionPreset>> {
@@ -1689,7 +2025,7 @@ async function finalizeLogin(
 }
 
 function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult'> {
@@ -1703,6 +2039,8 @@ function initialData(): Pick<AppState,
     connectionNetworkDetails: undefined,
     hostDescriptor: undefined,
     codexAvailable: false,
+    cursorAvailable: false,
+    antigravityAvailable: false,
     workspaces: [],
     favoriteWorkspaces: [],
     recentWorkspaces: [],

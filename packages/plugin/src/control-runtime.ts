@@ -84,6 +84,7 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.server.set') return ok(await this.setServer(payload))
       if (endpoint === 'settings.role.set') return ok(await this.setRole(payload))
       if (endpoint === 'settings.codex.set') return ok(await this.setCodex(payload))
+      if (endpoint === 'settings.cursor.set') return ok(await this.setCursor(payload))
       if (endpoint === 'settings.acp.set') return ok(await this.setAcp(payload))
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
@@ -238,6 +239,23 @@ export class PluginControlRuntime {
     return this.settingsView()
   }
 
+  private async setCursor(payload: unknown): Promise<PluginSettingsView> {
+    if (this.settings === undefined) {
+      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    }
+    const enabled = record(payload).enabled
+    if (typeof enabled !== 'boolean') {
+      throw new ClientModeError('INVALID_MESSAGE', 'Cursor Remote enabled must be a boolean.')
+    }
+    const current = editableConfig(resolveConfig(this.settings.get()))
+    const next = resolveConfig({
+      ...current,
+      cursor: { ...current.cursor, enabled },
+    })
+    await this.settings.replace(editableConfig(next))
+    return this.settingsView()
+  }
+
   private async setAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const value = record(payload)
@@ -273,7 +291,6 @@ export class PluginControlRuntime {
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))
     return this.settingsView()
   }
-
   private async authorizeOwnedRole(
     serverUrl: string,
     sourceRole: 'host' | 'client',
@@ -390,6 +407,10 @@ function editableConfig(config: ResolvedConfig): Config {
     codex: {
       enabled: config.codex.enabled,
       binary: config.codex.binary,
+    },
+    cursor: {
+      enabled: config.cursor.enabled,
+      binary: config.cursor.binary,
     },
     ...(config.acp === undefined ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }),
   }

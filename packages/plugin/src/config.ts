@@ -25,10 +25,20 @@ export interface Config {
     enabled?: boolean
     binary?: string
   }
+  /** Optional Cursor ACP domain carried by the existing authenticated Remote Plugin. */
+  cursor?: {
+    enabled?: boolean
+    binary?: string
+  }
   acp?: { enabled?: boolean; backends?: Array<{ id:string; enabled?: boolean; command?: string; args?: string[]; cwd?: string }>; backend?: string; command?: string; args?: string[]; cwd?: string }
 }
 
 export interface ResolvedCodexConfig {
+  enabled: boolean
+  binary: string
+}
+
+export interface ResolvedCursorConfig {
   enabled: boolean
   binary: string
 }
@@ -50,6 +60,7 @@ export interface ResolvedConfig {
   hostControl?: { enabled: boolean }
   loopback: { ports: number[] }
   codex: ResolvedCodexConfig
+  cursor: ResolvedCursorConfig
   acp?: { enabled: boolean; backends: Array<{ id:string; enabled:boolean; command:string; args:string[]; cwd?:string }> }
 }
 
@@ -86,6 +97,10 @@ const entryConfigSchema = s.object({
     }),
   ]),
   codex: s.object({
+    enabled: s.boolean(),
+    binary: s.string(),
+  }),
+  cursor: s.object({
     enabled: s.boolean(),
     binary: s.string(),
   }),
@@ -131,6 +146,10 @@ const configSchema = z.object({
     enabled: z.boolean().optional(),
     binary: z.string().trim().min(1).max(4096).optional(),
   }).strict().optional(),
+  cursor: z.object({
+    enabled: z.boolean().optional(),
+    binary: z.string().trim().min(1).max(4096).optional(),
+  }).strict().optional(),
   acp: z.object({ enabled:z.boolean().optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
 }).strict()
 
@@ -148,7 +167,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
-    deviceName: parsed.deviceName ?? hostname(),
+    deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
@@ -164,7 +183,11 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       enabled: parsed.codex?.enabled ?? true,
       binary: parsed.codex?.binary ?? 'codex',
     },
-    acp: { enabled: parsed.acp?.enabled ?? true, backends: [...new Set(['codex','cursor','kimi',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? ['acp'], ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },
+    cursor: {
+      enabled: parsed.cursor?.enabled ?? parsed.acp?.enabled ?? false,
+      binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? 'agent',
+    },
+    acp: { enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false, backends: [...new Set(['codex','cursor','kimi','antigravity',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi',antigravity:'agy'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? (id === 'antigravity' ? ['--input-format', 'stream-json', '--output-format', 'stream-json'] : ['acp']), ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },
   }
 }
 

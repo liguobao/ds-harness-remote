@@ -23,18 +23,18 @@
     mod
   ));
 
-  // ../../node_modules/qrcode/lib/can-promise.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js
   var require_can_promise = __commonJS({
-    "../../node_modules/qrcode/lib/can-promise.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js"(exports, module) {
       module.exports = function() {
         return typeof Promise == "function" && Promise.prototype && Promise.prototype.then;
       };
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/utils.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js
   var require_utils = __commonJS({
-    "../../node_modules/qrcode/lib/core/utils.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js"(exports) {
       var toSJISFunction, CODEWORDS_COUNT = [
         0,
         // Not used
@@ -107,9 +107,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/error-correction-level.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js
   var require_error_correction_level = __commonJS({
-    "../../node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
       exports.L = { bit: 1 };
       exports.M = { bit: 0 };
       exports.Q = { bit: 3 };
@@ -149,9 +149,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/bit-buffer.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js
   var require_bit_buffer = __commonJS({
-    "../../node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
       function BitBuffer() {
         this.buffer = [], this.length = 0;
       }
@@ -176,9 +176,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/bit-matrix.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js
   var require_bit_matrix = __commonJS({
-    "../../node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
       function BitMatrix(size) {
         if (!size || size < 1)
           throw new Error("BitMatrix size must be defined and greater than 0");
@@ -201,9 +201,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/alignment-pattern.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js
   var require_alignment_pattern = __commonJS({
-    "../../node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize;
       exports.getRowColCoords = function(version) {
         if (version === 1) return [];
@@ -224,9 +224,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/finder-pattern.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js
   var require_finder_pattern = __commonJS({
-    "../../node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize, FINDER_PATTERN_SIZE = 7;
       exports.getPositions = function(version) {
         let size = getSymbolSize(version);
@@ -242,9 +242,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/mask-pattern.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js
   var require_mask_pattern = __commonJS({
-    "../../node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
       exports.Patterns = {
         PATTERN000: 0,
         PATTERN001: 1,
@@ -342,9 +342,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/error-correction-code.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js
   var require_error_correction_code = __commonJS({
-    "../../node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
       var ECLevel = require_error_correction_level(), EC_BLOCKS_TABLE = [
         // L  M  Q  H
         1,
@@ -701,9 +701,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/galois-field.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js
   var require_galois_field = __commonJS({
-    "../../node_modules/qrcode/lib/core/galois-field.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js"(exports) {
       var EXP_TABLE = new Uint8Array(512), LOG_TABLE = new Uint8Array(256);
       (function() {
         let x = 1;
@@ -725,9 +725,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/polynomial.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js
   var require_polynomial = __commonJS({
-    "../../node_modules/qrcode/lib/core/polynomial.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js"(exports) {
       var GF = require_galois_field();
       exports.mul = function(p1, p2) {
         let coeff = new Uint8Array(p1.length + p2.length - 1);
@@ -757,9 +757,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/reed-solomon-encoder.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js
   var require_reed_solomon_encoder = __commonJS({
-    "../../node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
       var Polynomial = require_polynomial();
       function ReedSolomonEncoder(degree) {
         this.genPoly = void 0, this.degree = degree, this.degree && this.initialize(this.degree);
@@ -783,18 +783,18 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/version-check.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js
   var require_version_check = __commonJS({
-    "../../node_modules/qrcode/lib/core/version-check.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js"(exports) {
       exports.isValid = function(version) {
         return !isNaN(version) && version >= 1 && version <= 40;
       };
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/regex.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js
   var require_regex = __commonJS({
-    "../../node_modules/qrcode/lib/core/regex.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js"(exports) {
       var numeric = "[0-9]+", alphanumeric = "[A-Z $%*+\\-./:]+", kanji = "(?:[u3000-u303F]|[u3040-u309F]|[u30A0-u30FF]|[uFF00-uFFEF]|[u4E00-u9FAF]|[u2605-u2606]|[u2190-u2195]|u203B|[u2010u2015u2018u2019u2025u2026u201Cu201Du2225u2260]|[u0391-u0451]|[u00A7u00A8u00B1u00B4u00D7u00F7])+";
       kanji = kanji.replace(/u/g, "\\u");
       var byte = "(?:(?![A-Z0-9 $%*+\\-./:]|" + kanji + `)(?:.|[\r
@@ -817,9 +817,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/mode.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js
   var require_mode = __commonJS({
-    "../../node_modules/qrcode/lib/core/mode.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js"(exports) {
       var VersionCheck = require_version_check(), Regex = require_regex();
       exports.NUMERIC = {
         id: "Numeric",
@@ -888,9 +888,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/version.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js
   var require_version = __commonJS({
-    "../../node_modules/qrcode/lib/core/version.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js"(exports) {
       var Utils = require_utils(), ECCode = require_error_correction_code(), ECLevel = require_error_correction_level(), Mode = require_mode(), VersionCheck = require_version_check(), G18 = 7973, G18_BCH = Utils.getBCHDigit(G18);
       function getBestVersionForDataLength(mode, length, errorCorrectionLevel) {
         for (let currentVersion = 1; currentVersion <= 40; currentVersion++)
@@ -957,9 +957,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/format-info.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js
   var require_format_info = __commonJS({
-    "../../node_modules/qrcode/lib/core/format-info.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js"(exports) {
       var Utils = require_utils(), G15 = 1335, G15_MASK = 21522, G15_BCH = Utils.getBCHDigit(G15);
       exports.getEncodedBits = function(errorCorrectionLevel, mask) {
         let data = errorCorrectionLevel.bit << 3 | mask, d = data << 10;
@@ -970,9 +970,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/numeric-data.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js
   var require_numeric_data = __commonJS({
-    "../../node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
       var Mode = require_mode();
       function NumericData(data) {
         this.mode = Mode.NUMERIC, this.data = data.toString();
@@ -997,9 +997,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/alphanumeric-data.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js
   var require_alphanumeric_data = __commonJS({
-    "../../node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
       var Mode = require_mode(), ALPHA_NUM_CHARS = [
         "0",
         "1",
@@ -1071,9 +1071,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/byte-data.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js
   var require_byte_data = __commonJS({
-    "../../node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
       var Mode = require_mode();
       function ByteData(data) {
         this.mode = Mode.BYTE, typeof data == "string" ? this.data = new TextEncoder().encode(data) : this.data = new Uint8Array(data);
@@ -1095,9 +1095,9 @@
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/kanji-data.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js
   var require_kanji_data = __commonJS({
-    "../../node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
       var Mode = require_mode(), Utils = require_utils();
       function KanjiData(data) {
         this.mode = Mode.KANJI, this.data = data;
@@ -1131,9 +1131,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/dijkstrajs/dijkstra.js
+  // ../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js
   var require_dijkstra = __commonJS({
-    "../../node_modules/dijkstrajs/dijkstra.js"(exports, module) {
+    "../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js"(exports, module) {
       "use strict";
       var dijkstra = {
         single_source_shortest_paths: function(graph, s, d) {
@@ -1201,9 +1201,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/segments.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js
   var require_segments = __commonJS({
-    "../../node_modules/qrcode/lib/core/segments.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js"(exports) {
       var Mode = require_mode(), NumericData = require_numeric_data(), AlphanumericData = require_alphanumeric_data(), ByteData = require_byte_data(), KanjiData = require_kanji_data(), Regex = require_regex(), Utils = require_utils(), dijkstra = require_dijkstra();
       function getStringByteLength(str) {
         return unescape(encodeURIComponent(str)).length;
@@ -1334,9 +1334,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/qrcode/lib/core/qrcode.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js
   var require_qrcode = __commonJS({
-    "../../node_modules/qrcode/lib/core/qrcode.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js"(exports) {
       var Utils = require_utils(), ECLevel = require_error_correction_level(), BitBuffer = require_bit_buffer(), BitMatrix = require_bit_matrix(), AlignmentPattern = require_alignment_pattern(), FinderPattern = require_finder_pattern(), MaskPattern = require_mask_pattern(), ECCode = require_error_correction_code(), ReedSolomonEncoder = require_reed_solomon_encoder(), Version = require_version(), FormatInfo = require_format_info(), Mode = require_mode(), Segments = require_segments();
       function setupFinderPattern(matrix, version) {
         let size = matrix.size, pos = FinderPattern.getPositions(version);
@@ -1464,9 +1464,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/qrcode/lib/renderer/utils.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js
   var require_utils2 = __commonJS({
-    "../../node_modules/qrcode/lib/renderer/utils.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js"(exports) {
       function hex2rgba(hex) {
         if (typeof hex == "number" && (hex = hex.toString()), typeof hex != "string")
           throw new Error("Color should be defined as hex string");
@@ -1522,9 +1522,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/qrcode/lib/renderer/canvas.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js
   var require_canvas = __commonJS({
-    "../../node_modules/qrcode/lib/renderer/canvas.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js"(exports) {
       var Utils = require_utils2();
       function clearCanvas(ctx, canvas, size) {
         ctx.clearRect(0, 0, canvas.width, canvas.height), canvas.style || (canvas.style = {}), canvas.height = size, canvas.width = size, canvas.style.height = size + "px", canvas.style.width = size + "px";
@@ -1551,9 +1551,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/qrcode/lib/renderer/svg-tag.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js
   var require_svg_tag = __commonJS({
-    "../../node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
       var Utils = require_utils2();
       function getColorAttrib(color, attrib) {
         let alpha = color.a / 255, str = attrib + '="' + color.hex + '"';
@@ -1579,9 +1579,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/qrcode/lib/browser.js
+  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js
   var require_browser = __commonJS({
-    "../../node_modules/qrcode/lib/browser.js"(exports) {
+    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js"(exports) {
       var canPromise = require_can_promise(), QRCode2 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
       function renderCanvas(renderFunc, canvas, text, opts, cb) {
         let args = [].slice.call(arguments, 1), argsNum = args.length, isLastArgCb = typeof args[argsNum - 1] == "function";
@@ -1758,7 +1758,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       try {
         let value = JSON.parse(raw);
         if (typeof value.targetDeviceId != "string" || typeof value.workspaceId != "string") throw new Error("invalid");
-        if (value.backend !== void 0 && value.backend !== "harness" && value.backend !== "codex") throw new Error("invalid");
+        if (value.backend !== void 0 && value.backend !== "harness" && value.backend !== "codex" && value.backend !== "cursor" && value.backend !== "antigravity") throw new Error("invalid");
         if (value.sessionId !== void 0 && typeof value.sessionId != "string") throw new Error("invalid");
         return value;
       } catch {
@@ -1812,6 +1812,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "Expose Codex projects through this Host. Restart DSH after changing this setting.",
     codexSaved: "Codex Remote setting saved. Restart DSH to apply it.",
+    cursorRemote: "Cursor ACP adapter (experimental)",
+    cursorRemoteHint: "Enable the Cursor `agent acp` backend for the Agent ACP gateway. Requires local `agent login`. Restart DSH after changing this setting.",
+    cursorSaved: "Cursor ACP adapter setting saved. Restart DSH to apply it.",
     authorizeFromRemote: "Sign in from the Remote entry in the sidebar, then return here to manage this device.",
     authorizationMethod: "Authorization method",
     accountPassword: "Account password",
@@ -1918,11 +1921,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
     exitRemote: "Exit",
     addRemoteWorkspace: "Add remote workspace",
     addCodexWorkspace: "Add CodeX workspace",
+    addCursorWorkspace: "Add Cursor workspace",
+    addAntigravityWorkspace: "Add Antigravity workspace",
     noCodexWorkspaces: "No CodeX workspaces yet.",
+    noCursorWorkspaces: "No Cursor workspaces yet. Add a project directory to start.",
+    noAntigravityWorkspaces: "No Antigravity workspaces yet. Add a project directory to start.",
     cancelAddWorkspace: "Cancel",
     confirmAddWorkspace: "Add and open",
     showAllWorkspaces: "Show all DSH workspaces",
     showAllCodexWorkspaces: "Show all CodeX workspaces",
+    showAllCursorWorkspaces: "Show all Cursor workspaces",
+    showAllAntigravityWorkspaces: "Show all Antigravity workspaces",
     remoteModeLabel: "Remote mode \xB7 {name}",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
@@ -2008,6 +2017,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     qrLoginExpired: "This QR code expired. Refresh it to continue.",
     refreshQrCode: "Refresh QR code",
     codexVirtualWorkspace: "CodeX virtual workspace",
+    cursorVirtualWorkspace: "Cursor virtual workspace",
+    antigravityVirtualWorkspace: "Antigravity virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
     terminalRemote: "\u8FDC\u7A0B\u7EC8\u7AEF",
@@ -2052,6 +2063,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexRemote: "Codex Remote",
     codexRemoteHint: "\u901A\u8FC7\u8FD9\u53F0 Host \u63D0\u4F9B Codex \u9879\u76EE\uFF1B\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
     codexSaved: "Codex Remote \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
+    cursorRemote: "Cursor ACP adapter\uFF08\u5B9E\u9A8C\u6027\uFF09",
+    cursorRemoteHint: "\u4E3A Agent ACP gateway \u542F\u7528 Cursor `agent acp` backend\u3002\u9700\u672C\u673A\u5B8C\u6210 `agent login`\u3002\u4FEE\u6539\u540E\u9700\u91CD\u542F DSH \u751F\u6548\u3002",
+    cursorSaved: "Cursor ACP adapter \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548\u3002",
     authorizeFromRemote: "\u8BF7\u4ECE\u4FA7\u680F Remote \u5165\u53E3\u767B\u5F55\uFF0C\u767B\u5F55\u540E\u53EF\u5728\u8FD9\u91CC\u7BA1\u7406\u5F53\u524D\u8BBE\u5907\u3002",
     authorizationMethod: "\u6388\u6743\u65B9\u5F0F",
     accountPassword: "\u8D26\u53F7\u5BC6\u7801",
@@ -2158,11 +2172,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
     exitRemote: "\u9000\u51FA",
     addRemoteWorkspace: "\u6DFB\u52A0\u8FDC\u7A0B\u5DE5\u4F5C\u533A",
     addCodexWorkspace: "\u6DFB\u52A0 CodeX \u5DE5\u4F5C\u533A",
+    addCursorWorkspace: "\u6DFB\u52A0 Cursor \u5DE5\u4F5C\u533A",
+    addAntigravityWorkspace: "\u6DFB\u52A0 Antigravity \u5DE5\u4F5C\u533A",
     noCodexWorkspaces: "\u8FD8\u6CA1\u6709 CodeX \u5DE5\u4F5C\u533A\u3002",
+    noCursorWorkspaces: "\u8FD8\u6CA1\u6709 Cursor \u5DE5\u4F5C\u533A\u3002\u6DFB\u52A0\u9879\u76EE\u76EE\u5F55\u5373\u53EF\u5F00\u59CB\u3002",
+    noAntigravityWorkspaces: "\u8FD8\u6CA1\u6709 Antigravity \u5DE5\u4F5C\u533A\u3002\u6DFB\u52A0\u9879\u76EE\u76EE\u5F55\u5373\u53EF\u5F00\u59CB\u3002",
     cancelAddWorkspace: "\u53D6\u6D88",
     confirmAddWorkspace: "\u786E\u8BA4\u5E76\u6253\u5F00",
     showAllWorkspaces: "\u663E\u793A\u5168\u90E8 DSH \u5DE5\u4F5C\u533A",
     showAllCodexWorkspaces: "\u663E\u793A\u5168\u90E8 CodeX \u5DE5\u4F5C\u533A",
+    showAllCursorWorkspaces: "\u663E\u793A\u5168\u90E8 Cursor \u5DE5\u4F5C\u533A",
+    showAllAntigravityWorkspaces: "\u663E\u793A\u5168\u90E8 Antigravity \u5DE5\u4F5C\u533A",
     remoteModeLabel: "\u8FDC\u7A0B\u6A21\u5F0F \xB7 {name}",
     remoteNetworkP2p: "P2P",
     remoteNetworkTurn: "TURN",
@@ -2248,6 +2268,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     qrLoginExpired: "\u4E8C\u7EF4\u7801\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002",
     refreshQrCode: "\u5237\u65B0\u4E8C\u7EF4\u7801",
     codexVirtualWorkspace: "CodeX \u5DE5\u4F5C\u533A",
+    cursorVirtualWorkspace: "Cursor \u5DE5\u4F5C\u533A",
+    antigravityVirtualWorkspace: "Antigravity \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
   }, defaultPreferredTransports = ["lan", "p2p", "turn", "relay"], controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
     constructor(message) {
@@ -2261,7 +2283,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       controlUnavailable: !0,
       connected: !1,
       transport: "Disconnected",
-      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1 },
+      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1, cursor: !1 },
       hostAuthorizationAvailable: !1
     };
   }
@@ -2442,8 +2464,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       }
       function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [cursorEnabled, setCursorEnabled] = React.useState(!1), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [cursorBusy, setCursorBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setCursorEnabled(view.config.cursor?.enabled ?? !1), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
             props.control("settings.get"),
@@ -2514,6 +2536,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setCodexEnabled(previous), setError(messageOf(reason));
           } finally {
             setCodexBusy(!1);
+          }
+        }, setCursorRemote = async (enabled) => {
+          let previous = cursorEnabled;
+          setCursorEnabled(enabled), setCursorBusy(!0), setError(void 0), setNotice(void 0);
+          try {
+            let view = await props.control("settings.cursor.set", { enabled });
+            applyView(view), setNotice({ key: "cursorSaved" });
+          } catch (reason) {
+            setCursorEnabled(previous), setError(messageOf(reason));
+          } finally {
+            setCursorBusy(!1);
           }
         }, setTerminalRemote = async (enabled) => {
           let previous = terminalEnabled, portsDraft = previewPorts;
@@ -2638,6 +2671,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("codexRemote"),
             checked: codexEnabled,
             onChange: (event) => void setCodexRemote(event.target.checked)
+          })
+        ), cursorSetting = React.createElement(
+          "div",
+          { className: "dshRemoteAuthorizationSetting" },
+          React.createElement(
+            "div",
+            null,
+            React.createElement("strong", null, t("cursorRemote")),
+            React.createElement("p", null, t("cursorRemoteHint"))
+          ),
+          React.createElement("input", {
+            type: "checkbox",
+            role: "switch",
+            disabled: busy || cursorBusy || !writable,
+            "aria-label": t("cursorRemote"),
+            checked: cursorEnabled,
+            onChange: (event) => void setCursorRemote(event.target.checked)
           })
         ), acpSetting = React.createElement(
           "details",
@@ -2774,6 +2824,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               ),
               developmentSetting,
               codexSetting,
+              cursorSetting,
               acpSetting,
               React.createElement(
                 "div",
@@ -2878,6 +2929,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               ),
               developmentSetting,
               codexSetting,
+              cursorSetting,
               acpSetting,
               React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
               writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
@@ -2896,7 +2948,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         );
       }
       function RemoteWorkspaceAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [loginMethod, setLoginMethod] = React.useState(props.preferredQrProvider), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [loginMethod, setLoginMethod] = React.useState(props.preferredQrProvider), [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
         React.useEffect(() => {
           open || setDevicesOpen(!1);
         }, [open]), React.useEffect(() => {
@@ -2994,7 +3046,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           disabled: busy,
           onClick: () => selectLoginMethod(provider)
         }, t(provider === "github" ? "githubLogin" : "zhihuLogin")), selectHost = async (host) => {
-          setBusy(!0), setError(void 0), setConnectingHost(host), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1);
+          setBusy(!0), setError(void 0), setConnectingHost(host), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1);
           try {
             let result = await runConnectHostProgress(
               status?.preferredTransports,
@@ -3008,13 +3060,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   targetDeviceId: host.deviceId
                 }), nextCodexWorkspaces = await props.control("codex.workspaces.list", {
                   targetDeviceId: host.deviceId
+                }).catch(() => []), nextCursorWorkspaces = await props.control("cursor.workspaces.list", {
+                  targetDeviceId: host.deviceId
+                }).catch(() => []), nextAntigravityWorkspaces = await props.control("antigravity.workspaces.list", {
+                  targetDeviceId: host.deviceId
                 }).catch(() => []), nextStatus = await props.control("status").catch(() => {
                 });
-                return nextStatus !== void 0 && setStatus(nextStatus), { workspaces: nextWorkspaces, codexWorkspaces: nextCodexWorkspaces, status: nextStatus };
+                return nextStatus !== void 0 && setStatus(nextStatus), {
+                  workspaces: nextWorkspaces,
+                  codexWorkspaces: nextCodexWorkspaces,
+                  cursorWorkspaces: nextCursorWorkspaces,
+                  antigravityWorkspaces: nextAntigravityWorkspaces,
+                  status: nextStatus
+                };
               },
               (result2) => connectedProgress(result2.status)
             );
-            setWorkspaces(result.workspaces), setCodexWorkspaces(result.codexWorkspaces), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setSelectedHost(host), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+            setWorkspaces(result.workspaces), setCodexWorkspaces(result.codexWorkspaces), setCursorWorkspaces(result.cursorWorkspaces), setAntigravityWorkspaces(result.antigravityWorkspaces), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setSelectedHost(host), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -3028,7 +3090,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 targetDeviceId: selectedHost.deviceId,
                 ...nextPath === void 0 ? {} : { path: nextPath }
               });
-              setDirectory(listing), setCodexWorkspaceId(void 0), setPath(listing.path);
+              setDirectory(listing), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPath(listing.path);
             } catch (reason) {
               setError(messageOf(reason));
             } finally {
@@ -3036,25 +3098,29 @@ Minimum version required to store current data is: ` + bestVersion + `.
             }
           }
         }, startAddingWorkspace = (backend) => {
-          setAddingWorkspace(!0), setWorkspaceBackend(backend), setCodexWorkspaceId(void 0), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setDirectory(void 0), setPath(""), browseDirectory();
+          setAddingWorkspace(!0), setWorkspaceBackend(backend), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setDirectory(void 0), setPath(""), browseDirectory();
         }, cancelAddingWorkspace = () => {
-          setAddingWorkspace(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath("");
+          setAddingWorkspace(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setDirectory(void 0), setPath("");
         }, refreshRemote = async () => {
           setBusy(!0), setNotice(void 0), setError(void 0);
           try {
             let nextStatus = await props.control("status");
             if (setStatus(nextStatus), !nextStatus.available) {
-              setDevices([]), setNeedsAuthorization(!1), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+              setDevices([]), setNeedsAuthorization(!1), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
               return;
             }
             try {
               let nextDevices = await props.control("devices");
               if (setDevices(nextDevices), setNeedsAuthorization(!1), selectedHost !== void 0) {
                 let nextSelectedHost = nextDevices.find((device) => device.deviceId === selectedHost.deviceId);
-                nextSelectedHost === void 0 ? (setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : setSelectedHost(nextSelectedHost);
+                nextSelectedHost === void 0 ? (setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : (setSelectedHost(nextSelectedHost), props.control("workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setWorkspaces(w)).catch(() => {
+                }), props.control("codex.workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setCodexWorkspaces(w)).catch(() => {
+                }), props.control("cursor.workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setCursorWorkspaces(w)).catch(() => {
+                }), props.control("antigravity.workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setAntigravityWorkspaces(w)).catch(() => {
+                }));
               }
             } catch {
-              setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+              setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
             }
           } catch (reason) {
             setError(messageOf(reason));
@@ -3062,14 +3128,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setBusy(!1);
           }
         }, show = async () => {
-          setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setOpen(!0), await refreshRemote();
+          setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setOpen(!0), await refreshRemote();
         };
         React.useEffect(() => {
           if (!(!open || selectedHost !== void 0))
             return props.statusFeed.subscribe(setStatus);
         }, [open, selectedHost]);
         let chooseAnotherHost = () => {
-          setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
+          setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
         }, signInClient = async () => {
           if (!(email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
             setBusy(!0), setError(void 0);
@@ -3112,8 +3178,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setBusy(!1);
           }
         }, openWorkspace = async (selection) => {
-          let targetBackend = selection?.backend ?? workspaceBackend, targetPath = (selection?.path ?? path).trim(), targetCodexWorkspaceId = selection?.backend === "codex" ? selection.workspaceId : selection === void 0 ? codexWorkspaceId : void 0, createWorkspace = selection === void 0 && addingWorkspace;
-          if (!(selectedHost === void 0 || targetPath === "" || !createWorkspace && targetBackend === "codex" && targetCodexWorkspaceId === void 0)) {
+          let targetBackend = selection?.backend ?? workspaceBackend, targetPath = (selection?.path ?? path).trim(), targetCodexWorkspaceId = selection?.backend === "codex" ? selection.workspaceId : selection === void 0 ? codexWorkspaceId : void 0, targetCursorWorkspaceId = selection?.backend === "cursor" ? selection.workspaceId : selection === void 0 ? cursorWorkspaceId : void 0, targetAntigravityWorkspaceId = selection?.backend === "antigravity" ? selection.workspaceId : selection === void 0 ? antigravityWorkspaceId : void 0, createWorkspace = selection === void 0 && addingWorkspace;
+          if (!(selectedHost === void 0 || targetPath === "" || !createWorkspace && targetBackend === "codex" && targetCodexWorkspaceId === void 0 || !createWorkspace && targetBackend === "cursor" && targetCursorWorkspaceId === void 0 && targetPath === "" || !createWorkspace && targetBackend === "antigravity" && targetAntigravityWorkspaceId === void 0 && targetPath === "")) {
             setBusy(!0), setError(void 0);
             try {
               let nextStatus = await (targetBackend === "codex" ? createWorkspace ? props.control("codex.workspace.create", {
@@ -3122,6 +3188,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
               }) : props.control("codex.workspace.open", {
                 targetDeviceId: selectedHost.deviceId,
                 workspaceId: targetCodexWorkspaceId
+              }) : targetBackend === "cursor" ? createWorkspace || targetCursorWorkspaceId === void 0 ? props.control("cursor.workspace.create", {
+                targetDeviceId: selectedHost.deviceId,
+                path: targetPath
+              }) : props.control("cursor.workspace.open", {
+                targetDeviceId: selectedHost.deviceId,
+                workspaceId: targetCursorWorkspaceId
+              }) : targetBackend === "antigravity" ? createWorkspace || targetAntigravityWorkspaceId === void 0 ? props.control("antigravity.workspace.create", {
+                targetDeviceId: selectedHost.deviceId,
+                path: targetPath
+              }) : props.control("antigravity.workspace.open", {
+                targetDeviceId: selectedHost.deviceId,
+                workspaceId: targetAntigravityWorkspaceId
               }) : props.control("workspace.open", {
                 targetDeviceId: selectedHost.deviceId,
                 path: targetPath
@@ -3131,7 +3209,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               setError(messageOf(reason)), setBusy(!1);
             }
           }
-        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
+        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0 || status?.remoteFeatures?.workspaceTypes?.some((w) => w.id === "codex" && w.available) === !0, cursorAvailable = status?.remoteFeatures?.cursor === !0 || status?.remoteFeatures?.workspaceTypes?.some((w) => w.id === "cursor" && w.available) === !0, antigravityAvailable = status?.remoteFeatures?.antigravity === !0 || status?.remoteFeatures?.workspaceTypes?.some((w) => w.id === "antigravity" && w.available) === !0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
           formatPlatform(selectedHost.platform),
           selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
           selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion })
@@ -3467,7 +3545,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     React.createElement(
                       "div",
                       { className: "dshRemoteSectionHeading dshRemoteWorkspaceHeading" },
-                      React.createElement("strong", null, t(addingWorkspace ? workspaceBackend === "codex" ? "addCodexWorkspace" : "addRemoteWorkspace" : "existingWorkspaces")),
+                      React.createElement("strong", null, t(addingWorkspace ? workspaceBackend === "codex" ? "addCodexWorkspace" : workspaceBackend === "cursor" ? "addCursorWorkspace" : workspaceBackend === "antigravity" ? "addAntigravityWorkspace" : "addRemoteWorkspace" : "existingWorkspaces")),
                       addingWorkspace ? React.createElement("button", {
                         type: "button",
                         className: "dshRemoteCancelWorkspace",
@@ -3529,7 +3607,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                               className: workspaceBackend === "harness" && path === workspace.path ? "isSelected" : "",
                               "aria-pressed": workspaceBackend === "harness" && path === workspace.path,
                               onClick: () => {
-                                setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setPath(workspace.path);
+                                setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(workspace.path);
                               },
                               onDoubleClick: () => void openWorkspace({ backend: "harness", path: workspace.path })
                             },
@@ -3588,7 +3666,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                             className: workspaceBackend === "codex" && codexWorkspaceId === workspace.workspaceId ? "isSelected" : "",
                             "aria-pressed": workspaceBackend === "codex" && codexWorkspaceId === workspace.workspaceId,
                             onClick: () => {
-                              setWorkspaceBackend("codex"), setCodexWorkspaceId(workspace.workspaceId), setPath(workspace.path);
+                              setWorkspaceBackend("codex"), setCodexWorkspaceId(workspace.workspaceId), setCursorWorkspaceId(void 0), setPath(workspace.path);
                             },
                             onDoubleClick: () => void openWorkspace({
                               backend: "codex",
@@ -3608,6 +3686,130 @@ Minimum version required to store current data is: ` + bestVersion + `.
                           "aria-label": t("showAllCodexWorkspaces"),
                           onClick: () => setShowAllCodexWorkspaces(!0)
                         }, React.createElement("span", { "aria-hidden": !0 }, "\u2026"))
+                      ),
+                      !cursorAvailable && cursorWorkspaces.length === 0 ? null : React.createElement(
+                        "section",
+                        { className: "dshRemoteCodexWorkspaceGroup" },
+                        React.createElement(
+                          "div",
+                          {
+                            id: cursorWorkspaceHeadingId,
+                            className: "dshRemoteWorkspaceSourceHeading"
+                          },
+                          React.createElement(
+                            "span",
+                            { className: "dshRemoteWorkspaceSourceText" },
+                            React.createElement("strong", null, t("cursorVirtualWorkspace"))
+                          ),
+                          cursorAvailable ? React.createElement("button", {
+                            type: "button",
+                            className: "dshRemoteAddWorkspace",
+                            disabled: busy,
+                            title: t("addCursorWorkspace"),
+                            "aria-label": t("addCursorWorkspace"),
+                            onClick: () => startAddingWorkspace("cursor")
+                          }, React.createElement("svg", {
+                            className: "dshRemoteAddWorkspaceIcon",
+                            viewBox: "0 0 16 16",
+                            "aria-hidden": !0,
+                            focusable: !1
+                          }, React.createElement("path", { d: "M8 3v10M3 8h10", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" }))) : null
+                        ),
+                        React.createElement("div", {
+                          id: cursorWorkspaceListId,
+                          className: "dshRemoteDirectoryList dshRemoteCodexWorkspaceList",
+                          "aria-labelledby": cursorWorkspaceHeadingId
+                        }, visibleCursorWorkspaces.length === 0 ? React.createElement("p", null, t("noCursorWorkspaces")) : visibleCursorWorkspaces.map((workspace) => React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === "cursor" && cursorWorkspaceId === workspace.workspaceId ? "isSelected" : "",
+                            "aria-pressed": workspaceBackend === "cursor" && cursorWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend("cursor"), setCursorWorkspaceId(workspace.workspaceId), setCodexWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPath(workspace.path);
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: "cursor",
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId
+                            })
+                          },
+                          React.createElement("img", { className: "dshRemoteWorkspaceIcon", src: deepSeekWorkspaceIcon, alt: "", "aria-hidden": !0 }),
+                          React.createElement("span", null, workspace.title),
+                          React.createElement("small", null, `${workspace.path} \xB7 ${workspace.sessionCount}`)
+                        ))),
+                        cursorWorkspaces.length <= 3 || showAllCursorWorkspaces ? null : React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteWorkspaceMore",
+                          disabled: busy,
+                          "aria-controls": cursorWorkspaceListId,
+                          "aria-label": t("showAllCursorWorkspaces"),
+                          onClick: () => setShowAllCursorWorkspaces(!0)
+                        }, React.createElement("span", { "aria-hidden": !0 }, "\u2026"))
+                      ),
+                      !antigravityAvailable && antigravityWorkspaces.length === 0 ? null : React.createElement(
+                        "section",
+                        { className: "dshRemoteCodexWorkspaceGroup" },
+                        React.createElement(
+                          "div",
+                          {
+                            id: antigravityWorkspaceHeadingId,
+                            className: "dshRemoteWorkspaceSourceHeading"
+                          },
+                          React.createElement(
+                            "span",
+                            { className: "dshRemoteWorkspaceSourceText" },
+                            React.createElement("strong", null, t("antigravityVirtualWorkspace"))
+                          ),
+                          antigravityAvailable ? React.createElement("button", {
+                            type: "button",
+                            className: "dshRemoteAddWorkspace",
+                            disabled: busy,
+                            title: t("addAntigravityWorkspace"),
+                            "aria-label": t("addAntigravityWorkspace"),
+                            onClick: () => startAddingWorkspace("antigravity")
+                          }, React.createElement("svg", {
+                            className: "dshRemoteAddWorkspaceIcon",
+                            viewBox: "0 0 16 16",
+                            "aria-hidden": !0,
+                            focusable: !1
+                          }, React.createElement("path", { d: "M8 3v10M3 8h10", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round" }))) : null
+                        ),
+                        React.createElement("div", {
+                          id: antigravityWorkspaceListId,
+                          className: "dshRemoteDirectoryList dshRemoteCodexWorkspaceList",
+                          "aria-labelledby": antigravityWorkspaceHeadingId
+                        }, visibleAntigravityWorkspaces.length === 0 ? React.createElement("p", null, t("noAntigravityWorkspaces")) : visibleAntigravityWorkspaces.map((workspace) => React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === "antigravity" && antigravityWorkspaceId === workspace.workspaceId ? "isSelected" : "",
+                            "aria-pressed": workspaceBackend === "antigravity" && antigravityWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend("antigravity"), setAntigravityWorkspaceId(workspace.workspaceId), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setPath(workspace.path);
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: "antigravity",
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId
+                            })
+                          },
+                          React.createElement("img", { className: "dshRemoteWorkspaceIcon", src: deepSeekWorkspaceIcon, alt: "", "aria-hidden": !0 }),
+                          React.createElement("span", null, workspace.title),
+                          React.createElement("small", null, `${workspace.path} \xB7 ${workspace.sessionCount}`)
+                        ))),
+                        antigravityWorkspaces.length <= 3 || showAllAntigravityWorkspaces ? null : React.createElement("button", {
+                          type: "button",
+                          className: "dshRemoteWorkspaceMore",
+                          disabled: busy,
+                          "aria-controls": antigravityWorkspaceListId,
+                          "aria-label": t("showAllAntigravityWorkspaces"),
+                          onClick: () => setShowAllAntigravityWorkspaces(!0)
+                        }, React.createElement("span", { "aria-hidden": !0 }, "\u2026"))
                       )
                     ),
                     React.createElement(
@@ -3616,7 +3818,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                       React.createElement("div", null, React.createElement("span", null, t("currentDirectory")), React.createElement("strong", null, path || "\u2014")),
                       React.createElement("button", {
                         type: "button",
-                        disabled: busy || path.trim() === "" || !addingWorkspace && workspaceBackend === "codex" && codexWorkspaceId === void 0,
+                        disabled: busy || path.trim() === "" || !addingWorkspace && workspaceBackend === "codex" && codexWorkspaceId === void 0 || !addingWorkspace && workspaceBackend === "cursor" && cursorWorkspaceId === void 0 && path === "" || !addingWorkspace && workspaceBackend === "antigravity" && antigravityWorkspaceId === void 0 && path === "",
                         onClick: () => void openWorkspace()
                       }, t(busy ? "openingWorkspace" : addingWorkspace ? "confirmAddWorkspace" : "openWorkspace"))
                     )
@@ -3789,7 +3991,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }, [status?.mode]), React.useEffect(() => (document.documentElement.classList.toggle(
           "dshRemoteCodexTargetActive",
           status?.mode === "remote" && status.backend === "codex"
-        ), () => document.documentElement.classList.remove("dshRemoteCodexTargetActive")), [status?.mode, status?.backend]), React.useEffect(() => {
+        ), document.documentElement.classList.toggle(
+          "dshRemoteCursorTargetActive",
+          status?.mode === "remote" && status.backend === "cursor"
+        ), () => {
+          document.documentElement.classList.remove("dshRemoteCodexTargetActive"), document.documentElement.classList.remove("dshRemoteCursorTargetActive");
+        }), [status?.mode, status?.backend]), React.useEffect(() => {
           if (!routeOpen) return;
           let closeOnEscape = (event) => {
             event.key === "Escape" && setRouteOpen(!1);
@@ -4059,8 +4266,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();
             if (!workspacesReady(workspaceSnapshot) || !workspaceSnapshot.items.some((workspace) => workspace.workspaceId === pending.workspaceId)) return;
             let sessionSnapshot = ctx.sessions.list.getSnapshot();
-            if (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
-            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (pending.backend === "codex" && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
+            if ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
+            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
               disposed || (ctx.sessions.open(sessionId), window.sessionStorage.removeItem(pendingWorkspaceSelectionKey), await control("workspace.selection.consume", pending).catch(() => {
               }));
             }).catch((reason) => {

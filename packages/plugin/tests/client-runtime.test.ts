@@ -25,12 +25,12 @@ afterEach(async () => {
 
 describe('ClientModeRuntime Host account control', () => {
   it('uses a conservative compatibility profile for legacy and unknown Hosts', () => {
-    expect(remoteHostFeatures()).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
-    expect(remoteHostFeatures('not-semver')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
-    expect(remoteHostFeatures('0.3.15')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
-    expect(remoteHostFeatures('0.3.16')).toEqual({ commandList: true, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
-    expect(remoteHostFeatures('v0.3.17')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
-    expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false })
+    expect(remoteHostFeatures()).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
+    expect(remoteHostFeatures('not-semver')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
+    expect(remoteHostFeatures('0.3.15')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
+    expect(remoteHostFeatures('0.3.16')).toEqual({ commandList: true, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
+    expect(remoteHostFeatures('v0.3.17')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
+    expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
   })
 
   it('prefers encrypted Host capability discovery while retaining the legacy fallback', async () => {
@@ -46,6 +46,8 @@ describe('ClientModeRuntime Host account control', () => {
       apiProxy: false,
       remoteGateway: true,
       codex: true,
+      cursor: false,
+      antigravity: false,
     })
 
     alphaClient.rpc.mockResolvedValueOnce({
@@ -59,6 +61,8 @@ describe('ClientModeRuntime Host account control', () => {
       remoteGateway: true,
       sessionFormat: 3,
       codex: false,
+      cursor: false,
+      antigravity: false,
     })
 
     alphaClient.rpc.mockResolvedValueOnce({
@@ -71,6 +75,8 @@ describe('ClientModeRuntime Host account control', () => {
       apiProxy: false,
       remoteGateway: false,
       codex: true,
+      cursor: false,
+      antigravity: false,
     })
 
     const legacyClient = {
@@ -85,6 +91,26 @@ describe('ClientModeRuntime Host account control', () => {
       apiProxy: true,
       remoteGateway: false,
       codex: false,
+      cursor: false,
+      antigravity: false,
+    })
+  })
+
+  it('probes workspaceTypes from remote Host and safely tolerates malformed values', async () => {
+    const client = {
+      rpc: vi.fn(async () => ({
+        capabilities: ['transport.relay', 'codex.appserver.v1'],
+        workspaceTypes: [
+          { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+          { id: 456, invalid: true },
+        ],
+      })),
+    }
+    await expect(probeRemoteHostFeatures(client as never, '0.4.19')).resolves.toMatchObject({
+      codex: true,
+      workspaceTypes: [
+        { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+      ],
     })
   })
 
@@ -834,6 +860,7 @@ function config(): ResolvedConfig {
     logLevel: 'error',
     reconnect: { enabled: true, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
     codex: { enabled: false, binary: 'codex' },
+    cursor: { enabled: false, binary: 'agent' },
   }
 }
 

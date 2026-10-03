@@ -1,4 +1,4 @@
-import { RemoteTypertGateway, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, probeRemoteHostFeatures } from '@dsh-remote/client-core'
+import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures } from '@dsh-remote/client-core'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { strings } from '../locales/i18n'
@@ -23,6 +23,8 @@ export class AndroidRemoteConnection {
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
   private codex?: CodexRemoteClient
+  private cursor?: AgentAcpClient
+  private acpBackends = new Set<string>()
   private sessionTools?: HarnessSessionTools
   private closeMux?: (notifyRemote?: boolean) => Promise<void>
   private unsubscribeClose?: () => void
@@ -91,6 +93,7 @@ export class AndroidRemoteConnection {
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
+        this.cursor = undefined
         this.sessionTools = undefined
         if (!replacingFallback) options.onClose?.()
       })
@@ -117,6 +120,15 @@ export class AndroidRemoteConnection {
       const capabilities = new Set(features.capabilities)
       if (capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')) {
         this.codex = new CodexRemoteClient(core)
+      }
+      if (capabilities.has('agent.acp.v1')) {
+        this.cursor = new AgentAcpClient(core)
+        if (capabilities.has('agent.acp.antigravity.v1')) {
+          this.acpBackends.add('antigravity')
+        }
+        if (capabilities.has('agent.acp.cursor.v1') || !capabilities.has('agent.acp.antigravity.v1')) {
+          this.acpBackends.add('cursor')
+        }
       }
       if (features.remoteGateway) {
         this.sessionTools = new HarnessSessionTools(new RemoteTypertGateway(core))
@@ -166,6 +178,26 @@ export class AndroidRemoteConnection {
     return this.codex !== undefined
   }
 
+  /** Optional Agent ACP client (Cursor UI backend); available when the Host advertises agent.acp.cursor.v1. */
+  requireCursor(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('cursor')) throw new Error(strings.runtime.cursorUnavailable)
+    return this.cursor
+  }
+
+  hasCursor(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('cursor')
+  }
+
+  /** Optional Agent ACP client (Antigravity UI backend); available when the Host advertises agent.acp.antigravity.v1. */
+  requireAntigravity(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('antigravity')) throw new Error(strings.runtime.antigravityUnavailable)
+    return this.cursor
+  }
+
+  hasAntigravity(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('antigravity')
+  }
+
   getStats() {
     return this.core?.getStats()
   }
@@ -189,6 +221,8 @@ export class AndroidRemoteConnection {
     this.transport = undefined
     this.proxy = undefined
     this.codex = undefined
+    this.cursor = undefined
+    this.acpBackends.clear()
     this.sessionTools = undefined
     if (core !== undefined) await core.close()
   }
