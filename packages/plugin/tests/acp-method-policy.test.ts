@@ -16,7 +16,9 @@ describe('ACP method policy', () => {
   })
 
   it('accepts text-only prompts and rejects unknown methods', () => {
-    expect(parseAcpCall('initialize', { protocolVersion: 1 })).toMatchObject({ method: 'initialize' })
+    expect(parseAcpCall('initialize', { protocolVersion: 1, backend: 'antigravity' })).toMatchObject({ method: 'initialize' })
+    expect(parseAcpCall('session/new', { cwd: '/tmp/project', backend: 'antigravity' })).toMatchObject({ method: 'session/new' })
+    expect(parseAcpCall('session/load', { sessionId: 'sess_1', backend: 'antigravity' })).toMatchObject({ method: 'session/load' })
     expect(parseAcpCall('session/prompt', {
       sessionId: 'sess_1',
       prompt: [{ type: 'text', text: 'hello' }],

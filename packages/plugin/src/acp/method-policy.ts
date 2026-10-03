@@ -12,6 +12,7 @@ const promptBlock = z.object({
 const schemas = {
   'initialize': z.object({
     protocolVersion: z.number().int().positive().optional(),
+    backend: z.string().min(1).max(64).optional(),
     clientInfo: z.object({
       name: z.string().min(1).max(128).optional(),
       version: z.string().min(1).max(128).optional(),
@@ -19,11 +20,13 @@ const schemas = {
   }).strict(),
   'session/new': z.object({
     cwd,
+    backend: z.string().min(1).max(64).optional(),
     mcpServers: z.array(z.unknown()).max(0).optional(),
     mode: mode.optional(),
   }).strict(),
   'session/load': z.object({
     sessionId: id,
+    backend: z.string().min(1).max(64).optional(),
   }).strict(),
   'session/prompt': z.object({
     sessionId: id,

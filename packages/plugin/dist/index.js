@@ -28521,6 +28521,7 @@ var promptBlock = external_exports.object({
 var schemas2 = {
   "initialize": external_exports.object({
     protocolVersion: external_exports.number().int().positive().optional(),
+    backend: external_exports.string().min(1).max(64).optional(),
     clientInfo: external_exports.object({
       name: external_exports.string().min(1).max(128).optional(),
       version: external_exports.string().min(1).max(128).optional()
@@ -28528,11 +28529,13 @@ var schemas2 = {
   }).strict(),
   "session/new": external_exports.object({
     cwd,
+    backend: external_exports.string().min(1).max(64).optional(),
     mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
     mode: mode.optional()
   }).strict(),
   "session/load": external_exports.object({
-    sessionId: id4
+    sessionId: id4,
+    backend: external_exports.string().min(1).max(64).optional()
   }).strict(),
   "session/prompt": external_exports.object({
     sessionId: id4,
