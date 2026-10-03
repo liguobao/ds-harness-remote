@@ -3994,8 +3994,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
         ), document.documentElement.classList.toggle(
           "dshRemoteCursorTargetActive",
           status?.mode === "remote" && status.backend === "cursor"
+        ), document.documentElement.classList.toggle(
+          "dshRemoteAntigravityTargetActive",
+          status?.mode === "remote" && status.backend === "antigravity"
         ), () => {
-          document.documentElement.classList.remove("dshRemoteCodexTargetActive"), document.documentElement.classList.remove("dshRemoteCursorTargetActive");
+          document.documentElement.classList.remove("dshRemoteCodexTargetActive"), document.documentElement.classList.remove("dshRemoteCursorTargetActive"), document.documentElement.classList.remove("dshRemoteAntigravityTargetActive");
         }), [status?.mode, status?.backend]), React.useEffect(() => {
           if (!routeOpen) return;
           let closeOnEscape = (event) => {
@@ -4265,9 +4268,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
             if (disposed || opening || selection === void 0) return;
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();
             if (!workspacesReady(workspaceSnapshot) || !workspaceSnapshot.items.some((workspace) => workspace.workspaceId === pending.workspaceId)) return;
-            let sessionSnapshot = ctx.sessions.list.getSnapshot();
-            if ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
-            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, ((pending.backend === "codex" || pending.backend === "cursor") && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
+            let sessionSnapshot = ctx.sessions.list.getSnapshot(), isVirtualBackend = pending.backend === "codex" || pending.backend === "cursor" || pending.backend === "antigravity";
+            if (isVirtualBackend && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
+            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (isVirtualBackend && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
               disposed || (ctx.sessions.open(sessionId), window.sessionStorage.removeItem(pendingWorkspaceSelectionKey), await control("workspace.selection.consume", pending).catch(() => {
               }));
             }).catch((reason) => {

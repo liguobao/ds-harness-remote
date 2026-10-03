@@ -19072,6 +19072,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const title = this.backend === "antigravity" ? "Antigravity" : workspace.title;
     const session = this.registerSession(sessionId, cwd2, title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
+    this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, 0)]);
     this.publishWorkspaceBaseline();
     return session;
   }

@@ -2867,9 +2867,14 @@ window.__ModuleLoader__.load({
           'dshRemoteCursorTargetActive',
           status?.mode === 'remote' && status.backend === 'cursor',
         )
+        document.documentElement.classList.toggle(
+          'dshRemoteAntigravityTargetActive',
+          status?.mode === 'remote' && status.backend === 'antigravity',
+        )
         return () => {
           document.documentElement.classList.remove('dshRemoteCodexTargetActive')
           document.documentElement.classList.remove('dshRemoteCursorTargetActive')
+          document.documentElement.classList.remove('dshRemoteAntigravityTargetActive')
         }
       }, [status?.mode, status?.backend])
 
@@ -3212,7 +3217,8 @@ window.__ModuleLoader__.load({
           if (!workspacesReady(workspaceSnapshot)
             || !workspaceSnapshot.items.some(workspace => workspace.workspaceId === pending.workspaceId)) return
           const sessionSnapshot = ctx.sessions.list.getSnapshot()
-          if ((pending.backend === 'codex' || pending.backend === 'cursor') && pending.sessionId !== undefined
+          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity'
+          if (isVirtualBackend && pending.sessionId !== undefined
             && sessionSnapshot.phase !== 'ready') return
 
           opening = true
@@ -3220,7 +3226,7 @@ window.__ModuleLoader__.load({
           unsubscribeSessions?.()
           unsubscribeWorkspaces = undefined
           unsubscribeSessions = undefined
-          const open = (pending.backend === 'codex' || pending.backend === 'cursor') && pending.sessionId !== undefined
+          const open = isVirtualBackend && pending.sessionId !== undefined
             ? sessionSnapshot.ids.includes(pending.sessionId)
               ? Promise.resolve(pending.sessionId)
               : ctx.workspaces.connectWorkspace(pending.workspaceId)

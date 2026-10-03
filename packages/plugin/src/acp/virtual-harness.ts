@@ -832,6 +832,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const title = this.backend === 'antigravity' ? 'Antigravity' : workspace.title
     const session = this.registerSession(sessionId, cwd, title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
+    this.emitRemoteEvent('api-session/added', [this.sessionSummary(session, 0)])
     this.publishWorkspaceBaseline()
     return session
   }
