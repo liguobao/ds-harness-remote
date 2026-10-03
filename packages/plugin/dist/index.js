@@ -28125,13 +28125,14 @@ var AntigravityAcpClient = class {
       return {
         protocolVersion: 1,
         capabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          terminal: false
+          loadSession: true,
+          promptTypes: ["text"]
         },
         agentInfo: {
           name: "antigravity",
           version: "1.2.16"
-        }
+        },
+        backend: "antigravity"
       };
     }
     if (method === "session/new") {
@@ -28143,6 +28144,12 @@ var AntigravityAcpClient = class {
       return { sessionId };
     }
     if (method === "session/cancel") {
+      if (this.currentPromptPending) {
+        clearTimeout(this.currentPromptPending.timer);
+        const pending = this.currentPromptPending;
+        this.currentPromptPending = void 0;
+        pending.resolve({ stopReason: "cancelled" });
+      }
       return { cancelled: true };
     }
     if (method === "session/prompt") {
@@ -28316,6 +28323,17 @@ var AntigravityAcpClient = class {
             text: step.text_delta
           }
         });
+      } else if (stepType === "thought" || stepType === "reasoning") {
+        const text = typeof step.text_delta === "string" ? step.text_delta : typeof step.thought === "string" ? step.thought : typeof step.reasoning === "string" ? step.reasoning : void 0;
+        if (text) {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              text
+            }
+          });
+        }
       } else if (stepType === "tool") {
         const toolInfo = step.tool_info ?? {};
         const toolName = typeof step.tool_name === "string" ? step.tool_name : toolInfo.name ?? "tool";
@@ -29131,13 +29149,14 @@ var AcpRemoteGateway = class {
   }
   initializeResult(params) {
     const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
+    const isAntigravity = this.acp instanceof AntigravityAcpClient;
     return {
       protocolVersion: requested,
       agentInfo: {
-        name: "dsh-remote-acp",
+        name: isAntigravity ? "antigravity" : "dsh-remote-acp",
         version: PLUGIN_VERSION
       },
-      backend: "cursor",
+      backend: isAntigravity ? "antigravity" : "cursor",
       authMethods: [],
       capabilities: {
         loadSession: true,
@@ -29283,8 +29302,14 @@ function buildCrumbs(path, home) {
   return crumbs2;
 }
 function cursorBinaryCandidates(configured) {
-  if (configured !== "agent") return [configured];
   const userHome = homedir4();
+  if (configured === "agy" || configured === "antigravity") {
+    return [
+      join6(userHome, ".local", "bin", "agy"),
+      "agy"
+    ];
+  }
+  if (configured !== "agent") return [configured];
   return [
     join6(userHome, ".local", "bin", "agent"),
     "agent",

@@ -11,7 +11,7 @@ export function createAntigravityAcpAdapter(
     new AntigravityAcpClient(path, targetLogger)
   ),
 ): AcpBackendAdapter {
-  return adaptCursorProcess(createProcess(binary, logger))
+  return adaptCursorProcess(createProcess(binary, logger), 'antigravity')
 }
 
 export { AntigravityAcpClient, AntigravityAcpError } from './antigravity-process.js'

@@ -529,13 +529,14 @@ export class AcpRemoteGateway {
 
   private initializeResult(params: Record<string, unknown>): Record<string, unknown> {
     const requested = typeof params.protocolVersion === 'number' ? params.protocolVersion : 1
+    const isAntigravity = this.acp instanceof AntigravityAcpClient
     return {
       protocolVersion: requested,
       agentInfo: {
-        name: 'dsh-remote-acp',
+        name: isAntigravity ? 'antigravity' : 'dsh-remote-acp',
         version: PLUGIN_VERSION,
       },
-      backend: 'cursor',
+      backend: isAntigravity ? 'antigravity' : 'cursor',
       authMethods: [],
       capabilities: {
         loadSession: true,
@@ -715,8 +716,14 @@ function buildCrumbs(path: string, home: string): AcpDirectoryEntry[] {
  * binary configuration is never rewritten.
  */
 export function cursorBinaryCandidates(configured: string): string[] {
-  if (configured !== 'agent') return [configured]
   const userHome = homedir()
+  if (configured === 'agy' || configured === 'antigravity') {
+    return [
+      join(userHome, '.local', 'bin', 'agy'),
+      'agy',
+    ]
+  }
+  if (configured !== 'agent') return [configured]
   return [
     join(userHome, '.local', 'bin', 'agent'),
     'agent',

@@ -4,8 +4,10 @@ import type { CursorAcpInbound, CursorAcpLike } from './adapters/cursor-process.
  * Backend adapter contract for the Host Agent ACP gateway (#65).
  * Public Remote methods stay backend-neutral; adapters own runtime mapping.
  */
+export type AcpBackendId = 'cursor' | 'antigravity' | (string & {})
+
 export interface AcpBackendAdapter {
-  readonly id: 'cursor'
+  readonly id: AcpBackendId
   start(): Promise<void>
   close(): Promise<void>
   isReady(): boolean
@@ -16,9 +18,9 @@ export interface AcpBackendAdapter {
   onUnavailable(handler: (code: string) => void): () => void
 }
 
-export function adaptCursorProcess(process: CursorAcpLike): AcpBackendAdapter {
+export function adaptCursorProcess(process: CursorAcpLike, id: AcpBackendId = 'cursor'): AcpBackendAdapter {
   return {
-    id: 'cursor',
+    id,
     start: () => process.start(),
     close: () => process.close(),
     isReady: () => process.isReady(),

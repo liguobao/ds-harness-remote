@@ -11,7 +11,7 @@ import {
 import type { RemoteClientCore } from './index.js'
 import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
-export type AcpAgentBackend = 'cursor'
+export type AcpAgentBackend = 'cursor' | 'antigravity' | (string & {})
 
 /**
  * `session/prompt` blocks until the upstream turn finishes. Keep this well above

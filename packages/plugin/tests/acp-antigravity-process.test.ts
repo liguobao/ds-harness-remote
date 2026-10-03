@@ -23,6 +23,17 @@ describe('AntigravityAcpClient', () => {
             event: 'step_update',
             step_update: {
               conversation_id: 'conv_123',
+              step_index: 0,
+              state: 'ACTIVE',
+              step_type: 'thought',
+              text_delta: 'thinking deep thoughts',
+            },
+          })}\n`)
+
+          fake.stdout.write(`${JSON.stringify({
+            event: 'step_update',
+            step_update: {
+              conversation_id: 'conv_123',
               step_index: 1,
               state: 'ACTIVE',
               step_type: 'agent_response',
@@ -111,6 +122,18 @@ describe('AntigravityAcpClient', () => {
       params: {
         sessionId: 'conv_123',
         update: {
+          sessionUpdate: 'agent_thought_chunk',
+          text: 'thinking deep thoughts',
+        },
+      },
+    })
+
+    expect(inbound).toHaveBeenCalledWith({
+      kind: 'notification',
+      method: 'session/update',
+      params: {
+        sessionId: 'conv_123',
+        update: {
           sessionUpdate: 'agent_message_chunk',
           text: 'hello from antigravity',
         },
@@ -148,12 +171,43 @@ describe('AntigravityAcpClient', () => {
     expect(client.isReady()).toBe(false)
   })
 
+  it('cancels pending prompt cleanly', async () => {
+    const fake = fakeProcess()
+    const client = new AntigravityAcpClient('agy', logger(), () => {
+      setTimeout(() => {
+        fake.stdout.write(`${JSON.stringify({
+          event: 'init',
+          conversation_id: 'conv_cancel',
+          init: {},
+        })}\n`)
+      }, 5)
+      return fake.child
+    })
+
+    await client.start()
+    await client.call('session/new', {})
+
+    const promptPromise = client.call('session/prompt', {
+      sessionId: 'conv_cancel',
+      prompt: [{ type: 'text', text: 'cancel me' }],
+    })
+
+    const cancelResult = await client.call('session/cancel', { sessionId: 'conv_cancel' })
+    expect(cancelResult).toEqual({ cancelled: true })
+
+    const promptResult = await promptPromise
+    expect(promptResult).toEqual({ stopReason: 'cancelled' })
+
+    await client.close()
+  })
+
   it('includes agy in binary candidates and creates adapter', () => {
     const candidates = cursorBinaryCandidates('agent')
     expect(candidates).toContain('agy')
+    expect(cursorBinaryCandidates('agy')).toEqual([expect.stringContaining('agy'), 'agy'])
     expect(cursorBinaryCandidates('custom-bin')).toEqual(['custom-bin'])
     const adapter = createAntigravityAcpAdapter('agy-test', logger(), () => fakeProcess().child as any)
-    expect(adapter.id).toBe('cursor')
+    expect(adapter.id).toBe('antigravity')
   })
 })
 

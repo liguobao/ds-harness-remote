@@ -81,13 +81,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
       return {
         protocolVersion: 1,
         capabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          terminal: false,
+          loadSession: true,
+          promptTypes: ['text'],
         },
         agentInfo: {
           name: 'antigravity',
           version: '1.2.16',
         },
+        backend: 'antigravity',
       }
     }
 
@@ -102,7 +103,12 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/cancel') {
-      // In stream-json mode, a turn cancel is accomplished by interrupting or ignoring
+      if (this.currentPromptPending) {
+        clearTimeout(this.currentPromptPending.timer)
+        const pending = this.currentPromptPending
+        this.currentPromptPending = undefined
+        pending.resolve({ stopReason: 'cancelled' })
+      }
       return { cancelled: true }
     }
 
@@ -301,6 +307,23 @@ export class AntigravityAcpClient implements CursorAcpLike {
             text: step.text_delta,
           },
         })
+      } else if (stepType === 'thought' || stepType === 'reasoning') {
+        const text = typeof step.text_delta === 'string'
+          ? step.text_delta
+          : typeof step.thought === 'string'
+            ? step.thought
+            : typeof step.reasoning === 'string'
+              ? step.reasoning
+              : undefined
+        if (text) {
+          this.emitNotification('session/update', {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_thought_chunk',
+              text,
+            },
+          })
+        }
       } else if (stepType === 'tool') {
         const toolInfo = (step.tool_info as Record<string, unknown>) ?? {}
         const toolName = typeof step.tool_name === 'string' ? step.tool_name : (toolInfo.name as string) ?? 'tool'
