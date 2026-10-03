@@ -11,6 +11,7 @@ describe('ACP method policy', () => {
       'session/prompt',
       'session/cancel',
       'dsh/directoryList',
+      'dsh/workspaceList',
     ])
   })
 

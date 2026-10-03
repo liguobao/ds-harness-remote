@@ -141,7 +141,10 @@ export class AcpRemoteGateway {
 
   defaultBackend(): string {
     const available = this.availableBackends()
-    if (available.includes('antigravity')) return 'antigravity'
+    if (this.config.binary.includes('agent') || this.config.binary.includes('cursor')) {
+      if (available.includes('cursor')) return 'cursor'
+    }
+    if (available.includes('antigravity') || this.config.binary.includes('agy')) return 'antigravity'
     if (available.includes('cursor')) return 'cursor'
     return available[0] ?? 'antigravity'
   }
@@ -814,15 +817,15 @@ export function cursorBinaryCandidates(configured: string): string[] {
   if (configured === 'agy' || configured === 'antigravity') {
     return [
       join(userHome, '.local', 'bin', 'agy'),
-      '/var/lib/dsh/.local/bin/agy',
       'agy',
     ]
   }
   if (configured === 'agent' || configured === 'cursor') {
     return [
       join(userHome, '.local', 'bin', 'agent'),
-      '/var/lib/dsh/.local/bin/agent',
       'agent',
+      join(userHome, '.local', 'bin', 'agy'),
+      'agy',
     ]
   }
   return [configured]

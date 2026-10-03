@@ -171,7 +171,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (workspace === undefined) throw new Error('The selected Cursor workspace is no longer available.')
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
-    return workspace
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace)
+    }
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace
   }
 
   async selectOrCreateWorkspace(path: string): Promise<AcpVirtualWorkspaceView> {
@@ -181,7 +184,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = existing ?? createAcpWorkspaceView(trimmed)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
-    return workspace
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace)
+    }
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace
   }
 
   async preferredSessionId(): Promise<string | undefined> {
@@ -228,7 +234,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         })
         case 'workspace/insertSessionBefore': return business(await this.workspaceForSession(requestArg(args)))
         case 'workspace/archiveSession': return business(await this.archiveSession(requestArg(args)))
-        case 'session/list': return business(success({ items: this.sessionSummaries() }))
+        case 'session/list': return business(success({ items: await this.handleSessionList() }))
         case 'session/search': return business(success({ items: [], hasMore: false }))
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(failure('bad-request', 'Cursor Remote does not support session fork yet.'))
@@ -239,13 +245,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/rename': return business(await this.renameSession(requestArg(args)))
         case 'session/updateQueue': return business(failure('queue-item-not-found', 'Cursor does not expose a DSH inbox queue.'))
         case 'session/attachment': return business(failure('attachment-error', 'Cursor Remote accepts text prompts only.'))
-        case 'session/modelCatalog': return business(success(modelCatalog()))
+        case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
           nativeAcpId(requiredString(requestArg(args).sessionId, 'sessionId'))
+          const catalog = modelCatalog(this.backend)
           return business(success({
-            current: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            current: catalog.default,
             routable: false,
-            groups: modelCatalog().groups,
+            groups: catalog.groups,
             failures: [],
           }))
         }
@@ -362,7 +369,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = workspaceId === undefined ? undefined : this.workspaceById.get(workspaceId)
     const cwd = string(request.cwd) ?? workspace?.path
     if (cwd === undefined) return failure('workspace-not-found', 'The Cursor virtual Workspace was not found.')
-    const created = await this.client.createSession(cwd, 'agent', this.backend, signal)
+    const created = this.backend === 'cursor'
+      ? await this.client.createSession(cwd, 'agent', signal as never)
+      : await this.client.createSession(cwd, 'agent', this.backend, signal)
     const session = this.registerSession(created.sessionId, cwd, workspace?.title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
     this.publishWorkspaceBaseline()
@@ -546,11 +555,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? null,
+          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: {
-            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
-            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            lastUsed: modelCatalog(this.backend).default,
+            next: modelCatalog(this.backend).default,
           },
           imageLimits: {
             maxImageBytes: 0,
@@ -811,6 +820,34 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (this.selectedWorkspaceId === undefined) this.selectedWorkspaceId = next.workspaceId
   }
 
+  private async ensureInitialSession(workspace: AcpVirtualWorkspaceView): Promise<AcpSessionState> {
+    const cwd = workspace.path
+    let sessionId: string
+    try {
+      const created = await this.client.createSession(cwd, 'agent', this.backend)
+      sessionId = created.sessionId
+    } catch {
+      sessionId = `sess_${Date.now()}`
+    }
+    const title = this.backend === 'antigravity' ? 'Antigravity' : workspace.title
+    const session = this.registerSession(sessionId, cwd, title)
+    this.attachSessionToWorkspace(cwd, session.sessionId)
+    this.publishWorkspaceBaseline()
+    return session
+  }
+
+  private async handleSessionList(): Promise<unknown[]> {
+    let summaries = this.sessionSummaries()
+    if (summaries.length === 0 && this.selectedWorkspaceId !== undefined) {
+      const workspace = this.workspaceById.get(this.selectedWorkspaceId)
+      if (workspace !== undefined) {
+        await this.ensureInitialSession(workspace)
+        summaries = this.sessionSummaries()
+      }
+    }
+    return summaries
+  }
+
   private sessionSummaries(): unknown[] {
     const selected = this.selectedWorkspaceId === undefined
       ? undefined
@@ -831,11 +868,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq,
         values: {
-          title: session.title ?? null,
+          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: {
-            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
-            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            lastUsed: modelCatalog(this.backend).default,
+            next: modelCatalog(this.backend).default,
           },
           imageLimits: {
             maxImageBytes: 0,
@@ -1009,14 +1046,18 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 }
 
 function recreateWorkspaceFromId(workspaceId: string): AcpVirtualWorkspaceView | undefined {
-  if (!workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) return undefined
-  try {
-    const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length))
-    if (path.length === 0) return undefined
-    return createAcpWorkspaceView(path)
-  } catch {
-    return undefined
+  if (workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) {
+    try {
+      const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length))
+      if (path.length > 0) return createAcpWorkspaceView(path)
+    } catch {
+      return undefined
+    }
   }
+  if (workspaceId.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(workspaceId)) {
+    return createAcpWorkspaceView(workspaceId)
+  }
+  return undefined
 }
 
 function nativeWorkspace(view: AcpVirtualWorkspaceView): Omit<AcpVirtualWorkspaceView, 'sessionCount'> {
@@ -1030,13 +1071,16 @@ function nativeWorkspace(view: AcpVirtualWorkspaceView): Omit<AcpVirtualWorkspac
   }
 }
 
-function modelCatalog() {
+function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor') {
+  const provider = backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
+  const model = backend === 'antigravity' ? 'antigravity' : CURSOR_MODEL
+  const name = backend === 'antigravity' ? 'Antigravity' : 'Cursor'
   return {
-    default: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+    default: { provider, model },
     groups: [{
-      id: CURSOR_PROVIDER,
-      name: 'Cursor',
-      models: [{ id: CURSOR_MODEL, name: 'Cursor' }],
+      id: provider,
+      name,
+      models: [{ id: model, name }],
     }],
   }
 }

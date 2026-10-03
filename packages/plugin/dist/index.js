@@ -18446,7 +18446,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (workspace === void 0) throw new Error("The selected Cursor workspace is no longer available.");
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
-    return workspace;
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace);
+    }
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
   }
   async selectOrCreateWorkspace(path) {
     const trimmed = path.trim();
@@ -18455,7 +18458,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = existing ?? createAcpWorkspaceView(trimmed);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
-    return workspace;
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace);
+    }
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
   }
   async preferredSessionId() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
@@ -18506,7 +18512,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "workspace/archiveSession":
           return business2(await this.archiveSession(requestArg2(args)));
         case "session/list":
-          return business2(success2({ items: this.sessionSummaries() }));
+          return business2(success2({ items: await this.handleSessionList() }));
         case "session/search":
           return business2(success2({ items: [], hasMore: false }));
         case "session/create":
@@ -18528,13 +18534,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/attachment":
           return business2(failure2("attachment-error", "Cursor Remote accepts text prompts only."));
         case "session/modelCatalog":
-          return business2(success2(modelCatalog2()));
+          return business2(success2(modelCatalog2(this.backend)));
         case "session/models": {
           nativeAcpId(requiredString2(requestArg2(args).sessionId, "sessionId"));
+          const catalog = modelCatalog2(this.backend);
           return business2(success2({
-            current: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+            current: catalog.default,
             routable: false,
-            groups: modelCatalog2().groups,
+            groups: catalog.groups,
             failures: []
           }));
         }
@@ -18649,7 +18656,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
     const cwd2 = string3(request.cwd) ?? workspace?.path;
     if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
+    const created = this.backend === "cursor" ? await this.client.createSession(cwd2, "agent", signal) : await this.client.createSession(cwd2, "agent", this.backend, signal);
     const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
     this.publishWorkspaceBaseline();
@@ -18810,11 +18817,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? null,
+          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: {
-            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
-            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL }
+            lastUsed: modelCatalog2(this.backend).default,
+            next: modelCatalog2(this.backend).default
           },
           imageLimits: {
             maxImageBytes: 0,
@@ -19053,6 +19060,32 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.workspaceById.set(next.workspaceId, next);
     if (this.selectedWorkspaceId === void 0) this.selectedWorkspaceId = next.workspaceId;
   }
+  async ensureInitialSession(workspace) {
+    const cwd2 = workspace.path;
+    let sessionId;
+    try {
+      const created = await this.client.createSession(cwd2, "agent", this.backend);
+      sessionId = created.sessionId;
+    } catch {
+      sessionId = `sess_${Date.now()}`;
+    }
+    const title = this.backend === "antigravity" ? "Antigravity" : workspace.title;
+    const session = this.registerSession(sessionId, cwd2, title);
+    this.attachSessionToWorkspace(cwd2, session.sessionId);
+    this.publishWorkspaceBaseline();
+    return session;
+  }
+  async handleSessionList() {
+    let summaries = this.sessionSummaries();
+    if (summaries.length === 0 && this.selectedWorkspaceId !== void 0) {
+      const workspace = this.workspaceById.get(this.selectedWorkspaceId);
+      if (workspace !== void 0) {
+        await this.ensureInitialSession(workspace);
+        summaries = this.sessionSummaries();
+      }
+    }
+    return summaries;
+  }
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
@@ -19068,11 +19101,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq,
         values: {
-          title: session.title ?? null,
+          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: {
-            lastUsed: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
-            next: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL }
+            lastUsed: modelCatalog2(this.backend).default,
+            next: modelCatalog2(this.backend).default
           },
           imageLimits: {
             maxImageBytes: 0,
@@ -19230,14 +19263,18 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
 };
 function recreateWorkspaceFromId(workspaceId) {
-  if (!workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) return void 0;
-  try {
-    const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length));
-    if (path.length === 0) return void 0;
-    return createAcpWorkspaceView(path);
-  } catch {
-    return void 0;
+  if (workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) {
+    try {
+      const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length));
+      if (path.length > 0) return createAcpWorkspaceView(path);
+    } catch {
+      return void 0;
+    }
   }
+  if (workspaceId.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(workspaceId)) {
+    return createAcpWorkspaceView(workspaceId);
+  }
+  return void 0;
 }
 function nativeWorkspace2(view) {
   return {
@@ -19249,13 +19286,16 @@ function nativeWorkspace2(view) {
     updatedAt: view.updatedAt
   };
 }
-function modelCatalog2() {
+function modelCatalog2(backend = "cursor") {
+  const provider = backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
+  const model = backend === "antigravity" ? "antigravity" : CURSOR_MODEL;
+  const name2 = backend === "antigravity" ? "Antigravity" : "Cursor";
   return {
-    default: { provider: CURSOR_PROVIDER, model: CURSOR_MODEL },
+    default: { provider, model },
     groups: [{
-      id: CURSOR_PROVIDER,
-      name: "Cursor",
-      models: [{ id: CURSOR_MODEL, name: "Cursor" }]
+      id: provider,
+      name: name2,
+      models: [{ id: model, name: name2 }]
     }]
   };
 }
@@ -28886,7 +28926,10 @@ var AcpRemoteGateway = class {
   }
   defaultBackend() {
     const available = this.availableBackends();
-    if (available.includes("antigravity")) return "antigravity";
+    if (this.config.binary.includes("agent") || this.config.binary.includes("cursor")) {
+      if (available.includes("cursor")) return "cursor";
+    }
+    if (available.includes("antigravity") || this.config.binary.includes("agy")) return "antigravity";
     if (available.includes("cursor")) return "cursor";
     return available[0] ?? "antigravity";
   }
@@ -29467,15 +29510,15 @@ function cursorBinaryCandidates(configured) {
   if (configured === "agy" || configured === "antigravity") {
     return [
       join6(userHome, ".local", "bin", "agy"),
-      "/var/lib/dsh/.local/bin/agy",
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
       join6(userHome, ".local", "bin", "agent"),
-      "/var/lib/dsh/.local/bin/agent",
-      "agent"
+      "agent",
+      join6(userHome, ".local", "bin", "agy"),
+      "agy"
     ];
   }
   return [configured];
