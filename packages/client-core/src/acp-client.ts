@@ -59,11 +59,17 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async createSession(cwd: string, mode?: 'agent' | 'plan' | 'ask', signal?: AbortSignal): Promise<AcpRemoteSession> {
+  async createSession(
+    cwd: string,
+    mode?: 'agent' | 'plan' | 'ask',
+    backend?: AcpAgentBackend,
+    signal?: AbortSignal,
+  ): Promise<AcpRemoteSession> {
     const result = await this.call('session/new', {
       cwd,
       mcpServers: [],
       ...(mode === undefined ? {} : { mode }),
+      ...(backend === undefined ? {} : { backend }),
     }, signal)
     const sessionId = readString(result, 'sessionId')
     if (sessionId === undefined) throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session/new did not return sessionId.')

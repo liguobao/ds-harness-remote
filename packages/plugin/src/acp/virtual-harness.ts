@@ -62,7 +62,12 @@ interface PendingApproval {
 }
 
 interface AcpClientLike {
-  createSession(cwd: string, mode?: 'agent' | 'plan' | 'ask', signal?: AbortSignal): Promise<{ sessionId: string; cwd?: string }>
+  createSession(
+    cwd: string,
+    mode?: 'agent' | 'plan' | 'ask',
+    backend?: 'cursor' | 'antigravity',
+    signal?: AbortSignal,
+  ): Promise<{ sessionId: string; cwd?: string }>
   prompt(sessionId: string, text: string, signal?: AbortSignal): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
@@ -131,6 +136,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: AcpClientLike,
     private readonly host: { deviceId: string; name: string },
+    readonly backend: 'cursor' | 'antigravity' = 'cursor',
   ) {
     this.api = this.createApiProxy()
   }
@@ -138,8 +144,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   static remote(
     core: ConstructorParameters<typeof AgentAcpClient>[0],
     host: { deviceId: string; name: string },
+    backend: 'cursor' | 'antigravity' = 'cursor',
   ): AcpVirtualHarness {
-    return new AcpVirtualHarness(new AgentAcpClient(core), host)
+    return new AcpVirtualHarness(new AgentAcpClient(core), host, backend)
   }
 
   async workspaces(): Promise<AcpVirtualWorkspaceView[]> {
@@ -342,7 +349,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = workspaceId === undefined ? undefined : this.workspaceById.get(workspaceId)
     const cwd = string(request.cwd) ?? workspace?.path
     if (cwd === undefined) return failure('workspace-not-found', 'The Cursor virtual Workspace was not found.')
-    const created = await this.client.createSession(cwd, 'agent', signal)
+    const created = await this.client.createSession(cwd, 'agent', this.backend, signal)
     const session = this.registerSession(created.sessionId, cwd, workspace?.title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
     this.publishWorkspaceBaseline()

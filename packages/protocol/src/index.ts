@@ -461,10 +461,10 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | (string & {})
+export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
-export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[] }
-export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string }
+export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
+export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
 export interface AcpPromptParams { sessionId: string; prompt: string; images?: Array<{ mimeType: string; data: string }> }
 export interface AcpPermissionResponseParams { sessionId: string; requestId: string; decision: 'allow_once' | 'deny' }
 export interface AcpCancelParams { sessionId: string }

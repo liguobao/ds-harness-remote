@@ -5724,11 +5724,12 @@ var AgentAcpClient = class {
       ...result === void 0 ? {} : { result }
     }, signal);
   }
-  async createSession(cwd2, mode2, signal) {
+  async createSession(cwd2, mode2, backend, signal) {
     const result = await this.call("session/new", {
       cwd: cwd2,
       mcpServers: [],
-      ...mode2 === void 0 ? {} : { mode: mode2 }
+      ...mode2 === void 0 ? {} : { mode: mode2 },
+      ...backend === void 0 ? {} : { backend }
     }, signal);
     const sessionId = readString(result, "sessionId");
     if (sessionId === void 0)
@@ -18380,9 +18381,10 @@ async function discoverAcpVirtualWorkspaces(_client, _signal) {
   return [];
 }
 var AcpVirtualHarness = class _AcpVirtualHarness {
-  constructor(client, host) {
+  constructor(client, host, backend = "cursor") {
     this.client = client;
     this.host = host;
+    this.backend = backend;
     this.api = this.createApiProxy();
   }
   api;
@@ -18398,8 +18400,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   selectedWorkspaceId;
   lastProjectionSeq = 0;
   closed = false;
-  static remote(core, host) {
-    return new _AcpVirtualHarness(new AgentAcpClient(core), host);
+  static remote(core, host, backend = "cursor") {
+    return new _AcpVirtualHarness(new AgentAcpClient(core), host, backend);
   }
   async workspaces() {
     return [...this.workspaceById.values()];
@@ -18612,7 +18614,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
     const cwd2 = string3(request.cwd) ?? workspace?.path;
     if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    const created = await this.client.createSession(cwd2, "agent", signal);
+    const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
     const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
     this.publishWorkspaceBaseline();
@@ -19556,7 +19558,7 @@ function resolveConfig(input2 = {}, env = process.env) {
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
-    deviceName: parsed.deviceName ?? hostname(),
+    deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
@@ -21306,6 +21308,7 @@ var ClientModeRuntime = class {
   pendingWorkspaceSelection;
   codexVirtual;
   cursorVirtual;
+  acpVirtualBackend = "cursor";
   proxySwitch;
   gatewaySwitch;
   codexStreams = /* @__PURE__ */ new Map();
@@ -21369,7 +21372,7 @@ var ClientModeRuntime = class {
       },
       remoteFeatures: this.connected?.features ?? remoteHostFeatures(),
       ...this.pendingWorkspaceSelection === void 0 ? {} : { workspaceSelection: { ...this.pendingWorkspaceSelection } },
-      backend: this.cursorVirtual !== void 0 ? "cursor" : this.codexVirtual === void 0 ? "harness" : "codex",
+      backend: this.cursorVirtual !== void 0 ? this.acpVirtualBackend : this.codexVirtual === void 0 ? "harness" : "codex",
       hostAuthorizationAvailable: this.host !== void 0,
       ...this.host === void 0 ? {} : { host: this.host.hostStatus() }
     };
@@ -21639,73 +21642,75 @@ var ClientModeRuntime = class {
     }
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal);
   }
-  async listCursorWorkspaces(targetDeviceId, signal) {
+  async listCursorWorkspaces(targetDeviceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (!remote.features.cursor) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
-    if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId) {
+    if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
       return this.cursorVirtual.workspaces();
     }
     return discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal);
   }
-  async openCursorWorkspace(targetDeviceId, workspaceId, signal) {
+  async openCursorWorkspace(targetDeviceId, workspaceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (!remote.features.cursor) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    });
+    }, backend);
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId);
     } catch {
       await virtual.close();
-      throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected Cursor workspace is no longer available.");
+      throw new ClientModeError("WORKSPACE_NOT_FOUND", `The selected ${backend} workspace is no longer available.`);
     }
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
     this.cursorVirtual = virtual;
+    this.acpVirtualBackend = backend;
     this.selectCursorTarget(virtual, remote);
     const preferredSessionId = await virtual.preferredSessionId();
     this.pendingWorkspaceSelection = {
       targetDeviceId: remote.target.deviceId,
       workspaceId: workspace.workspaceId,
-      backend: "cursor",
+      backend,
       ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
     };
-    this.logger.info("Cursor virtual workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
+    this.logger.info(`${backend} virtual workspace opened`, { targetDeviceId: shortId(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }
-  async createCursorWorkspace(targetDeviceId, path, signal) {
+  async createCursorWorkspace(targetDeviceId, path, signal, backend = "cursor") {
     const trimmedPath = path.trim();
-    if (trimmedPath === "") throw new ClientModeError("INVALID_MESSAGE", "A Cursor project directory is required.");
+    if (trimmedPath === "") throw new ClientModeError("INVALID_MESSAGE", `A ${backend} project directory is required.`);
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (!remote.features.cursor) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide Cursor workspaces.");
+    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    });
+    }, backend);
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
     this.cursorVirtual = virtual;
+    this.acpVirtualBackend = backend;
     this.selectCursorTarget(virtual, remote);
     this.pendingWorkspaceSelection = {
       targetDeviceId: remote.target.deviceId,
       workspaceId: workspace.workspaceId,
-      backend: "cursor"
+      backend
     };
-    this.logger.info("Cursor virtual workspace created", { targetDeviceId: shortId(remote.target.deviceId) });
+    this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }
   consumeWorkspaceSelection(selection) {
@@ -22192,21 +22197,40 @@ var ClientModeRuntime = class {
       if (endpoint === "cursor.workspaces.list") {
         const value = record5(payload);
         if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal));
+        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "cursor"));
       }
       if (endpoint === "cursor.workspace.open") {
         const value = record5(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor Workspace are required.");
         }
-        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal));
+        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "cursor"));
       }
       if (endpoint === "cursor.workspace.create") {
         const value = record5(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor project directory are required.");
         }
-        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal));
+        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "cursor"));
+      }
+      if (endpoint === "antigravity.workspaces.list") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "antigravity"));
+      }
+      if (endpoint === "antigravity.workspace.open") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity Workspace are required.");
+        }
+        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "antigravity"));
+      }
+      if (endpoint === "antigravity.workspace.create") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity project directory are required.");
+        }
+        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "antigravity"));
       }
       if (endpoint === "workspace.selection.consume") {
         const value = record5(payload);
@@ -22216,7 +22240,7 @@ var ClientModeRuntime = class {
         return ok2(this.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...value.backend === "codex" || value.backend === "cursor" ? { backend: value.backend } : {},
+          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" ? { backend: value.backend } : {},
           ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
         }));
       }
@@ -22436,7 +22460,8 @@ function remoteHostFeatures(clientVersion) {
     apiProxy: true,
     remoteGateway: false,
     codex: false,
-    cursor: false
+    cursor: false,
+    antigravity: false
   };
 }
 async function probeRemoteHostFeatures(client, clientVersion) {
@@ -22457,13 +22482,15 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const remoteV3 = capabilities.has("harness.remote.v3");
   const terminal = capabilities.has("harness.terminal.v1");
   const codex = capabilities.has("codex.appserver.v1");
-  const cursor2 = capabilities.has("agent.acp.v1");
+  const hasAcp = capabilities.has("agent.acp.v1");
+  const cursor2 = capabilities.has("agent.acp.cursor.v1") || hasAcp && !capabilities.has("agent.acp.antigravity.v1");
+  const antigravity = capabilities.has("agent.acp.antigravity.v1") || hasAcp && !capabilities.has("agent.acp.cursor.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex && !cursor2) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -22474,7 +22501,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     remoteGateway,
     ...sessionFormat === void 0 ? {} : { sessionFormat },
     codex,
-    cursor: cursor2
+    cursor: cursor2,
+    antigravity
   };
 }
 async function waitForCodexFrames(stream, signal) {
@@ -28764,11 +28792,10 @@ var AcpRemoteGateway = class {
     this.createAcp = createAcp;
     this.restartDelaysMs = restartDelaysMs;
   }
-  acp;
-  unsubscribeInbound;
-  unsubscribeUnavailable;
+  backendInstances = /* @__PURE__ */ new Map();
   peers = /* @__PURE__ */ new Map();
   sessionOwners = /* @__PURE__ */ new Map();
+  sessionBackends = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
   restartTimer;
@@ -28793,12 +28820,25 @@ var AcpRemoteGateway = class {
       this.available = false;
       this.state = "unavailable";
       this.unavailableCode = errorCode4(error);
-      await this.disposeAcp(this.acp);
+      await this.disposeAllInstances();
       this.logger.warn("Cursor Remote domain unavailable", { code: this.unavailableCode });
     }
   }
   isAvailable() {
-    return this.available && this.acp?.isReady() === true;
+    return this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
+  }
+  availableBackends() {
+    const list = [];
+    for (const [id5, inst] of this.backendInstances) {
+      if (inst.client.isReady()) list.push(id5);
+    }
+    return list;
+  }
+  defaultBackend() {
+    const available = this.availableBackends();
+    if (available.includes("antigravity")) return "antigravity";
+    if (available.includes("cursor")) return "cursor";
+    return available[0] ?? "antigravity";
   }
   status() {
     return {
@@ -28806,6 +28846,7 @@ var AcpRemoteGateway = class {
       available: this.isAvailable(),
       state: this.state,
       restartAttempt: this.restartAttempt,
+      availableBackends: this.availableBackends(),
       ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
     };
   }
@@ -28819,30 +28860,40 @@ var AcpRemoteGateway = class {
     const envelope = parseCallEnvelope2(input2);
     const call = parseAcpCall(envelope.method, envelope.params);
     if (call.method === "initialize") {
-      this.requireAcp();
-      return this.initializeResult(call.params);
+      const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
+      this.requireAcp(requestedBackend);
+      return this.initializeResult(call.params, requestedBackend);
     }
-    this.requireAcp();
     if (call.method === "dsh/directoryList") {
       return this.listDirectory(String(call.params.path));
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
-      const result = await this.callUpstream("session/new", {
+      const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
+      const acp = this.requireAcp(requestedBackend);
+      const result = await acp.call("session/new", {
         cwd: cwd2,
         mcpServers: [],
         ...typeof call.params.mode === "string" ? { mode: call.params.mode } : {}
       });
       const sessionId2 = readSessionId(result);
-      if (sessionId2 !== void 0) this.sessionOwners.set(sessionId2, connectionId);
+      if (sessionId2 !== void 0) {
+        this.sessionOwners.set(sessionId2, connectionId);
+        this.sessionBackends.set(sessionId2, requestedBackend);
+      }
       return sanitizeSessionResult(result);
     }
     const sessionId = sessionIdFromParams(call.method, call.params);
     if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
     if (call.method === "session/load") {
-      const result = await this.callUpstream(call.method, call.params);
+      const targetBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+      const acp = this.requireAcp(targetBackend);
+      const result = await acp.call(call.method, call.params);
       const loadedId = readSessionId(result) ?? sessionId;
-      if (loadedId !== void 0) this.sessionOwners.set(loadedId, connectionId);
+      if (loadedId !== void 0) {
+        this.sessionOwners.set(loadedId, connectionId);
+        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
+      }
       return sanitizeSessionResult(result);
     }
     if (isSessionMutation(call.method) && sessionId !== void 0) {
@@ -28859,15 +28910,18 @@ var AcpRemoteGateway = class {
       void this.runPromptInBackground(sessionId, call.params);
       return { accepted: true, stopReason: "in_progress" };
     }
-    return sanitizeSessionResult(await this.callUpstream(call.method, call.params));
+    const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params));
   }
   async runPromptInBackground(sessionId, params) {
     try {
-      const result = await this.callUpstream("session/prompt", params);
+      const sessionBackend = this.sessionBackends.get(sessionId);
+      const acp = this.requireAcp(sessionBackend);
+      const result = await acp.call("session/prompt", params);
       await this.inboundChain;
       const stopReason = isRecord18(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
-      this.logger.info("Cursor prompt finished", {
+      this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
         stopReason,
         catchUp: catchUp.length
@@ -28884,7 +28938,7 @@ var AcpRemoteGateway = class {
         }
       });
     } catch (error) {
-      this.logger?.warn("Cursor session/prompt failed", { code: errorCode4(error) });
+      this.logger?.warn("ACP session/prompt failed", { code: errorCode4(error) });
       await this.inboundChain.catch(() => void 0);
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       await this.publishToSession(sessionId, {
@@ -28911,7 +28965,7 @@ var AcpRemoteGateway = class {
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
     this.approvals.delete(params.requestHandle);
-    const acp = this.requireAcp();
+    const acp = this.requireAcp(pending.backend);
     if (params.decision === "cancel") {
       await acp.respondError(pending.upstreamId, -32800, "Cancelled by Remote client.");
       return { resolved: true };
@@ -28928,7 +28982,7 @@ var AcpRemoteGateway = class {
     for (const [handle, approval] of this.approvals) {
       if (approval.connectionId === connectionId) {
         this.approvals.delete(handle);
-        void this.acp?.respondError(approval.upstreamId, -32800, "Remote peer disconnected.");
+        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
       }
     }
   }
@@ -28975,60 +29029,86 @@ var AcpRemoteGateway = class {
     for (const peer of this.peers.values()) await peer.closeAll();
     this.peers.clear();
     this.sessionOwners.clear();
+    this.sessionBackends.clear();
     this.recentFrames.clear();
     this.turnCatchUp.clear();
     this.approvals.clear();
-    await this.disposeAcp(this.acp);
-    this.acp = void 0;
+    await this.disposeAllInstances();
     this.available = false;
     this.state = "disabled";
   }
   async launchAcp() {
+    const candidates = [
+      { id: "antigravity", binary: "agy" },
+      { id: "cursor", binary: "agent" }
+    ];
+    let anyOk = false;
     let lastError;
-    for (const binary of cursorBinaryCandidates(this.config.binary)) {
-      try {
-        await this.launchAcpCandidate(binary);
-        return;
-      } catch (error) {
-        lastError = error;
-        this.logger.warn("Cursor ACP candidate failed", { code: errorCode4(error) });
+    for (const candidate of candidates) {
+      for (const binary of cursorBinaryCandidates(candidate.binary)) {
+        try {
+          await this.launchBackendCandidate(candidate.id, binary);
+          anyOk = true;
+          break;
+        } catch (error) {
+          lastError = error;
+          this.logger.debug?.("ACP candidate failed", { id: candidate.id, binary, code: errorCode4(error) });
+        }
       }
     }
-    throw lastError instanceof Error ? lastError : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "Cursor ACP binary is unavailable.");
+    if (anyOk) {
+      this.available = true;
+      this.state = "ready";
+      this.unavailableCode = void 0;
+      this.restartAttempt = 0;
+      return;
+    }
+    throw lastError instanceof Error ? lastError : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
-  async launchAcpCandidate(binary) {
+  async launchBackendCandidate(id5, binary) {
     const acp = this.createAcp(binary, this.logger);
     await acp.start();
-    await this.disposeAcp(this.acp);
-    this.unsubscribeInbound = acp.onInbound((message) => {
-      this.inboundChain = this.inboundChain.then(() => this.handleInbound(message)).catch((error) => {
-        this.logger.warn("ACP inbound fanout failed", { code: errorCode4(error) });
+    const unsubscribeInbound = acp.onInbound((message) => {
+      this.inboundChain = this.inboundChain.then(() => this.handleInbound(id5, message)).catch((error) => {
+        this.logger.warn("ACP inbound fanout failed", { id: id5, code: errorCode4(error) });
       });
     });
-    this.unsubscribeUnavailable = acp.onUnavailable((code) => {
+    const unsubscribeUnavailable = acp.onUnavailable((code) => {
       void this.handleUnavailable(code);
     });
-    this.acp = acp;
-    this.available = true;
-    this.state = "ready";
-    this.unavailableCode = void 0;
-    this.restartAttempt = 0;
+    const prev = this.backendInstances.get(id5);
+    if (prev !== void 0) {
+      await this.disposeInstance(prev);
+    }
+    this.backendInstances.set(id5, {
+      id: id5,
+      client: acp,
+      unsubscribeInbound,
+      unsubscribeUnavailable
+    });
   }
-  async handleInbound(message) {
+  async handleInbound(backend, message) {
     if (message.kind === "notification" || message.method === "session/update") {
       const sessionId2 = readSessionId(message.params) ?? readNestedSessionId(message.params);
       if (sessionId2 === void 0) return;
+      if (!this.sessionBackends.has(sessionId2)) {
+        this.sessionBackends.set(sessionId2, backend);
+      }
       await this.publishToSession(sessionId2, { method: message.method, params: message.params });
       return;
     }
     const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? "unknown";
+    if (sessionId !== "unknown" && !this.sessionBackends.has(sessionId)) {
+      this.sessionBackends.set(sessionId, backend);
+    }
     const requestHandle = randomUUID3();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? "unknown",
       sessionId,
       method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS2
+      expiresAt: Date.now() + APPROVAL_TTL_MS2,
+      backend
     });
     this.scheduleApprovalExpiry();
     const owner = this.sessionOwners.get(sessionId);
@@ -29134,29 +29214,40 @@ var AcpRemoteGateway = class {
       for (const [handle, approval] of this.approvals) {
         if (approval.expiresAt <= now) {
           this.approvals.delete(handle);
-          void this.acp?.respondError(approval.upstreamId, -32800, "Cursor approval expired.");
+          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
         }
       }
       this.scheduleApprovalExpiry();
     }, Math.max(0, next - Date.now()));
     this.approvalExpiryTimer.unref?.();
   }
-  requireAcp() {
-    if (!this.isAvailable() || this.acp === void 0) {
+  requireAcp(backend) {
+    if (!this.isAvailable()) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
     }
-    return this.acp;
+    if (backend !== void 0) {
+      const instance = this.backendInstances.get(backend);
+      if (instance !== void 0 && instance.client.isReady()) return instance.client;
+    }
+    for (const id5 of ["antigravity", "cursor"]) {
+      const instance = this.backendInstances.get(id5);
+      if (instance !== void 0 && instance.client.isReady()) return instance.client;
+    }
+    const first = [...this.backendInstances.values()].find((b) => b.client.isReady());
+    if (first !== void 0) return first.client;
+    throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
   }
-  initializeResult(params) {
+  initializeResult(params, backend) {
     const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
-    const isAntigravity = this.acp instanceof AntigravityAcpClient;
+    const actualBackend = backend ?? this.defaultBackend();
     return {
       protocolVersion: requested,
       agentInfo: {
-        name: isAntigravity ? "antigravity" : "dsh-remote-acp",
+        name: actualBackend === "antigravity" ? "antigravity" : "dsh-remote-acp",
         version: PLUGIN_VERSION
       },
-      backend: isAntigravity ? "antigravity" : "cursor",
+      backend: actualBackend,
+      availableBackends: this.availableBackends(),
       authMethods: [],
       capabilities: {
         loadSession: true,
@@ -29226,12 +29317,16 @@ var AcpRemoteGateway = class {
       truncated
     };
   }
-  async disposeAcp(acp) {
-    this.unsubscribeInbound?.();
-    this.unsubscribeUnavailable?.();
-    this.unsubscribeInbound = void 0;
-    this.unsubscribeUnavailable = void 0;
-    if (acp !== void 0) await acp.close();
+  async disposeInstance(inst) {
+    inst.unsubscribeInbound();
+    inst.unsubscribeUnavailable();
+    await inst.client.close();
+  }
+  async disposeAllInstances() {
+    for (const inst of this.backendInstances.values()) {
+      await this.disposeInstance(inst);
+    }
+    this.backendInstances.clear();
   }
 };
 function parseCallEnvelope2(input2) {
@@ -29306,16 +29401,18 @@ function cursorBinaryCandidates(configured) {
   if (configured === "agy" || configured === "antigravity") {
     return [
       join6(userHome, ".local", "bin", "agy"),
+      "/var/lib/dsh/.local/bin/agy",
       "agy"
     ];
   }
-  if (configured !== "agent") return [configured];
-  return [
-    join6(userHome, ".local", "bin", "agent"),
-    "agent",
-    join6(userHome, ".local", "bin", "agy"),
-    "agy"
-  ];
+  if (configured === "agent" || configured === "cursor") {
+    return [
+      join6(userHome, ".local", "bin", "agent"),
+      "/var/lib/dsh/.local/bin/agent",
+      "agent"
+    ];
+  }
+  return [configured];
 }
 function errorCode4(error) {
   if (error instanceof CursorAcpError || error instanceof RpcError) return error.code;
@@ -30155,7 +30252,12 @@ var HostPluginRuntime = class {
     }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
-    if (this.acp.isAvailable()) capabilities.push("agent.acp.v1", "agent.acp.transfer.v1");
+    if (this.acp.isAvailable()) {
+      capabilities.push("agent.acp.v1", "agent.acp.transfer.v1");
+      for (const backend of this.acp.availableBackends()) {
+        capabilities.push(`agent.acp.${backend}.v1`);
+      }
+    }
     return capabilities;
   }
   acpAvailable(command) {
@@ -30305,7 +30407,8 @@ Run "ds-harness-remote login" or use "/remote login" in dsh-TUI.
     return 0;
   }
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity = await identities.loadOrCreate(hostname3());
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
+  const identity = await identities.loadOrCreate(deviceName);
   const store = new ServerCredentialStore(directory);
   const stored = await store.load(serverUrl, identity.deviceId);
   lines.push(`Device: ${identity.name} (${identity.deviceId})`);
@@ -30345,7 +30448,7 @@ async function logout(args, runtime) {
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
   }
-  const deviceName = hostname3();
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
   const identity = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
@@ -30367,7 +30470,7 @@ async function hostContext(runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  const deviceName = hostname3();
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
   const identity = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));

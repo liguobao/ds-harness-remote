@@ -22,6 +22,19 @@ export function cursorWorkspacePath(workspaceId: string): string | undefined {
   }
 }
 
+export function antigravityWorkspaceId(path: string): string {
+  return `antigravity:cwd:${encodeURIComponent(path)}`
+}
+
+export function antigravityWorkspacePath(workspaceId: string): string | undefined {
+  if (!workspaceId.startsWith('antigravity:cwd:')) return undefined
+  try {
+    return decodeURIComponent(workspaceId.slice('antigravity:cwd:'.length))
+  } catch {
+    return undefined
+  }
+}
+
 export function createCursorWorkspace(path: string, title?: string): WorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
@@ -36,9 +49,24 @@ export function createCursorWorkspace(path: string, title?: string): WorkspaceVi
   }
 }
 
+export function createAntigravityWorkspace(path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: antigravityWorkspaceId(path),
+    backend: 'antigravity',
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function cursorNativeId(session: RemoteSession): string {
   if (session.nativeId !== undefined && session.nativeId.length > 0) return session.nativeId
   if (session.sessionId.startsWith('cursor:')) return session.sessionId.slice('cursor:'.length)
+  if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
   return session.sessionId
 }
 
@@ -62,6 +90,26 @@ export function createCursorSession(input: {
   }
 }
 
+export function createAntigravitySession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return {
+    sessionId: `antigravity:${input.acpSessionId}`,
+    backend: 'antigravity',
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: { backend: 'antigravity' },
+    },
+  }
+}
+
 /** In-flight assistant bubble; must be renamed on prompt_completed so turns do not merge. */
 const CURSOR_ASSISTANT_LIVE_ID = 'cursor-assistant-live'
 let cursorAssistantSeq = 0
@@ -71,9 +119,27 @@ export async function createCursorWorkspaceSession(
   path: string,
   mode: 'agent' | 'plan' | 'ask' = 'agent',
 ): Promise<{ workspace: WorkspaceView; session: RemoteSession }> {
-  const created = await client.createSession(path, mode)
+  const created = await client.createSession(path, mode, 'cursor')
   const workspace = createCursorWorkspace(path)
   const session = createCursorSession({
+    acpSessionId: created.sessionId,
+    cwd: path,
+    title: workspace.title,
+  })
+  return {
+    workspace: { ...workspace, sessionIds: [session.sessionId], updatedAt: new Date().toISOString() },
+    session,
+  }
+}
+
+export async function createAntigravityWorkspaceSession(
+  client: AgentAcpClient,
+  path: string,
+  mode: 'agent' | 'plan' | 'ask' = 'agent',
+): Promise<{ workspace: WorkspaceView; session: RemoteSession }> {
+  const created = await client.createSession(path, mode, 'antigravity')
+  const workspace = createAntigravityWorkspace(path)
+  const session = createAntigravitySession({
     acpSessionId: created.sessionId,
     cwd: path,
     title: workspace.title,

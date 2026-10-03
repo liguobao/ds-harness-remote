@@ -62,6 +62,7 @@ export interface RemoteHostFeatures {
   sessionFormat?: 3
   codex: boolean
   cursor: boolean
+  antigravity: boolean
 }
 
 interface CodexLoopbackStream {
@@ -117,7 +118,7 @@ export interface RemoteWorkspaceView {
 interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity'
   sessionId?: string
 }
 
@@ -192,6 +193,7 @@ export class ClientModeRuntime {
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
   private codexVirtual?: CodexVirtualHarness
   private cursorVirtual?: AcpVirtualHarness
+  private acpVirtualBackend: 'cursor' | 'antigravity' = 'cursor'
   private readonly proxySwitch?: ApiProxySwitch
   private readonly gatewaySwitch: TypertGatewaySwitch
   private readonly codexStreams = new Map<string, CodexLoopbackStream>()
@@ -286,7 +288,7 @@ export class ClientModeRuntime {
         ? {}
         : { workspaceSelection: { ...this.pendingWorkspaceSelection } }),
       backend: this.cursorVirtual !== undefined
-        ? 'cursor'
+        ? this.acpVirtualBackend
         : this.codexVirtual === undefined ? 'harness' : 'codex',
       hostAuthorizationAvailable: this.host !== undefined,
       ...(this.host === undefined ? {} : { host: this.host.hostStatus() }),
@@ -583,13 +585,13 @@ export class ClientModeRuntime {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal)
   }
 
-  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal): Promise<AcpVirtualWorkspaceView[]> {
+  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
-    if (!remote.features.cursor) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide Cursor workspaces.')
+    if (backend === 'antigravity' ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
-    if (this.cursorVirtual !== undefined && this.connected?.target.deviceId === targetDeviceId) {
+    if (this.cursorVirtual !== undefined && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
       return this.cursorVirtual.workspaces()
     }
     return discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal)
@@ -599,36 +601,38 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     workspaceId: string,
     signal?: AbortSignal,
+    backend: 'cursor' | 'antigravity' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
-    if (!remote.features.cursor) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide Cursor workspaces.')
+    if (backend === 'antigravity' ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
     this.assertLocalHarnessCarrierAvailable()
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    })
+    }, backend)
     let workspace: AcpVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId)
     } catch {
       await virtual.close()
-      throw new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected Cursor workspace is no longer available.')
+      throw new ClientModeError('WORKSPACE_NOT_FOUND', `The selected ${backend} workspace is no longer available.`)
     }
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
     this.cursorVirtual = virtual
+    this.acpVirtualBackend = backend
     this.selectCursorTarget(virtual, remote)
     const preferredSessionId = await virtual.preferredSessionId()
     this.pendingWorkspaceSelection = {
       targetDeviceId: remote.target.deviceId,
       workspaceId: workspace.workspaceId,
-      backend: 'cursor',
+      backend,
       ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
     }
-    this.logger.info('Cursor virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
+    this.logger.info(`${backend} virtual workspace opened`, { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
   }
 
@@ -636,30 +640,32 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     path: string,
     signal?: AbortSignal,
+    backend: 'cursor' | 'antigravity' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
-    if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', 'A Cursor project directory is required.')
+    if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', `A ${backend} project directory is required.`)
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
-    if (!remote.features.cursor) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide Cursor workspaces.')
+    if (backend === 'antigravity' ? !remote.features.antigravity : !remote.features.cursor) {
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
     this.assertLocalHarnessCarrierAvailable()
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    })
+    }, backend)
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath)
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
     this.cursorVirtual = virtual
+    this.acpVirtualBackend = backend
     this.selectCursorTarget(virtual, remote)
     this.pendingWorkspaceSelection = {
       targetDeviceId: remote.target.deviceId,
       workspaceId: workspace.workspaceId,
-      backend: 'cursor',
+      backend,
     }
-    this.logger.info('Cursor virtual workspace created', { targetDeviceId: shortId(remote.target.deviceId) })
+    this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
   }
 
@@ -1209,21 +1215,40 @@ export class ClientModeRuntime {
       if (endpoint === 'cursor.workspaces.list') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal))
+        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'cursor'))
       }
       if (endpoint === 'cursor.workspace.open') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'A Host and Cursor Workspace are required.')
         }
-        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal))
+        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'cursor'))
       }
       if (endpoint === 'cursor.workspace.create') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'A Host and Cursor project directory are required.')
         }
-        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal))
+        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'cursor'))
+      }
+      if (endpoint === 'antigravity.workspaces.list') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
+        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'antigravity'))
+      }
+      if (endpoint === 'antigravity.workspace.open') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Antigravity Workspace are required.')
+        }
+        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'antigravity'))
+      }
+      if (endpoint === 'antigravity.workspace.create') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Antigravity project directory are required.')
+        }
+        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'antigravity'))
       }
       if (endpoint === 'workspace.selection.consume') {
         const value = record(payload)
@@ -1233,7 +1258,7 @@ export class ClientModeRuntime {
         return ok(this.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...(value.backend === 'codex' || value.backend === 'cursor' ? { backend: value.backend } : {}),
+          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' ? { backend: value.backend } : {}),
           ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
         }))
       }
@@ -1488,6 +1513,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     remoteGateway: false,
     codex: false,
     cursor: false,
+    antigravity: false,
   }
 }
 
@@ -1513,13 +1539,15 @@ export async function probeRemoteHostFeatures(
   const remoteV3 = capabilities.has('harness.remote.v3')
   const terminal = capabilities.has('harness.terminal.v1')
   const codex = capabilities.has('codex.appserver.v1')
-  const cursor = capabilities.has('agent.acp.v1')
+  const hasAcp = capabilities.has('agent.acp.v1')
+  const cursor = capabilities.has('agent.acp.cursor.v1') || (hasAcp && !capabilities.has('agent.acp.antigravity.v1'))
+  const antigravity = capabilities.has('agent.acp.antigravity.v1') || (hasAcp && !capabilities.has('agent.acp.cursor.v1'))
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
   const sessionFormat = remoteV3 ? 3 as const : undefined
   const remoteGateway = remoteV3 || remoteV1
-  if (!apiProxy && !remoteGateway && !codex && !cursor) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
@@ -1531,6 +1559,7 @@ export async function probeRemoteHostFeatures(
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
     codex,
     cursor,
+    antigravity,
   }
 }
 

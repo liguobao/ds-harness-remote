@@ -45,6 +45,7 @@ interface PendingApproval {
   sessionId: string
   method: string
   expiresAt: number
+  backend?: string
 }
 
 interface BufferedAcpFrame {
@@ -75,11 +76,15 @@ type AcpFactory = (binary: string, logger: SafeLogger) => CursorAcpLike
  * session ownership, subscriptions, and permission handles per connection.
  */
 export class AcpRemoteGateway {
-  private acp?: CursorAcpLike
-  private unsubscribeInbound?: () => void
-  private unsubscribeUnavailable?: () => void
+  private readonly backendInstances = new Map<string, {
+    id: string
+    client: CursorAcpLike
+    unsubscribeInbound: () => void
+    unsubscribeUnavailable: () => void
+  }>()
   private readonly peers = new Map<string, AcpPeerBridge>()
   private readonly sessionOwners = new Map<string, string>()
+  private readonly sessionBackends = new Map<string, string>()
   private readonly approvals = new Map<string, PendingApproval>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
@@ -117,12 +122,29 @@ export class AcpRemoteGateway {
       this.available = false
       this.state = 'unavailable'
       this.unavailableCode = errorCode(error)
-      await this.disposeAcp(this.acp)
+      await this.disposeAllInstances()
       this.logger.warn('Cursor Remote domain unavailable', { code: this.unavailableCode })
     }
   }
 
-  isAvailable(): boolean { return this.available && this.acp?.isReady() === true }
+  isAvailable(): boolean {
+    return this.available && [...this.backendInstances.values()].some(inst => inst.client.isReady())
+  }
+
+  availableBackends(): string[] {
+    const list: string[] = []
+    for (const [id, inst] of this.backendInstances) {
+      if (inst.client.isReady()) list.push(id)
+    }
+    return list
+  }
+
+  defaultBackend(): string {
+    const available = this.availableBackends()
+    if (available.includes('antigravity')) return 'antigravity'
+    if (available.includes('cursor')) return 'cursor'
+    return available[0] ?? 'antigravity'
+  }
 
   status(): {
     enabled: boolean
@@ -130,12 +152,14 @@ export class AcpRemoteGateway {
     state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable'
     restartAttempt: number
     error?: string
+    availableBackends?: string[]
   } {
     return {
       enabled: this.config.enabled,
       available: this.isAvailable(),
       state: this.state,
       restartAttempt: this.restartAttempt,
+      availableBackends: this.availableBackends(),
       ...(this.unavailableCode === undefined ? {} : { error: this.unavailableCode }),
     }
   }
@@ -152,11 +176,10 @@ export class AcpRemoteGateway {
     const call = parseAcpCall(envelope.method, envelope.params)
 
     if (call.method === 'initialize') {
-      this.requireAcp()
-      return this.initializeResult(call.params)
+      const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
+      this.requireAcp(requestedBackend)
+      return this.initializeResult(call.params, requestedBackend)
     }
-
-    this.requireAcp()
 
     if (call.method === 'dsh/directoryList') {
       return this.listDirectory(String(call.params.path))
@@ -164,13 +187,20 @@ export class AcpRemoteGateway {
 
     if (call.method === 'session/new') {
       const cwd = await this.requireExistingDirectory(String(call.params.cwd))
-      const result = await this.callUpstream('session/new', {
+      const requestedBackend = typeof call.params.backend === 'string'
+        ? call.params.backend
+        : this.defaultBackend()
+      const acp = this.requireAcp(requestedBackend)
+      const result = await acp.call('session/new', {
         cwd,
         mcpServers: [],
         ...(typeof call.params.mode === 'string' ? { mode: call.params.mode } : {}),
       })
       const sessionId = readSessionId(result)
-      if (sessionId !== undefined) this.sessionOwners.set(sessionId, connectionId)
+      if (sessionId !== undefined) {
+        this.sessionOwners.set(sessionId, connectionId)
+        this.sessionBackends.set(sessionId, requestedBackend)
+      }
       return sanitizeSessionResult(result)
     }
 
@@ -178,9 +208,14 @@ export class AcpRemoteGateway {
     if (sessionId !== undefined) this.requireSessionAccess(connectionId, sessionId, call.method)
 
     if (call.method === 'session/load') {
-      const result = await this.callUpstream(call.method, call.params)
+      const targetBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
+      const acp = this.requireAcp(targetBackend)
+      const result = await acp.call(call.method, call.params)
       const loadedId = readSessionId(result) ?? sessionId
-      if (loadedId !== undefined) this.sessionOwners.set(loadedId, connectionId)
+      if (loadedId !== undefined) {
+        this.sessionOwners.set(loadedId, connectionId)
+        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend)
+      }
       return sanitizeSessionResult(result)
     }
 
@@ -204,12 +239,15 @@ export class AcpRemoteGateway {
       return { accepted: true, stopReason: 'in_progress' }
     }
 
-    return sanitizeSessionResult(await this.callUpstream(call.method, call.params))
+    const sessionBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
+    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params))
   }
 
   private async runPromptInBackground(sessionId: string, params: unknown): Promise<void> {
     try {
-      const result = await this.callUpstream('session/prompt', params)
+      const sessionBackend = this.sessionBackends.get(sessionId)
+      const acp = this.requireAcp(sessionBackend)
+      const result = await acp.call('session/prompt', params)
       // Cursor emits final session/update lines before the JSON-RPC result.
       // Those notifications are queued on inboundChain; drain it before we
       // snapshot catch-up or the Client only sees an empty prompt_completed.
@@ -218,7 +256,7 @@ export class AcpRemoteGateway {
         ? result.stopReason
         : 'end_turn'
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
-      this.logger.info('Cursor prompt finished', {
+      this.logger.info('ACP prompt finished', {
         sessionId: shortSessionId(sessionId),
         stopReason,
         catchUp: catchUp.length,
@@ -235,7 +273,7 @@ export class AcpRemoteGateway {
         },
       })
     } catch (error) {
-      this.logger?.warn('Cursor session/prompt failed', { code: errorCode(error) })
+      this.logger?.warn('ACP session/prompt failed', { code: errorCode(error) })
       await this.inboundChain.catch(() => undefined)
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
       await this.publishToSession(sessionId, {
@@ -263,7 +301,7 @@ export class AcpRemoteGateway {
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
     this.approvals.delete(params.requestHandle)
-    const acp = this.requireAcp()
+    const acp = this.requireAcp(pending.backend)
     if (params.decision === 'cancel') {
       await acp.respondError(pending.upstreamId, -32800, 'Cancelled by Remote client.')
       return { resolved: true }
@@ -281,7 +319,7 @@ export class AcpRemoteGateway {
     for (const [handle, approval] of this.approvals) {
       if (approval.connectionId === connectionId) {
         this.approvals.delete(handle)
-        void this.acp?.respondError(approval.upstreamId, -32800, 'Remote peer disconnected.')
+        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
       }
     }
   }
@@ -332,62 +370,83 @@ export class AcpRemoteGateway {
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
     this.sessionOwners.clear()
+    this.sessionBackends.clear()
     this.recentFrames.clear()
     this.turnCatchUp.clear()
     this.approvals.clear()
-    await this.disposeAcp(this.acp)
-    this.acp = undefined
+    await this.disposeAllInstances()
     this.available = false
     this.state = 'disabled'
   }
 
   private async launchAcp(): Promise<void> {
+    const candidates = [
+      { id: 'antigravity', binary: 'agy' },
+      { id: 'cursor', binary: 'agent' },
+    ]
+    let anyOk = false
     let lastError: unknown
-    for (const binary of cursorBinaryCandidates(this.config.binary)) {
-      try {
-        await this.launchAcpCandidate(binary)
-        return
-      } catch (error) {
-        lastError = error
-        this.logger.warn('Cursor ACP candidate failed', { code: errorCode(error) })
+    for (const candidate of candidates) {
+      for (const binary of cursorBinaryCandidates(candidate.binary)) {
+        try {
+          await this.launchBackendCandidate(candidate.id, binary)
+          anyOk = true
+          break
+        } catch (error) {
+          lastError = error
+          this.logger.debug?.('ACP candidate failed', { id: candidate.id, binary, code: errorCode(error) })
+        }
       }
     }
-    throw lastError instanceof Error ? lastError : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'Cursor ACP binary is unavailable.')
+    if (anyOk) {
+      this.available = true
+      this.state = 'ready'
+      this.unavailableCode = undefined
+      this.restartAttempt = 0
+      return
+    }
+    throw lastError instanceof Error ? lastError : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'No ACP backend is available.')
   }
 
-  private async launchAcpCandidate(binary: string): Promise<void> {
+  private async launchBackendCandidate(id: string, binary: string): Promise<void> {
     const acp = this.createAcp(binary, this.logger)
     await acp.start()
-    // Dispose the previous process first. disposeAcp() always clears the current
-    // inbound/unavailable unsubscribers; registering handlers before that would
-    // immediately drop them on first launch (this.acp is undefined) and leave
-    // session/update notifications undelivered while RPC still succeeds.
-    await this.disposeAcp(this.acp)
-    this.unsubscribeInbound = acp.onInbound(message => {
+    const unsubscribeInbound = acp.onInbound(message => {
       this.inboundChain = this.inboundChain
-        .then(() => this.handleInbound(message))
+        .then(() => this.handleInbound(id, message))
         .catch(error => {
-          this.logger.warn('ACP inbound fanout failed', { code: errorCode(error) })
+          this.logger.warn('ACP inbound fanout failed', { id, code: errorCode(error) })
         })
     })
-    this.unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(code) })
-    this.acp = acp
-    this.available = true
-    this.state = 'ready'
-    this.unavailableCode = undefined
-    this.restartAttempt = 0
+    const unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(code) })
+    const prev = this.backendInstances.get(id)
+    if (prev !== undefined) {
+      await this.disposeInstance(prev)
+    }
+    this.backendInstances.set(id, {
+      id,
+      client: acp,
+      unsubscribeInbound,
+      unsubscribeUnavailable,
+    })
   }
 
-  private async handleInbound(message: CursorAcpInbound): Promise<void> {
+  private async handleInbound(backend: string, message: CursorAcpInbound): Promise<void> {
     // session/update is a stream notification even if a buggy agent attaches an id.
     if (message.kind === 'notification' || message.method === 'session/update') {
       const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params)
       if (sessionId === undefined) return
+      if (!this.sessionBackends.has(sessionId)) {
+        this.sessionBackends.set(sessionId, backend)
+      }
       await this.publishToSession(sessionId, { method: message.method, params: message.params })
       return
     }
 
     const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? 'unknown'
+    if (sessionId !== 'unknown' && !this.sessionBackends.has(sessionId)) {
+      this.sessionBackends.set(sessionId, backend)
+    }
     const requestHandle = randomUUID()
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
@@ -395,6 +454,7 @@ export class AcpRemoteGateway {
       sessionId,
       method: message.method,
       expiresAt: Date.now() + APPROVAL_TTL_MS,
+      backend,
     })
     this.scheduleApprovalExpiry()
     const owner = this.sessionOwners.get(sessionId)
@@ -512,7 +572,7 @@ export class AcpRemoteGateway {
       for (const [handle, approval] of this.approvals) {
         if (approval.expiresAt <= now) {
           this.approvals.delete(handle)
-          void this.acp?.respondError(approval.upstreamId, -32800, 'Cursor approval expired.')
+          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
         }
       }
       this.scheduleApprovalExpiry()
@@ -520,23 +580,34 @@ export class AcpRemoteGateway {
     this.approvalExpiryTimer.unref?.()
   }
 
-  private requireAcp(): CursorAcpLike {
-    if (!this.isAvailable() || this.acp === undefined) {
+  private requireAcp(backend?: string): CursorAcpLike {
+    if (!this.isAvailable()) {
       throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
     }
-    return this.acp
+    if (backend !== undefined) {
+      const instance = this.backendInstances.get(backend)
+      if (instance !== undefined && instance.client.isReady()) return instance.client
+    }
+    for (const id of ['antigravity', 'cursor']) {
+      const instance = this.backendInstances.get(id)
+      if (instance !== undefined && instance.client.isReady()) return instance.client
+    }
+    const first = [...this.backendInstances.values()].find(b => b.client.isReady())
+    if (first !== undefined) return first.client
+    throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
   }
 
-  private initializeResult(params: Record<string, unknown>): Record<string, unknown> {
+  private initializeResult(params: Record<string, unknown>, backend?: string): Record<string, unknown> {
     const requested = typeof params.protocolVersion === 'number' ? params.protocolVersion : 1
-    const isAntigravity = this.acp instanceof AntigravityAcpClient
+    const actualBackend = backend ?? this.defaultBackend()
     return {
       protocolVersion: requested,
       agentInfo: {
-        name: isAntigravity ? 'antigravity' : 'dsh-remote-acp',
+        name: actualBackend === 'antigravity' ? 'antigravity' : 'dsh-remote-acp',
         version: PLUGIN_VERSION,
       },
-      backend: isAntigravity ? 'antigravity' : 'cursor',
+      backend: actualBackend,
+      availableBackends: this.availableBackends(),
       authMethods: [],
       capabilities: {
         loadSession: true,
@@ -619,12 +690,17 @@ export class AcpRemoteGateway {
     }
   }
 
-  private async disposeAcp(acp: CursorAcpLike | undefined): Promise<void> {
-    this.unsubscribeInbound?.()
-    this.unsubscribeUnavailable?.()
-    this.unsubscribeInbound = undefined
-    this.unsubscribeUnavailable = undefined
-    if (acp !== undefined) await acp.close()
+  private async disposeInstance(inst: { client: CursorAcpLike; unsubscribeInbound: () => void; unsubscribeUnavailable: () => void }): Promise<void> {
+    inst.unsubscribeInbound()
+    inst.unsubscribeUnavailable()
+    await inst.client.close()
+  }
+
+  private async disposeAllInstances(): Promise<void> {
+    for (const inst of this.backendInstances.values()) {
+      await this.disposeInstance(inst)
+    }
+    this.backendInstances.clear()
   }
 }
 
@@ -720,16 +796,18 @@ export function cursorBinaryCandidates(configured: string): string[] {
   if (configured === 'agy' || configured === 'antigravity') {
     return [
       join(userHome, '.local', 'bin', 'agy'),
+      '/var/lib/dsh/.local/bin/agy',
       'agy',
     ]
   }
-  if (configured !== 'agent') return [configured]
-  return [
-    join(userHome, '.local', 'bin', 'agent'),
-    'agent',
-    join(userHome, '.local', 'bin', 'agy'),
-    'agy',
-  ]
+  if (configured === 'agent' || configured === 'cursor') {
+    return [
+      join(userHome, '.local', 'bin', 'agent'),
+      '/var/lib/dsh/.local/bin/agent',
+      'agent',
+    ]
+  }
+  return [configured]
 }
 
 function errorCode(error: unknown): string {

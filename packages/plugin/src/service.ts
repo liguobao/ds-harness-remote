@@ -465,7 +465,12 @@ export class HostPluginRuntime {
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
-    if (this.acp.isAvailable()) capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
+    if (this.acp.isAvailable()) {
+      capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
+      for (const backend of this.acp.availableBackends()) {
+        capabilities.push(`agent.acp.${backend}.v1`)
+      }
+    }
     return capabilities
   }
 
