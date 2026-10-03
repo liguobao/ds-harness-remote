@@ -71,6 +71,7 @@ interface AcpClientLike {
   prompt(sessionId: string, text: string, signal?: AbortSignal): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
+  listWorkspaces?(signal?: AbortSignal): Promise<Array<{ path: string; title?: string }>>
   openStream(
     sessionId: string,
     onFrame: (frame: AgentAcpFrameData) => void,
@@ -104,11 +105,23 @@ export function createAcpWorkspaceView(path: string, title?: string): AcpVirtual
   }
 }
 
-/** ACP/Cursor has no Host-side project catalog; discovery starts empty until create/open. */
+/** Discover ACP virtual workspaces visible on the Host. */
 export async function discoverAcpVirtualWorkspaces(
-  _client?: AcpClientLike,
-  _signal?: AbortSignal,
+  client?: AcpClientLike,
+  signal?: AbortSignal,
 ): Promise<AcpVirtualWorkspaceView[]> {
+  if (client?.listWorkspaces !== undefined) {
+    try {
+      const items = await client.listWorkspaces(signal)
+      if (Array.isArray(items) && items.length > 0) {
+        return items
+          .filter(item => typeof item?.path === 'string' && item.path.trim() !== '')
+          .map(item => createAcpWorkspaceView(item.path, item.title))
+      }
+    } catch {
+      // fallback to empty
+    }
+  }
   return []
 }
 

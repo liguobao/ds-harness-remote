@@ -58,7 +58,15 @@ interface RemoteStatus {
     phase: 'checking-host' | 'authorizing-peer' | 'probing' | 'connected'
     activeTransports?: RemoteTransportPreference[]
   }
-  remoteFeatures?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean; cursor?: boolean; antigravity?: boolean }
+  remoteFeatures?: {
+    commandList: boolean
+    fileViewer: boolean
+    terminal?: boolean
+    codex?: boolean
+    cursor?: boolean
+    antigravity?: boolean
+    workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
+  }
   network?: RemoteNetworkDetails
   hostAuthorizationAvailable: boolean
   host?: {
@@ -1957,6 +1965,14 @@ window.__ModuleLoader__.load({
                 setDirectory(undefined)
               } else {
                 setSelectedHost(nextSelectedHost)
+                void props.control<RemoteWorkspaceView[]>('workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setWorkspaces(w)).catch(() => undefined)
+                void props.control<CodexWorkspaceView[]>('codex.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setCodexWorkspaces(w)).catch(() => undefined)
+                void props.control<CursorWorkspaceView[]>('cursor.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setCursorWorkspaces(w)).catch(() => undefined)
+                void props.control<CursorWorkspaceView[]>('antigravity.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setAntigravityWorkspaces(w)).catch(() => undefined)
               }
             }
           } catch {
@@ -2165,8 +2181,11 @@ window.__ModuleLoader__.load({
       const visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3)
       const visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3)
       const codexAvailable = status?.remoteFeatures?.codex === true
+        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'codex' && w.available) === true
       const cursorAvailable = status?.remoteFeatures?.cursor === true
+        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'cursor' && w.available) === true
       const antigravityAvailable = status?.remoteFeatures?.antigravity === true
+        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'antigravity' && w.available) === true
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),

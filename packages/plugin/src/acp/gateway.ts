@@ -185,6 +185,24 @@ export class AcpRemoteGateway {
       return this.listDirectory(String(call.params.path))
     }
 
+    if (call.method === 'dsh/workspaceList') {
+      const candidates = new Set<string>()
+      const cwd = process.cwd()
+      if (cwd) candidates.add(cwd)
+      for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/var/lib/dsh/local']) {
+        try {
+          const s = await stat(candidate)
+          if (s.isDirectory()) candidates.add(candidate)
+        } catch {
+          // ignore
+        }
+      }
+      return [...candidates].map(p => ({
+        path: p,
+        title: basename(p) || 'workspace',
+      }))
+    }
+
     if (call.method === 'session/new') {
       const cwd = await this.requireExistingDirectory(String(call.params.cwd))
       const requestedBackend = typeof call.params.backend === 'string'

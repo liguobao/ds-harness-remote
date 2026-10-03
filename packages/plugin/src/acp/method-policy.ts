@@ -35,6 +35,7 @@ const schemas = {
   'dsh/directoryList': z.object({
     path: z.string().min(1).max(4096),
   }).strict(),
+  'dsh/workspaceList': z.object({}).strict().optional(),
 } as const
 
 export type AllowedAcpMethod = keyof typeof schemas

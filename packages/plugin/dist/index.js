@@ -5746,6 +5746,10 @@ var AgentAcpClient = class {
       ...result === void 0 ? {} : { result }
     }, signal);
   }
+  async listWorkspaces(signal) {
+    const result = await this.call("dsh/workspaceList", {}, signal).catch(() => []);
+    return Array.isArray(result) ? result : [];
+  }
   async createSession(cwd2, mode2, backend, signal) {
     const result = await this.call("session/new", {
       cwd: cwd2,
@@ -18399,7 +18403,16 @@ function createAcpWorkspaceView(path, title) {
     updatedAt: now
   };
 }
-async function discoverAcpVirtualWorkspaces(_client, _signal) {
+async function discoverAcpVirtualWorkspaces(client, signal) {
+  if (client?.listWorkspaces !== void 0) {
+    try {
+      const items = await client.listWorkspaces(signal);
+      if (Array.isArray(items) && items.length > 0) {
+        return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => createAcpWorkspaceView(item.path, item.title));
+      }
+    } catch {
+    }
+  }
   return [];
 }
 var AcpVirtualHarness = class _AcpVirtualHarness {
@@ -28491,7 +28504,8 @@ var schemas2 = {
   }).strict(),
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
-  }).strict()
+  }).strict(),
+  "dsh/workspaceList": external_exports.object({}).strict().optional()
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
 function parseAcpCall(method, params) {
@@ -28903,6 +28917,22 @@ var AcpRemoteGateway = class {
     }
     if (call.method === "dsh/directoryList") {
       return this.listDirectory(String(call.params.path));
+    }
+    if (call.method === "dsh/workspaceList") {
+      const candidates = /* @__PURE__ */ new Set();
+      const cwd2 = process.cwd();
+      if (cwd2) candidates.add(cwd2);
+      for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
+        try {
+          const s2 = await stat5(candidate);
+          if (s2.isDirectory()) candidates.add(candidate);
+        } catch {
+        }
+      }
+      return [...candidates].map((p) => ({
+        path: p,
+        title: basename4(p) || "workspace"
+      }));
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));

@@ -59,6 +59,11 @@ export class AgentAcpClient {
     }, signal)
   }
 
+  async listWorkspaces(signal?: AbortSignal): Promise<Array<{ path: string; title?: string }>> {
+    const result = await this.call('dsh/workspaceList', {}, signal).catch(() => [])
+    return Array.isArray(result) ? result as Array<{ path: string; title?: string }> : []
+  }
+
   async createSession(
     cwd: string,
     mode?: 'agent' | 'plan' | 'ask',
