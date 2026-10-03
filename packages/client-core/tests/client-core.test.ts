@@ -305,6 +305,28 @@ describe('Remote Host feature probing', () => {
       fileViewer: true,
     })
   })
+
+  it('parses workspaceTypes from Host description and safely handles malformed values', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(encodeMessage(createRpcResponse(request.id, {
+      capabilities: ['harness.remote.v3', 'codex.appserver.v1'],
+      workspaceTypes: [
+        { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+        { id: 999 }, // malformed entry ignored
+      ],
+    })))
+
+    const features = await probing
+    expect(features.capabilities).toEqual(['harness.remote.v3', 'codex.appserver.v1'])
+    expect(features.workspaceTypes).toEqual([
+      { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+    ])
+  })
 })
 
 describe('RemoteTypertGateway', () => {

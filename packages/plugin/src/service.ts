@@ -2,7 +2,7 @@ import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
 import { randomUUID } from 'node:crypto'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { createEvent } from '@dsh-remote/protocol'
+import { createEvent, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
@@ -141,6 +141,7 @@ export class HostPluginRuntime {
         cursor,
         // Handles and their lifetime belong to this connection; only policy is shared.
         this.createLoopbackHost(),
+        () => this.hostWorkspaceTypes(),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -405,6 +406,7 @@ export class HostPluginRuntime {
       peerDeviceIds: this.connections.peerDeviceIds().map(shortId),
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
+      workspaceTypes: this.hostWorkspaceTypes(),
       codex: this.codex.status(),
       acp: this.acp.status(),
     }
@@ -472,6 +474,38 @@ export class HostPluginRuntime {
       }
     }
     return capabilities
+  }
+
+  private hostWorkspaceTypes(): RemoteWorkspaceTypeDescription[] {
+    const types: RemoteWorkspaceTypeDescription[] = []
+    if (this.codex.isAvailable()) {
+      types.push({
+        id: 'codex',
+        name: 'CodeX',
+        capability: 'codex.appserver.v1',
+        available: true,
+      })
+    }
+    if (this.acp.isAvailable()) {
+      for (const backend of this.acp.availableBackends()) {
+        if (backend === 'cursor') {
+          types.push({
+            id: 'cursor',
+            name: 'Cursor',
+            capability: 'agent.acp.cursor.v1',
+            available: true,
+          })
+        } else if (backend === 'antigravity') {
+          types.push({
+            id: 'antigravity',
+            name: 'Antigravity',
+            capability: 'agent.acp.antigravity.v1',
+            available: true,
+          })
+        }
+      }
+    }
+    return types
   }
 
   private acpAvailable(command: string): boolean {

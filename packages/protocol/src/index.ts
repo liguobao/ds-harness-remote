@@ -620,8 +620,16 @@ export interface HarnessRemoteStreamClosedData {
   }
 }
 
+export interface RemoteWorkspaceTypeDescription {
+  id: string
+  name: string
+  capability: string
+  available: boolean
+}
+
 export interface HarnessTransportDescription {
   capabilities: string[]
+  workspaceTypes?: RemoteWorkspaceTypeDescription[]
 }
 
 export type CodexPermissionPreset = 'workspace-write' | 'danger-full-access'
@@ -896,6 +904,30 @@ export const helloAckPayloadSchema = z.object({
   webrtcEnabled: z.boolean().optional(),
   webrtcFallbackTimeoutMs: z.number().int().positive().optional(),
 })
+
+export const remoteWorkspaceTypeDescriptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  capability: z.string().min(1),
+  available: z.boolean(),
+})
+
+export const harnessTransportDescriptionSchema = z.object({
+  capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
+  workspaceTypes: z.array(remoteWorkspaceTypeDescriptionSchema).optional(),
+})
+
+export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDescription[] {
+  if (!Array.isArray(value)) return []
+  const types: RemoteWorkspaceTypeDescription[] = []
+  for (const item of value) {
+    const result = remoteWorkspaceTypeDescriptionSchema.safeParse(item)
+    if (result.success) {
+      types.push(result.data)
+    }
+  }
+  return types
+}
 
 export const connectRequestPayloadSchema = z.object({
   hostDeviceId: z.string().min(1),

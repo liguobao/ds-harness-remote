@@ -4351,6 +4351,28 @@ var helloAckPayloadSchema = external_exports.object({
   webrtcEnabled: external_exports.boolean().optional(),
   webrtcFallbackTimeoutMs: external_exports.number().int().positive().optional()
 });
+var remoteWorkspaceTypeDescriptionSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  name: external_exports.string().min(1),
+  capability: external_exports.string().min(1),
+  available: external_exports.boolean()
+});
+var harnessTransportDescriptionSchema = external_exports.object({
+  capabilities: external_exports.array(external_exports.string().min(1)).refine(uniqueStrings),
+  workspaceTypes: external_exports.array(remoteWorkspaceTypeDescriptionSchema).optional()
+});
+function parseRemoteWorkspaceTypes(value) {
+  if (!Array.isArray(value))
+    return [];
+  const types = [];
+  for (const item of value) {
+    const result = remoteWorkspaceTypeDescriptionSchema.safeParse(item);
+    if (result.success) {
+      types.push(result.data);
+    }
+  }
+  return types;
+}
 var connectRequestPayloadSchema = external_exports.object({
   hostDeviceId: external_exports.string().min(1),
   preferredTransports: external_exports.array(transportEnum).min(1)
@@ -22493,6 +22515,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
+  const workspaceTypes = isRecord10(value) && "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
   return {
     commandList: remoteGateway || apiProxy && fallback.commandList,
     fileViewer: capabilities.has("fileviewer.read.v1"),
@@ -22502,7 +22525,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     ...sessionFormat === void 0 ? {} : { sessionFormat },
     codex,
     cursor: cursor2,
-    antigravity
+    antigravity,
+    ...workspaceTypes === void 0 ? {} : { workspaceTypes }
   };
 }
 async function waitForCodexFrames(stream, signal) {
@@ -23599,7 +23623,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback) {
+  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes) {
     this.harnessApi = harnessApi;
     this.maxPending = maxPending;
     this.logger = logger;
@@ -23609,6 +23633,7 @@ var RpcRouter = class {
     this.codex = codex;
     this.acp = acp;
     this.loopback = loopback;
+    this.workspaceTypes = workspaceTypes;
   }
   active = 0;
   async closePeerStreams() {
@@ -23659,7 +23684,19 @@ var RpcRouter = class {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
-        return { capabilities: [...this.capabilities()] };
+        const capabilities = [...this.capabilities()];
+        let workspaceTypes;
+        if (this.workspaceTypes !== void 0) {
+          try {
+            workspaceTypes = parseRemoteWorkspaceTypes(this.workspaceTypes());
+          } catch {
+            workspaceTypes = [];
+          }
+        }
+        return {
+          capabilities,
+          ...workspaceTypes === void 0 ? {} : { workspaceTypes }
+        };
       }
       case "harness.api.call":
         return this.requireApiProxy().call(params);
@@ -29950,7 +29987,8 @@ var HostPluginRuntime = class {
         codex,
         cursor2,
         // Handles and their lifetime belong to this connection; only policy is shared.
-        this.createLoopbackHost()
+        this.createLoopbackHost(),
+        () => this.hostWorkspaceTypes()
       );
     }, this.logger);
     if (config.serverUrl !== void 0) {
@@ -30200,6 +30238,7 @@ var HostPluginRuntime = class {
       peerDeviceIds: this.connections.peerDeviceIds().map(shortId5),
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
+      workspaceTypes: this.hostWorkspaceTypes(),
       codex: this.codex.status(),
       acp: this.acp.status()
     };
@@ -30259,6 +30298,37 @@ var HostPluginRuntime = class {
       }
     }
     return capabilities;
+  }
+  hostWorkspaceTypes() {
+    const types = [];
+    if (this.codex.isAvailable()) {
+      types.push({
+        id: "codex",
+        name: "CodeX",
+        capability: "codex.appserver.v1",
+        available: true
+      });
+    }
+    if (this.acp.isAvailable()) {
+      for (const backend of this.acp.availableBackends()) {
+        if (backend === "cursor") {
+          types.push({
+            id: "cursor",
+            name: "Cursor",
+            capability: "agent.acp.cursor.v1",
+            available: true
+          });
+        } else if (backend === "antigravity") {
+          types.push({
+            id: "antigravity",
+            name: "Antigravity",
+            capability: "agent.acp.antigravity.v1",
+            available: true
+          });
+        }
+      }
+    }
+    return types;
   }
   acpAvailable(command) {
     try {

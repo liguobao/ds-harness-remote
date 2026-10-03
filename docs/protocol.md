@@ -758,12 +758,68 @@ Host handshake 的 capability 例子：
 ]
 ```
 
-建立 Noise channel 后，Desktop Client 必须先调用 `harness.transport.describe`，Params 为
-空对象，Result 为 `{ "capabilities": string[] }`。当前 Host 按实际注入服务动态返回
+建立 Noise channel 后，Desktop/Web/Android Client 必须先调用 `harness.transport.describe`，Params 为
+空对象，Result 为 `{ "capabilities": string[], "workspaceTypes"?: RemoteWorkspaceTypeDescription[] }`。当前 Host 按实际注入服务动态返回
 `harness.api.v1`、`harness.remote.v1` 或 `harness.remote.v3`，不得宣告不存在的 carrier。
 Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使用
 `harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
+
+### 17.1 工作区类型能力声明（workspaceTypes）
+
+为支持 Web 等客户端动态渲染工作区类型选择器并避免在前端硬编码判断，Host 在 `harness.transport.describe`
+响应中提供结构化的工作区类型列表 `workspaceTypes`：
+
+```json
+{
+  "capabilities": [
+    "transport.relay",
+    "harness.api.v1",
+    "harness.api.transfer.v1",
+    "codex.appserver.v1",
+    "codex.appserver.transfer.v1"
+  ],
+  "workspaceTypes": [
+    {
+      "id": "codex",
+      "name": "CodeX",
+      "capability": "codex.appserver.v1",
+      "available": true
+    }
+  ]
+}
+```
+
+#### 概念区分
+
+在 Remote 协议中明确区分以下三层概念：
+
+1. **工作区类型（workspace type）**：
+   - 表示 Host 支持的工作区类型与协议载体形态（例如 CodeX）。
+   - `id` 使用稳定的小写标识符（如 `codex`）；`name` 仅用于展示（如 `CodeX`）；`capability` 为关联的底层能力标识（如 `codex.appserver.v1`）；`available` 表示当前真实可调用。
+   - Web 端与客户端通过遍历 `workspaceTypes` 动态渲染工作区类型入口，无需为新类型增加前端分支判断。
+   - 严禁将项目路径、会话内容、prompt、文件内容或 tool output 放入能力描述响应。
+2. **工作区 / 项目（workspace / project）**：
+   - 表示 Host 上的具体项目目录实体（例如 CodeX 的具体 project root 目录，或 Harness 原生 workspace 目录）。
+   - 具体项目依然通过各工作区领域的数据面接口（例如 `project/list`、`thread/list` 中的 cwd 或 Harness workspace 列表）获取，绝不混入类型声明。
+3. **会话（session / thread）**：
+   - 表示在具体工作区/项目上下文中的具体交互会话。
+   - 例如 CodeX Thread（`codex:<threadId>`）或 Harness Session ID，由各会话生命周期与消息流管理。
+
+#### 准确性与兼容约束
+
+1. **真实可用性判定**：
+   - 只有真实可调用工作区运行时（如 CodeX App Server）且能力协商完成（`account/read` 成功确认已登录）时，才声明 `available: true`。
+   - 若服务启动失败、权限不足、未登录、协议不兼容或能力未协商成功，必须返回不可用或直接省略该条目，严禁仅根据本地安装文件存在就声明可用。
+2. **双向兼容性**：
+   - 继续保留现有的 `capabilities` 字符串数组；不支持 `workspaceTypes` 的旧客户端仍可通过 `codex.appserver.v1` 工作。
+   - 新客户端支持读取 `workspaceTypes`，并在未提供时平滑回退；遇到 malformed 数据安全容错，不得崩溃。
+   - 不修改现有的 Harness Remote、WebRTC、Relay、Noise 加密和 Server 中继协议。
+3. **新增工作区类型扩展规范**：
+   - 后续扩展新的工作区类型时，必须配套提供：
+     1. 对应的 `capability` 标识；
+     2. `workspaceTypes` 中的声明条目（稳定小写 `id` 与展示名称 `name`）；
+     3. 对应的数据面 RPC / Stream / Event allowlist 策略及通道隔离实现。
 
 ApiProxy 与 Typert Remote contract 仍随 Desktop Plugin 发布物升级，但新增的可选业务能力
 必须保持加法兼容。当前实现不翻译 rc.2 与 alpha 的完整 Harness 业务模型：本地与远端

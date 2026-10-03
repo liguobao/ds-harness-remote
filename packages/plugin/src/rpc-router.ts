@@ -1,7 +1,9 @@
 import {
   createRpcError,
   createRpcResponse,
+  parseRemoteWorkspaceTypes,
   type RemoteMessage,
+  type RemoteWorkspaceTypeDescription,
   type RpcErrorPayload,
   type RpcRequestPayload,
 } from '@dsh-remote/protocol'
@@ -85,6 +87,7 @@ export class RpcRouter {
     private readonly codex?: CodexPeerBridge,
     private readonly acp?: AcpPeerBridge,
     private readonly loopback?: LoopbackHost,
+    private readonly workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -137,7 +140,19 @@ export class RpcRouter {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        return { capabilities: [...this.capabilities()] }
+        const capabilities = [...this.capabilities()]
+        let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
+        if (this.workspaceTypes !== undefined) {
+          try {
+            workspaceTypes = parseRemoteWorkspaceTypes(this.workspaceTypes())
+          } catch {
+            workspaceTypes = []
+          }
+        }
+        return {
+          capabilities,
+          ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
+        }
       }
       case 'harness.api.call': return this.requireApiProxy().call(params)
       case 'harness.api.transfer.open': return this.requireApiProxy().openTransfer(params)

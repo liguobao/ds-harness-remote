@@ -1,4 +1,4 @@
-import { createRpcRequest } from '@dsh-remote/protocol'
+import { createRpcRequest, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import type { HarnessApiBridge } from '../src/harness-api-bridge.js'
 import type { RemoteFileViewerBridge } from '../src/file-viewer-bridge.js'
@@ -119,6 +119,108 @@ describe('RpcRouter', () => {
     }))
     expect(unavailable).toMatchObject({ type: 'rpc.error', payload: { code: 'FEATURE_NOT_SUPPORTED' } })
   })
+
+  it('describes workspace types when supported and avoids leaking project paths or session contents', async () => {
+    const capabilities = () => ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1']
+    const workspaceTypes = () => [{
+      id: 'codex',
+      name: 'CodeX',
+      capability: 'codex.appserver.v1',
+      available: true,
+    }]
+    const router = createRouter({}, undefined, undefined, capabilities, undefined, workspaceTypes)
+
+    const response = await router.handle(createRpcRequest('harness.transport.describe', {}))
+    expect(response).toMatchObject({
+      type: 'rpc.response',
+      payload: {
+        result: {
+          capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1'],
+          workspaceTypes: [{
+            id: 'codex',
+            name: 'CodeX',
+            capability: 'codex.appserver.v1',
+            available: true,
+          }],
+        },
+      },
+    })
+
+    const result = (response.payload as { result: Record<string, unknown> }).result
+    // Guarantee no leaking of project path, prompt, file content, or tool output
+    const serialized = JSON.stringify(result)
+    expect(serialized).not.toMatch(/(\/|\\)Users|(\/|\\)home|prompt|output|projectPath|cwd/i)
+    expect(Object.keys(result)).toEqual(['capabilities', 'workspaceTypes'])
+    const types = result.workspaceTypes as Array<Record<string, unknown>>
+    expect(types).toHaveLength(1)
+    expect(Object.keys(types[0])).toEqual(['id', 'name', 'capability', 'available'])
+  })
+
+  it('omits or returns empty workspace types when CodeX is unavailable or negotiation fails', async () => {
+    const router = createRouter({}, undefined, undefined, () => ['transport.relay', 'harness.api.v1'], undefined, () => [])
+    const response = await router.handle(createRpcRequest('harness.transport.describe', {}))
+    expect(response).toMatchObject({
+      type: 'rpc.response',
+      payload: {
+        result: {
+          capabilities: ['transport.relay', 'harness.api.v1'],
+          workspaceTypes: [],
+        },
+      },
+    })
+  })
+
+  it('preserves legacy capability declaration when workspaceTypes provider is omitted', async () => {
+    const router = createRouter({}, undefined, undefined, () => ['transport.relay', 'codex.appserver.v1'])
+    const response = await router.handle(createRpcRequest('harness.transport.describe', {}))
+    expect(response).toMatchObject({
+      type: 'rpc.response',
+      payload: {
+        result: {
+          capabilities: ['transport.relay', 'codex.appserver.v1'],
+        },
+      },
+    })
+    expect((response.payload as { result: Record<string, unknown> }).result.workspaceTypes).toBeUndefined()
+  })
+
+  it('safely handles malformed workspaceTypes without crashing the Host', async () => {
+    const malformed = () => [
+      { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+      { id: 123, name: 'Invalid' },
+      null,
+      'malformed string entry',
+    ] as unknown as RemoteWorkspaceTypeDescription[]
+    const router = createRouter({}, undefined, undefined, () => ['codex.appserver.v1'], undefined, malformed)
+    const response = await router.handle(createRpcRequest('harness.transport.describe', {}))
+    expect(response).toMatchObject({
+      type: 'rpc.response',
+      payload: {
+        result: {
+          capabilities: ['codex.appserver.v1'],
+          workspaceTypes: [{
+            id: 'codex',
+            name: 'CodeX',
+            capability: 'codex.appserver.v1',
+            available: true,
+          }],
+        },
+      },
+    })
+
+    const throwing = () => { throw new Error('Querying workspace types failed') }
+    const throwingRouter = createRouter({}, undefined, undefined, () => ['codex.appserver.v1'], undefined, throwing)
+    const throwingResponse = await throwingRouter.handle(createRpcRequest('harness.transport.describe', {}))
+    expect(throwingResponse).toMatchObject({
+      type: 'rpc.response',
+      payload: {
+        result: {
+          capabilities: ['codex.appserver.v1'],
+          workspaceTypes: [],
+        },
+      },
+    })
+  })
 })
 
 function createRouter(
@@ -127,6 +229,7 @@ function createRouter(
   logger?: SafeLogger,
   capabilities?: () => readonly string[],
   codex?: CodexPeerBridge,
+  workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
 ): RpcRouter {
   return new RpcRouter({
     call: vi.fn(),
@@ -140,5 +243,5 @@ function createRouter(
     closeTransfer: vi.fn(),
     closeAll: vi.fn(async () => undefined),
     ...overrides,
-  } as unknown as HarnessApiBridge, undefined, logger, fileViewer, undefined, capabilities, codex)
+  } as unknown as HarnessApiBridge, undefined, logger, fileViewer, undefined, capabilities, codex, undefined, undefined, workspaceTypes)
 }

@@ -1,6 +1,11 @@
 import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { CodexAppFrameData, CodexAppStreamClosedData } from '@dsh-remote/protocol'
+import {
+  parseRemoteWorkspaceTypes,
+  type CodexAppFrameData,
+  type CodexAppStreamClosedData,
+  type RemoteWorkspaceTypeDescription,
+} from '@dsh-remote/protocol'
 import { AgentAcpClient, CodexRemoteClient, RemoteClientCore } from '@dsh-remote/client-core'
 import {
   AdaptiveTransport,
@@ -63,6 +68,7 @@ export interface RemoteHostFeatures {
   codex: boolean
   cursor: boolean
   antigravity: boolean
+  workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
 }
 
 interface CodexLoopbackStream {
@@ -1550,6 +1556,7 @@ export async function probeRemoteHostFeatures(
   if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
+  const workspaceTypes = isRecord(value) && 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
   return {
     commandList: remoteGateway || (apiProxy && fallback.commandList),
     fileViewer: capabilities.has('fileviewer.read.v1'),
@@ -1560,6 +1567,7 @@ export async function probeRemoteHostFeatures(
     codex,
     cursor,
     antigravity,
+    ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }
 }
 
