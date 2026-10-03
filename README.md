@@ -83,6 +83,8 @@ Download the latest Android APK from [GitHub Releases](https://github.com/liguob
 
 Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
 
+Tap **Prompts** beside the composer's `+` button to open the saved prompt list, then tap a prompt to send it. Edit prompts in the same panel. Files, Terminal, and Trajectory remain under `+` → **Tool access**.
+
 ### Automated installation (background service)
 
 Install Remote Host as a background service. For service management, login, directory settings,

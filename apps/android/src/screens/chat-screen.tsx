@@ -140,7 +140,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     return () => controller.abort()
   }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
   useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
-  // 「工具访问」→「提示词」列表：连接后加载一次（内置三条 + 本地保存的自定义条目）。
+  // Composer quick prompts: load built-ins and saved entries once per connection.
   useEffect(() => {
     if (connection.phase !== 'connected') return
     if (customPrompts !== undefined || promptsLoadingRef.current) return
@@ -533,6 +533,12 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     setPlusMenuOpen(false)
   }
 
+  const openPromptsPicker = () => {
+    Keyboard.dismiss()
+    setMentionType(null)
+    setPromptsPickerOpen(true)
+  }
+
   const handleBack = () => {
     Keyboard.dismiss()
     if (trajectory) {
@@ -608,14 +614,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
   }
 
-  const pickToolMode = (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => {
+  const pickToolMode = (mode: 'files' | 'terminal' | 'trajectory') => {
     setToolPickerOpen(false)
     if (mode === 'trajectory') {
       setTrajectory(value => !value)
-      return
-    }
-    if (mode === 'prompts') {
-      setPromptsPickerOpen(true)
       return
     }
     setToolsMode(mode)
@@ -979,6 +981,16 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
             >
               <Plus size={20} color={connected ? colors.ink : colors.disabled} />
             </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.quickPrompts}
+              accessibilityState={{ disabled: !connected || permissionSelecting, expanded: promptsPickerOpen }}
+              disabled={!connected || permissionSelecting}
+              onPress={openPromptsPicker}
+              style={({ pressed }) => [styles.quickPromptsButton, pressed && styles.plusPressed, (!connected || permissionSelecting) && styles.plusDisabled]}
+            >
+              <Text style={styles.quickPromptsText} numberOfLines={1}>{zhCN.chat.quickPrompts}</Text>
+            </Pressable>
             <View style={styles.composerSpacer} />
             {sessionModels !== undefined && (
               <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.selectModel} onPress={() => setModelPickerOpen(true)} style={styles.modelChip}>
@@ -1326,7 +1338,7 @@ function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
   visible: boolean
   trajectory: boolean
   onClose: () => void
-  onPick: (mode: 'files' | 'terminal' | 'prompts' | 'trajectory') => void
+  onPick: (mode: 'files' | 'terminal' | 'trajectory') => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1335,7 +1347,6 @@ function ToolAccessPicker({ visible, trajectory, onClose, onPick }: {
     { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
     { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
     { id: 'trajectory' as const, icon: ListTree, name: zhCN.trajectory.title, description: trajectory ? zhCN.trajectory.close : zhCN.trajectory.open },
-    { id: 'prompts' as const, icon: OfficialMenuIcons.sliders, name: zhCN.chat.toolPrompts, description: zhCN.chat.toolPromptsDescription },
   ]
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -2359,6 +2370,8 @@ function createStyles(colors: ThemeColors) {
   // Keep the actual target at the Android 48dp minimum. hitSlop is not
   // reliable when a control sits inside a clipped/native text-input surface.
   plusButton: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
+  quickPromptsButton: { minWidth: 48, minHeight: 48, flexShrink: 0, paddingHorizontal: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
+  quickPromptsText: { ...type.smallStrong, color: colors.primary },
   plusPressed: { opacity: 0.7 },
   plusDisabled: { opacity: 0.52 },
   plusMenuOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surface, marginBottom: spacing.xs },

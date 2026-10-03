@@ -284,7 +284,7 @@ function agentBackend(value: unknown): AgentBackend {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
-/** A user-managed quick prompt shown under 「工具访问」→「提示词」. */
+/** A user-managed quick prompt shown in the composer's quick prompts picker. */
 export interface CustomPrompt {
   id: string
   title: string

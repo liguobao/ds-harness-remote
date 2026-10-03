@@ -41,6 +41,8 @@
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.10.7",
     "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "19.1.0",
+    "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3",
     "vitest": "^2.1.8"
   },
