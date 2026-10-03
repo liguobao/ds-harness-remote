@@ -186,9 +186,9 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     cursor: {
       // Experimental: off by default until Host has `agent login` / API key ready.
       enabled: parsed.cursor?.enabled ?? false,
-      binary: parsed.cursor?.binary ?? 'agent',
+      binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? 'agent',
     },
-    acp: { enabled: parsed.acp?.enabled ?? true, backends: [...new Set(['codex','cursor','kimi',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? ['acp'], ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },
+    acp: { enabled: parsed.acp?.enabled ?? true, backends: [...new Set(['codex','cursor','kimi','antigravity',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi',antigravity:'agy'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? (id === 'antigravity' ? ['--input-format', 'stream-json', '--output-format', 'stream-json'] : ['acp']), ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },
   }
 }
 

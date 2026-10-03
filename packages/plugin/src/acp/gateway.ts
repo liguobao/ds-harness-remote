@@ -13,6 +13,7 @@ import {
   type CursorAcpInbound,
   type CursorAcpLike,
 } from './adapters/cursor-process.js'
+import { AntigravityAcpClient } from './adapters/antigravity-process.js'
 import {
   ACP_METHOD_ALLOWLIST,
   isSessionMutation,
@@ -97,7 +98,12 @@ export class AcpRemoteGateway {
   constructor(
     readonly config: ResolvedCursorConfig,
     private readonly logger: SafeLogger,
-    private readonly createAcp: AcpFactory = (binary, targetLogger) => new CursorAcpClient(binary, targetLogger),
+    private readonly createAcp: AcpFactory = (binary, targetLogger) => {
+      if (binary.endsWith('agy') || binary.includes('antigravity')) {
+        return new AntigravityAcpClient(binary, targetLogger)
+      }
+      return new CursorAcpClient(binary, targetLogger)
+    },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
   ) {}
 
@@ -714,6 +720,8 @@ export function cursorBinaryCandidates(configured: string): string[] {
   return [
     join(userHome, '.local', 'bin', 'agent'),
     'agent',
+    join(userHome, '.local', 'bin', 'agy'),
+    'agy',
   ]
 }
 

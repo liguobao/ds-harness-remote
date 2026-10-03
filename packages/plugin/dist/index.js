@@ -19575,12 +19575,12 @@ function resolveConfig(input2 = {}, env = process.env) {
     cursor: {
       // Experimental: off by default until Host has `agent login` / API key ready.
       enabled: parsed.cursor?.enabled ?? false,
-      binary: parsed.cursor?.binary ?? "agent"
+      binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
     },
-    acp: { enabled: parsed.acp?.enabled ?? true, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
+    acp: { enabled: parsed.acp?.enabled ?? true, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
       const d = parsed.acp?.backends?.find((x) => x.id === id5);
       const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
-      return { id: id5, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? { codex: "codex", cursor: "agent", kimi: "kimi" }[id5] ?? id5, args: d?.args ?? legacy?.args ?? ["acp"], ...d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {} };
+      return { id: id5, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? { codex: "codex", cursor: "agent", kimi: "kimi", antigravity: "agy" }[id5] ?? id5, args: d?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]), ...d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {} };
     }) }
   };
 }
@@ -28064,6 +28064,317 @@ function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/acp/adapters/antigravity-process.ts
+import { spawn as spawn4 } from "node:child_process";
+import { Buffer as Buffer5 } from "node:buffer";
+import { existsSync as existsSync3 } from "node:fs";
+var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
+var ACP_START_TIMEOUT_MS2 = 2e4;
+var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
+var AntigravityAcpError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "AntigravityAcpError";
+  }
+};
+function resolveAntigravityBinary(preferred) {
+  if (preferred && preferred.trim() !== "" && preferred !== "agent" && preferred !== "cursor") {
+    return preferred.trim();
+  }
+  const defaultLocal = "/var/lib/dsh/.local/bin/agy";
+  if (existsSync3(defaultLocal)) {
+    return defaultLocal;
+  }
+  return "agy";
+}
+var AntigravityAcpClient = class {
+  constructor(binary = "agy", logger, spawnAcp = (bin, args) => spawn4(bin, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: process.env
+  })) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAcp = spawnAcp;
+  }
+  process;
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  stdoutBuffer = Buffer5.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  startPromise;
+  activeConversationId;
+  currentPromptPending;
+  start() {
+    if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  async call(method, params, timeoutMs) {
+    if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
+    if (method === "initialize") {
+      return {
+        protocolVersion: 1,
+        capabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false
+        },
+        agentInfo: {
+          name: "antigravity",
+          version: "1.2.16"
+        }
+      };
+    }
+    if (method === "session/new") {
+      const sessionId = this.activeConversationId || `sess_${Date.now()}`;
+      return { sessionId };
+    }
+    if (method === "session/load") {
+      const sessionId = params?.sessionId ?? this.activeConversationId ?? `sess_${Date.now()}`;
+      return { sessionId };
+    }
+    if (method === "session/cancel") {
+      return { cancelled: true };
+    }
+    if (method === "session/prompt") {
+      const p = params;
+      const promptText = Array.isArray(p.prompt) ? p.prompt.map((item) => item.text).join("\n") : String(params);
+      return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS2);
+    }
+    throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", `Method ${method} is not supported by Antigravity ACP adapter.`);
+  }
+  async respond(_id, _result) {
+  }
+  async respondError(_id, _code, _message) {
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.ready = false;
+    if (this.currentPromptPending) {
+      clearTimeout(this.currentPromptPending.timer);
+      this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "Antigravity ACP was closed."));
+      this.currentPromptPending = void 0;
+    }
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve5) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve5();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve5();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new AntigravityAcpError("ANTIGRAVITY_STARTING", "Antigravity ACP is already starting.");
+    }
+    const bin = resolveAntigravityBinary(this.binary);
+    const child = this.spawnAcp(bin, ["--input-format", "stream-json", "--output-format", "stream-json"]);
+    this.process = child;
+    this.stdoutBuffer = Buffer5.alloc(0);
+    this.stderrBytes = 0;
+    let initResolved = false;
+    const initPromise = new Promise((resolve5, reject) => {
+      const timer = setTimeout(() => {
+        if (!initResolved) {
+          reject(new AntigravityAcpError("ANTIGRAVITY_INIT_TIMEOUT", "Timed out waiting for Antigravity init event."));
+        }
+      }, ACP_START_TIMEOUT_MS2);
+      timer.unref?.();
+      const checkInit = (chunk) => {
+        this.consumeStdout(chunk, (event) => {
+          if (event.event === "init") {
+            initResolved = true;
+            clearTimeout(timer);
+            const conversationId = event.conversation_id;
+            if (typeof conversationId === "string") {
+              this.activeConversationId = conversationId;
+            }
+            resolve5();
+          }
+        });
+      };
+      child.stdout.on("data", (chunk) => {
+        if (!initResolved) {
+          checkInit(Buffer5.from(chunk));
+        } else {
+          this.consumeStdout(Buffer5.from(chunk));
+        }
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer5.byteLength(chunk));
+    });
+    child.on("error", (error) => {
+      this.ready = false;
+      if (!this.closed) {
+        this.logger?.warn("Antigravity binary error", { message: error.message });
+        this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
+      }
+    });
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      if (this.currentPromptPending) {
+        clearTimeout(this.currentPromptPending.timer);
+        this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited unexpectedly."));
+        this.currentPromptPending = void 0;
+      }
+      if (!this.closed) {
+        this.logger?.warn("Antigravity process exited", { code: code ?? "none", signal: signal ?? "none" });
+        this.notifyUnavailable("ANTIGRAVITY_EXITED");
+      }
+    });
+    try {
+      await initPromise;
+      this.ready = true;
+      this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
+    } catch (err) {
+      child.kill("SIGTERM");
+      throw err;
+    }
+  }
+  sendPrompt(sessionId, promptText, timeoutMs) {
+    if (this.currentPromptPending) {
+      throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
+    }
+    return new Promise((resolve5, reject) => {
+      const timer = setTimeout(() => {
+        if (this.currentPromptPending) {
+          this.currentPromptPending = void 0;
+          reject(new AntigravityAcpError("ANTIGRAVITY_REQUEST_TIMEOUT", "Antigravity turn timed out."));
+        }
+      }, timeoutMs);
+      timer.unref?.();
+      this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
+      const payload = {
+        event: "user",
+        message: { content: promptText }
+      };
+      const data2 = Buffer5.from(`${JSON.stringify(payload)}
+`, "utf8");
+      this.process?.stdin.write(data2);
+    });
+  }
+  consumeStdout(chunk, onRawEvent) {
+    this.stdoutBuffer = Buffer5.concat([this.stdoutBuffer, chunk]);
+    while (true) {
+      const newlineIndex = this.stdoutBuffer.indexOf(10);
+      if (newlineIndex === -1) break;
+      const line = this.stdoutBuffer.subarray(0, newlineIndex).toString("utf8").trim();
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newlineIndex + 1);
+      if (line === "") continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (onRawEvent) {
+          onRawEvent(parsed);
+        }
+        this.handleAgyEvent(parsed);
+      } catch (err) {
+        this.logger?.debug("Failed to parse agy stdout line", { line, error: String(err) });
+      }
+    }
+  }
+  handleAgyEvent(event) {
+    const eventName = event.event;
+    const current = this.currentPromptPending;
+    const sessionId = current?.sessionId ?? this.activeConversationId ?? "default";
+    if (eventName === "step_update" && typeof event.step_update === "object" && event.step_update !== null) {
+      const step = event.step_update;
+      const stepType = step.step_type;
+      if (stepType === "agent_response" && typeof step.text_delta === "string") {
+        this.emitNotification("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            text: step.text_delta
+          }
+        });
+      } else if (stepType === "tool") {
+        const toolInfo = step.tool_info ?? {};
+        const toolName = typeof step.tool_name === "string" ? step.tool_name : toolInfo.name ?? "tool";
+        const callId = String(step.step_index ?? Date.now());
+        if (step.state === "ACTIVE") {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "tool_call",
+              callId,
+              name: toolName,
+              parameters: toolInfo.parameters ?? {}
+            }
+          });
+        } else if (step.state === "DONE") {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "tool_call_update",
+              callId,
+              output: typeof toolInfo.output === "string" ? toolInfo.output : JSON.stringify(toolInfo.output ?? "")
+            }
+          });
+        }
+      }
+    } else if (eventName === "result" && typeof event.result === "object" && event.result !== null) {
+      const result = event.result;
+      if (current) {
+        clearTimeout(current.timer);
+        this.currentPromptPending = void 0;
+        if (result.status === "ERROR") {
+          current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
+        } else {
+          current.resolve({ stopReason: "end_turn", response: result.response });
+        }
+      }
+    }
+  }
+  emitNotification(method, params) {
+    const notification = { kind: "notification", method, params };
+    for (const handler of this.inboundHandlers) {
+      try {
+        handler(notification);
+      } catch (err) {
+        this.logger?.warn("Error in inbound ACP handler", { error: String(err) });
+      }
+    }
+  }
+  notifyUnavailable(code) {
+    for (const handler of this.unavailableHandlers) {
+      try {
+        handler(code);
+      } catch (err) {
+        this.logger?.warn("Error in unavailable ACP handler", { error: String(err) });
+      }
+    }
+  }
+};
+
 // src/acp/method-policy.ts
 var id4 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
@@ -28121,7 +28432,7 @@ function isSessionMutation(method) {
 }
 
 // src/acp/peer-bridge.ts
-import { Buffer as Buffer5 } from "node:buffer";
+import { Buffer as Buffer6 } from "node:buffer";
 var streamOpenSchema4 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   sessionId: external_exports.string().min(1).max(256)
@@ -28305,7 +28616,7 @@ var AcpPeerBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer5.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer6.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input2) {
@@ -28381,7 +28692,7 @@ function decodeCanonicalBase644(value) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
-  const decoded = Buffer5.from(value, "base64");
+  const decoded = Buffer6.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
@@ -28424,7 +28735,12 @@ var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
   "tool_call_update"
 ]);
 var AcpRemoteGateway = class {
-  constructor(config, logger, createAcp = (binary, targetLogger) => new CursorAcpClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
+  constructor(config, logger, createAcp = (binary, targetLogger) => {
+    if (binary.endsWith("agy") || binary.includes("antigravity")) {
+      return new AntigravityAcpClient(binary, targetLogger);
+    }
+    return new CursorAcpClient(binary, targetLogger);
+  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
     this.config = config;
     this.logger = logger;
     this.createAcp = createAcp;
@@ -28971,7 +29287,9 @@ function cursorBinaryCandidates(configured) {
   const userHome = homedir4();
   return [
     join6(userHome, ".local", "bin", "agent"),
-    "agent"
+    "agent",
+    join6(userHome, ".local", "bin", "agy"),
+    "agy"
   ];
 }
 function errorCode4(error) {
@@ -28991,7 +29309,7 @@ function isRecord18(value) {
 }
 
 // src/codex-workspace-bridge.ts
-import { spawn as spawn4 } from "node:child_process";
+import { spawn as spawn5 } from "node:child_process";
 import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join7, relative as relative3, resolve as resolve4 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
@@ -29346,7 +29664,7 @@ var CodexWorkspaceBridge = class {
 };
 function pipeTerminalSpawner() {
   return async (spec) => {
-    const child = spawn4(spec.argv[0], spec.argv.slice(1), {
+    const child = spawn5(spec.argv[0], spec.argv.slice(1), {
       cwd: spec.cwd,
       stdio: "pipe",
       windowsHide: true,
