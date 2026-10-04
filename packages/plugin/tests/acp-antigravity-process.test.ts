@@ -201,9 +201,10 @@ describe('AntigravityAcpClient', () => {
     await client.close()
   })
 
-  it('includes agy in binary candidates and creates adapter', () => {
+  it('resolves binary candidates and creates adapter', () => {
     const candidates = cursorBinaryCandidates('agent')
-    expect(candidates).toContain('agy')
+    expect(candidates).not.toContain('agy')
+    expect(candidates).toContain('agent')
     expect(cursorBinaryCandidates('agy')).toEqual([expect.stringContaining('agy'), 'agy'])
     expect(cursorBinaryCandidates('custom-bin')).toEqual(['custom-bin'])
     const adapter = createAntigravityAcpAdapter('agy-test', logger(), () => fakeProcess().child as any)

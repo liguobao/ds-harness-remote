@@ -289,4 +289,27 @@ describe('AcpRemoteGateway', () => {
       })).toBe(true)
     })
   })
+
+  it('only reports antigravity in availableBackends when cursor binary is unavailable', async () => {
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, binary: 'agent' },
+      silentLogger(),
+      (binary) => {
+        if (binary.includes('agent') || binary === 'agent') {
+          throw new Error('agent: not found')
+        }
+        return readyAcp()
+      },
+    )
+    await gateway.start()
+    expect(gateway.isAvailable()).toBe(true)
+    expect(gateway.availableBackends()).toEqual(['antigravity'])
+    expect(gateway.status().availableBackends).toEqual(['antigravity'])
+    const init = await gateway.call('conn-test', {
+      method: 'initialize',
+      params: { protocolVersion: 1 },
+    }) as { backend: string; availableBackends: string[] }
+    expect(init.backend).toBe('antigravity')
+    expect(init.availableBackends).toEqual(['antigravity'])
+  })
 })

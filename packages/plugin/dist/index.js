@@ -29699,9 +29699,7 @@ function cursorBinaryCandidates(configured) {
   if (configured === "agent" || configured === "cursor") {
     return [
       join6(userHome, ".local", "bin", "agent"),
-      "agent",
-      join6(userHome, ".local", "bin", "agy"),
-      "agy"
+      "agent"
     ];
   }
   return [configured];

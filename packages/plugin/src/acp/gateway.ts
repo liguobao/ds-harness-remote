@@ -824,8 +824,6 @@ export function cursorBinaryCandidates(configured: string): string[] {
     return [
       join(userHome, '.local', 'bin', 'agent'),
       'agent',
-      join(userHome, '.local', 'bin', 'agy'),
-      'agy',
     ]
   }
   return [configured]
