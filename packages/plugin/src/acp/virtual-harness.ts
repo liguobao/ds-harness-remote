@@ -433,22 +433,35 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
-    return success(this.historyPage(session, undefined, optionalPositiveInteger(request.maxMessages) ?? 50))
+    return success(this.historyPage(session, {
+      beforeSeq: optionalInteger(request.beforeSeq),
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
+    }))
   }
 
   private async sessionPage(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
-    return success(this.historyPage(session, optionalInteger(request.beforeSeq), optionalPositiveInteger(request.limit) ?? 50))
+    const page = this.historyPage(session, {
+      beforeSeq: optionalInteger(request.beforeSeq),
+      throughSeq: optionalInteger(request.throughSeq),
+      limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50,
+    })
+    return success({ records: page.records, hasMore: page.hasMore })
   }
 
-  private historyPage(session: AcpSessionState, beforeSeq: number | undefined, limit: number) {
-    const filtered = beforeSeq === undefined
-      ? session.events
-      : session.events.filter(entry => entry.event.seq < beforeSeq)
-    const records = filtered.slice(Math.max(0, filtered.length - limit))
-    const cursor = records[0]?.event.seq ?? -1
+  private historyPage(
+    session: AcpSessionState,
+    options: { beforeSeq?: number; throughSeq?: number; limit?: number } = {},
+  ) {
+    const lastSessionSeq = session.events.at(-1)?.event.seq ?? -1
+    const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq)
+    const endSeq = Math.min(throughSeq, options.beforeSeq === undefined ? throughSeq : options.beforeSeq - 1)
+    const window = endSeq < 0 ? [] : session.events.filter(entry => entry.event.seq <= endSeq)
+    const limit = options.limit ?? 50
+    const records = window.slice(Math.max(0, window.length - limit))
+    const cursor = records.at(-1)?.event.seq ?? -1
     return {
       header: {
         version: 3,
@@ -460,7 +473,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       cursor,
       nextTurn: 1,
       records,
-      hasMore: filtered.length > records.length,
+      hasMore: window.length > records.length,
       ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
       assistantStream: { revision: 0 },
     }
@@ -550,13 +563,15 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) throw new Error('The Session was not found.')
-    const history = this.historyPage(session, undefined, optionalPositiveInteger(request.maxMessages) ?? 50)
+    const history = this.historyPage(session, {
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
+    })
     const queue = new AsyncValueQueue(signal)
     const follow: FollowState = {
       sessionId,
       acpSessionId: session.acpSessionId,
       queue,
-      nextSeq: Math.max(0, ...session.events.map(entry => entry.event.seq)) + 1,
+      nextSeq: session.events.length,
       turn: 1,
       stepOpen: session.running,
       streamActive: false,

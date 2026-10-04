@@ -18719,18 +18719,30 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    return success2(this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50));
+    return success2(this.historyPage(session, {
+      beforeSeq: optionalInteger2(request.beforeSeq),
+      limit: optionalPositiveInteger2(request.maxMessages) ?? 50
+    }));
   }
   async sessionPage(request) {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    return success2(this.historyPage(session, optionalInteger2(request.beforeSeq), optionalPositiveInteger2(request.limit) ?? 50));
+    const page = this.historyPage(session, {
+      beforeSeq: optionalInteger2(request.beforeSeq),
+      throughSeq: optionalInteger2(request.throughSeq),
+      limit: optionalPositiveInteger2(request.limit) ?? optionalPositiveInteger2(request.maxMessages) ?? 50
+    });
+    return success2({ records: page.records, hasMore: page.hasMore });
   }
-  historyPage(session, beforeSeq, limit) {
-    const filtered = beforeSeq === void 0 ? session.events : session.events.filter((entry) => entry.event.seq < beforeSeq);
-    const records = filtered.slice(Math.max(0, filtered.length - limit));
-    const cursor2 = records[0]?.event.seq ?? -1;
+  historyPage(session, options = {}) {
+    const lastSessionSeq = session.events.at(-1)?.event.seq ?? -1;
+    const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq);
+    const endSeq = Math.min(throughSeq, options.beforeSeq === void 0 ? throughSeq : options.beforeSeq - 1);
+    const window = endSeq < 0 ? [] : session.events.filter((entry) => entry.event.seq <= endSeq);
+    const limit = options.limit ?? 50;
+    const records = window.slice(Math.max(0, window.length - limit));
+    const cursor2 = records.at(-1)?.event.seq ?? -1;
     return {
       header: {
         version: 3,
@@ -18742,7 +18754,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       cursor: cursor2,
       nextTurn: 1,
       records,
-      hasMore: filtered.length > records.length,
+      hasMore: window.length > records.length,
       ...session.running ? { activeTurnId: "cursor-live" } : {},
       assistantStream: { revision: 0 }
     };
@@ -18811,13 +18823,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) throw new Error("The Session was not found.");
-    const history = this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50);
+    const history = this.historyPage(session, {
+      limit: optionalPositiveInteger2(request.maxMessages) ?? 50
+    });
     const queue = new AsyncValueQueue3(signal);
     const follow = {
       sessionId,
       acpSessionId: session.acpSessionId,
       queue,
-      nextSeq: Math.max(0, ...session.events.map((entry) => entry.event.seq)) + 1,
+      nextSeq: session.events.length,
       turn: 1,
       stepOpen: session.running,
       streamActive: false

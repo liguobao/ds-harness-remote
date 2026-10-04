@@ -195,11 +195,50 @@ describe('AcpVirtualHarness', () => {
         address: { kind: 'session', sessionId },
         throughSeq: 0,
       } },
-    }, new AbortController().signal) as { ok: true; value: { header: { version: number; id: string } } }
+    }, new AbortController().signal) as { ok: true; value: { records: unknown[]; hasMore: boolean } }
 
     expect(pageResult.ok).toBe(true)
-    expect(pageResult.value.header.id).toBe(sessionId)
-    expect(pageResult.value.header.version).toBe(3)
+    expect(pageResult.value.records).toEqual([])
+    expect(pageResult.value.hasMore).toBe(false)
+
+    // Send a prompt to create history events and verify follow snapshot cursor matches tail record seq
+    await target.dispatch('session/prompt', {
+      args: { request: {
+        sessionId,
+        content: [{ type: 'text', text: 'Hello Antigravity' }],
+      } },
+    }, new AbortController().signal)
+
+    const followStream = await target.open('session/follow', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        assistantStream: true,
+      } },
+    }, new AbortController().signal)
+
+    const iterator = followStream[Symbol.asyncIterator]()
+    const snapshotFrame = await iterator.next()
+    expect(snapshotFrame.done).toBe(false)
+    const snapshot = snapshotFrame.value as {
+      type: string
+      cursor: number
+      records: Array<{ event: { seq: number } }>
+    }
+    expect(snapshot.type).toBe('snapshot')
+    expect(snapshot.records.length).toBeGreaterThan(0)
+    // The cursor MUST equal the tail entry's seq (assertPageThrough requirement)
+    expect(snapshot.cursor).toBe(snapshot.records.at(-1)!.event.seq)
+
+    // And session/page throughSeq returns records up to that seq
+    const pageWithThrough = await target.dispatch('session/page', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        throughSeq: 0,
+      } },
+    }, new AbortController().signal) as { ok: true; value: { records: Array<{ event: { seq: number } }> } }
+    expect(pageWithThrough.ok).toBe(true)
+    expect(pageWithThrough.value.records.at(-1)!.event.seq).toBe(0)
+
     await target.close()
   })
 })
