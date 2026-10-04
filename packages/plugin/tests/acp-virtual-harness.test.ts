@@ -250,4 +250,148 @@ describe('AcpVirtualHarness', () => {
 
     await target.close()
   })
+
+  it('streams assistant response via assistant-stream frames and commits assistant/message event', async () => {
+    let inboundHandler: ((frame: { frame: { method: string; params: unknown } }) => void) | undefined
+    const client = {
+      ...fakeAcp(),
+      openStream: vi.fn(async (_sessionId: string, onFrame: (frame: unknown) => void) => {
+        inboundHandler = onFrame as never
+        return { close: vi.fn(async () => undefined) }
+      }),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+    const sessionId = created.value.sessionId
+
+    const followController = new AbortController()
+    const followStream = await target.open('session/follow', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        assistantStream: true,
+      } },
+    }, followController.signal)
+    const iterator = followStream[Symbol.asyncIterator]()
+    const snapshot = await iterator.next()
+    expect(snapshot.value).toMatchObject({ type: 'snapshot' })
+
+    // Simulate ACP inbound events: agent_message_chunk -> prompt_completed
+    expect(inboundHandler).toBeDefined()
+    inboundHandler!({
+      frame: {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            text: 'Hello, World!',
+          },
+        },
+      },
+    })
+
+    // Should receive turn/start and step/start events before assistant-stream frames
+    const turnStart = await iterator.next()
+    expect(turnStart.value).toMatchObject({ type: 'event', event: { type: 'turn/start' } })
+
+    const stepStart = await iterator.next()
+    expect(stepStart.value).toMatchObject({ type: 'event', event: { type: 'step/start' } })
+
+    // Should receive assistant-stream start and chunk frames
+    const startFrame = await iterator.next()
+    expect(startFrame.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: { type: 'start', turn: 1 },
+    })
+
+    const chunk1 = await iterator.next()
+    expect(chunk1.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: { type: 'chunk', chunk: { type: 'block-start', blockType: 'text' } },
+    })
+
+    const chunk2 = await iterator.next()
+    expect(chunk2.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: { type: 'chunk', chunk: { type: 'text-delta', text: 'Hello, World!' } },
+    })
+
+    // Now emit prompt_completed
+    inboundHandler!({
+      frame: {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'prompt_completed',
+            stopReason: 'end_turn',
+          },
+        },
+      },
+    })
+
+    // Should receive block-end, finish, assistant/message event, and end frame
+    const blockEnd = await iterator.next()
+    expect(blockEnd.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: { type: 'chunk', chunk: { type: 'block-end', block: { text: 'Hello, World!' } } },
+    })
+
+    const finish = await iterator.next()
+    expect(finish.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: { type: 'chunk', chunk: { type: 'finish', reason: { kind: 'stop' } } },
+    })
+
+    const msgEvent = await iterator.next()
+    expect(msgEvent.value).toMatchObject({
+      type: 'event',
+      event: {
+        type: 'assistant/message',
+        surfaceOp: 'append',
+        data: {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Hello, World!' }],
+          },
+        },
+      },
+    })
+
+    const endFrame = await iterator.next()
+    expect(endFrame.value).toMatchObject({
+      type: 'assistant-stream',
+      frame: {
+        type: 'end',
+        outcome: {
+          kind: 'committed',
+          eventType: 'assistant/message',
+        },
+      },
+    })
+
+    // Verify session/page returns the committed assistant/message in history
+    const pageResult = await target.dispatch('session/page', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        cursor: -1,
+      } },
+    }, new AbortController().signal) as { ok: true; value: { records: Array<{ event: { type: string; data: unknown } }> } }
+    expect(pageResult.ok).toBe(true)
+    const assistantRecord = pageResult.value.records.find(r => r.event.type === 'assistant/message')
+    expect(assistantRecord).toBeDefined()
+    expect(assistantRecord?.event.data).toMatchObject({
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello, World!' }],
+      },
+    })
+
+    followController.abort()
+    await iterator.return?.()
+    await target.close()
+  })
 })

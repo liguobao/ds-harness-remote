@@ -44,6 +44,13 @@ interface NativeEvent {
   surfaceOp?: 'append' | { op: 'replace'; start: number; end: number }
 }
 
+interface AssistantStreamAttempt {
+  attemptId: string
+  startedAfterSeq: number
+  nextIndex: number
+  stream: Array<{ time: number; chunk: JsonRecord }>
+}
+
 interface FollowState {
   sessionId: string
   acpSessionId: string
@@ -53,6 +60,10 @@ interface FollowState {
   stepOpen: boolean
   streamActive: boolean
   blockIndex?: number
+  reasoningBlockIndex?: number
+  assistantStreamRevision: number
+  assistantAttempt?: AssistantStreamAttempt
+  accumulatedText: string
   close?: () => Promise<void>
 }
 
@@ -396,7 +407,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       type: 'user/message',
       seq: session.events.length,
       time: Date.now(),
-      data: { text },
+      data: {
+        id: `user:${Date.now()}`,
+        role: 'user',
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      },
       surfaceOp: 'append',
     })
     for (const follow of this.follows) {
@@ -577,9 +593,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       acpSessionId: session.acpSessionId,
       queue,
       nextSeq: session.events.length,
-      turn: 1,
+      turn: Math.max(0, ...session.events.map(entry => (isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0))),
       stepOpen: session.running,
       streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: '',
     }
     this.follows.add(follow)
     queue.push({
@@ -636,10 +654,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       sessionId: session.sessionId,
       acpSessionId: session.acpSessionId,
       queue,
-      nextSeq: Math.max(0, ...session.events.map(entry => entry.event.seq)) + 1,
-      turn: 1,
+      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map(entry => entry.event.seq)) + 1,
+      turn: Math.max(0, ...session.events.map(entry => (isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0))),
       stepOpen: false,
       streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: '',
     }
     this.follows.add(follow)
     const stream = await this.client.openStream(
@@ -736,6 +756,66 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     })
   }
 
+  private pushAssistantChunk(follow: FollowState, chunk: JsonRecord): void {
+    let attempt = follow.assistantAttempt
+    if (attempt === undefined) {
+      attempt = {
+        attemptId: `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: [],
+      }
+      follow.assistantAttempt = attempt
+      follow.assistantStreamRevision += 1
+      follow.queue.push({
+        type: 'assistant-stream',
+        frame: {
+          type: 'start',
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: 1,
+        },
+      })
+    }
+    const time = Date.now()
+    const index = attempt.nextIndex++
+    attempt.stream.push({ time, chunk })
+    follow.assistantStreamRevision += 1
+    follow.queue.push({
+      type: 'assistant-stream',
+      frame: {
+        type: 'chunk',
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk,
+      },
+    })
+  }
+
+  private endAssistantAttempt(
+    follow: FollowState,
+    outcome: { kind: 'abandoned' } | { kind: 'committed'; eventType: 'assistant/message'; seq: number },
+  ): void {
+    const attempt = follow.assistantAttempt
+    if (attempt === undefined) return
+    follow.assistantAttempt = undefined
+    follow.assistantStreamRevision += 1
+    follow.queue.push({
+      type: 'assistant-stream',
+      frame: {
+        type: 'end',
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index: attempt.nextIndex,
+        outcome,
+      },
+    })
+  }
+
   private appendAssistantDelta(follow: FollowState, delta: string): void {
     if (!follow.stepOpen) {
       follow.turn += 1
@@ -744,19 +824,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
     }
     if (follow.blockIndex === undefined) {
-      follow.blockIndex = 0
+      follow.blockIndex = (follow.reasoningBlockIndex ?? -1) + 1
       follow.streamActive = true
-      this.pushEvent(follow, 'assistant/chunk', {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: 'block-start', index: 0, blockType: 'text' },
-      })
+      this.pushAssistantChunk(follow, { type: 'block-start', index: follow.blockIndex, blockType: 'text' })
     }
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: 'text-delta', index: follow.blockIndex, text: delta },
-    })
+    follow.accumulatedText += delta
+    this.pushAssistantChunk(follow, { type: 'text-delta', index: follow.blockIndex, text: delta })
   }
 
   private appendReasoningDelta(follow: FollowState, delta: string): void {
@@ -766,36 +839,63 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       this.pushEvent(follow, 'turn/start', { turn: follow.turn })
       this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
     }
-    const index = (follow.blockIndex ?? -1) + 1
-    follow.blockIndex = index
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: 'block-start', index, blockType: 'reasoning' },
-    })
-    this.pushEvent(follow, 'assistant/chunk', {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: 'reasoning-delta', index, text: delta },
-    })
+    if (follow.reasoningBlockIndex === undefined) {
+      follow.reasoningBlockIndex = (follow.blockIndex ?? -1) + 1
+      follow.streamActive = true
+      this.pushAssistantChunk(follow, { type: 'block-start', index: follow.reasoningBlockIndex, blockType: 'reasoning' })
+    }
+    this.pushAssistantChunk(follow, { type: 'reasoning-delta', index: follow.reasoningBlockIndex, text: delta })
   }
 
   private closeFollowAfterRemoteStreamClosed(follow: FollowState): void {
-    if (follow.streamActive && follow.blockIndex !== undefined) {
-      this.pushEvent(follow, 'assistant/chunk', {
+    if (follow.streamActive) {
+      if (follow.reasoningBlockIndex !== undefined) {
+        this.pushAssistantChunk(follow, {
+          type: 'block-end',
+          index: follow.reasoningBlockIndex,
+          block: { type: 'reasoning', text: '' },
+        })
+        follow.reasoningBlockIndex = undefined
+      }
+      if (follow.blockIndex !== undefined) {
+        const fullText = follow.accumulatedText
+        this.pushAssistantChunk(follow, {
+          type: 'block-end',
+          index: follow.blockIndex,
+          block: { type: 'text', text: fullText },
+        })
+      }
+      this.pushAssistantChunk(follow, {
+        type: 'finish',
+        reason: { kind: 'stop' },
+      })
+      const fullText = follow.accumulatedText
+      const selection = this.modelSelection(follow.sessionId)
+      const stream = follow.assistantAttempt?.stream ?? []
+      const assistantMessageSeq = this.pushEvent(follow, 'assistant/message', {
         turn: follow.turn,
         step: 1,
-        chunk: { type: 'block-end', index: follow.blockIndex, block: { type: 'text', text: '' } },
+        message: {
+          id: `${follow.sessionId}:${follow.turn}`,
+          role: 'assistant',
+          content: [{ type: 'text', text: fullText }],
+          source: { kind: 'model', provider: selection.provider, model: selection.model },
+        },
+        stream,
       })
-      this.pushEvent(follow, 'assistant/chunk', {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: 'finish', reason: { kind: 'stop' } },
+      this.endAssistantAttempt(follow, {
+        kind: 'committed',
+        eventType: 'assistant/message',
+        seq: assistantMessageSeq,
       })
+      this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
+      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: { kind: 'completed' } })
     }
     follow.streamActive = false
     follow.stepOpen = false
     follow.blockIndex = undefined
+    follow.reasoningBlockIndex = undefined
+    follow.accumulatedText = ''
   }
 
   private pushEvent(follow: FollowState, type: string, data: unknown): number {
@@ -1250,8 +1350,9 @@ function nativeAcpId(sessionId: string): string {
 }
 
 function isSurfaceEvent(type: string): boolean {
-  return type === 'assistant/chunk'
-    || type === 'user/message'
+  return type === 'user/message'
+    || type === 'assistant/message'
+    || type === 'assistant/chunk'
     || type === 'tool/call'
     || type === 'tool/result'
 }

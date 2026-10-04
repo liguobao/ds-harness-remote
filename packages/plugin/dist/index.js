@@ -18683,7 +18683,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       type: "user/message",
       seq: session.events.length,
       time: Date.now(),
-      data: { text },
+      data: {
+        id: `user:${Date.now()}`,
+        role: "user",
+        content: [{ type: "text", text }],
+        source: { kind: "user" }
+      },
       surfaceOp: "append"
     });
     for (const follow of this.follows) {
@@ -18835,9 +18840,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       acpSessionId: session.acpSessionId,
       queue,
       nextSeq: session.events.length,
-      turn: 1,
+      turn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
       stepOpen: session.running,
-      streamActive: false
+      streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: ""
     };
     this.follows.add(follow);
     queue.push({
@@ -18892,10 +18899,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       sessionId: session.sessionId,
       acpSessionId: session.acpSessionId,
       queue,
-      nextSeq: Math.max(0, ...session.events.map((entry) => entry.event.seq)) + 1,
-      turn: 1,
+      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map((entry) => entry.event.seq)) + 1,
+      turn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
       stepOpen: false,
-      streamActive: false
+      streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: ""
     };
     this.follows.add(follow);
     const stream = await this.client.openStream(
@@ -18980,6 +18989,61 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       }
     });
   }
+  pushAssistantChunk(follow, chunk) {
+    let attempt = follow.assistantAttempt;
+    if (attempt === void 0) {
+      attempt = {
+        attemptId: `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: []
+      };
+      follow.assistantAttempt = attempt;
+      follow.assistantStreamRevision += 1;
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "start",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: 1
+        }
+      });
+    }
+    const time = Date.now();
+    const index = attempt.nextIndex++;
+    attempt.stream.push({ time, chunk });
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "chunk",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk
+      }
+    });
+  }
+  endAssistantAttempt(follow, outcome) {
+    const attempt = follow.assistantAttempt;
+    if (attempt === void 0) return;
+    follow.assistantAttempt = void 0;
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "end",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index: attempt.nextIndex,
+        outcome
+      }
+    });
+  }
   appendAssistantDelta(follow, delta) {
     if (!follow.stepOpen) {
       follow.turn += 1;
@@ -18988,19 +19052,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
     }
     if (follow.blockIndex === void 0) {
-      follow.blockIndex = 0;
+      follow.blockIndex = (follow.reasoningBlockIndex ?? -1) + 1;
       follow.streamActive = true;
-      this.pushEvent(follow, "assistant/chunk", {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: "block-start", index: 0, blockType: "text" }
-      });
+      this.pushAssistantChunk(follow, { type: "block-start", index: follow.blockIndex, blockType: "text" });
     }
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: "text-delta", index: follow.blockIndex, text: delta }
-    });
+    follow.accumulatedText += delta;
+    this.pushAssistantChunk(follow, { type: "text-delta", index: follow.blockIndex, text: delta });
   }
   appendReasoningDelta(follow, delta) {
     if (!follow.stepOpen) {
@@ -19009,35 +19066,62 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.pushEvent(follow, "turn/start", { turn: follow.turn });
       this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
     }
-    const index = (follow.blockIndex ?? -1) + 1;
-    follow.blockIndex = index;
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: "block-start", index, blockType: "reasoning" }
-    });
-    this.pushEvent(follow, "assistant/chunk", {
-      turn: follow.turn,
-      step: 1,
-      chunk: { type: "reasoning-delta", index, text: delta }
-    });
+    if (follow.reasoningBlockIndex === void 0) {
+      follow.reasoningBlockIndex = (follow.blockIndex ?? -1) + 1;
+      follow.streamActive = true;
+      this.pushAssistantChunk(follow, { type: "block-start", index: follow.reasoningBlockIndex, blockType: "reasoning" });
+    }
+    this.pushAssistantChunk(follow, { type: "reasoning-delta", index: follow.reasoningBlockIndex, text: delta });
   }
   closeFollowAfterRemoteStreamClosed(follow) {
-    if (follow.streamActive && follow.blockIndex !== void 0) {
-      this.pushEvent(follow, "assistant/chunk", {
+    if (follow.streamActive) {
+      if (follow.reasoningBlockIndex !== void 0) {
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.reasoningBlockIndex,
+          block: { type: "reasoning", text: "" }
+        });
+        follow.reasoningBlockIndex = void 0;
+      }
+      if (follow.blockIndex !== void 0) {
+        const fullText2 = follow.accumulatedText;
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.blockIndex,
+          block: { type: "text", text: fullText2 }
+        });
+      }
+      this.pushAssistantChunk(follow, {
+        type: "finish",
+        reason: { kind: "stop" }
+      });
+      const fullText = follow.accumulatedText;
+      const selection = this.modelSelection(follow.sessionId);
+      const stream = follow.assistantAttempt?.stream ?? [];
+      const assistantMessageSeq = this.pushEvent(follow, "assistant/message", {
         turn: follow.turn,
         step: 1,
-        chunk: { type: "block-end", index: follow.blockIndex, block: { type: "text", text: "" } }
+        message: {
+          id: `${follow.sessionId}:${follow.turn}`,
+          role: "assistant",
+          content: [{ type: "text", text: fullText }],
+          source: { kind: "model", provider: selection.provider, model: selection.model }
+        },
+        stream
       });
-      this.pushEvent(follow, "assistant/chunk", {
-        turn: follow.turn,
-        step: 1,
-        chunk: { type: "finish", reason: { kind: "stop" } }
+      this.endAssistantAttempt(follow, {
+        kind: "committed",
+        eventType: "assistant/message",
+        seq: assistantMessageSeq
       });
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
     }
     follow.streamActive = false;
     follow.stepOpen = false;
     follow.blockIndex = void 0;
+    follow.reasoningBlockIndex = void 0;
+    follow.accumulatedText = "";
   }
   pushEvent(follow, type, data2) {
     const seq = follow.nextSeq++;
@@ -19424,7 +19508,7 @@ function nativeAcpId(sessionId) {
   return sessionId.slice(CURSOR_SESSION_PREFIX.length);
 }
 function isSurfaceEvent2(type) {
-  return type === "assistant/chunk" || type === "user/message" || type === "tool/call" || type === "tool/result";
+  return type === "user/message" || type === "assistant/message" || type === "assistant/chunk" || type === "tool/call" || type === "tool/result";
 }
 function carrierArgs2(payload) {
   return record4(record4(payload).args);
