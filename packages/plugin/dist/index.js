@@ -19508,7 +19508,7 @@ function nativeAcpId(sessionId) {
   return sessionId.slice(CURSOR_SESSION_PREFIX.length);
 }
 function isSurfaceEvent2(type) {
-  return type === "user/message" || type === "assistant/message" || type === "assistant/chunk" || type === "tool/call" || type === "tool/result";
+  return type === "user/message" || type === "assistant/message" || type === "tool/result";
 }
 function carrierArgs2(payload) {
   return record4(record4(payload).args);

@@ -1350,11 +1350,7 @@ function nativeAcpId(sessionId: string): string {
 }
 
 function isSurfaceEvent(type: string): boolean {
-  return type === 'user/message'
-    || type === 'assistant/message'
-    || type === 'assistant/chunk'
-    || type === 'tool/call'
-    || type === 'tool/result'
+  return type === 'user/message' || type === 'assistant/message' || type === 'tool/result'
 }
 
 function carrierArgs(payload: unknown): JsonRecord {
