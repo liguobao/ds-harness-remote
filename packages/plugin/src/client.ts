@@ -2183,12 +2183,18 @@ window.__ModuleLoader__.load({
       const visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3)
       const visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3)
       const visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3)
-      const codexAvailable = status?.remoteFeatures?.codex === true
-        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'codex' && w.available) === true
-      const cursorAvailable = status?.remoteFeatures?.cursor === true
-        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'cursor' && w.available) === true
-      const antigravityAvailable = status?.remoteFeatures?.antigravity === true
-        || status?.remoteFeatures?.workspaceTypes?.some(w => w.id === 'antigravity' && w.available) === true
+      const workspaceTypeAvailable = (id: string, legacyAvailable: boolean | undefined): boolean => {
+        const workspaceTypes = status?.remoteFeatures?.workspaceTypes
+        // New Hosts expose the authoritative enabled-and-ready state through
+        // workspaceTypes. Only fall back to legacy booleans for old Hosts that
+        // do not send the structured list.
+        return workspaceTypes === undefined
+          ? legacyAvailable === true
+          : workspaceTypes.some(workspace => workspace.id === id && workspace.available)
+      }
+      const codexAvailable = workspaceTypeAvailable('codex', status?.remoteFeatures?.codex)
+      const cursorAvailable = workspaceTypeAvailable('cursor', status?.remoteFeatures?.cursor)
+      const antigravityAvailable = workspaceTypeAvailable('antigravity', status?.remoteFeatures?.antigravity)
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),
@@ -2482,7 +2488,7 @@ window.__ModuleLoader__.load({
                               'aria-label': t('showAllWorkspaces'),
                               onClick: () => setShowAllWorkspaces(true),
                             }, React.createElement('span', { 'aria-hidden': true }, '…')))),
-                        !codexAvailable && codexWorkspaces.length === 0 ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        !codexAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                           React.createElement('div', {
                             id: codexWorkspaceHeadingId,
                             className: 'dshRemoteWorkspaceSourceHeading',
@@ -2532,7 +2538,7 @@ window.__ModuleLoader__.load({
                             'aria-label': t('showAllCodexWorkspaces'),
                             onClick: () => setShowAllCodexWorkspaces(true),
                           }, React.createElement('span', { 'aria-hidden': true }, '…'))),
-                        !cursorAvailable && cursorWorkspaces.length === 0 ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        !cursorAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                           React.createElement('div', {
                             id: cursorWorkspaceHeadingId,
                             className: 'dshRemoteWorkspaceSourceHeading',
@@ -2583,7 +2589,7 @@ window.__ModuleLoader__.load({
                             'aria-label': t('showAllCursorWorkspaces'),
                             onClick: () => setShowAllCursorWorkspaces(true),
                           }, React.createElement('span', { 'aria-hidden': true }, '…'))),
-                        !antigravityAvailable && antigravityWorkspaces.length === 0 ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        !antigravityAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                           React.createElement('div', {
                             id: antigravityWorkspaceHeadingId,
                             className: 'dshRemoteWorkspaceSourceHeading',
