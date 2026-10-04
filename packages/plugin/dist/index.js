@@ -18436,6 +18436,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   follows = /* @__PURE__ */ new Set();
   pendingApprovals = /* @__PURE__ */ new Map();
   selectedWorkspaceId;
+  selectedModels = /* @__PURE__ */ new Map();
   lastProjectionSeq = 0;
   closed = false;
   static remote(core, host, backend = "cursor") {
@@ -18540,17 +18541,18 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/modelCatalog":
           return business2(success2(modelCatalog2(this.backend)));
         case "session/models": {
-          nativeAcpId(requiredString2(requestArg2(args).sessionId, "sessionId"));
+          const rawId = requiredString2(requestArg2(args).sessionId, "sessionId");
+          nativeAcpId(rawId);
           const catalog = modelCatalog2(this.backend);
           return business2(success2({
-            current: catalog.default,
+            current: this.modelSelection(rawId),
             routable: false,
             groups: catalog.groups,
             failures: []
           }));
         }
         case "session/selectModel":
-          return business2(failure2("bad-request", "Cursor Remote does not expose model selection yet."));
+          return business2(await this.selectModel(requestArg2(args)));
         case "session/canOpenWorkspacePath":
           return business2(this.selectedWorkspaceId !== void 0);
         case "session/openWorkspacePath":
@@ -18731,16 +18733,18 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const cursor2 = records[0]?.event.seq ?? -1;
     return {
       header: {
-        version: 1,
+        version: 3,
         id: session.sessionId,
         createdAt: session.createdAt,
-        cwd: session.cwd
+        cwd: session.cwd,
+        isSeeded: false
       },
       cursor: cursor2,
       nextTurn: 1,
       records,
       hasMore: filtered.length > records.length,
-      ...session.running ? { activeTurnId: "cursor-live" } : {}
+      ...session.running ? { activeTurnId: "cursor-live" } : {},
+      assistantStream: { revision: 0 }
     };
   }
   describeHost() {
@@ -18826,21 +18830,20 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
+        kind: "sequenced",
         asOfSeq: history.cursor,
         values: {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
-          modelSelection: {
-            lastUsed: modelCatalog2(this.backend).default,
-            next: modelCatalog2(this.backend).default
-          },
+          modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
             maxImagesPerMessage: 0,
             mediaTypes: []
           }
         }
-      }
+      },
+      assistantStream: { revision: 0 }
     });
     try {
       const stream = await this.client.openStream(
@@ -19111,10 +19114,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         values: {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
-          modelSelection: {
-            lastUsed: modelCatalog2(this.backend).default,
-            next: modelCatalog2(this.backend).default
-          },
+          modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: {
             maxImageBytes: 0,
             maxImagesPerMessage: 0,
@@ -19124,6 +19124,35 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       }
     };
   }
+  modelSelection(sessionId) {
+    return this.selectedModels.get(sessionId) ?? modelCatalog2(this.backend).default;
+  }
+  modelSelectionProjection(sessionId) {
+    const selection = this.modelSelection(sessionId);
+    return { lastUsed: selection, next: selection };
+  }
+  async selectModel(request) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    nativeAcpId(sessionId);
+    const provider = requiredString2(request.provider, "provider");
+    const model = requiredString2(request.model, "model");
+    const reasoningEffort = string3(request.reasoningEffort);
+    const catalog = modelCatalog2(this.backend);
+    const group = catalog.groups.find((g) => g.id === provider);
+    const targetModel = group?.models.find((m) => m.id === model);
+    if (group === void 0 || targetModel === void 0) {
+      return failure2("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
+    }
+    const selected = {
+      provider,
+      model,
+      ...reasoningEffort === void 0 ? {} : { reasoningEffort }
+    };
+    this.selectedModels.set(sessionId, selected);
+    const seq = this.nextProjectionSeq();
+    this.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
+    return success2({ selected });
+  }
   publishWorkspaceBaseline() {
     for (const queue of this.workspaceStreams) {
       for (const workspace of this.visibleWorkspaces()) {
@@ -19132,11 +19161,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       queue.push({ type: "archived", archivedSessionIds: [] });
     }
   }
-  publishProjection(sessionId, key, value) {
-    const seq = this.nextProjectionSeq();
+  publishProjection(sessionId, key, value, seq = this.nextProjectionSeq()) {
     for (const queue of this.controlStreams) {
-      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq });
+      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq, seq });
     }
+    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
   }
   emitRemoteEvent(event, args) {
     for (const queue of this.eventStreams.values()) queue.push({ type: "emit", event, args });
@@ -19294,16 +19323,41 @@ function nativeWorkspace2(view) {
     updatedAt: view.updatedAt
   };
 }
+var ANTIGRAVITY_MODELS = [
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)" },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)" },
+  { id: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)" },
+  { id: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)" },
+  { id: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)" },
+  { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)" },
+  { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)" },
+  { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" },
+  { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
+  { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" }
+];
+var CURSOR_MODELS = [
+  { id: "auto", name: "Auto" },
+  { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet" },
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+  { id: "gpt-4o", name: "GPT-4o" },
+  { id: "o3-mini", name: "o3-mini" },
+  { id: "deepseek-r1", name: "DeepSeek R1" }
+];
 function modelCatalog2(backend = "cursor") {
   const provider = backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
-  const model = backend === "antigravity" ? "antigravity" : CURSOR_MODEL;
   const name2 = backend === "antigravity" ? "Antigravity" : "Cursor";
+  const models = backend === "antigravity" ? ANTIGRAVITY_MODELS : CURSOR_MODELS;
+  const defaultModel = models[0].id;
   return {
-    default: { provider, model },
+    default: { provider, model: defaultModel },
     groups: [{
       id: provider,
       name: name2,
-      models: [{ id: model, name: name2 }]
+      models
     }]
   };
 }

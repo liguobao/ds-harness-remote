@@ -123,4 +123,60 @@ describe('AcpVirtualHarness', () => {
     expect(client.respond).toHaveBeenCalledWith('req_1', 'allow-once')
     await target.close()
   })
+
+  it('emits opening snapshot with assistantStream baseline in session/follow', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+
+    const controller = new AbortController()
+    const source = await target.open('session/follow', {
+      args: { request: {
+        address: { kind: 'session', sessionId: created.value.sessionId },
+        assistantStream: true,
+      } },
+    }, controller.signal)
+    const iterator = source[Symbol.asyncIterator]()
+    const snapshot = await iterator.next()
+    expect(snapshot.value).toMatchObject({
+      type: 'snapshot',
+      header: { version: 3, id: created.value.sessionId },
+      assistantStream: { revision: 0 },
+    })
+    controller.abort()
+    await iterator.return?.()
+    await target.close()
+  })
+
+  it('allows model selection and projects selected model for antigravity', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+    const sessionId = created.value.sessionId
+
+    const modelsResult = await target.dispatch('session/models', {
+      args: { request: { sessionId } },
+    }, new AbortController().signal) as { ok: true; value: { current: { provider: string; model: string }; groups: Array<{ models: unknown[] }> } }
+    expect(modelsResult.ok).toBe(true)
+    expect(modelsResult.value.current.provider).toBe('antigravity')
+    expect(modelsResult.value.groups[0]?.models.length).toBeGreaterThan(1)
+
+    const selectResult = await target.dispatch('session/selectModel', {
+      args: { request: { sessionId, provider: 'antigravity', model: 'claude-sonnet-4-6' } },
+    }, new AbortController().signal) as { ok: true; value: { selected: { model: string } } }
+    expect(selectResult.ok).toBe(true)
+    expect(selectResult.value.selected.model).toBe('claude-sonnet-4-6')
+
+    const modelsAfter = await target.dispatch('session/models', {
+      args: { request: { sessionId } },
+    }, new AbortController().signal) as { ok: true; value: { current: { model: string } } }
+    expect(modelsAfter.value.current.model).toBe('claude-sonnet-4-6')
+    await target.close()
+  })
 })

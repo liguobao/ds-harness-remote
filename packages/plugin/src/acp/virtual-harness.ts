@@ -143,6 +143,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly follows = new Set<FollowState>()
   private readonly pendingApprovals = new Map<string, PendingApproval>()
   private selectedWorkspaceId?: string
+  private readonly selectedModels = new Map<string, AcpModelSelection>()
   private lastProjectionSeq = 0
   private closed = false
 
@@ -248,16 +249,17 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/attachment': return business(failure('attachment-error', 'Cursor Remote accepts text prompts only.'))
         case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
-          nativeAcpId(requiredString(requestArg(args).sessionId, 'sessionId'))
+          const rawId = requiredString(requestArg(args).sessionId, 'sessionId')
+          nativeAcpId(rawId)
           const catalog = modelCatalog(this.backend)
           return business(success({
-            current: catalog.default,
+            current: this.modelSelection(rawId),
             routable: false,
             groups: catalog.groups,
             failures: [],
           }))
         }
-        case 'session/selectModel': return business(failure('bad-request', 'Cursor Remote does not expose model selection yet.'))
+        case 'session/selectModel': return business(await this.selectModel(requestArg(args)))
         case 'session/canOpenWorkspacePath': return business(this.selectedWorkspaceId !== undefined)
         case 'session/openWorkspacePath': return business(failure('bad-request', 'Opening Host paths is unavailable in Cursor mode.'))
         case 'host/describe': return business(success(this.describeHost()))
@@ -449,16 +451,18 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const cursor = records[0]?.event.seq ?? -1
     return {
       header: {
-        version: 1,
+        version: 3,
         id: session.sessionId,
         createdAt: session.createdAt,
         cwd: session.cwd,
+        isSeeded: false,
       },
       cursor,
       nextTurn: 1,
       records,
       hasMore: filtered.length > records.length,
       ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
+      assistantStream: { revision: 0 },
     }
   }
 
@@ -565,14 +569,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
+        kind: 'sequenced',
         asOfSeq: history.cursor,
         values: {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
-          modelSelection: {
-            lastUsed: modelCatalog(this.backend).default,
-            next: modelCatalog(this.backend).default,
-          },
+          modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
             maxImagesPerMessage: 0,
@@ -580,6 +582,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           },
         },
       },
+      assistantStream: { revision: 0 },
     })
     try {
       const stream = await this.client.openStream(
@@ -879,10 +882,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         values: {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
-          modelSelection: {
-            lastUsed: modelCatalog(this.backend).default,
-            next: modelCatalog(this.backend).default,
-          },
+          modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: {
             maxImageBytes: 0,
             maxImagesPerMessage: 0,
@@ -891,6 +891,38 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         },
       },
     }
+  }
+
+  private modelSelection(sessionId: string): AcpModelSelection {
+    return this.selectedModels.get(sessionId) ?? modelCatalog(this.backend).default
+  }
+
+  private modelSelectionProjection(sessionId: string): { lastUsed: AcpModelSelection; next: AcpModelSelection } {
+    const selection = this.modelSelection(sessionId)
+    return { lastUsed: selection, next: selection }
+  }
+
+  private async selectModel(request: JsonRecord): Promise<unknown> {
+    const sessionId = requiredString(request.sessionId, 'sessionId')
+    nativeAcpId(sessionId)
+    const provider = requiredString(request.provider, 'provider')
+    const model = requiredString(request.model, 'model')
+    const reasoningEffort = string(request.reasoningEffort)
+    const catalog = modelCatalog(this.backend)
+    const group = catalog.groups.find(g => g.id === provider)
+    const targetModel = group?.models.find(m => m.id === model)
+    if (group === undefined || targetModel === undefined) {
+      return failure('model-unavailable', `The selected ${this.backend} model is unavailable on this Host.`)
+    }
+    const selected: AcpModelSelection = {
+      provider,
+      model,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    }
+    this.selectedModels.set(sessionId, selected)
+    const seq = this.nextProjectionSeq()
+    this.publishProjection(sessionId, 'modelSelection', this.modelSelectionProjection(sessionId), seq)
+    return success({ selected })
   }
 
   private publishWorkspaceBaseline(): void {
@@ -902,11 +934,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
   }
 
-  private publishProjection(sessionId: string, key: string, value: unknown): void {
-    const seq = this.nextProjectionSeq()
+  private publishProjection(sessionId: string, key: string, value: unknown, seq = this.nextProjectionSeq()): void {
     for (const queue of this.controlStreams) {
-      queue.push({ type: 'projection', sessionId, key, value, asOfSeq: seq })
+      queue.push({ type: 'projection', sessionId, key, value, asOfSeq: seq, seq })
     }
+    this.broadcastRcMux({ type: 'session/projection', sessionId, key, value, seq })
   }
 
   private emitRemoteEvent(event: string, args: unknown[]): void {
@@ -1080,16 +1112,62 @@ function nativeWorkspace(view: AcpVirtualWorkspaceView): Omit<AcpVirtualWorkspac
   }
 }
 
-function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor') {
+export interface AcpModelSelection {
+  provider: string
+  model: string
+  reasoningEffort?: string
+}
+
+export interface AcpModelView {
+  id: string
+  name: string
+  description?: string
+  reasoning?: {
+    efforts: Array<{ id: string; name: string; description?: string }>
+    defaultEffort?: string
+  }
+}
+
+const ANTIGRAVITY_MODELS: AcpModelView[] = [
+  { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
+  { id: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
+  { id: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
+  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
+  { id: 'gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash (Medium)' },
+  { id: 'gemini-3.7-flash-low', name: 'Gemini 3.7 Flash (Low)' },
+  { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)' },
+  { id: 'gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash (Medium)' },
+  { id: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' },
+  { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
+  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
+  { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
+  { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+]
+
+const CURSOR_MODELS: AcpModelView[] = [
+  { id: 'auto', name: 'Auto' },
+  { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet' },
+  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+  { id: 'gpt-4o', name: 'GPT-4o' },
+  { id: 'o3-mini', name: 'o3-mini' },
+  { id: 'deepseek-r1', name: 'DeepSeek R1' },
+]
+
+export function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor'): {
+  default: AcpModelSelection
+  groups: Array<{ id: string; name: string; models: AcpModelView[] }>
+} {
   const provider = backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
-  const model = backend === 'antigravity' ? 'antigravity' : CURSOR_MODEL
   const name = backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  const models = backend === 'antigravity' ? ANTIGRAVITY_MODELS : CURSOR_MODELS
+  const defaultModel = models[0]!.id
   return {
-    default: { provider, model },
+    default: { provider, model: defaultModel },
     groups: [{
       id: provider,
       name,
-      models: [{ id: model, name }],
+      models,
     }],
   }
 }
