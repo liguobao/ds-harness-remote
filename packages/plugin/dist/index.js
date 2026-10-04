@@ -18389,7 +18389,6 @@ var AsyncValueQueue2 = class {
 var CURSOR_SESSION_PREFIX = "cursor:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var CURSOR_PROVIDER = "cursor";
-var CURSOR_MODEL = "cursor";
 function acpCwdWorkspaceId(path) {
   return `${CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
 }
@@ -18445,9 +18444,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async workspaces() {
     return [...this.workspaceById.values()];
   }
+  backendLabel() {
+    return this.backend === "antigravity" ? "Antigravity" : "Cursor";
+  }
   async selectWorkspace(workspaceId) {
     const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId);
-    if (workspace === void 0) throw new Error("The selected Cursor workspace is no longer available.");
+    if (workspace === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
     if (workspace.sessionIds.length === 0) {
@@ -18457,7 +18459,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async selectOrCreateWorkspace(path) {
     const trimmed = path.trim();
-    if (trimmed.length === 0) throw new Error("A Cursor working directory is required.");
+    if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`);
     const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
     const workspace = existing ?? createAcpWorkspaceView(trimmed);
     this.workspaceById.set(workspace.workspaceId, workspace);
@@ -18507,7 +18509,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "workspace/rename":
           return business2(await this.renameWorkspace(requestArg2(args)));
         case "workspace/delete":
-          return business2(failure2("workspace-read-only", "Cursor virtual Workspaces cannot be deleted from Desktop yet."));
+          return business2(failure2("workspace-read-only", `${this.backendLabel()} virtual Workspaces cannot be deleted from Desktop yet.`));
         case "workspace/insertBefore":
           return business2({
             workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId)
@@ -18523,7 +18525,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/create":
           return business2(await this.createSession(requestArg2(args), signal));
         case "session/fork":
-          return business2(failure2("bad-request", "Cursor Remote does not support session fork yet."));
+          return business2(failure2("bad-request", `${this.backendLabel()} Remote does not support session fork yet.`));
         case "session/history":
           return business2(await this.sessionHistory(requestArg2(args)));
         case "session/page":
@@ -18535,9 +18537,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/rename":
           return business2(await this.renameSession(requestArg2(args)));
         case "session/updateQueue":
-          return business2(failure2("queue-item-not-found", "Cursor does not expose a DSH inbox queue."));
+          return business2(failure2("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
         case "session/attachment":
-          return business2(failure2("attachment-error", "Cursor Remote accepts text prompts only."));
+          return business2(failure2("attachment-error", `${this.backendLabel()} Remote accepts text prompts only.`));
         case "session/modelCatalog":
           return business2(success2(modelCatalog2(this.backend)));
         case "session/models": {
@@ -18556,7 +18558,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/canOpenWorkspacePath":
           return business2(this.selectedWorkspaceId !== void 0);
         case "session/openWorkspacePath":
-          return business2(failure2("bad-request", "Opening Host paths is unavailable in Cursor mode."));
+          return business2(failure2("bad-request", `Opening Host paths is unavailable in ${this.backendLabel()} mode.`));
         case "host/describe":
           return business2(success2(this.describeHost()));
         case "host/listDirectory":
@@ -18569,7 +18571,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "commands/execute":
           return business2(void 0);
         default:
-          return fail2("method-not-found", `Cursor virtual Harness does not implement ${endpoint}.`);
+          return fail2("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`);
       }
     } catch (error) {
       return failFrom2(error);
@@ -18581,7 +18583,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg2(args), signal);
     if (endpoint === "$events") return this.remoteEvents(signal);
-    throw Object.assign(new Error(`Cursor virtual Harness does not implement stream ${endpoint}.`), {
+    throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",
       details: {}
@@ -18761,26 +18763,27 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   describeHost() {
     const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const name2 = this.backendLabel();
     return {
-      version: "Cursor Remote",
+      version: `${name2} Remote`,
       cwd: workspace?.path ?? "",
       home: workspace?.path ?? "",
-      provider: "Cursor",
-      model: CURSOR_MODEL,
+      provider: name2,
+      model: modelCatalog2(this.backend).default.model,
       attachedSessions: this.sessions.size,
       canOpenPath: workspace !== void 0
     };
   }
   async listDirectory(request, signal) {
     const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    if (workspace === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    if (workspace === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
     const path = string3(request.path) ?? workspace.path;
     return success2(await this.client.listDirectory(path, signal));
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string3(args.eventId);
     const outcome = record4(args.outcome);
-    if (eventId === void 0) throw new Error("The Cursor approval result is missing its event id.");
+    if (eventId === void 0) throw new Error(`The ${this.backendLabel()} approval result is missing its event id.`);
     const pending = this.pendingApprovals.get(eventId);
     if (pending === void 0) return void 0;
     this.pendingApprovals.delete(eventId);
@@ -19210,7 +19213,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       type: "approval/requested",
       sessionId: input2.agentId,
       approvalId: input2.eventId,
-      toolName: string3(input2.request.toolName) ?? "Cursor",
+      toolName: string3(input2.request.toolName) ?? this.backendLabel(),
       ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
     }, input2.eventId);
   }
@@ -19441,7 +19444,7 @@ function business2(value) {
   if (isRecord8(value) && value.ok === false && isRecord8(value.error)) {
     return { ok: false, error: {
       code: string3(value.error.code) ?? "internal",
-      message: string3(value.error.message) ?? "The Cursor virtual Harness request failed.",
+      message: string3(value.error.message) ?? "The virtual Harness request failed.",
       details: isRecord8(value.error.details) ? value.error.details : {}
     } };
   }
@@ -19474,12 +19477,12 @@ function integer2(value) {
 function optionalInteger2(value) {
   if (value === void 0) return void 0;
   const parsed = integer2(value);
-  if (parsed === void 0) throw new Error("The Cursor History cursor is invalid.");
+  if (parsed === void 0) throw new Error("The History cursor is invalid.");
   return parsed;
 }
 function optionalPositiveInteger2(value) {
   const parsed = optionalInteger2(value);
-  if (parsed !== void 0 && parsed <= 0) throw new Error("The Cursor History page size is invalid.");
+  if (parsed !== void 0 && parsed <= 0) throw new Error("The History page size is invalid.");
   return parsed;
 }
 function requiredString2(value, field) {

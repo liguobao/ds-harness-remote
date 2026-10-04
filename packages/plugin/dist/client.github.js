@@ -2283,7 +2283,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       controlUnavailable: !0,
       connected: !1,
       transport: "Disconnected",
-      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1, cursor: !1 },
+      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1, cursor: !1, antigravity: !1 },
       hostAuthorizationAvailable: !1
     };
   }

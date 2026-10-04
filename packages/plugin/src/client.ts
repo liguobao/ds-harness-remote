@@ -808,7 +808,7 @@ function controlRouteUnavailableStatus(): RemoteStatus {
     controlUnavailable: true,
     connected: false,
     transport: 'Disconnected',
-    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, cursor: false },
+    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, cursor: false, antigravity: false },
     hostAuthorizationAvailable: false,
   }
 }

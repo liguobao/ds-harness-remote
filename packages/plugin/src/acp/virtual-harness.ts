@@ -167,9 +167,13 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return [...this.workspaceById.values()]
   }
 
+  private backendLabel(): string {
+    return this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  }
+
   async selectWorkspace(workspaceId: string): Promise<AcpVirtualWorkspaceView> {
     const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId)
-    if (workspace === undefined) throw new Error('The selected Cursor workspace is no longer available.')
+    if (workspace === undefined) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
     if (workspace.sessionIds.length === 0) {
@@ -180,7 +184,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   async selectOrCreateWorkspace(path: string): Promise<AcpVirtualWorkspaceView> {
     const trimmed = path.trim()
-    if (trimmed.length === 0) throw new Error('A Cursor working directory is required.')
+    if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`)
     const existing = [...this.workspaceById.values()].find(item => item.path === trimmed)
     const workspace = existing ?? createAcpWorkspaceView(trimmed)
     this.workspaceById.set(workspace.workspaceId, workspace)
@@ -230,7 +234,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }))
         case 'workspace/create': return business(await this.createWorkspace(requestArg(args)))
         case 'workspace/rename': return business(await this.renameWorkspace(requestArg(args)))
-        case 'workspace/delete': return business(failure('workspace-read-only', 'Cursor virtual Workspaces cannot be deleted from Desktop yet.'))
+        case 'workspace/delete': return business(failure('workspace-read-only', `${this.backendLabel()} virtual Workspaces cannot be deleted from Desktop yet.`))
         case 'workspace/insertBefore': return business({
           workspaceIds: this.visibleWorkspaces().map(item => item.workspaceId),
         })
@@ -239,14 +243,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/list': return business(success({ items: await this.handleSessionList() }))
         case 'session/search': return business(success({ items: [], hasMore: false }))
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
-        case 'session/fork': return business(failure('bad-request', 'Cursor Remote does not support session fork yet.'))
+        case 'session/fork': return business(failure('bad-request', `${this.backendLabel()} Remote does not support session fork yet.`))
         case 'session/history': return business(await this.sessionHistory(requestArg(args)))
         case 'session/page': return business(await this.sessionPage(requestArg(args)))
         case 'session/prompt': return business(await this.prompt(requestArg(args), signal))
         case 'session/cancel': return business(await this.cancel(requestArg(args), signal))
         case 'session/rename': return business(await this.renameSession(requestArg(args)))
-        case 'session/updateQueue': return business(failure('queue-item-not-found', 'Cursor does not expose a DSH inbox queue.'))
-        case 'session/attachment': return business(failure('attachment-error', 'Cursor Remote accepts text prompts only.'))
+        case 'session/updateQueue': return business(failure('queue-item-not-found', `${this.backendLabel()} does not expose a DSH inbox queue.`))
+        case 'session/attachment': return business(failure('attachment-error', `${this.backendLabel()} Remote accepts text prompts only.`))
         case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
@@ -261,7 +265,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }
         case 'session/selectModel': return business(await this.selectModel(requestArg(args)))
         case 'session/canOpenWorkspacePath': return business(this.selectedWorkspaceId !== undefined)
-        case 'session/openWorkspacePath': return business(failure('bad-request', 'Opening Host paths is unavailable in Cursor mode.'))
+        case 'session/openWorkspacePath': return business(failure('bad-request', `Opening Host paths is unavailable in ${this.backendLabel()} mode.`))
         case 'host/describe': return business(success(this.describeHost()))
         case 'host/listDirectory':
         case 'directoryPicker/list': return business(await this.listDirectory(requestArg(args), signal))
@@ -269,7 +273,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'commands/list': return business([])
         case 'commands/execute': return business(undefined)
         default:
-          return fail('method-not-found', `Cursor virtual Harness does not implement ${endpoint}.`)
+          return fail('method-not-found', `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`)
       }
     } catch (error) {
       return failFrom(error)
@@ -282,7 +286,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (endpoint === 'session/control') return this.sessionControl(signal)
     if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
     if (endpoint === '$events') return this.remoteEvents(signal)
-    throw Object.assign(new Error(`Cursor virtual Harness does not implement stream ${endpoint}.`), {
+    throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true as const,
       code: 'method-not-found',
       details: {},
@@ -483,12 +487,13 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = this.selectedWorkspaceId === undefined
       ? undefined
       : this.workspaceById.get(this.selectedWorkspaceId)
+    const name = this.backendLabel()
     return {
-      version: 'Cursor Remote',
+      version: `${name} Remote`,
       cwd: workspace?.path ?? '',
       home: workspace?.path ?? '',
-      provider: 'Cursor',
-      model: CURSOR_MODEL,
+      provider: name,
+      model: modelCatalog(this.backend).default.model,
       attachedSessions: this.sessions.size,
       canOpenPath: workspace !== undefined,
     }
@@ -498,7 +503,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = this.selectedWorkspaceId === undefined
       ? undefined
       : this.workspaceById.get(this.selectedWorkspaceId)
-    if (workspace === undefined) return failure('workspace-not-found', 'The Cursor virtual Workspace was not found.')
+    if (workspace === undefined) return failure('workspace-not-found', `The ${this.backendLabel()} virtual Workspace was not found.`)
     const path = string(request.path) ?? workspace.path
     return success(await this.client.listDirectory(path, signal))
   }
@@ -506,7 +511,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private async answerRemoteEvent(args: JsonRecord, signal: AbortSignal): Promise<undefined> {
     const eventId = string(args.eventId)
     const outcome = record(args.outcome)
-    if (eventId === undefined) throw new Error('The Cursor approval result is missing its event id.')
+    if (eventId === undefined) throw new Error(`The ${this.backendLabel()} approval result is missing its event id.`)
     const pending = this.pendingApprovals.get(eventId)
     if (pending === undefined) return undefined
     this.pendingApprovals.delete(eventId)
@@ -986,7 +991,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       type: 'approval/requested',
       sessionId: input.agentId,
       approvalId: input.eventId,
-      toolName: string(input.request.toolName) ?? 'Cursor',
+      toolName: string(input.request.toolName) ?? this.backendLabel(),
       ...(typeof input.request.reason === 'string' ? { reason: input.request.reason } : {}),
     }, input.eventId)
   }
@@ -1272,7 +1277,7 @@ function business(value: unknown): TypertRpcResult {
   if (isRecord(value) && value.ok === false && isRecord(value.error)) {
     return { ok: false, error: {
       code: string(value.error.code) ?? 'internal',
-      message: string(value.error.message) ?? 'The Cursor virtual Harness request failed.',
+      message: string(value.error.message) ?? 'The virtual Harness request failed.',
       details: isRecord(value.error.details) ? value.error.details : {},
     } }
   }
@@ -1313,13 +1318,13 @@ function integer(value: unknown): number | undefined {
 function optionalInteger(value: unknown): number | undefined {
   if (value === undefined) return undefined
   const parsed = integer(value)
-  if (parsed === undefined) throw new Error('The Cursor History cursor is invalid.')
+  if (parsed === undefined) throw new Error('The History cursor is invalid.')
   return parsed
 }
 
 function optionalPositiveInteger(value: unknown): number | undefined {
   const parsed = optionalInteger(value)
-  if (parsed !== undefined && parsed <= 0) throw new Error('The Cursor History page size is invalid.')
+  if (parsed !== undefined && parsed <= 0) throw new Error('The History page size is invalid.')
   return parsed
 }
 
