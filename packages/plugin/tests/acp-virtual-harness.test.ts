@@ -394,4 +394,123 @@ describe('AcpVirtualHarness', () => {
     await iterator.return?.()
     await target.close()
   })
+
+  it('encloses user/message in turn/step and associates rpcId across multiple turns', async () => {
+    let inboundHandler: ((frame: AgentAcpFrameData) => void) | undefined
+    const client: AgentAcpClientLike = {
+      createSession: vi.fn(async () => ({ sessionId: 'acp_multiturn' })),
+      prompt: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      listDirectory: vi.fn(async () => []),
+      openStream: vi.fn(async (_sid, onFrame) => {
+        inboundHandler = onFrame
+        return { close: async () => {} }
+      }),
+      respond: vi.fn(async () => {}),
+    }
+
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+    const sessionId = created.value.sessionId
+
+    const followController = new AbortController()
+    const followStream = await target.open('session/follow', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        assistantStream: true,
+      } },
+    }, followController.signal)
+    const iterator = followStream[Symbol.asyncIterator]()
+    await iterator.next() // snapshot
+
+    // Turn 1 prompt
+    await target.dispatch('session/prompt', {
+      args: { request: {
+        sessionId,
+        requestId: 'req_turn_1',
+        content: [{ type: 'text', text: 'First question' }],
+      } },
+    }, new AbortController().signal)
+
+    // Should receive turn/start, step/start, user/message with rpcId
+    const t1TurnStart = await iterator.next()
+    expect(t1TurnStart.value).toMatchObject({ type: 'event', event: { type: 'turn/start', data: { turn: 1 } } })
+    const t1StepStart = await iterator.next()
+    expect(t1StepStart.value).toMatchObject({ type: 'event', event: { type: 'step/start', data: { turn: 1, step: 1 } } })
+    const t1UserMsg = await iterator.next()
+    expect(t1UserMsg.value).toMatchObject({
+      type: 'event',
+      event: {
+        type: 'user/message',
+        surfaceOp: 'append',
+        data: {
+          role: 'user',
+          content: [{ type: 'text', text: 'First question' }],
+          source: { kind: 'user', rpcId: 'req_turn_1' },
+        },
+      },
+    })
+
+    // Reply turn 1
+    inboundHandler!({
+      frame: {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', text: 'First answer' },
+        },
+      },
+    })
+    inboundHandler!({
+      frame: {
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' },
+        },
+      },
+    })
+
+    // Consume stream frames for turn 1
+    let frame = await iterator.next()
+    while (!frame.done && !(frame.value as { event?: { type: string } }).event?.type?.includes('turn/end')) {
+      frame = await iterator.next()
+    }
+
+    // Turn 2 prompt
+    await target.dispatch('session/prompt', {
+      args: { request: {
+        sessionId,
+        requestId: 'req_turn_2',
+        content: [{ type: 'text', text: 'Second question' }],
+      } },
+    }, new AbortController().signal)
+
+    // Should receive turn/start (turn 2), step/start (turn 2), user/message with rpcId req_turn_2
+    const t2TurnStart = await iterator.next()
+    expect(t2TurnStart.value).toMatchObject({ type: 'event', event: { type: 'turn/start', data: { turn: 2 } } })
+    const t2StepStart = await iterator.next()
+    expect(t2StepStart.value).toMatchObject({ type: 'event', event: { type: 'step/start', data: { turn: 2, step: 1 } } })
+    const t2UserMsg = await iterator.next()
+    expect(t2UserMsg.value).toMatchObject({
+      type: 'event',
+      event: {
+        type: 'user/message',
+        surfaceOp: 'append',
+        data: {
+          role: 'user',
+          content: [{ type: 'text', text: 'Second question' }],
+          source: { kind: 'user', rpcId: 'req_turn_2' },
+        },
+      },
+    })
+
+    followController.abort()
+    await iterator.return?.()
+    await target.close()
+  })
 })
+

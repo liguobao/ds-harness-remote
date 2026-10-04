@@ -402,22 +402,22 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     const text = extractPromptText(array(request.content))
     if (text === undefined) return failure('attachment-error', 'Remote accepts text prompts only.')
+    const requestId = typeof request.requestId === 'string' && request.requestId.length > 0
+      ? request.requestId
+      : undefined
     await this.ensureFollow(session)
-    const userEvent = this.appendHistory(session, {
-      type: 'user/message',
-      seq: session.events.length,
-      time: Date.now(),
-      data: {
+    const follow = [...this.follows].find(f => f.sessionId === sessionId)
+    if (follow !== undefined) {
+      follow.turn += 1
+      follow.stepOpen = true
+      this.pushEvent(follow, 'turn/start', { turn: follow.turn })
+      this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
+      this.pushEvent(follow, 'user/message', {
         id: `user:${Date.now()}`,
         role: 'user',
         content: [{ type: 'text', text }],
-        source: { kind: 'user' },
-      },
-      surfaceOp: 'append',
-    })
-    for (const follow of this.follows) {
-      if (follow.sessionId !== sessionId) continue
-      follow.queue.push({ type: 'event', event: { ...userEvent, seq: follow.nextSeq++ } })
+        source: requestId ? { kind: 'user', rpcId: requestId } : { kind: 'user' },
+      })
     }
     session.blank = false
     session.running = true
@@ -890,6 +890,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       })
       this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
       this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: { kind: 'completed' } })
+    } else if (follow.stepOpen) {
+      this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
+      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: { kind: 'completed' } })
     }
     follow.streamActive = false
     follow.stepOpen = false
@@ -899,7 +902,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private pushEvent(follow: FollowState, type: string, data: unknown): number {
-    const seq = follow.nextSeq++
+    const session = this.sessions.get(follow.sessionId)
+    const seq = session !== undefined ? session.events.length : follow.nextSeq++
     const event: NativeEvent = {
       type,
       seq,
@@ -907,9 +911,15 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       data,
       ...(isSurfaceEvent(type) ? { surfaceOp: 'append' as const } : {}),
     }
-    const session = this.sessions.get(follow.sessionId)
-    if (session !== undefined) this.appendHistory(session, event)
-    follow.queue.push({ type: 'event', event })
+    if (session !== undefined) {
+      session.events.push({ type: 'event', event })
+    }
+    for (const f of this.follows) {
+      if (f.sessionId === follow.sessionId) {
+        f.queue.push({ type: 'event', event })
+        f.nextSeq = seq + 1
+      }
+    }
     this.broadcastRcMux({
       type: 'session/event',
       sessionId: follow.sessionId,
@@ -918,11 +928,6 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return seq
   }
 
-  private appendHistory(session: AcpSessionState, event: NativeEvent): NativeEvent {
-    const next = { ...event, seq: session.events.length }
-    session.events.push({ type: 'event', event: next })
-    return next
-  }
 
   private registerSession(acpSessionId: string, cwd: string, title?: string): AcpSessionState {
     const now = Date.now()

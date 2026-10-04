@@ -18678,22 +18678,20 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     const text = extractPromptText(array2(request.content));
     if (text === void 0) return failure2("attachment-error", "Remote accepts text prompts only.");
+    const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
     await this.ensureFollow(session);
-    const userEvent = this.appendHistory(session, {
-      type: "user/message",
-      seq: session.events.length,
-      time: Date.now(),
-      data: {
+    const follow = [...this.follows].find((f) => f.sessionId === sessionId);
+    if (follow !== void 0) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "user/message", {
         id: `user:${Date.now()}`,
         role: "user",
         content: [{ type: "text", text }],
-        source: { kind: "user" }
-      },
-      surfaceOp: "append"
-    });
-    for (const follow of this.follows) {
-      if (follow.sessionId !== sessionId) continue;
-      follow.queue.push({ type: "event", event: { ...userEvent, seq: follow.nextSeq++ } });
+        source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
+      });
     }
     session.blank = false;
     session.running = true;
@@ -19116,6 +19114,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       });
       this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
       this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
+    } else if (follow.stepOpen) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
     }
     follow.streamActive = false;
     follow.stepOpen = false;
@@ -19124,7 +19125,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     follow.accumulatedText = "";
   }
   pushEvent(follow, type, data2) {
-    const seq = follow.nextSeq++;
+    const session = this.sessions.get(follow.sessionId);
+    const seq = session !== void 0 ? session.events.length : follow.nextSeq++;
     const event = {
       type,
       seq,
@@ -19132,20 +19134,21 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       data: data2,
       ...isSurfaceEvent2(type) ? { surfaceOp: "append" } : {}
     };
-    const session = this.sessions.get(follow.sessionId);
-    if (session !== void 0) this.appendHistory(session, event);
-    follow.queue.push({ type: "event", event });
+    if (session !== void 0) {
+      session.events.push({ type: "event", event });
+    }
+    for (const f of this.follows) {
+      if (f.sessionId === follow.sessionId) {
+        f.queue.push({ type: "event", event });
+        f.nextSeq = seq + 1;
+      }
+    }
     this.broadcastRcMux({
       type: "session/event",
       sessionId: follow.sessionId,
       event
     });
     return seq;
-  }
-  appendHistory(session, event) {
-    const next = { ...event, seq: session.events.length };
-    session.events.push({ type: "event", event: next });
-    return next;
   }
   registerSession(acpSessionId, cwd2, title) {
     const now = Date.now();
