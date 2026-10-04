@@ -83,7 +83,9 @@ interface AcpClientLike {
   prompt(sessionId: string, text: string, signal?: AbortSignal): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
-  listWorkspaces?(signal?: AbortSignal): Promise<Array<{ path: string; title?: string }>>
+  listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
+  listSessions?(path: string, backend?: string, limit?: number, signal?: AbortSignal): Promise<Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }>>
+  loadSessionHistory?(sessionId: string, backend?: string, signal?: AbortSignal): Promise<unknown[]>
   openStream(
     sessionId: string,
     onFrame: (frame: AgentAcpFrameData) => void,
@@ -121,14 +123,19 @@ export function createAcpWorkspaceView(path: string, title?: string): AcpVirtual
 export async function discoverAcpVirtualWorkspaces(
   client?: AcpClientLike,
   signal?: AbortSignal,
+  backend?: 'cursor' | 'antigravity',
 ): Promise<AcpVirtualWorkspaceView[]> {
   if (client?.listWorkspaces !== undefined) {
     try {
-      const items = await client.listWorkspaces(signal)
+      const items = await client.listWorkspaces(backend, signal)
       if (Array.isArray(items) && items.length > 0) {
         return items
           .filter(item => typeof item?.path === 'string' && item.path.trim() !== '')
-          .map(item => createAcpWorkspaceView(item.path, item.title))
+          .map(item => {
+            const view = createAcpWorkspaceView(item.path, item.title)
+            if (typeof item.sessionCount === 'number') view.sessionCount = item.sessionCount
+            return view
+          })
       }
     } catch {
       // fallback to empty
@@ -484,7 +491,21 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async hydrateSession(session: AcpSessionState): Promise<void> {
     if (this.backend !== 'antigravity' || session.events.length > 0) return
-    const events = await loadTranscriptEvents(session.acpSessionId, session.sessionId)
+    let events: unknown[] = []
+    if (this.client.loadSessionHistory !== undefined) {
+      try {
+        events = await this.client.loadSessionHistory(session.sessionId, this.backend)
+      } catch {
+        // fallback
+      }
+    }
+    if (events.length === 0) {
+      try {
+        events = await loadTranscriptEvents(session.acpSessionId, session.sessionId)
+      } catch {
+        // fallback
+      }
+    }
     if (events.length > 0) {
       session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
       session.blank = false
@@ -1019,7 +1040,21 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
     if (this.backend !== 'antigravity') return
     try {
-      const discovered = await discoverAntigravitySessions(workspace.path, 30)
+      let discovered: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
+      if (this.client.listSessions !== undefined) {
+        try {
+          discovered = await this.client.listSessions(workspace.path, this.backend, 30)
+        } catch {
+          // fallback
+        }
+      }
+      if (discovered.length === 0) {
+        try {
+          discovered = await discoverAntigravitySessions(workspace.path, 30)
+        } catch {
+          // fallback
+        }
+      }
       for (const item of discovered) {
         const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`
         if (!this.sessions.has(sessionId)) {

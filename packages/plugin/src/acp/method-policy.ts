@@ -38,7 +38,18 @@ const schemas = {
   'dsh/directoryList': z.object({
     path: z.string().min(1).max(4096),
   }).strict(),
-  'dsh/workspaceList': z.object({}).strict().optional(),
+  'dsh/workspaceList': z.object({
+    backend: z.string().min(1).max(64).optional(),
+  }).strict().optional(),
+  'dsh/sessionList': z.object({
+    path: z.string().min(1).max(4096).or(z.literal('')),
+    backend: z.string().min(1).max(64).optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  }).strict(),
+  'dsh/sessionHistory': z.object({
+    sessionId: id,
+    backend: z.string().min(1).max(64).optional(),
+  }).strict(),
 } as const
 
 export type AllowedAcpMethod = keyof typeof schemas
@@ -61,7 +72,14 @@ export function parseAcpCall(method: string, params: unknown): {
 }
 
 export function sessionIdFromParams(method: AllowedAcpMethod, params: Record<string, unknown>): string | undefined {
-  if (method === 'initialize' || method === 'session/new' || method === 'dsh/directoryList') return undefined
+  if (
+    method === 'initialize'
+    || method === 'session/new'
+    || method === 'dsh/directoryList'
+    || method === 'dsh/workspaceList'
+    || method === 'dsh/sessionList'
+    || method === 'dsh/sessionHistory'
+  ) return undefined
   if (typeof params.sessionId === 'string') return params.sessionId
   return undefined
 }

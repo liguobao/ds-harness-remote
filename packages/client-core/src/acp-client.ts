@@ -59,9 +59,45 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async listWorkspaces(signal?: AbortSignal): Promise<Array<{ path: string; title?: string }>> {
-    const result = await this.call('dsh/workspaceList', {}, signal).catch(() => [])
-    return Array.isArray(result) ? result as Array<{ path: string; title?: string }> : []
+  async listWorkspaces(
+    backend?: AcpAgentBackend,
+    signal?: AbortSignal,
+  ): Promise<Array<{ path: string; title?: string; sessionCount?: number }>> {
+    const result = await this.call('dsh/workspaceList', {
+      ...(backend === undefined ? {} : { backend }),
+    }, signal).catch(() => [])
+    return Array.isArray(result) ? result as Array<{ path: string; title?: string; sessionCount?: number }> : []
+  }
+
+  async listSessions(
+    path: string,
+    backend?: AcpAgentBackend,
+    limit?: number,
+    signal?: AbortSignal,
+  ): Promise<Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }>> {
+    const result = await this.call('dsh/sessionList', {
+      path,
+      ...(backend === undefined ? {} : { backend }),
+      ...(limit === undefined ? {} : { limit }),
+    }, signal).catch(() => ({ items: [] }))
+    return isRecord(result) && Array.isArray(result.items) ? result.items as Array<{
+      conversationId: string
+      title: string
+      createdAt: number
+      updatedAt: number
+    }> : []
+  }
+
+  async loadSessionHistory(
+    sessionId: string,
+    backend?: AcpAgentBackend,
+    signal?: AbortSignal,
+  ): Promise<unknown[]> {
+    const result = await this.call('dsh/sessionHistory', {
+      sessionId,
+      ...(backend === undefined ? {} : { backend }),
+    }, signal).catch(() => ({ events: [] }))
+    return isRecord(result) && Array.isArray(result.events) ? result.events : []
   }
 
   async createSession(

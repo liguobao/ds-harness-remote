@@ -564,4 +564,48 @@ describe('AcpVirtualHarness', () => {
     expect(ws.sessionIds).toContain(preferred)
     await target.close()
   })
+
+  it('hydrates session history via client.loadSessionHistory RPC when available', async () => {
+    const mockEvents = [
+      { type: 'event', event: { type: 'turn/start', seq: 0, time: 1000, data: { turn: 1 } } },
+      { type: 'event', event: { type: 'step/start', seq: 1, time: 1000, data: { turn: 1, step: 1 } } },
+      { type: 'event', event: { type: 'user/message', seq: 2, time: 1000, data: { role: 'user', content: [{ type: 'text', text: 'hello' }] }, surfaceOp: 'append' } },
+      { type: 'event', event: { type: 'assistant/message', seq: 3, time: 1001, data: { role: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }, surfaceOp: 'append' } },
+      { type: 'event', event: { type: 'step/end', seq: 4, time: 1001, data: { turn: 1, step: 1 } } },
+      { type: 'event', event: { type: 'turn/end', seq: 5, time: 1001, data: { turn: 1 } } },
+    ]
+    const client: AcpClientLike = {
+      createSession: vi.fn(async () => ({ sessionId: 'new-session' })),
+      prompt: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      listDirectory: vi.fn(async () => []),
+      openStream: vi.fn(async () => ({ close: async () => {} })),
+      respond: vi.fn(async () => {}),
+      listSessions: vi.fn(async () => [
+        { conversationId: 'remote-conv-1', title: 'Remote conversation', createdAt: 1000, updatedAt: 2000 },
+      ]),
+      loadSessionHistory: vi.fn(async () => mockEvents),
+    }
+
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote')
+    const ws = await target.selectWorkspace(workspaceId)
+    expect(client.listSessions).toHaveBeenCalled()
+    expect(ws.sessionIds).toContain('cursor:remote-conv-1')
+
+    const historyRes = await target.dispatch('session/history', {
+      args: { sessionId: 'cursor:remote-conv-1', maxMessages: 50 },
+    }, new AbortController().signal)
+
+    expect(client.loadSessionHistory).toHaveBeenCalledWith('cursor:remote-conv-1', 'antigravity')
+    expect(historyRes.ok).toBe(true)
+    if (historyRes.ok) {
+      const records = (historyRes.value as any).records
+      expect(records.length).toBe(6)
+      const types = records.map((r: any) => r.event.type)
+      expect(types).toContain('user/message')
+      expect(types).toContain('assistant/message')
+    }
+    await target.close()
+  })
 })

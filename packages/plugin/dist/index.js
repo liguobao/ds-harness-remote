@@ -1,171 +1,8 @@
 var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
 var __export = (target2, all) => {
   for (var name2 in all)
     __defProp(target2, name2, { get: all[name2], enumerable: true });
 };
-
-// src/acp/adapters/antigravity/transcript-loader.ts
-var transcript_loader_exports = {};
-__export(transcript_loader_exports, {
-  cleanUserPrompt: () => cleanUserPrompt,
-  discoverAntigravitySessions: () => discoverAntigravitySessions,
-  loadTranscriptEvents: () => loadTranscriptEvents
-});
-import { promises as fs } from "node:fs";
-import { join as join2 } from "node:path";
-import { homedir } from "node:os";
-function cleanUserPrompt(raw) {
-  if (!raw) return "";
-  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return raw.trim();
-}
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  let content = "";
-  try {
-    content = await fs.readFile(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines = content.split("\n");
-  const events = [];
-  let currentSeq = 0;
-  let currentTurn = 0;
-  let turnOpen = false;
-  const push = (type, data2, time, surface = false) => {
-    events.push({
-      type: "event",
-      event: {
-        type,
-        seq: currentSeq++,
-        time,
-        data: data2,
-        ...surface ? { surfaceOp: "append" } : {}
-      }
-    });
-  };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record8;
-    try {
-      record8 = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
-    if (record8.type === "USER_INPUT") {
-      if (turnOpen) {
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-      currentTurn += 1;
-      turnOpen = true;
-      push("turn/start", { turn: currentTurn }, time);
-      push("step/start", { turn: currentTurn, step: 1 }, time);
-      const text = cleanUserPrompt(record8.content);
-      push("user/message", {
-        id: `user:${record8.step_index}`,
-        role: "user",
-        content: [{ type: "text", text }],
-        source: { kind: "user" }
-      }, time, true);
-    } else if (record8.type === "PLANNER_RESPONSE") {
-      if (!turnOpen) {
-        currentTurn += 1;
-        turnOpen = true;
-        push("turn/start", { turn: currentTurn }, time);
-        push("step/start", { turn: currentTurn, step: 1 }, time);
-      }
-      if (Array.isArray(record8.tool_calls)) {
-        for (const call of record8.tool_calls) {
-          push("tool/call", {
-            turn: currentTurn,
-            step: 1,
-            toolCallId: `${record8.step_index}:${call.name}`,
-            toolName: call.name,
-            status: call.status === "ERROR" ? "failed" : "finished"
-          }, time, false);
-        }
-      }
-      if (record8.content && record8.content.trim() !== "") {
-        push("assistant/message", {
-          turn: currentTurn,
-          step: 1,
-          message: {
-            id: `${sessionId}:${currentTurn}`,
-            role: "assistant",
-            content: [{ type: "text", text: record8.content }],
-            source: { kind: "model", provider: "google", model: "gemini" }
-          },
-          stream: []
-        }, time, true);
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-    }
-  }
-  if (turnOpen) {
-    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
-    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
-  }
-  return events;
-}
-async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
-  let dirEntries;
-  try {
-    dirEntries = await fs.readdir(baseDir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const entry of dirEntries) {
-    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
-    try {
-      const s2 = await fs.stat(transcriptPath);
-      const handle = await fs.open(transcriptPath, "r");
-      try {
-        const buf = Buffer.alloc(4096);
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine);
-          const rawPrompt = cleanUserPrompt(parsed.content);
-          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s2.mtimeMs
-            });
-          }
-        }
-      } finally {
-        await handle.close();
-      }
-    } catch {
-    }
-  }
-  results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
-}
-var init_transcript_loader = __esm({
-  "src/acp/adapters/antigravity/transcript-loader.ts"() {
-    "use strict";
-  }
-});
 
 // src/loopback-preview.ts
 import { randomBytes, randomUUID } from "node:crypto";
@@ -5909,9 +5746,26 @@ var AgentAcpClient = class {
       ...result === void 0 ? {} : { result }
     }, signal);
   }
-  async listWorkspaces(signal) {
-    const result = await this.call("dsh/workspaceList", {}, signal).catch(() => []);
+  async listWorkspaces(backend, signal) {
+    const result = await this.call("dsh/workspaceList", {
+      ...backend === void 0 ? {} : { backend }
+    }, signal).catch(() => []);
     return Array.isArray(result) ? result : [];
+  }
+  async listSessions(path, backend, limit, signal) {
+    const result = await this.call("dsh/sessionList", {
+      path,
+      ...backend === void 0 ? {} : { backend },
+      ...limit === void 0 ? {} : { limit }
+    }, signal).catch(() => ({ items: [] }));
+    return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
+  }
+  async loadSessionHistory(sessionId, backend, signal) {
+    const result = await this.call("dsh/sessionHistory", {
+      sessionId,
+      ...backend === void 0 ? {} : { backend }
+    }, signal).catch(() => ({ events: [] }));
+    return isRecord2(result) && Array.isArray(result.events) ? result.events : [];
   }
   async createSession(cwd2, mode2, backend, signal) {
     const result = await this.call("session/new", {
@@ -18548,8 +18402,155 @@ var AsyncValueQueue2 = class {
   }
 };
 
+// src/acp/adapters/antigravity/transcript-loader.ts
+import { promises as fs } from "node:fs";
+import { join as join2 } from "node:path";
+import { homedir } from "node:os";
+function cleanUserPrompt(raw) {
+  if (!raw) return "";
+  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return raw.trim();
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  let content = "";
+  try {
+    content = await fs.readFile(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = content.split("\n");
+  const events = [];
+  let currentSeq = 0;
+  let currentTurn = 0;
+  let turnOpen = false;
+  const push = (type, data2, time, surface = false) => {
+    events.push({
+      type: "event",
+      event: {
+        type,
+        seq: currentSeq++,
+        time,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    });
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let record8;
+    try {
+      record8 = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
+    if (record8.type === "USER_INPUT") {
+      if (turnOpen) {
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+      currentTurn += 1;
+      turnOpen = true;
+      push("turn/start", { turn: currentTurn }, time);
+      push("step/start", { turn: currentTurn, step: 1 }, time);
+      const text = cleanUserPrompt(record8.content);
+      push("user/message", {
+        id: `user:${record8.step_index}`,
+        role: "user",
+        content: [{ type: "text", text }],
+        source: { kind: "user" }
+      }, time, true);
+    } else if (record8.type === "PLANNER_RESPONSE") {
+      if (!turnOpen) {
+        currentTurn += 1;
+        turnOpen = true;
+        push("turn/start", { turn: currentTurn }, time);
+        push("step/start", { turn: currentTurn, step: 1 }, time);
+      }
+      if (Array.isArray(record8.tool_calls)) {
+        for (const call of record8.tool_calls) {
+          push("tool/call", {
+            turn: currentTurn,
+            step: 1,
+            toolCallId: `${record8.step_index}:${call.name}`,
+            toolName: call.name,
+            status: call.status === "ERROR" ? "failed" : "finished"
+          }, time, false);
+        }
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        push("assistant/message", {
+          turn: currentTurn,
+          step: 1,
+          message: {
+            id: `${sessionId}:${currentTurn}`,
+            role: "assistant",
+            content: [{ type: "text", text: record8.content }],
+            source: { kind: "model", provider: "google", model: "gemini" }
+          },
+          stream: []
+        }, time, true);
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+    }
+  }
+  if (turnOpen) {
+    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
+  }
+  return events;
+}
+async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  let dirEntries;
+  try {
+    dirEntries = await fs.readdir(baseDir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of dirEntries) {
+    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
+    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    try {
+      const s2 = await fs.stat(transcriptPath);
+      const handle = await fs.open(transcriptPath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine);
+          const rawPrompt = cleanUserPrompt(parsed.content);
+          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s2.mtimeMs
+            });
+          }
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+    }
+  }
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
+  return results.slice(0, limit);
+}
+
 // src/acp/virtual-harness.ts
-init_transcript_loader();
 var CURSOR_SESSION_PREFIX = "cursor:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var CURSOR_PROVIDER = "cursor";
@@ -18569,12 +18570,16 @@ function createAcpWorkspaceView(path, title) {
     updatedAt: now
   };
 }
-async function discoverAcpVirtualWorkspaces(client, signal) {
+async function discoverAcpVirtualWorkspaces(client, signal, backend) {
   if (client?.listWorkspaces !== void 0) {
     try {
-      const items = await client.listWorkspaces(signal);
+      const items = await client.listWorkspaces(backend, signal);
       if (Array.isArray(items) && items.length > 0) {
-        return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => createAcpWorkspaceView(item.path, item.title));
+        return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => {
+          const view = createAcpWorkspaceView(item.path, item.title);
+          if (typeof item.sessionCount === "number") view.sessionCount = item.sessionCount;
+          return view;
+        });
       }
     } catch {
     }
@@ -18917,7 +18922,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async hydrateSession(session) {
     if (this.backend !== "antigravity" || session.events.length > 0) return;
-    const events = await loadTranscriptEvents(session.acpSessionId, session.sessionId);
+    let events = [];
+    if (this.client.loadSessionHistory !== void 0) {
+      try {
+        events = await this.client.loadSessionHistory(session.sessionId, this.backend);
+      } catch {
+      }
+    }
+    if (events.length === 0) {
+      try {
+        events = await loadTranscriptEvents(session.acpSessionId, session.sessionId);
+      } catch {
+      }
+    }
     if (events.length > 0) {
       session.events = events;
       session.blank = false;
@@ -19393,7 +19410,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async discoverAndAttachSessions(workspace) {
     if (this.backend !== "antigravity") return;
     try {
-      const discovered = await discoverAntigravitySessions(workspace.path, 30);
+      let discovered = [];
+      if (this.client.listSessions !== void 0) {
+        try {
+          discovered = await this.client.listSessions(workspace.path, this.backend, 30);
+        } catch {
+        }
+      }
+      if (discovered.length === 0) {
+        try {
+          discovered = await discoverAntigravitySessions(workspace.path, 30);
+        } catch {
+        }
+      }
       for (const item of discovered) {
         const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
@@ -22145,13 +22174,15 @@ var ClientModeRuntime = class {
     if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
       return this.cursorVirtual.workspaces();
     }
-    const workspaces = await discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal);
+    const acpClient = new AgentAcpClient(remote.client);
+    const workspaces = await discoverAcpVirtualWorkspaces(acpClient, signal, backend);
     if (backend === "antigravity") {
       try {
-        const { discoverAntigravitySessions: discoverAntigravitySessions2 } = await Promise.resolve().then(() => (init_transcript_loader(), transcript_loader_exports));
-        const sessions = await discoverAntigravitySessions2("", 100);
-        for (const ws of workspaces) {
-          if (ws.sessionCount === 0) ws.sessionCount = sessions.length;
+        const sessions = await acpClient.listSessions("", "antigravity", 100, signal);
+        if (sessions.length > 0) {
+          for (const ws of workspaces) {
+            if (ws.sessionCount === 0) ws.sessionCount = sessions.length;
+          }
         }
       } catch {
       }
@@ -24145,8 +24176,10 @@ var RpcRouter = class {
     const startedAt = performance.now();
     try {
       const result = await this.invoke(request.payload.method, request.payload.params);
-      this.logger?.debug("host rpc ok", {
+      const subMethod = typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
+      this.logger?.info("host rpc ok", {
         method: request.payload.method,
+        ...subMethod ? { subMethod } : {},
         durationMs: Math.round(performance.now() - startedAt)
       });
       return createRpcResponse(request.id, result);
@@ -29141,7 +29174,18 @@ var schemas2 = {
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
   }).strict(),
-  "dsh/workspaceList": external_exports.object({}).strict().optional()
+  "dsh/workspaceList": external_exports.object({
+    backend: external_exports.string().min(1).max(64).optional()
+  }).strict().optional(),
+  "dsh/sessionList": external_exports.object({
+    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
+    backend: external_exports.string().min(1).max(64).optional(),
+    limit: external_exports.number().int().positive().max(100).optional()
+  }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    sessionId: id4,
+    backend: external_exports.string().min(1).max(64).optional()
+  }).strict()
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
 function parseAcpCall(method, params) {
@@ -29156,7 +29200,7 @@ function parseAcpCall(method, params) {
   return { method, params: parsed.data };
 }
 function sessionIdFromParams(method, params) {
-  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList") return void 0;
+  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
   if (typeof params.sessionId === "string") return params.sessionId;
   return void 0;
 }
@@ -29549,6 +29593,10 @@ var AcpRemoteGateway = class {
   async call(connectionId, input2) {
     const envelope = parseCallEnvelope2(input2);
     const call = parseAcpCall(envelope.method, envelope.params);
+    this.logger.info("ACP call received", {
+      method: call.method,
+      sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
+    });
     if (call.method === "initialize") {
       const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
       this.requireAcp(requestedBackend);
@@ -29568,10 +29616,41 @@ var AcpRemoteGateway = class {
         } catch {
         }
       }
+      const backend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
+      let sessionCount = 0;
+      if (backend === "antigravity") {
+        try {
+          const sessions = await discoverAntigravitySessions("", 100);
+          sessionCount = sessions.length;
+        } catch {
+        }
+      }
       return [...candidates].map((p) => ({
         path: p,
-        title: basename4(p) || "workspace"
+        title: basename4(p) || "workspace",
+        ...sessionCount > 0 ? { sessionCount } : {}
       }));
+    }
+    if (call.method === "dsh/sessionList") {
+      const limit = typeof call.params.limit === "number" ? call.params.limit : 30;
+      const path = String(call.params.path || "");
+      const backend = typeof call.params.backend === "string" ? call.params.backend : "antigravity";
+      if (backend === "antigravity") {
+        const items = await discoverAntigravitySessions(path, limit);
+        this.logger.info("ACP session list fetched", { count: items.length, path });
+        return { items };
+      }
+      return { items: [] };
+    }
+    if (call.method === "dsh/sessionHistory") {
+      const rawSessionId = String(call.params.sessionId);
+      const conversationId = rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
+      const events = await loadTranscriptEvents(conversationId, rawSessionId);
+      this.logger.info("ACP session history fetched", {
+        sessionId: shortSessionId(rawSessionId),
+        eventCount: events.length
+      });
+      return { events };
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));

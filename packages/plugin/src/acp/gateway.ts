@@ -21,6 +21,7 @@ import {
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
+import { discoverAntigravitySessions, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -177,6 +178,10 @@ export class AcpRemoteGateway {
   async call(connectionId: string, input: unknown): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
     const call = parseAcpCall(envelope.method, envelope.params)
+    this.logger.info('ACP call received', {
+      method: call.method,
+      sessionId: typeof call.params?.sessionId === 'string' ? shortSessionId(call.params.sessionId) : undefined,
+    })
 
     if (call.method === 'initialize') {
       const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
@@ -200,10 +205,44 @@ export class AcpRemoteGateway {
           // ignore
         }
       }
+      const backend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
+      let sessionCount = 0
+      if (backend === 'antigravity') {
+        try {
+          const sessions = await discoverAntigravitySessions('', 100)
+          sessionCount = sessions.length
+        } catch {
+          // ignore
+        }
+      }
       return [...candidates].map(p => ({
         path: p,
         title: basename(p) || 'workspace',
+        ...(sessionCount > 0 ? { sessionCount } : {}),
       }))
+    }
+
+    if (call.method === 'dsh/sessionList') {
+      const limit = typeof call.params.limit === 'number' ? call.params.limit : 30
+      const path = String(call.params.path || '')
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : 'antigravity'
+      if (backend === 'antigravity') {
+        const items = await discoverAntigravitySessions(path, limit)
+        this.logger.info('ACP session list fetched', { count: items.length, path })
+        return { items }
+      }
+      return { items: [] }
+    }
+
+    if (call.method === 'dsh/sessionHistory') {
+      const rawSessionId = String(call.params.sessionId)
+      const conversationId = rawSessionId.startsWith('cursor:') ? rawSessionId.slice('cursor:'.length) : rawSessionId
+      const events = await loadTranscriptEvents(conversationId, rawSessionId)
+      this.logger.info('ACP session history fetched', {
+        sessionId: shortSessionId(rawSessionId),
+        eventCount: events.length,
+      })
+      return { events }
     }
 
     if (call.method === 'session/new') {

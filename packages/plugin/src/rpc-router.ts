@@ -117,8 +117,12 @@ export class RpcRouter {
     const startedAt = performance.now()
     try {
       const result = await this.invoke(request.payload.method, request.payload.params)
-      this.logger?.debug('host rpc ok', {
+      const subMethod = typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
+        ? String((request.payload.params as Record<string, unknown>).method)
+        : undefined
+      this.logger?.info('host rpc ok', {
         method: request.payload.method,
+        ...(subMethod ? { subMethod } : {}),
         durationMs: Math.round(performance.now() - startedAt),
       })
       return createRpcResponse(request.id, result)
