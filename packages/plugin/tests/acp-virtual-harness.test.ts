@@ -160,11 +160,20 @@ describe('AcpVirtualHarness', () => {
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
     const sessionId = created.value.sessionId
 
+    const catalogResult = await target.dispatch('session/modelCatalog', {}, new AbortController().signal) as {
+      ok: true
+      value: { default: unknown; routableProviders: string[]; groups: Array<{ models: unknown[] }>; failures: unknown[] }
+    }
+    expect(catalogResult.ok).toBe(true)
+    expect(catalogResult.value.routableProviders).toEqual(['antigravity'])
+    expect(catalogResult.value.failures).toEqual([])
+
     const modelsResult = await target.dispatch('session/models', {
       args: { request: { sessionId } },
-    }, new AbortController().signal) as { ok: true; value: { current: { provider: string; model: string }; groups: Array<{ models: unknown[] }> } }
+    }, new AbortController().signal) as { ok: true; value: { current: { provider: string; model: string }; routable: boolean; groups: Array<{ models: unknown[] }> } }
     expect(modelsResult.ok).toBe(true)
     expect(modelsResult.value.current.provider).toBe('antigravity')
+    expect(modelsResult.value.routable).toBe(true)
     expect(modelsResult.value.groups[0]?.models.length).toBeGreaterThan(1)
 
     const selectResult = await target.dispatch('session/selectModel', {

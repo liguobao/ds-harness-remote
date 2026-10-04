@@ -258,7 +258,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           const catalog = modelCatalog(this.backend)
           return business(success({
             current: this.modelSelection(rawId),
-            routable: false,
+            routable: true,
             groups: catalog.groups,
             failures: [],
           }))
@@ -1176,7 +1176,9 @@ const CURSOR_MODELS: AcpModelView[] = [
 
 export function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor'): {
   default: AcpModelSelection
+  routableProviders: string[]
   groups: Array<{ id: string; name: string; models: AcpModelView[] }>
+  failures: Array<{ id: string; name: string; message: string }>
 } {
   const provider = backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
   const name = backend === 'antigravity' ? 'Antigravity' : 'Cursor'
@@ -1184,11 +1186,13 @@ export function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor'): {
   const defaultModel = models[0]!.id
   return {
     default: { provider, model: defaultModel },
+    routableProviders: [provider],
     groups: [{
       id: provider,
       name,
       models,
     }],
+    failures: [],
   }
 }
 

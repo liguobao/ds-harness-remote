@@ -18548,7 +18548,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           const catalog = modelCatalog2(this.backend);
           return business2(success2({
             current: this.modelSelection(rawId),
-            routable: false,
+            routable: true,
             groups: catalog.groups,
             failures: []
           }));
@@ -19371,11 +19371,13 @@ function modelCatalog2(backend = "cursor") {
   const defaultModel = models[0].id;
   return {
     default: { provider, model: defaultModel },
+    routableProviders: [provider],
     groups: [{
       id: provider,
       name: name2,
       models
-    }]
+    }],
+    failures: []
   };
 }
 function extractPromptText(content) {
