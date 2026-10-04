@@ -188,9 +188,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (workspace === undefined) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
+    await this.discoverAndAttachSessions(workspace)
     if (workspace.sessionIds.length === 0) {
       await this.ensureInitialSession(workspace)
     }
+    this.publishWorkspaceBaseline()
     return this.workspaceById.get(workspace.workspaceId) ?? workspace
   }
 
@@ -214,12 +216,21 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       ? undefined
       : this.workspaceById.get(this.selectedWorkspaceId)
     const sessionIds = selected?.sessionIds ?? []
-    for (let index = sessionIds.length - 1; index >= 0; index -= 1) {
-      const sessionId = sessionIds[index]!
+    let bestSessionId: string | undefined
+    let bestUpdatedAt = -1
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId)
+      if (session !== undefined && !session.running && !session.blank && session.updatedAt > bestUpdatedAt) {
+        bestUpdatedAt = session.updatedAt
+        bestSessionId = sessionId
+      }
+    }
+    if (bestSessionId !== undefined) return bestSessionId
+    for (const sessionId of sessionIds) {
       const session = this.sessions.get(sessionId)
       if (session !== undefined && !session.running) return sessionId
     }
-    return sessionIds.at(-1)
+    return sessionIds[0] ?? sessionIds.at(-1)
   }
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
@@ -399,10 +410,29 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return success({ sessionId: session.sessionId })
   }
 
+  private ensureSessionRegistered(sessionId: string): AcpSessionState | undefined {
+    let session = this.sessions.get(sessionId)
+    if (session !== undefined) return session
+    if (this.backend === 'antigravity' && sessionId.startsWith(CURSOR_SESSION_PREFIX)) {
+      const acpSessionId = sessionId.slice(CURSOR_SESSION_PREFIX.length)
+      const workspace = this.selectedWorkspaceId !== undefined ? this.workspaceById.get(this.selectedWorkspaceId) : undefined
+      const cwd = workspace?.path ?? '/'
+      session = this.registerSession(acpSessionId, cwd, 'Antigravity', Date.now(), Date.now(), false)
+      if (workspace && !workspace.sessionIds.includes(sessionId)) {
+        workspace.sessionIds.unshift(sessionId)
+        workspace.sessionCount = workspace.sessionIds.length
+        this.publishWorkspaceBaseline()
+      }
+      return session
+    }
+    return undefined
+  }
+
   private async prompt(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
+    await this.hydrateSession(session)
     const text = extractPromptText(array(request.content))
     if (text === undefined) return failure('attachment-error', 'Remote accepts text prompts only.')
     const requestId = typeof request.requestId === 'string' && request.requestId.length > 0
@@ -432,7 +462,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async cancel(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.client.cancel(session.acpSessionId, signal)
     session.running = false
@@ -443,7 +473,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private async renameSession(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
     const title = string(request.title)?.trim()
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     if (title === undefined) return failure('bad-request', 'A Session title is required.')
     session.title = title
@@ -464,18 +494,36 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async sessionHistory(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.hydrateSession(session)
-    return success(this.historyPage(session, {
+    const page = this.historyPage(session, {
       beforeSeq: optionalInteger(request.beforeSeq),
       limit: optionalPositiveInteger(request.maxMessages) ?? 50,
-    }))
+    })
+    return success({
+      ...page,
+      events: page.records.map(entry => ({ event: entry.event })),
+      projections: {
+        kind: 'sequenced',
+        asOfSeq: page.cursor,
+        values: {
+          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          modelSelection: this.modelSelectionProjection(sessionId),
+          imageLimits: {
+            maxImageBytes: 0,
+            maxImagesPerMessage: 0,
+            mediaTypes: [],
+          },
+        },
+      },
+    })
   }
 
   private async sessionPage(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.hydrateSession(session)
     const page = this.historyPage(session, {
@@ -597,7 +645,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async sessionFollow(request: JsonRecord, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     const sessionId = extractSessionId(request)
-    const session = this.sessions.get(sessionId)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) throw new Error('The Session was not found.')
     await this.hydrateSession(session)
     const history = this.historyPage(session, {
@@ -1015,13 +1063,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async handleSessionList(): Promise<unknown[]> {
-    if (this.selectedWorkspaceId !== undefined) {
-      const workspace = this.workspaceById.get(this.selectedWorkspaceId)
-      if (workspace !== undefined) {
-        await this.discoverAndAttachSessions(workspace)
-        if (workspace.sessionIds.length === 0) {
-          await this.ensureInitialSession(workspace)
-        }
+    for (const workspace of this.workspaceById.values()) {
+      await this.discoverAndAttachSessions(workspace)
+      if (workspace.sessionIds.length === 0) {
+        await this.ensureInitialSession(workspace)
       }
     }
     return this.sessionSummaries()

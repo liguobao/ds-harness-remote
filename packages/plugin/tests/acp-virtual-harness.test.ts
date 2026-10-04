@@ -544,5 +544,24 @@ describe('AcpVirtualHarness', () => {
 
     await target.close()
   })
-})
 
+  it('discovers and attaches sessions when selectWorkspace is called directly', async () => {
+    const client: AcpClientLike = {
+      createSession: vi.fn(async () => ({ sessionId: 'new-session' })),
+      prompt: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      listDirectory: vi.fn(async () => []),
+      openStream: vi.fn(async () => ({ close: async () => {} })),
+      respond: vi.fn(async () => {}),
+    }
+
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote')
+    const ws = await target.selectWorkspace(workspaceId)
+    expect(ws.sessionIds.length).toBeGreaterThan(0)
+    const preferred = await target.preferredSessionId()
+    expect(preferred).toBeDefined()
+    expect(ws.sessionIds).toContain(preferred)
+    await target.close()
+  })
+})

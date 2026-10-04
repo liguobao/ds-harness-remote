@@ -600,7 +600,19 @@ export class ClientModeRuntime {
     if (this.cursorVirtual !== undefined && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
       return this.cursorVirtual.workspaces()
     }
-    return discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal)
+    const workspaces = await discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal)
+    if (backend === 'antigravity') {
+      try {
+        const { discoverAntigravitySessions } = await import('./acp/adapters/antigravity/transcript-loader.js')
+        const sessions = await discoverAntigravitySessions('', 100)
+        for (const ws of workspaces) {
+          if (ws.sessionCount === 0) ws.sessionCount = sessions.length
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return workspaces
   }
 
   async openCursorWorkspace(

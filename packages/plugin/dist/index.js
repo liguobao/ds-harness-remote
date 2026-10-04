@@ -1,8 +1,171 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target2, all) => {
   for (var name2 in all)
     __defProp(target2, name2, { get: all[name2], enumerable: true });
 };
+
+// src/acp/adapters/antigravity/transcript-loader.ts
+var transcript_loader_exports = {};
+__export(transcript_loader_exports, {
+  cleanUserPrompt: () => cleanUserPrompt,
+  discoverAntigravitySessions: () => discoverAntigravitySessions,
+  loadTranscriptEvents: () => loadTranscriptEvents
+});
+import { promises as fs } from "node:fs";
+import { join as join2 } from "node:path";
+import { homedir } from "node:os";
+function cleanUserPrompt(raw) {
+  if (!raw) return "";
+  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return raw.trim();
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  let content = "";
+  try {
+    content = await fs.readFile(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = content.split("\n");
+  const events = [];
+  let currentSeq = 0;
+  let currentTurn = 0;
+  let turnOpen = false;
+  const push = (type, data2, time, surface = false) => {
+    events.push({
+      type: "event",
+      event: {
+        type,
+        seq: currentSeq++,
+        time,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    });
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let record8;
+    try {
+      record8 = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
+    if (record8.type === "USER_INPUT") {
+      if (turnOpen) {
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+      currentTurn += 1;
+      turnOpen = true;
+      push("turn/start", { turn: currentTurn }, time);
+      push("step/start", { turn: currentTurn, step: 1 }, time);
+      const text = cleanUserPrompt(record8.content);
+      push("user/message", {
+        id: `user:${record8.step_index}`,
+        role: "user",
+        content: [{ type: "text", text }],
+        source: { kind: "user" }
+      }, time, true);
+    } else if (record8.type === "PLANNER_RESPONSE") {
+      if (!turnOpen) {
+        currentTurn += 1;
+        turnOpen = true;
+        push("turn/start", { turn: currentTurn }, time);
+        push("step/start", { turn: currentTurn, step: 1 }, time);
+      }
+      if (Array.isArray(record8.tool_calls)) {
+        for (const call of record8.tool_calls) {
+          push("tool/call", {
+            turn: currentTurn,
+            step: 1,
+            toolCallId: `${record8.step_index}:${call.name}`,
+            toolName: call.name,
+            status: call.status === "ERROR" ? "failed" : "finished"
+          }, time, false);
+        }
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        push("assistant/message", {
+          turn: currentTurn,
+          step: 1,
+          message: {
+            id: `${sessionId}:${currentTurn}`,
+            role: "assistant",
+            content: [{ type: "text", text: record8.content }],
+            source: { kind: "model", provider: "google", model: "gemini" }
+          },
+          stream: []
+        }, time, true);
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+    }
+  }
+  if (turnOpen) {
+    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
+  }
+  return events;
+}
+async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  let dirEntries;
+  try {
+    dirEntries = await fs.readdir(baseDir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of dirEntries) {
+    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
+    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    try {
+      const s2 = await fs.stat(transcriptPath);
+      const handle = await fs.open(transcriptPath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine);
+          const rawPrompt = cleanUserPrompt(parsed.content);
+          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s2.mtimeMs
+            });
+          }
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+    }
+  }
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
+  return results.slice(0, limit);
+}
+var init_transcript_loader = __esm({
+  "src/acp/adapters/antigravity/transcript-loader.ts"() {
+    "use strict";
+  }
+});
 
 // src/loopback-preview.ts
 import { randomBytes, randomUUID } from "node:crypto";
@@ -18385,155 +18548,8 @@ var AsyncValueQueue2 = class {
   }
 };
 
-// src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs } from "node:fs";
-import { join as join2 } from "node:path";
-import { homedir } from "node:os";
-function cleanUserPrompt(raw) {
-  if (!raw) return "";
-  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return raw.trim();
-}
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  let content = "";
-  try {
-    content = await fs.readFile(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines = content.split("\n");
-  const events = [];
-  let currentSeq = 0;
-  let currentTurn = 0;
-  let turnOpen = false;
-  const push = (type, data2, time, surface = false) => {
-    events.push({
-      type: "event",
-      event: {
-        type,
-        seq: currentSeq++,
-        time,
-        data: data2,
-        ...surface ? { surfaceOp: "append" } : {}
-      }
-    });
-  };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record8;
-    try {
-      record8 = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
-    if (record8.type === "USER_INPUT") {
-      if (turnOpen) {
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-      currentTurn += 1;
-      turnOpen = true;
-      push("turn/start", { turn: currentTurn }, time);
-      push("step/start", { turn: currentTurn, step: 1 }, time);
-      const text = cleanUserPrompt(record8.content);
-      push("user/message", {
-        id: `user:${record8.step_index}`,
-        role: "user",
-        content: [{ type: "text", text }],
-        source: { kind: "user" }
-      }, time, true);
-    } else if (record8.type === "PLANNER_RESPONSE") {
-      if (!turnOpen) {
-        currentTurn += 1;
-        turnOpen = true;
-        push("turn/start", { turn: currentTurn }, time);
-        push("step/start", { turn: currentTurn, step: 1 }, time);
-      }
-      if (Array.isArray(record8.tool_calls)) {
-        for (const call of record8.tool_calls) {
-          push("tool/call", {
-            turn: currentTurn,
-            step: 1,
-            toolCallId: `${record8.step_index}:${call.name}`,
-            toolName: call.name,
-            status: call.status === "ERROR" ? "failed" : "finished"
-          }, time, false);
-        }
-      }
-      if (record8.content && record8.content.trim() !== "") {
-        push("assistant/message", {
-          turn: currentTurn,
-          step: 1,
-          message: {
-            id: `${sessionId}:${currentTurn}`,
-            role: "assistant",
-            content: [{ type: "text", text: record8.content }],
-            source: { kind: "model", provider: "google", model: "gemini" }
-          },
-          stream: []
-        }, time, true);
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-    }
-  }
-  if (turnOpen) {
-    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
-    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
-  }
-  return events;
-}
-async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
-  let dirEntries;
-  try {
-    dirEntries = await fs.readdir(baseDir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const entry of dirEntries) {
-    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
-    try {
-      const s2 = await fs.stat(transcriptPath);
-      const handle = await fs.open(transcriptPath, "r");
-      try {
-        const buf = Buffer.alloc(4096);
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine);
-          const rawPrompt = cleanUserPrompt(parsed.content);
-          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s2.mtimeMs
-            });
-          }
-        }
-      } finally {
-        await handle.close();
-      }
-    } catch {
-    }
-  }
-  results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
-}
-
 // src/acp/virtual-harness.ts
+init_transcript_loader();
 var CURSOR_SESSION_PREFIX = "cursor:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var CURSOR_PROVIDER = "cursor";
@@ -18600,9 +18616,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (workspace === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
+    await this.discoverAndAttachSessions(workspace);
     if (workspace.sessionIds.length === 0) {
       await this.ensureInitialSession(workspace);
     }
+    this.publishWorkspaceBaseline();
     return this.workspaceById.get(workspace.workspaceId) ?? workspace;
   }
   async selectOrCreateWorkspace(path) {
@@ -18622,12 +18640,21 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async preferredSessionId() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const sessionIds = selected?.sessionIds ?? [];
-    for (let index = sessionIds.length - 1; index >= 0; index -= 1) {
-      const sessionId = sessionIds[index];
+    let bestSessionId;
+    let bestUpdatedAt = -1;
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId);
+      if (session !== void 0 && !session.running && !session.blank && session.updatedAt > bestUpdatedAt) {
+        bestUpdatedAt = session.updatedAt;
+        bestSessionId = sessionId;
+      }
+    }
+    if (bestSessionId !== void 0) return bestSessionId;
+    for (const sessionId of sessionIds) {
       const session = this.sessions.get(sessionId);
       if (session !== void 0 && !session.running) return sessionId;
     }
-    return sessionIds.at(-1);
+    return sessionIds[0] ?? sessionIds.at(-1);
   }
   async invoke(request) {
     const result = await this.dispatch(
@@ -18822,10 +18849,28 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
     return success2({ sessionId: session.sessionId });
   }
+  ensureSessionRegistered(sessionId) {
+    let session = this.sessions.get(sessionId);
+    if (session !== void 0) return session;
+    if (this.backend === "antigravity" && sessionId.startsWith(CURSOR_SESSION_PREFIX)) {
+      const acpSessionId = sessionId.slice(CURSOR_SESSION_PREFIX.length);
+      const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
+      const cwd2 = workspace?.path ?? "/";
+      session = this.registerSession(acpSessionId, cwd2, "Antigravity", Date.now(), Date.now(), false);
+      if (workspace && !workspace.sessionIds.includes(sessionId)) {
+        workspace.sessionIds.unshift(sessionId);
+        workspace.sessionCount = workspace.sessionIds.length;
+        this.publishWorkspaceBaseline();
+      }
+      return session;
+    }
+    return void 0;
+  }
   async prompt(request, signal) {
     const sessionId = extractSessionId(request);
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
     const text = extractPromptText(array2(request.content));
     if (text === void 0) return failure2("attachment-error", "Remote accepts text prompts only.");
     const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
@@ -18852,7 +18897,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async cancel(request, signal) {
     const sessionId = extractSessionId(request);
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.client.cancel(session.acpSessionId, signal);
     session.running = false;
@@ -18862,7 +18907,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async renameSession(request) {
     const sessionId = extractSessionId(request);
     const title = string3(request.title)?.trim();
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     if (title === void 0) return failure2("bad-request", "A Session title is required.");
     session.title = title;
@@ -18881,17 +18926,35 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async sessionHistory(request) {
     const sessionId = extractSessionId(request);
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session);
-    return success2(this.historyPage(session, {
+    const page = this.historyPage(session, {
       beforeSeq: optionalInteger2(request.beforeSeq),
       limit: optionalPositiveInteger2(request.maxMessages) ?? 50
-    }));
+    });
+    return success2({
+      ...page,
+      events: page.records.map((entry) => ({ event: entry.event })),
+      projections: {
+        kind: "sequenced",
+        asOfSeq: page.cursor,
+        values: {
+          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          modelSelection: this.modelSelectionProjection(sessionId),
+          imageLimits: {
+            maxImageBytes: 0,
+            maxImagesPerMessage: 0,
+            mediaTypes: []
+          }
+        }
+      }
+    });
   }
   async sessionPage(request) {
     const sessionId = extractSessionId(request);
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session);
     const page = this.historyPage(session, {
@@ -18988,7 +19051,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async sessionFollow(request, signal) {
     const sessionId = extractSessionId(request);
-    const session = this.sessions.get(sessionId);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session === void 0) throw new Error("The Session was not found.");
     await this.hydrateSession(session);
     const history = this.historyPage(session, {
@@ -19369,13 +19432,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return session;
   }
   async handleSessionList() {
-    if (this.selectedWorkspaceId !== void 0) {
-      const workspace = this.workspaceById.get(this.selectedWorkspaceId);
-      if (workspace !== void 0) {
-        await this.discoverAndAttachSessions(workspace);
-        if (workspace.sessionIds.length === 0) {
-          await this.ensureInitialSession(workspace);
-        }
+    for (const workspace of this.workspaceById.values()) {
+      await this.discoverAndAttachSessions(workspace);
+      if (workspace.sessionIds.length === 0) {
+        await this.ensureInitialSession(workspace);
       }
     }
     return this.sessionSummaries();
@@ -22085,7 +22145,18 @@ var ClientModeRuntime = class {
     if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
       return this.cursorVirtual.workspaces();
     }
-    return discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal);
+    const workspaces = await discoverAcpVirtualWorkspaces(new AgentAcpClient(remote.client), signal);
+    if (backend === "antigravity") {
+      try {
+        const { discoverAntigravitySessions: discoverAntigravitySessions2 } = await Promise.resolve().then(() => (init_transcript_loader(), transcript_loader_exports));
+        const sessions = await discoverAntigravitySessions2("", 100);
+        for (const ws of workspaces) {
+          if (ws.sessionCount === 0) ws.sessionCount = sessions.length;
+        }
+      } catch {
+      }
+    }
+    return workspaces;
   }
   async openCursorWorkspace(targetDeviceId, workspaceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
