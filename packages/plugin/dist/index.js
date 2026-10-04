@@ -18491,6 +18491,47 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
   }
   return events;
 }
+async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  let dirEntries;
+  try {
+    dirEntries = await fs.readdir(baseDir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of dirEntries) {
+    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
+    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    try {
+      const s2 = await fs.stat(transcriptPath);
+      const handle = await fs.open(transcriptPath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine);
+          const rawPrompt = cleanUserPrompt(parsed.content);
+          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s2.mtimeMs
+            });
+          }
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+    }
+  }
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
+  return results.slice(0, limit);
+}
 
 // src/acp/virtual-harness.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
@@ -18571,9 +18612,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = existing ?? createAcpWorkspaceView(trimmed);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
+    await this.discoverAndAttachSessions(workspace);
     if (workspace.sessionIds.length === 0) {
       await this.ensureInitialSession(workspace);
     }
+    this.publishWorkspaceBaseline();
     return this.workspaceById.get(workspace.workspaceId) ?? workspace;
   }
   async preferredSessionId() {
@@ -19269,21 +19312,38 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
     return seq;
   }
-  registerSession(acpSessionId, cwd2, title) {
-    const now = Date.now();
+  registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
     const session = {
       sessionId: `${CURSOR_SESSION_PREFIX}${acpSessionId}`,
       acpSessionId,
       cwd: cwd2,
       ...title === void 0 ? {} : { title },
-      blank: true,
+      blank,
       running: false,
-      createdAt: now,
-      updatedAt: now,
+      createdAt,
+      updatedAt,
       events: []
     };
     this.sessions.set(session.sessionId, session);
     return session;
+  }
+  async discoverAndAttachSessions(workspace) {
+    if (this.backend !== "antigravity") return;
+    try {
+      const discovered = await discoverAntigravitySessions(workspace.path, 30);
+      for (const item of discovered) {
+        const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`;
+        if (!this.sessions.has(sessionId)) {
+          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
+        }
+        if (!workspace.sessionIds.includes(sessionId)) {
+          workspace.sessionIds.push(sessionId);
+        }
+      }
+      workspace.sessionCount = workspace.sessionIds.length;
+      workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    } catch {
+    }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
     const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2);
@@ -19309,15 +19369,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return session;
   }
   async handleSessionList() {
-    let summaries = this.sessionSummaries();
-    if (summaries.length === 0 && this.selectedWorkspaceId !== void 0) {
+    if (this.selectedWorkspaceId !== void 0) {
       const workspace = this.workspaceById.get(this.selectedWorkspaceId);
       if (workspace !== void 0) {
-        await this.ensureInitialSession(workspace);
-        summaries = this.sessionSummaries();
+        await this.discoverAndAttachSessions(workspace);
+        if (workspace.sessionIds.length === 0) {
+          await this.ensureInitialSession(workspace);
+        }
       }
     }
-    return summaries;
+    return this.sessionSummaries();
   }
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);

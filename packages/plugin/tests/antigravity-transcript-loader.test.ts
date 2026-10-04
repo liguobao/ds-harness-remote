@@ -22,4 +22,15 @@ describe('TranscriptLoader', () => {
       expect((user?.event?.data as any)?.content?.[0]?.text).toBe('这个主机咋样')
     }
   })
+
+  it('discovers existing Antigravity sessions from brain directory', async () => {
+    const { discoverAntigravitySessions } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
+    const list = await discoverAntigravitySessions('/var/lib/dsh/workspace/ds-harness-remote', 10)
+    expect(Array.isArray(list)).toBe(true)
+    if (list.length > 0) {
+      expect(typeof list[0].conversationId).toBe('string')
+      expect(typeof list[0].title).toBe('string')
+      expect(list[0].title.length).toBeGreaterThan(0)
+    }
+  })
 })

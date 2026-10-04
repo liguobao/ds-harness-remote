@@ -6,7 +6,7 @@ import type {
   TypertGatewayRequest,
   TypertRpcResult,
 } from '../typert-gateway-contract.js'
-import { loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { discoverAntigravitySessions, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
 const CURSOR_WORKSPACE_PREFIX = 'cursor:cwd:'
@@ -201,9 +201,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = existing ?? createAcpWorkspaceView(trimmed)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
+    await this.discoverAndAttachSessions(workspace)
     if (workspace.sessionIds.length === 0) {
       await this.ensureInitialSession(workspace)
     }
+    this.publishWorkspaceBaseline()
     return this.workspaceById.get(workspace.workspaceId) ?? workspace
   }
 
@@ -943,21 +945,47 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
 
-  private registerSession(acpSessionId: string, cwd: string, title?: string): AcpSessionState {
-    const now = Date.now()
+  private registerSession(
+    acpSessionId: string,
+    cwd: string,
+    title?: string,
+    createdAt: number = Date.now(),
+    updatedAt: number = Date.now(),
+    blank: boolean = true,
+  ): AcpSessionState {
     const session: AcpSessionState = {
       sessionId: `${CURSOR_SESSION_PREFIX}${acpSessionId}`,
       acpSessionId,
       cwd,
       ...(title === undefined ? {} : { title }),
-      blank: true,
+      blank,
       running: false,
-      createdAt: now,
-      updatedAt: now,
+      createdAt,
+      updatedAt,
       events: [],
     }
     this.sessions.set(session.sessionId, session)
     return session
+  }
+
+  private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
+    if (this.backend !== 'antigravity') return
+    try {
+      const discovered = await discoverAntigravitySessions(workspace.path, 30)
+      for (const item of discovered) {
+        const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`
+        if (!this.sessions.has(sessionId)) {
+          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
+        }
+        if (!workspace.sessionIds.includes(sessionId)) {
+          workspace.sessionIds.push(sessionId)
+        }
+      }
+      workspace.sessionCount = workspace.sessionIds.length
+      workspace.updatedAt = new Date().toISOString()
+    } catch {
+      // 容错降级
+    }
   }
 
   private attachSessionToWorkspace(cwd: string, sessionId: string): void {
@@ -987,15 +1015,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async handleSessionList(): Promise<unknown[]> {
-    let summaries = this.sessionSummaries()
-    if (summaries.length === 0 && this.selectedWorkspaceId !== undefined) {
+    if (this.selectedWorkspaceId !== undefined) {
       const workspace = this.workspaceById.get(this.selectedWorkspaceId)
       if (workspace !== undefined) {
-        await this.ensureInitialSession(workspace)
-        summaries = this.sessionSummaries()
+        await this.discoverAndAttachSessions(workspace)
+        if (workspace.sessionIds.length === 0) {
+          await this.ensureInitialSession(workspace)
+        }
       }
     }
-    return summaries
+    return this.sessionSummaries()
   }
 
   private sessionSummaries(): unknown[] {

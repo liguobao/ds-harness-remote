@@ -132,3 +132,59 @@ export async function loadTranscriptEvents(
 
   return events
 }
+
+export interface DiscoveredSession {
+  conversationId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+}
+
+export async function discoverAntigravitySessions(
+  _workspacePath: string,
+  limit: number = 30,
+  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+): Promise<DiscoveredSession[]> {
+  let dirEntries: string[]
+  try {
+    dirEntries = await fs.readdir(baseDir)
+  } catch {
+    return []
+  }
+
+  const results: DiscoveredSession[] = []
+  for (const entry of dirEntries) {
+    if (entry === 'tempmediaStorage' || !entry.includes('-')) continue
+    const transcriptPath = join(baseDir, entry, '.system_generated/logs/transcript.jsonl')
+    try {
+      const s = await fs.stat(transcriptPath)
+      const handle = await fs.open(transcriptPath, 'r')
+      try {
+        const buf = Buffer.alloc(4096)
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0)
+        const firstLine = buf.subarray(0, bytesRead).toString('utf-8').split('\n')[0]
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine) as StepLogRecord
+          const rawPrompt = cleanUserPrompt(parsed.content)
+          const title = rawPrompt ? rawPrompt.split('\n')[0]?.trim().slice(0, 40) : undefined
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s.mtimeMs
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s.mtimeMs,
+            })
+          }
+        }
+      } finally {
+        await handle.close()
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  results.sort((a, b) => b.updatedAt - a.updatedAt)
+  return results.slice(0, limit)
+}
