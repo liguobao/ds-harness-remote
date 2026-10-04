@@ -2193,8 +2193,15 @@ window.__ModuleLoader__.load({
           : workspaceTypes.some(workspace => workspace.id === id && workspace.available)
       }
       const codexAvailable = workspaceTypeAvailable('codex', status?.remoteFeatures?.codex)
-      const cursorAvailable = workspaceTypeAvailable('cursor', status?.remoteFeatures?.cursor)
-      const antigravityAvailable = workspaceTypeAvailable('antigravity', status?.remoteFeatures?.antigravity)
+      // ACP backends must be explicitly reported by the Host as enabled and
+      // ready. The legacy generic `agent.acp.v1` capability is insufficient
+      // to identify a particular backend and must not create a false group.
+      const cursorAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+        workspace => workspace.id === 'cursor' && workspace.available,
+      ) === true
+      const antigravityAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+        workspace => workspace.id === 'antigravity' && workspace.available,
+      ) === true
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),

@@ -3209,10 +3209,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
               setError(messageOf(reason)), setBusy(!1);
             }
           }
-        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), workspaceTypeAvailable = (id, legacyAvailable) => {
+        }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), codexAvailable = ((id, legacyAvailable) => {
           let workspaceTypes = status?.remoteFeatures?.workspaceTypes;
           return workspaceTypes === void 0 ? legacyAvailable === !0 : workspaceTypes.some((workspace) => workspace.id === id && workspace.available);
-        }, codexAvailable = workspaceTypeAvailable("codex", status?.remoteFeatures?.codex), cursorAvailable = workspaceTypeAvailable("cursor", status?.remoteFeatures?.cursor), antigravityAvailable = workspaceTypeAvailable("antigravity", status?.remoteFeatures?.antigravity), selectedHostDetails = selectedHost === void 0 ? void 0 : [
+        })("codex", status?.remoteFeatures?.codex), cursorAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+          (workspace) => workspace.id === "cursor" && workspace.available
+        ) === !0, antigravityAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+          (workspace) => workspace.id === "antigravity" && workspace.available
+        ) === !0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
           formatPlatform(selectedHost.platform),
           selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
           selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion })
