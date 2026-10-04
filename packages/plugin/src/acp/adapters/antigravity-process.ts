@@ -9,6 +9,8 @@ import type {
   CursorAcpUnavailableHandler,
 } from './cursor-process.js'
 
+import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
+
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
@@ -34,6 +36,11 @@ export function resolveAntigravityBinary(preferred?: string): string {
   return 'agy'
 }
 
+export interface AntigravityAcpClientOptions {
+  skipPermissions?: boolean
+  conversationId?: string
+}
+
 /**
  * Host-local stdio client for Google Antigravity CLI (`agy --input-format stream-json --output-format stream-json`).
  * Maps Antigravity's stream-json NDJSON events to the standard Agent ACP gateway protocol.
@@ -42,12 +49,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private process?: ChildProcessWithoutNullStreams
   private readonly inboundHandlers = new Set<CursorAcpInboundHandler>()
   private readonly unavailableHandlers = new Set<CursorAcpUnavailableHandler>()
+  private watcher?: TranscriptWatcher
   private stdoutBuffer: Buffer = Buffer.alloc(0)
   private stderrBytes = 0
   private ready = false
   private closed = false
   private startPromise?: Promise<void>
   private activeConversationId?: string
+  private readonly skipPermissions: boolean
   private currentPromptPending?: {
     sessionId: string
     resolve: (result: unknown) => void
@@ -63,7 +72,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
       windowsHide: true,
       env: process.env,
     }),
-  ) {}
+    options: AntigravityAcpClientOptions = {},
+  ) {
+    this.skipPermissions = options.skipPermissions === true
+    this.activeConversationId = options.conversationId
+  }
 
   start(): Promise<void> {
     if (this.closed) return Promise.reject(new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.'))
@@ -143,6 +156,10 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.closed) return
     this.closed = true
     this.ready = false
+    if (this.watcher) {
+      this.watcher.stop()
+      this.watcher = undefined
+    }
     if (this.currentPromptPending) {
       clearTimeout(this.currentPromptPending.timer)
       this.currentPromptPending.reject(new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'Antigravity ACP was closed.'))
@@ -170,7 +187,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
       throw new AntigravityAcpError('ANTIGRAVITY_STARTING', 'Antigravity ACP is already starting.')
     }
     const bin = resolveAntigravityBinary(this.binary)
-    const child = this.spawnAcp(bin, ['--input-format', 'stream-json', '--output-format', 'stream-json'])
+    const args = ['--input-format', 'stream-json', '--output-format', 'stream-json']
+    if (this.activeConversationId) {
+      args.push('--conversation', this.activeConversationId)
+    }
+    if (this.skipPermissions) {
+      args.push('--dangerously-skip-permissions')
+    }
+    const child = this.spawnAcp(bin, args)
     this.process = child
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
@@ -192,6 +216,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
             const conversationId = (event as Record<string, unknown>).conversation_id
             if (typeof conversationId === 'string') {
               this.activeConversationId = conversationId
+              this.watcher = new TranscriptWatcher(conversationId)
+              this.watcher.start()
             }
             resolve()
           }

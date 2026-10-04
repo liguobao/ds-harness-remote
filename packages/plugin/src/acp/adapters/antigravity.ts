@@ -15,3 +15,4 @@ export function createAntigravityAcpAdapter(
 }
 
 export { AntigravityAcpClient, AntigravityAcpError } from './antigravity-process.js'
+export * from './antigravity/index.js'

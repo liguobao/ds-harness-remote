@@ -210,6 +210,24 @@ describe('AntigravityAcpClient', () => {
     const adapter = createAntigravityAcpAdapter('agy-test', logger(), () => fakeProcess().child as any)
     expect(adapter.id).toBe('antigravity')
   })
+
+  it('passes skipPermissions and conversationId to agy args', async () => {
+    let passedArgs: string[] = []
+    const client = new AntigravityAcpClient('agy', logger(), (_bin, args) => {
+      passedArgs = args
+      const proc = fakeProcess()
+      setTimeout(() => {
+        proc.stdout.write(Buffer.from(JSON.stringify({ event: 'init', conversation_id: 'conv-opt-1' }) + '\n'))
+      }, 10)
+      return proc.child
+    }, { skipPermissions: true, conversationId: 'conv-opt-1' })
+
+    await client.start()
+    expect(passedArgs).toContain('--dangerously-skip-permissions')
+    expect(passedArgs).toContain('--conversation')
+    expect(passedArgs).toContain('conv-opt-1')
+    await client.close()
+  })
 })
 
 function fakeProcess(): {

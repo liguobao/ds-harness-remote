@@ -28114,8 +28114,8 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 // src/acp/gateway.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { readdir as readdir3, realpath as realpath2, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir4 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute4, join as join6, relative as relative2, resolve as resolve3 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+import { basename as basename4, isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
@@ -28365,6 +28365,152 @@ function isRecord16(value) {
 import { spawn as spawn4 } from "node:child_process";
 import { Buffer as Buffer5 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
+
+// src/acp/adapters/antigravity/transcript-watcher.ts
+import { promises as fs } from "node:fs";
+import { join as join6 } from "node:path";
+import { EventEmitter } from "node:events";
+import { homedir as homedir4 } from "node:os";
+var TranscriptWatcher = class extends EventEmitter {
+  constructor(conversationId, baseDir = join6(homedir4(), ".gemini/antigravity-cli/brain")) {
+    super();
+    this.conversationId = conversationId;
+    this.baseDir = baseDir;
+    const brainDir = join6(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join6(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join6(brainDir, "transcript_full.jsonl");
+  }
+  offset = 0;
+  lineRemainder = "";
+  pollTimer;
+  closed = false;
+  transcriptPath;
+  transcriptFullPath;
+  on(event, listener) {
+    return super.on(event, listener);
+  }
+  emit(event, ...args) {
+    return super.emit(event, ...args);
+  }
+  /**
+   * 启动增量文件监听
+   */
+  start(intervalMs = 250) {
+    if (this.closed) return;
+    const poll = async () => {
+      try {
+        await this.readNewLines();
+      } catch {
+      }
+      if (!this.closed) {
+        this.pollTimer = setTimeout(poll, intervalMs);
+        this.pollTimer.unref?.();
+      }
+    };
+    void poll();
+  }
+  stop() {
+    this.closed = true;
+    if (this.pollTimer !== void 0) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = void 0;
+    }
+  }
+  /**
+   * 立即触发一次读取（同步/主动检查）
+   */
+  async flush() {
+    await this.readNewLines();
+  }
+  async readNewLines() {
+    let stat8;
+    try {
+      stat8 = await fs.stat(this.transcriptPath);
+    } catch {
+      return;
+    }
+    if (stat8.size <= this.offset) return;
+    const handle = await fs.open(this.transcriptPath, "r");
+    try {
+      const bytesToRead = stat8.size - this.offset;
+      const buffer = Buffer.alloc(bytesToRead);
+      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset);
+      this.offset += bytesRead;
+      const text = this.lineRemainder + buffer.subarray(0, bytesRead).toString("utf-8");
+      const lines = text.split("\n");
+      this.lineRemainder = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        await this.parseAndDispatch(trimmed);
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+  async parseAndDispatch(rawLine) {
+    let record8;
+    try {
+      record8 = JSON.parse(rawLine);
+    } catch {
+      return;
+    }
+    if (Array.isArray(record8.truncated_fields) && record8.truncated_fields.length > 0) {
+      record8 = await this.enrichFromFullTranscript(record8);
+    }
+    this.emit("step", record8);
+    if (record8.type === "PLANNER_RESPONSE") {
+      if (record8.thinking && record8.thinking.trim() !== "") {
+        this.emit("thinking", {
+          stepIndex: record8.step_index,
+          thinking: record8.thinking,
+          createdAt: record8.created_at
+        });
+      }
+      if (Array.isArray(record8.tool_calls) && record8.tool_calls.length > 0) {
+        this.emit("toolCall", {
+          stepIndex: record8.step_index,
+          toolCalls: record8.tool_calls,
+          createdAt: record8.created_at
+        });
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        this.emit("message", {
+          stepIndex: record8.step_index,
+          text: record8.content,
+          createdAt: record8.created_at
+        });
+      }
+    } else if (record8.type === "USER_INPUT" && record8.content) {
+      this.emit("message", {
+        stepIndex: record8.step_index,
+        text: record8.content,
+        createdAt: record8.created_at
+      });
+    }
+    if (record8.status === "DONE" && record8.type === "PLANNER_RESPONSE") {
+      this.emit("complete", this.conversationId);
+    }
+  }
+  async enrichFromFullTranscript(record8) {
+    try {
+      const content = await fs.readFile(this.transcriptFullPath, "utf-8");
+      const lines = content.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const full = JSON.parse(trimmed);
+        if (full.step_index === record8.step_index) {
+          return full;
+        }
+      }
+    } catch {
+    }
+    return record8;
+  }
+};
+
+// src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS2 = 2e4;
 var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
@@ -28390,20 +28536,24 @@ var AntigravityAcpClient = class {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     env: process.env
-  })) {
+  }), options = {}) {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
+    this.skipPermissions = options.skipPermissions === true;
+    this.activeConversationId = options.conversationId;
   }
   process;
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
+  watcher;
   stdoutBuffer = Buffer5.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
   startPromise;
   activeConversationId;
+  skipPermissions;
   currentPromptPending;
   start() {
     if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
@@ -28472,6 +28622,10 @@ var AntigravityAcpClient = class {
     if (this.closed) return;
     this.closed = true;
     this.ready = false;
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = void 0;
+    }
     if (this.currentPromptPending) {
       clearTimeout(this.currentPromptPending.timer);
       this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "Antigravity ACP was closed."));
@@ -28498,7 +28652,14 @@ var AntigravityAcpClient = class {
       throw new AntigravityAcpError("ANTIGRAVITY_STARTING", "Antigravity ACP is already starting.");
     }
     const bin = resolveAntigravityBinary(this.binary);
-    const child = this.spawnAcp(bin, ["--input-format", "stream-json", "--output-format", "stream-json"]);
+    const args = ["--input-format", "stream-json", "--output-format", "stream-json"];
+    if (this.activeConversationId) {
+      args.push("--conversation", this.activeConversationId);
+    }
+    if (this.skipPermissions) {
+      args.push("--dangerously-skip-permissions");
+    }
+    const child = this.spawnAcp(bin, args);
     this.process = child;
     this.stdoutBuffer = Buffer5.alloc(0);
     this.stderrBytes = 0;
@@ -28518,6 +28679,8 @@ var AntigravityAcpClient = class {
             const conversationId = event.conversation_id;
             if (typeof conversationId === "string") {
               this.activeConversationId = conversationId;
+              this.watcher = new TranscriptWatcher(conversationId);
+              this.watcher.start();
             }
             resolve5();
           }
@@ -29582,8 +29745,8 @@ var AcpRemoteGateway = class {
     }
   }
   async listDirectory(path) {
-    const home = homedir4();
-    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join6(home, path.slice(2)) : path;
+    const home = homedir5();
+    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join7(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
     const names = await readdir3(canonical);
     const entries = [];
@@ -29593,7 +29756,7 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join6(canonical, name2);
+      const child = join7(canonical, name2);
       try {
         const info = await stat5(child);
         if (!info.isDirectory()) continue;
@@ -29689,16 +29852,16 @@ function buildCrumbs(path, home) {
   return crumbs2;
 }
 function cursorBinaryCandidates(configured) {
-  const userHome = homedir4();
+  const userHome = homedir5();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join6(userHome, ".local", "bin", "agy"),
+      join7(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join6(userHome, ".local", "bin", "agent"),
+      join7(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
@@ -29723,7 +29886,7 @@ function isRecord18(value) {
 // src/codex-workspace-bridge.ts
 import { spawn as spawn5 } from "node:child_process";
 import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join7, relative as relative3, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join8, relative as relative3, resolve as resolve4 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -29813,7 +29976,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join7(target2, entry.name);
+          const item = join8(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -30634,7 +30797,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -30721,7 +30884,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join8(directory, "device.json"))) {
+  if (!await exists3(join9(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -30766,7 +30929,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join8(directory, "device.json"))) {
+  if (!await exists3(join9(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
