@@ -3,7 +3,11 @@ import {
   AcpVirtualHarness,
   createAcpWorkspaceView,
   acpCwdWorkspaceId,
+  type AcpClientLike,
 } from '../src/acp/virtual-harness.js'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+
+type AgentAcpClientLike = AcpClientLike
 
 function fakeAcp() {
   return {
@@ -456,6 +460,7 @@ describe('AcpVirtualHarness', () => {
 
     // Reply turn 1
     inboundHandler!({
+      streamId: 'stream-1',
       frame: {
         method: 'session/update',
         params: {
@@ -465,6 +470,7 @@ describe('AcpVirtualHarness', () => {
       },
     })
     inboundHandler!({
+      streamId: 'stream-1',
       frame: {
         method: 'session/update',
         params: {

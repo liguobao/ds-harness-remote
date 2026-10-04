@@ -73,7 +73,7 @@ interface PendingApproval {
   sessionId: string
 }
 
-interface AcpClientLike {
+export interface AcpClientLike {
   createSession(
     cwd: string,
     mode?: 'agent' | 'plan' | 'ask',
