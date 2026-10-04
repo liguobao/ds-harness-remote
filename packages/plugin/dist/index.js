@@ -18541,7 +18541,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/modelCatalog":
           return business2(success2(modelCatalog2(this.backend)));
         case "session/models": {
-          const rawId = requiredString2(requestArg2(args).sessionId, "sessionId");
+          const rawId = extractSessionId(requestArg2(args));
           nativeAcpId(rawId);
           const catalog = modelCatalog2(this.backend);
           return business2(success2({
@@ -18641,7 +18641,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return workspace === void 0 ? failure2("workspace-not-found", "The Cursor virtual Workspace was not found.") : success2({ workspace: nativeWorkspace2(workspace) });
   }
   async archiveSession(request) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     this.sessions.delete(sessionId);
     for (const [workspaceId, workspace] of this.workspaceById) {
       if (!workspace.sessionIds.includes(sessionId)) continue;
@@ -18671,11 +18671,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ sessionId: session.sessionId });
   }
   async prompt(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     const text = extractPromptText(array2(request.content));
-    if (text === void 0) return failure2("attachment-error", "Cursor Remote accepts text prompts only.");
+    if (text === void 0) return failure2("attachment-error", "Remote accepts text prompts only.");
     await this.ensureFollow(session);
     const userEvent = this.appendHistory(session, {
       type: "user/message",
@@ -18696,19 +18696,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ accepted: true });
   }
   async cancel(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.client.cancel(session.acpSessionId, signal);
     session.running = false;
     this.emitRemoteEvent("api-session/status", [sessionId, false]);
     return success2({ accepted: true });
   }
   async renameSession(request) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     const title = string3(request.title)?.trim();
     const session = this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     if (title === void 0) return failure2("bad-request", "A Session title is required.");
     session.title = title;
     session.updatedAt = Date.now();
@@ -18716,15 +18716,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ sessionId });
   }
   async sessionHistory(request) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     return success2(this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50));
   }
   async sessionPage(request) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Cursor Session was not found.");
+    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     return success2(this.historyPage(session, optionalInteger2(request.beforeSeq), optionalPositiveInteger2(request.limit) ?? 50));
   }
   historyPage(session, beforeSeq, limit) {
@@ -18808,9 +18808,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return queue.iterate(() => this.eventStreams.delete(id5));
   }
   async sessionFollow(request, signal) {
-    const sessionId = sessionIdFromAddress2(record4(request.address));
+    const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
-    if (session === void 0) throw new Error("The Cursor Session was not found.");
+    if (session === void 0) throw new Error("The Session was not found.");
     const history = this.historyPage(session, void 0, optionalPositiveInteger2(request.maxMessages) ?? 50);
     const queue = new AsyncValueQueue3(signal);
     const follow = {
@@ -19132,7 +19132,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return { lastUsed: selection, next: selection };
   }
   async selectModel(request) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const sessionId = extractSessionId(request);
     nativeAcpId(sessionId);
     const provider = requiredString2(request.provider, "provider");
     const model = requiredString2(request.model, "model");
@@ -19386,12 +19386,21 @@ function summarizeQuestions(params) {
   return lines.length === 0 ? void 0 : lines.join("\n");
 }
 function sessionIdFromAddress2(address) {
-  if (address.kind === "session") return requiredString2(address.sessionId, "sessionId");
-  return requiredString2(address.childSessionId, "childSessionId");
+  if (typeof address.sessionId === "string" && address.sessionId.length > 0) return address.sessionId;
+  if (typeof address.childSessionId === "string" && address.childSessionId.length > 0) return address.childSessionId;
+  if (address.kind === "session" && typeof address.sessionId === "string" && address.sessionId.length > 0) {
+    return address.sessionId;
+  }
+  throw new Error("The sessionId is required.");
+}
+function extractSessionId(request) {
+  if (typeof request.sessionId === "string" && request.sessionId.length > 0) return request.sessionId;
+  if (isRecord8(request.address)) return sessionIdFromAddress2(request.address);
+  throw new Error("The sessionId is required.");
 }
 function nativeAcpId(sessionId) {
   if (!sessionId.startsWith(CURSOR_SESSION_PREFIX) || sessionId.length === CURSOR_SESSION_PREFIX.length) {
-    throw new Error("The selected Session does not belong to Cursor.");
+    throw new Error("The selected Session does not belong to the virtual harness.");
   }
   return sessionId.slice(CURSOR_SESSION_PREFIX.length);
 }
@@ -19460,7 +19469,7 @@ function optionalPositiveInteger2(value) {
   return parsed;
 }
 function requiredString2(value, field) {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`The Cursor ${field} is required.`);
+  if (typeof value !== "string" || value.length === 0) throw new Error(`The ${field} is required.`);
   return value;
 }
 var AsyncValueQueue3 = class {

@@ -249,7 +249,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/attachment': return business(failure('attachment-error', 'Cursor Remote accepts text prompts only.'))
         case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
-          const rawId = requiredString(requestArg(args).sessionId, 'sessionId')
+          const rawId = extractSessionId(requestArg(args))
           nativeAcpId(rawId)
           const catalog = modelCatalog(this.backend)
           return business(success({
@@ -350,7 +350,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async archiveSession(request: JsonRecord): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     this.sessions.delete(sessionId)
     for (const [workspaceId, workspace] of this.workspaceById) {
       if (!workspace.sessionIds.includes(sessionId)) continue
@@ -382,11 +382,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async prompt(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return failure('session-not-found', 'The Cursor Session was not found.')
+    if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     const text = extractPromptText(array(request.content))
-    if (text === undefined) return failure('attachment-error', 'Cursor Remote accepts text prompts only.')
+    if (text === undefined) return failure('attachment-error', 'Remote accepts text prompts only.')
     await this.ensureFollow(session)
     const userEvent = this.appendHistory(session, {
       type: 'user/message',
@@ -408,9 +408,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async cancel(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return failure('session-not-found', 'The Cursor Session was not found.')
+    if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.client.cancel(session.acpSessionId, signal)
     session.running = false
     this.emitRemoteEvent('api-session/status', [sessionId, false])
@@ -418,10 +418,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async renameSession(request: JsonRecord): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     const title = string(request.title)?.trim()
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return failure('session-not-found', 'The Cursor Session was not found.')
+    if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     if (title === undefined) return failure('bad-request', 'A Session title is required.')
     session.title = title
     session.updatedAt = Date.now()
@@ -430,16 +430,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async sessionHistory(request: JsonRecord): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return failure('session-not-found', 'The Cursor Session was not found.')
+    if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     return success(this.historyPage(session, undefined, optionalPositiveInteger(request.maxMessages) ?? 50))
   }
 
   private async sessionPage(request: JsonRecord): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
-    if (session === undefined) return failure('session-not-found', 'The Cursor Session was not found.')
+    if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     return success(this.historyPage(session, optionalInteger(request.beforeSeq), optionalPositiveInteger(request.limit) ?? 50))
   }
 
@@ -547,9 +547,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async sessionFollow(request: JsonRecord, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const sessionId = sessionIdFromAddress(record(request.address))
+    const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
-    if (session === undefined) throw new Error('The Cursor Session was not found.')
+    if (session === undefined) throw new Error('The Session was not found.')
     const history = this.historyPage(session, undefined, optionalPositiveInteger(request.maxMessages) ?? 50)
     const queue = new AsyncValueQueue(signal)
     const follow: FollowState = {
@@ -903,7 +903,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async selectModel(request: JsonRecord): Promise<unknown> {
-    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const sessionId = extractSessionId(request)
     nativeAcpId(sessionId)
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
@@ -1204,13 +1204,23 @@ function summarizeQuestions(params: JsonRecord): string | undefined {
 }
 
 function sessionIdFromAddress(address: JsonRecord): string {
-  if (address.kind === 'session') return requiredString(address.sessionId, 'sessionId')
-  return requiredString(address.childSessionId, 'childSessionId')
+  if (typeof address.sessionId === 'string' && address.sessionId.length > 0) return address.sessionId
+  if (typeof address.childSessionId === 'string' && address.childSessionId.length > 0) return address.childSessionId
+  if (address.kind === 'session' && typeof address.sessionId === 'string' && address.sessionId.length > 0) {
+    return address.sessionId
+  }
+  throw new Error('The sessionId is required.')
+}
+
+function extractSessionId(request: JsonRecord): string {
+  if (typeof request.sessionId === 'string' && request.sessionId.length > 0) return request.sessionId
+  if (isRecord(request.address)) return sessionIdFromAddress(request.address)
+  throw new Error('The sessionId is required.')
 }
 
 function nativeAcpId(sessionId: string): string {
   if (!sessionId.startsWith(CURSOR_SESSION_PREFIX) || sessionId.length === CURSOR_SESSION_PREFIX.length) {
-    throw new Error('The selected Session does not belong to Cursor.')
+    throw new Error('The selected Session does not belong to the virtual harness.')
   }
   return sessionId.slice(CURSOR_SESSION_PREFIX.length)
 }
@@ -1299,7 +1309,7 @@ function optionalPositiveInteger(value: unknown): number | undefined {
 }
 
 function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(`The Cursor ${field} is required.`)
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`The ${field} is required.`)
   return value
 }
 

@@ -179,4 +179,27 @@ describe('AcpVirtualHarness', () => {
     expect(modelsAfter.value.current.model).toBe('claude-sonnet-4-6')
     await target.close()
   })
+
+  it('loads session/page with address object from DSH session controller', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+    const sessionId = created.value.sessionId
+
+    // DSH SessionController sends address instead of sessionId:
+    const pageResult = await target.dispatch('session/page', {
+      args: { request: {
+        address: { kind: 'session', sessionId },
+        throughSeq: 0,
+      } },
+    }, new AbortController().signal) as { ok: true; value: { header: { version: number; id: string } } }
+
+    expect(pageResult.ok).toBe(true)
+    expect(pageResult.value.header.id).toBe(sessionId)
+    expect(pageResult.value.header.version).toBe(3)
+    await target.close()
+  })
 })
