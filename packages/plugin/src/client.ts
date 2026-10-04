@@ -200,6 +200,8 @@ interface WorkspacesClientServiceLike {
     subscribe(listener: () => void): () => void
   }
   connectWorkspace(workspaceId: string): Promise<string>
+  /** Harness 0.2 owns the main Session retain/release lifecycle here. */
+  openSession?(sessionId: string): void
 }
 
 interface SessionsClientServiceLike {
@@ -207,7 +209,8 @@ interface SessionsClientServiceLike {
     getSnapshot(): { ids: ReadonlyArray<string>; phase: string }
     subscribe(listener: () => void): () => void
   }
-  open(sessionId: string): void
+  open?(sessionId: string): void
+  retain?(target: string, options: { source: string }): { sessionId: string; ready?: Promise<unknown>; release(): void }
 }
 
 function workspacesReady(snapshot: ReturnType<WorkspacesClientServiceLike['list']['getSnapshot']>): boolean {
@@ -3209,6 +3212,7 @@ window.__ModuleLoader__.load({
         let unsubscribeSessions: (() => void) | undefined
         let selection: RemoteWorkspaceSelection | undefined
         let opening = false
+        let retainedReference: { release(): void } | undefined
 
         const reconcile = (): void => {
           if (disposed || opening || selection === undefined) return
@@ -3233,7 +3237,23 @@ window.__ModuleLoader__.load({
             : ctx.workspaces.connectWorkspace(pending.workspaceId)
           void open.then(async sessionId => {
             if (disposed) return
-            ctx.sessions.open(sessionId)
+            // Harness <= 0.1.6 exposed `sessions.open()`. Harness 0.2 moved
+            // main-view retention to the UI Workspace service, while the
+            // Session controller exposes `retain()` for other consumers.
+            if (typeof ctx.workspaces.openSession === 'function') {
+              ctx.workspaces.openSession(sessionId)
+            } else if (typeof ctx.sessions.open === 'function') {
+              ctx.sessions.open(sessionId)
+            } else if (typeof ctx.sessions.retain === 'function') {
+              const reference = ctx.sessions.retain(sessionId, { source: 'mainView' })
+              retainedReference?.release()
+              retainedReference = reference
+              void reference.ready?.catch(reason => {
+                if (!disposed) console.warn('remote Session opening failed:', reason)
+              })
+            } else {
+              throw new Error('No supported Session open API is available.')
+            }
             window.sessionStorage.removeItem(pendingWorkspaceSelectionKey)
             await control('workspace.selection.consume', pending).catch(() => undefined)
           }).catch(reason => {
@@ -3255,6 +3275,8 @@ window.__ModuleLoader__.load({
           disposed = true
           unsubscribeWorkspaces?.()
           unsubscribeSessions?.()
+          retainedReference?.release()
+          retainedReference = undefined
         }
       }, 'ds-harness-remote: resume selected workspace')
       ctx.inject(['fileViewer'], fileViewerContext => {

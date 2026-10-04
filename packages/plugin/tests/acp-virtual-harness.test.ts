@@ -34,7 +34,7 @@ describe('AcpVirtualHarness', () => {
       args: { request: { workspaceId: workspace.workspaceId } },
     }, new AbortController().signal)
     expect(created).toMatchObject({ ok: true, value: { sessionId: 'cursor:acp_1' } })
-    expect(client.createSession).toHaveBeenCalledWith('/workspace/repo', 'agent', expect.any(AbortSignal))
+    expect(client.createSession).toHaveBeenCalledWith('/workspace/repo', 'agent', 'cursor', expect.any(AbortSignal))
 
     const listed = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
     expect(listed).toMatchObject({
@@ -44,9 +44,42 @@ describe('AcpVirtualHarness', () => {
           sessionId: 'cursor:acp_1',
           blank: true,
           cwd: '/workspace/repo',
+          projections: expect.objectContaining({ kind: 'sequenced' }),
         })],
       },
     })
+    await target.close()
+  })
+
+  it('opens the Session control stream with the required baseline', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    const stream = await target.open('session/control', {}, new AbortController().signal)
+    const first = await stream[Symbol.asyncIterator]().next()
+    expect(first.value).toEqual({ type: 'baseline', value: { projections: {} } })
+    await target.close()
+  })
+
+  it('opens the Workspace follow stream with the complete 0.2 baseline', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const stream = await target.open('workspace/follow', {}, new AbortController().signal)
+    const first = await stream[Symbol.asyncIterator]().next()
+    expect(first.value).toMatchObject({
+      type: 'baseline',
+      value: { archivedSessionIds: [], pinnedSessionIds: [] },
+    })
+    await target.close()
+  })
+
+  it('opens the event stream with the required ready frame', async () => {
+    const client = fakeAcp()
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const stream = await target.open('$events', {}, new AbortController().signal)
+    const first = await stream[Symbol.asyncIterator]().next()
+    expect(first.value).toMatchObject({ type: 'ready', host: { home: '/workspace/repo' } })
     await target.close()
   })
 

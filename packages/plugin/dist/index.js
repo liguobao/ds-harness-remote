@@ -16172,7 +16172,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           const catalog = await this.refreshCatalog(signal);
           return business(success({
             items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id)
+            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+            pinnedSessionIds: []
           }));
         }
         case "workspace/create":
@@ -16439,6 +16440,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       blank: options.blank,
       ...session.cwd === void 0 ? {} : { cwd: session.cwd },
       projections: {
+        kind: "sequenced",
         asOfSeq: options.asOfSeq ?? 0,
         values: {
           title: displayTitle(session),
@@ -16478,7 +16480,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       type: "baseline",
       value: {
         items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id)
+        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+        pinnedSessionIds: []
       }
     });
     return queue.iterate(() => this.workspaceStreams.delete(queue));
@@ -18495,7 +18498,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "workspace/list":
           return business2(success2({
             items: this.visibleWorkspaces().map(nativeWorkspace2),
-            archivedSessionIds: []
+            archivedSessionIds: [],
+            pinnedSessionIds: []
           }));
         case "workspace/create":
           return business2(await this.createWorkspace(requestArg2(args)));
@@ -18656,7 +18660,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
     const cwd2 = string3(request.cwd) ?? workspace?.path;
     if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    const created = this.backend === "cursor" ? await this.client.createSession(cwd2, "agent", signal) : await this.client.createSession(cwd2, "agent", this.backend, signal);
+    const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
     const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
     this.publishWorkspaceBaseline();
@@ -18775,7 +18779,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       type: "baseline",
       value: {
         items: this.visibleWorkspaces().map(nativeWorkspace2),
-        archivedSessionIds: []
+        archivedSessionIds: [],
+        pinnedSessionIds: []
       }
     });
     return queue.iterate(() => this.workspaceStreams.delete(queue));
@@ -18783,13 +18788,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async sessionControl(signal) {
     const queue = new AsyncValueQueue3(signal);
     this.controlStreams.add(queue);
-    queue.push({ type: "ready" });
+    queue.push({ type: "baseline", value: { projections: {} } });
     return queue.iterate(() => this.controlStreams.delete(queue));
   }
   async remoteEvents(signal) {
     const id5 = `cursor-events:${Date.now()}:${Math.random()}`;
     const queue = new AsyncValueQueue3(signal);
     this.eventStreams.set(id5, queue);
+    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    queue.push({
+      type: "ready",
+      clientId: id5,
+      host: { home: workspace?.path ?? "/" }
+    });
     return queue.iterate(() => this.eventStreams.delete(id5));
   }
   async sessionFollow(request, signal) {
@@ -19062,13 +19073,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async ensureInitialSession(workspace) {
     const cwd2 = workspace.path;
-    let sessionId;
-    try {
-      const created = await this.client.createSession(cwd2, "agent", this.backend);
-      sessionId = created.sessionId;
-    } catch {
-      sessionId = `sess_${Date.now()}`;
-    }
+    const created = await this.client.createSession(cwd2, "agent", this.backend);
+    const sessionId = created.sessionId;
     const title = this.backend === "antigravity" ? "Antigravity" : workspace.title;
     const session = this.registerSession(sessionId, cwd2, title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
@@ -19100,6 +19106,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       cwd: session.cwd,
       updatedAt: session.updatedAt,
       projections: {
+        kind: "sequenced",
         asOfSeq,
         values: {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),

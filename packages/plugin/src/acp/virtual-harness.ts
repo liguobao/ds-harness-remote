@@ -225,6 +225,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'workspace/list': return business(success({
           items: this.visibleWorkspaces().map(nativeWorkspace),
           archivedSessionIds: [],
+          pinnedSessionIds: [],
         }))
         case 'workspace/create': return business(await this.createWorkspace(requestArg(args)))
         case 'workspace/rename': return business(await this.renameWorkspace(requestArg(args)))
@@ -369,9 +370,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = workspaceId === undefined ? undefined : this.workspaceById.get(workspaceId)
     const cwd = string(request.cwd) ?? workspace?.path
     if (cwd === undefined) return failure('workspace-not-found', 'The Cursor virtual Workspace was not found.')
-    const created = this.backend === 'cursor'
-      ? await this.client.createSession(cwd, 'agent', signal as never)
-      : await this.client.createSession(cwd, 'agent', this.backend, signal)
+    const created = await this.client.createSession(cwd, 'agent', this.backend, signal)
     const session = this.registerSession(created.sessionId, cwd, workspace?.title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
     this.publishWorkspaceBaseline()
@@ -511,6 +510,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       value: {
         items: this.visibleWorkspaces().map(nativeWorkspace),
         archivedSessionIds: [],
+        pinnedSessionIds: [],
       },
     })
     return queue.iterate(() => this.workspaceStreams.delete(queue))
@@ -519,7 +519,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private async sessionControl(signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     const queue = new AsyncValueQueue(signal)
     this.controlStreams.add(queue)
-    queue.push({ type: 'ready' })
+    // Session Controller treats the first control frame as the opening
+    // snapshot. Without it the Client-side RemoteSnapshotStream never moves
+    // to `ready`, so a workspace selected through the Remote modal remains
+    // stuck on the empty shell after the page reload.
+    queue.push({ type: 'baseline', value: { projections: {} } })
     return queue.iterate(() => this.controlStreams.delete(queue))
   }
 
@@ -527,6 +531,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const id = `cursor-events:${Date.now()}:${Math.random()}`
     const queue = new AsyncValueQueue(signal)
     this.eventStreams.set(id, queue)
+    const workspace = this.selectedWorkspaceId === undefined
+      ? undefined
+      : this.workspaceById.get(this.selectedWorkspaceId)
+    queue.push({
+      type: 'ready',
+      clientId: id,
+      host: { home: workspace?.path ?? '/' },
+    })
     return queue.iterate(() => this.eventStreams.delete(id))
   }
 
@@ -822,13 +834,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async ensureInitialSession(workspace: AcpVirtualWorkspaceView): Promise<AcpSessionState> {
     const cwd = workspace.path
-    let sessionId: string
-    try {
-      const created = await this.client.createSession(cwd, 'agent', this.backend)
-      sessionId = created.sessionId
-    } catch {
-      sessionId = `sess_${Date.now()}`
-    }
+    const created = await this.client.createSession(cwd, 'agent', this.backend)
+    const sessionId = created.sessionId
     const title = this.backend === 'antigravity' ? 'Antigravity' : workspace.title
     const session = this.registerSession(sessionId, cwd, title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
@@ -867,6 +874,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       cwd: session.cwd,
       updatedAt: session.updatedAt,
       projections: {
+        kind: 'sequenced',
         asOfSeq,
         values: {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
