@@ -18475,30 +18475,36 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
       }
       if (Array.isArray(record8.tool_calls)) {
         for (const call of record8.tool_calls) {
+          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
+          const callId = `${record8.step_index}:${toolName}`;
           push("tool/call", {
             turn: currentTurn,
             step: 1,
-            toolCallId: `${record8.step_index}:${call.name}`,
-            toolName: call.name,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
+            toolCallId: callId,
+            toolName,
             status: call.status === "ERROR" ? "failed" : "finished"
           }, time, false);
         }
       }
       if (record8.content && record8.content.trim() !== "") {
+        const contentBlocks2 = [];
+        if (record8.thinking && record8.thinking.trim() !== "") {
+          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
+        }
+        contentBlocks2.push({ type: "text", text: record8.content.trim() });
         push("assistant/message", {
           turn: currentTurn,
           step: 1,
           message: {
-            id: `${sessionId}:${currentTurn}`,
+            id: `${sessionId}:${record8.step_index}`,
             role: "assistant",
-            content: [{ type: "text", text: record8.content }],
+            content: contentBlocks2,
             source: { kind: "model", provider: "google", model: "gemini" }
-          },
-          stream: []
+          }
         }, time, true);
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
       }
     }
   }
@@ -18508,7 +18514,100 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
   }
   return events;
 }
-async function discoverAntigravitySessions(_workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+async function querySqliteJson(dbPath, sql, params = []) {
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const stmt = db.prepare(sql);
+      const rows = stmt.all(...params);
+      return rows;
+    } finally {
+      db.close();
+    }
+  } catch {
+  }
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    let formattedSql = sql;
+    for (const p of params) {
+      const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
+      formattedSql = formattedSql.replace("?", val);
+    }
+    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
+    return JSON.parse(stdout || "[]");
+  } catch {
+    return [];
+  }
+}
+async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  try {
+    await fs.stat(dbPath);
+  } catch {
+    return [];
+  }
+  const sql = "SELECT DISTINCT workspace_uris FROM conversation_summaries WHERE (step_count > 0 OR title != '');";
+  const rows = await querySqliteJson(dbPath, sql);
+  const paths = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    if (!row?.workspace_uris) continue;
+    try {
+      const uris = JSON.parse(row.workspace_uris);
+      if (Array.isArray(uris)) {
+        for (const u of uris) {
+          if (typeof u === "string" && u.startsWith("file://")) {
+            try {
+              const parsed = new URL(u);
+              let p = decodeURIComponent(parsed.pathname);
+              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
+                p = p.slice(1);
+              }
+              paths.add(p);
+            } catch {
+            }
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  const verified = [];
+  for (const p of paths) {
+    try {
+      const s2 = await fs.stat(p);
+      if (s2.isDirectory()) verified.push(p);
+    } catch {
+    }
+  }
+  return verified;
+}
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain"), dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  try {
+    await fs.stat(dbPath);
+    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
+    const params = [];
+    if (workspacePath && workspacePath.trim() !== "") {
+      sql += " AND workspace_uris LIKE ?";
+      params.push(`%${workspacePath.trim()}%`);
+    }
+    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
+    params.push(limit);
+    const rows = await querySqliteJson(dbPath, sql, params);
+    if (rows && rows.length > 0) {
+      return rows.map((r) => {
+        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
+        return {
+          conversationId: r.conversation_id,
+          title: r.title && r.title.trim() !== "" ? r.title.trim() : "Untitled Session",
+          createdAt: time,
+          updatedAt: time
+        };
+      });
+    }
+  } catch {
+  }
   let dirEntries;
   try {
     dirEntries = await fs.readdir(baseDir);
@@ -18954,11 +19053,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       ...page,
       events: page.records.map((entry) => ({ event: entry.event })),
       projections: {
-        kind: "sequenced",
         asOfSeq: page.cursor,
         values: {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
-          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
@@ -19094,11 +19192,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
-        kind: "sequenced",
         asOfSeq: history.cursor,
         values: {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
-          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
@@ -19181,10 +19278,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (kind === "tool_call" || kind === "tool_call_update") {
       const toolName = string3(update.title) ?? string3(update.toolName) ?? string3(update.name) ?? "tool";
       const status2 = string3(update.status);
+      const callId = string3(update.toolCallId) ?? string3(update.callId) ?? toolName;
       this.pushEvent(follow, "tool/call", {
         turn: follow.turn,
         step: 1,
-        toolCallId: string3(update.toolCallId) ?? toolName,
+        callId,
+        name: toolName,
+        arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
+        toolCallId: callId,
         toolName,
         status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
       });
@@ -29617,19 +29718,31 @@ var AcpRemoteGateway = class {
         }
       }
       const backend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
-      let sessionCount = 0;
       if (backend === "antigravity") {
         try {
-          const sessions = await discoverAntigravitySessions("", 100);
-          sessionCount = sessions.length;
+          const agyDirs = await discoverAntigravityWorkspaces();
+          for (const d of agyDirs) {
+            candidates.add(d);
+          }
         } catch {
         }
       }
-      return [...candidates].map((p) => ({
-        path: p,
-        title: basename4(p) || "workspace",
-        ...sessionCount > 0 ? { sessionCount } : {}
+      const results = await Promise.all([...candidates].map(async (p) => {
+        let sessionCount = 0;
+        if (backend === "antigravity") {
+          try {
+            const sessions = await discoverAntigravitySessions(p, 100);
+            sessionCount = sessions.length;
+          } catch {
+          }
+        }
+        return {
+          path: p,
+          title: basename4(p) || "workspace",
+          ...sessionCount > 0 ? { sessionCount } : {}
+        };
       }));
+      return results;
     }
     if (call.method === "dsh/sessionList") {
       const limit = typeof call.params.limit === "number" ? call.params.limit : 30;

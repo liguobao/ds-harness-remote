@@ -526,11 +526,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       ...page,
       events: page.records.map(entry => ({ event: entry.event })),
       projections: {
-        kind: 'sequenced',
         asOfSeq: page.cursor,
         values: {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
-          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
@@ -692,11 +691,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       records: history.records,
       hasMore: history.hasMore,
       projections: {
-        kind: 'sequenced',
         asOfSeq: history.cursor,
         values: {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
-          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: {
             maxImageBytes: 0,
@@ -783,10 +781,18 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (kind === 'tool_call' || kind === 'tool_call_update') {
       const toolName = string(update.title) ?? string(update.toolName) ?? string(update.name) ?? 'tool'
       const status = string(update.status)
+      const callId = string(update.toolCallId) ?? string(update.callId) ?? toolName
       this.pushEvent(follow, 'tool/call', {
         turn: follow.turn,
         step: 1,
-        toolCallId: string(update.toolCallId) ?? toolName,
+        callId,
+        name: toolName,
+        arguments: typeof update.parameters === 'object' && update.parameters !== null
+          ? JSON.stringify(update.parameters)
+          : typeof update.rawInput === 'object' && update.rawInput !== null
+            ? JSON.stringify(update.rawInput)
+            : '{}',
+        toolCallId: callId,
         toolName,
         status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
       })

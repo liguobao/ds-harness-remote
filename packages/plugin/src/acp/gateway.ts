@@ -21,7 +21,7 @@ import {
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
-import { discoverAntigravitySessions, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -206,20 +206,34 @@ export class AcpRemoteGateway {
         }
       }
       const backend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
-      let sessionCount = 0
       if (backend === 'antigravity') {
         try {
-          const sessions = await discoverAntigravitySessions('', 100)
-          sessionCount = sessions.length
+          const agyDirs = await discoverAntigravityWorkspaces()
+          for (const d of agyDirs) {
+            candidates.add(d)
+          }
         } catch {
           // ignore
         }
       }
-      return [...candidates].map(p => ({
-        path: p,
-        title: basename(p) || 'workspace',
-        ...(sessionCount > 0 ? { sessionCount } : {}),
+
+      const results = await Promise.all([...candidates].map(async p => {
+        let sessionCount = 0
+        if (backend === 'antigravity') {
+          try {
+            const sessions = await discoverAntigravitySessions(p, 100)
+            sessionCount = sessions.length
+          } catch {
+            // ignore
+          }
+        }
+        return {
+          path: p,
+          title: basename(p) || 'workspace',
+          ...(sessionCount > 0 ? { sessionCount } : {}),
+        }
       }))
+      return results
     }
 
     if (call.method === 'dsh/sessionList') {

@@ -95,32 +95,38 @@ export async function loadTranscriptEvents(
 
       if (Array.isArray(record.tool_calls)) {
         for (const call of record.tool_calls) {
+          const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
+          const callId = `${record.step_index}:${toolName}`
           push('tool/call', {
             turn: currentTurn,
             step: 1,
-            toolCallId: `${record.step_index}:${call.name}`,
-            toolName: call.name,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
+            toolCallId: callId,
+            toolName,
             status: call.status === 'ERROR' ? 'failed' : 'finished',
           }, time, false)
         }
       }
 
       if (record.content && record.content.trim() !== '') {
+        const contentBlocks: Array<{ type: string; text: string }> = []
+        if (record.thinking && record.thinking.trim() !== '') {
+          contentBlocks.push({ type: 'reasoning', text: record.thinking.trim() })
+        }
+        contentBlocks.push({ type: 'text', text: record.content.trim() })
+
         push('assistant/message', {
           turn: currentTurn,
           step: 1,
           message: {
-            id: `${sessionId}:${currentTurn}`,
+            id: `${sessionId}:${record.step_index}`,
             role: 'assistant',
-            content: [{ type: 'text', text: record.content }],
+            content: contentBlocks,
             source: { kind: 'model', provider: 'google', model: 'gemini' },
           },
-          stream: [],
         }, time, true)
-
-        push('step/end', { turn: currentTurn, step: 1 }, time)
-        push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, time)
-        turnOpen = false
       }
     }
   }
@@ -140,11 +146,129 @@ export interface DiscoveredSession {
   updatedAt: number
 }
 
+async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params: Array<string | number> = []): Promise<T[]> {
+  try {
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(dbPath, { readOnly: true })
+    try {
+      const stmt = db.prepare(sql)
+      const rows = stmt.all(...params)
+      return rows as T[]
+    } finally {
+      db.close()
+    }
+  } catch {
+    // fallback to sqlite3 CLI
+  }
+
+  try {
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const execFileAsync = promisify(execFile)
+    let formattedSql = sql
+    for (const p of params) {
+      const val = typeof p === 'number' ? String(p) : `'${String(p).replace(/'/g, "''")}'`
+      formattedSql = formattedSql.replace('?', val)
+    }
+    const { stdout } = await execFileAsync('sqlite3', [dbPath, '-json', formattedSql])
+    return JSON.parse(stdout || '[]') as T[]
+  } catch {
+    return []
+  }
+}
+
+export async function discoverAntigravityWorkspaces(
+  dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
+): Promise<string[]> {
+  try {
+    await fs.stat(dbPath)
+  } catch {
+    return []
+  }
+
+  const sql = "SELECT DISTINCT workspace_uris FROM conversation_summaries WHERE (step_count > 0 OR title != '');"
+  const rows = await querySqliteJson<{ workspace_uris?: string }>(dbPath, sql)
+  const paths = new Set<string>()
+
+  for (const row of rows) {
+    if (!row?.workspace_uris) continue
+    try {
+      const uris = JSON.parse(row.workspace_uris)
+      if (Array.isArray(uris)) {
+        for (const u of uris) {
+          if (typeof u === 'string' && u.startsWith('file://')) {
+            try {
+              const parsed = new URL(u)
+              let p = decodeURIComponent(parsed.pathname)
+              if (process.platform === 'win32' && p.startsWith('/') && p.length > 2 && p[2] === ':') {
+                p = p.slice(1)
+              }
+              paths.add(p)
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const verified: string[] = []
+  for (const p of paths) {
+    try {
+      const s = await fs.stat(p)
+      if (s.isDirectory()) verified.push(p)
+    } catch {
+      // ignore
+    }
+  }
+  return verified
+}
+
 export async function discoverAntigravitySessions(
-  _workspacePath: string,
+  workspacePath: string,
   limit: number = 30,
   baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+  dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
 ): Promise<DiscoveredSession[]> {
+  // 1. Try querying from conversation_summaries.db
+  try {
+    await fs.stat(dbPath)
+    let sql = 'SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != \'\')'
+    const params: Array<string | number> = []
+    if (workspacePath && workspacePath.trim() !== '') {
+      sql += ' AND workspace_uris LIKE ?'
+      params.push(`%${workspacePath.trim()}%`)
+    }
+    sql += ' ORDER BY last_modified_time DESC LIMIT ?;'
+    params.push(limit)
+
+    interface DbSessionRow {
+      conversation_id: string
+      title?: string
+      step_count?: number
+      last_modified_time?: string
+    }
+
+    const rows = await querySqliteJson<DbSessionRow>(dbPath, sql, params)
+    if (rows && rows.length > 0) {
+      return rows.map(r => {
+        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now()
+        return {
+          conversationId: r.conversation_id,
+          title: r.title && r.title.trim() !== '' ? r.title.trim() : 'Untitled Session',
+          createdAt: time,
+          updatedAt: time,
+        }
+      })
+    }
+  } catch {
+    // fallback to filesystem scanning
+  }
+
+  // 2. Fallback to filesystem scanning
   let dirEntries: string[]
   try {
     dirEntries = await fs.readdir(baseDir)

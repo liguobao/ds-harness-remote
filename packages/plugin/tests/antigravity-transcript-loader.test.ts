@@ -33,4 +33,35 @@ describe('TranscriptLoader', () => {
       expect(list[0].title.length).toBeGreaterThan(0)
     }
   })
+
+  it('discovers existing Antigravity workspaces from database', async () => {
+    const { discoverAntigravityWorkspaces } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
+    const workspaces = await discoverAntigravityWorkspaces()
+    expect(Array.isArray(workspaces)).toBe(true)
+    if (workspaces.length > 0) {
+      expect(workspaces).toContain('/var/lib/dsh/workspace/ds-harness-remote')
+    }
+  })
+
+  it('hydrates tool/call events with valid name and callId to satisfy DSH front-end', async () => {
+    const events = await loadTranscriptEvents(
+      '8563e7e9-7c52-4687-a61f-12f69014d03e',
+      'cursor:8563e7e9-7c52-4687-a61f-12f69014d03e',
+    )
+    const toolCalls = events.filter(e => e.event.type === 'tool/call')
+    if (toolCalls.length > 0) {
+      for (const tc of toolCalls) {
+        const data = tc.event.data as Record<string, unknown>
+        expect(typeof data.name).toBe('string')
+        expect((data.name as string).length).toBeGreaterThan(0)
+        expect(typeof data.callId).toBe('string')
+        // DSH client isSubagentDelegationTool check should not throw
+        expect(() => {
+          const name = data.name as string
+          const isSub = name === 'subagent' || name.startsWith('subagent_')
+          return isSub
+        }).not.toThrow()
+      }
+    }
+  })
 })
