@@ -34,6 +34,20 @@ describe('plugin config', () => {
       cursor: { enabled: true, binary: 'agent' },
     })
     expect(resolveConfig({ acp: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: false, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ acp: {
+      enabled: true,
+      backends: [{ id: 'cursor', enabled: false }],
+    } }, {})).toMatchObject({
+      cursor: { enabled: false, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ acp: {
+      enabled: true,
+      backends: [{ id: 'cursor', enabled: true }],
+    } }, {})).toMatchObject({
       cursor: { enabled: true, binary: 'agent' },
       acp: { enabled: true },
     })

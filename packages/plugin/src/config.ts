@@ -155,6 +155,12 @@ const configSchema = z.object({
 
 export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const parsed = configSchema.parse(input)
+  const configuredCursorBackend = parsed.acp?.backends?.find(item => item.id === 'cursor')
+  const legacyCursorEnabled = parsed.acp?.backend === 'cursor' ? parsed.acp.enabled : undefined
+  const cursorEnabled = parsed.cursor?.enabled
+    ?? configuredCursorBackend?.enabled
+    ?? legacyCursorEnabled
+    ?? false
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
@@ -184,7 +190,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       binary: parsed.codex?.binary ?? 'codex',
     },
     cursor: {
-      enabled: parsed.cursor?.enabled ?? parsed.acp?.enabled ?? false,
+      enabled: cursorEnabled,
       binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? 'agent',
     },
     acp: { enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false, backends: [...new Set(['codex','cursor','kimi','antigravity',...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => { const d = parsed.acp?.backends?.find(x => x.id === id); const legacy = parsed.acp?.backend === id ? parsed.acp : undefined; return { id, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? ({codex:'codex',cursor:'agent',kimi:'kimi',antigravity:'agy'} as Record<string,string>)[id] ?? id, args: d?.args ?? legacy?.args ?? (id === 'antigravity' ? ['--input-format', 'stream-json', '--output-format', 'stream-json'] : ['acp']), ...(d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {}) } }) },

@@ -19683,6 +19683,9 @@ var configSchema = external_exports.object({
 }).strict();
 function resolveConfig(input2 = {}, env = process.env) {
   const parsed = configSchema.parse(input2);
+  const configuredCursorBackend = parsed.acp?.backends?.find((item) => item.id === "cursor");
+  const legacyCursorEnabled = parsed.acp?.backend === "cursor" ? parsed.acp.enabled : void 0;
+  const cursorEnabled = parsed.cursor?.enabled ?? configuredCursorBackend?.enabled ?? legacyCursorEnabled ?? false;
   const reconnect = typeof parsed.reconnect === "object" ? parsed.reconnect : {};
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER;
   const serverUrl = configuredServerUrl === void 0 ? void 0 : normalizeServerUrl(configuredServerUrl);
@@ -19712,7 +19715,7 @@ function resolveConfig(input2 = {}, env = process.env) {
       binary: parsed.codex?.binary ?? "codex"
     },
     cursor: {
-      enabled: parsed.cursor?.enabled ?? parsed.acp?.enabled ?? false,
+      enabled: cursorEnabled,
       binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
     },
     acp: { enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
