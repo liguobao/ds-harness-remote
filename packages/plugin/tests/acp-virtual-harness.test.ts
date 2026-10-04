@@ -512,5 +512,37 @@ describe('AcpVirtualHarness', () => {
     await iterator.return?.()
     await target.close()
   })
+
+  it('hydrates Antigravity session history from transcript loader', async () => {
+    const client: AgentAcpClientLike = {
+      createSession: vi.fn(async () => ({ sessionId: 'bab821dd-6184-43f1-8ed5-fe589be9b302' })),
+      prompt: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      listDirectory: vi.fn(async () => []),
+      openStream: vi.fn(async () => ({ close: async () => {} })),
+      respond: vi.fn(async () => {}),
+    }
+
+    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+    await target.selectOrCreateWorkspace('/workspace/repo')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
+    const sessionId = created.value.sessionId
+
+    const historyResult = await target.dispatch('session/history', {
+      args: { request: { sessionId, maxMessages: 50 } },
+    }, new AbortController().signal) as { ok: true; value: { records: Array<{ type: string; event: { type: string } }> } }
+
+    expect(historyResult.ok).toBe(true)
+    const records = historyResult.value.records
+    if (records.length > 0) {
+      const types = records.map(r => r.event.type)
+      expect(types).toContain('user/message')
+      expect(types).toContain('assistant/message')
+    }
+
+    await target.close()
+  })
 })
 

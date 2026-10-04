@@ -18385,6 +18385,113 @@ var AsyncValueQueue2 = class {
   }
 };
 
+// src/acp/adapters/antigravity/transcript-loader.ts
+import { promises as fs } from "node:fs";
+import { join as join2 } from "node:path";
+import { homedir } from "node:os";
+function cleanUserPrompt(raw) {
+  if (!raw) return "";
+  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return raw.trim();
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  let content = "";
+  try {
+    content = await fs.readFile(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = content.split("\n");
+  const events = [];
+  let currentSeq = 0;
+  let currentTurn = 0;
+  let turnOpen = false;
+  const push = (type, data2, time, surface = false) => {
+    events.push({
+      type: "event",
+      event: {
+        type,
+        seq: currentSeq++,
+        time,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    });
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let record8;
+    try {
+      record8 = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
+    if (record8.type === "USER_INPUT") {
+      if (turnOpen) {
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+      currentTurn += 1;
+      turnOpen = true;
+      push("turn/start", { turn: currentTurn }, time);
+      push("step/start", { turn: currentTurn, step: 1 }, time);
+      const text = cleanUserPrompt(record8.content);
+      push("user/message", {
+        id: `user:${record8.step_index}`,
+        role: "user",
+        content: [{ type: "text", text }],
+        source: { kind: "user" }
+      }, time, true);
+    } else if (record8.type === "PLANNER_RESPONSE") {
+      if (!turnOpen) {
+        currentTurn += 1;
+        turnOpen = true;
+        push("turn/start", { turn: currentTurn }, time);
+        push("step/start", { turn: currentTurn, step: 1 }, time);
+      }
+      if (Array.isArray(record8.tool_calls)) {
+        for (const call of record8.tool_calls) {
+          push("tool/call", {
+            turn: currentTurn,
+            step: 1,
+            toolCallId: `${record8.step_index}:${call.name}`,
+            toolName: call.name,
+            status: call.status === "ERROR" ? "failed" : "finished"
+          }, time, false);
+        }
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        push("assistant/message", {
+          turn: currentTurn,
+          step: 1,
+          message: {
+            id: `${sessionId}:${currentTurn}`,
+            role: "assistant",
+            content: [{ type: "text", text: record8.content }],
+            source: { kind: "model", provider: "google", model: "gemini" }
+          },
+          stream: []
+        }, time, true);
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+    }
+  }
+  if (turnOpen) {
+    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
+  }
+  return events;
+}
+
 // src/acp/virtual-harness.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
@@ -18720,10 +18827,20 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishProjection(sessionId, "title", title);
     return success2({ sessionId });
   }
+  async hydrateSession(session) {
+    if (this.backend !== "antigravity" || session.events.length > 0) return;
+    const events = await loadTranscriptEvents(session.acpSessionId, session.sessionId);
+    if (events.length > 0) {
+      session.events = events;
+      session.blank = false;
+      session.updatedAt = Date.now();
+    }
+  }
   async sessionHistory(request) {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
     return success2(this.historyPage(session, {
       beforeSeq: optionalInteger2(request.beforeSeq),
       limit: optionalPositiveInteger2(request.maxMessages) ?? 50
@@ -18733,6 +18850,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
     const page = this.historyPage(session, {
       beforeSeq: optionalInteger2(request.beforeSeq),
       throughSeq: optionalInteger2(request.throughSeq),
@@ -18829,6 +18947,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const sessionId = extractSessionId(request);
     const session = this.sessions.get(sessionId);
     if (session === void 0) throw new Error("The Session was not found.");
+    await this.hydrateSession(session);
     const history = this.historyPage(session, {
       limit: optionalPositiveInteger2(request.maxMessages) ?? 50
     });
@@ -19633,7 +19752,7 @@ import { platform } from "node:os";
 
 // src/server-credentials.ts
 import { chmod, mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { dirname as dirname2, join as join3 } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -19648,7 +19767,7 @@ var credentialSchema = external_exports.object({
 var ServerCredentialStore = class {
   path;
   constructor(directory) {
-    this.path = join2(directory, "server-credentials.json");
+    this.path = join3(directory, "server-credentials.json");
   }
   /** Serialize the complete read/refresh/write transaction across processes.
    * Never steal an old lock: a suspended owner may still consume a one-use token.
@@ -20477,7 +20596,7 @@ import { networkInterfaces } from "node:os";
 // src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname as dirname3, join as join3 } from "node:path";
+import { delimiter, dirname as dirname3, join as join4 } from "node:path";
 import { fileURLToPath } from "node:url";
 var cachedExternalFactory;
 var cachedExternalFactoryResolved = false;
@@ -20528,21 +20647,21 @@ function nodeBinaryCandidates() {
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
   add3(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join3(part, process.platform === "win32" ? "node.exe" : "node"));
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join4(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");
   add3("/usr/bin/node");
-  add3(join3(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join3(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join3(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join4(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join4(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join4(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
-  const root = join3(process.env.HOME ?? "", ".nvm", "versions", "node");
+  const root = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
   if (root === "" || !existsSync(root)) return [];
   try {
-    return readdirSync(root).map((version) => join3(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root).map((version) => join4(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -22826,8 +22945,8 @@ import { execFileSync } from "node:child_process";
 // src/identity-store.ts
 import { createHash } from "node:crypto";
 import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname as dirname4, join as join4 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -22856,14 +22975,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join4(options.homeDirectory ?? homedir(), ".dsh");
-    this.directory = options.directory ?? join4(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+    this.directory = options.directory ?? join5(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
     await mkdir2(this.directory, { recursive: true, mode: 448 });
     await chmod2(this.directory, 448);
-    const devicePath = join4(this.directory, "device.json");
-    const keyPath = join4(this.directory, "device.key");
+    const devicePath = join5(this.directory, "device.json");
+    const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -22932,7 +23051,7 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join4(this.directory, "trusted-peers.json");
+    const path = join5(this.directory, "trusted-peers.json");
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
@@ -22948,7 +23067,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join4(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -22957,7 +23076,7 @@ var IdentityStore = class {
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
   const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join4(root, "servers", scope, role);
+  return join5(root, "servers", scope, role);
 }
 function fingerprint(publicKey) {
   const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -25081,12 +25200,12 @@ function closeCode(code) {
 
 // src/remote-directory-browser.ts
 import { readdir, stat as stat3 } from "node:fs/promises";
-import { homedir as homedir2, platform as platform2 } from "node:os";
+import { homedir as homedir3, platform as platform2 } from "node:os";
 import { basename as basename2, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve(homedir2());
+  const home = resolve(homedir3());
   const target2 = path === void 0 || path.trim() === "" ? home : resolve(path);
   if (!isAbsolute2(target2)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir(target2, { withFileTypes: true });
@@ -26408,8 +26527,8 @@ function isRecord12(value) {
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -27853,19 +27972,19 @@ var CodexRemoteDomain = class {
     return paths;
   }
 };
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir4()) {
   if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
-    join5(userHome, "Applications", "ChatGPT.app")
+    join6(userHome, "Applications", "ChatGPT.app")
   ].flatMap((chatGptApp) => {
-    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
+    const codexCli = join6(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(join6(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord15(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
-      const candidate = join5(codexCli, manifest.entrypoint);
+      const candidate = join6(codexCli, manifest.entrypoint);
       if (!existsSync2(candidate)) return [];
       accessSync(candidate, constants.X_OK);
       return [candidate];
@@ -27876,7 +27995,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   return [.../* @__PURE__ */ new Set([
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
 }
@@ -28114,8 +28233,8 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 // src/acp/gateway.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { readdir as readdir3, realpath as realpath2, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir5 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve3 } from "node:path";
+import { homedir as homedir6 } from "node:os";
+import { basename as basename4, isAbsolute as isAbsolute4, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
@@ -28367,18 +28486,18 @@ import { Buffer as Buffer5 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/antigravity/transcript-watcher.ts
-import { promises as fs } from "node:fs";
-import { join as join6 } from "node:path";
+import { promises as fs2 } from "node:fs";
+import { join as join7 } from "node:path";
 import { EventEmitter } from "node:events";
-import { homedir as homedir4 } from "node:os";
+import { homedir as homedir5 } from "node:os";
 var TranscriptWatcher = class extends EventEmitter {
-  constructor(conversationId, baseDir = join6(homedir4(), ".gemini/antigravity-cli/brain")) {
+  constructor(conversationId, baseDir = join7(homedir5(), ".gemini/antigravity-cli/brain")) {
     super();
     this.conversationId = conversationId;
     this.baseDir = baseDir;
-    const brainDir = join6(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join6(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join6(brainDir, "transcript_full.jsonl");
+    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join7(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
   }
   offset = 0;
   lineRemainder = "";
@@ -28425,12 +28544,12 @@ var TranscriptWatcher = class extends EventEmitter {
   async readNewLines() {
     let stat8;
     try {
-      stat8 = await fs.stat(this.transcriptPath);
+      stat8 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
     if (stat8.size <= this.offset) return;
-    const handle = await fs.open(this.transcriptPath, "r");
+    const handle = await fs2.open(this.transcriptPath, "r");
     try {
       const bytesToRead = stat8.size - this.offset;
       const buffer = Buffer.alloc(bytesToRead);
@@ -28494,7 +28613,7 @@ var TranscriptWatcher = class extends EventEmitter {
   }
   async enrichFromFullTranscript(record8) {
     try {
-      const content = await fs.readFile(this.transcriptFullPath, "utf-8");
+      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
       for (const line of lines) {
         const trimmed = line.trim();
@@ -29745,8 +29864,8 @@ var AcpRemoteGateway = class {
     }
   }
   async listDirectory(path) {
-    const home = homedir5();
-    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join7(home, path.slice(2)) : path;
+    const home = homedir6();
+    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join8(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
     const names = await readdir3(canonical);
     const entries = [];
@@ -29756,7 +29875,7 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join7(canonical, name2);
+      const child = join8(canonical, name2);
       try {
         const info = await stat5(child);
         if (!info.isDirectory()) continue;
@@ -29852,16 +29971,16 @@ function buildCrumbs(path, home) {
   return crumbs2;
 }
 function cursorBinaryCandidates(configured) {
-  const userHome = homedir5();
+  const userHome = homedir6();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join7(userHome, ".local", "bin", "agy"),
+      join8(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join7(userHome, ".local", "bin", "agent"),
+      join8(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
@@ -29886,7 +30005,7 @@ function isRecord18(value) {
 // src/codex-workspace-bridge.ts
 import { spawn as spawn5 } from "node:child_process";
 import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join8, relative as relative3, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join9, relative as relative3, resolve as resolve4 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -29976,7 +30095,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join8(target2, entry.name);
+          const item = join9(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -30797,7 +30916,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -30884,7 +31003,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join9(directory, "device.json"))) {
+  if (!await exists3(join10(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -30929,7 +31048,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join9(directory, "device.json"))) {
+  if (!await exists3(join10(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;

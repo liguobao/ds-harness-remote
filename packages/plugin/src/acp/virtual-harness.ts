@@ -6,6 +6,7 @@ import type {
   TypertGatewayRequest,
   TypertRpcResult,
 } from '../typert-gateway-contract.js'
+import { loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
 const CURSOR_WORKSPACE_PREFIX = 'cursor:cwd:'
@@ -449,10 +450,21 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return success({ sessionId })
   }
 
+  private async hydrateSession(session: AcpSessionState): Promise<void> {
+    if (this.backend !== 'antigravity' || session.events.length > 0) return
+    const events = await loadTranscriptEvents(session.acpSessionId, session.sessionId)
+    if (events.length > 0) {
+      session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
+      session.blank = false
+      session.updatedAt = Date.now()
+    }
+  }
+
   private async sessionHistory(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
+    await this.hydrateSession(session)
     return success(this.historyPage(session, {
       beforeSeq: optionalInteger(request.beforeSeq),
       limit: optionalPositiveInteger(request.maxMessages) ?? 50,
@@ -463,6 +475,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
+    await this.hydrateSession(session)
     const page = this.historyPage(session, {
       beforeSeq: optionalInteger(request.beforeSeq),
       throughSeq: optionalInteger(request.throughSeq),
@@ -584,6 +597,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const sessionId = extractSessionId(request)
     const session = this.sessions.get(sessionId)
     if (session === undefined) throw new Error('The Session was not found.')
+    await this.hydrateSession(session)
     const history = this.historyPage(session, {
       limit: optionalPositiveInteger(request.maxMessages) ?? 50,
     })
