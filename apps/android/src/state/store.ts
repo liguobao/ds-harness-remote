@@ -53,6 +53,7 @@ import {
   createCursorSession,
   createCursorWorkspace,
   cursorNativeId,
+  foldAcpHistory,
 } from '../services/cursor'
 import { AndroidRemoteConnection } from '../services/connection'
 import { reconcileTrustedDevices } from '../services/device-directory'
@@ -735,7 +736,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (session.backend === 'cursor' || session.backend === 'antigravity') {
         await closeActiveCodexStream()
-        await ensureCursorStream(session)
+        const acpClient = session.backend === 'antigravity'
+          ? connection.requireAntigravity()
+          : connection.requireCursor()
+        const [history] = await Promise.all([
+          session.backend === 'antigravity'
+            ? acpClient.loadSessionHistory(cursorNativeId(session), 'antigravity')
+            : Promise.resolve([] as unknown[]),
+          ensureCursorStream(session),
+        ])
+        const items = foldAcpHistory(history, session.sessionId)
         set(state => ({
           selectedSession: session,
           sessions: state.sessions.some(item => item.sessionId === session.sessionId)
@@ -743,7 +753,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             : [session, ...state.sessions],
           messages: {
             ...state.messages,
-            [session.sessionId]: state.messages[session.sessionId] ?? [],
+            [session.sessionId]: mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
           },
           sessionModels: undefined,
           historyHasMore: false,

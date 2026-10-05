@@ -4,10 +4,13 @@ import type {
   ApprovalActivity,
   ChatItem,
   ChatMessage,
+  HistoryEntry,
+  NativeSessionEvent,
   RemoteSession,
   ToolActivity,
   WorkspaceView,
 } from '../types'
+import { foldHistory } from '../state/event-reducer'
 
 export function cursorWorkspaceId(path: string): string {
   return `cursor:cwd:${encodeURIComponent(path)}`
@@ -164,6 +167,24 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
     return appendAssistantDelta(messages, sessionId, `\n\n${text}`, `cursor-todo:${stringValue(params.toolCallId) ?? Date.now()}`)
   }
   return messages
+}
+
+/** Fold Host ACP transcript events into the Android chat projection. */
+export function foldAcpHistory(events: unknown[], sessionId: string): ChatItem[] {
+  const entries: HistoryEntry[] = []
+  for (const [index, value] of events.entries()) {
+    if (!isRecord(value) || !isRecord(value.event)) continue
+    const raw = value.event
+    if (typeof raw.type !== 'string' || !isRecord(raw.data)) continue
+    const event: NativeSessionEvent = {
+      type: raw.type,
+      seq: typeof raw.seq === 'number' && Number.isSafeInteger(raw.seq) && raw.seq >= 0 ? raw.seq : index,
+      time: typeof raw.time === 'number' && Number.isFinite(raw.time) ? raw.time : Date.now(),
+      data: raw.data,
+    }
+    entries.push({ event })
+  }
+  return foldHistory(entries, sessionId, true)
 }
 
 function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Record<string, unknown>): ChatItem[] {
