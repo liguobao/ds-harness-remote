@@ -295,6 +295,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
       const payload = {
         event: 'user',
+        conversation_id: sessionId,
         message: { content: promptText },
       }
       const data = Buffer.from(`${JSON.stringify(payload)}\n`, 'utf8')

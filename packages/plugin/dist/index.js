@@ -7694,11 +7694,11 @@ var ApiProxySwitch = class {
   }
 };
 
-// ../crypto/node_modules/@noble/ciphers/esm/cryptoNode.js
+// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../crypto/node_modules/@noble/ciphers/esm/webcrypto.js
+// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/webcrypto.js
 function randomBytes2(bytesLength = 32) {
   if (crypto && typeof crypto.getRandomValues === "function") {
     return crypto.getRandomValues(new Uint8Array(bytesLength));
@@ -19195,7 +19195,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       stepOpen: session.running,
       streamActive: false,
       assistantStreamRevision: 0,
-      accumulatedText: ""
+      accumulatedText: "",
+      activeToolCalls: /* @__PURE__ */ new Set()
     };
     this.follows.add(follow);
     queue.push({
@@ -19254,7 +19255,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       stepOpen: false,
       streamActive: false,
       assistantStreamRevision: 0,
-      accumulatedText: ""
+      accumulatedText: "",
+      activeToolCalls: /* @__PURE__ */ new Set()
     };
     this.follows.add(follow);
     const stream = await this.client.openStream(
@@ -19292,6 +19294,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       const toolName = string3(update.title) ?? string3(update.toolName) ?? string3(update.name) ?? "tool";
       const status2 = string3(update.status);
       const callId = string3(update.toolCallId) ?? string3(update.callId) ?? toolName;
+      const terminal = status2 === "completed" || status2 === "failed";
+      if (kind === "tool_call_update" && !terminal) return;
+      if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
       this.pushEvent(follow, "tool/call", {
         turn: follow.turn,
         step: 1,
@@ -19302,6 +19307,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         toolName,
         status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
       });
+      if (terminal) follow.activeToolCalls.delete(callId);
+      else follow.activeToolCalls.add(callId);
       if (session !== void 0) session.updatedAt = Date.now();
       return;
     }

@@ -65,6 +65,7 @@ interface FollowState {
   assistantStreamRevision: number
   assistantAttempt?: AssistantStreamAttempt
   accumulatedText: string
+  activeToolCalls: Set<string>
   close?: () => Promise<void>
 }
 
@@ -682,6 +683,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: '',
+      activeToolCalls: new Set(),
     }
     this.follows.add(follow)
     queue.push({
@@ -743,6 +745,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: '',
+      activeToolCalls: new Set(),
     }
     this.follows.add(follow)
     const stream = await this.client.openStream(
@@ -782,6 +785,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       const toolName = string(update.title) ?? string(update.toolName) ?? string(update.name) ?? 'tool'
       const status = string(update.status)
       const callId = string(update.toolCallId) ?? string(update.callId) ?? toolName
+      const terminal = status === 'completed' || status === 'failed'
+      if (kind === 'tool_call_update' && !terminal) return
+      if (kind === 'tool_call' && follow.activeToolCalls.has(callId)) return
       this.pushEvent(follow, 'tool/call', {
         turn: follow.turn,
         step: 1,
@@ -796,6 +802,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         toolName,
         status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
       })
+      if (terminal) follow.activeToolCalls.delete(callId)
+      else follow.activeToolCalls.add(callId)
       if (session !== undefined) session.updatedAt = Date.now()
       return
     }
