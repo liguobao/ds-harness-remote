@@ -1168,6 +1168,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (group === undefined || targetModel === undefined) {
       return failure('model-unavailable', `The selected ${this.backend} model is unavailable on this Host.`)
     }
+    const supportedEfforts = targetModel.reasoning?.efforts.map(effort => effort.id) ?? []
+    if (reasoningEffort !== undefined && !supportedEfforts.includes(reasoningEffort)) {
+      return failure('model-unavailable', `The selected reasoning effort is unavailable for this ${this.backend} model.`)
+    }
     const selected: AcpModelSelection = {
       provider,
       model,
@@ -1382,21 +1386,40 @@ export interface AcpModelView {
   }
 }
 
+function antigravityModel(
+  id: string,
+  name: string,
+  effortIds: string[],
+  defaultEffort: string,
+): AcpModelView {
+  return {
+    id,
+    name,
+    reasoning: {
+      efforts: effortIds.map(effort => ({ id: effort, name: reasoningEffortName(effort) })),
+      defaultEffort,
+    },
+  }
+}
+
+function reasoningEffortName(effort: string): string {
+  const names: Record<string, string> = {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    thinking: 'Thinking',
+  }
+  return names[effort] ?? effort
+}
+
 const ANTIGRAVITY_MODELS: AcpModelView[] = [
-  { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' },
-  { id: 'gemini-3.8-flash-medium', name: 'Gemini 3.8 Flash (Medium)' },
-  { id: 'gemini-3.8-flash-low', name: 'Gemini 3.8 Flash (Low)' },
-  { id: 'gemini-3.7-flash-high', name: 'Gemini 3.7 Flash (High)' },
-  { id: 'gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash (Medium)' },
-  { id: 'gemini-3.7-flash-low', name: 'Gemini 3.7 Flash (Low)' },
-  { id: 'gemini-3.6-flash-high', name: 'Gemini 3.6 Flash (High)' },
-  { id: 'gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash (Medium)' },
-  { id: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' },
-  { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
-  { id: 'gemini-3.1-pro-low', name: 'Gemini 3.1 Pro (Low)' },
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' },
-  { id: 'claude-opus-4-6-thinking', name: 'Claude Opus 4.6 (Thinking)' },
-  { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+  antigravityModel('gemini-3.8-flash', 'Gemini 3.8 Flash', ['high', 'medium', 'low'], 'high'),
+  antigravityModel('gemini-3.7-flash', 'Gemini 3.7 Flash', ['high', 'medium', 'low'], 'high'),
+  antigravityModel('gemini-3.6-flash', 'Gemini 3.6 Flash', ['high', 'medium', 'low'], 'high'),
+  antigravityModel('gemini-3.1-pro', 'Gemini 3.1 Pro', ['high', 'low'], 'high'),
+  antigravityModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', ['thinking'], 'thinking'),
+  antigravityModel('claude-opus-4-6', 'Claude Opus 4.6', ['thinking'], 'thinking'),
+  antigravityModel('gpt-oss-120b', 'GPT-OSS 120B', ['medium'], 'medium'),
 ]
 
 const CURSOR_MODELS: AcpModelView[] = [

@@ -171,6 +171,20 @@ describe('AcpVirtualHarness', () => {
     expect(catalogResult.ok).toBe(true)
     expect(catalogResult.value.routableProviders).toEqual(['antigravity'])
     expect(catalogResult.value.failures).toEqual([])
+    const models = catalogResult.value.groups[0]?.models as Array<{
+      id: string
+      name: string
+      reasoning?: { efforts: Array<{ id: string }>; defaultEffort?: string }
+    }>
+    const flash = models.find(model => model.id === 'gemini-3.8-flash')
+    expect(flash?.name).toBe('Gemini 3.8 Flash')
+    expect(flash?.reasoning?.efforts.map(effort => effort.id)).toEqual(['high', 'medium', 'low'])
+    expect(flash?.reasoning?.defaultEffort).toBe('high')
+    const sonnet = models.find(model => model.id === 'claude-sonnet-4-6')
+    expect(sonnet?.name).toBe('Claude Sonnet 4.6')
+    expect(sonnet?.reasoning?.efforts.map(effort => effort.id)).toEqual(['thinking'])
+    expect(sonnet?.reasoning?.defaultEffort).toBe('thinking')
+    expect(models.every(model => !model.name.includes('('))).toBe(true)
 
     const modelsResult = await target.dispatch('session/models', {
       args: { request: { sessionId } },
@@ -181,10 +195,11 @@ describe('AcpVirtualHarness', () => {
     expect(modelsResult.value.groups[0]?.models.length).toBeGreaterThan(1)
 
     const selectResult = await target.dispatch('session/selectModel', {
-      args: { request: { sessionId, provider: 'antigravity', model: 'claude-sonnet-4-6' } },
-    }, new AbortController().signal) as { ok: true; value: { selected: { model: string } } }
+      args: { request: { sessionId, provider: 'antigravity', model: 'claude-sonnet-4-6', reasoningEffort: 'thinking' } },
+    }, new AbortController().signal) as { ok: true; value: { selected: { model: string; reasoningEffort?: string } } }
     expect(selectResult.ok).toBe(true)
     expect(selectResult.value.selected.model).toBe('claude-sonnet-4-6')
+    expect(selectResult.value.selected.reasoningEffort).toBe('thinking')
 
     const modelsAfter = await target.dispatch('session/models', {
       args: { request: { sessionId } },

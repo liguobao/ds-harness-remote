@@ -19617,6 +19617,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (group === void 0 || targetModel === void 0) {
       return failure2("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
     }
+    const supportedEfforts = targetModel.reasoning?.efforts.map((effort) => effort.id) ?? [];
+    if (reasoningEffort !== void 0 && !supportedEfforts.includes(reasoningEffort)) {
+      return failure2("model-unavailable", `The selected reasoning effort is unavailable for this ${this.backend} model.`);
+    }
     const selected = {
       provider,
       model,
@@ -19797,21 +19801,33 @@ function nativeWorkspace2(view) {
     updatedAt: view.updatedAt
   };
 }
+function antigravityModel(id5, name2, effortIds, defaultEffort) {
+  return {
+    id: id5,
+    name: name2,
+    reasoning: {
+      efforts: effortIds.map((effort) => ({ id: effort, name: reasoningEffortName2(effort) })),
+      defaultEffort
+    }
+  };
+}
+function reasoningEffortName2(effort) {
+  const names = {
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    thinking: "Thinking"
+  };
+  return names[effort] ?? effort;
+}
 var ANTIGRAVITY_MODELS = [
-  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
-  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)" },
-  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)" },
-  { id: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)" },
-  { id: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)" },
-  { id: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)" },
-  { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)" },
-  { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)" },
-  { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)" },
-  { id: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)" },
-  { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
-  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
-  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" }
+  antigravityModel("gemini-3.8-flash", "Gemini 3.8 Flash", ["high", "medium", "low"], "high"),
+  antigravityModel("gemini-3.7-flash", "Gemini 3.7 Flash", ["high", "medium", "low"], "high"),
+  antigravityModel("gemini-3.6-flash", "Gemini 3.6 Flash", ["high", "medium", "low"], "high"),
+  antigravityModel("gemini-3.1-pro", "Gemini 3.1 Pro", ["high", "low"], "high"),
+  antigravityModel("claude-sonnet-4-6", "Claude Sonnet 4.6", ["thinking"], "thinking"),
+  antigravityModel("claude-opus-4-6", "Claude Opus 4.6", ["thinking"], "thinking"),
+  antigravityModel("gpt-oss-120b", "GPT-OSS 120B", ["medium"], "medium")
 ];
 var CURSOR_MODELS = [
   { id: "auto", name: "Auto" },
