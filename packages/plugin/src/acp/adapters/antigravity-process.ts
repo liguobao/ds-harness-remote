@@ -87,6 +87,24 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   isReady(): boolean { return this.ready }
 
+  private async restartForNewConversation(): Promise<void> {
+    const child = this.process
+    this.ready = false
+    this.activeConversationId = undefined
+    this.watcher?.stop()
+    this.watcher = undefined
+    this.process = undefined
+    if (child !== undefined && child.exitCode === null && !child.killed) {
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { child.kill('SIGKILL'); resolve() }, 2_000)
+        timer.unref?.()
+        child.once('exit', () => { clearTimeout(timer); resolve() })
+        child.kill('SIGTERM')
+      })
+    }
+    await this.start()
+  }
+
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new AntigravityAcpError('ANTIGRAVITY_UNAVAILABLE', 'Antigravity ACP is not ready.')
 
@@ -106,6 +124,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/new') {
+      if (this.activeConversationId !== undefined) await this.restartForNewConversation()
       const sessionId = this.activeConversationId || `sess_${Date.now()}`
       return { sessionId }
     }
@@ -295,7 +314,6 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
       const payload = {
         event: 'user',
-        conversation_id: sessionId,
         message: { content: promptText },
       }
       const data = Buffer.from(`${JSON.stringify(payload)}\n`, 'utf8')

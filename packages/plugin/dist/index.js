@@ -28989,6 +28989,29 @@ var AntigravityAcpClient = class {
   isReady() {
     return this.ready;
   }
+  async restartForNewConversation() {
+    const child = this.process;
+    this.ready = false;
+    this.activeConversationId = void 0;
+    this.watcher?.stop();
+    this.watcher = void 0;
+    this.process = void 0;
+    if (child !== void 0 && child.exitCode === null && !child.killed) {
+      await new Promise((resolve5) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve5();
+        }, 2e3);
+        timer.unref?.();
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve5();
+        });
+        child.kill("SIGTERM");
+      });
+    }
+    await this.start();
+  }
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
     if (method === "initialize") {
@@ -29006,6 +29029,7 @@ var AntigravityAcpClient = class {
       };
     }
     if (method === "session/new") {
+      if (this.activeConversationId !== void 0) await this.restartForNewConversation();
       const sessionId = this.activeConversationId || `sess_${Date.now()}`;
       return { sessionId };
     }
@@ -29173,7 +29197,6 @@ var AntigravityAcpClient = class {
       this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
       const payload = {
         event: "user",
-        conversation_id: sessionId,
         message: { content: promptText }
       };
       const data2 = Buffer5.from(`${JSON.stringify(payload)}
