@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import type { SafeLogger } from '../../logging.js'
@@ -10,7 +10,6 @@ import type {
 } from './cursor-process.js'
 
 import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
-import { spawnAntigravityWithLocalCredentials } from './antigravity-local-auth.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
@@ -68,7 +67,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string = 'agy',
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args) => spawnAntigravityWithLocalCredentials(bin, args, {
+    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args) => spawn(bin, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: process.env,

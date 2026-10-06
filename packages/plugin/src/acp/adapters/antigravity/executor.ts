@@ -1,6 +1,5 @@
-import { type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { resolveAntigravityBinary } from '../antigravity-process.js'
-import { spawnAntigravityWithLocalCredentials } from '../antigravity-local-auth.js'
 import type { ExecutionOptions } from './types.js'
 
 export interface SingleExecutionResult {
@@ -35,7 +34,7 @@ export class AntigravityExecutor {
     args.push('--print-timeout', String(Math.floor(timeoutMs / 1000)))
 
     const binary = resolveAntigravityBinary(options.binaryPath)
-    const child = spawnAntigravityWithLocalCredentials(binary, args, {
+    const child = spawn(binary, args, {
       cwd: options.cwd ?? process.cwd(),
       env: { ...process.env, ...options.env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -106,7 +105,7 @@ export class AntigravityExecutor {
     }
 
     const binary = resolveAntigravityBinary(options.binaryPath)
-    return spawnAntigravityWithLocalCredentials(binary, args, {
+    return spawn(binary, args, {
       cwd: options.cwd ?? process.cwd(),
       env: { ...process.env, ...options.env },
       stdio: ['pipe', 'pipe', 'pipe'],
