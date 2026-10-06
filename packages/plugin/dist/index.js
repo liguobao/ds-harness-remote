@@ -29049,7 +29049,9 @@ var AntigravityAcpClient = class {
     this.stdoutBuffer = Buffer5.alloc(0);
     this.stderrBytes = 0;
     let initResolved = false;
+    let rejectInit;
     const initPromise = new Promise((resolve5, reject) => {
+      rejectInit = reject;
       const timer = setTimeout(() => {
         if (!initResolved) {
           reject(new AntigravityAcpError("ANTIGRAVITY_INIT_TIMEOUT", "Timed out waiting for Antigravity init event."));
@@ -29084,6 +29086,9 @@ var AntigravityAcpClient = class {
     });
     child.on("error", (error) => {
       this.ready = false;
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause: error }));
+      }
       if (!this.closed) {
         this.logger?.warn("Antigravity binary error", { message: error.message });
         this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
@@ -29093,6 +29098,9 @@ var AntigravityAcpClient = class {
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited before initialization."));
+      }
       if (this.currentPromptPending) {
         clearTimeout(this.currentPromptPending.timer);
         this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited unexpectedly."));

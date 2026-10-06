@@ -200,7 +200,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
     this.stderrBytes = 0
 
     let initResolved = false
+    let rejectInit: ((error: Error) => void) | undefined
     const initPromise = new Promise<void>((resolve, reject) => {
+      rejectInit = reject
       const timer = setTimeout(() => {
         if (!initResolved) {
           reject(new AntigravityAcpError('ANTIGRAVITY_INIT_TIMEOUT', 'Timed out waiting for Antigravity init event.'))
@@ -239,6 +241,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
     child.on('error', error => {
       this.ready = false
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError('ANTIGRAVITY_BINARY_UNAVAILABLE', 'Failed to start the Antigravity CLI.', { cause: error }))
+      }
       if (!this.closed) {
         this.logger?.warn('Antigravity binary error', { message: error.message })
         this.notifyUnavailable('ANTIGRAVITY_BINARY_UNAVAILABLE')
@@ -249,6 +254,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError('ANTIGRAVITY_EXITED', 'Antigravity exited before initialization.'))
+      }
       if (this.currentPromptPending) {
         clearTimeout(this.currentPromptPending.timer)
         this.currentPromptPending.reject(new AntigravityAcpError('ANTIGRAVITY_EXITED', 'Antigravity exited unexpectedly.'))

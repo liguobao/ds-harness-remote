@@ -201,6 +201,19 @@ describe('AntigravityAcpClient', () => {
     await client.close()
   })
 
+  it('rejects start when the agy process cannot be spawned', async () => {
+    const fake = fakeProcess()
+    const client = new AntigravityAcpClient('missing-agy', logger(), () => {
+      queueMicrotask(() => fake.child.emit('error', new Error('spawn ENOENT')))
+      return fake.child
+    })
+
+    await expect(client.start()).rejects.toMatchObject({
+      code: 'ANTIGRAVITY_BINARY_UNAVAILABLE',
+    })
+    expect(client.isReady()).toBe(false)
+  })
+
   it('resolves binary candidates and creates adapter', () => {
     const candidates = cursorBinaryCandidates('agent')
     expect(candidates).not.toContain('agy')
