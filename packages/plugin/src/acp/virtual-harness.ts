@@ -9,6 +9,7 @@ import type {
 import { discoverAntigravitySessions, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
+const ACP_SESSION_PREFIX = 'acp:'
 const CURSOR_WORKSPACE_PREFIX = 'cursor:cwd:'
 const CURSOR_PROVIDER = 'cursor'
 const CURSOR_MODEL = 'cursor'
@@ -421,8 +422,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private ensureSessionRegistered(sessionId: string): AcpSessionState | undefined {
     let session = this.sessions.get(sessionId)
     if (session !== undefined) return session
-    if (this.backend === 'antigravity' && sessionId.startsWith(CURSOR_SESSION_PREFIX)) {
-      const acpSessionId = sessionId.slice(CURSOR_SESSION_PREFIX.length)
+    if (this.backend === 'antigravity' && (sessionId.startsWith(ACP_SESSION_PREFIX) || sessionId.startsWith(CURSOR_SESSION_PREFIX))) {
+      const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+      const acpSessionId = sessionId.slice(prefix.length)
       const workspace = this.selectedWorkspaceId !== undefined ? this.workspaceById.get(this.selectedWorkspaceId) : undefined
       const cwd = workspace?.path ?? '/'
       session = this.registerSession(acpSessionId, cwd, 'Antigravity', Date.now(), Date.now(), false)
@@ -1037,7 +1039,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     blank: boolean = true,
   ): AcpSessionState {
     const session: AcpSessionState = {
-      sessionId: `${CURSOR_SESSION_PREFIX}${acpSessionId}`,
+      sessionId: `${this.backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX}${acpSessionId}`,
       acpSessionId,
       cwd,
       ...(title === undefined ? {} : { title }),
@@ -1070,7 +1072,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }
       }
       for (const item of discovered) {
-        const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`
+        const sessionId = `${ACP_SESSION_PREFIX}${item.conversationId}`
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
         }
@@ -1508,10 +1510,11 @@ function extractSessionId(request: JsonRecord): string {
 }
 
 function nativeAcpId(sessionId: string): string {
-  if (!sessionId.startsWith(CURSOR_SESSION_PREFIX) || sessionId.length === CURSOR_SESSION_PREFIX.length) {
+  const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+  if (sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')
   }
-  return sessionId.slice(CURSOR_SESSION_PREFIX.length)
+  return sessionId.slice(prefix.length)
 }
 
 function isSurfaceEvent(type: string): boolean {

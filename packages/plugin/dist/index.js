@@ -18664,6 +18664,7 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
 
 // src/acp/virtual-harness.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
+var ACP_SESSION_PREFIX = "acp:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var CURSOR_PROVIDER = "cursor";
 function acpCwdWorkspaceId(path) {
@@ -18969,8 +18970,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   ensureSessionRegistered(sessionId) {
     let session = this.sessions.get(sessionId);
     if (session !== void 0) return session;
-    if (this.backend === "antigravity" && sessionId.startsWith(CURSOR_SESSION_PREFIX)) {
-      const acpSessionId = sessionId.slice(CURSOR_SESSION_PREFIX.length);
+    if (this.backend === "antigravity" && (sessionId.startsWith(ACP_SESSION_PREFIX) || sessionId.startsWith(CURSOR_SESSION_PREFIX))) {
+      const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+      const acpSessionId = sessionId.slice(prefix.length);
       const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
       const cwd2 = workspace?.path ?? "/";
       session = this.registerSession(acpSessionId, cwd2, "Antigravity", Date.now(), Date.now(), false);
@@ -19515,7 +19517,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
     const session = {
-      sessionId: `${CURSOR_SESSION_PREFIX}${acpSessionId}`,
+      sessionId: `${this.backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX}${acpSessionId}`,
       acpSessionId,
       cwd: cwd2,
       ...title === void 0 ? {} : { title },
@@ -19545,7 +19547,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         }
       }
       for (const item of discovered) {
-        const sessionId = `${CURSOR_SESSION_PREFIX}${item.conversationId}`;
+        const sessionId = `${ACP_SESSION_PREFIX}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
         }
@@ -19911,10 +19913,11 @@ function extractSessionId(request) {
   throw new Error("The sessionId is required.");
 }
 function nativeAcpId(sessionId) {
-  if (!sessionId.startsWith(CURSOR_SESSION_PREFIX) || sessionId.length === CURSOR_SESSION_PREFIX.length) {
+  const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+  if (sessionId.length === prefix.length) {
     throw new Error("The selected Session does not belong to the virtual harness.");
   }
-  return sessionId.slice(CURSOR_SESSION_PREFIX.length);
+  return sessionId.slice(prefix.length);
 }
 function isSurfaceEvent2(type) {
   return type === "user/message" || type === "assistant/message" || type === "tool/result";
@@ -29171,6 +29174,7 @@ var AntigravityAcpClient = class {
       this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
       const payload = {
         event: "user",
+        conversation_id: sessionId,
         message: { content: promptText }
       };
       const data2 = Buffer5.from(`${JSON.stringify(payload)}
@@ -29801,7 +29805,7 @@ var AcpRemoteGateway = class {
     }
     if (call.method === "dsh/sessionHistory") {
       const rawSessionId = String(call.params.sessionId);
-      const conversationId = rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
+      const conversationId = rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),

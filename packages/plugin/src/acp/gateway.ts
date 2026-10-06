@@ -250,7 +250,11 @@ export class AcpRemoteGateway {
 
     if (call.method === 'dsh/sessionHistory') {
       const rawSessionId = String(call.params.sessionId)
-      const conversationId = rawSessionId.startsWith('cursor:') ? rawSessionId.slice('cursor:'.length) : rawSessionId
+      const conversationId = rawSessionId.startsWith('acp:')
+        ? rawSessionId.slice('acp:'.length)
+        : rawSessionId.startsWith('cursor:')
+          ? rawSessionId.slice('cursor:'.length)
+          : rawSessionId
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
       this.logger.info('ACP session history fetched', {
         sessionId: shortSessionId(rawSessionId),
