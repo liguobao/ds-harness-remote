@@ -612,13 +612,13 @@ describe('AcpVirtualHarness', () => {
     const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote')
     const ws = await target.selectWorkspace(workspaceId)
     expect(client.listSessions).toHaveBeenCalled()
-    expect(ws.sessionIds).toContain('cursor:remote-conv-1')
+    expect(ws.sessionIds).toContain('acp:remote-conv-1')
 
     const historyRes = await target.dispatch('session/history', {
-      args: { sessionId: 'cursor:remote-conv-1', maxMessages: 50 },
+      args: { sessionId: 'acp:remote-conv-1', maxMessages: 50 },
     }, new AbortController().signal)
 
-    expect(client.loadSessionHistory).toHaveBeenCalledWith('cursor:remote-conv-1', 'antigravity')
+    expect(client.loadSessionHistory).toHaveBeenCalledWith('acp:remote-conv-1', 'antigravity')
     expect(historyRes.ok).toBe(true)
     if (historyRes.ok) {
       const records = (historyRes.value as any).records
