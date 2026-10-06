@@ -15376,6 +15376,14 @@ function normalizeLegacySessionGatewayValue(endpoint, value) {
   if (endpoint === "session/follow") return normalizeFollowFrame(value);
   return value;
 }
+function normalizeAssistantMessageStreamValue(endpoint, value) {
+  if (endpoint === "session/page" && isRecord4(value)) return { ...value, records: normalizeRecords(value.records) };
+  if (endpoint === "session/follow" && isRecord4(value) && value.type === "snapshot") {
+    return { ...value, records: normalizeRecords(value.records) };
+  }
+  if (endpoint === "session/follow") return normalizeEntry(value);
+  return value;
+}
 function normalizeFollowFrame(value) {
   if (!isRecord4(value)) return value;
   if (value.type === "snapshot") {
@@ -15467,6 +15475,10 @@ function normalizeEventType(value) {
 }
 function normalizeEventData(type, value) {
   if (!isRecord4(value)) return value;
+  if (type === "assistant/message" && Object.hasOwn(value, "stream") && !Array.isArray(value.stream)) {
+    const { stream: _stream, ...rest } = value;
+    return rest;
+  }
   if (type === "request/header") return normalizeRequestHeaderData(value);
   if (type === "agent-preset/selected" && value.agentPreset === "code") return { ...value, agentPreset: "ptc" };
   if (type === "user/message") return normalizeMessage(value);
@@ -15563,8 +15575,9 @@ var RemoteTypertGateway2 = class {
     const result = parseRpcResult(response);
     const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result);
     if (settingsResult !== void 0) return settingsResult;
-    if (result.ok && this.compatibility === "legacy-to-v3") {
-      return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) };
+    if (result.ok) {
+      const value = this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, result.value) : normalizeAssistantMessageStreamValue(endpoint, result.value);
+      return { ...result, value };
     }
     return result;
   }
@@ -15606,7 +15619,7 @@ var RemoteTypertGateway2 = class {
   async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort) {
     try {
       for await (const value of queue) {
-        yield this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, value) : value;
+        yield this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, value) : normalizeAssistantMessageStreamValue(endpoint, value);
       }
     } finally {
       signal.removeEventListener("abort", onAbort);
