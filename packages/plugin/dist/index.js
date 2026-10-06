@@ -18516,7 +18516,10 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
             role: "assistant",
             content: contentBlocks2,
             source: { kind: "model", provider: "google", model: "gemini" }
-          }
+          },
+          // Harness trajectory timing expects every assistant message to carry
+          // an iterable stream, including messages restored from transcript.
+          stream: []
         }, time, true);
       }
     }
