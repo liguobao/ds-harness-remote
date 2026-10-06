@@ -288,7 +288,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
-          nativeAcpId(rawId)
+          nativeAcpId(rawId, this.backend)
           const catalog = modelCatalog(this.backend)
           return business(success({
             current: this.modelSelection(rawId),
@@ -422,9 +422,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private ensureSessionRegistered(sessionId: string): AcpSessionState | undefined {
     let session = this.sessions.get(sessionId)
     if (session !== undefined) return session
-    if (this.backend === 'antigravity' && (sessionId.startsWith(ACP_SESSION_PREFIX) || sessionId.startsWith(CURSOR_SESSION_PREFIX))) {
-      const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
-      const acpSessionId = sessionId.slice(prefix.length)
+    if (this.backend === 'antigravity' && sessionId.startsWith(ACP_SESSION_PREFIX)) {
+      const acpSessionId = sessionId.slice(ACP_SESSION_PREFIX.length)
       const workspace = this.selectedWorkspaceId !== undefined ? this.workspaceById.get(this.selectedWorkspaceId) : undefined
       const cwd = workspace?.path ?? '/'
       session = this.registerSession(acpSessionId, cwd, 'Antigravity', Date.now(), Date.now(), false)
@@ -1168,7 +1167,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async selectModel(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    nativeAcpId(sessionId)
+    nativeAcpId(sessionId, this.backend)
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
     const reasoningEffort = string(request.reasoningEffort)
@@ -1509,9 +1508,9 @@ function extractSessionId(request: JsonRecord): string {
   throw new Error('The sessionId is required.')
 }
 
-function nativeAcpId(sessionId: string): string {
-  const prefix = sessionId.startsWith(ACP_SESSION_PREFIX) ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
-  if (sessionId.length === prefix.length) {
+function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity'): string {
+  const prefix = backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+  if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')
   }
   return sessionId.slice(prefix.length)
