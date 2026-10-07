@@ -1,62 +1,79 @@
 import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadTranscriptEvents, cleanUserPrompt } from '../src/acp/adapters/antigravity/transcript-loader.js'
+import { pathToFileURL } from 'node:url'
+import {
+  cleanUserPrompt,
+  discoverAntigravitySessions,
+  discoverAntigravityWorkspaces,
+  loadTranscriptEvents,
+} from '../src/acp/adapters/antigravity/transcript-loader.js'
+
+let base: string
+
+beforeEach(async () => {
+  base = await mkdtemp(join(tmpdir(), 'agy-transcript-test-'))
+})
+
+afterEach(async () => {
+  await rm(base, { recursive: true, force: true })
+})
+
+async function writeTranscript(conversationId: string, records: unknown[]): Promise<string> {
+  const logs = join(base, conversationId, '.system_generated', 'logs')
+  await mkdir(logs, { recursive: true })
+  const path = join(logs, 'transcript.jsonl')
+  await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n')
+  return path
+}
+
+function createDatabase() {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
+  const dbPath = join(base, 'summaries.db')
+  const db = new DatabaseSync(dbPath)
+  db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, workspace_uris TEXT, step_count INTEGER, last_modified_time TEXT)')
+  return { db, dbPath }
+}
+
+const createdAt = '2026-10-07T00:00:00Z'
 
 describe('TranscriptLoader', () => {
   it('restores the durable turn end timestamp instead of the history read time', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'agy-history-'))
-    try {
-      const logs = join(base, 'conversation', '.system_generated', 'logs')
-      await mkdir(logs, { recursive: true })
-      await writeFile(join(logs, 'transcript.jsonl'), [
-        { type: 'USER_INPUT', step_index: 1, created_at: '2026-09-29T09:10:00Z', content: 'ping' },
-        { type: 'PLANNER_RESPONSE', step_index: 2, created_at: '2026-09-29T09:10:04Z', content: 'pong' },
-      ].map(record => JSON.stringify(record)).join('\n'))
-      const events = await loadTranscriptEvents('conversation', 'acp:conversation', base)
-      expect(events.at(-1)?.event).toMatchObject({ type: 'turn/end', time: Date.parse('2026-09-29T09:10:04Z') })
-      expect(await loadTranscriptEvents('conversation', 'acp:conversation', base)).toEqual(events)
-    } finally {
-      await rm(base, { recursive: true, force: true })
-    }
+    await writeTranscript('conversation', [
+      { type: 'USER_INPUT', step_index: 1, created_at: '2026-09-29T09:10:00Z', content: 'ping' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: '2026-09-29T09:10:04Z', content: 'pong' },
+    ])
+    const events = await loadTranscriptEvents('conversation', 'acp:conversation', base)
+    expect(events.at(-1)?.event).toMatchObject({ type: 'turn/end', time: Date.parse('2026-09-29T09:10:04Z') })
+    expect(await loadTranscriptEvents('conversation', 'acp:conversation', base)).toEqual(events)
   })
+
   it('recovers workspace-scoped durable conversations with empty AGY summaries', async () => {
-    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
-    const { discoverAntigravitySessions, discoverAntigravityWorkspaces } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
-    const base = await mkdtemp(join(tmpdir(), 'agy-summary-'))
-    const dbPath = join(base, 'summaries.db')
     const workspace = join(base, 'project')
     const other = join(base, 'other')
     const empty = join(base, 'empty')
+    for (const path of [workspace, other, empty]) await mkdir(path)
+    const { db, dbPath } = createDatabase()
     try {
-      for (const path of [workspace, other, empty]) await mkdir(path)
-      const db = new DatabaseSync(dbPath)
-      try {
-        db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, workspace_uris TEXT, step_count INTEGER, last_modified_time TEXT)')
-        const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
-        for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty], ['active-untitled', workspace]]) {
-          insert.run(id, '', JSON.stringify([`file://${path}`]), 0, '2026-10-07T00:00:00Z')
-        }
-        db.prepare('UPDATE conversation_summaries SET step_count = 2 WHERE conversation_id = ?').run('active-untitled')
-        insert.run('normal-session', 'Normal', JSON.stringify([`file://${workspace}`]), 2, '2026-10-07T00:00:00Z')
-      } finally {
-        db.close()
+      const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
+      for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty], ['active-untitled', workspace]]) {
+        insert.run(id, '', JSON.stringify([`file://${path}`]), 0, createdAt)
       }
-      for (const id of ['stale-session', 'other-session', 'active-untitled']) {
-        const logs = join(base, id, '.system_generated', 'logs')
-        await mkdir(logs, { recursive: true })
-        await writeFile(join(logs, 'transcript.jsonl'), JSON.stringify({ type: 'USER_INPUT', step_index: 1, created_at: '2026-10-07T00:00:00Z', content: 'Durable message' }) + '\n')
-      }
-      const sessions = await discoverAntigravitySessions(workspace, 30, base, dbPath)
-      expect(sessions.map(session => session.conversationId).sort()).toEqual(['active-untitled', 'normal-session', 'stale-session'])
-      expect(sessions.find(session => session.conversationId === 'stale-session')?.title).toBe('Durable message')
-      expect(sessions.find(session => session.conversationId === 'active-untitled')?.title).toBe('Durable message')
-      expect((await discoverAntigravityWorkspaces(dbPath, base)).sort()).toEqual([workspace, other].sort())
+      db.prepare('UPDATE conversation_summaries SET step_count = 2 WHERE conversation_id = ?').run('active-untitled')
+      insert.run('normal-session', 'Normal', JSON.stringify([`file://${workspace}`]), 2, createdAt)
     } finally {
-      await rm(base, { recursive: true, force: true })
+      db.close()
     }
+    for (const id of ['stale-session', 'other-session', 'active-untitled']) {
+      await writeTranscript(id, [{ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Durable message' }])
+    }
+    const sessions = await discoverAntigravitySessions(workspace, 30, base, dbPath)
+    expect(sessions.map(session => session.conversationId).sort()).toEqual(['active-untitled', 'normal-session', 'stale-session'])
+    expect(sessions.find(session => session.conversationId === 'stale-session')?.title).toBe('Durable message')
+    expect(sessions.find(session => session.conversationId === 'active-untitled')?.title).toBe('Durable message')
+    expect((await discoverAntigravityWorkspaces(dbPath, base)).sort()).toEqual([workspace, other].sort())
   })
 
   it('cleans user prompt wrapper tags', () => {
@@ -65,60 +82,67 @@ describe('TranscriptLoader', () => {
     expect(cleanUserPrompt('普通问题')).toBe('普通问题')
   })
 
-  it('hydrates events from real local transcript file', async () => {
-    const events = await loadTranscriptEvents(
-      'bab821dd-6184-43f1-8ed5-fe589be9b302',
-      'cursor:bab821dd-6184-43f1-8ed5-fe589be9b302',
-    )
-    if (events.length > 0) {
-      expect(events.length).toBeGreaterThan(0)
-      const types = events.map(e => e.event.type)
-      expect(types).toContain('user/message')
-      expect(types).toContain('assistant/message')
-      const user = events.find(e => e.event.type === 'user/message')
-      expect((user?.event?.data as any)?.content?.[0]?.text).toBe('这个主机咋样')
-    }
+  it('hydrates user and assistant messages from an isolated transcript', async () => {
+    await writeTranscript('fixture-conversation', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: '<USER_REQUEST>\n这个主机咋样\n</USER_REQUEST>' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, content: '主机状态正常。' },
+    ])
+    const events = await loadTranscriptEvents('fixture-conversation', 'antigravity:fixture-conversation', base)
+    expect(events.find(e => e.event.type === 'user/message')?.event.data).toMatchObject({
+      content: [{ type: 'text', text: '这个主机咋样' }],
+    })
+    expect(events.find(e => e.event.type === 'assistant/message')?.event.data).toMatchObject({
+      message: { content: [{ type: 'text', text: '主机状态正常。' }] }, stream: [],
+    })
   })
 
-  it('discovers existing Antigravity sessions from brain directory', async () => {
-    const { discoverAntigravitySessions } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
-    const list = await discoverAntigravitySessions('/var/lib/dsh/workspace/ds-harness-remote', 10)
-    expect(Array.isArray(list)).toBe(true)
-    if (list.length > 0) {
-      expect(typeof list[0].conversationId).toBe('string')
-      expect(typeof list[0].title).toBe('string')
-      expect(list[0].title.length).toBeGreaterThan(0)
+  it('discovers sessions from an isolated brain directory when the database is missing', async () => {
+    for (const [id, title, time] of [['older-session', 'Older conversation', 1_000], ['newer-session', 'Newer conversation', 2_000]] as const) {
+      const path = await writeTranscript(id, [{ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: title }])
+      await utimes(path, time, time)
     }
+    const dbPath = join(base, 'missing.db')
+    const sessions = await discoverAntigravitySessions('', 10, base, dbPath)
+    expect(sessions).toMatchObject([
+      { conversationId: 'newer-session', title: 'Newer conversation', updatedAt: 2_000_000 },
+      { conversationId: 'older-session', title: 'Older conversation', updatedAt: 1_000_000 },
+    ])
+    expect(await discoverAntigravitySessions('', 1, base, dbPath)).toEqual(sessions.slice(0, 1))
   })
 
-  it('discovers existing Antigravity workspaces from database', async () => {
-    const { discoverAntigravityWorkspaces } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
-    const workspaces = await discoverAntigravityWorkspaces()
-    expect(Array.isArray(workspaces)).toBe(true)
-    if (workspaces.length > 0) {
-      expect(workspaces).toContain('/var/lib/dsh/workspace/ds-harness-remote')
+  it('discovers only existing project directories from an isolated database', async () => {
+    const project = join(base, 'project with spaces')
+    const file = join(base, 'not-a-directory')
+    await mkdir(project)
+    await writeFile(file, 'fixture')
+    const { db, dbPath } = createDatabase()
+    try {
+      const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
+      insert.run('project-session', 'Project', JSON.stringify([
+        pathToFileURL(project).href, pathToFileURL(project).href,
+        pathToFileURL(file).href, pathToFileURL(join(base, 'missing-project')).href,
+        'https://example.invalid/project',
+      ]), 2, createdAt)
+      insert.run('malformed-session', 'Malformed', 'not-json', 2, createdAt)
+    } finally {
+      db.close()
     }
+    expect(await discoverAntigravityWorkspaces(dbPath, base)).toEqual([project])
   })
 
-  it('hydrates tool/call events with valid name and callId to satisfy DSH front-end', async () => {
-    const events = await loadTranscriptEvents(
-      '8563e7e9-7c52-4687-a61f-12f69014d03e',
-      'cursor:8563e7e9-7c52-4687-a61f-12f69014d03e',
-    )
+  it('hydrates tool calls with a valid name and callId, including unnamed tools', async () => {
+    await writeTranscript('tool-conversation', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Run the tool' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, tool_calls: [
+        { name: 'view_file', args: { path: 'fixture.txt' } },
+        { args: {} },
+      ] },
+    ])
+    const events = await loadTranscriptEvents('tool-conversation', 'antigravity:tool-conversation', base)
     const toolCalls = events.filter(e => e.event.type === 'tool/call')
-    if (toolCalls.length > 0) {
-      for (const tc of toolCalls) {
-        const data = tc.event.data as Record<string, unknown>
-        expect(typeof data.name).toBe('string')
-        expect((data.name as string).length).toBeGreaterThan(0)
-        expect(typeof data.callId).toBe('string')
-        // DSH client isSubagentDelegationTool check should not throw
-        expect(() => {
-          const name = data.name as string
-          const isSub = name === 'subagent' || name.startsWith('subagent_')
-          return isSub
-        }).not.toThrow()
-      }
-    }
+    expect(toolCalls.map(e => e.event.data)).toMatchObject([
+      { name: 'view_file', callId: '2:view_file' },
+      { name: 'tool', callId: '2:tool' },
+    ])
   })
 })

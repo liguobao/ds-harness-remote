@@ -261,3 +261,8 @@ Android check、286 测试、Hermes export 通过；真实 AGY CLI 的 in-proces
 未验证加密传输、APK 或 Android 真机 UI（本机无设备/Java runtime）。
 
 2026-10-07 Agent 后端设置：CodeX、Cursor、AGY 使用统一后端列表，Kimi 未实现并移除。后端开关保存后热更新对应进程与 capability，不重启 DSH 或关闭 Harness 加密连接；变化后端的流和待审批句柄失效，其他后端进程保留。Android 刷新工作区时重新探测后端就绪状态。
+
+2026-10-07 合并后测试修复：`antigravity-transcript-loader.test.ts` 的本机数据库与 transcript
+依赖已替换为隔离临时 fixtures，移除硬编码 Linux 项目路径及数据为空时跳过断言的行为。
+Plugin 类型检查、42 个测试文件 / 372 个测试和 `git diff --check` 通过；此前记录的该
+环境依赖测试失败已修复。此验证不代表 Windows 或真实 AGY 跨设备验收。
