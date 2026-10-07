@@ -63,6 +63,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 [docs/cursor-remote.md](docs/cursor-remote.md)。**暂不**推进 Codex→ACP adapter。
 
 - [x] Host gateway、capability、allowlist、Cursor stdio adapter
+- [x] ACP 后台初始化与 Harness Remote 启动隔离；各后端独立遵循启用开关、command/args/cwd，明确选择不可用后端时 fail closed
 - [x] Desktop Virtual Harness 与设置开关（默认关闭）
 - [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式
 - [x] inbound 订阅生命周期、`prompt_completed` catch-up、多轮气泡分离

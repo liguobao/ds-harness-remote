@@ -251,6 +251,10 @@ export class PluginControlRuntime {
     const next = resolveConfig({
       ...current,
       cursor: { ...current.cursor, enabled },
+      acp: {
+        enabled: enabled || current.acp?.enabled === true,
+        backends: current.acp?.backends?.map(item => item.id === 'cursor' ? { ...item, enabled } : item),
+      },
     })
     await this.settings.replace(editableConfig(next))
     return this.settingsView()
@@ -263,8 +267,13 @@ export class PluginControlRuntime {
     const enabled = value.enabled
     if (typeof backend !== 'string' || typeof enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'ACP backend and enabled are required.')
     const current = resolveConfig(this.settings.get())
-    const backends = current.acp?.backends.map(item => item.id === backend ? { ...item, enabled } : item) ?? []
-    await this.settings.replace({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
+    if (!current.acp?.backends.some(item => item.id === backend)) throw new ClientModeError('INVALID_MESSAGE', 'Unknown ACP backend.')
+    const backends = current.acp.backends.map(item => item.id === backend ? { ...item, enabled } : item)
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...(backend === 'cursor' ? { cursor: { ...current.cursor, enabled } } : {}),
+      acp: { enabled: enabled || current.acp.enabled, backends },
+    })
     return this.settingsView()
   }
 

@@ -19,6 +19,16 @@ ACP Client
 - 按 Remote connection 隔离；编译期固定 allowlist；未授权 method fail closed
 - 现有 `codex.app.*` 保持不变；**暂不**把 Codex 迁到 ACP adapter
 
+## 启动与后端配置
+
+`acp.enabled` 控制 gateway；`acp.backends` 内各后端独立使用 `enabled`、`command`、`args`、
+可选 `cwd`。当前支持 `cursor` / `antigravity`，不按 binary 名称推测 adapter，也不把不可用后端的
+请求转发到其他后端。仅配置旧 `cursor` 字段时，只启用 Cursor。
+
+ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册和 Client 初始化。
+能力声明表示已启用的协议支持，`workspaceTypes.available` 表示实际就绪；关闭期间会清理
+正在启动的 CLI，迟到的初始化结果不得重新注册实例。配置修改需要重启 DSH。
+
 ## 公共方法（allowlist）
 
 | 方法 | 用途 |

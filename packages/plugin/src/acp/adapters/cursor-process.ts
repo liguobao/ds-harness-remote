@@ -74,11 +74,13 @@ export class CursorAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnCursorAcp = binary => spawn(binary, ['acp'], {
+    private readonly spawnAcp: SpawnCursorAcp = binary => spawn(binary, options.args ?? ['acp'], {
+      cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: process.env,
     }),
+    options: { args?: string[]; cwd?: string } = {},
   ) {}
 
   start(): Promise<void> {

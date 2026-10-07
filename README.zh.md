@@ -187,6 +187,11 @@ Prompt、思考/正文流式更新、中断与一次性审批。Cursor 暂不支
 PNG/JPEG/WebP/GIF（每张 8 MiB、每次最多 4 张），图片保存到 Host 私有临时缓存，由 AGY 图片工具读取。
 历史中的图片可在 24 小时内恢复；系统提前清理 tmp 时图片将不可用。
 
+ACP 后端在后台初始化，AGY/Cursor 启动不会阻塞 Harness Remote 注册或 Client 初始化。
+`acp.enabled` 控制整个域，`acp.backends` 中各已支持后端独立使用自己的 `enabled`、`command`、
+`args` 和可选 `cwd`。当前 gateway 实现 `cursor` 和 `antigravity`，其他注册项不会启动或声明 adapter。
+明确选中的后端关闭或不可用时直接返回错误，不会转发到另一个后端。配置修改后需要重启 DSH。
+
 Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.enabled`，在 Host 完成本机
 `agent login`（或配置 `CURSOR_API_KEY`）后重启 DSH。细节见
 [Agent ACP / Cursor adapter 技术说明](docs/cursor-remote.md)。

@@ -221,6 +221,7 @@ describe('AntigravityAcpClient', () => {
     await client.start()
     const first = await client.call('session/new', { cwd: '/host' })
     expect(first).toEqual({ sessionId: 'warm-0' })
+    await vi.waitFor(() => expect(directories).toEqual(['/host', '/host']))
     client.prewarmSession('/selected')
     client.prewarmSession('/selected')
     await vi.waitFor(() => expect(directories).toEqual(['/host', '/host', '/selected']))

@@ -202,6 +202,13 @@ PNG/JPEG/WebP/GIF images (8 MiB each, up to four per prompt) through a private H
 AGY reads these files with its image tool; cached images can be restored with conversation history
 for up to 24 hours, unless the system clears temporary files earlier.
 
+ACP backends initialize in the background, so AGY/Cursor startup does not delay Harness Remote
+registration or Client initialization. `acp.enabled` gates the domain; each supported entry in
+`acp.backends` uses its own `enabled`, `command`, `args`, and optional `cwd`. Currently the gateway
+implements `cursor` and `antigravity`; other registry entries do not launch or advertise an adapter.
+An explicitly selected disabled or unavailable backend fails without routing to another backend.
+Configuration changes require a DSH restart.
+
 The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
 `agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:
 [Agent ACP / Cursor adapter notes](docs/cursor-remote.md).

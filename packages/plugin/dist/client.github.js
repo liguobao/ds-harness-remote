@@ -2726,7 +2726,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               React.createElement("input", {
                 type: "checkbox",
                 role: "switch",
-                checked: item.enabled && acpAvailability[item.id] === !0,
+                checked: settingsView?.config.acp?.enabled === !0 && item.enabled && acpAvailability[item.id] === !0,
                 disabled: busy || !writable || !acpAvailability[item.id],
                 onChange: (event) => void props.control("settings.acp.set", { backend: item.id, enabled: event.target.checked }).then((view) => {
                   applyView(view), setAcpBackends((view.config.acp?.backends ?? []).map((v) => ({ id: v.id, enabled: v.enabled !== !1 })));

@@ -91,7 +91,7 @@ export class HostPluginRuntime {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
-    this.acp = new AcpRemoteGateway(config.cursor, logger)
+    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === undefined
         ? undefined
@@ -174,7 +174,9 @@ export class HostPluginRuntime {
       server: this.config.serverUrl ?? 'not configured',
     })
     await this.codex.start()
-    await this.acp.start()
+    void this.acp.start().catch(() => {
+      this.logger.warn('ACP background initialization failed', { code: 'ACP_START_FAILED' })
+    })
     if (this.serverApi !== undefined) {
       this.harnessVersion = await this.readHarnessVersion()
       this.serverApi.setHarnessVersion(this.harnessVersion)
@@ -467,9 +469,10 @@ export class HostPluginRuntime {
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
-    if (this.acp.isAvailable()) {
+    // Protocol support is stable during background warmup; workspaceTypes reports readiness.
+    if (this.acp.enabledBackends().length > 0) {
       capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
-      for (const backend of this.acp.availableBackends()) {
+      for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`)
       }
     }
@@ -486,24 +489,14 @@ export class HostPluginRuntime {
         available: true,
       })
     }
-    if (this.acp.isAvailable()) {
-      for (const backend of this.acp.availableBackends()) {
-        if (backend === 'cursor') {
-          types.push({
-            id: 'cursor',
-            name: 'Cursor',
-            capability: 'agent.acp.cursor.v1',
-            available: true,
-          })
-        } else if (backend === 'antigravity') {
-          types.push({
-            id: 'antigravity',
-            name: 'Antigravity',
-            capability: 'agent.acp.antigravity.v1',
-            available: true,
-          })
-        }
-      }
+    const readyBackends = this.acp.availableBackends()
+    for (const backend of this.acp.enabledBackends()) {
+      types.push({
+        id: backend,
+        name: backend === 'cursor' ? 'Cursor' : 'Antigravity',
+        capability: `agent.acp.${backend}.v1`,
+        available: readyBackends.includes(backend),
+      })
     }
     return types
   }

@@ -20501,11 +20501,23 @@ function resolveConfig(input2 = {}, env = process.env) {
       enabled: cursorEnabled,
       binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
     },
-    acp: { enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false, backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
-      const d = parsed.acp?.backends?.find((x) => x.id === id5);
-      const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
-      return { id: id5, enabled: d?.enabled ?? legacy?.enabled ?? true, command: d?.command ?? legacy?.command ?? { codex: "codex", cursor: "agent", kimi: "kimi", antigravity: "agy" }[id5] ?? id5, args: d?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]), ...d?.cwd ?? legacy?.cwd ? { cwd: d?.cwd ?? legacy?.cwd } : {} };
-    }) }
+    acp: {
+      enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false,
+      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
+        const configured = parsed.acp?.backends?.find((item) => item.id === id5);
+        const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
+        const defaults = { codex: "codex", cursor: "agent", kimi: "kimi", antigravity: "agy" };
+        const cursorCommand = id5 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
+        const cwd2 = configured?.cwd ?? legacy?.cwd;
+        return {
+          id: id5,
+          enabled: configured?.enabled ?? legacy?.enabled ?? (parsed.acp === void 0 ? id5 === "cursor" && cursorEnabled : true),
+          command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id5] ?? id5,
+          args: configured?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
+          ...cwd2 === void 0 ? {} : { cwd: cwd2 }
+        };
+      })
+    }
   };
 }
 function normalizeServerUrl(value) {
@@ -24033,7 +24045,11 @@ var PluginControlRuntime = class {
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
-      cursor: { ...current.cursor, enabled }
+      cursor: { ...current.cursor, enabled },
+      acp: {
+        enabled: enabled || current.acp?.enabled === true,
+        backends: current.acp?.backends?.map((item) => item.id === "cursor" ? { ...item, enabled } : item)
+      }
     });
     await this.settings.replace(editableConfig(next));
     return this.settingsView();
@@ -24045,8 +24061,13 @@ var PluginControlRuntime = class {
     const enabled = value.enabled;
     if (typeof backend !== "string" || typeof enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "ACP backend and enabled are required.");
     const current = resolveConfig(this.settings.get());
-    const backends = current.acp?.backends.map((item) => item.id === backend ? { ...item, enabled } : item) ?? [];
-    await this.settings.replace({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } });
+    if (!current.acp?.backends.some((item) => item.id === backend)) throw new ClientModeError("INVALID_MESSAGE", "Unknown ACP backend.");
+    const backends = current.acp.backends.map((item) => item.id === backend ? { ...item, enabled } : item);
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...backend === "cursor" ? { cursor: { ...current.cursor, enabled } } : {},
+      acp: { enabled: enabled || current.acp.enabled, backends }
+    });
     return this.settingsView();
   }
   async addAcp(payload) {
@@ -28835,11 +28856,12 @@ var CursorAcpError = class extends Error {
   }
 };
 var CursorAcpClient = class {
-  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, ["acp"], {
+  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
+    cwd: options.cwd,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     env: process.env
-  })) {
+  }), options = {}) {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
@@ -29243,6 +29265,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
+    this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
     this.cwd = options.cwd ?? process.cwd();
     this.sessionWorker = options.sessionWorker === true;
     this.initialConversationClaimed = options.conversationId !== void 0;
@@ -29265,6 +29288,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   sessions = /* @__PURE__ */ new Map();
   spare;
   spareCwd;
+  args;
   cwd;
   currentPromptPending;
   start() {
@@ -29280,6 +29304,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   }
   prepareSession(conversationId, cwd2 = this.cwd) {
     const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
+      args: this.args,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd: cwd2,
@@ -29445,7 +29470,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const bin = resolveAntigravityBinary(this.binary);
     const imageDirectory = await prepareAgyImageDirectory();
-    const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--add-dir", imageDirectory];
+    if (this.closed) throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
+    const args = [...this.args, "--add-dir", imageDirectory];
     if (this.activeConversationId) {
       args.push("--conversation", this.activeConversationId);
     }
@@ -30040,11 +30066,11 @@ var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
   "tool_call_update"
 ]);
 var AcpRemoteGateway = class {
-  constructor(config, logger, createAcp = (binary, targetLogger) => {
-    if (binary.endsWith("agy") || binary.includes("antigravity")) {
-      return new AntigravityAcpClient(binary, targetLogger);
+  constructor(config, logger, createAcp = (binary, targetLogger, backend) => {
+    if (backend.id === "antigravity") {
+      return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
     }
-    return new CursorAcpClient(binary, targetLogger);
+    return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
   }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
     this.config = config;
     this.logger = logger;
@@ -30069,18 +30095,32 @@ var AcpRemoteGateway = class {
   recentFrames = /* @__PURE__ */ new Map();
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
   turnCatchUp = /* @__PURE__ */ new Map();
-  async start() {
-    if (this.closed) throw new RpcError("CURSOR_CLOSED", "The Cursor Remote domain is closed.");
-    if (!this.config.enabled) return;
+  startPromise;
+  startingClients = /* @__PURE__ */ new Set();
+  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
+  enabledBackends() {
+    if (!this.config.enabled) return [];
+    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor"].includes(item.id)).map((item) => item.id);
+  }
+  start() {
+    if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
+    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  async startOnce() {
     try {
       this.state = "starting";
       await this.launchAcp();
     } catch (error) {
+      if (this.closed) return;
       this.available = false;
       this.state = "unavailable";
       this.unavailableCode = errorCode4(error);
       await this.disposeAllInstances();
-      this.logger.warn("Cursor Remote domain unavailable", { code: this.unavailableCode });
+      this.logger.warn("ACP Remote domain unavailable", { code: this.unavailableCode });
     }
   }
   isAvailable() {
@@ -30094,13 +30134,8 @@ var AcpRemoteGateway = class {
     return list;
   }
   defaultBackend() {
-    const available = this.availableBackends();
-    if (this.config.binary.includes("agent") || this.config.binary.includes("cursor")) {
-      if (available.includes("cursor")) return "cursor";
-    }
-    if (available.includes("antigravity") || this.config.binary.includes("agy")) return "antigravity";
-    if (available.includes("cursor")) return "cursor";
-    return available[0] ?? "antigravity";
+    const ready = this.availableBackends();
+    return this.enabledBackends().find((id5) => ready.includes(id5)) ?? this.enabledBackends()[0] ?? "antigravity";
   }
   status() {
     return {
@@ -30125,6 +30160,14 @@ var AcpRemoteGateway = class {
       method: call.method,
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
     });
+    if (typeof call.params.backend === "string") {
+      const sessionId2 = sessionIdFromParams(call.method, call.params);
+      const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
+      if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      this.requireAcp(call.params.backend);
+    }
     if (call.method === "initialize") {
       const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
       this.requireAcp(requestedBackend);
@@ -30223,7 +30266,11 @@ var AcpRemoteGateway = class {
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
-      const targetBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+      const boundBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+      const targetBackend = typeof call.params.backend === "string" ? call.params.backend : boundBackend;
+      if (boundBackend !== void 0 && targetBackend !== boundBackend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
       const acp = this.requireAcp(targetBackend);
       const result = await acp.call(call.method, call.params);
       const loadedId = readSessionId(result) ?? sessionId;
@@ -30370,41 +30417,54 @@ var AcpRemoteGateway = class {
     this.recentFrames.clear();
     this.turnCatchUp.clear();
     this.approvals.clear();
+    await Promise.all([...this.startingClients].map((client) => client.close()));
     await this.disposeAllInstances();
     this.available = false;
     this.state = "disabled";
   }
   async launchAcp() {
-    const candidates = [
-      { id: "antigravity", binary: "agy" },
-      { id: "cursor", binary: "agent" }
-    ];
-    let anyOk = false;
-    let lastError;
-    for (const candidate of candidates) {
-      for (const binary of cursorBinaryCandidates(candidate.binary)) {
+    const candidates = this.config.backends.filter((item) => this.enabledBackends().includes(item.id));
+    const results = await Promise.allSettled(candidates.map(async (candidate) => {
+      if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
+      let lastError;
+      for (const binary of cursorBinaryCandidates(candidate.command)) {
+        if (this.closed) return;
         try {
-          await this.launchBackendCandidate(candidate.id, binary);
-          anyOk = true;
-          break;
+          await this.launchBackendCandidate(candidate, binary);
+          return;
         } catch (error) {
           lastError = error;
-          this.logger.debug?.("ACP candidate failed", { id: candidate.id, binary, code: errorCode4(error) });
+          this.logger.debug?.("ACP candidate failed", { id: candidate.id, code: errorCode4(error) });
         }
       }
-    }
-    if (anyOk) {
-      this.available = true;
+      throw lastError;
+    }));
+    if (this.closed) return;
+    if (this.isAvailable()) {
       this.state = "ready";
       this.unavailableCode = void 0;
       this.restartAttempt = 0;
       return;
     }
-    throw lastError instanceof Error ? lastError : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
+    const failure3 = results.find((result) => result.status === "rejected");
+    throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
-  async launchBackendCandidate(id5, binary) {
-    const acp = this.createAcp(binary, this.logger);
-    await acp.start();
+  async launchBackendCandidate(backend, binary) {
+    const id5 = backend.id;
+    const acp = this.createAcp(binary, this.logger, backend);
+    this.startingClients.add(acp);
+    try {
+      await acp.start();
+      if (this.closed) {
+        await acp.close();
+        return;
+      }
+    } catch (error) {
+      await acp.close();
+      throw error;
+    } finally {
+      this.startingClients.delete(acp);
+    }
     const unsubscribeInbound = acp.onInbound((message) => {
       this.inboundChain = this.inboundChain.then(() => this.handleInbound(id5, message)).catch((error) => {
         this.logger.warn("ACP inbound fanout failed", { id: id5, code: errorCode4(error) });
@@ -30417,6 +30477,13 @@ var AcpRemoteGateway = class {
     if (prev !== void 0) {
       await this.disposeInstance(prev);
     }
+    if (this.closed) {
+      unsubscribeInbound();
+      unsubscribeUnavailable();
+      await acp.close();
+      return;
+    }
+    this.available = true;
     this.backendInstances.set(id5, {
       id: id5,
       client: acp,
@@ -30519,6 +30586,7 @@ var AcpRemoteGateway = class {
     else this.recentFrames.set(sessionId, next);
   }
   async handleUnavailable(code) {
+    if (this.closed) return;
     this.available = false;
     this.state = "restarting";
     this.unavailableCode = code;
@@ -30565,13 +30633,10 @@ var AcpRemoteGateway = class {
     if (backend !== void 0) {
       const instance = this.backendInstances.get(backend);
       if (instance !== void 0 && instance.client.isReady()) return instance.client;
+      throw new RpcError("CURSOR_UNAVAILABLE", "The requested ACP backend is disabled or unavailable on this Host.");
     }
-    for (const id5 of ["antigravity", "cursor"]) {
-      const instance = this.backendInstances.get(id5);
-      if (instance !== void 0 && instance.client.isReady()) return instance.client;
-    }
-    const first = [...this.backendInstances.values()].find((b) => b.client.isReady());
-    if (first !== void 0) return first.client;
+    const selected = this.backendInstances.get(this.defaultBackend());
+    if (selected !== void 0 && selected.client.isReady()) return selected.client;
     throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
   }
   initializeResult(params, backend) {
@@ -31240,7 +31305,7 @@ var HostPluginRuntime = class {
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
     this.codex = new CodexRemoteDomain(config.codex, logger);
-    this.acp = new AcpRemoteGateway(config.cursor, logger);
+    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
         this.apiProxy,
@@ -31332,7 +31397,9 @@ var HostPluginRuntime = class {
       server: this.config.serverUrl ?? "not configured"
     });
     await this.codex.start();
-    await this.acp.start();
+    void this.acp.start().catch(() => {
+      this.logger.warn("ACP background initialization failed", { code: "ACP_START_FAILED" });
+    });
     if (this.serverApi !== void 0) {
       this.harnessVersion = await this.readHarnessVersion();
       this.serverApi.setHarnessVersion(this.harnessVersion);
@@ -31589,9 +31656,9 @@ var HostPluginRuntime = class {
     }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
-    if (this.acp.isAvailable()) {
+    if (this.acp.enabledBackends().length > 0) {
       capabilities.push("agent.acp.v1", "agent.acp.transfer.v1");
-      for (const backend of this.acp.availableBackends()) {
+      for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`);
       }
     }
@@ -31607,24 +31674,14 @@ var HostPluginRuntime = class {
         available: true
       });
     }
-    if (this.acp.isAvailable()) {
-      for (const backend of this.acp.availableBackends()) {
-        if (backend === "cursor") {
-          types.push({
-            id: "cursor",
-            name: "Cursor",
-            capability: "agent.acp.cursor.v1",
-            available: true
-          });
-        } else if (backend === "antigravity") {
-          types.push({
-            id: "antigravity",
-            name: "Antigravity",
-            capability: "agent.acp.antigravity.v1",
-            available: true
-          });
-        }
-      }
+    const readyBackends = this.acp.availableBackends();
+    for (const backend of this.acp.enabledBackends()) {
+      types.push({
+        id: backend,
+        name: backend === "cursor" ? "Cursor" : "Antigravity",
+        capability: `agent.acp.${backend}.v1`,
+        available: readyBackends.includes(backend)
+      });
     }
     return types;
   }

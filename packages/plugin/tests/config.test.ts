@@ -56,6 +56,20 @@ describe('plugin config', () => {
     })
   })
 
+  it('preserves independent ACP launch options and scopes legacy Cursor configuration to Cursor', () => {
+    const legacy = resolveConfig({ cursor: { enabled: true, binary: '/custom/cursor' } }, {})
+    expect(legacy.acp?.backends.find(item => item.id === 'cursor')).toMatchObject({ enabled: true, command: '/custom/cursor' })
+    expect(legacy.acp?.backends.find(item => item.id === 'antigravity')?.enabled).toBe(false)
+    const config = resolveConfig({ acp: { enabled: false, backends: [
+      { id: 'cursor', enabled: false },
+      { id: 'antigravity', enabled: true, command: '/custom/agy', args: ['--custom'], cwd: '/host' },
+    ] } }, {})
+    expect(config.acp?.enabled).toBe(false)
+    expect(config.acp?.backends.find(item => item.id === 'antigravity')).toEqual({
+      id: 'antigravity', enabled: true, command: '/custom/agy', args: ['--custom'], cwd: '/host',
+    })
+  })
+
   it('rejects insecure non-local servers and embedded credentials', () => {
     expect(() => resolveConfig({ serverUrl: 'http://remote.example.com' })).toThrow(/HTTPS/)
     expect(() => resolveConfig({ serverUrl: 'https://user:password@remote.example.com' })).toThrow(/credentials/)

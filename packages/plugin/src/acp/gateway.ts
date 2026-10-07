@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
-import type { ResolvedCursorConfig } from '../config.js'
+import type { ResolvedAcpConfig, ResolvedAcpBackendConfig } from '../config.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
@@ -69,11 +69,11 @@ interface AcpDirectoryListing {
   truncated: boolean
 }
 
-type AcpFactory = (binary: string, logger: SafeLogger) => CursorAcpLike
+type AcpFactory = (binary: string, logger: SafeLogger, backend: ResolvedAcpBackendConfig) => CursorAcpLike
 
 /**
  * Host-side Agent ACP gateway (#65). Reuses the authenticated Remote channel and
- * delegates to a backend adapter (Cursor `agent acp` first). Owns method policy,
+ * delegates to independently configured Cursor/Antigravity adapters. Owns method policy,
  * session ownership, subscriptions, and permission handles per connection.
  */
 export class AcpRemoteGateway {
@@ -101,30 +101,45 @@ export class AcpRemoteGateway {
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
   private readonly turnCatchUp = new Map<string, Array<{ method: string; params: unknown }>>()
 
+  private startPromise?: Promise<void>
+  private readonly startingClients = new Set<CursorAcpLike>()
+
   constructor(
-    readonly config: ResolvedCursorConfig,
+    readonly config: ResolvedAcpConfig,
     private readonly logger: SafeLogger,
-    private readonly createAcp: AcpFactory = (binary, targetLogger) => {
-      if (binary.endsWith('agy') || binary.includes('antigravity')) {
-        return new AntigravityAcpClient(binary, targetLogger)
+    private readonly createAcp: AcpFactory = (binary, targetLogger, backend) => {
+      if (backend.id === 'antigravity') {
+        return new AntigravityAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       }
-      return new CursorAcpClient(binary, targetLogger)
+      return new CursorAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
     },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
   ) {}
 
-  async start(): Promise<void> {
-    if (this.closed) throw new RpcError('CURSOR_CLOSED', 'The Cursor Remote domain is closed.')
-    if (!this.config.enabled) return
+  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
+  enabledBackends(): string[] {
+    if (!this.config.enabled) return []
+    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor'].includes(item.id)).map(item => item.id)
+  }
+
+  start(): Promise<void> {
+    if (this.closed) return Promise.reject(new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.'))
+    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve()
+    this.startPromise ??= this.startOnce().finally(() => { this.startPromise = undefined })
+    return this.startPromise
+  }
+
+  private async startOnce(): Promise<void> {
     try {
       this.state = 'starting'
       await this.launchAcp()
     } catch (error) {
+      if (this.closed) return
       this.available = false
       this.state = 'unavailable'
       this.unavailableCode = errorCode(error)
       await this.disposeAllInstances()
-      this.logger.warn('Cursor Remote domain unavailable', { code: this.unavailableCode })
+      this.logger.warn('ACP Remote domain unavailable', { code: this.unavailableCode })
     }
   }
 
@@ -141,13 +156,8 @@ export class AcpRemoteGateway {
   }
 
   defaultBackend(): string {
-    const available = this.availableBackends()
-    if (this.config.binary.includes('agent') || this.config.binary.includes('cursor')) {
-      if (available.includes('cursor')) return 'cursor'
-    }
-    if (available.includes('antigravity') || this.config.binary.includes('agy')) return 'antigravity'
-    if (available.includes('cursor')) return 'cursor'
-    return available[0] ?? 'antigravity'
+    const ready = this.availableBackends()
+    return this.enabledBackends().find(id => ready.includes(id)) ?? this.enabledBackends()[0] ?? 'antigravity'
   }
 
   status(): {
@@ -182,6 +192,15 @@ export class AcpRemoteGateway {
       method: call.method,
       sessionId: typeof call.params?.sessionId === 'string' ? shortSessionId(call.params.sessionId) : undefined,
     })
+
+    if (typeof call.params.backend === 'string') {
+      const sessionId = sessionIdFromParams(call.method, call.params)
+      const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
+      if (boundBackend !== undefined && boundBackend !== call.params.backend) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
+      this.requireAcp(call.params.backend)
+    }
 
     if (call.method === 'initialize') {
       const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
@@ -301,7 +320,11 @@ export class AcpRemoteGateway {
     }
 
     if (call.method === 'session/load') {
-      const targetBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
+      const boundBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
+      const targetBackend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend
+      if (boundBackend !== undefined && targetBackend !== boundBackend) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
       const acp = this.requireAcp(targetBackend)
       const result = await acp.call(call.method, call.params)
       const loadedId = readSessionId(result) ?? sessionId
@@ -467,43 +490,56 @@ export class AcpRemoteGateway {
     this.recentFrames.clear()
     this.turnCatchUp.clear()
     this.approvals.clear()
+    await Promise.all([...this.startingClients].map(client => client.close()))
     await this.disposeAllInstances()
     this.available = false
     this.state = 'disabled'
   }
 
   private async launchAcp(): Promise<void> {
-    const candidates = [
-      { id: 'antigravity', binary: 'agy' },
-      { id: 'cursor', binary: 'agent' },
-    ]
-    let anyOk = false
-    let lastError: unknown
-    for (const candidate of candidates) {
-      for (const binary of cursorBinaryCandidates(candidate.binary)) {
+    const candidates = this.config.backends.filter(item => this.enabledBackends().includes(item.id))
+    const results = await Promise.allSettled(candidates.map(async candidate => {
+      if (this.backendInstances.get(candidate.id)?.client.isReady()) return
+      let lastError: unknown
+      for (const binary of cursorBinaryCandidates(candidate.command)) {
+        if (this.closed) return
         try {
-          await this.launchBackendCandidate(candidate.id, binary)
-          anyOk = true
-          break
+          await this.launchBackendCandidate(candidate, binary)
+          return
         } catch (error) {
           lastError = error
-          this.logger.debug?.('ACP candidate failed', { id: candidate.id, binary, code: errorCode(error) })
+          this.logger.debug?.('ACP candidate failed', { id: candidate.id, code: errorCode(error) })
         }
       }
-    }
-    if (anyOk) {
-      this.available = true
+      throw lastError
+    }))
+    if (this.closed) return
+    if (this.isAvailable()) {
       this.state = 'ready'
       this.unavailableCode = undefined
       this.restartAttempt = 0
       return
     }
-    throw lastError instanceof Error ? lastError : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'No ACP backend is available.')
+    const failure = results.find(result => result.status === 'rejected')
+    throw failure?.status === 'rejected' ? failure.reason : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'No ACP backend is available.')
   }
 
-  private async launchBackendCandidate(id: string, binary: string): Promise<void> {
-    const acp = this.createAcp(binary, this.logger)
-    await acp.start()
+  private async launchBackendCandidate(backend: ResolvedAcpBackendConfig, binary: string): Promise<void> {
+    const id = backend.id
+    const acp = this.createAcp(binary, this.logger, backend)
+    this.startingClients.add(acp)
+    try {
+      await acp.start()
+      if (this.closed) {
+        await acp.close()
+        return
+      }
+    } catch (error) {
+      await acp.close()
+      throw error
+    } finally {
+      this.startingClients.delete(acp)
+    }
     const unsubscribeInbound = acp.onInbound(message => {
       this.inboundChain = this.inboundChain
         .then(() => this.handleInbound(id, message))
@@ -516,6 +552,13 @@ export class AcpRemoteGateway {
     if (prev !== undefined) {
       await this.disposeInstance(prev)
     }
+    if (this.closed) {
+      unsubscribeInbound()
+      unsubscribeUnavailable()
+      await acp.close()
+      return
+    }
+    this.available = true
     this.backendInstances.set(id, {
       id,
       client: acp,
@@ -631,6 +674,7 @@ export class AcpRemoteGateway {
   }
 
   private async handleUnavailable(code: string): Promise<void> {
+    if (this.closed) return
     this.available = false
     this.state = 'restarting'
     this.unavailableCode = code
@@ -680,13 +724,10 @@ export class AcpRemoteGateway {
     if (backend !== undefined) {
       const instance = this.backendInstances.get(backend)
       if (instance !== undefined && instance.client.isReady()) return instance.client
+      throw new RpcError('CURSOR_UNAVAILABLE', 'The requested ACP backend is disabled or unavailable on this Host.')
     }
-    for (const id of ['antigravity', 'cursor']) {
-      const instance = this.backendInstances.get(id)
-      if (instance !== undefined && instance.client.isReady()) return instance.client
-    }
-    const first = [...this.backendInstances.values()].find(b => b.client.isReady())
-    if (first !== undefined) return first.client
+    const selected = this.backendInstances.get(this.defaultBackend())
+    if (selected !== undefined && selected.client.isReady()) return selected.client
     throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
   }
 

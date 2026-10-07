@@ -27,10 +27,56 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('honors the global switch and independent backend launch settings', async () => {
+    const factory = vi.fn(() => readyAcp())
+    const backends = [
+      { id: 'cursor', enabled: false, command: '/custom/cursor', args: ['acp'] },
+      { id: 'antigravity', enabled: true, command: '/custom/agy-wrapper', args: ['--custom'], cwd: '/tmp' },
+    ]
+    const disabled = new AcpRemoteGateway({ enabled: false, backends }, silentLogger(), factory)
+    await disabled.start()
+    expect(factory).not.toHaveBeenCalled()
+    await disabled.close()
+    const gateway = new AcpRemoteGateway({ enabled: true, backends }, silentLogger(), factory)
+    await gateway.start()
+    try {
+      expect(factory).toHaveBeenCalledTimes(1)
+      expect(factory).toHaveBeenCalledWith('/custom/agy-wrapper', expect.anything(), backends[1])
+      expect(gateway.availableBackends()).toEqual(['antigravity'])
+      await expect(gateway.call('owner', { method: 'session/load', params: { sessionId: 'cursor-old', backend: 'cursor' } }))
+        .rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+      await expect(gateway.call('owner', { method: 'initialize', params: { backend: 'cursor' } }))
+        .rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+    } finally { await gateway.close() }
+  })
+
+  it('makes a ready backend usable while another initializes and cleans up late startup on close', async () => {
+    let release!: () => void
+    const slow = readyAcp()
+    slow.start = vi.fn(() => new Promise<void>(resolve => { release = resolve }))
+    const fast = readyAcp()
+    const factory = vi.fn((_binary: string, _logger: SafeLogger, backend: { id: string }) => backend.id === 'cursor' ? slow : fast)
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [
+      { id: 'cursor', enabled: true, command: '/slow-cursor', args: ['acp'] },
+      { id: 'antigravity', enabled: true, command: '/fast-agy', args: [] },
+    ] }, silentLogger(), factory)
+    const startup = gateway.start()
+    const sameStartup = gateway.start()
+    expect(sameStartup).toBe(startup)
+    await vi.waitFor(() => expect(gateway.availableBackends()).toEqual(['antigravity']))
+    expect(gateway.isAvailable()).toBe(true)
+    await gateway.close()
+    expect(slow.close).toHaveBeenCalled()
+    release()
+    await startup
+    expect(gateway.status()).toMatchObject({ state: 'disabled', available: false, availableBackends: [] })
+    expect(factory).toHaveBeenCalledTimes(2)
+  })
+
   it('prewarms only a validated selected AGY directory while listing history', async () => {
     const acp = readyAcp()
     acp.prewarmSession = vi.fn()
-    const gateway = new AcpRemoteGateway({ enabled: true, binary: 'agy' }, silentLogger(), () => acp)
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: [] }, { id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] }, silentLogger(), () => acp)
     await gateway.start()
     try {
       const list = (path: string, backend = 'antigravity') => gateway.call('warm-connection', {
@@ -50,7 +96,7 @@ describe('AcpRemoteGateway', () => {
   it('rejects AGY images and mismatched backend labels on a Cursor-owned session', async () => {
     const acp = readyAcp()
     acp.call = vi.fn(async () => ({ sessionId: 'cursor-image-session' }))
-    const gateway = new AcpRemoteGateway({ enabled: true, binary: 'agent' }, silentLogger(), () => acp)
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] }, silentLogger(), () => acp)
     await gateway.start()
     try {
       await gateway.call('owner', { method: 'session/new', params: { cwd: process.cwd(), backend: 'cursor' } })
@@ -64,7 +110,7 @@ describe('AcpRemoteGateway', () => {
   it('answers initialize on the gateway without forwarding to Cursor', async () => {
     const acp = readyAcp()
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
       silentLogger(),
       () => acp,
     )
@@ -107,7 +153,7 @@ describe('AcpRemoteGateway', () => {
       return {}
     })
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
       silentLogger(),
       () => acp,
     )
@@ -158,7 +204,7 @@ describe('AcpRemoteGateway', () => {
       return {}
     })
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
       silentLogger(),
       () => acp,
     )
@@ -224,7 +270,7 @@ describe('AcpRemoteGateway', () => {
       return {}
     })
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
       silentLogger(),
       () => acp,
     )
@@ -285,7 +331,7 @@ describe('AcpRemoteGateway', () => {
       return {}
     })
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
       silentLogger(),
       () => acp,
     )
@@ -327,7 +373,7 @@ describe('AcpRemoteGateway', () => {
 
   it('only reports antigravity in availableBackends when cursor binary is unavailable', async () => {
     const gateway = new AcpRemoteGateway(
-      { enabled: true, binary: 'agent' },
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }, { id: 'antigravity', enabled: true, command: 'agy', args: [] }] },
       silentLogger(),
       (binary) => {
         if (binary.includes('agent') || binary === 'agent') {

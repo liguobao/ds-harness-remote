@@ -765,6 +765,12 @@ Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使�
 `harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
 
+ACP 的 `agent.acp.v1` / `agent.acp.transfer.v1` 及 `agent.acp.<backend>.v1` 声明表示
+Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 后台初始化不阻塞 Harness Remote
+上线；初始化中或启动失败时，`workspaceTypes` 对应项的 `available` 必须为 `false`，数据面调用
+返回不可用。关闭的后端不声明能力；明确选择的后端不可用时禁止转发到其他后端。后端就绪后，
+再次调用 `harness.transport.describe` 可取得最新可用性，无需重新建立加密连接。
+
 ### 17.1 工作区类型能力声明（workspaceTypes）
 
 为支持 Web 等客户端动态渲染工作区类型选择器并避免在前端硬编码判断，Host 在 `harness.transport.describe`

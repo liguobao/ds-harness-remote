@@ -44,6 +44,7 @@ export interface AntigravityAcpClientOptions {
   /** Internal process bound to one conversation. */
   sessionWorker?: boolean
   cwd?: string
+  args?: string[]
 }
 
 /**
@@ -67,6 +68,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private readonly sessions = new Map<string, AntigravityAcpClient>()
   private spare?: Promise<AntigravityAcpClient>
   private spareCwd?: string
+  private readonly args: string[]
   private readonly cwd: string
   private currentPromptPending?: {
     sessionId: string
@@ -86,6 +88,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }),
     options: AntigravityAcpClientOptions = {},
   ) {
+    this.args = options.args ?? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     this.cwd = options.cwd ?? process.cwd()
     this.sessionWorker = options.sessionWorker === true
     this.initialConversationClaimed = options.conversationId !== undefined
@@ -104,6 +107,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   private prepareSession(conversationId?: string, cwd = this.cwd): Promise<AntigravityAcpClient> {
     const worker = new AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
+      args: this.args,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd,
@@ -281,7 +285,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
     const bin = resolveAntigravityBinary(this.binary)
     const imageDirectory = await prepareAgyImageDirectory()
-    const args = ['--input-format', 'stream-json', '--output-format', 'stream-json', '--add-dir', imageDirectory]
+    if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
+    const args = [...this.args, '--add-dir', imageDirectory]
     if (this.activeConversationId) {
       args.push('--conversation', this.activeConversationId)
     }
