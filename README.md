@@ -217,7 +217,7 @@ Configuration changes require a DSH restart.
 
 The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
 `agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:
-[Agent ACP / Cursor adapter notes](docs/cursor-remote.md).
+[ACP Remote / Agent adapter notes](docs/acp-remote.md).
 
 ## End-to-end encryption
 
@@ -253,7 +253,7 @@ validation status.
 - [Plugin guide](packages/plugin/README.md)
 - [dsh-TUI Remote guide](docs/dsh-tui.md)
 - [Codex Remote technical notes](docs/codex-remote.md)
-- [Agent ACP / Cursor adapter notes](docs/cursor-remote.md)
+- [ACP Remote / Agent adapter notes](docs/acp-remote.md)
 - [Documentation index](docs/README.md)
 - [End-to-end encryption](docs/end-to-end-encryption.md)
 - [Network and transport](docs/network.md)

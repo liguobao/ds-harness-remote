@@ -1,4 +1,4 @@
-# Agent ACP / Cursor adapter 技术说明
+# ACP Remote / Agent adapter 技术说明
 
 本文记录 Remote 内通用 Agent ACP gateway（#65）与 Cursor backend adapter 的边界。
 线协议以 [Remote Protocol v1](protocol.md) 为准。

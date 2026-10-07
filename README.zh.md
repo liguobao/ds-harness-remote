@@ -199,7 +199,7 @@ ACP 后端在后台初始化，AGY/Cursor 启动不会阻塞 Harness Remote 注�
 
 Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.enabled`，在 Host 完成本机
 `agent login`（或配置 `CURSOR_API_KEY`）后重启 DSH。细节见
-[Agent ACP / Cursor adapter 技术说明](docs/cursor-remote.md)。
+[ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)。
 
 ## 端到端加密
 
@@ -232,7 +232,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - [插件说明](packages/plugin/README.md)
 - [dsh-TUI Remote 使用指南](docs/dsh-tui.md)
 - [Codex Remote 技术说明](docs/codex-remote.md)
-- [Agent ACP / Cursor adapter 技术说明](docs/cursor-remote.md)
+- [ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)
 - [文档索引](docs/README.md)
 - [端到端加密](docs/end-to-end-encryption.md)
 - [网络与传输](docs/network.md)

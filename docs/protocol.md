@@ -1158,7 +1158,7 @@ AGY 必须明确声明 `agent.acp.antigravity.v1`。
 transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
 History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
 
-Cursor adapter 实现细节见 [Cursor Remote / ACP](cursor-remote.md)。
+Cursor adapter 实现细节见 [ACP Remote](acp-remote.md)。
 
 ### Codex App Server domain
 
