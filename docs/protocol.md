@@ -752,16 +752,87 @@ Host handshake 的 capability 例子：
   "harness.remote.transfer.v1",
   "fileviewer.read.v1",
   "codex.appserver.v1",
-  "codex.appserver.transfer.v1"
+  "codex.appserver.transfer.v1",
+  "agent.acp.v1",
+  "agent.acp.transfer.v1"
 ]
 ```
 
-建立 Noise channel 后，Desktop Client 必须先调用 `harness.transport.describe`，Params 为
-空对象，Result 为 `{ "capabilities": string[] }`。当前 Host 按实际注入服务动态返回
+建立 Noise channel 后，Desktop/Web/Android Client 必须先调用 `harness.transport.describe`，Params 为
+空对象，Result 为 `{ "capabilities": string[], "workspaceTypes"?: RemoteWorkspaceTypeDescription[] }`。当前 Host 按实际注入服务动态返回
 `harness.api.v1`、`harness.remote.v1` 或 `harness.remote.v3`，不得宣告不存在的 carrier。
 Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使用
 `harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
+
+ACP 的 `agent.acp.v1` / `agent.acp.transfer.v1` 及 `agent.acp.<backend>.v1` 声明表示
+Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 后台初始化不阻塞 Harness Remote
+上线；初始化中或启动失败时，`workspaceTypes` 对应项的 `available` 必须为 `false`，数据面调用
+返回不可用。关闭的后端不声明能力；明确选择的后端不可用时禁止转发到其他后端。后端就绪后，
+再次调用 `harness.transport.describe` 可取得最新可用性，无需重新建立加密连接。
+
+### 17.1 工作区类型能力声明（workspaceTypes）
+
+为支持 Web 等客户端动态渲染工作区类型选择器并避免在前端硬编码判断，Host 在 `harness.transport.describe`
+响应中提供结构化的工作区类型列表 `workspaceTypes`：
+
+```json
+{
+  "capabilities": [
+    "transport.relay",
+    "harness.api.v1",
+    "harness.api.transfer.v1",
+    "codex.appserver.v1",
+    "codex.appserver.transfer.v1"
+  ],
+  "workspaceTypes": [
+    {
+      "id": "codex",
+      "name": "CodeX",
+      "capability": "codex.appserver.v1",
+      "available": true
+    }
+  ]
+}
+```
+
+#### 概念区分
+
+在 Remote 协议中明确区分以下三层概念：
+
+1. **工作区类型（workspace type）**：
+   - 表示 Host 支持的工作区类型与协议载体形态（例如 CodeX）。
+   - `id` 使用稳定的小写标识符（如 `codex`）；`name` 仅用于展示（如 `CodeX`）；`capability` 为关联的底层能力标识（如 `codex.appserver.v1`）；`available` 表示当前真实可调用。
+   - Web 端与客户端通过遍历 `workspaceTypes` 动态渲染工作区类型入口，无需为新类型增加前端分支判断。
+   - 严禁将项目路径、会话内容、prompt、文件内容或 tool output 放入能力描述响应。
+2. **工作区 / 项目（workspace / project）**：
+   - 表示 Host 上的具体项目目录实体（例如 CodeX 的具体 project root 目录，或 Harness 原生 workspace 目录）。
+   - 具体项目依然通过各工作区领域的数据面接口（例如 `project/list`、`thread/list` 中的 cwd 或 Harness workspace 列表）获取，绝不混入类型声明。
+3. **会话（session / thread）**：
+   - 表示在具体工作区/项目上下文中的具体交互会话。
+   - 例如 CodeX Thread（`codex:<threadId>`）或 Harness Session ID，由各会话生命周期与消息流管理。
+
+#### 准确性与兼容约束
+
+1. **真实可用性判定**：
+   - 只有真实可调用工作区运行时（如 CodeX App Server）且能力协商完成（`account/read` 成功确认已登录）时，才声明 `available: true`。
+   - 若服务启动失败、权限不足、未登录、协议不兼容或能力未协商成功，必须返回不可用或直接省略该条目，严禁仅根据本地安装文件存在就声明可用。
+2. **双向兼容性**：
+   - 继续保留现有的 `capabilities` 字符串数组；不支持 `workspaceTypes` 的旧客户端仍可通过 `codex.appserver.v1` 工作。
+   - 新客户端支持读取 `workspaceTypes`，并在未提供时平滑回退；遇到 malformed 数据安全容错，不得崩溃。
+   - 不修改现有的 Harness Remote、WebRTC、Relay、Noise 加密和 Server 中继协议。
+3. **新增工作区类型扩展规范**：
+   - 后续扩展新的工作区类型时，必须配套提供：
+     1. 对应的 `capability` 标识；
+     2. `workspaceTypes` 中的声明条目（稳定小写 `id` 与展示名称 `name`）；
+     3. 对应的数据面 RPC / Stream / Event allowlist 策略及通道隔离实现。
+
+Web 接入时，`workspaceTypes` 是现有 `harness.transport.describe` 响应的可选加法字段，
+无需修改 Server 中继或握手协议。既有 Harness / CodeX 数据面应直接复用；新客户端优先读取
+有效的类型条目及 `available`，旧 Host 未提供该字段时才沿用 `capabilities` 判断。类型列表
+不是 Harness 入口的完整替代：当前 Host 单独声明 CodeX 和已启用的 ACP 后端，Harness
+入口仍由原有 `harness.api.v1` / `harness.remote.v1|v3` 能力决定。未知类型可以展示其 `name`，
+但只有已有对应 RPC / 数据面处理器时才允许进入，不得据类型声明代理任意方法。
 
 ApiProxy 与 Typert Remote contract 仍随 Desktop Plugin 发布物升级，但新增的可选业务能力
 必须保持加法兼容。当前实现不翻译 rc.2 与 alpha 的完整 Harness 业务模型：本地与远端
@@ -1045,6 +1116,56 @@ Host 必须调用 `fileViewerHost` 服务，让被选中的 File Viewer provider
 禁止 `readHead`（Client 以 offset 0 的 `readRange` 实现）、`openExternal`、写入、上传、删除、
 重命名、执行和任意 endpoint。Host 未安装 File Viewer、请求超限、provider 拒绝或返回异常时
 必须 fail closed。错误不得回显 Host 内部路径或原始 filesystem 异常。
+
+### Agent ACP domain
+
+Agent ACP 是现有 Remote Plugin 内部的通用业务面（见 #65），不是第二个 Plugin，也不是
+Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cursor / Antigravity
+adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.binary` 仅兼容 Cursor。
+`agent.acp.v1`、`agent.acp.transfer.v1` 与 `agent.acp.<backend>.v1` 表示启用且已实现的协议；
+实际就绪状态见 `workspaceTypes.available`，后台初始化不得阻塞 Harness Remote。
+现有 `harness.api.*` / `harness.remote.*` 和 `codex.app.*` 的线协议、路由与能力不受影响。
+
+业务 RPC 固定为 `agent.acp.call|respond|stream.*|transfer.*`，事件固定为
+`agent.acp.frame|stream.closed`，所有 Client（包括 Web）使用同一独立 ACP 数据面。
+`agent.acp.call` 不是通用代理；编译期 allowlist 仅含 `initialize`、`session/new`、`session/load`、
+`session/prompt`、`session/cancel`、以及 Host 扩展 `dsh/directoryList`、`dsh/workspaceList`、
+`dsh/sessionList`、`dsh/sessionHistory`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
+不得通过 Harness ApiProxy / Typert 业务端点调用。
+
+Client 侧 `initialize` 由 Gateway 返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
+`dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、
+不发送 prompt，也不注册客户端 Session；`session/new` 才领取预热进程。AGY 摘要数据库
+中零步数且无标题的记录若已有持久化 transcript，历史发现应按数据库中的工作区归属
+恢复该会话；没有 transcript 的空闲预热进程不显示为历史会话。Remote 在 AGY 回复完成
+和历史重新发现时读取持久化标题，并以有序 title projection 更新已有会话；AGY 标题
+为空时使用 transcript 中首条用户消息的摘要，不修改 AGY 数据库。`session/new`
+强制 `mcpServers: []`，cwd 必须经 `realpath` 确认为 Host 上已存在的绝对目录。Cursor Prompt
+仅允许文本块；AGY 还允许 `{ type: "image", mimeType, data }`（canonical base64、PNG/JPEG/WebP/GIF，
+每张最多 8 MiB，每次最多 4 张）。`session/prompt.backend` 可显式指定后端，必须与已有会话后端
+一致，图片不能转发到 Cursor。图片 Prompt 和含图片的 History 使用已有 ACP transfer 分块通道。
+按用户 2026-10-07 授权，Host 在 tmp 专用私有缓存按会话哈希目录和随机文件名保存图片，
+总量上限 512 MiB，拒绝越界和 symlink；24 小时后在后续上传时清理，系统也可能提前清理 tmp。
+AGY 1.3.0 的 stream-json 不接受 image block，Host 将缓存目录加入 AGY `--add-dir`，
+用 text 内的受限引用让其 `view_file` 读取图片。缓存目录不作为 Workspace 暴露。
+Remote 将图片投影到原生 user/message 与 session/attachment，仅返回所属 Session 引用的图片；
+历史从该 AGY transcript 的引用恢复仍有效的附件，用户文案移除内部缓存引用。
+不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
+`reject-once` / `cancel`）。有序 `session/update` 与 `session/request_permission` 经
+`agent.acp.frame` 下发。
+
+Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生 Harness UI，
+该投影不改变 Harness Host API，也不写入 DSH SessionStore、Workspace 数据库或日志。
+客户端工作区发现与历史读取只调用 ACP 接口，不回退读取 Client 本机的 AGY 数据库或文件。
+新工作区 ID 分别使用 `cursor:cwd:<encoded-path>` 和 `antigravity:cwd:<encoded-path>`；
+工作区只接受所属后端前缀，不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无前缀路径作为 ID。既有 Session ID（Cursor `cursor:`、AGY `acp:`）
+保持不变。旧 Host 仅声明 `agent.acp.v1` 时只兼容 Cursor，不能据此推断支持 AGY；
+AGY 必须明确声明 `agent.acp.antigravity.v1`。
+`dsh/sessionHistory` 使用有界 ACP transfer 读取含图片或大文本的响应；图片 Prompt 的
+transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
+History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
+
+Cursor adapter 实现细节见 [ACP Remote](acp-remote.md)。
 
 ### Codex App Server domain
 
@@ -1436,3 +1557,10 @@ process-range termination) when that service is available and falls back to a pl
 pipe otherwise. This carrier has no terminal emulator, so `screen` is a bounded raw
 output journal replayed into the client emulator, prefixed with a reset when the
 journal was truncated.
+
+### ACP catalog reads without prewarming
+
+`agent.acp.call` 内的 `dsh/sessionList` Params 新增可选布尔字段 `prewarm`，默认 `true`。
+`false` 仅关闭该次列表读取触发的空闲 CLI 预热，不改变后端选择、身份/权限校验或 catalog
+来源；Android 批量读取各目录时使用它，防止为每个目录启动一个进程。此字段不扩展 method
+allowlist，也不提供文件写入能力。

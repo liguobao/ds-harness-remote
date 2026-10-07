@@ -10,6 +10,8 @@ export const MAX_SECURE_MESSAGE_BYTES = 4 * 1024 * 1024
 export const HARNESS_API_TRANSFER_CHUNK_BYTES = 512 * 1024
 /** Decoded bytes carried by one authenticated Codex domain transfer chunk. */
 export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
+/** Decoded bytes carried by one authenticated Agent ACP domain transfer chunk. */
+export const AGENT_ACP_TRANSFER_CHUNK_BYTES = 512 * 1024
 /**
  * Bounded transfer size for Harness image prompts. The upstream default admits
  * up to 200 MiB of source images; their base64 JSON envelope needs roughly
@@ -17,6 +19,7 @@ export const CODEX_APP_TRANSFER_CHUNK_BYTES = 512 * 1024
  */
 export const MAX_HARNESS_API_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_CODEX_APP_TRANSFER_BYTES = 288 * 1024 * 1024
+export const MAX_AGENT_ACP_TRANSFER_BYTES = 288 * 1024 * 1024
 export const MAX_DEVICE_NAME_LENGTH = 128
 export const MAX_DEVICE_PLATFORM_LENGTH = 64
 export const MAX_DEVICE_VERSION_LENGTH = 64
@@ -121,6 +124,15 @@ export const rpcMethods = [
   'codex.app.transfer.commit',
   'codex.app.transfer.read',
   'codex.app.transfer.close',
+  'agent.acp.call',
+  'agent.acp.respond',
+  'agent.acp.stream.open',
+  'agent.acp.stream.close',
+  'agent.acp.transfer.open',
+  'agent.acp.transfer.chunk',
+  'agent.acp.transfer.commit',
+  'agent.acp.transfer.read',
+  'agent.acp.transfer.close',
   'acp.initialize',
   'acp.session.new',
   'acp.session.load',
@@ -137,6 +149,8 @@ export const remoteEvents = [
   'harness.remote.stream.closed',
   'codex.app.frame',
   'codex.app.stream.closed',
+  'agent.acp.frame',
+  'agent.acp.stream.closed',
   'acp.session.update',
   'acp.session.request_permission',
   'acp.session.closed',
@@ -447,10 +461,10 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | (string & {})
+export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
-export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[] }
-export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string }
+export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
+export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
 export interface AcpPromptParams { sessionId: string; prompt: string; images?: Array<{ mimeType: string; data: string }> }
 export interface AcpPermissionResponseParams { sessionId: string; requestId: string; decision: 'allow_once' | 'deny' }
 export interface AcpCancelParams { sessionId: string }
@@ -606,8 +620,16 @@ export interface HarnessRemoteStreamClosedData {
   }
 }
 
+export interface RemoteWorkspaceTypeDescription {
+  id: string
+  name: string
+  capability: string
+  available: boolean
+}
+
 export interface HarnessTransportDescription {
   capabilities: string[]
+  workspaceTypes?: RemoteWorkspaceTypeDescription[]
 }
 
 export type CodexPermissionPreset = 'workspace-write' | 'danger-full-access'
@@ -671,6 +693,67 @@ export type CodexAppTransferCommitResult =
   | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
 
 export interface CodexAppTransferReadResult {
+  transferId: string
+  index: number
+  data: string
+}
+
+/** Fixed allowlisted Agent ACP call carried inside Remote. */
+export interface AgentAcpCallParams {
+  method: string
+  params: unknown
+}
+
+export interface AgentAcpRespondParams {
+  requestHandle: string
+  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel'
+  /** Optional structured answer for backend extension methods (ask_question / create_plan). */
+  result?: unknown
+}
+
+export interface AgentAcpStreamOpenParams {
+  streamId: string
+  sessionId: string
+}
+
+export interface AgentAcpStreamCloseParams {
+  streamId: string
+}
+
+export interface AgentAcpFrameData {
+  streamId: string
+  frame: {
+    method: string
+    params: unknown
+  }
+}
+
+export interface AgentAcpStreamClosedData {
+  streamId: string
+  reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected'
+}
+
+export interface AgentAcpTransferOpenParams {
+  transferId: string
+  totalBytes: number
+  totalChunks: number
+}
+
+export interface AgentAcpTransferChunkParams {
+  transferId: string
+  index: number
+  data: string
+}
+
+export interface AgentAcpTransferCommitParams { transferId: string }
+export interface AgentAcpTransferReadParams { transferId: string; index: number }
+export interface AgentAcpTransferCloseParams { transferId: string }
+
+export type AgentAcpTransferCommitResult =
+  | { kind: 'inline'; response: unknown }
+  | { kind: 'chunked'; transferId: string; totalBytes: number; totalChunks: number }
+
+export interface AgentAcpTransferReadResult {
   transferId: string
   index: number
   data: string
@@ -821,6 +904,30 @@ export const helloAckPayloadSchema = z.object({
   webrtcEnabled: z.boolean().optional(),
   webrtcFallbackTimeoutMs: z.number().int().positive().optional(),
 })
+
+export const remoteWorkspaceTypeDescriptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  capability: z.string().min(1),
+  available: z.boolean(),
+})
+
+export const harnessTransportDescriptionSchema = z.object({
+  capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
+  workspaceTypes: z.array(remoteWorkspaceTypeDescriptionSchema).optional(),
+})
+
+export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDescription[] {
+  if (!Array.isArray(value)) return []
+  const types: RemoteWorkspaceTypeDescription[] = []
+  for (const item of value) {
+    const result = remoteWorkspaceTypeDescriptionSchema.safeParse(item)
+    if (result.success) {
+      types.push(result.data)
+    }
+  }
+  return types
+}
 
 export const connectRequestPayloadSchema = z.object({
   hostDeviceId: z.string().min(1),

@@ -3,6 +3,32 @@ import type { TypertGatewayLike } from '../src/harness-api-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 
 describe('TypertGatewaySwitch', () => {
+  it('fails remote session calls after disconnect until reconnect or explicit exit', async () => {
+    const localInvoke = vi.fn(async (_request: Parameters<TypertGatewayLike['invoke']>[0]) => 'local')
+    const localDispatch = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'local' }))
+    const localOpen = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => (async function* () {})())
+    const gateway = { invoke: localInvoke, dispatchRpc: localDispatch, openWireStream: localOpen }
+    const target = new TypertGatewaySwitch(gateway)
+    target.install()
+    const remote = {
+      invoke: vi.fn(async () => 'remote'),
+      dispatch: vi.fn(async () => ({ ok: true as const, value: 'remote' })),
+      open: vi.fn(async () => (async function* () {})()),
+    }
+    target.selectRemote(remote, undefined, { deviceId: 'agy', name: 'AGY' })
+    target.disconnectRemote()
+    expect(target.status()).toMatchObject({ mode: 'remote', target: { deviceId: 'agy' } })
+    await expect(gateway.invoke({ namespace: 'session', method: 'create', args: {} })).rejects.toMatchObject({ code: 'remote/disconnected' })
+    await expect(gateway.dispatchRpc('session/create', {}, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { code: 'remote/disconnected' } })
+    await expect(gateway.openWireStream('session/follow', {}, new AbortController().signal)).rejects.toMatchObject({ code: 'remote/disconnected' })
+    expect(localInvoke).not.toHaveBeenCalled()
+    expect(localDispatch).not.toHaveBeenCalled()
+    expect(localOpen).not.toHaveBeenCalled()
+    target.selectRemote(remote)
+    await expect(gateway.invoke({ namespace: 'session', method: 'create', args: {} })).resolves.toBe('remote')
+    target.selectLocal()
+    await expect(gateway.invoke({ namespace: 'session', method: 'create', args: {} })).resolves.toBe('local')
+  })
   it('routes command catalog and execution to the selected Host while leaving other calls local', async () => {
     const localInvoke = vi.fn(async () => 'local')
     const remoteInvoke = vi.fn(async () => 'remote')

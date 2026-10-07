@@ -11,6 +11,7 @@ describe('plugin config', () => {
       forceRelay: false,
       reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
       codex: { enabled: true, binary: 'codex' },
+      cursor: { enabled: false, binary: 'agent' },
     })
     expect(resolveConfig({}, { DSH_REMOTE_TERMINAL_ENABLED: 'false' }).terminal.enabled).toBe(false)
   })
@@ -26,6 +27,56 @@ describe('plugin config', () => {
       codex: { enabled: true, binary: '/opt/codex/bin/codex' },
     })
     expect(() => resolveConfig({ codex: { enabled: true, allowedRoots: ['/workspace'] } } as never)).toThrow()
+  })
+
+  it('keeps Cursor ACP opt-in and accepts an explicit binary', () => {
+    expect(resolveConfig({ cursor: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: 'agent' },
+    })
+    expect(resolveConfig({ acp: { enabled: true } }, {})).toMatchObject({
+      cursor: { enabled: false, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ acp: {
+      enabled: true,
+      backends: [{ id: 'cursor', enabled: false }],
+    } }, {})).toMatchObject({
+      cursor: { enabled: false, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ acp: {
+      enabled: true,
+      backends: [{ id: 'cursor', enabled: true }],
+    } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: 'agent' },
+      acp: { enabled: true },
+    })
+    expect(resolveConfig({ cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' } }, {})).toMatchObject({
+      cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' },
+    })
+  })
+
+  it('preserves independent ACP launch options and scopes legacy Cursor configuration to Cursor', () => {
+    const legacy = resolveConfig({ cursor: { enabled: true, binary: '/custom/cursor' } }, {})
+    expect(legacy.acp?.backends.find(item => item.id === 'cursor')).toMatchObject({ enabled: true, command: '/custom/cursor' })
+    expect(legacy.acp?.backends.find(item => item.id === 'antigravity')?.enabled).toBe(false)
+    const config = resolveConfig({ acp: { enabled: false, backends: [
+      { id: 'cursor', enabled: false },
+      { id: 'antigravity', enabled: true, command: '/custom/agy', args: ['--custom'], cwd: '/host' },
+    ] } }, {})
+    expect(config.acp?.enabled).toBe(false)
+    expect(config.acp?.backends.find(item => item.id === 'antigravity')).toEqual({
+      id: 'antigravity', enabled: true, command: '/custom/agy', args: ['--custom'], cwd: '/host',
+    })
+  })
+
+  it('uses one CodeX backend setting and drops unimplemented Kimi', () => {
+    const config = resolveConfig({ codex: { enabled: true, binary: '/old/codex' }, acp: {
+      enabled: true, backends: [{ id: 'codex', enabled: false, command: '/new/codex' }, { id: 'kimi', enabled: true }],
+    } }, {})
+    expect(config.codex).toEqual({ enabled: false, binary: '/new/codex' })
+    expect(config.acp?.backends.some(item => item.id === 'kimi')).toBe(false)
+    expect(resolveConfig({ acp: { enabled: false, backends: [{ id: 'codex', enabled: true }] } }, {}).codex.enabled).toBe(false)
   })
 
   it('rejects insecure non-local servers and embedded credentials', () => {

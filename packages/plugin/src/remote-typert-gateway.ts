@@ -10,6 +10,7 @@ import {
 } from '@dsh-remote/protocol'
 import { uuidV7 } from './ids.js'
 import {
+  normalizeAssistantMessageStreamValue,
   normalizeLegacySessionGatewayValue,
   type SessionFormatCompatibility,
 } from './session-format-compat.js'
@@ -66,8 +67,11 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     const result = parseRpcResult(response)
     const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result)
     if (settingsResult !== undefined) return settingsResult
-    if (result.ok && this.compatibility === 'legacy-to-v3') {
-      return { ...result, value: normalizeLegacySessionGatewayValue(endpoint, result.value) }
+    if (result.ok) {
+      const value = this.compatibility === 'legacy-to-v3'
+        ? normalizeLegacySessionGatewayValue(endpoint, result.value)
+        : normalizeAssistantMessageStreamValue(endpoint, result.value)
+      return { ...result, value }
     }
     return result
   }
@@ -126,7 +130,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       for await (const value of queue) {
         yield this.compatibility === 'legacy-to-v3'
           ? normalizeLegacySessionGatewayValue(endpoint, value)
-          : value
+          : normalizeAssistantMessageStreamValue(endpoint, value)
       }
     } finally {
       signal.removeEventListener('abort', onAbort)

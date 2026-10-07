@@ -57,6 +57,25 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [ ] 完善账号过期、`DEVICE_OWNERSHIP_REQUIRED` 和 legacy owner 的显式恢复体验
 - [x] transport 关闭后 pending unary/stream 立即返回稳定错误，并清理 timer 和 abort listener
 
+## Agent ACP / Cursor adapter（进行中，实验）
+
+通用 `agent.acp.*` gateway + Cursor `agent acp` adapter。技术说明见
+[docs/acp-remote.md](docs/acp-remote.md)。**暂不**推进 Codex→ACP adapter。
+
+- [x] Host gateway、capability、allowlist、Cursor stdio adapter
+- [x] ACP Web 兼容边界：独立 API/事件、浏览器安全内存投影、远端历史分块与后端工作区 ID 隔离
+- [ ] 独立 Remote Web 的 AGY 接入与跨设备回归（在独立 Server 仓库完成 runtime 变更）
+- [x] ACP 后台初始化与 Harness Remote 启动隔离；各后端独立遵循启用开关、command/args/cwd，明确选择不可用后端时 fail closed
+- [x] Desktop Virtual Harness 与设置开关（默认关闭）
+- [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式
+- [x] inbound 订阅生命周期、`prompt_completed` catch-up、多轮气泡分离
+- [ ] 断线重连后 ACP stream 重建与会话 claim
+- [x] Android：重连保留 Cursor workspace/session，并自动 `stream.open`
+- [ ] Host 侧会话内可分页 History（不写 SessionStore）与 Android/Desktop 恢复
+- [ ] `session/load` / 会话列表与跨设备继续聊
+- [ ] 审批 / 提问真机矩阵与长工具轮次稳定性
+- [ ] Desktop ↔ 异机 Client 完整 E2E
+
 ## Codex Remote Session / History（已完成，实验发布）
 
 Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域。它在 Remote 工作区选择阶段
@@ -206,3 +225,8 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] 真机验证新旧 DSH 权限切换、Host 热开启/关闭终端、跨机重连、Windows 路径与 shell、长输出、IME/TalkBack/大字体
 - [ ] Android 图片/PDF/Office 只读预览真实 Host 与真机验收：大文件、转换超时/字体缺失、取消与断线、内存峰值、分页缩放
 - [ ] PDF 文本选择与 TalkBack 验收（当前已有受限文本叠层，真机未验证）
+
+## Android AGY (2026-10-07)
+
+- [x] AGY 工作区/会话 catalog、空白新会话、历史/图片、流式、标题刷新与重连恢复
+- [ ] Android AGY APK 与真机/加密跨设备回归；每目录超过 100 个会话的分页体验

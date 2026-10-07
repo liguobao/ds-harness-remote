@@ -14,6 +14,9 @@ import {
   parseRemoteMessage,
   remoteEvents,
   rpcMethods,
+  harnessTransportDescriptionSchema,
+  parseRemoteWorkspaceTypes,
+  remoteWorkspaceTypeDescriptionSchema,
   selectCapabilities,
   selectProtocolVersion,
 } from '../src/index.js'
@@ -124,5 +127,34 @@ describe('protocol envelope', () => {
     expect(() => outOfOrder.decode(frames[1]!)).toThrow('Secure fragment sequence is invalid.')
     const small = new TextEncoder().encode('small message')
     expect(new SecureMessageCodec().decode(encoder.encode(small)[0]!)).toEqual(small)
+  })
+
+  it('validates and safely parses structured workspace type descriptions', () => {
+    const valid = {
+      id: 'codex',
+      name: 'CodeX',
+      capability: 'codex.appserver.v1',
+      available: true,
+    }
+    expect(remoteWorkspaceTypeDescriptionSchema.parse(valid)).toEqual(valid)
+
+    // Valid transport description with workspaceTypes
+    const transportDesc = {
+      capabilities: ['transport.relay', 'codex.appserver.v1'],
+      workspaceTypes: [valid],
+    }
+    expect(harnessTransportDescriptionSchema.parse(transportDesc)).toEqual(transportDesc)
+
+    // Robust parsing of malformed workspaceTypes
+    expect(parseRemoteWorkspaceTypes(undefined)).toEqual([])
+    expect(parseRemoteWorkspaceTypes(null)).toEqual([])
+    expect(parseRemoteWorkspaceTypes('not an array')).toEqual([])
+    expect(parseRemoteWorkspaceTypes([
+      valid,
+      { id: 'bad' }, // missing name, capability, available
+      { id: 123, name: 'Invalid', capability: 'codex.appserver.v1', available: true },
+      null,
+      'just a string',
+    ])).toEqual([valid])
   })
 })

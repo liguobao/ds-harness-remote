@@ -49,6 +49,7 @@ describe('CodexVirtualHarness', () => {
           blank: false,
           cwd: '/workspace/repo',
           projections: {
+            kind: 'sequenced',
             values: {
               title: 'Native renderer',
               modelSelection: {
@@ -963,7 +964,7 @@ describe('CodexVirtualHarness', () => {
     expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).not.toHaveProperty('permissionPreset')
     expect(await target.dispatch('session/list', { args: {} }, new AbortController().signal))
       .toMatchObject({ value: { items: expect.arrayContaining([expect.objectContaining({
-        sessionId: 'codex:thr_full', projections: { asOfSeq: 0, values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: 'danger-full-access' }) }) },
+        sessionId: 'codex:thr_full', projections: { kind: 'sequenced', asOfSeq: 0, values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: 'danger-full-access' }) }) },
       })]) } })
     await target.close()
   })
@@ -1043,10 +1044,11 @@ describe('CodexVirtualHarness', () => {
       type: 'emit',
       event: 'api-session/added',
     })
-    const summary = (added.value as { args: Array<{ projections?: { values?: Record<string, unknown> } }> }).args[0]!
+    const summary = (added.value as { args: Array<{ projections?: { kind?: string; values?: Record<string, unknown> } }> }).args[0]!
     expect(summary).toMatchObject({
       sessionId: 'codex:new_1',
       projections: {
+        kind: 'sequenced',
         values: {
           title: null,
           sessionListMetadata: { blank: true, lastPromptAt: null },

@@ -42,7 +42,7 @@ type RemoteTransportPreference = 'lan' | 'p2p' | 'turn' | 'relay'
 
 interface RemoteStatus {
   mode: 'local' | 'remote'
-  backend?: 'harness' | 'codex'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity'
   target?: { deviceId: string; name: string }
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
@@ -58,7 +58,15 @@ interface RemoteStatus {
     phase: 'checking-host' | 'authorizing-peer' | 'probing' | 'connected'
     activeTransports?: RemoteTransportPreference[]
   }
-  remoteFeatures?: { commandList: boolean; fileViewer: boolean; terminal?: boolean; codex?: boolean }
+  remoteFeatures?: {
+    commandList: boolean
+    fileViewer: boolean
+    terminal?: boolean
+    codex?: boolean
+    cursor?: boolean
+    antigravity?: boolean
+    workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
+  }
   network?: RemoteNetworkDetails
   hostAuthorizationAvailable: boolean
   host?: {
@@ -152,10 +160,14 @@ interface CodexWorkspaceView extends RemoteWorkspaceView {
   sessionCount: number
 }
 
+interface CursorWorkspaceView extends RemoteWorkspaceView {
+  sessionCount: number
+}
+
 interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity'
   sessionId?: string
 }
 
@@ -165,7 +177,11 @@ function storedWorkspaceSelection(): RemoteWorkspaceSelection | undefined {
   try {
     const value = JSON.parse(raw) as Partial<RemoteWorkspaceSelection>
     if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') throw new Error('invalid')
-    if (value.backend !== undefined && value.backend !== 'harness' && value.backend !== 'codex') throw new Error('invalid')
+    if (value.backend !== undefined
+      && value.backend !== 'harness'
+      && value.backend !== 'codex'
+      && value.backend !== 'cursor'
+      && value.backend !== 'antigravity') throw new Error('invalid')
     if (value.sessionId !== undefined && typeof value.sessionId !== 'string') throw new Error('invalid')
     return value as RemoteWorkspaceSelection
   } catch {
@@ -184,6 +200,8 @@ interface WorkspacesClientServiceLike {
     subscribe(listener: () => void): () => void
   }
   connectWorkspace(workspaceId: string): Promise<string>
+  /** Harness 0.2 owns the main Session retain/release lifecycle here. */
+  openSession?(sessionId: string): void
 }
 
 interface SessionsClientServiceLike {
@@ -191,7 +209,13 @@ interface SessionsClientServiceLike {
     getSnapshot(): { ids: ReadonlyArray<string>; phase: string }
     subscribe(listener: () => void): () => void
   }
-  open(sessionId: string): void
+  open?(sessionId: string): void
+  retain?(target: string, options: { source: string }): { sessionId: string; ready?: Promise<unknown>; release(): void }
+}
+
+interface UiWorkspaceClientServiceLike {
+  connectWorkspace(workspaceId: string): Promise<string>
+  openSession(sessionId: string): void
 }
 
 function workspacesReady(snapshot: ReturnType<WorkspacesClientServiceLike['list']['getSnapshot']>): boolean {
@@ -214,6 +238,10 @@ interface PluginSettings {
     jitter?: number
   }
   codex?: {
+    enabled?: boolean
+    binary?: string
+  }
+  cursor?: {
     enabled?: boolean
     binary?: string
   }
@@ -286,8 +314,11 @@ const en = {
   serverUrlHint: 'HTTPS origin used for account authorization and encrypted relay.',
   serverSaved: 'Server address saved. Restart DSH to apply it.',
   codexRemote: 'Codex Remote',
-  codexRemoteHint: 'Expose Codex projects through this Host. Restart DSH after changing this setting.',
+  codexRemoteHint: 'Connect to CodeX projects on this Host.',
   codexSaved: 'Codex Remote setting saved. Restart DSH to apply it.',
+  cursorRemote: 'Cursor ACP adapter (experimental)',
+  cursorRemoteHint: 'Enable the Cursor `agent acp` backend for the Agent ACP gateway. Requires local `agent login`. Restart DSH after changing this setting.',
+  cursorSaved: 'Cursor ACP adapter setting saved. Restart DSH to apply it.',
   authorizeFromRemote: 'Sign in from the Remote entry in the sidebar, then return here to manage this device.',
   authorizationMethod: 'Authorization method',
   accountPassword: 'Account password',
@@ -394,11 +425,17 @@ const en = {
   exitRemote: 'Exit',
   addRemoteWorkspace: 'Add remote workspace',
   addCodexWorkspace: 'Add CodeX workspace',
+  addCursorWorkspace: 'Add Cursor workspace',
+  addAntigravityWorkspace: 'Add Antigravity workspace',
   noCodexWorkspaces: 'No CodeX workspaces yet.',
+  noCursorWorkspaces: 'No Cursor workspaces yet. Add a project directory to start.',
+  noAntigravityWorkspaces: 'No Antigravity workspaces yet. Add a project directory to start.',
   cancelAddWorkspace: 'Cancel',
   confirmAddWorkspace: 'Add and open',
   showAllWorkspaces: 'Show all DSH workspaces',
   showAllCodexWorkspaces: 'Show all CodeX workspaces',
+  showAllCursorWorkspaces: 'Show all Cursor workspaces',
+  showAllAntigravityWorkspaces: 'Show all Antigravity workspaces',
   remoteModeLabel: 'Remote mode · {name}',
   remoteNetworkP2p: 'P2P',
   remoteNetworkTurn: 'TURN',
@@ -457,11 +494,13 @@ const en = {
   allowControlCurrentDevice: 'Allow control of this device',
   allowControlDevice: 'Allow control of device',
   connectedClientCount: '{count} connected',
-  checkAcp: 'Check ACP',
+  checkAcp: 'Check backend',
   checkingAcp: 'Checking ACP…',
   acpAvailable: 'ACP available',
   acpUnavailable: 'ACP unavailable',
-  acpHint: 'Connect compatible coding agents through the Agent Client Protocol.',
+  agentBackends: 'More Coding Agents',
+  acpDocumentation: 'Read the documentation.',
+  acpHint: 'Connect through ACP. ',
   acpCheckPassed: 'Check passed',
   acpCheckFailed: 'Check failed',
   addAcp: 'Add ACP',
@@ -484,6 +523,8 @@ const en = {
   qrLoginExpired: 'This QR code expired. Refresh it to continue.',
   refreshQrCode: 'Refresh QR code',
   codexVirtualWorkspace: 'CodeX virtual workspace',
+  cursorVirtualWorkspace: 'Cursor virtual workspace',
+  antigravityVirtualWorkspace: 'Antigravity virtual workspace',
   codexVirtualSessions: 'Sessions',
 } as const
 
@@ -529,8 +570,11 @@ const zh: Record<keyof typeof en, string> = {
   serverUrlHint: '用于账号授权和加密中继的 HTTPS 地址。',
   serverSaved: 'Server 地址已保存，重启 DSH 后生效。',
   codexRemote: 'Codex Remote',
-  codexRemoteHint: '通过这台 Host 提供 Codex 项目；修改后需重启 DSH 生效。',
+  codexRemoteHint: '连接这台 Host 上的 CodeX 项目。',
   codexSaved: 'Codex Remote 设置已保存，重启 DSH 后生效。',
+  cursorRemote: 'Cursor ACP adapter（实验性）',
+  cursorRemoteHint: '为 Agent ACP gateway 启用 Cursor `agent acp` backend。需本机完成 `agent login`。修改后需重启 DSH 生效。',
+  cursorSaved: 'Cursor ACP adapter 设置已保存，重启 DSH 后生效。',
   authorizeFromRemote: '请从侧栏 Remote 入口登录，登录后可在这里管理当前设备。',
   authorizationMethod: '授权方式',
   accountPassword: '账号密码',
@@ -637,11 +681,17 @@ const zh: Record<keyof typeof en, string> = {
   exitRemote: '退出',
   addRemoteWorkspace: '添加远程工作区',
   addCodexWorkspace: '添加 CodeX 工作区',
+  addCursorWorkspace: '添加 Cursor 工作区',
+  addAntigravityWorkspace: '添加 Antigravity 工作区',
   noCodexWorkspaces: '还没有 CodeX 工作区。',
+  noCursorWorkspaces: '还没有 Cursor 工作区。添加项目目录即可开始。',
+  noAntigravityWorkspaces: '还没有 Antigravity 工作区。添加项目目录即可开始。',
   cancelAddWorkspace: '取消',
   confirmAddWorkspace: '确认并打开',
   showAllWorkspaces: '显示全部 DSH 工作区',
   showAllCodexWorkspaces: '显示全部 CodeX 工作区',
+  showAllCursorWorkspaces: '显示全部 Cursor 工作区',
+  showAllAntigravityWorkspaces: '显示全部 Antigravity 工作区',
   remoteModeLabel: '远程模式 · {name}',
   remoteNetworkP2p: 'P2P',
   remoteNetworkTurn: 'TURN',
@@ -700,11 +750,13 @@ const zh: Record<keyof typeof en, string> = {
   allowControlCurrentDevice: '允许控制当前设备',
   allowControlDevice: '允许控制设备',
   connectedClientCount: '{count} 台已连接',
-  checkAcp: '检测 ACP',
+  checkAcp: '检测后端',
   checkingAcp: '正在检测 ACP…',
   acpAvailable: 'ACP 可用',
   acpUnavailable: 'ACP 不可用',
-  acpHint: '通过 Agent Client Protocol 连接兼容的编码 Agent。',
+  agentBackends: '更多 Coding Agent',
+  acpDocumentation: '详细请查阅。',
+  acpHint: '通过 ACP 统一接入，',
   acpCheckPassed: '检测通过',
   acpCheckFailed: '检测失败',
   addAcp: '添加 ACP',
@@ -727,6 +779,8 @@ const zh: Record<keyof typeof en, string> = {
   qrLoginExpired: '二维码已过期，请刷新后重试。',
   refreshQrCode: '刷新二维码',
   codexVirtualWorkspace: 'CodeX 工作区',
+  cursorVirtualWorkspace: 'Cursor 工作区',
+  antigravityVirtualWorkspace: 'Antigravity 工作区',
   codexVirtualSessions: 'Sessions',
 }
 
@@ -763,7 +817,7 @@ function controlRouteUnavailableStatus(): RemoteStatus {
     controlUnavailable: true,
     connected: false,
     transport: 'Disconnected',
-    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false },
+    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, cursor: false, antigravity: false },
     hostAuthorizationAvailable: false,
   }
 }
@@ -1059,7 +1113,6 @@ window.__ModuleLoader__.load({
       const { t } = props
       const [open, setOpen] = React.useState(props.view === 'page')
       const [serverUrl, setServerUrl] = React.useState('')
-      const [codexEnabled, setCodexEnabled] = React.useState(true)
       const [portsBusy, setPortsBusy] = React.useState(false)
       const [previewPorts, setPreviewPorts] = React.useState('')
       const role = 'host' as const
@@ -1070,7 +1123,6 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [terminalEnabled, setTerminalEnabled] = React.useState(false)
       const [terminalBusy, setTerminalBusy] = React.useState(false)
-      const [codexBusy, setCodexBusy] = React.useState(false)
       const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
       const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
       const [acpChecking, setAcpChecking] = React.useState<Record<string, boolean>>({})
@@ -1094,7 +1146,6 @@ window.__ModuleLoader__.load({
       const applyView = (view: PluginSettingsView): void => {
         setSettingsView(view)
         setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
-        setCodexEnabled(view.config.codex?.enabled ?? true)
         setTerminalEnabled(view.config.terminal?.enabled ?? true)
         setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
         setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
@@ -1194,24 +1245,6 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const setCodexRemote = async (enabled: boolean): Promise<void> => {
-        const previous = codexEnabled
-        setCodexEnabled(enabled)
-        setCodexBusy(true)
-        setError(undefined)
-        setNotice(undefined)
-        try {
-          const view = await props.control<PluginSettingsView>('settings.codex.set', { enabled })
-          applyView(view)
-          setNotice({ key: 'codexSaved' })
-        } catch (reason) {
-          setCodexEnabled(previous)
-          setError(messageOf(reason))
-        } finally {
-          setCodexBusy(false)
-        }
-      }
-
       const setTerminalRemote = async (enabled: boolean): Promise<void> => {
         const previous = terminalEnabled
         const portsDraft = previewPorts
@@ -1249,6 +1282,7 @@ window.__ModuleLoader__.load({
       }
 
       const checkAcp = async (backend: string): Promise<void> => {
+        if (acpChecking[backend]) return
         setAcpChecking(current => ({ ...current, [backend]: true }))
         setAcpCheckResults(current => ({ ...current, [backend]: undefined }))
         setError(undefined)
@@ -1256,9 +1290,8 @@ window.__ModuleLoader__.load({
           const view = await props.control<PluginSettingsView>('settings.get')
           applyView(view)
           const available = view.acpAvailability?.[backend] === true
-          if (!available) {
-            const disabledView = await props.control<PluginSettingsView>('settings.acp.set', { backend, enabled: false })
-            applyView(disabledView)
+          if (!available && view.writable && view.config.acp?.backends?.some(item => item.id === backend && item.enabled !== false)) {
+            applyView(await props.control<PluginSettingsView>('settings.acp.set', { backend, enabled: false }))
           }
           setAcpCheckResults(current => ({ ...current, [backend]: available }))
           setNotice({ key: available ? 'acpAvailable' : 'acpUnavailable' })
@@ -1326,29 +1359,22 @@ window.__ModuleLoader__.load({
               onClick: () => void savePreviewPorts() }, t('developmentSave'))),
           React.createElement('small', null, t('previewPortsHint'))))
 
-      const codexSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('codexRemote')),
-          React.createElement('p', null, t('codexRemoteHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', disabled: busy || codexBusy || !writable,
-          'aria-label': t('codexRemote'),
-          checked: codexEnabled,
-          onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
-        }))
-
       const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
         React.createElement('summary', null,
           React.createElement('div', { className: 'dshRemoteAcpSummaryText' },
-            React.createElement('strong', null, 'ACP Agent backends'),
-            React.createElement('p', null, t('acpHint')))),
+            React.createElement('strong', null, t('agentBackends')),
+            React.createElement('p', null, t('acpHint'), React.createElement('a', {
+              href: 'https://github.com/liguobao/ds-harness-remote/blob/feat/cursor-remote/docs/acp-remote.md',
+              target: '_blank', rel: 'noopener noreferrer',
+              onClick: (event: Event) => event.stopPropagation(),
+            }, t('acpDocumentation'))))),
         React.createElement('div', { className: 'dshRemoteAcpList' }, acpBackends.map(item => React.createElement('div', { key: item.id, className: 'dshRemoteAuthorizationSetting' },
-          React.createElement('span', null, item.id),
+          React.createElement('div', null, React.createElement('strong', null, item.id === 'codex' ? 'CodeX' : item.id === 'cursor' ? 'Cursor' : item.id === 'antigravity' ? 'AGY' : item.id), null),
           React.createElement('span', { className: 'dshRemoteAcpCheckCell' },
             React.createElement('a', { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? ' isChecking' : acpCheckResults[item.id] === undefined ? '' : acpCheckResults[item.id] ? ' isPassed' : ' isFailed'}`, onClick: (event: Event) => { event.preventDefault(); void checkAcp(item.id) } },
               acpChecking[item.id] ? t('checkingAcp') : acpCheckResults[item.id] === undefined ? t('checkAcp') : t(acpCheckResults[item.id] ? 'acpCheckPassed' : 'acpCheckFailed'))),
-          ['codex', 'cursor', 'kimi'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
-          React.createElement('input', { type: 'checkbox', role: 'switch', checked: item.enabled && acpAvailability[item.id] === true, disabled: busy || !writable || !acpAvailability[item.id],
+          ['codex', 'cursor', 'antigravity'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
+          React.createElement('input', { type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled && acpAvailability[item.id] === true, 'aria-label': item.id, disabled: busy || !writable || acpChecking[item.id] === true || acpAvailability[item.id] !== true,
             onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason)))
           }))),
           addingAcp ? React.createElement('div', { className: 'dshRemoteAcpAddForm' },
@@ -1411,7 +1437,6 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         developmentSetting,
-        codexSetting,
         acpSetting,
         React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
           React.createElement('div', null,
@@ -1484,7 +1509,6 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         developmentSetting,
-        codexSetting,
         acpSetting,
         React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
         !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,
@@ -1514,17 +1538,27 @@ window.__ModuleLoader__.load({
       const [connectingHost, setConnectingHost] = React.useState<RemoteDevice | undefined>(undefined)
       const [workspaces, setWorkspaces] = React.useState<RemoteWorkspaceView[]>([])
       const [codexWorkspaces, setCodexWorkspaces] = React.useState<CodexWorkspaceView[]>([])
-      const [workspaceBackend, setWorkspaceBackend] = React.useState<'harness' | 'codex'>('harness')
+      const [cursorWorkspaces, setCursorWorkspaces] = React.useState<CursorWorkspaceView[]>([])
+      const [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState<CursorWorkspaceView[]>([])
+      const [workspaceBackend, setWorkspaceBackend] = React.useState<'harness' | 'codex' | 'cursor' | 'antigravity'>('harness')
       const [codexWorkspaceId, setCodexWorkspaceId] = React.useState<string | undefined>(undefined)
+      const [cursorWorkspaceId, setCursorWorkspaceId] = React.useState<string | undefined>(undefined)
+      const [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState<string | undefined>(undefined)
       const [directory, setDirectory] = React.useState<RemoteDirectoryListing | undefined>(undefined)
       const [path, setPath] = React.useState('')
       const [addingWorkspace, setAddingWorkspace] = React.useState(false)
       const [showAllWorkspaces, setShowAllWorkspaces] = React.useState(false)
       const [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(false)
       const [devicesOpen, setDevicesOpen] = React.useState(false)
+      const [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(false)
+      const [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(false)
       const workspaceListId = 'dsh-remote-workspace-list'
       const codexWorkspaceHeadingId = 'dsh-remote-codex-workspace-heading'
       const codexWorkspaceListId = 'dsh-remote-codex-workspace-list'
+      const cursorWorkspaceHeadingId = 'dsh-remote-cursor-workspace-heading'
+      const cursorWorkspaceListId = 'dsh-remote-cursor-workspace-list'
+      const antigravityWorkspaceHeadingId = 'dsh-remote-antigravity-workspace-heading'
+      const antigravityWorkspaceListId = 'dsh-remote-antigravity-workspace-list'
       const [busy, setBusy] = React.useState(false)
       const [needsAuthorization, setNeedsAuthorization] = React.useState(false)
       const [email, setEmail] = React.useState('')
@@ -1716,8 +1750,12 @@ window.__ModuleLoader__.load({
         setError(undefined)
         setConnectingHost(host)
         setCodexWorkspaces([])
+        setCursorWorkspaces([])
+        setAntigravityWorkspaces([])
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
+        setShowAllCursorWorkspaces(false)
+        setShowAllAntigravityWorkspaces(false)
         try {
           const result = await runConnectHostProgress(
             status?.preferredTransports,
@@ -1728,24 +1766,40 @@ window.__ModuleLoader__.load({
             progressRun,
             async () => {
               // The first request establishes the selected Host connection.
-              // Keep the optional CodeX probe on that same connection instead
-              // of racing two initial handshakes for one target.
+              // Keep optional probes on that same connection instead of racing
+              // multiple initial handshakes for one target.
               const nextWorkspaces = await props.control<RemoteWorkspaceView[]>('workspaces.list', {
                 targetDeviceId: host.deviceId,
               })
               const nextCodexWorkspaces = await props.control<CodexWorkspaceView[]>('codex.workspaces.list', {
                 targetDeviceId: host.deviceId,
               }).catch(() => [])
+              const nextCursorWorkspaces = await props.control<CursorWorkspaceView[]>('cursor.workspaces.list', {
+                targetDeviceId: host.deviceId,
+              }).catch(() => [])
+              const nextAntigravityWorkspaces = await props.control<CursorWorkspaceView[]>('antigravity.workspaces.list', {
+                targetDeviceId: host.deviceId,
+              }).catch(() => [])
               const nextStatus = await props.control<RemoteStatus>('status').catch(() => undefined)
               if (nextStatus !== undefined) setStatus(nextStatus)
-              return { workspaces: nextWorkspaces, codexWorkspaces: nextCodexWorkspaces, status: nextStatus }
+              return {
+                workspaces: nextWorkspaces,
+                codexWorkspaces: nextCodexWorkspaces,
+                cursorWorkspaces: nextCursorWorkspaces,
+                antigravityWorkspaces: nextAntigravityWorkspaces,
+                status: nextStatus,
+              }
             },
             result => connectedProgress(result.status),
           )
           setWorkspaces(result.workspaces)
           setCodexWorkspaces(result.codexWorkspaces)
+          setCursorWorkspaces(result.cursorWorkspaces)
+          setAntigravityWorkspaces(result.antigravityWorkspaces)
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
+          setCursorWorkspaceId(undefined)
+          setAntigravityWorkspaceId(undefined)
           setSelectedHost(host)
           setPath('')
           setAddingWorkspace(false)
@@ -1771,6 +1825,8 @@ window.__ModuleLoader__.load({
           })
           setDirectory(listing)
           setCodexWorkspaceId(undefined)
+          setCursorWorkspaceId(undefined)
+          setAntigravityWorkspaceId(undefined)
           setPath(listing.path)
         } catch (reason) {
           setError(messageOf(reason))
@@ -1779,12 +1835,16 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const startAddingWorkspace = (backend: 'harness' | 'codex'): void => {
+      const startAddingWorkspace = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity'): void => {
         setAddingWorkspace(true)
         setWorkspaceBackend(backend)
         setCodexWorkspaceId(undefined)
+        setCursorWorkspaceId(undefined)
+        setAntigravityWorkspaceId(undefined)
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
+        setShowAllCursorWorkspaces(false)
+        setShowAllAntigravityWorkspaces(false)
         setDirectory(undefined)
         setPath('')
         void browseDirectory()
@@ -1794,6 +1854,8 @@ window.__ModuleLoader__.load({
         setAddingWorkspace(false)
         setWorkspaceBackend('harness')
         setCodexWorkspaceId(undefined)
+        setCursorWorkspaceId(undefined)
+        setAntigravityWorkspaceId(undefined)
         setDirectory(undefined)
         setPath('')
       }
@@ -1811,10 +1873,16 @@ window.__ModuleLoader__.load({
             setSelectedHost(undefined)
             setWorkspaces([])
             setCodexWorkspaces([])
+            setCursorWorkspaces([])
+            setAntigravityWorkspaces([])
             setShowAllWorkspaces(false)
             setShowAllCodexWorkspaces(false)
+            setShowAllCursorWorkspaces(false)
+            setShowAllAntigravityWorkspaces(false)
             setWorkspaceBackend('harness')
             setCodexWorkspaceId(undefined)
+            setCursorWorkspaceId(undefined)
+            setAntigravityWorkspaceId(undefined)
             setPath('')
             setAddingWorkspace(false)
             setDirectory(undefined)
@@ -1830,15 +1898,29 @@ window.__ModuleLoader__.load({
                 setSelectedHost(undefined)
                 setWorkspaces([])
                 setCodexWorkspaces([])
+                setCursorWorkspaces([])
+                setAntigravityWorkspaces([])
                 setShowAllWorkspaces(false)
                 setShowAllCodexWorkspaces(false)
+                setShowAllCursorWorkspaces(false)
+                setShowAllAntigravityWorkspaces(false)
                 setWorkspaceBackend('harness')
                 setCodexWorkspaceId(undefined)
+                setCursorWorkspaceId(undefined)
+                setAntigravityWorkspaceId(undefined)
                 setPath('')
                 setAddingWorkspace(false)
                 setDirectory(undefined)
               } else {
                 setSelectedHost(nextSelectedHost)
+                void props.control<RemoteWorkspaceView[]>('workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setWorkspaces(w)).catch(() => undefined)
+                void props.control<CodexWorkspaceView[]>('codex.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setCodexWorkspaces(w)).catch(() => undefined)
+                void props.control<CursorWorkspaceView[]>('cursor.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setCursorWorkspaces(w)).catch(() => undefined)
+                void props.control<CursorWorkspaceView[]>('antigravity.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                  .then(w => setAntigravityWorkspaces(w)).catch(() => undefined)
               }
             }
           } catch {
@@ -1847,10 +1929,16 @@ window.__ModuleLoader__.load({
             setSelectedHost(undefined)
             setWorkspaces([])
             setCodexWorkspaces([])
+            setCursorWorkspaces([])
+            setAntigravityWorkspaces([])
             setShowAllWorkspaces(false)
             setShowAllCodexWorkspaces(false)
+            setShowAllCursorWorkspaces(false)
+            setShowAllAntigravityWorkspaces(false)
             setWorkspaceBackend('harness')
             setCodexWorkspaceId(undefined)
+            setCursorWorkspaceId(undefined)
+            setAntigravityWorkspaceId(undefined)
             setPath('')
             setAddingWorkspace(false)
             setDirectory(undefined)
@@ -1865,6 +1953,8 @@ window.__ModuleLoader__.load({
       const show = async (): Promise<void> => {
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
+        setShowAllCursorWorkspaces(false)
+        setShowAllAntigravityWorkspaces(false)
         setOpen(true)
         await refreshRemote()
       }
@@ -1881,10 +1971,16 @@ window.__ModuleLoader__.load({
         setSelectedHost(undefined)
         setWorkspaces([])
         setCodexWorkspaces([])
+        setCursorWorkspaces([])
+        setAntigravityWorkspaces([])
         setShowAllWorkspaces(false)
         setShowAllCodexWorkspaces(false)
+        setShowAllCursorWorkspaces(false)
+        setShowAllAntigravityWorkspaces(false)
         setWorkspaceBackend('harness')
         setCodexWorkspaceId(undefined)
+        setCursorWorkspaceId(undefined)
+        setAntigravityWorkspaceId(undefined)
         setDirectory(undefined)
         setPath('')
         setAddingWorkspace(false)
@@ -1957,16 +2053,26 @@ window.__ModuleLoader__.load({
 
       const openWorkspace = async (selection?:
         | { backend: 'harness'; path: string }
-        | { backend: 'codex'; path: string; workspaceId: string }): Promise<void> => {
+        | { backend: 'codex'; path: string; workspaceId: string }
+        | { backend: 'cursor'; path: string; workspaceId?: string }
+        | { backend: 'antigravity'; path: string; workspaceId?: string }): Promise<void> => {
         const targetBackend = selection?.backend ?? workspaceBackend
         const targetPath = (selection?.path ?? path).trim()
         const targetCodexWorkspaceId = selection?.backend === 'codex'
           ? selection.workspaceId
           : selection === undefined ? codexWorkspaceId : undefined
+        const targetCursorWorkspaceId = selection?.backend === 'cursor'
+          ? selection.workspaceId
+          : selection === undefined ? cursorWorkspaceId : undefined
+        const targetAntigravityWorkspaceId = selection?.backend === 'antigravity'
+          ? selection.workspaceId
+          : selection === undefined ? antigravityWorkspaceId : undefined
         const createWorkspace = selection === undefined && addingWorkspace
         if (selectedHost === undefined
           || targetPath === ''
-          || !createWorkspace && targetBackend === 'codex' && targetCodexWorkspaceId === undefined) return
+          || !createWorkspace && targetBackend === 'codex' && targetCodexWorkspaceId === undefined
+          || !createWorkspace && targetBackend === 'cursor' && targetCursorWorkspaceId === undefined && targetPath === ''
+          || !createWorkspace && targetBackend === 'antigravity' && targetAntigravityWorkspaceId === undefined && targetPath === '') return
         setBusy(true)
         setError(undefined)
         try {
@@ -1980,10 +2086,30 @@ window.__ModuleLoader__.load({
                 targetDeviceId: selectedHost.deviceId,
                 workspaceId: targetCodexWorkspaceId,
               })
-            : props.control<RemoteStatus>('workspace.open', {
-              targetDeviceId: selectedHost.deviceId,
-              path: targetPath,
-            }))
+            : targetBackend === 'cursor'
+              ? createWorkspace || targetCursorWorkspaceId === undefined
+                ? props.control<RemoteStatus>('cursor.workspace.create', {
+                  targetDeviceId: selectedHost.deviceId,
+                  path: targetPath,
+                })
+                : props.control<RemoteStatus>('cursor.workspace.open', {
+                  targetDeviceId: selectedHost.deviceId,
+                  workspaceId: targetCursorWorkspaceId,
+                })
+            : targetBackend === 'antigravity'
+              ? createWorkspace || targetAntigravityWorkspaceId === undefined
+                ? props.control<RemoteStatus>('antigravity.workspace.create', {
+                  targetDeviceId: selectedHost.deviceId,
+                  path: targetPath,
+                })
+                : props.control<RemoteStatus>('antigravity.workspace.open', {
+                  targetDeviceId: selectedHost.deviceId,
+                  workspaceId: targetAntigravityWorkspaceId,
+                })
+              : props.control<RemoteStatus>('workspace.open', {
+                targetDeviceId: selectedHost.deviceId,
+                path: targetPath,
+              }))
           setStatus(nextStatus)
           if (nextStatus.workspaceSelection !== undefined) {
             window.sessionStorage.setItem(pendingWorkspaceSelectionKey, JSON.stringify(nextStatus.workspaceSelection))
@@ -2000,7 +2126,27 @@ window.__ModuleLoader__.load({
         : t('remoteEntry')
       const visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3)
       const visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3)
-      const codexAvailable = status?.remoteFeatures?.codex === true
+      const visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3)
+      const visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3)
+      const workspaceTypeAvailable = (id: string, legacyAvailable: boolean | undefined): boolean => {
+        const workspaceTypes = status?.remoteFeatures?.workspaceTypes
+        // New Hosts expose the authoritative enabled-and-ready state through
+        // workspaceTypes. Only fall back to legacy booleans for old Hosts that
+        // do not send the structured list.
+        return workspaceTypes === undefined
+          ? legacyAvailable === true
+          : workspaceTypes.some(workspace => workspace.id === id && workspace.available)
+      }
+      const codexAvailable = workspaceTypeAvailable('codex', status?.remoteFeatures?.codex)
+      // ACP backends must be explicitly reported by the Host as enabled and
+      // ready. The legacy generic `agent.acp.v1` capability is insufficient
+      // to identify a particular backend and must not create a false group.
+      const cursorAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+        workspace => workspace.id === 'cursor' && workspace.available,
+      ) === true
+      const antigravityAvailable = status?.remoteFeatures?.workspaceTypes?.some(
+        workspace => workspace.id === 'antigravity' && workspace.available,
+      ) === true
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),
@@ -2233,7 +2379,13 @@ window.__ModuleLoader__.load({
                   : React.createElement('section', { className: 'dshRemoteBrowser', 'aria-label': t('chooseDirectory') },
                     React.createElement('div', { className: 'dshRemoteSectionHeading dshRemoteWorkspaceHeading' },
                       React.createElement('strong', null, t(addingWorkspace
-                        ? workspaceBackend === 'codex' ? 'addCodexWorkspace' : 'addRemoteWorkspace'
+                        ? workspaceBackend === 'codex'
+                          ? 'addCodexWorkspace'
+                          : workspaceBackend === 'cursor'
+                            ? 'addCursorWorkspace'
+                            : workspaceBackend === 'antigravity'
+                              ? 'addAntigravityWorkspace'
+                              : 'addRemoteWorkspace'
                         : 'existingWorkspaces')),
                       addingWorkspace
                         ? React.createElement('button', {
@@ -2276,7 +2428,7 @@ window.__ModuleLoader__.load({
                               type: 'button', key: workspace.workspaceId, disabled: busy,
                               className: workspaceBackend === 'harness' && path === workspace.path ? 'isSelected' : '',
                               'aria-pressed': workspaceBackend === 'harness' && path === workspace.path,
-                              onClick: () => { setWorkspaceBackend('harness'); setCodexWorkspaceId(undefined); setPath(workspace.path) },
+                              onClick: () => { setWorkspaceBackend('harness'); setCodexWorkspaceId(undefined); setCursorWorkspaceId(undefined); setPath(workspace.path) },
                               onDoubleClick: () => void openWorkspace({ backend: 'harness', path: workspace.path }),
                             }, React.createElement('img', { className: 'dshRemoteWorkspaceIcon', src: deepSeekWorkspaceIcon, alt: '', 'aria-hidden': true }),
                             React.createElement('span', null, workspace.title), React.createElement('small', null, workspace.path))),
@@ -2288,7 +2440,7 @@ window.__ModuleLoader__.load({
                               'aria-label': t('showAllWorkspaces'),
                               onClick: () => setShowAllWorkspaces(true),
                             }, React.createElement('span', { 'aria-hidden': true }, '…')))),
-                        !codexAvailable && codexWorkspaces.length === 0 ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        !codexAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                           React.createElement('div', {
                             id: codexWorkspaceHeadingId,
                             className: 'dshRemoteWorkspaceSourceHeading',
@@ -2319,6 +2471,7 @@ window.__ModuleLoader__.load({
                             onClick: () => {
                               setWorkspaceBackend('codex')
                               setCodexWorkspaceId(workspace.workspaceId)
+                              setCursorWorkspaceId(undefined)
                               setPath(workspace.path)
                             },
                             onDoubleClick: () => void openWorkspace({
@@ -2336,12 +2489,117 @@ window.__ModuleLoader__.load({
                             'aria-controls': codexWorkspaceListId,
                             'aria-label': t('showAllCodexWorkspaces'),
                             onClick: () => setShowAllCodexWorkspaces(true),
+                          }, React.createElement('span', { 'aria-hidden': true }, '…'))),
+                        !cursorAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                          React.createElement('div', {
+                            id: cursorWorkspaceHeadingId,
+                            className: 'dshRemoteWorkspaceSourceHeading',
+                          }, React.createElement('span', { className: 'dshRemoteWorkspaceSourceText' },
+                            React.createElement('strong', null, t('cursorVirtualWorkspace'))),
+                          !cursorAvailable ? null : React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteAddWorkspace',
+                            disabled: busy,
+                            title: t('addCursorWorkspace'),
+                            'aria-label': t('addCursorWorkspace'),
+                            onClick: () => startAddingWorkspace('cursor'),
+                          }, React.createElement('svg', {
+                            className: 'dshRemoteAddWorkspaceIcon', viewBox: '0 0 16 16', 'aria-hidden': true, focusable: false,
+                          }, React.createElement('path', { d: 'M8 3v10M3 8h10', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' })))),
+                          React.createElement('div', {
+                            id: cursorWorkspaceListId,
+                            className: 'dshRemoteDirectoryList dshRemoteCodexWorkspaceList',
+                            'aria-labelledby': cursorWorkspaceHeadingId,
+                          }, visibleCursorWorkspaces.length === 0
+                            ? React.createElement('p', null, t('noCursorWorkspaces'))
+                            : visibleCursorWorkspaces.map(workspace => React.createElement('button', {
+                            type: 'button',
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === 'cursor' && cursorWorkspaceId === workspace.workspaceId ? 'isSelected' : '',
+                            'aria-pressed': workspaceBackend === 'cursor' && cursorWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend('cursor')
+                              setCursorWorkspaceId(workspace.workspaceId)
+                              setCodexWorkspaceId(undefined)
+                              setAntigravityWorkspaceId(undefined)
+                              setPath(workspace.path)
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: 'cursor',
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId,
+                            }),
+                          }, React.createElement('img', { className: 'dshRemoteWorkspaceIcon', src: deepSeekWorkspaceIcon, alt: '', 'aria-hidden': true }),
+                          React.createElement('span', null, workspace.title),
+                          React.createElement('small', null, `${workspace.path} · ${workspace.sessionCount}`)))),
+                          cursorWorkspaces.length <= 3 || showAllCursorWorkspaces ? null : React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteWorkspaceMore',
+                            disabled: busy,
+                            'aria-controls': cursorWorkspaceListId,
+                            'aria-label': t('showAllCursorWorkspaces'),
+                            onClick: () => setShowAllCursorWorkspaces(true),
+                          }, React.createElement('span', { 'aria-hidden': true }, '…'))),
+                        !antigravityAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                          React.createElement('div', {
+                            id: antigravityWorkspaceHeadingId,
+                            className: 'dshRemoteWorkspaceSourceHeading',
+                          }, React.createElement('span', { className: 'dshRemoteWorkspaceSourceText' },
+                            React.createElement('strong', null, t('antigravityVirtualWorkspace'))),
+                          !antigravityAvailable ? null : React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteAddWorkspace',
+                            disabled: busy,
+                            title: t('addAntigravityWorkspace'),
+                            'aria-label': t('addAntigravityWorkspace'),
+                            onClick: () => startAddingWorkspace('antigravity'),
+                          }, React.createElement('svg', {
+                            className: 'dshRemoteAddWorkspaceIcon', viewBox: '0 0 16 16', 'aria-hidden': true, focusable: false,
+                          }, React.createElement('path', { d: 'M8 3v10M3 8h10', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' })))),
+                          React.createElement('div', {
+                            id: antigravityWorkspaceListId,
+                            className: 'dshRemoteDirectoryList dshRemoteCodexWorkspaceList',
+                            'aria-labelledby': antigravityWorkspaceHeadingId,
+                          }, visibleAntigravityWorkspaces.length === 0
+                            ? React.createElement('p', null, t('noAntigravityWorkspaces'))
+                            : visibleAntigravityWorkspaces.map(workspace => React.createElement('button', {
+                            type: 'button',
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === 'antigravity' && antigravityWorkspaceId === workspace.workspaceId ? 'isSelected' : '',
+                            'aria-pressed': workspaceBackend === 'antigravity' && antigravityWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend('antigravity')
+                              setAntigravityWorkspaceId(workspace.workspaceId)
+                              setCodexWorkspaceId(undefined)
+                              setCursorWorkspaceId(undefined)
+                              setPath(workspace.path)
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: 'antigravity',
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId,
+                            }),
+                          }, React.createElement('img', { className: 'dshRemoteWorkspaceIcon', src: deepSeekWorkspaceIcon, alt: '', 'aria-hidden': true }),
+                          React.createElement('span', null, workspace.title),
+                          React.createElement('small', null, `${workspace.path} · ${workspace.sessionCount}`)))),
+                          antigravityWorkspaces.length <= 3 || showAllAntigravityWorkspaces ? null : React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteWorkspaceMore',
+                            disabled: busy,
+                            'aria-controls': antigravityWorkspaceListId,
+                            'aria-label': t('showAllAntigravityWorkspaces'),
+                            onClick: () => setShowAllAntigravityWorkspaces(true),
                           }, React.createElement('span', { 'aria-hidden': true }, '…')))),
                     React.createElement('footer', { className: 'dshRemoteOpenBar' },
                       React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
                       React.createElement('button', {
                         type: 'button',
-                        disabled: busy || path.trim() === '' || !addingWorkspace && workspaceBackend === 'codex' && codexWorkspaceId === undefined,
+                        disabled: busy || path.trim() === ''
+                          || !addingWorkspace && workspaceBackend === 'codex' && codexWorkspaceId === undefined
+                          || !addingWorkspace && workspaceBackend === 'cursor' && cursorWorkspaceId === undefined && path === ''
+                          || !addingWorkspace && workspaceBackend === 'antigravity' && antigravityWorkspaceId === undefined && path === '',
                         onClick: () => void openWorkspace(),
                       }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
             notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),
@@ -2566,7 +2824,19 @@ window.__ModuleLoader__.load({
           'dshRemoteCodexTargetActive',
           status?.mode === 'remote' && status.backend === 'codex',
         )
-        return () => document.documentElement.classList.remove('dshRemoteCodexTargetActive')
+        document.documentElement.classList.toggle(
+          'dshRemoteCursorTargetActive',
+          status?.mode === 'remote' && status.backend === 'cursor',
+        )
+        document.documentElement.classList.toggle(
+          'dshRemoteAntigravityTargetActive',
+          status?.mode === 'remote' && status.backend === 'antigravity',
+        )
+        return () => {
+          document.documentElement.classList.remove('dshRemoteCodexTargetActive')
+          document.documentElement.classList.remove('dshRemoteCursorTargetActive')
+          document.documentElement.classList.remove('dshRemoteAntigravityTargetActive')
+        }
       }, [status?.mode, status?.backend])
 
       React.useEffect(() => {
@@ -2908,7 +3178,8 @@ window.__ModuleLoader__.load({
           if (!workspacesReady(workspaceSnapshot)
             || !workspaceSnapshot.items.some(workspace => workspace.workspaceId === pending.workspaceId)) return
           const sessionSnapshot = ctx.sessions.list.getSnapshot()
-          if (pending.backend === 'codex' && pending.sessionId !== undefined
+          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity'
+          if (isVirtualBackend && pending.sessionId !== undefined
             && sessionSnapshot.phase !== 'ready') return
 
           opening = true
@@ -2916,14 +3187,31 @@ window.__ModuleLoader__.load({
           unsubscribeSessions?.()
           unsubscribeWorkspaces = undefined
           unsubscribeSessions = undefined
-          const open = pending.backend === 'codex' && pending.sessionId !== undefined
+          // 0.2 separates Workspace data from UI navigation. Let its single
+          // mainReference owner release the previous selection on every open.
+          const navigation = ctx.get<UiWorkspaceClientServiceLike>('uiWorkspace')
+          const connectWorkspace = (workspaceId: string): Promise<string> => navigation !== undefined
+            ? navigation.connectWorkspace(workspaceId)
+            : ctx.workspaces.connectWorkspace(workspaceId)
+          const open = isVirtualBackend && pending.sessionId !== undefined
             ? sessionSnapshot.ids.includes(pending.sessionId)
               ? Promise.resolve(pending.sessionId)
-              : ctx.workspaces.connectWorkspace(pending.workspaceId)
-            : ctx.workspaces.connectWorkspace(pending.workspaceId)
+              : connectWorkspace(pending.workspaceId)
+            : connectWorkspace(pending.workspaceId)
           void open.then(async sessionId => {
             if (disposed) return
-            ctx.sessions.open(sessionId)
+            // Harness <= 0.1.6 exposed `sessions.open()`. Harness 0.2 moved
+            // main-view retention to the UI Workspace service, while the
+            // Session controller exposes `retain()` for other consumers.
+            if (navigation !== undefined) {
+              navigation.openSession(sessionId)
+            } else if (typeof ctx.workspaces.openSession === 'function') {
+              ctx.workspaces.openSession(sessionId)
+            } else if (typeof ctx.sessions.open === 'function') {
+              ctx.sessions.open(sessionId)
+            } else {
+              throw new Error('No supported Session open API is available.')
+            }
             window.sessionStorage.removeItem(pendingWorkspaceSelectionKey)
             await control('workspace.selection.consume', pending).catch(() => undefined)
           }).catch(reason => {

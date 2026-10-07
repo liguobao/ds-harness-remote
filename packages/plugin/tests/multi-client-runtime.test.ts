@@ -9,10 +9,117 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
+import { CodexRemoteDomain } from '../src/codex/domain.js'
+import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
+  it.each(['ready', 'disabled', 'protocol-failure', 'permission-denied', 'signed-out', 'account-failure', 'not-ready'] as const)(
+    'advertises CodeX workspace types over the authenticated channel only when %s', async scenario => {
+      const settings = { ...config(), codex: { enabled: scenario !== 'disabled', binary: '/test/codex' } }
+      const runtime = new HostPluginRuntime(settings, identities(), apiProxy({}), logger())
+      let ready = false
+      const app: CodexAppServerLike = {
+        start: vi.fn(async () => {
+          if (scenario === 'protocol-failure' || scenario === 'permission-denied') {
+            throw new CodexAppServerError('CODEX_START_FAILED', scenario)
+          }
+          ready = scenario !== 'not-ready'
+        }),
+        isReady: () => ready,
+        call: vi.fn(async method => {
+          if (method !== 'account/read') throw new Error('Capability discovery must not query projects or sessions.')
+          if (scenario === 'account-failure') throw new CodexAppServerError('CODEX_REQUEST_TIMEOUT', 'account unavailable')
+          return {
+            requiresOpenaiAuth: true,
+            account: scenario === 'signed-out' ? null : { type: 'chatgpt' },
+            projectPath: '/private/workspace', prompt: 'private prompt',
+            fileContent: 'private source', toolOutput: 'private output',
+          }
+        }),
+        respond: vi.fn(async () => undefined),
+        respondError: vi.fn(async () => undefined),
+        onInbound: () => () => undefined,
+        onUnavailable: () => () => undefined,
+        close: vi.fn(async () => { ready = false }),
+      }
+      const factory = vi.fn(() => app)
+      // Exercise the real domain startup/auth state machine with a controlled upstream.
+      ;(runtime as unknown as { codex: CodexRemoteDomain }).codex = new CodexRemoteDomain(settings.codex, logger(), factory)
+      const channel = fakeChannel('workspace-types', 'client-phone')
+      const describe = async () => {
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = channel.sent().find(message => message.type === 'rpc.response'
+            && (message.payload as RpcResponsePayload).requestId === request.id)
+          expect(response).toBeDefined()
+        })
+        return (response!.payload as RpcResponsePayload).result as { capabilities: string[]; workspaceTypes: unknown[] }
+      }
+      try {
+        await runtime.start()
+        await runtime.acceptAuthenticatedPeer(channel)
+        const result = await describe()
+        expect(result.capabilities).toEqual(scenario === 'ready'
+          ? ['harness.api.v1', 'harness.api.transfer.v1', 'codex.appserver.v1', 'codex.appserver.transfer.v1']
+          : ['harness.api.v1', 'harness.api.transfer.v1'])
+        expect(result.workspaceTypes).toEqual(scenario === 'ready'
+          ? [{ id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true }]
+          : [])
+        expect(JSON.stringify(result)).not.toMatch(/private|projectPath|prompt|fileContent|toolOutput/)
+        if (scenario === 'disabled') expect(factory).not.toHaveBeenCalled()
+        if (scenario === 'ready') {
+          expect(app.call).toHaveBeenCalledWith('account/read', { refreshToken: false }, 15_000)
+          // The advertisement must reflect a lost upstream immediately, without cached readiness.
+          ready = false
+          const disconnected = await describe()
+          expect(disconnected.workspaceTypes).toEqual([])
+          expect(disconnected.capabilities).not.toContain('codex.appserver.v1')
+          expect(disconnected.capabilities).not.toContain('codex.appserver.transfer.v1')
+        }
+      } finally { await runtime.close() }
+    },
+  )
+
+  it('starts the Harness Host without waiting for ACP and advertises enabled backend support during warmup', async () => {
+    const settings = { ...config(), serverUrl: 'https://example.invalid', acp: { enabled: true, backends: [
+      { id: 'antigravity', enabled: true, command: 'agy', args: [] },
+      { id: 'cursor', enabled: false, command: 'agent', args: ['acp'] },
+    ] } }
+    const runtime = new HostPluginRuntime(settings, { ...identities(), directory: '/tmp/dsh-remote-startup-test' } as IdentityStore, apiProxy({}), logger(), localGateway())
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const start = vi.fn()
+    const stop = vi.fn(async () => undefined)
+    const internal = runtime as unknown as {
+      acp: { start(): Promise<void> }
+      readHarnessVersion(): Promise<string>
+      createServerConnection(): unknown
+    }
+    vi.spyOn(internal.acp, 'start').mockReturnValue(pending)
+    vi.spyOn(internal, 'readHarnessVersion').mockResolvedValue('0.2.0-rc.1')
+    vi.spyOn(internal, 'createServerConnection').mockReturnValue({ start, stop, isOnline: () => true, lastError: () => undefined })
+    try {
+      await runtime.start()
+      expect(start).toHaveBeenCalledTimes(1)
+      const capabilities = runtime.diagnostics().capabilities
+      expect(capabilities).toContain('harness.remote.v3')
+      expect(capabilities).toContain('agent.acp.antigravity.v1')
+      expect(capabilities).not.toContain('agent.acp.cursor.v1')
+      expect(runtime.diagnostics().workspaceTypes).toEqual([{
+        id: 'antigravity', name: 'Antigravity', capability: 'agent.acp.antigravity.v1', available: false,
+      }])
+    } finally {
+      await runtime.close()
+      release()
+      await pending
+    }
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['0.1.5-rc.1', '0.2.0-rc.1'])('advertises ApiProxy alongside Session V3 on %s', async version => {
     const runtime = new HostPluginRuntime(
       config(),
@@ -365,6 +472,7 @@ function config(): ResolvedConfig {
     logLevel: 'error',
     reconnect: { enabled: false, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
     codex: { enabled: false, binary: 'codex' },
+    cursor: { enabled: false, binary: 'agent' },
   }
 }
 

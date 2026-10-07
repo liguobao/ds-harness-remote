@@ -192,6 +192,33 @@ requires Host confirmation; sending a prompt preserves the session's current pol
 Codex is enabled by default and can be turned off in the DeepSeek Remote settings card. Advanced
 configuration and implementation notes live in [Codex Remote technical notes](docs/codex-remote.md).
 
+## Experimental Agent ACP / Cursor workspaces
+
+Remote can also open Host-local Cursor Agent sessions through a backend-neutral Agent ACP gateway
+(`agent.acp.*`). Desktop reuses the native Workspace / Session / Composer shell; Android uses an
+in-memory Cursor workspace projection. Text prompts, streaming thought/message updates, cancel, and
+one-shot approvals are supported. Cursor image prompts are not supported. AGY workspaces accept
+PNG/JPEG/WebP/GIF images (8 MiB each, up to four per prompt) through a private Host temporary cache.
+AGY reads these files with its image tool; cached images can be restored with conversation history
+for up to 24 hours, unless the system clears temporary files earlier.
+
+AGY keeps the Web client compatible through the independent `agent.acp.*` API and events.
+Workspace discovery and history come from the Host over ACP; the client never reads local AGY files.
+The native UI projection stays in memory, with separate Cursor/AGY workspace IDs.
+Older AGY IDs using the Cursor prefix are rejected. Harness and Codex APIs remain unchanged. Independent Remote Web integration
+and cross-device AGY regression still need verification.
+
+ACP backends initialize in the background, so AGY/Cursor startup does not delay Harness Remote
+registration or Client initialization. `acp.enabled` gates the domain; each supported entry in
+`acp.backends` uses its own `enabled`, `command`, `args`, and optional `cwd`. Currently the gateway
+implements `cursor` and `antigravity`; other registry entries do not launch or advertise an adapter.
+An explicitly selected disabled or unavailable backend fails without routing to another backend.
+Configuration changes require a DSH restart.
+
+The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
+`agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:
+[ACP Remote / Agent adapter notes](docs/acp-remote.md).
+
 ## End-to-end encryption
 
 Harness business traffic is encrypted on the Client and decrypted only by the selected Host using
@@ -218,6 +245,7 @@ validation status.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
 - Codex Remote is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
+- Agent ACP / Cursor is optional and off by default; it follows the same encrypted Host permission boundary and a fixed method allowlist.
 - Removing a device revokes its credentials, membership, and active Remote connections.
 
 ## Documentation
@@ -225,6 +253,7 @@ validation status.
 - [Plugin guide](packages/plugin/README.md)
 - [dsh-TUI Remote guide](docs/dsh-tui.md)
 - [Codex Remote technical notes](docs/codex-remote.md)
+- [ACP Remote / Agent adapter notes](docs/acp-remote.md)
 - [Documentation index](docs/README.md)
 - [End-to-end encryption](docs/end-to-end-encryption.md)
 - [Network and transport](docs/network.md)
@@ -256,3 +285,11 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+Android also supports AGY workspaces through the independently enabled Antigravity ACP backend:
+Host catalog discovery, new conversations, durable history, live replies, title refresh, reconnect,
+and text/image prompts. PNG/JPEG/WebP/GIF images are limited to 8 MiB each and four per message;
+images use the Host's private temporary cache. See [Android notes](apps/android/README.md#agy-workspaces)
+for validation limits.
+
+Agent backend settings have one switch per backend: CodeX uses the existing App Server Remote domain, while Cursor and AGY use ACP adapters. CodeX is controlled by `acp.backends[id=codex].enabled` and `.command`; old `codex` settings are read only when no backend value exists. Kimi is not implemented and is omitted. Workspace entries appear only when the Host reports the backend ready. Backend switches apply immediately without restarting DSH.

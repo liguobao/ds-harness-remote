@@ -6,6 +6,15 @@ export function normalizeLegacySessionGatewayValue(endpoint: string, value: unkn
   return value
 }
 
+export function normalizeAssistantMessageStreamValue(endpoint: string, value: unknown): unknown {
+  if (endpoint === 'session/page' && isRecord(value)) return { ...value, records: normalizeRecords(value.records) }
+  if (endpoint === 'session/follow' && isRecord(value) && value.type === 'snapshot') {
+    return { ...value, records: normalizeRecords(value.records) }
+  }
+  if (endpoint === 'session/follow') return normalizeEntry(value)
+  return value
+}
+
 function normalizeFollowFrame(value: unknown): unknown {
   if (!isRecord(value)) return value
   if (value.type === 'snapshot') {
@@ -114,6 +123,10 @@ function normalizeEventType(value: unknown): unknown {
 
 function normalizeEventData(type: unknown, value: unknown): unknown {
   if (!isRecord(value)) return value
+  if (type === 'assistant/message' && Object.hasOwn(value, 'stream') && !Array.isArray(value.stream)) {
+    const { stream: _stream, ...rest } = value
+    return rest
+  }
   if (type === 'request/header') return normalizeRequestHeaderData(value)
   if (type === 'agent-preset/selected' && value.agentPreset === 'code') return { ...value, agentPreset: 'ptc' }
   if (type === 'user/message') return normalizeMessage(value)

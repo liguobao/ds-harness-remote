@@ -179,6 +179,28 @@ Web 和 Desktop 的审批控件显示所选 Codex 会话经 Host 确认的模式
 Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。高级配置和实现细节见
 [Codex Remote 技术说明](docs/codex-remote.md)。
 
+## 实验性 Agent ACP / Cursor 工作区
+
+Remote 也可通过后端无关的 Agent ACP gateway（`agent.acp.*`）打开 Host 本机的 Cursor Agent 会话。
+Desktop 复用原生 Workspace / Session / Composer；Android 使用内存中的 Cursor 工作区投影。支持文本
+Prompt、思考/正文流式更新、中断与一次性审批。Cursor 暂不支持图片 Prompt；AGY 工作区支持
+PNG/JPEG/WebP/GIF（每张 8 MiB、每次最多 4 张），图片保存到 Host 私有临时缓存，由 AGY 图片工具读取。
+历史中的图片可在 24 小时内恢复；系统提前清理 tmp 时图片将不可用。
+
+AGY 通过独立的 `agent.acp.*` 接口和事件保持 Web 客户端兼容，工作区发现和历史均通过 ACP
+从 Host 获取，客户端不读取本机 AGY 文件。原生 UI 投影只保留在内存中，Cursor/AGY 工作区 ID
+独立，不兼容使用 Cursor 前缀的旧 AGY ID；Harness 和 Codex 接口保持原有契约。独立 Remote Web 接入及 AGY
+跨设备回归仍待验证。
+
+ACP 后端在后台初始化，AGY/Cursor 启动不会阻塞 Harness Remote 注册或 Client 初始化。
+`acp.enabled` 控制整个域，`acp.backends` 中各已支持后端独立使用自己的 `enabled`、`command`、
+`args` 和可选 `cwd`。当前 gateway 实现 `cursor` 和 `antigravity`，其他注册项不会启动或声明 adapter。
+明确选中的后端关闭或不可用时直接返回错误，不会转发到另一个后端。配置修改后需要重启 DSH。
+
+Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.enabled`，在 Host 完成本机
+`agent login`（或配置 `CURSOR_API_KEY`）后重启 DSH。细节见
+[ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)。
+
 ## 端到端加密
 
 Harness 业务流量在 Client 加密，只能由选定的 Host 解密，固定使用
@@ -202,6 +224,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote 是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
+- Agent ACP / Cursor 是可选功能且默认关闭；遵循同一加密 Host 权限边界与固定方法白名单。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
 
 ## 文档
@@ -209,6 +232,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - [插件说明](packages/plugin/README.md)
 - [dsh-TUI Remote 使用指南](docs/dsh-tui.md)
 - [Codex Remote 技术说明](docs/codex-remote.md)
+- [ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)
 - [文档索引](docs/README.md)
 - [端到端加密](docs/end-to-end-encryption.md)
 - [网络与传输](docs/network.md)
@@ -239,3 +263,9 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+Android 也支持独立启用的 AGY 工作区：Host 目录与会话发现、新建对话、历史恢复、流式回复、
+标题刷新、重连及文字/图片 Prompt。PNG/JPEG/WebP/GIF 图片每张上限 8 MiB、每次最多四张，
+使用 Host 私有临时缓存。验证范围见 [Android 说明](apps/android/README.md#agy-workspaces)。
+
+Agent 后端设置统一为每个后端一个开关：CodeX 复用现有 App Server Remote 域，Cursor 和 AGY 使用 ACP adapter。CodeX 由 `acp.backends[id=codex].enabled` 和 `.command` 控制；旧 `codex` 配置仅在后端字段缺失时读取。Kimi 尚未实现，已移除。工作区入口仅在 Host 报告后端就绪时显示。后端开关保存后立即生效，无需重启 DSH。

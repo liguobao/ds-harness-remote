@@ -1,7 +1,9 @@
 import {
   createRpcError,
   createRpcResponse,
+  parseRemoteWorkspaceTypes,
   type RemoteMessage,
+  type RemoteWorkspaceTypeDescription,
   type RpcErrorPayload,
   type RpcRequestPayload,
 } from '@dsh-remote/protocol'
@@ -12,8 +14,8 @@ import type { HarnessApiBridge } from './harness-api-bridge.js'
 import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { SafeLogger } from './logging.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
+import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode } from './safe-error.js'
-import type { AcpGateway } from './acp.js'
 
 export { RpcError } from './safe-error.js'
 
@@ -49,8 +51,15 @@ const apiMethods = new Set([
   'codex.app.transfer.commit',
   'codex.app.transfer.read',
   'codex.app.transfer.close',
-  'acp.initialize', 'acp.session.new', 'acp.session.load', 'acp.session.prompt',
-  'acp.session.respond_permission', 'acp.session.cancel', 'acp.session.set_mode',
+  'agent.acp.call',
+  'agent.acp.respond',
+  'agent.acp.stream.open',
+  'agent.acp.stream.close',
+  'agent.acp.transfer.open',
+  'agent.acp.transfer.chunk',
+  'agent.acp.transfer.commit',
+  'agent.acp.transfer.read',
+  'agent.acp.transfer.close',
 ])
 
 export const HOST_CAPABILITIES = [
@@ -62,6 +71,7 @@ export const HOST_CAPABILITIES = [
   'codex.appserver.v1',
   'codex.appserver.transfer.v1',
   'agent.acp.v1',
+  'agent.acp.transfer.v1',
 ] as const
 
 export class RpcRouter {
@@ -75,8 +85,9 @@ export class RpcRouter {
     private readonly harnessRemote?: HarnessRemoteBridge,
     private readonly capabilities: () => readonly string[] = () => HOST_CAPABILITIES,
     private readonly codex?: CodexPeerBridge,
-    private readonly acp?: AcpGateway,
+    private readonly acp?: AcpPeerBridge,
     private readonly loopback?: LoopbackHost,
+    private readonly workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -85,6 +96,7 @@ export class RpcRouter {
       this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
+      this.acp?.closeAll(),
     ])
   }
 
@@ -105,8 +117,12 @@ export class RpcRouter {
     const startedAt = performance.now()
     try {
       const result = await this.invoke(request.payload.method, request.payload.params)
-      this.logger?.debug('host rpc ok', {
+      const subMethod = typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
+        ? String((request.payload.params as Record<string, unknown>).method)
+        : undefined
+      this.logger?.info('host rpc ok', {
         method: request.payload.method,
+        ...(subMethod ? { subMethod } : {}),
         durationMs: Math.round(performance.now() - startedAt),
       })
       return createRpcResponse(request.id, result)
@@ -128,7 +144,19 @@ export class RpcRouter {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        return { capabilities: [...this.capabilities()] }
+        const capabilities = [...this.capabilities()]
+        let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
+        if (this.workspaceTypes !== undefined) {
+          try {
+            workspaceTypes = parseRemoteWorkspaceTypes(this.workspaceTypes())
+          } catch {
+            workspaceTypes = []
+          }
+        }
+        return {
+          capabilities,
+          ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
+        }
       }
       case 'harness.api.call': return this.requireApiProxy().call(params)
       case 'harness.api.transfer.open': return this.requireApiProxy().openTransfer(params)
@@ -166,13 +194,15 @@ export class RpcRouter {
       case 'codex.app.transfer.commit': return this.requireCodex().commitTransfer(params)
       case 'codex.app.transfer.read': return this.requireCodex().readTransfer(params)
       case 'codex.app.transfer.close': return this.requireCodex().closeTransfer(params)
-      case 'acp.initialize': return this.requireAcp().initialize(params as any)
-      case 'acp.session.new': return this.requireAcp().sessionNew(params as any)
-      case 'acp.session.load': return this.requireAcp().sessionLoad(params as any)
-      case 'acp.session.prompt': return this.requireAcp().prompt(params as any, async () => undefined)
-      case 'acp.session.respond_permission': return this.requireAcp().respondPermission(params as any)
-      case 'acp.session.cancel': return this.requireAcp().cancel(params as any)
-      case 'acp.session.set_mode': return this.requireAcp().setMode(params as any)
+      case 'agent.acp.call': return this.requireAcp().call(params)
+      case 'agent.acp.respond': return this.requireAcp().respond(params)
+      case 'agent.acp.stream.open': return this.requireAcp().openStream(params)
+      case 'agent.acp.stream.close': return this.requireAcp().closeStream(params)
+      case 'agent.acp.transfer.open': return this.requireAcp().openTransfer(params)
+      case 'agent.acp.transfer.chunk': return this.requireAcp().appendTransfer(params)
+      case 'agent.acp.transfer.commit': return this.requireAcp().commitTransfer(params)
+      case 'agent.acp.transfer.read': return this.requireAcp().readTransfer(params)
+      case 'agent.acp.transfer.close': return this.requireAcp().closeTransfer(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
   }
@@ -191,16 +221,18 @@ export class RpcRouter {
     return this.harnessRemote
   }
 
-  private requireAcp(): AcpGateway {
-    if (!this.acp) throw new RpcError('CAPABILITY_NOT_SUPPORTED', 'ACP is not configured on this Host.')
-    return this.acp
-  }
-
   private requireCodex(): CodexPeerBridge {
     if (this.codex === undefined) {
       throw new RpcError('FEATURE_NOT_SUPPORTED', 'Codex Remote is disabled or unavailable on this Host.')
     }
     return this.codex
+  }
+
+  private requireAcp(): AcpPeerBridge {
+    if (this.acp === undefined) {
+      throw new RpcError('FEATURE_NOT_SUPPORTED', 'Agent ACP is disabled or unavailable on this Host.')
+    }
+    return this.acp
   }
 }
 

@@ -17,6 +17,18 @@ afterEach(async () => {
 })
 
 describe('PluginControlRuntime settings setup', () => {
+  it('applies backend settings to the running Host after persistence', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({ acp: { enabled: true, backends: [{ id: 'codex', enabled: false }] } })
+    const apply = vi.fn(async (config: ReturnType<typeof resolveConfig>) => {
+      expect(resolveConfig(settings.get()).codex.enabled).toBe(config.codex.enabled)
+    })
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, { setAgentBackends: apply } as unknown as HostAuthorizationControl))
+    await expect(handler('settings.acp.set', { backend: 'codex', enabled: true }, signal())).resolves.toMatchObject({ ok: true, value: { applies: 'live' } })
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply.mock.calls[0]?.[0].codex.enabled).toBe(true)
+  })
+
   it('coexists with a Remote Web UI that already owns /remote', async () => {
     const channels = new Set(['/remote'])
     const connection = {
@@ -98,6 +110,29 @@ describe('PluginControlRuntime settings setup', () => {
       value: { config: { codex: { enabled: false, binary: '/opt/codex' } } },
     })
     expect(settings.get()).toMatchObject({ codex: { enabled: false, binary: '/opt/codex' } })
+
+    await expect(handler('settings.acp.set', { backend: 'codex', enabled: true }, signal())).resolves.toMatchObject({ ok: true })
+    expect(resolveConfig(settings.get()).codex.enabled).toBe(true)
+    await handler('settings.acp.set', { backend: 'codex', enabled: false }, signal())
+    expect(resolveConfig(settings.get()).codex.enabled).toBe(false)
+
+    await expect(handler('settings.cursor.set', { enabled: true }, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { config: { cursor: { enabled: true, binary: 'agent' } } },
+    })
+    expect(settings.get()).toMatchObject({ cursor: { enabled: true, binary: 'agent' } })
+    expect(resolveConfig(settings.get()).acp?.backends.find(item => item.id === 'cursor')?.enabled).toBe(true)
+    await expect(handler('settings.acp.set', { backend: 'cursor', enabled: false }, signal())).resolves.toMatchObject({ ok: true })
+    const before = resolveConfig(settings.get()).acp!
+    const seed = structuredClone(settings.get()) as Config
+    await settings.replace({ ...seed, acp: { ...before, enabled: false } })
+    await expect(handler('settings.acp.set', { backend: 'antigravity', enabled: true }, signal())).resolves.toMatchObject({ ok: true })
+    const after = resolveConfig(settings.get()).acp!
+    expect(after.enabled).toBe(true)
+    expect(after.backends.find(item => item.id === 'antigravity')?.enabled).toBe(true)
+    expect(after.backends.find(item => item.id === 'cursor')?.enabled).toBe(false)
+    await expect(handler('settings.acp.set', { backend: 'unknown-backend', enabled: true }, signal())).resolves.toMatchObject({ ok: false })
+
   })
 
   it('exposes Host activity and starts a manual reconnect through loopback control', async () => {

@@ -13,6 +13,8 @@ import { ClientServerApi, HostServerApi } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
+import { codexBinaryCandidates } from './codex/domain.js'
+import { cursorBinaryCandidates } from './acp/gateway.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -84,6 +86,7 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.server.set') return ok(await this.setServer(payload))
       if (endpoint === 'settings.role.set') return ok(await this.setRole(payload))
       if (endpoint === 'settings.codex.set') return ok(await this.setCodex(payload))
+      if (endpoint === 'settings.cursor.set') return ok(await this.setCursor(payload))
       if (endpoint === 'settings.acp.set') return ok(await this.setAcp(payload))
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
@@ -229,13 +232,29 @@ export class PluginControlRuntime {
     if (typeof enabled !== 'boolean') {
       throw new ClientModeError('INVALID_MESSAGE', 'Codex Remote enabled must be a boolean.')
     }
+    return this.setAcp({ backend: 'codex', enabled })
+  }
+
+  private async setCursor(payload: unknown): Promise<PluginSettingsView> {
+    if (this.settings === undefined) {
+      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    }
+    const enabled = record(payload).enabled
+    if (typeof enabled !== 'boolean') {
+      throw new ClientModeError('INVALID_MESSAGE', 'Cursor Remote enabled must be a boolean.')
+    }
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({
       ...current,
-      codex: { ...current.codex, enabled },
+      cursor: { ...current.cursor, enabled },
+      acp: {
+        enabled: enabled || current.acp?.enabled === true,
+        backends: current.acp?.backends?.map(item => item.id === 'cursor' ? { ...item, enabled } : item),
+      },
     })
     await this.settings.replace(editableConfig(next))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async setAcp(payload: unknown): Promise<PluginSettingsView> {
@@ -245,9 +264,16 @@ export class PluginControlRuntime {
     const enabled = value.enabled
     if (typeof backend !== 'string' || typeof enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'ACP backend and enabled are required.')
     const current = resolveConfig(this.settings.get())
-    const backends = current.acp?.backends.map(item => item.id === backend ? { ...item, enabled } : item) ?? []
-    await this.settings.replace({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
-    return this.settingsView()
+    if (!current.acp?.backends.some(item => item.id === backend)) throw new ClientModeError('INVALID_MESSAGE', 'Unknown ACP backend.')
+    const backends = current.acp.backends.map(item => item.id === backend ? { ...item, enabled } : item)
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...(backend === 'cursor' ? { cursor: { ...current.cursor, enabled } } : {}),
+      ...(backend === 'codex' ? { codex: { ...current.codex, enabled } } : {}),
+      acp: { enabled: enabled || current.acp.enabled, backends },
+    })
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async addAcp(payload: unknown): Promise<PluginSettingsView> {
@@ -257,23 +283,25 @@ export class PluginControlRuntime {
       throw new ClientModeError('INVALID_MESSAGE', 'ACP name, command, and arguments are required.')
     }
     const current = resolveConfig(this.settings.get())
+    if (value.id === 'kimi') throw new ClientModeError('INVALID_MESSAGE', 'Kimi is not implemented.')
     if (current.acp?.backends.some(item => item.id === value.id)) throw new ClientModeError('INVALID_MESSAGE', 'ACP backend already exists.')
     const backends = [...(current.acp?.backends ?? []), { id: value.id, command: value.command, args: value.args, enabled: false }]
     const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
     await this.settings.replace(editableConfig(next))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async removeAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const id = record(payload).id
-    if (typeof id !== 'string' || ['codex', 'cursor', 'kimi'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
+    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
     const current = resolveConfig(this.settings.get())
     const backends = (current.acp?.backends ?? []).filter(item => item.id !== id)
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
-
   private async authorizeOwnedRole(
     serverUrl: string,
     sourceRole: 'host' | 'client',
@@ -325,7 +353,7 @@ export class PluginControlRuntime {
       writable: this.settings !== undefined,
       applies: 'restart',
       associations,
-      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, commandAvailable(item.command ?? '')])),
+      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, backendCommandAvailable(item.id, item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
     }
   }
@@ -366,6 +394,12 @@ export class PluginControlRuntime {
   }
 }
 
+function backendCommandAvailable(backend: string, command: string): boolean {
+  const candidates = backend === 'codex' ? codexBinaryCandidates(command)
+    : backend === 'cursor' || backend === 'antigravity' ? cursorBinaryCandidates(command) : [command]
+  return candidates.some(commandAvailable)
+}
+
 function commandAvailable(command: string): boolean {
   try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
 }
@@ -390,6 +424,10 @@ function editableConfig(config: ResolvedConfig): Config {
     codex: {
       enabled: config.codex.enabled,
       binary: config.codex.binary,
+    },
+    cursor: {
+      enabled: config.cursor.enabled,
+      binary: config.cursor.binary,
     },
     ...(config.acp === undefined ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }),
   }

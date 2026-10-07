@@ -353,6 +353,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
           return business(success({
             items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
             archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id),
+            pinnedSessionIds: [],
           }))
         }
         case 'workspace/create': return business(await this.createWorkspace(requestArg(args), signal))
@@ -615,6 +616,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       blank: options.blank,
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       projections: {
+        kind: 'sequenced',
         asOfSeq: options.asOfSeq ?? 0,
         values: {
           title: displayTitle(session),
@@ -658,6 +660,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       value: {
         items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
         archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id),
+        pinnedSessionIds: [],
       },
     })
     return queue.iterate(() => this.workspaceStreams.delete(queue))

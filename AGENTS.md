@@ -215,3 +215,49 @@ Host 限额仍生效。原生真机与真实跨设备文件预览验收尚待完
 该预览分支的全仓 check/生产 build、Android 197 测试、client-core 38 测试及本地 PDF 浏览器
 烟测通过；全仓 test 仍有既有 codex-domain Windows 平台假设的 3 个失败。原生 APK 构建在
 Expo CMake/Prefab 的 Windows 超长批处理路径处失败，不能视为已完成 APK 或真机验收。
+
+## AGY temporary image attachments (2026-10-07)
+
+按用户 2026-10-07 明确授权，AGY 图片 Prompt 可例外写入 Host 用户 tmp 下的专用私有缓存，
+不得写入项目目录或扩展为通用文件上传/写入 RPC。仅接受 PNG/JPEG/WebP/GIF，每张 8 MiB、
+每次最多 4 张，缓存总量上限 512 MiB。目录和文件仅 Host 用户可读，随机文件名、按会话隔离，
+拒绝路径越界及符号链接。图片保留 24 小时，在后续上传时清理；系统清理 tmp 后无法恢复图片。
+AGY 1.3.0 stream-json 仅接受 text，图片通过固定缓存目录的 `--add-dir` 和 `view_file` 读取；
+Remote 历史只恢复该 AGY 会话 transcript 引用且仍有效的缓存图片，不能读任意 Host 文件。
+Cursor 保持文字输入；不得把 AGY 图片缓存路径作为 Remote Workspace 展示。
+
+## ACP startup isolation (2026-10-07)
+
+ACP 使用 `config.acp` 后端注册表；当前 gateway 仅实现 Cursor/Antigravity adapter，各自遵循
+启用开关和 command/args/cwd，不按可执行文件名选择 adapter，不对明确选择的不可用后端降级。
+ACP 后台启动不得阻塞 Harness Remote 注册或 Client 初始化；能力声明表示启用的协议支持，
+`workspaceTypes.available` 表示实际就绪。关闭时清理正在启动的进程，禁止迟到初始化重新注册。
+
+## ACP Web compatibility and API isolation (2026-10-07)
+
+按用户要求，新增 AGY 工作区保持 Web 客户端兼容。ACP 的 RPC、stream、transfer 和事件
+统一保留在独立 `agent.acp.*` 数据面；不得把 ACP 方法加入 Harness ApiProxy/Typert allowlist
+或改变 Codex API。允许 Web/Desktop 用纯客户端内存投影复用原生 UI，不写入 DSH 持久化。
+`acp/virtual-harness.ts` 必须可用于浏览器，禁止依赖 Node filesystem、AGY 数据库或本机
+transcript fallback；工作区和历史只从 Host ACP 接口读取。新 AGY 工作区 ID 使用
+`antigravity:cwd:`，ID 生成和 catalog 投影必须显式指定 backend，不得默认生成 Cursor ID。
+不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无后端前缀的路径作为工作区 ID；旧通用 ACP capability 仅兼容
+Cursor，AGY 需独立 capability。含图片历史走有界 ACP transfer。
+独立 Remote Web runtime 仍在独立 Server 仓库，本仓库验证不等于跨站点或跨设备验收。
+
+本次兼容边界验证：Plugin/client-core 类型检查、Plugin build、DSH bundle 校验、浏览器
+platform bundle 与无 Node globals 的工作区/历史烟测通过；Plugin 相关 49 测试和 client-core
+44 测试通过。Plugin 全量为 360/361，通过外的既有 transcript-loader 测试依赖本机数据库并
+硬编码 Linux `/var/lib/dsh/workspace/ds-harness-remote` 路径，在本机 Mac 环境失败；未修改
+该 loader 或测试，不将全量 test 记为通过。
+
+## Android AGY workspaces (2026-10-07)
+
+Android 从 Host 的 AGY catalog 加载工作区与每目录最近 100 个会话，内存投影不写 DSH
+SessionStore/Workspace。History 和图片 Prompt 使用有界 ACP transfer；重连恢复历史/stream，
+完成回复后刷新标题。新建会话保持空白，不同 Host 的 ACP 内存状态不得互相复用。批量 catalog
+请求使用 `dsh/sessionList.prewarm=false` 避免每个目录启动一个空闲 CLI；选中目录仍可预热。
+Android check、286 测试、Hermes export 通过；真实 AGY CLI 的 in-process 恢复测试六项通过，
+未验证加密传输、APK 或 Android 真机 UI（本机无设备/Java runtime）。
+
+2026-10-07 Agent 后端设置：CodeX、Cursor、AGY 使用统一后端列表，Kimi 未实现并移除。后端开关保存后热更新对应进程与 capability，不重启 DSH 或关闭 Harness 加密连接；变化后端的流和待审批句柄失效，其他后端进程保留。Android 刷新工作区时重新探测后端就绪状态。

@@ -26,6 +26,7 @@
 - [自动安装指南](installation.zh.md)（[English](installation.md)）：安装命令、Windows 独立运行环境、服务账户、目录配置与卸载。
 - [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、ApiProxy/Typert carrier 兼容与排障。
 - [Codex Remote 技术说明](codex-remote.md)：说明 Codex 工作区展示、数据边界、配置、安全限制和当前验证状态。
+- [ACP Remote / Agent adapters](acp-remote.md)：说明 #65 Agent ACP gateway、Cursor adapter、allowlist 与配置。
 - [端到端加密](end-to-end-encryption.md)：解释 Noise IK、设备身份固定、密钥生命周期、Server 可见元数据、重放保护与安全边界。
 - [网络与传输](network.md)：解释出站连接、Control/Data plane、LAN/P2P/TURN/Relay 选路、NAT、降级、断线恢复与当前验证状态。
 - [版本兼容说明](compatibility.zh.md)（[English](compatibility.md)）：记录 Plugin 与各版本 DeepSeek Harness 的 carrier、Session 和 Desktop 兼容范围。

@@ -109,6 +109,21 @@ describe('RemoteClientCore', () => {
     await termination
   })
 
+  it('allows a per-call timeout longer than the client default', async () => {
+    vi.useFakeTimers()
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport, 1_000)
+    await client.connect()
+    const call = client.rpc('agent.acp.call', { method: 'session/prompt', params: {} }, undefined, 5_000)
+    const pending = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    await pending
+  })
+
   it('times out even when transport.send never settles', async () => {
     vi.useFakeTimers()
     const transport = new LoopbackTransport()
@@ -289,6 +304,28 @@ describe('Remote Host feature probing', () => {
       commandList: true,
       fileViewer: true,
     })
+  })
+
+  it('parses workspaceTypes from Host description and safely handles malformed values', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(encodeMessage(createRpcResponse(request.id, {
+      capabilities: ['harness.remote.v3', 'codex.appserver.v1'],
+      workspaceTypes: [
+        { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+        { id: 999 }, // malformed entry ignored
+      ],
+    })))
+
+    const features = await probing
+    expect(features.capabilities).toEqual(['harness.remote.v3', 'codex.appserver.v1'])
+    expect(features.workspaceTypes).toEqual([
+      { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+    ])
   })
 })
 

@@ -3,10 +3,11 @@ import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../s
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
 import { mergeHistoryAndLive, prependHistory } from '../src/state/message-helpers'
 
-const { proxy, transport, storage, authenticate } = vi.hoisted(() => ({
+const { proxy, transport, storage, authenticate, acp } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn() },
   authenticate: vi.fn(),
 }))
@@ -17,6 +18,10 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   connect = transport.connect
   close = transport.close
   hasCodex() { return false }
+  hasCursor = transport.hasCursor
+  hasAntigravity = transport.hasAntigravity
+  requireCursor() { return acp }
+  requireAntigravity() { return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -37,6 +42,11 @@ const page = (events: HistoryEntry[], throughSeq = 10) => ({ events, throughSeq,
 
 beforeEach(() => {
   vi.resetAllMocks()
+  transport.hasCursor.mockReturnValue(false)
+  transport.hasAntigravity.mockReturnValue(false)
+  acp.call.mockResolvedValue([])
+  acp.transferCall.mockResolvedValue({ events: [] })
+  acp.openStream.mockImplementation(async () => ({ streamId: 'acp-test', close: vi.fn(async () => undefined) }))
   useAppStore.setState({ ...useAppStore.getInitialState(), selectedSession: session, sessions: [session],
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
   proxy.sessionHistory.mockResolvedValue(page([]))
@@ -128,6 +138,23 @@ describe('session restore state machine', () => {
     expect(transport.connect).toHaveBeenCalledTimes(1)
     expect(proxy.sessionHistory).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
+  })
+  it.each(['cursor', 'antigravity'] as const)('restores %s once for overlapping reconnects and respects restoreSession=false', async backend => {
+    const selected = { ...session, sessionId: `${backend}:native-session`, nativeId: 'native-session', backend }
+    useAppStore.setState({ selectedSession: selected, sessions: [selected],
+      selectedDevice: { deviceId: 'host' } as never, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+    transport.hasCursor.mockReturnValue(backend === 'cursor')
+    transport.hasAntigravity.mockReturnValue(backend === 'antigravity')
+    const first = useAppStore.getState().reconnect()
+    const second = useAppStore.getState().reconnect()
+    expect(await first).toBe(true)
+    expect(await second).toBe(true)
+    expect(transport.connect).toHaveBeenCalledTimes(1)
+    expect(acp.openStream).toHaveBeenCalledTimes(1)
+    expect(acp.transferCall).toHaveBeenCalledTimes(backend === 'antigravity' ? 1 : 0)
+    expect(await useAppStore.getState().reconnect({ restoreSession: false })).toBe(true)
+    expect(acp.openStream).toHaveBeenCalledTimes(1)
+    expect(acp.transferCall).toHaveBeenCalledTimes(backend === 'antigravity' ? 1 : 0)
   })
   it('does not let an older turn-start reopen a completed turn', () => {
     useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 20, { turn: 1 })))
