@@ -27,6 +27,31 @@ function fakeAcp() {
 }
 
 describe('AcpVirtualHarness', () => {
+  it('keeps a new AGY follow empty and reuses only the requested blank session', async () => {
+    const client = { ...fakeAcp(),
+      listSessions: vi.fn(async () => [{ conversationId: 'old', title: 'Old history', createdAt: 1, updatedAt: 2 }]),
+      loadSessionHistory: vi.fn(async () => [{ type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: {} } }]),
+    }
+    client.createSession.mockResolvedValue({ sessionId: 'new', cwd: '/test' })
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+    const workspace = await target.selectOrCreateWorkspace('/test')
+    const signal = new AbortController().signal
+    const created = await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
+    expect(created).toMatchObject({ ok: true, value: { sessionId: 'acp:new' } })
+    const stream = await target.open('session/follow', { args: { request: { address: { kind: 'session', sessionId: 'acp:new' } } } }, signal)
+    const iterator = stream[Symbol.asyncIterator]()
+    expect((await iterator.next()).value).toMatchObject({ type: 'snapshot', header: { id: 'acp:new' }, records: [], cursor: -1 })
+    expect(client.loadSessionHistory).not.toHaveBeenCalled()
+    const calls = client.createSession.mock.calls.length
+    expect(await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId, sessionId: 'acp:new' } } }, signal))
+      .toMatchObject({ ok: true, value: { sessionId: 'acp:new' } })
+    expect(client.createSession.mock.calls).toHaveLength(calls)
+    expect(await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal))
+      .toMatchObject({ ok: false, error: { code: 'session-already-exists' } })
+    await iterator.return?.()
+    await target.close()
+  })
+
   it('creates a cwd workspace and session with cursor ids', async () => {
     const client = fakeAcp()
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })

@@ -18962,12 +18962,21 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
     const cwd2 = string3(request.cwd) ?? workspace?.path;
     if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    const requestedSessionId = string3(request.sessionId);
+    const reusable = requestedSessionId === void 0 ? void 0 : this.sessions.get(requestedSessionId);
+    if (reusable !== void 0 && reusable.cwd === cwd2 && reusable.blank && !reusable.running) {
+      return success2({ sessionId: reusable.sessionId });
+    }
     const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
+    if (this.backend === "antigravity" && this.sessions.has(`${ACP_SESSION_PREFIX}${created.sessionId}`)) {
+      return failure2("session-already-exists", "The backend returned an existing conversation for a new Session.");
+    }
     const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
     this.publishWorkspaceBaseline();
     const seq = this.nextProjectionSeq();
     this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
+    this.publishProjection(session.sessionId, "title", session.title ?? this.backendLabel(), seq);
     return success2({ sessionId: session.sessionId });
   }
   ensureSessionRegistered(sessionId) {
@@ -19037,7 +19046,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ sessionId });
   }
   async hydrateSession(session) {
-    if (this.backend !== "antigravity" || session.events.length > 0) return;
+    if (this.backend !== "antigravity" || session.blank || session.events.length > 0) return;
     let events = [];
     if (this.client.loadSessionHistory !== void 0) {
       try {
@@ -19113,7 +19122,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         isSeeded: false
       },
       cursor: cursor2,
-      nextTurn: 1,
+      nextTurn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)) + 1,
       records,
       hasMore: window.length > records.length,
       ...session.running ? { activeTurnId: "cursor-live" } : {},
@@ -19602,6 +19611,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   sessionSummary(session, asOfSeq) {
     return {
       sessionId: session.sessionId,
+      agentAvailable: true,
       running: session.running,
       blank: session.blank,
       cwd: session.cwd,
@@ -28957,8 +28967,9 @@ function resolveAntigravityBinary(preferred) {
   }
   return "agy";
 }
-var AntigravityAcpClient = class {
-  constructor(binary = "agy", logger, spawnAcp = (bin, args) => spawn4(bin, args, {
+var AntigravityAcpClient = class _AntigravityAcpClient {
+  constructor(binary = "agy", logger, spawnAcp = (bin, args, cwd2) => spawn4(bin, args, {
+    cwd: cwd2,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     env: process.env
@@ -28966,6 +28977,9 @@ var AntigravityAcpClient = class {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
+    this.cwd = options.cwd ?? process.cwd();
+    this.sessionWorker = options.sessionWorker === true;
+    this.initialConversationClaimed = options.conversationId !== void 0;
     this.skipPermissions = options.skipPermissions === true;
     this.activeConversationId = options.conversationId;
   }
@@ -28980,6 +28994,12 @@ var AntigravityAcpClient = class {
   startPromise;
   activeConversationId;
   skipPermissions;
+  sessionWorker;
+  initialConversationClaimed = false;
+  sessions = /* @__PURE__ */ new Map();
+  spare;
+  spareCwd;
+  cwd;
   currentPromptPending;
   start() {
     if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
@@ -28992,28 +29012,39 @@ var AntigravityAcpClient = class {
   isReady() {
     return this.ready;
   }
-  async restartForNewConversation() {
-    const child = this.process;
-    this.ready = false;
-    this.activeConversationId = void 0;
-    this.watcher?.stop();
-    this.watcher = void 0;
-    this.process = void 0;
-    if (child !== void 0 && child.exitCode === null && !child.killed) {
-      await new Promise((resolve5) => {
-        const timer = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve5();
-        }, 2e3);
-        timer.unref?.();
-        child.once("exit", () => {
-          clearTimeout(timer);
-          resolve5();
-        });
-        child.kill("SIGTERM");
-      });
-    }
-    await this.start();
+  prepareSession(conversationId, cwd2 = this.cwd) {
+    const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
+      skipPermissions: this.skipPermissions,
+      sessionWorker: true,
+      cwd: cwd2,
+      ...conversationId === void 0 ? {} : { conversationId }
+    });
+    worker.onInbound((frame) => {
+      for (const handler of this.inboundHandlers) handler(frame);
+    });
+    return worker.start().then(async () => {
+      if (this.closed) {
+        await worker.close();
+        throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
+      }
+      if (!worker.activeConversationId || conversationId !== void 0 && worker.activeConversationId !== conversationId) {
+        await worker.close();
+        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity initialized the wrong conversation.");
+      }
+      return worker;
+    }).catch(async (error) => {
+      await worker.close();
+      throw error;
+    });
+  }
+  warmNextSession(cwd2 = this.cwd) {
+    if (this.sessionWorker || this.closed || this.spare !== void 0) return;
+    const spare = this.prepareSession(void 0, cwd2);
+    this.spareCwd = cwd2;
+    this.spare = spare;
+    void spare.catch(() => {
+      if (this.spare === spare) this.spare = void 0;
+    });
   }
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
@@ -29032,12 +29063,38 @@ var AntigravityAcpClient = class {
       };
     }
     if (method === "session/new") {
-      if (this.activeConversationId !== void 0) await this.restartForNewConversation();
-      const sessionId = this.activeConversationId || `sess_${Date.now()}`;
-      return { sessionId };
+      if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A prompt is in progress.");
+      const cwd2 = typeof params?.cwd === "string" ? params.cwd : this.cwd;
+      if (!this.initialConversationClaimed && this.activeConversationId !== void 0 && cwd2 === this.cwd) {
+        this.initialConversationClaimed = true;
+        this.warmNextSession(cwd2);
+        return { sessionId: this.activeConversationId };
+      }
+      const cached = this.spare;
+      const pending = cached !== void 0 && this.spareCwd === cwd2 ? cached : this.prepareSession(void 0, cwd2);
+      if (cached !== void 0 && this.spareCwd !== cwd2) void cached.then((worker2) => worker2.close()).catch(() => void 0);
+      this.spare = void 0;
+      const worker = await pending;
+      const sessionId2 = worker.activeConversationId;
+      if (sessionId2 === this.activeConversationId || this.sessions.has(sessionId2)) {
+        await worker.close();
+        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity reused an existing conversation for session/new.");
+      }
+      this.sessions.set(sessionId2, worker);
+      this.warmNextSession(cwd2);
+      return { sessionId: sessionId2 };
+    }
+    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : void 0;
+    if (!this.sessionWorker && sessionId !== void 0 && sessionId !== this.activeConversationId) {
+      let worker = this.sessions.get(sessionId);
+      if (worker === void 0) {
+        worker = await this.prepareSession(sessionId);
+        this.sessions.set(sessionId, worker);
+      }
+      return worker.call(method, params, timeoutMs);
     }
     if (method === "session/load") {
-      const sessionId = params?.sessionId ?? this.activeConversationId ?? `sess_${Date.now()}`;
+      if (sessionId !== this.activeConversationId) throw new AntigravityAcpError("SESSION_MISMATCH", "The process is bound to another conversation.");
       return { sessionId };
     }
     if (method === "session/cancel") {
@@ -29071,6 +29128,11 @@ var AntigravityAcpClient = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    const spare = this.spare;
+    this.spare = void 0;
+    void spare?.then((worker) => worker.close()).catch(() => void 0);
+    await Promise.all([...this.sessions.values()].map((worker) => worker.close()));
+    this.sessions.clear();
     this.ready = false;
     if (this.watcher) {
       this.watcher.stop();
@@ -29109,7 +29171,7 @@ var AntigravityAcpClient = class {
     if (this.skipPermissions) {
       args.push("--dangerously-skip-permissions");
     }
-    const child = this.spawnAcp(bin, args);
+    const child = this.spawnAcp(bin, args, this.cwd);
     this.process = child;
     this.stdoutBuffer = Buffer5.alloc(0);
     this.stderrBytes = 0;
@@ -29179,6 +29241,7 @@ var AntigravityAcpClient = class {
     try {
       await initPromise;
       this.ready = true;
+      this.warmNextSession();
       this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
     } catch (err) {
       child.kill("SIGTERM");

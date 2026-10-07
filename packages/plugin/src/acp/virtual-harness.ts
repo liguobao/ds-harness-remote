@@ -410,12 +410,21 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const workspace = workspaceId === undefined ? undefined : this.workspaceById.get(workspaceId)
     const cwd = string(request.cwd) ?? workspace?.path
     if (cwd === undefined) return failure('workspace-not-found', 'The Cursor virtual Workspace was not found.')
+    const requestedSessionId = string(request.sessionId)
+    const reusable = requestedSessionId === undefined ? undefined : this.sessions.get(requestedSessionId)
+    if (reusable !== undefined && reusable.cwd === cwd && reusable.blank && !reusable.running) {
+      return success({ sessionId: reusable.sessionId })
+    }
     const created = await this.client.createSession(cwd, 'agent', this.backend, signal)
+    if (this.backend === 'antigravity' && this.sessions.has(`${ACP_SESSION_PREFIX}${created.sessionId}`)) {
+      return failure('session-already-exists', 'The backend returned an existing conversation for a new Session.')
+    }
     const session = this.registerSession(created.sessionId, cwd, workspace?.title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
     this.publishWorkspaceBaseline()
     const seq = this.nextProjectionSeq()
     this.emitRemoteEvent('api-session/added', [this.sessionSummary(session, seq)])
+    this.publishProjection(session.sessionId, 'title', session.title ?? this.backendLabel(), seq)
     return success({ sessionId: session.sessionId })
   }
 
@@ -492,7 +501,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hydrateSession(session: AcpSessionState): Promise<void> {
-    if (this.backend !== 'antigravity' || session.events.length > 0) return
+    if (this.backend !== 'antigravity' || session.blank || session.events.length > 0) return
     let events: unknown[] = []
     if (this.client.loadSessionHistory !== undefined) {
       try {
@@ -576,7 +585,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         isSeeded: false,
       },
       cursor,
-      nextTurn: 1,
+      nextTurn: Math.max(0, ...session.events.map(entry => isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0)) + 1,
       records,
       hasMore: window.length > records.length,
       ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
@@ -1135,6 +1144,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private sessionSummary(session: AcpSessionState, asOfSeq: number): JsonRecord {
     return {
       sessionId: session.sessionId,
+      agentAvailable: true,
       running: session.running,
       blank: session.blank,
       cwd: session.cwd,

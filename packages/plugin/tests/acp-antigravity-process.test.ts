@@ -89,7 +89,7 @@ describe('AntigravityAcpClient', () => {
         })}\n`)
       }, 10)
       return fake.child
-    })
+    }, { cwd: '/test' })
 
     const inbound = vi.fn()
     client.onInbound(inbound)
@@ -171,6 +171,41 @@ describe('AntigravityAcpClient', () => {
     expect(client.isReady()).toBe(false)
   })
 
+  it('uses warmed distinct conversations and routes prompts back to their own process', async () => {
+    const processes: ReturnType<typeof fakeProcess>[] = []
+    const messages: Array<{ process: number; content: string }> = []
+    const client = new AntigravityAcpClient('agy', logger(), (_bin, args, cwd) => {
+      const fake = fakeProcess()
+      const index = processes.push(fake) - 1
+      const id = `conversation-${index}`
+      expect(cwd).toBe('/test')
+      expect(args).not.toContain('--conversation')
+      fake.stdin.on('data', chunk => {
+        const payload = JSON.parse(String(chunk))
+        messages.push({ process: index, content: payload.message.content })
+        fake.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: id, status: 'SUCCESS' } }) + '\n')
+      })
+      queueMicrotask(() => fake.stdout.write(JSON.stringify({ event: 'init', conversation_id: id }) + '\n'))
+      return fake.child
+    }, { cwd: '/test' })
+    await client.start()
+    const first = await client.call('session/new', { cwd: '/test' }) as { sessionId: string }
+    await Promise.resolve()
+    const beforeCreate = processes.length
+    const second = await client.call('session/new', { cwd: '/test' }) as { sessionId: string }
+    expect(first.sessionId).toBe('conversation-0')
+    expect(second.sessionId).toBe('conversation-1')
+    expect(processes[0]!.child.kill).not.toHaveBeenCalled()
+    // The create claims process 1; only the next spare is spawned afterwards.
+    expect(processes.length).toBe(beforeCreate + 1)
+    await client.call('session/prompt', { sessionId: second.sessionId, prompt: [{ type: 'text', text: 'new' }] })
+    await client.call('session/prompt', { sessionId: first.sessionId, prompt: [{ type: 'text', text: 'old' }] })
+    expect(messages).toEqual([{ process: 1, content: 'new' }, { process: 0, content: 'old' }])
+    await client.close()
+    expect(processes[0]!.child.kill).toHaveBeenCalled()
+    expect(processes[1]!.child.kill).toHaveBeenCalled()
+  })
+
   it('cancels pending prompt cleanly', async () => {
     const fake = fakeProcess()
     const client = new AntigravityAcpClient('agy', logger(), () => {
@@ -233,7 +268,7 @@ describe('AntigravityAcpClient', () => {
         proc.stdout.write(Buffer.from(JSON.stringify({ event: 'init', conversation_id: 'conv-opt-1' }) + '\n'))
       }, 10)
       return proc.child
-    }, { skipPermissions: true, conversationId: 'conv-opt-1' })
+    }, { skipPermissions: true, conversationId: 'conv-opt-1', sessionWorker: true })
 
     await client.start()
     expect(passedArgs).toContain('--dangerously-skip-permissions')

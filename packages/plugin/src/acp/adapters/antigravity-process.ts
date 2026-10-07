@@ -16,7 +16,7 @@ const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
 
-export type SpawnAntigravityAcp = (binary: string, args: string[]) => ChildProcessWithoutNullStreams
+export type SpawnAntigravityAcp = (binary: string, args: string[], cwd?: string) => ChildProcessWithoutNullStreams
 
 export class AntigravityAcpError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {
@@ -39,6 +39,9 @@ export function resolveAntigravityBinary(preferred?: string): string {
 export interface AntigravityAcpClientOptions {
   skipPermissions?: boolean
   conversationId?: string
+  /** Internal process bound to one conversation. */
+  sessionWorker?: boolean
+  cwd?: string
 }
 
 /**
@@ -57,6 +60,12 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private startPromise?: Promise<void>
   private activeConversationId?: string
   private readonly skipPermissions: boolean
+  private readonly sessionWorker: boolean
+  private initialConversationClaimed = false
+  private readonly sessions = new Map<string, AntigravityAcpClient>()
+  private spare?: Promise<AntigravityAcpClient>
+  private spareCwd?: string
+  private readonly cwd: string
   private currentPromptPending?: {
     sessionId: string
     resolve: (result: unknown) => void
@@ -67,13 +76,17 @@ export class AntigravityAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string = 'agy',
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args) => spawn(bin, args, {
+    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args, cwd) => spawn(bin, args, {
+      cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: process.env,
     }),
     options: AntigravityAcpClientOptions = {},
   ) {
+    this.cwd = options.cwd ?? process.cwd()
+    this.sessionWorker = options.sessionWorker === true
+    this.initialConversationClaimed = options.conversationId !== undefined
     this.skipPermissions = options.skipPermissions === true
     this.activeConversationId = options.conversationId
   }
@@ -87,22 +100,34 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   isReady(): boolean { return this.ready }
 
-  private async restartForNewConversation(): Promise<void> {
-    const child = this.process
-    this.ready = false
-    this.activeConversationId = undefined
-    this.watcher?.stop()
-    this.watcher = undefined
-    this.process = undefined
-    if (child !== undefined && child.exitCode === null && !child.killed) {
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { child.kill('SIGKILL'); resolve() }, 2_000)
-        timer.unref?.()
-        child.once('exit', () => { clearTimeout(timer); resolve() })
-        child.kill('SIGTERM')
-      })
-    }
-    await this.start()
+  private prepareSession(conversationId?: string, cwd = this.cwd): Promise<AntigravityAcpClient> {
+    const worker = new AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
+      skipPermissions: this.skipPermissions,
+      sessionWorker: true,
+      cwd,
+      ...(conversationId === undefined ? {} : { conversationId }),
+    })
+    worker.onInbound(frame => { for (const handler of this.inboundHandlers) handler(frame) })
+    return worker.start().then(async () => {
+      if (this.closed) {
+        await worker.close()
+        throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
+      }
+      if (!worker.activeConversationId || (conversationId !== undefined && worker.activeConversationId !== conversationId)) {
+        await worker.close()
+        throw new AntigravityAcpError('SESSION_MISMATCH', 'Antigravity initialized the wrong conversation.')
+      }
+      return worker
+    }).catch(async error => { await worker.close(); throw error })
+  }
+
+  private warmNextSession(cwd = this.cwd): void {
+    if (this.sessionWorker || this.closed || this.spare !== undefined) return
+    const spare = this.prepareSession(undefined, cwd)
+    this.spareCwd = cwd
+    this.spare = spare
+    // Observe startup failures even when nobody has requested the spare yet.
+    void spare.catch(() => { if (this.spare === spare) this.spare = undefined })
   }
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
@@ -124,13 +149,40 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/new') {
-      if (this.activeConversationId !== undefined) await this.restartForNewConversation()
-      const sessionId = this.activeConversationId || `sess_${Date.now()}`
+      if (this.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A prompt is in progress.')
+      const cwd = typeof (params as Record<string, unknown>)?.cwd === 'string' ? (params as Record<string, unknown>).cwd as string : this.cwd
+      if (!this.initialConversationClaimed && this.activeConversationId !== undefined && cwd === this.cwd) {
+        this.initialConversationClaimed = true
+        this.warmNextSession(cwd)
+        return { sessionId: this.activeConversationId }
+      }
+      const cached = this.spare
+      const pending = cached !== undefined && this.spareCwd === cwd ? cached : this.prepareSession(undefined, cwd)
+      if (cached !== undefined && this.spareCwd !== cwd) void cached.then(worker => worker.close()).catch(() => undefined)
+      this.spare = undefined
+      const worker = await pending
+      const sessionId = worker.activeConversationId!
+      if (sessionId === this.activeConversationId || this.sessions.has(sessionId)) {
+        await worker.close()
+        throw new AntigravityAcpError('SESSION_MISMATCH', 'Antigravity reused an existing conversation for session/new.')
+      }
+      this.sessions.set(sessionId, worker)
+      this.warmNextSession(cwd)
       return { sessionId }
     }
 
+    const sessionId = typeof (params as Record<string, unknown>)?.sessionId === 'string'
+      ? (params as Record<string, unknown>).sessionId as string : undefined
+    if (!this.sessionWorker && sessionId !== undefined && sessionId !== this.activeConversationId) {
+      let worker = this.sessions.get(sessionId)
+      if (worker === undefined) {
+        worker = await this.prepareSession(sessionId)
+        this.sessions.set(sessionId, worker)
+      }
+      return worker.call(method, params, timeoutMs)
+    }
     if (method === 'session/load') {
-      const sessionId = (params as Record<string, unknown>)?.sessionId ?? this.activeConversationId ?? `sess_${Date.now()}`
+      if (sessionId !== this.activeConversationId) throw new AntigravityAcpError('SESSION_MISMATCH', 'The process is bound to another conversation.')
       return { sessionId }
     }
 
@@ -174,6 +226,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    const spare = this.spare
+    this.spare = undefined
+    void spare?.then(worker => worker.close()).catch(() => undefined)
+    await Promise.all([...this.sessions.values()].map(worker => worker.close()))
+    this.sessions.clear()
     this.ready = false
     if (this.watcher) {
       this.watcher.stop()
@@ -213,7 +270,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.skipPermissions) {
       args.push('--dangerously-skip-permissions')
     }
-    const child = this.spawnAcp(bin, args)
+    const child = this.spawnAcp(bin, args, this.cwd)
     this.process = child
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
@@ -290,6 +347,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     try {
       await initPromise
       this.ready = true
+      this.warmNextSession()
       this.logger?.info('Antigravity ACP ready', { conversationId: this.activeConversationId })
     } catch (err) {
       child.kill('SIGTERM')
