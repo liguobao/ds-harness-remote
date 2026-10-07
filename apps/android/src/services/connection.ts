@@ -25,6 +25,7 @@ export class AndroidRemoteConnection {
   private codex?: CodexRemoteClient
   private cursor?: AgentAcpClient
   private acpBackends = new Set<string>()
+  private codexAvailable = false
   private sessionTools?: HarnessSessionTools
   private closeMux?: (notifyRemote?: boolean) => Promise<void>
   private unsubscribeClose?: () => void
@@ -93,6 +94,7 @@ export class AndroidRemoteConnection {
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
+    this.codexAvailable = false
         this.cursor = undefined
         this.sessionTools = undefined
         if (!replacingFallback) options.onClose?.()
@@ -120,6 +122,7 @@ export class AndroidRemoteConnection {
       const capabilities = new Set(features.capabilities)
       if (capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')) {
         this.codex = new CodexRemoteClient(core)
+        this.codexAvailable = true
       }
       if (capabilities.has('agent.acp.v1')) {
         this.cursor = new AgentAcpClient(core)
@@ -157,6 +160,22 @@ export class AndroidRemoteConnection {
     }
   }
 
+  /** Reprobe readiness on workspace refresh so Host backend switches need no reconnect. */
+  async refreshBackends(): Promise<void> {
+    if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
+    const core = this.core
+    const features = await probeRemoteHostFeatures(core)
+    if (this.core !== core) return
+    const capabilities = new Set(features.capabilities)
+    this.codexAvailable = capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')
+    if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core)
+    if (capabilities.has('agent.acp.v1')) this.cursor ??= new AgentAcpClient(core)
+    this.acpBackends.clear()
+    for (const item of features.workspaceTypes ?? []) {
+      if (item.available && (item.id === 'cursor' || item.id === 'antigravity')) this.acpBackends.add(item.id)
+    }
+  }
+
   /** Harness business client; only available while connected. */
   requireProxy(): RemoteHarnessClient {
     if (this.proxy === undefined) throw new Error(strings.runtime.connectHostFirst)
@@ -165,7 +184,7 @@ export class AndroidRemoteConnection {
 
   /** Optional CodeX business client; available only when the Host advertises both domain capabilities. */
   requireCodex(): CodexRemoteClient {
-    if (this.codex === undefined) throw new Error(strings.runtime.codexUnavailable)
+    if (this.codex === undefined || !this.codexAvailable) throw new Error(strings.runtime.codexUnavailable)
     return this.codex
   }
 
@@ -175,7 +194,7 @@ export class AndroidRemoteConnection {
   }
 
   hasCodex(): boolean {
-    return this.codex !== undefined
+    return this.codex !== undefined && this.codexAvailable
   }
 
   /** Optional Agent ACP client (Cursor UI backend); available when the Host advertises agent.acp.cursor.v1. */
@@ -221,6 +240,7 @@ export class AndroidRemoteConnection {
     this.transport = undefined
     this.proxy = undefined
     this.codex = undefined
+    this.codexAvailable = false
     this.cursor = undefined
     this.acpBackends.clear()
     this.sessionTools = undefined

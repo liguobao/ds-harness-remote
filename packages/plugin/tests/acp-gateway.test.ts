@@ -27,6 +27,28 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('updates one backend live while preserving other backend processes and existing peers', async () => {
+    const cursor = readyAcp()
+    const agy = readyAcp()
+    const initial = { enabled: true, backends: [
+      { id: 'cursor', enabled: false, command: 'agent', args: ['acp'] },
+      { id: 'antigravity', enabled: true, command: 'agy', args: [] },
+    ] }
+    const gateway = new AcpRemoteGateway(initial, silentLogger(), (_binary, _logger, backend) => backend.id === 'cursor' ? cursor : agy)
+    await gateway.start()
+    const peer = gateway.createPeer({ connectionId: 'live-peer', peerDeviceId: 'device' } as never, async () => undefined)!
+    await gateway.reconfigure({ ...initial, backends: initial.backends.map(item => ({ ...item, enabled: true })) })
+    expect(gateway.availableBackends().sort()).toEqual(['antigravity', 'cursor'])
+    expect(agy.close).not.toHaveBeenCalled()
+    await expect(peer.call({ method: 'initialize', params: { backend: 'cursor' } })).resolves.toMatchObject({ backend: 'cursor' })
+    await gateway.reconfigure(initial)
+    expect(cursor.close).toHaveBeenCalledTimes(1)
+    expect(agy.close).not.toHaveBeenCalled()
+    await expect(peer.call({ method: 'initialize', params: { backend: 'cursor' } })).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+    await expect(peer.call({ method: 'initialize', params: { backend: 'antigravity' } })).resolves.toMatchObject({ backend: 'antigravity' })
+    await gateway.close()
+  })
+
   it('honors the global switch and independent backend launch settings', async () => {
     const factory = vi.fn(() => readyAcp())
     const backends = [

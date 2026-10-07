@@ -27,7 +27,7 @@ ACP Client
 
 ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册和 Client 初始化。
 能力声明表示已启用的协议支持，`workspaceTypes.available` 表示实际就绪；关闭期间会清理
-正在启动的 CLI，迟到的初始化结果不得重新注册实例。配置修改需要重启 DSH。
+正在启动的 CLI，迟到的初始化结果不得重新注册实例。后端配置保存后立即生效，仅更新发生变化的后端。
 
 ## 公共方法（allowlist）
 
@@ -58,7 +58,7 @@ Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / e
 ## 配置
 
 Cursor adapter 默认**关闭**。开启前请在 Host 本机完成 `agent login`，或配置
-`CURSOR_API_KEY`。也可在 Desktop 插件设置中切换开关（需重启 DSH）。
+`CURSOR_API_KEY`。也可在 Desktop 插件设置中切换开关（立即生效）。
 
 ```yaml
 ds-harness-remote:
@@ -84,7 +84,7 @@ ds-harness-remote:
 
 ## Desktop 使用
 
-1. Host：设置中开启 **Agent 后端 → Cursor**（`acp.backends` 的 `cursor.enabled`），完成本机 `agent login`，**重启 DSH**。
+1. Host：设置中开启 **Agent 后端 → Cursor**（`acp.backends` 的 `cursor.enabled`），完成本机 `agent login`，保存后立即生效。
 2. Client：侧栏 Remote → 选择在线 Host → 在 **Cursor virtual workspace** 分组点 `+`，浏览并确认 Host 上已有绝对目录。
 3. 打开后复用原生 Workspace / Session / Composer；会话 id 形如 `cursor:<acpSessionId>`，不写入 DSH SessionStore。
 

@@ -23640,7 +23640,8 @@ var PluginControlRuntime = class {
       }
     });
     await this.settings.replace(editableConfig(next));
-    return this.settingsView();
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
+    return { ...await this.settingsView(), applies: "live" };
   }
   async setAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
@@ -23657,7 +23658,8 @@ var PluginControlRuntime = class {
       ...backend === "codex" ? { codex: { ...current.codex, enabled } } : {},
       acp: { enabled: enabled || current.acp.enabled, backends }
     });
-    return this.settingsView();
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
+    return { ...await this.settingsView(), applies: "live" };
   }
   async addAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
@@ -23671,7 +23673,8 @@ var PluginControlRuntime = class {
     const backends = [...current.acp?.backends ?? [], { id: value.id, command: value.command, args: value.args, enabled: false }];
     const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } });
     await this.settings.replace(editableConfig(next));
-    return this.settingsView();
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
+    return { ...await this.settingsView(), applies: "live" };
   }
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
@@ -23680,7 +23683,8 @@ var PluginControlRuntime = class {
     const current = resolveConfig(this.settings.get());
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id5);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));
-    return this.settingsView();
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
+    return { ...await this.settingsView(), applies: "live" };
   }
   async authorizeOwnedRole(serverUrl, sourceRole, targetRole) {
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
@@ -27377,7 +27381,14 @@ var CodexRemoteDomain = class {
   closed = false;
   state = "disabled";
   unavailableCode;
-  async start() {
+  startPromise;
+  start() {
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  async startOnce() {
     if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
     if (!this.config.enabled) return;
     try {
@@ -27417,7 +27428,6 @@ var CodexRemoteDomain = class {
     }
   }
   createPeer(context, publish) {
-    if (!this.config.enabled) return void 0;
     const bridge = new CodexPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
@@ -27590,6 +27600,27 @@ var CodexRemoteDomain = class {
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
     }
     this.scheduleApprovalExpiry();
+  }
+  async reconfigure(config) {
+    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
+    if (JSON.stringify(this.config) === JSON.stringify(config)) return;
+    this.config = config;
+    this.available = false;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    await this.startPromise?.catch(() => void 0);
+    this.available = false;
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    this.approvals.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    await this.disposeAppServer(this.appServer);
+    this.restartAttempt = 0;
+    this.unavailableCode = void 0;
+    this.state = "disabled";
+    await this.start();
   }
   async close() {
     if (this.closed) return;
@@ -27987,7 +28018,7 @@ var CodexRemoteDomain = class {
     this.approvalExpiryTimer.unref?.();
   }
   requireAppServer() {
-    if (!this.isAvailable() || this.appServer === void 0) {
+    if (!this.config.enabled || !this.isAvailable() || this.appServer === void 0) {
       throw new RpcError("CODEX_UNAVAILABLE", "Codex Remote is disabled or unavailable on this Host.");
     }
     return this.appServer;
@@ -29957,10 +29988,10 @@ var AcpPeerBridge = class {
       throw error;
     }
   }
-  async failStreams(reason = "failed") {
+  async failStreams(reason = "failed", sessions) {
     if (this.closed) return;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
+    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id5]) => id5);
+    for (const id5 of streamIds) this.streams.delete(id5);
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
@@ -30099,12 +30130,12 @@ var AcpRemoteGateway = class {
     }
   }
   isAvailable() {
-    return this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
+    return this.config.enabled && this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
   }
   availableBackends() {
     const list = [];
     for (const [id5, inst] of this.backendInstances) {
-      if (inst.client.isReady()) list.push(id5);
+      if (this.enabledBackends().includes(id5) && inst.client.isReady()) list.push(id5);
     }
     return list;
   }
@@ -30123,7 +30154,6 @@ var AcpRemoteGateway = class {
     };
   }
   createPeer(context, publish) {
-    if (!this.config.enabled) return void 0;
     const bridge = new AcpPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     return bridge;
@@ -30387,6 +30417,43 @@ var AcpRemoteGateway = class {
       await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
     }
   }
+  async reconfigure(config) {
+    if (this.closed) throw new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed.");
+    const previous = this.config;
+    const implemented = (value) => ({
+      enabled: value.enabled,
+      backends: value.backends.filter((item) => ["cursor", "antigravity"].includes(item.id))
+    });
+    this.config = config;
+    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    await this.startPromise?.catch(() => void 0);
+    const changed = new Set(previous.backends.filter((item) => {
+      const next = config.backends.find((candidate) => candidate.id === item.id);
+      return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next);
+    }).map((item) => item.id));
+    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
+    if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
+    for (const id5 of sessions) {
+      this.sessionOwners.delete(id5);
+      this.sessionBackends.delete(id5);
+      this.recentFrames.delete(id5);
+      this.turnCatchUp.delete(id5);
+    }
+    for (const [id5, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id5);
+    for (const id5 of changed) {
+      const instance = this.backendInstances.get(id5);
+      if (instance === void 0) continue;
+      this.backendInstances.delete(id5);
+      await this.disposeInstance(instance);
+    }
+    this.available = this.availableBackends().length > 0;
+    this.state = this.available ? "ready" : "disabled";
+    this.restartAttempt = 0;
+    this.unavailableCode = void 0;
+    await this.start();
+  }
   async close() {
     if (this.closed) return;
     this.closed = true;
@@ -30609,7 +30676,7 @@ var AcpRemoteGateway = class {
     this.approvalExpiryTimer.unref?.();
   }
   requireAcp(backend) {
-    if (!this.isAvailable()) {
+    if (!this.config.enabled || backend !== void 0 && !this.enabledBackends().includes(backend) || !this.isAvailable()) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
     }
     if (backend !== void 0) {
@@ -31363,6 +31430,15 @@ var HostPluginRuntime = class {
   setLoopbackPorts(ports) {
     this.loopbackPorts = [...ports];
     for (const loopback of this.loopbackHosts) loopback.setPorts(this.loopbackPorts);
+  }
+  backendUpdate = Promise.resolve();
+  setAgentBackends(config) {
+    const update = this.backendUpdate.catch(() => void 0).then(async () => {
+      if (this.closed) throw new Error("remote runtime is closed");
+      await Promise.all([this.codex.reconfigure(config.codex), this.acp.reconfigure(config.acp ?? { enabled: false, backends: [] })]);
+    });
+    this.backendUpdate = update;
+    return update;
   }
   createLoopbackHost() {
     let loopback;

@@ -17,6 +17,18 @@ afterEach(async () => {
 })
 
 describe('PluginControlRuntime settings setup', () => {
+  it('applies backend settings to the running Host after persistence', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({ acp: { enabled: true, backends: [{ id: 'codex', enabled: false }] } })
+    const apply = vi.fn(async (config: ReturnType<typeof resolveConfig>) => {
+      expect(resolveConfig(settings.get()).codex.enabled).toBe(config.codex.enabled)
+    })
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, { setAgentBackends: apply } as unknown as HostAuthorizationControl))
+    await expect(handler('settings.acp.set', { backend: 'codex', enabled: true }, signal())).resolves.toMatchObject({ ok: true, value: { applies: 'live' } })
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply.mock.calls[0]?.[0].codex.enabled).toBe(true)
+  })
+
   it('coexists with a Remote Web UI that already owns /remote', async () => {
     const channels = new Set(['/remote'])
     const connection = {

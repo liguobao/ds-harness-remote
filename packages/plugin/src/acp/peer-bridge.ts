@@ -279,10 +279,10 @@ export class AcpPeerBridge {
     }
   }
 
-  async failStreams(reason: AgentAcpStreamClosedData['reason'] = 'failed'): Promise<void> {
+  async failStreams(reason: AgentAcpStreamClosedData['reason'] = 'failed', sessions?: ReadonlySet<string>): Promise<void> {
     if (this.closed) return
-    const streamIds = [...this.streams.keys()]
-    this.streams.clear()
+    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === undefined || sessions.has(sessionId)).map(([id]) => id)
+    for (const id of streamIds) this.streams.delete(id)
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {

@@ -20,6 +20,23 @@ afterEach(async () => {
 })
 
 describe('CodexRemoteDomain', () => {
+  it('enables and disables CodeX live without replacing authenticated peers', async () => {
+    const app = new FakeAppServer('/unused')
+    const domain = new CodexRemoteDomain({ enabled: false, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peer = domain.createPeer({ connectionId: 'live-peer', peerDeviceId: 'device' } as never, async () => undefined)!
+    expect(peer).toBeDefined()
+    await domain.reconfigure({ enabled: true, binary: 'codex' })
+    expect(domain.isAvailable()).toBe(true)
+    await expect(peer.call({ method: 'project/list', params: {} })).resolves.toBeDefined()
+    await domain.reconfigure({ enabled: false, binary: 'codex' })
+    expect(domain.isAvailable()).toBe(false)
+    await expect(peer.call({ method: 'project/list', params: {} })).rejects.toMatchObject({ code: 'CODEX_UNAVAILABLE' })
+    await domain.reconfigure({ enabled: true, binary: 'codex' })
+    await expect(peer.call({ method: 'project/list', params: {} })).resolves.toBeDefined()
+    await domain.close()
+  })
+
   it('discovers the ChatGPT-bundled Codex only for the default macOS command', () => {
     const candidates = codexBinaryCandidates('codex', 'darwin', '/Users/tester')
     expect(candidates).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')

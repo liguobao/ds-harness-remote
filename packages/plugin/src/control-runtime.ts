@@ -251,7 +251,8 @@ export class PluginControlRuntime {
       },
     })
     await this.settings.replace(editableConfig(next))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async setAcp(payload: unknown): Promise<PluginSettingsView> {
@@ -269,7 +270,8 @@ export class PluginControlRuntime {
       ...(backend === 'codex' ? { codex: { ...current.codex, enabled } } : {}),
       acp: { enabled: enabled || current.acp.enabled, backends },
     })
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async addAcp(payload: unknown): Promise<PluginSettingsView> {
@@ -284,7 +286,8 @@ export class PluginControlRuntime {
     const backends = [...(current.acp?.backends ?? []), { id: value.id, command: value.command, args: value.args, enabled: false }]
     const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
     await this.settings.replace(editableConfig(next))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async removeAcp(payload: unknown): Promise<PluginSettingsView> {
@@ -294,7 +297,8 @@ export class PluginControlRuntime {
     const current = resolveConfig(this.settings.get())
     const backends = (current.acp?.backends ?? []).filter(item => item.id !== id)
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))
-    return this.settingsView()
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    return { ...await this.settingsView(), applies: 'live' }
   }
   private async authorizeOwnedRole(
     serverUrl: string,

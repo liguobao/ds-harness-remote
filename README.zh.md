@@ -268,4 +268,4 @@ Android 也支持独立启用的 AGY 工作区：Host 目录与会话发现、�
 标题刷新、重连及文字/图片 Prompt。PNG/JPEG/WebP/GIF 图片每张上限 8 MiB、每次最多四张，
 使用 Host 私有临时缓存。验证范围见 [Android 说明](apps/android/README.md#agy-workspaces)。
 
-Agent 后端设置统一为每个后端一个开关：CodeX 复用现有 App Server Remote 域，Cursor 和 AGY 使用 ACP adapter。CodeX 由 `acp.backends[id=codex].enabled` 和 `.command` 控制；旧 `codex` 配置仅在后端字段缺失时读取。Kimi 尚未实现，已移除。工作区入口仅在 Host 报告后端就绪时显示。修改后端设置后需重启 DSH。
+Agent 后端设置统一为每个后端一个开关：CodeX 复用现有 App Server Remote 域，Cursor 和 AGY 使用 ACP adapter。CodeX 由 `acp.backends[id=codex].enabled` 和 `.command` 控制；旧 `codex` 配置仅在后端字段缺失时读取。Kimi 尚未实现，已移除。工作区入口仅在 Host 报告后端就绪时显示。后端开关保存后立即生效，无需重启 DSH。

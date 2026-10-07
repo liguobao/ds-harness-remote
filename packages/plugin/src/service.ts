@@ -158,6 +158,17 @@ export class HostPluginRuntime {
     for (const loopback of this.loopbackHosts) loopback.setPorts(this.loopbackPorts)
   }
 
+  private backendUpdate: Promise<void> = Promise.resolve()
+
+  setAgentBackends(config: ResolvedConfig): Promise<void> {
+    const update = this.backendUpdate.catch(() => undefined).then(async () => {
+      if (this.closed) throw new Error('remote runtime is closed')
+      await Promise.all([this.codex.reconfigure(config.codex), this.acp.reconfigure(config.acp ?? { enabled: false, backends: [] })])
+    })
+    this.backendUpdate = update
+    return update
+  }
+
   private createLoopbackHost(): LoopbackHost {
     let loopback: LoopbackHost
     loopback = new LoopbackHost(() => this.loopbackPorts, () => this.loopbackHosts.delete(loopback))

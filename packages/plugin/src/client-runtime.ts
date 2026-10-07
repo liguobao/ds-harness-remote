@@ -155,6 +155,7 @@ export interface HostConnectionHandle {
 }
 
 export interface HostAuthorizationControl {
+  setAgentBackends?(config: ResolvedConfig): Promise<void>
   setTerminalEnabled?(enabled: boolean): void
   setLoopbackPorts?(ports: readonly number[]): void
   hostStatus(): {

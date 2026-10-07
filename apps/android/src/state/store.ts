@@ -429,6 +429,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshWorkspaces() {
     if (get().connection.phase !== 'connected') return
     try {
+      await connection.refreshBackends()
       const proxy = connection.requireProxy()
       const [workspaceList, sessions] = await Promise.all([
         proxy.workspaceList(),
@@ -462,13 +463,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
-        const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
+        const cursorWorkspaces = connection.hasCursor() ? state.workspaces.filter(workspace => workspace.backend === 'cursor') : []
         const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-        const antigravityWorkspaces = agy.workspaces
+        const antigravityWorkspaces = connection.hasAntigravity() ? agy.workspaces : []
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
         const antigravitySessions = agy.sessions
         const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
         return {
+          codexAvailable: connection.hasCodex(),
+          cursorAvailable: connection.hasCursor(),
+          antigravityAvailable: connection.hasAntigravity(),
           workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,

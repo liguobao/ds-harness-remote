@@ -105,7 +105,7 @@ export class AcpRemoteGateway {
   private readonly startingClients = new Set<CursorAcpLike>()
 
   constructor(
-    readonly config: ResolvedAcpConfig,
+    public config: ResolvedAcpConfig,
     private readonly logger: SafeLogger,
     private readonly createAcp: AcpFactory = (binary, targetLogger, backend) => {
       if (backend.id === 'antigravity') {
@@ -144,13 +144,13 @@ export class AcpRemoteGateway {
   }
 
   isAvailable(): boolean {
-    return this.available && [...this.backendInstances.values()].some(inst => inst.client.isReady())
+    return this.config.enabled && this.available && [...this.backendInstances.values()].some(inst => inst.client.isReady())
   }
 
   availableBackends(): string[] {
     const list: string[] = []
     for (const [id, inst] of this.backendInstances) {
-      if (inst.client.isReady()) list.push(id)
+      if (this.enabledBackends().includes(id) && inst.client.isReady()) list.push(id)
     }
     return list
   }
@@ -179,7 +179,6 @@ export class AcpRemoteGateway {
   }
 
   createPeer(context: PeerConnectionContext, publish: PublishAcpFrame): AcpPeerBridge | undefined {
-    if (!this.config.enabled) return undefined
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     return bridge
@@ -489,6 +488,42 @@ export class AcpRemoteGateway {
     }
   }
 
+  async reconfigure(config: ResolvedAcpConfig): Promise<void> {
+    if (this.closed) throw new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.')
+    const previous = this.config
+    const implemented = (value: ResolvedAcpConfig) => ({ enabled: value.enabled,
+      backends: value.backends.filter(item => ['cursor', 'antigravity'].includes(item.id)) })
+    this.config = config
+    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return
+    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+    this.restartTimer = undefined
+    await this.startPromise?.catch(() => undefined)
+    const changed = new Set(previous.backends.filter(item => {
+      const next = config.backends.find(candidate => candidate.id === item.id)
+      return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
+    }).map(item => item.id))
+    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
+    if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
+    for (const id of sessions) {
+      this.sessionOwners.delete(id)
+      this.sessionBackends.delete(id)
+      this.recentFrames.delete(id)
+      this.turnCatchUp.delete(id)
+    }
+    for (const [id, approval] of this.approvals) if (approval.backend !== undefined && changed.has(approval.backend)) this.approvals.delete(id)
+    for (const id of changed) {
+      const instance = this.backendInstances.get(id)
+      if (instance === undefined) continue
+      this.backendInstances.delete(id)
+      await this.disposeInstance(instance)
+    }
+    this.available = this.availableBackends().length > 0
+    this.state = this.available ? 'ready' : 'disabled'
+    this.restartAttempt = 0
+    this.unavailableCode = undefined
+    await this.start()
+  }
+
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
@@ -729,7 +764,7 @@ export class AcpRemoteGateway {
   }
 
   private requireAcp(backend?: string): CursorAcpLike {
-    if (!this.isAvailable()) {
+    if (!this.config.enabled || (backend !== undefined && !this.enabledBackends().includes(backend)) || !this.isAvailable()) {
       throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
     }
     if (backend !== undefined) {

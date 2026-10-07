@@ -91,13 +91,20 @@ export class CodexRemoteDomain {
   private unavailableCode?: string
 
   constructor(
-    readonly config: ResolvedCodexConfig,
+    public config: ResolvedCodexConfig,
     private readonly logger: SafeLogger,
     private readonly createAppServer: AppServerFactory = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger),
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
   ) {}
 
-  async start(): Promise<void> {
+  private startPromise?: Promise<void>
+
+  start(): Promise<void> {
+    this.startPromise ??= this.startOnce().finally(() => { this.startPromise = undefined })
+    return this.startPromise
+  }
+
+  private async startOnce(): Promise<void> {
     if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
     if (!this.config.enabled) return
     try {
@@ -145,7 +152,6 @@ export class CodexRemoteDomain {
   }
 
   createPeer(context: PeerConnectionContext, publish: PublishCodexFrame): CodexPeerBridge | undefined {
-    if (!this.config.enabled) return undefined
     const bridge = new CodexPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     this.peerDeviceIds.set(context.connectionId, context.peerDeviceId)
@@ -347,6 +353,28 @@ export class CodexRemoteDomain {
       await appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
     }
     this.scheduleApprovalExpiry()
+  }
+
+  async reconfigure(config: ResolvedCodexConfig): Promise<void> {
+    if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
+    if (JSON.stringify(this.config) === JSON.stringify(config)) return
+    this.config = config
+    this.available = false
+    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+    this.restartTimer = undefined
+    await this.startPromise?.catch(() => undefined)
+    this.available = false
+    await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
+    this.turnOwners.clear()
+    this.permissionPresets.clear()
+    this.approvals.clear()
+    if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
+    this.approvalExpiryTimer = undefined
+    await this.disposeAppServer(this.appServer)
+    this.restartAttempt = 0
+    this.unavailableCode = undefined
+    this.state = 'disabled'
+    await this.start()
   }
 
   async close(): Promise<void> {
@@ -799,7 +827,7 @@ export class CodexRemoteDomain {
   }
 
   private requireAppServer(): CodexAppServerLike {
-    if (!this.isAvailable() || this.appServer === undefined) {
+    if (!this.config.enabled || !this.isAvailable() || this.appServer === undefined) {
       throw new RpcError('CODEX_UNAVAILABLE', 'Codex Remote is disabled or unavailable on this Host.')
     }
     return this.appServer
