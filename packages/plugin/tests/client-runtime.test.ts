@@ -96,6 +96,13 @@ describe('ClientModeRuntime Host account control', () => {
     })
   })
 
+  it('does not infer AGY support from the legacy generic ACP capability', async () => {
+    const client = { rpc: vi.fn(async () => ({ capabilities: ['agent.acp.v1'] })) }
+    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ cursor: true, antigravity: false })
+    client.rpc.mockResolvedValueOnce({ capabilities: ['agent.acp.v1', 'agent.acp.antigravity.v1'] })
+    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ cursor: false, antigravity: true })
+  })
+
   it('probes workspaceTypes from remote Host and safely tolerates malformed values', async () => {
     const client = {
       rpc: vi.fn(async () => ({

@@ -1113,15 +1113,20 @@ Host 必须调用 `fileViewerHost` 服务，让被选中的 File Viewer provider
 ### Agent ACP domain
 
 Agent ACP 是现有 Remote Plugin 内部的通用业务面（见 #65），不是第二个 Plugin，也不是
-Codex 专用 API。Host 配置 `cursor.enabled: true` 后，Plugin 才可使用 `cursor.binary`
-（默认 `agent`）启动 Cursor CLI `agent acp` 作为**第一个 backend adapter**。Host 完成本地
-initialize / `authenticate(methodId: cursor_login)` 后，才宣告 `agent.acp.v1` 与
-`agent.acp.transfer.v1`。现有 `codex.app.*` 继续服务当前 Client，不受影响。
+Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cursor / Antigravity
+adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.binary` 仅兼容 Cursor。
+`agent.acp.v1`、`agent.acp.transfer.v1` 与 `agent.acp.<backend>.v1` 表示启用且已实现的协议；
+实际就绪状态见 `workspaceTypes.available`，后台初始化不得阻塞 Harness Remote。
+现有 `harness.api.*` / `harness.remote.*` 和 `codex.app.*` 的线协议、路由与能力不受影响。
 
-业务 RPC 固定为 `agent.acp.call|respond|stream.*|transfer.*`。`agent.acp.call` 不是通用
-代理；编译期 allowlist 仅含 `initialize`、`session/new`、`session/load`、`session/prompt`、
-`session/cancel`、以及 Host 扩展 `dsh/directoryList`。Client 侧 `initialize` 由 Gateway
-返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
+业务 RPC 固定为 `agent.acp.call|respond|stream.*|transfer.*`，事件固定为
+`agent.acp.frame|stream.closed`，所有 Client（包括 Web）使用同一独立 ACP 数据面。
+`agent.acp.call` 不是通用代理；编译期 allowlist 仅含 `initialize`、`session/new`、`session/load`、
+`session/prompt`、`session/cancel`、以及 Host 扩展 `dsh/directoryList`、`dsh/workspaceList`、
+`dsh/sessionList`、`dsh/sessionHistory`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
+不得通过 Harness ApiProxy / Typert 业务端点调用。
+
+Client 侧 `initialize` 由 Gateway 返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
 `dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、
 不发送 prompt，也不注册客户端 Session；`session/new` 才领取预热进程。AGY 摘要数据库
 中零步数且无标题的记录若已有持久化 transcript，历史发现应按数据库中的工作区归属
@@ -1141,6 +1146,17 @@ Remote 将图片投影到原生 user/message 与 session/attachment，仅返回�
 不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
 `reject-once` / `cancel`）。有序 `session/update` 与 `session/request_permission` 经
 `agent.acp.frame` 下发。
+
+Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生 Harness UI，
+该投影不改变 Harness Host API，也不写入 DSH SessionStore、Workspace 数据库或日志。
+客户端工作区发现与历史读取只调用 ACP 接口，不回退读取 Client 本机的 AGY 数据库或文件。
+新工作区 ID 分别使用 `cursor:cwd:<encoded-path>` 和 `antigravity:cwd:<encoded-path>`；
+工作区只接受所属后端前缀，不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无前缀路径作为 ID。既有 Session ID（Cursor `cursor:`、AGY `acp:`）
+保持不变。旧 Host 仅声明 `agent.acp.v1` 时只兼容 Cursor，不能据此推断支持 AGY；
+AGY 必须明确声明 `agent.acp.antigravity.v1`。
+`dsh/sessionHistory` 使用有界 ACP transfer 读取含图片或大文本的响应；图片 Prompt 的
+transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
+History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
 
 Cursor adapter 实现细节见 [Cursor Remote / ACP](cursor-remote.md)。
 

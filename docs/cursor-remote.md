@@ -36,12 +36,24 @@ ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册
 | `initialize` | Gateway 返回能力描述（不转发 Cursor 私有 initialize） |
 | `session/new` | 在 Host 上已存在的绝对目录创建会话（强制 `mcpServers: []`） |
 | `session/load` | 恢复会话 |
-| `session/prompt` | 仅文本 Prompt |
+| `session/prompt` | Cursor 文本 Prompt；AGY 文本/受限图片 Prompt |
 | `session/cancel` | 中断 |
 | `dsh/directoryList` | Host 只读单层目录浏览（选 cwd；Remote 扩展） |
+| `dsh/workspaceList` | 指定后端的 Host 工作区发现 |
+| `dsh/sessionList` | AGY 持久化会话发现 |
+| `dsh/sessionHistory` | AGY 历史读取（有界 ACP transfer） |
 
 线 RPC：`agent.acp.call|respond|stream.*|transfer.*`  
 事件：`agent.acp.frame` / `agent.acp.stream.closed`
+
+## Web 兼容边界
+
+Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / event。
+`dsh/` 扩展只存在于 ACP call 内，不注册到 Harness 或 Codex 业务 API。
+`virtual-harness.ts` 是可在浏览器使用的内存 UI 投影，不读取本机 AGY 文件；工作区和历史
+由 Host ACP 返回。AGY 工作区仅接受 `antigravity:cwd:` ID，不兼容旧 `cursor:cwd:` ID
+或无前缀路径。AGY 需 `agent.acp.antigravity.v1`，旧通用 ACP capability 只兼容 Cursor。
+独立 Remote Web runtime 的接入和跨设备 E2E 仍待在独立 Server 仓库验证。
 
 ## 配置
 

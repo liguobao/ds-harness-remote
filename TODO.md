@@ -63,6 +63,8 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 [docs/cursor-remote.md](docs/cursor-remote.md)。**暂不**推进 Codex→ACP adapter。
 
 - [x] Host gateway、capability、allowlist、Cursor stdio adapter
+- [x] ACP Web 兼容边界：独立 API/事件、浏览器安全内存投影、远端历史分块与后端工作区 ID 隔离
+- [ ] 独立 Remote Web 的 AGY 接入与跨设备回归（在独立 Server 仓库完成 runtime 变更）
 - [x] ACP 后台初始化与 Harness Remote 启动隔离；各后端独立遵循启用开关、command/args/cwd，明确选择不可用后端时 fail closed
 - [x] Desktop Virtual Harness 与设置开关（默认关闭）
 - [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式

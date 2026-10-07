@@ -233,6 +233,24 @@ ACP 使用 `config.acp` 后端注册表；当前 gateway 仅实现 Cursor/Antigr
 ACP 后台启动不得阻塞 Harness Remote 注册或 Client 初始化；能力声明表示启用的协议支持，
 `workspaceTypes.available` 表示实际就绪。关闭时清理正在启动的进程，禁止迟到初始化重新注册。
 
+## ACP Web compatibility and API isolation (2026-10-07)
+
+按用户要求，新增 AGY 工作区保持 Web 客户端兼容。ACP 的 RPC、stream、transfer 和事件
+统一保留在独立 `agent.acp.*` 数据面；不得把 ACP 方法加入 Harness ApiProxy/Typert allowlist
+或改变 Codex API。允许 Web/Desktop 用纯客户端内存投影复用原生 UI，不写入 DSH 持久化。
+`acp/virtual-harness.ts` 必须可用于浏览器，禁止依赖 Node filesystem、AGY 数据库或本机
+transcript fallback；工作区和历史只从 Host ACP 接口读取。新 AGY 工作区 ID 使用
+`antigravity:cwd:`，ID 生成和 catalog 投影必须显式指定 backend，不得默认生成 Cursor ID。
+不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无后端前缀的路径作为工作区 ID；旧通用 ACP capability 仅兼容
+Cursor，AGY 需独立 capability。含图片历史走有界 ACP transfer。
+独立 Remote Web runtime 仍在独立 Server 仓库，本仓库验证不等于跨站点或跨设备验收。
+
+本次兼容边界验证：Plugin/client-core 类型检查、Plugin build、DSH bundle 校验、浏览器
+platform bundle 与无 Node globals 的工作区/历史烟测通过；Plugin 相关 49 测试和 client-core
+44 测试通过。Plugin 全量为 360/361，通过外的既有 transcript-loader 测试依赖本机数据库并
+硬编码 Linux `/var/lib/dsh/workspace/ds-harness-remote` 路径，在本机 Mac 环境失败；未修改
+该 loader 或测试，不将全量 test 记为通过。
+
 ## Android AGY workspaces (2026-10-07)
 
 Android 从 Host 的 AGY catalog 加载工作区与每目录最近 100 个会话，内存投影不写 DSH

@@ -187,6 +187,11 @@ Prompt、思考/正文流式更新、中断与一次性审批。Cursor 暂不支
 PNG/JPEG/WebP/GIF（每张 8 MiB、每次最多 4 张），图片保存到 Host 私有临时缓存，由 AGY 图片工具读取。
 历史中的图片可在 24 小时内恢复；系统提前清理 tmp 时图片将不可用。
 
+AGY 通过独立的 `agent.acp.*` 接口和事件保持 Web 客户端兼容，工作区发现和历史均通过 ACP
+从 Host 获取，客户端不读取本机 AGY 文件。原生 UI 投影只保留在内存中，Cursor/AGY 工作区 ID
+独立，不兼容使用 Cursor 前缀的旧 AGY ID；Harness 和 Codex 接口保持原有契约。独立 Remote Web 接入及 AGY
+跨设备回归仍待验证。
+
 ACP 后端在后台初始化，AGY/Cursor 启动不会阻塞 Harness Remote 注册或 Client 初始化。
 `acp.enabled` 控制整个域，`acp.backends` 中各已支持后端独立使用自己的 `enabled`、`command`、
 `args` 和可选 `cwd`。当前 gateway 实现 `cursor` 和 `antigravity`，其他注册项不会启动或声明 adapter。

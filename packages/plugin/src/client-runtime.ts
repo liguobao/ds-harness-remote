@@ -601,19 +601,7 @@ export class ClientModeRuntime {
       return this.cursorVirtual.workspaces()
     }
     const acpClient = new AgentAcpClient(remote.client)
-    const workspaces = await discoverAcpVirtualWorkspaces(acpClient, signal, backend)
-    if (backend === 'antigravity') {
-      try {
-        const sessions = await acpClient.listSessions('', 'antigravity', 100, signal)
-        if (sessions.length > 0) {
-          for (const ws of workspaces) {
-            if (ws.sessionCount === 0) ws.sessionCount = sessions.length
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
+    const workspaces = await discoverAcpVirtualWorkspaces(acpClient, backend, signal)
     return workspaces
   }
 
@@ -1561,7 +1549,7 @@ export async function probeRemoteHostFeatures(
   const codex = capabilities.has('codex.appserver.v1')
   const hasAcp = capabilities.has('agent.acp.v1')
   const cursor = capabilities.has('agent.acp.cursor.v1') || (hasAcp && !capabilities.has('agent.acp.antigravity.v1'))
-  const antigravity = capabilities.has('agent.acp.antigravity.v1') || (hasAcp && !capabilities.has('agent.acp.cursor.v1'))
+  const antigravity = capabilities.has('agent.acp.antigravity.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }

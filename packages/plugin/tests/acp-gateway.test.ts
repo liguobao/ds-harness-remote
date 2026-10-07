@@ -105,6 +105,9 @@ describe('AcpRemoteGateway', () => {
       const prompt = [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' }]
       await expect(gateway.call('owner', { method: 'session/prompt', params: { sessionId: 'cursor-image-session', backend: 'cursor', prompt } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
       await expect(gateway.call('owner', { method: 'session/prompt', params: { sessionId: 'cursor-image-session', backend: 'antigravity', prompt } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'acp:cursor-image-session', backend: 'antigravity' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'acp:cursor-image-session', backend: 'cursor' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      expect(await gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'cursor:cursor-image-session', backend: 'cursor' } })).toEqual({ events: [] })
       expect(acp.call).toHaveBeenCalledTimes(1)
     } finally { await gateway.close() }
   })

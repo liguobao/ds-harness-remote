@@ -202,6 +202,12 @@ PNG/JPEG/WebP/GIF images (8 MiB each, up to four per prompt) through a private H
 AGY reads these files with its image tool; cached images can be restored with conversation history
 for up to 24 hours, unless the system clears temporary files earlier.
 
+AGY keeps the Web client compatible through the independent `agent.acp.*` API and events.
+Workspace discovery and history come from the Host over ACP; the client never reads local AGY files.
+The native UI projection stays in memory, with separate Cursor/AGY workspace IDs.
+Older AGY IDs using the Cursor prefix are rejected. Harness and Codex APIs remain unchanged. Independent Remote Web integration
+and cross-device AGY regression still need verification.
+
 ACP backends initialize in the background, so AGY/Cursor startup does not delay Harness Remote
 registration or Client initialization. `acp.enabled` gates the domain; each supported entry in
 `acp.backends` uses its own `enabled`, `command`, `args`, and optional `cwd`. Currently the gateway

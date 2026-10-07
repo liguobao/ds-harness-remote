@@ -5761,7 +5761,7 @@ var AgentAcpClient = class {
     return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
   }
   async loadSessionHistory(sessionId, backend, signal) {
-    const result = await this.call("dsh/sessionHistory", {
+    const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch(() => ({ events: [] }));
@@ -5842,7 +5842,7 @@ var AgentAcpClient = class {
           data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
         }, signal);
       }
-      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal);
+      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal, method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0);
       if (commit.kind === "inline")
         return commit.response;
       if (commit.kind !== "chunked" || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES))
@@ -18491,403 +18491,21 @@ function acpImageLimits(backend) {
   return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
 }
 
-// src/acp/adapters/antigravity/image-store.ts
-import { promises as fs, realpathSync, constants } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join2, basename as basename2 } from "node:path";
-import { createHash, randomUUID as randomUUID2 } from "node:crypto";
-var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
-var TTL = 24 * 60 * 60 * 1e3;
-var AGY_IMAGE_ROOT = join2(realpathSync(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
-var stagingChain = Promise.resolve();
-var sessionFolder = (sessionId) => createHash("sha256").update(sessionId).digest("hex");
-async function privateDirectory(path) {
-  await fs.mkdir(path, { recursive: true, mode: 448 });
-  const info = await fs.lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
-}
-async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
-  await privateDirectory(root);
-  return root;
-}
-function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
-  const result = stagingChain.then(() => stageImages(sessionId, images, root));
-  stagingChain = result.then(() => void 0, () => void 0);
-  return result;
-}
-async function stageImages(sessionId, images, root) {
-  await prepareAgyImageDirectory(root);
-  let total = 0;
-  for (const entry of await fs.readdir(root)) {
-    if (!/^[0-9a-f]{64}$/.test(entry)) continue;
-    const dir = join2(root, entry);
-    const info = await fs.lstat(dir);
-    if (!info.isDirectory() || info.isSymbolicLink()) continue;
-    for (const name2 of await fs.readdir(dir)) {
-      if (!IMAGE_NAME.test(name2)) continue;
-      const path = join2(dir, name2);
-      const file = await fs.lstat(path);
-      if (!file.isFile() || file.isSymbolicLink()) continue;
-      if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
-      else total += file.size;
-    }
-  }
-  const parsed = images.map(parseAcpImage);
-  if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
-  const directory = join2(root, sessionFolder(sessionId));
-  await privateDirectory(directory);
-  const paths = [];
-  try {
-    for (const image of parsed) {
-      const path = join2(directory, `${randomUUID2()}.${EXTENSIONS[image.mimeType]}`);
-      await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
-      paths.push(path);
-    }
-    return paths;
-  } catch (error) {
-    await Promise.all(paths.map((path) => fs.unlink(path).catch(() => void 0)));
-    throw error;
-  }
-}
-function agyImagePrompt(text, paths) {
-  return `${text}
-<AGY_REMOTE_IMAGES>
-User attached images. Use view_file to inspect these images before answering.
-${JSON.stringify(paths)}
-</AGY_REMOTE_IMAGES>`;
-}
-function stripAgyImageReferences(text) {
-  return text.replace(/\n?<AGY_REMOTE_IMAGES>[\s\S]*?<\/AGY_REMOTE_IMAGES>/g, "").trim();
-}
-function agyImageReferences(text) {
-  const block = /<AGY_REMOTE_IMAGES>\n[^\n]*\n([^\n]+)\n<\/AGY_REMOTE_IMAGES>/.exec(text);
-  if (!block) return [];
-  try {
-    const value = JSON.parse(block[1]);
-    return Array.isArray(value) && value.length <= 4 ? value.filter((path) => typeof path === "string") : [];
-  } catch {
-    return [];
-  }
-}
-async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
-  const name2 = basename2(path);
-  if (!IMAGE_NAME.test(name2) || path !== join2(root, sessionFolder(sessionId), name2)) return void 0;
-  try {
-    await privateDirectory(root);
-    await privateDirectory(join2(root, sessionFolder(sessionId)));
-    const info = await fs.lstat(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
-    const file = await fs.open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    try {
-      const current = await file.stat();
-      if (current.ino !== info.ino || current.dev !== info.dev || current.size !== info.size) return void 0;
-      const mediaType = Object.entries(EXTENSIONS).find(([, ext]) => name2.endsWith(`.${ext}`))?.[0];
-      const image = parseAcpImage({ type: "image", mimeType: mediaType, data: (await file.readFile()).toString("base64") });
-      return acpImageContent(image, `agy-image:${name2}`);
-    } finally {
-      await file.close();
-    }
-  } catch {
-    return void 0;
-  }
-}
-
-// src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs2 } from "node:fs";
-import { join as join3 } from "node:path";
-import { homedir } from "node:os";
-function cleanUserPrompt(raw) {
-  if (!raw) return "";
-  raw = stripAgyImageReferences(raw);
-  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return raw.trim();
-}
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join3(homedir(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join3(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  let content = "";
-  try {
-    content = await fs2.readFile(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines = content.split("\n");
-  const events = [];
-  let currentSeq = 0;
-  let currentTurn = 0;
-  let turnOpen = false;
-  const push = (type, data2, time, surface = false) => {
-    events.push({
-      type: "event",
-      event: {
-        type,
-        seq: currentSeq++,
-        time,
-        data: data2,
-        ...surface ? { surfaceOp: "append" } : {}
-      }
-    });
-  };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record8;
-    try {
-      record8 = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
-    if (record8.type === "USER_INPUT") {
-      if (turnOpen) {
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-      currentTurn += 1;
-      turnOpen = true;
-      push("turn/start", { turn: currentTurn }, time);
-      push("step/start", { turn: currentTurn, step: 1 }, time);
-      const text = cleanUserPrompt(record8.content);
-      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
-      push("user/message", {
-        id: `user:${record8.step_index}`,
-        role: "user",
-        content: [...text ? [{ type: "text", text }] : [], ...images],
-        source: { kind: "user" }
-      }, time, true);
-    } else if (record8.type === "PLANNER_RESPONSE") {
-      if (!turnOpen) {
-        currentTurn += 1;
-        turnOpen = true;
-        push("turn/start", { turn: currentTurn }, time);
-        push("step/start", { turn: currentTurn, step: 1 }, time);
-      }
-      if (Array.isArray(record8.tool_calls)) {
-        for (const call of record8.tool_calls) {
-          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record8.step_index}:${toolName}`;
-          push("tool/call", {
-            turn: currentTurn,
-            step: 1,
-            callId,
-            name: toolName,
-            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
-            toolCallId: callId,
-            toolName,
-            status: call.status === "ERROR" ? "failed" : "finished"
-          }, time, false);
-        }
-      }
-      if (record8.content && record8.content.trim() !== "") {
-        const contentBlocks2 = [];
-        if (record8.thinking && record8.thinking.trim() !== "") {
-          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
-        }
-        contentBlocks2.push({ type: "text", text: record8.content.trim() });
-        push("assistant/message", {
-          turn: currentTurn,
-          step: 1,
-          message: {
-            id: `${sessionId}:${record8.step_index}`,
-            role: "assistant",
-            content: contentBlocks2,
-            source: { kind: "model", provider: "google", model: "gemini" }
-          },
-          // Harness trajectory timing expects every assistant message to carry
-          // an iterable stream, including messages restored from transcript.
-          stream: []
-        }, time, true);
-      }
-    }
-  }
-  if (turnOpen) {
-    const settledAt = events.at(-1)?.event.time ?? Date.now();
-    push("step/end", { turn: currentTurn, step: 1 }, settledAt);
-    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
-  }
-  return events;
-}
-async function querySqliteJson(dbPath, sql, params = []) {
-  try {
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    try {
-      const stmt = db.prepare(sql);
-      const rows = stmt.all(...params);
-      return rows;
-    } finally {
-      db.close();
-    }
-  } catch {
-  }
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
-    let formattedSql = sql;
-    for (const p of params) {
-      const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
-      formattedSql = formattedSql.replace("?", val);
-    }
-    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
-    return JSON.parse(stdout || "[]");
-  } catch {
-    return [];
-  }
-}
-async function discoverAntigravityWorkspaces(dbPath = join3(homedir(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join3(homedir(), ".gemini/antigravity-cli/brain")) {
-  try {
-    await fs2.stat(dbPath);
-  } catch {
-    return [];
-  }
-  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
-  const rows = await querySqliteJson(dbPath, sql);
-  const paths = /* @__PURE__ */ new Set();
-  for (const row of rows) {
-    if (!row?.workspace_uris) continue;
-    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
-    try {
-      const uris = JSON.parse(row.workspace_uris);
-      if (Array.isArray(uris)) {
-        for (const u of uris) {
-          if (typeof u === "string" && u.startsWith("file://")) {
-            try {
-              const parsed = new URL(u);
-              let p = decodeURIComponent(parsed.pathname);
-              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
-                p = p.slice(1);
-              }
-              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
-            } catch {
-            }
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  const verified = [];
-  for (const p of paths) {
-    try {
-      const s2 = await fs2.stat(p);
-      if (s2.isDirectory()) verified.push(p);
-    } catch {
-    }
-  }
-  return verified;
-}
-async function readTranscriptSummary(baseDir, conversationId) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
-  const path = join3(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  try {
-    const stat8 = await fs2.stat(path);
-    const handle = await fs2.open(path, "r");
-    try {
-      const buffer = Buffer.alloc(4096);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-      if (!firstLine) return void 0;
-      const record8 = JSON.parse(firstLine);
-      if (record8.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
-      if (!title) return void 0;
-      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return void 0;
-  }
-}
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join3(homedir(), ".gemini/antigravity-cli/brain"), dbPath = join3(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
-  try {
-    await fs2.stat(dbPath);
-    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
-    const params = [];
-    if (workspacePath && workspacePath.trim() !== "") {
-      sql += " AND workspace_uris LIKE ?";
-      params.push(`%${workspacePath.trim()}%`);
-    }
-    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
-    params.push(limit);
-    const rows = await querySqliteJson(dbPath, sql, params);
-    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
-    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
-    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
-    if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = await Promise.all(rows.map(async (r) => {
-        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
-        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
-        return {
-          conversationId: r.conversation_id,
-          title: r.title?.trim() || transcript?.title || "Untitled Session",
-          createdAt: time,
-          updatedAt: time
-        };
-      }));
-      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-    }
-  } catch {
-  }
-  let dirEntries;
-  try {
-    dirEntries = await fs2.readdir(baseDir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const entry of dirEntries) {
-    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join3(baseDir, entry, ".system_generated/logs/transcript.jsonl");
-    try {
-      const s2 = await fs2.stat(transcriptPath);
-      const handle = await fs2.open(transcriptPath, "r");
-      try {
-        const buf = Buffer.alloc(4096);
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine);
-          const rawPrompt = cleanUserPrompt(parsed.content);
-          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s2.mtimeMs
-            });
-          }
-        }
-      } finally {
-        await handle.close();
-      }
-    } catch {
-    }
-  }
-  results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
-}
-
 // src/acp/virtual-harness.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
 var ACP_SESSION_PREFIX = "acp:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
+var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
 var CURSOR_PROVIDER = "cursor";
-function acpCwdWorkspaceId(path) {
-  return `${CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
+function acpCwdWorkspaceId(path, backend) {
+  if (backend !== "cursor" && backend !== "antigravity") throw new Error("An explicit ACP workspace backend is required.");
+  return `${backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
 }
-function createAcpWorkspaceView(path, title) {
+function createAcpWorkspaceView(path, backend, title) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path;
   return {
-    workspaceId: acpCwdWorkspaceId(path),
+    workspaceId: acpCwdWorkspaceId(path, backend),
     path,
     title: label,
     sessionIds: [],
@@ -18896,13 +18514,13 @@ function createAcpWorkspaceView(path, title) {
     updatedAt: now
   };
 }
-async function discoverAcpVirtualWorkspaces(client, signal, backend) {
+async function discoverAcpVirtualWorkspaces(client, backend, signal) {
   if (client?.listWorkspaces !== void 0) {
     try {
       const items = await client.listWorkspaces(backend, signal);
       if (Array.isArray(items) && items.length > 0) {
         return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => {
-          const view = createAcpWorkspaceView(item.path, item.title);
+          const view = createAcpWorkspaceView(item.path, backend, item.title);
           if (typeof item.sessionCount === "number") view.sessionCount = item.sessionCount;
           return view;
         });
@@ -18944,7 +18562,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return this.backend === "antigravity" ? "Antigravity" : "Cursor";
   }
   async selectWorkspace(workspaceId) {
-    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId);
+    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
     if (workspace === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
@@ -18959,7 +18577,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const trimmed = path.trim();
     if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`);
     const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
-    const workspace = existing ?? createAcpWorkspaceView(trimmed);
+    const workspace = existing ?? createAcpWorkspaceView(trimmed, this.backend);
     this.workspaceById.set(workspace.workspaceId, workspace);
     this.selectedWorkspaceId = workspace.workspaceId;
     await this.discoverAndAttachSessions(workspace);
@@ -19291,12 +18909,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (this.client.loadSessionHistory !== void 0) {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend);
-      } catch {
-      }
-    }
-    if (events.length === 0) {
-      try {
-        events = await loadTranscriptEvents(session.acpSessionId, session.sessionId);
       } catch {
       }
     }
@@ -19800,12 +19412,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         } catch {
         }
       }
-      if (discovered.length === 0) {
-        try {
-          discovered = await discoverAntigravitySessions(workspace.path, 30);
-        } catch {
-        }
-      }
       for (const item of discovered) {
         const sessionId = `${ACP_SESSION_PREFIX}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
@@ -19823,7 +19429,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
-    const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2);
+    const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2, this.backend);
     const sessionIds = [sessionId, ...workspace.sessionIds.filter((id5) => id5 !== sessionId)];
     const next = {
       ...workspace,
@@ -20058,17 +19664,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     for (const queue of this.rcHostStreams) queue.push(frame);
   }
 };
-function recreateWorkspaceFromId(workspaceId) {
-  if (workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) {
-    try {
-      const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length));
-      if (path.length > 0) return createAcpWorkspaceView(path);
-    } catch {
-      return void 0;
-    }
-  }
-  if (workspaceId.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(workspaceId)) {
-    return createAcpWorkspaceView(workspaceId);
+function recreateWorkspaceFromId(workspaceId, backend) {
+  const prefix = backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  if (!workspaceId.startsWith(prefix)) return void 0;
+  try {
+    const path = decodeURIComponent(workspaceId.slice(prefix.length));
+    if (path.length > 0) return createAcpWorkspaceView(path, backend);
+  } catch {
+    return void 0;
   }
   return void 0;
 }
@@ -20301,7 +19904,7 @@ import { platform } from "node:os";
 
 // src/server-credentials.ts
 import { chmod, mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname as dirname2, join as join4 } from "node:path";
+import { dirname as dirname2, join as join2 } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -20316,7 +19919,7 @@ var credentialSchema = external_exports.object({
 var ServerCredentialStore = class {
   path;
   constructor(directory) {
-    this.path = join4(directory, "server-credentials.json");
+    this.path = join2(directory, "server-credentials.json");
   }
   /** Serialize the complete read/refresh/write transaction across processes.
    * Never steal an old lock: a suspended owner may still consume a one-use token.
@@ -21175,8 +20778,8 @@ import { networkInterfaces } from "node:os";
 
 // src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, realpathSync as realpathSync2, statSync } from "node:fs";
-import { delimiter, dirname as dirname3, join as join5 } from "node:path";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { delimiter, dirname as dirname3, join as join3 } from "node:path";
 import { fileURLToPath } from "node:url";
 var cachedExternalFactory;
 var cachedExternalFactoryResolved = false;
@@ -21201,7 +20804,7 @@ function buildExternalNativeRtcFactory(nodeBinary, requireFrom = resolveNativeRt
 function resolveNativeRtcRequireFrom(moduleUrl = import.meta.url) {
   const modulePath = fileURLToPath(moduleUrl);
   try {
-    return realpathSync2(modulePath);
+    return realpathSync(modulePath);
   } catch {
     return modulePath;
   }
@@ -21227,21 +20830,21 @@ function nodeBinaryCandidates() {
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
   add3(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join5(part, process.platform === "win32" ? "node.exe" : "node"));
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join3(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");
   add3("/usr/bin/node");
-  add3(join5(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join5(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join5(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join3(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join3(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join3(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
-  const root = join5(process.env.HOME ?? "", ".nvm", "versions", "node");
+  const root = join3(process.env.HOME ?? "", ".nvm", "versions", "node");
   if (root === "" || !existsSync(root)) return [];
   try {
-    return readdirSync(root).map((version) => join5(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root).map((version) => join3(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -22605,18 +22208,7 @@ var ClientModeRuntime = class {
       return this.cursorVirtual.workspaces();
     }
     const acpClient = new AgentAcpClient(remote.client);
-    const workspaces = await discoverAcpVirtualWorkspaces(acpClient, signal, backend);
-    if (backend === "antigravity") {
-      try {
-        const sessions = await acpClient.listSessions("", "antigravity", 100, signal);
-        if (sessions.length > 0) {
-          for (const ws of workspaces) {
-            if (ws.sessionCount === 0) ws.sessionCount = sessions.length;
-          }
-        }
-      } catch {
-      }
-    }
+    const workspaces = await discoverAcpVirtualWorkspaces(acpClient, backend, signal);
     return workspaces;
   }
   async openCursorWorkspace(targetDeviceId, workspaceId, signal, backend = "cursor") {
@@ -23450,7 +23042,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const codex = capabilities.has("codex.appserver.v1");
   const hasAcp = capabilities.has("agent.acp.v1");
   const cursor2 = capabilities.has("agent.acp.cursor.v1") || hasAcp && !capabilities.has("agent.acp.antigravity.v1");
-  const antigravity = capabilities.has("agent.acp.antigravity.v1") || hasAcp && !capabilities.has("agent.acp.cursor.v1");
+  const antigravity = capabilities.has("agent.acp.antigravity.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
@@ -23536,10 +23128,10 @@ import { hostname as hostname2 } from "node:os";
 import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash } from "node:crypto";
 import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname4, join as join6 } from "node:path";
+import { homedir } from "node:os";
+import { dirname as dirname4, join as join4 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -23568,14 +23160,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join6(options.homeDirectory ?? homedir2(), ".dsh");
-    this.directory = options.directory ?? join6(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join4(options.homeDirectory ?? homedir(), ".dsh");
+    this.directory = options.directory ?? join4(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
     await mkdir2(this.directory, { recursive: true, mode: 448 });
     await chmod2(this.directory, 448);
-    const devicePath = join6(this.directory, "device.json");
-    const keyPath = join6(this.directory, "device.key");
+    const devicePath = join4(this.directory, "device.json");
+    const keyPath = join4(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -23644,7 +23236,7 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join6(this.directory, "trusted-peers.json");
+    const path = join4(this.directory, "trusted-peers.json");
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
@@ -23660,7 +23252,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join6(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join4(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -23668,11 +23260,11 @@ var IdentityStore = class {
 };
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
-  const scope = createHash2("sha256").update(origin).digest("hex").slice(0, 24);
-  return join6(root, "servers", scope, role);
+  const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
+  return join4(root, "servers", scope, role);
 }
 function fingerprint(publicKey) {
-  const compact = createHash2("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
+  const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
   return compact.match(/.{1,4}/g).join(" ");
 }
 async function assertPrivateMode2(path) {
@@ -25804,12 +25396,12 @@ function closeCode(code) {
 
 // src/remote-directory-browser.ts
 import { readdir, stat as stat3 } from "node:fs/promises";
-import { homedir as homedir3, platform as platform2 } from "node:os";
-import { basename as basename3, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
+import { homedir as homedir2, platform as platform2 } from "node:os";
+import { basename as basename2, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve(homedir3());
+  const home = resolve(homedir2());
   const target2 = path === void 0 || path.trim() === "" ? home : resolve(path);
   if (!isAbsolute2(target2)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir(target2, { withFileTypes: true });
@@ -25837,7 +25429,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root) {
-    segments.unshift(basename3(current));
+    segments.unshift(basename2(current));
     current = dirname5(current);
   }
   for (const segment of segments) {
@@ -27128,11 +26720,11 @@ function isRecord12(value) {
 }
 
 // src/codex/domain.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir4 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute3, join as join7, relative, resolve as resolve2 } from "node:path";
+import { homedir as homedir3 } from "node:os";
+import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -28200,7 +27792,7 @@ var CodexRemoteDomain = class {
       await appServer.respond(message.id, { decision: "decline" });
       return;
     }
-    const requestHandle = randomUUID3();
+    const requestHandle = randomUUID2();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner.connectionId,
@@ -28576,21 +28168,21 @@ var CodexRemoteDomain = class {
     return paths;
   }
 };
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir4()) {
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
   if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
-    join7(userHome, "Applications", "ChatGPT.app")
+    join5(userHome, "Applications", "ChatGPT.app")
   ].flatMap((chatGptApp) => {
-    const codexCli = join7(chatGptApp, "Contents", "Resources", "codex-cli");
+    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join7(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord15(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
-      const candidate = join7(codexCli, manifest.entrypoint);
+      const candidate = join5(codexCli, manifest.entrypoint);
       if (!existsSync2(candidate)) return [];
-      accessSync(candidate, constants2.X_OK);
+      accessSync(candidate, constants.X_OK);
       return [candidate];
     } catch {
       return [];
@@ -28599,7 +28191,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   return [.../* @__PURE__ */ new Set([
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join7(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
 }
@@ -28716,7 +28308,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename4(root) || root, path: root, hidden: false }];
+  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
   const remainder = relative(root, path);
   if (remainder === "") return crumbs2;
   let current = root;
@@ -29085,24 +28677,126 @@ function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/acp/adapters/antigravity/image-store.ts
+import { promises as fs, realpathSync as realpathSync2, constants as constants2 } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join6, basename as basename4 } from "node:path";
+import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
+var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
+var TTL = 24 * 60 * 60 * 1e3;
+var AGY_IMAGE_ROOT = join6(realpathSync2(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
+var stagingChain = Promise.resolve();
+var sessionFolder = (sessionId) => createHash2("sha256").update(sessionId).digest("hex");
+async function privateDirectory(path) {
+  await fs.mkdir(path, { recursive: true, mode: 448 });
+  const info = await fs.lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
+}
+async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
+  await privateDirectory(root);
+  return root;
+}
+function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
+  const result = stagingChain.then(() => stageImages(sessionId, images, root));
+  stagingChain = result.then(() => void 0, () => void 0);
+  return result;
+}
+async function stageImages(sessionId, images, root) {
+  await prepareAgyImageDirectory(root);
+  let total = 0;
+  for (const entry of await fs.readdir(root)) {
+    if (!/^[0-9a-f]{64}$/.test(entry)) continue;
+    const dir = join6(root, entry);
+    const info = await fs.lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) continue;
+    for (const name2 of await fs.readdir(dir)) {
+      if (!IMAGE_NAME.test(name2)) continue;
+      const path = join6(dir, name2);
+      const file = await fs.lstat(path);
+      if (!file.isFile() || file.isSymbolicLink()) continue;
+      if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
+      else total += file.size;
+    }
+  }
+  const parsed = images.map(parseAcpImage);
+  if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
+  const directory = join6(root, sessionFolder(sessionId));
+  await privateDirectory(directory);
+  const paths = [];
+  try {
+    for (const image of parsed) {
+      const path = join6(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
+      await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
+      paths.push(path);
+    }
+    return paths;
+  } catch (error) {
+    await Promise.all(paths.map((path) => fs.unlink(path).catch(() => void 0)));
+    throw error;
+  }
+}
+function agyImagePrompt(text, paths) {
+  return `${text}
+<AGY_REMOTE_IMAGES>
+User attached images. Use view_file to inspect these images before answering.
+${JSON.stringify(paths)}
+</AGY_REMOTE_IMAGES>`;
+}
+function stripAgyImageReferences(text) {
+  return text.replace(/\n?<AGY_REMOTE_IMAGES>[\s\S]*?<\/AGY_REMOTE_IMAGES>/g, "").trim();
+}
+function agyImageReferences(text) {
+  const block = /<AGY_REMOTE_IMAGES>\n[^\n]*\n([^\n]+)\n<\/AGY_REMOTE_IMAGES>/.exec(text);
+  if (!block) return [];
+  try {
+    const value = JSON.parse(block[1]);
+    return Array.isArray(value) && value.length <= 4 ? value.filter((path) => typeof path === "string") : [];
+  } catch {
+    return [];
+  }
+}
+async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
+  const name2 = basename4(path);
+  if (!IMAGE_NAME.test(name2) || path !== join6(root, sessionFolder(sessionId), name2)) return void 0;
+  try {
+    await privateDirectory(root);
+    await privateDirectory(join6(root, sessionFolder(sessionId)));
+    const info = await fs.lstat(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
+    const file = await fs.open(path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
+    try {
+      const current = await file.stat();
+      if (current.ino !== info.ino || current.dev !== info.dev || current.size !== info.size) return void 0;
+      const mediaType = Object.entries(EXTENSIONS).find(([, ext]) => name2.endsWith(`.${ext}`))?.[0];
+      const image = parseAcpImage({ type: "image", mimeType: mediaType, data: (await file.readFile()).toString("base64") });
+      return acpImageContent(image, `agy-image:${name2}`);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
+
 // src/acp/adapters/antigravity-process.ts
 import { spawn as spawn4 } from "node:child_process";
 import { Buffer as Buffer5 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/antigravity/transcript-watcher.ts
-import { promises as fs3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { promises as fs2 } from "node:fs";
+import { join as join7 } from "node:path";
 import { EventEmitter } from "node:events";
-import { homedir as homedir5 } from "node:os";
+import { homedir as homedir4 } from "node:os";
 var TranscriptWatcher = class extends EventEmitter {
-  constructor(conversationId, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
+  constructor(conversationId, baseDir = join7(homedir4(), ".gemini/antigravity-cli/brain")) {
     super();
     this.conversationId = conversationId;
     this.baseDir = baseDir;
-    const brainDir = join8(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join8(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join8(brainDir, "transcript_full.jsonl");
+    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join7(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
   }
   offset = 0;
   lineRemainder = "";
@@ -29149,12 +28843,12 @@ var TranscriptWatcher = class extends EventEmitter {
   async readNewLines() {
     let stat8;
     try {
-      stat8 = await fs3.stat(this.transcriptPath);
+      stat8 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
     if (stat8.size <= this.offset) return;
-    const handle = await fs3.open(this.transcriptPath, "r");
+    const handle = await fs2.open(this.transcriptPath, "r");
     try {
       const bytesToRead = stat8.size - this.offset;
       const buffer = Buffer.alloc(bytesToRead);
@@ -29218,7 +28912,7 @@ var TranscriptWatcher = class extends EventEmitter {
   }
   async enrichFromFullTranscript(record8) {
     try {
-      const content = await fs3.readFile(this.transcriptFullPath, "utf-8");
+      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
       for (const line of lines) {
         const trimmed = line.trim();
@@ -29763,6 +29457,288 @@ function isSessionMutation(method) {
   return method === "session/prompt" || method === "session/cancel";
 }
 
+// src/acp/adapters/antigravity/transcript-loader.ts
+import { promises as fs3 } from "node:fs";
+import { join as join8 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+function cleanUserPrompt(raw) {
+  if (!raw) return "";
+  raw = stripAgyImageReferences(raw);
+  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return raw.trim();
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  let content = "";
+  try {
+    content = await fs3.readFile(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = content.split("\n");
+  const events = [];
+  let currentSeq = 0;
+  let currentTurn = 0;
+  let turnOpen = false;
+  const push = (type, data2, time, surface = false) => {
+    events.push({
+      type: "event",
+      event: {
+        type,
+        seq: currentSeq++,
+        time,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    });
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let record8;
+    try {
+      record8 = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
+    if (record8.type === "USER_INPUT") {
+      if (turnOpen) {
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+      currentTurn += 1;
+      turnOpen = true;
+      push("turn/start", { turn: currentTurn }, time);
+      push("step/start", { turn: currentTurn, step: 1 }, time);
+      const text = cleanUserPrompt(record8.content);
+      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
+      push("user/message", {
+        id: `user:${record8.step_index}`,
+        role: "user",
+        content: [...text ? [{ type: "text", text }] : [], ...images],
+        source: { kind: "user" }
+      }, time, true);
+    } else if (record8.type === "PLANNER_RESPONSE") {
+      if (!turnOpen) {
+        currentTurn += 1;
+        turnOpen = true;
+        push("turn/start", { turn: currentTurn }, time);
+        push("step/start", { turn: currentTurn, step: 1 }, time);
+      }
+      if (Array.isArray(record8.tool_calls)) {
+        for (const call of record8.tool_calls) {
+          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
+          const callId = `${record8.step_index}:${toolName}`;
+          push("tool/call", {
+            turn: currentTurn,
+            step: 1,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
+            toolCallId: callId,
+            toolName,
+            status: call.status === "ERROR" ? "failed" : "finished"
+          }, time, false);
+        }
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        const contentBlocks2 = [];
+        if (record8.thinking && record8.thinking.trim() !== "") {
+          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
+        }
+        contentBlocks2.push({ type: "text", text: record8.content.trim() });
+        push("assistant/message", {
+          turn: currentTurn,
+          step: 1,
+          message: {
+            id: `${sessionId}:${record8.step_index}`,
+            role: "assistant",
+            content: contentBlocks2,
+            source: { kind: "model", provider: "google", model: "gemini" }
+          },
+          // Harness trajectory timing expects every assistant message to carry
+          // an iterable stream, including messages restored from transcript.
+          stream: []
+        }, time, true);
+      }
+    }
+  }
+  if (turnOpen) {
+    const settledAt = events.at(-1)?.event.time ?? Date.now();
+    push("step/end", { turn: currentTurn, step: 1 }, settledAt);
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
+  }
+  return events;
+}
+async function querySqliteJson(dbPath, sql, params = []) {
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const stmt = db.prepare(sql);
+      const rows = stmt.all(...params);
+      return rows;
+    } finally {
+      db.close();
+    }
+  } catch {
+  }
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    let formattedSql = sql;
+    for (const p of params) {
+      const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
+      formattedSql = formattedSql.replace("?", val);
+    }
+    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
+    return JSON.parse(stdout || "[]");
+  } catch {
+    return [];
+  }
+}
+async function discoverAntigravityWorkspaces(dbPath = join8(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
+  try {
+    await fs3.stat(dbPath);
+  } catch {
+    return [];
+  }
+  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
+  const rows = await querySqliteJson(dbPath, sql);
+  const paths = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    if (!row?.workspace_uris) continue;
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
+    try {
+      const uris = JSON.parse(row.workspace_uris);
+      if (Array.isArray(uris)) {
+        for (const u of uris) {
+          if (typeof u === "string" && u.startsWith("file://")) {
+            try {
+              const parsed = new URL(u);
+              let p = decodeURIComponent(parsed.pathname);
+              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
+                p = p.slice(1);
+              }
+              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
+            } catch {
+            }
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  const verified = [];
+  for (const p of paths) {
+    try {
+      const s2 = await fs3.stat(p);
+      if (s2.isDirectory()) verified.push(p);
+    } catch {
+    }
+  }
+  return verified;
+}
+async function readTranscriptSummary(baseDir, conversationId) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
+  const path = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  try {
+    const stat8 = await fs3.stat(path);
+    const handle = await fs3.open(path, "r");
+    try {
+      const buffer = Buffer.alloc(4096);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+      if (!firstLine) return void 0;
+      const record8 = JSON.parse(firstLine);
+      if (record8.type !== "USER_INPUT") return void 0;
+      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
+      if (!title) return void 0;
+      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join8(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  try {
+    await fs3.stat(dbPath);
+    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
+    const params = [];
+    if (workspacePath && workspacePath.trim() !== "") {
+      sql += " AND workspace_uris LIKE ?";
+      params.push(`%${workspacePath.trim()}%`);
+    }
+    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
+    params.push(limit);
+    const rows = await querySqliteJson(dbPath, sql, params);
+    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
+    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
+    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
+    if (rows.length > 0 || emptyRows.length > 0) {
+      const summaries = await Promise.all(rows.map(async (r) => {
+        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
+        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
+        return {
+          conversationId: r.conversation_id,
+          title: r.title?.trim() || transcript?.title || "Untitled Session",
+          createdAt: time,
+          updatedAt: time
+        };
+      }));
+      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+    }
+  } catch {
+  }
+  let dirEntries;
+  try {
+    dirEntries = await fs3.readdir(baseDir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of dirEntries) {
+    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
+    const transcriptPath = join8(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    try {
+      const s2 = await fs3.stat(transcriptPath);
+      const handle = await fs3.open(transcriptPath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine);
+          const rawPrompt = cleanUserPrompt(parsed.content);
+          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s2.mtimeMs
+            });
+          }
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+    }
+  }
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
+  return results.slice(0, limit);
+}
+
 // src/acp/peer-bridge.ts
 import { Buffer as Buffer6 } from "node:buffer";
 var streamOpenSchema4 = external_exports.object({
@@ -30162,7 +30138,7 @@ var AcpRemoteGateway = class {
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
     });
     if (typeof call.params.backend === "string") {
-      const sessionId2 = sessionIdFromParams(call.method, call.params);
+      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor):/, "") : sessionIdFromParams(call.method, call.params);
       const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
       if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
@@ -30218,14 +30194,14 @@ var AcpRemoteGateway = class {
     if (call.method === "dsh/sessionList") {
       const limit = typeof call.params.limit === "number" ? call.params.limit : 30;
       const path = String(call.params.path || "");
-      const backend = typeof call.params.backend === "string" ? call.params.backend : "antigravity";
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (backend === "antigravity") {
         if (path.trim() !== "" && call.params.prewarm !== false) {
           const cwd2 = await this.requireExistingDirectory(path);
           this.requireAcp("antigravity").prewarmSession?.(cwd2);
         }
         const items = await discoverAntigravitySessions(path, limit);
-        this.logger.info("ACP session list fetched", { count: items.length, path });
+        this.logger.info("ACP session list fetched", { count: items.length });
         return { items };
       }
       return { items: [] };
@@ -30233,6 +30209,13 @@ var AcpRemoteGateway = class {
     if (call.method === "dsh/sessionHistory") {
       const rawSessionId = String(call.params.sessionId);
       const conversationId = rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
+      const boundBackend = this.sessionBackends.get(conversationId);
+      const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
+      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      this.requireAcp(backend);
+      if (backend !== "antigravity") return { events: [] };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),

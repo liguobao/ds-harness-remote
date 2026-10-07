@@ -7,11 +7,11 @@ import type {
   TypertGatewayRequest,
   TypertRpcResult,
 } from '../typert-gateway-contract.js'
-import { discoverAntigravitySessions, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
 const ACP_SESSION_PREFIX = 'acp:'
 const CURSOR_WORKSPACE_PREFIX = 'cursor:cwd:'
+const AGY_WORKSPACE_PREFIX = 'antigravity:cwd:'
 const CURSOR_PROVIDER = 'cursor'
 const CURSOR_MODEL = 'cursor'
 
@@ -104,16 +104,17 @@ export interface AcpClientLike {
   ): Promise<unknown>
 }
 
-/** Build the stable ACP/Cursor virtual Workspace id for an absolute Host cwd. */
-export function acpCwdWorkspaceId(path: string): string {
-  return `${CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`
+/** Build a backend-scoped virtual Workspace id for an absolute Host cwd. */
+export function acpCwdWorkspaceId(path: string, backend: 'cursor' | 'antigravity'): string {
+  if (backend !== 'cursor' && backend !== 'antigravity') throw new Error('An explicit ACP workspace backend is required.')
+  return `${backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`
 }
 
-export function createAcpWorkspaceView(path: string, title?: string): AcpVirtualWorkspaceView {
+export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigravity', title?: string): AcpVirtualWorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
-    workspaceId: acpCwdWorkspaceId(path),
+    workspaceId: acpCwdWorkspaceId(path, backend),
     path,
     title: label,
     sessionIds: [],
@@ -125,9 +126,9 @@ export function createAcpWorkspaceView(path: string, title?: string): AcpVirtual
 
 /** Discover ACP virtual workspaces visible on the Host. */
 export async function discoverAcpVirtualWorkspaces(
-  client?: AcpClientLike,
+  client: AcpClientLike,
+  backend: 'cursor' | 'antigravity',
   signal?: AbortSignal,
-  backend?: 'cursor' | 'antigravity',
 ): Promise<AcpVirtualWorkspaceView[]> {
   if (client?.listWorkspaces !== undefined) {
     try {
@@ -136,20 +137,20 @@ export async function discoverAcpVirtualWorkspaces(
         return items
           .filter(item => typeof item?.path === 'string' && item.path.trim() !== '')
           .map(item => {
-            const view = createAcpWorkspaceView(item.path, item.title)
+            const view = createAcpWorkspaceView(item.path, backend, item.title)
             if (typeof item.sessionCount === 'number') view.sessionCount = item.sessionCount
             return view
           })
       }
     } catch {
-      // fallback to empty
+      // Discovery is optional; an unavailable Host returns no workspaces.
     }
   }
   return []
 }
 
 /**
- * Plugin-owned virtual Harness target for Agent ACP (Cursor adapter). Projects
+ * Browser-safe, in-memory Harness projection for the independent Agent ACP domain. Projects
  * cwd workspaces and ACP sessions onto the native DSH Workspace / Session /
  * Composer surface without writing DSH SessionStore.
  */
@@ -196,7 +197,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   async selectWorkspace(workspaceId: string): Promise<AcpVirtualWorkspaceView> {
-    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId)
+    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend)
     if (workspace === undefined) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
@@ -212,7 +213,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const trimmed = path.trim()
     if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`)
     const existing = [...this.workspaceById.values()].find(item => item.path === trimmed)
-    const workspace = existing ?? createAcpWorkspaceView(trimmed)
+    const workspace = existing ?? createAcpWorkspaceView(trimmed, this.backend)
     this.workspaceById.set(workspace.workspaceId, workspace)
     this.selectedWorkspaceId = workspace.workspaceId
     await this.discoverAndAttachSessions(workspace)
@@ -539,14 +540,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend)
       } catch {
-        // fallback
-      }
-    }
-    if (events.length === 0) {
-      try {
-        events = await loadTranscriptEvents(session.acpSessionId, session.sessionId)
-      } catch {
-        // fallback
+        // Keep the projection empty until remote history is available.
       }
     }
     if (events.length > 0) {
@@ -1116,14 +1110,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30)
         } catch {
-          // fallback
-        }
-      }
-      if (discovered.length === 0) {
-        try {
-          discovered = await discoverAntigravitySessions(workspace.path, 30)
-        } catch {
-          // fallback
+          // Keep the projection empty until remote history is available.
         }
       }
       for (const item of discovered) {
@@ -1146,7 +1133,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private attachSessionToWorkspace(cwd: string, sessionId: string): void {
     const workspace = [...this.workspaceById.values()].find(item => item.path === cwd)
-      ?? createAcpWorkspaceView(cwd)
+      ?? createAcpWorkspaceView(cwd, this.backend)
     const sessionIds = [sessionId, ...workspace.sessionIds.filter(id => id !== sessionId)]
     const next = {
       ...workspace,
@@ -1408,17 +1395,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 }
 
-function recreateWorkspaceFromId(workspaceId: string): AcpVirtualWorkspaceView | undefined {
-  if (workspaceId.startsWith(CURSOR_WORKSPACE_PREFIX)) {
-    try {
-      const path = decodeURIComponent(workspaceId.slice(CURSOR_WORKSPACE_PREFIX.length))
-      if (path.length > 0) return createAcpWorkspaceView(path)
-    } catch {
-      return undefined
-    }
-  }
-  if (workspaceId.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(workspaceId)) {
-    return createAcpWorkspaceView(workspaceId)
+function recreateWorkspaceFromId(workspaceId: string, backend: 'cursor' | 'antigravity'): AcpVirtualWorkspaceView | undefined {
+  const prefix = backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
+  if (!workspaceId.startsWith(prefix)) return undefined
+  try {
+    const path = decodeURIComponent(workspaceId.slice(prefix.length))
+    if (path.length > 0) return createAcpWorkspaceView(path, backend)
+  } catch {
+    return undefined
   }
   return undefined
 }

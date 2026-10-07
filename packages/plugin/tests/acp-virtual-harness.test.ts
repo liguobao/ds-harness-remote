@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AcpVirtualHarness,
   createAcpWorkspaceView,
+  discoverAcpVirtualWorkspaces,
   acpCwdWorkspaceId,
   type AcpClientLike,
 } from '../src/acp/virtual-harness.js'
@@ -12,6 +13,7 @@ type AgentAcpClientLike = AcpClientLike
 function fakeAcp() {
   return {
     createSession: vi.fn(async (cwd: string) => ({ sessionId: 'acp_1', cwd })),
+    listSessions: vi.fn(async () => [{ conversationId: 'remote-history', title: 'Remote history', createdAt: 1, updatedAt: 2 }]),
     prompt: vi.fn(async () => ({})),
     cancel: vi.fn(async () => ({})),
     listDirectory: vi.fn(async (path: string) => ({
@@ -114,8 +116,8 @@ describe('AcpVirtualHarness', () => {
     const client = fakeAcp()
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
     const workspace = await target.selectOrCreateWorkspace('/workspace/repo')
-    expect(workspace.workspaceId).toBe(acpCwdWorkspaceId('/workspace/repo'))
-    expect(createAcpWorkspaceView('/workspace/repo').title).toBe('repo')
+    expect(workspace.workspaceId).toBe(acpCwdWorkspaceId('/workspace/repo', 'cursor'))
+    expect(createAcpWorkspaceView('/workspace/repo', 'cursor').title).toBe('repo')
 
     const created = await target.dispatch('session/create', {
       args: { request: { workspaceId: workspace.workspaceId } },
@@ -175,7 +177,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
     await target.selectOrCreateWorkspace('/workspace/repo')
     await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'cursor') } },
     }, new AbortController().signal)
 
     const prompted = await target.dispatch('session/prompt', {
@@ -195,7 +197,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
     await target.selectOrCreateWorkspace('/workspace/repo')
     await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'cursor') } },
     }, new AbortController().signal)
 
     // Seed a pending approval the same way stream frames would.
@@ -216,7 +218,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
     await target.selectOrCreateWorkspace('/workspace/repo')
     const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'antigravity') } },
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
 
     const controller = new AbortController()
@@ -243,7 +245,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
     await target.selectOrCreateWorkspace('/workspace/repo')
     const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'antigravity') } },
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
     const sessionId = created.value.sessionId
 
@@ -296,7 +298,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
     await target.selectOrCreateWorkspace('/workspace/repo')
     const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'antigravity') } },
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
     const sessionId = created.value.sessionId
 
@@ -365,7 +367,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
     await target.selectOrCreateWorkspace('/workspace/repo')
     const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'antigravity') } },
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
     const sessionId = created.value.sessionId
 
@@ -520,7 +522,7 @@ describe('AcpVirtualHarness', () => {
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
     await target.selectOrCreateWorkspace('/workspace/repo')
     const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
+      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo', 'antigravity'), sessionId: 'acp:acp_multiturn' } },
     }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
     const sessionId = created.value.sessionId
 
@@ -623,36 +625,42 @@ describe('AcpVirtualHarness', () => {
     await target.close()
   })
 
-  it('hydrates Antigravity session history from transcript loader', async () => {
-    const client: AgentAcpClientLike = {
-      createSession: vi.fn(async () => ({ sessionId: 'bab821dd-6184-43f1-8ed5-fe589be9b302' })),
-      prompt: vi.fn(async () => {}),
-      cancel: vi.fn(async () => {}),
-      listDirectory: vi.fn(async () => []),
-      openStream: vi.fn(async () => ({ close: async () => {} })),
-      respond: vi.fn(async () => {}),
+  it('uses only the remote ACP history, including empty or unavailable history', async () => {
+    const client = { ...fakeAcp(),
+      listSessions: vi.fn(async () => [{ conversationId: 'remote-only', title: 'Remote', createdAt: 1, updatedAt: 2 }]),
+      loadSessionHistory: vi.fn(async () => [] as unknown[]),
     }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+    try {
+      await target.selectOrCreateWorkspace('/workspace/repo')
+      const history = () => target.dispatch('session/history', { args: { sessionId: 'acp:remote-only' } }, new AbortController().signal)
+      expect(await history()).toMatchObject({ ok: true, value: { records: [] } })
+      client.loadSessionHistory.mockRejectedValueOnce(new Error('remote unavailable'))
+      expect(await history()).toMatchObject({ ok: true, value: { records: [] } })
+      expect(client.loadSessionHistory).toHaveBeenCalledWith('acp:remote-only', 'antigravity')
+    } finally { await target.close() }
+  })
 
-    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
-    await target.selectOrCreateWorkspace('/workspace/repo')
-    const created = await target.dispatch('session/create', {
-      args: { request: { workspaceId: acpCwdWorkspaceId('/workspace/repo') } },
-    }, new AbortController().signal) as { ok: true; value: { sessionId: string } }
-    const sessionId = created.value.sessionId
-
-    const historyResult = await target.dispatch('session/history', {
-      args: { request: { sessionId, maxMessages: 50 } },
-    }, new AbortController().signal) as { ok: true; value: { records: Array<{ type: string; event: { type: string } }> } }
-
-    expect(historyResult.ok).toBe(true)
-    const records = historyResult.value.records
-    if (records.length > 0) {
-      const types = records.map(r => r.event.type)
-      expect(types).toContain('user/message')
-      expect(types).toContain('assistant/message')
-    }
-
-    await target.close()
+  it('scopes workspace IDs by backend and rejects unscoped or other backend IDs', async () => {
+    const cursorId = acpCwdWorkspaceId('/workspace/repo', 'cursor')
+    const agyId = acpCwdWorkspaceId('/workspace/repo', 'antigravity')
+    expect(cursorId).toBe('cursor:cwd:%2Fworkspace%2Frepo')
+    expect(agyId).toBe('antigravity:cwd:%2Fworkspace%2Frepo')
+    expect(agyId).not.toBe(cursorId)
+    expect(() => acpCwdWorkspaceId('/workspace/repo', undefined as never)).toThrow('explicit ACP workspace backend')
+    const catalog = { ...fakeAcp(), listWorkspaces: vi.fn(async () => [{ path: '/workspace/repo' }]) }
+    expect((await discoverAcpVirtualWorkspaces(catalog, 'cursor'))[0].workspaceId).toBe(cursorId)
+    expect((await discoverAcpVirtualWorkspaces(catalog, 'antigravity'))[0].workspaceId).toBe(agyId)
+    const agy = new AcpVirtualHarness(fakeAcp(), { deviceId: 'host', name: 'Host' }, 'antigravity')
+    const cursor = new AcpVirtualHarness(fakeAcp(), { deviceId: 'host', name: 'Host' })
+    try {
+      expect((await agy.selectWorkspace(agyId)).workspaceId).toBe(agyId)
+      expect((await cursor.selectWorkspace(cursorId)).workspaceId).toBe(cursorId)
+      await expect(agy.selectWorkspace(cursorId)).rejects.toThrow('no longer available')
+      await expect(agy.selectWorkspace('/workspace/repo')).rejects.toThrow('no longer available')
+      await expect(cursor.selectWorkspace('/workspace/repo')).rejects.toThrow('no longer available')
+      await expect(cursor.selectWorkspace(agyId)).rejects.toThrow('no longer available')
+    } finally { await agy.close(); await cursor.close() }
   })
 
   it('discovers and attaches sessions when selectWorkspace is called directly', async () => {
@@ -666,7 +674,7 @@ describe('AcpVirtualHarness', () => {
     }
 
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
-    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote')
+    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote', 'antigravity')
     const ws = await target.selectWorkspace(workspaceId)
     expect(ws.sessionIds.length).toBeGreaterThan(0)
     const preferred = await target.preferredSessionId()
@@ -698,7 +706,7 @@ describe('AcpVirtualHarness', () => {
     }
 
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
-    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote')
+    const workspaceId = acpCwdWorkspaceId('/var/lib/dsh/workspace/ds-harness-remote', 'antigravity')
     const ws = await target.selectWorkspace(workspaceId)
     expect(client.listSessions).toHaveBeenCalled()
     expect(ws.sessionIds).toContain('acp:remote-conv-1')

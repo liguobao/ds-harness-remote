@@ -93,7 +93,7 @@ export class AgentAcpClient {
     backend?: AcpAgentBackend,
     signal?: AbortSignal,
   ): Promise<unknown[]> {
-    const result = await this.call('dsh/sessionHistory', {
+    const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(() => ({ events: [] }))
@@ -188,7 +188,8 @@ export class AgentAcpClient {
           data: bytesToCanonicalBase64(requestBytes.subarray(start, end)),
         }, signal)
       }
-      const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal) as AgentAcpTransferCommitResult
+      const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal,
+        method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined) as AgentAcpTransferCommitResult
       if (commit.kind === 'inline') return commit.response
       if (commit.kind !== 'chunked' || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES
         || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer descriptor.')

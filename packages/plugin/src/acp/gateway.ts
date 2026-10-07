@@ -194,7 +194,9 @@ export class AcpRemoteGateway {
     })
 
     if (typeof call.params.backend === 'string') {
-      const sessionId = sessionIdFromParams(call.method, call.params)
+      const sessionId = call.method === 'dsh/sessionHistory'
+        ? String(call.params.sessionId).replace(/^(acp|cursor):/, '')
+        : sessionIdFromParams(call.method, call.params)
       const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
       if (boundBackend !== undefined && boundBackend !== call.params.backend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
@@ -258,7 +260,7 @@ export class AcpRemoteGateway {
     if (call.method === 'dsh/sessionList') {
       const limit = typeof call.params.limit === 'number' ? call.params.limit : 30
       const path = String(call.params.path || '')
-      const backend = typeof call.params.backend === 'string' ? call.params.backend : 'antigravity'
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
       if (backend === 'antigravity') {
         // Workspace selection loads history before the user presses New.
         // Prepare one idle process in that directory without awaiting startup.
@@ -267,7 +269,7 @@ export class AcpRemoteGateway {
           this.requireAcp('antigravity').prewarmSession?.(cwd)
         }
         const items = await discoverAntigravitySessions(path, limit)
-        this.logger.info('ACP session list fetched', { count: items.length, path })
+        this.logger.info('ACP session list fetched', { count: items.length })
         return { items }
       }
       return { items: [] }
@@ -280,6 +282,15 @@ export class AcpRemoteGateway {
         : rawSessionId.startsWith('cursor:')
           ? rawSessionId.slice('cursor:'.length)
           : rawSessionId
+      const boundBackend = this.sessionBackends.get(conversationId)
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend ?? this.defaultBackend()
+      if ((boundBackend !== undefined && boundBackend !== backend)
+        || (rawSessionId.startsWith('cursor:') && backend !== 'cursor')
+        || (rawSessionId.startsWith('acp:') && backend !== 'antigravity')) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
+      this.requireAcp(backend)
+      if (backend !== 'antigravity') return { events: [] }
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
       this.logger.info('ACP session history fetched', {
         sessionId: shortSessionId(rawSessionId),
