@@ -223,3 +223,8 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] 真机验证新旧 DSH 权限切换、Host 热开启/关闭终端、跨机重连、Windows 路径与 shell、长输出、IME/TalkBack/大字体
 - [ ] Android 图片/PDF/Office 只读预览真实 Host 与真机验收：大文件、转换超时/字体缺失、取消与断线、内存峰值、分页缩放
 - [ ] PDF 文本选择与 TalkBack 验收（当前已有受限文本叠层，真机未验证）
+
+## Android AGY (2026-10-07)
+
+- [x] AGY 工作区/会话 catalog、空白新会话、历史/图片、流式、标题刷新与重连恢复
+- [ ] Android AGY APK 与真机/加密跨设备回归；每目录超过 100 个会话的分页体验

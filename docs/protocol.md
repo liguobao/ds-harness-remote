@@ -1534,3 +1534,10 @@ process-range termination) when that service is available and falls back to a pl
 pipe otherwise. This carrier has no terminal emulator, so `screen` is a bounded raw
 output journal replayed into the client emulator, prefixed with a reset when the
 journal was truncated.
+
+### ACP catalog reads without prewarming
+
+`agent.acp.call` 内的 `dsh/sessionList` Params 新增可选布尔字段 `prewarm`，默认 `true`。
+`false` 仅关闭该次列表读取触发的空闲 CLI 预热，不改变后端选择、身份/权限校验或 catalog
+来源；Android 批量读取各目录时使用它，防止为每个目录启动一个进程。此字段不扩展 method
+allowlist，也不提供文件写入能力。

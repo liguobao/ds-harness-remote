@@ -117,3 +117,18 @@ The WebView native dependency requires a new APK; a JavaScript-only update to an
 Arbitrary tool RPCs remain unavailable. CodeX actions use separate fixed App Server schemas; Host
 policy remains authoritative. Native keyboard, TalkBack, and cross-device regression need real-device
 validation for this addition.
+
+## AGY workspaces
+
+When the Host enables the Antigravity ACP backend, Android loads its workspace roots and the latest
+100 conversations per directory from AGY's own catalog. Selecting a directory can also create a new
+blank conversation. History and live frames use `agent.acp.*`; reconnect reloads durable history and
+reopens the stream. Replies refresh the conversation title. AGY supports text and PNG/JPEG/WebP/GIF
+images (8 MiB each, four per message); image prompts and history use bounded ACP transfers. Images
+remain in the Host's private temporary cache for up to 24 hours. The Android projection stays in
+memory and never writes DSH SessionStore or Workspace data. Cursor remains a separate backend.
+
+Validation: Android typecheck, 286 tests, and production Hermes export passed. An in-process test
+using the real AGY CLI verified image replies and catalog/history/image recovery after Host restart;
+it did not exercise encrypted transport or an Android UI. No Android device or Java runtime was
+available, so this change has not been validated in a newly built APK on a physical device.

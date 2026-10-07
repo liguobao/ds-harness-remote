@@ -29734,7 +29734,8 @@ var schemas2 = {
   "dsh/sessionList": external_exports.object({
     path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
     backend: external_exports.string().min(1).max(64).optional(),
-    limit: external_exports.number().int().positive().max(100).optional()
+    limit: external_exports.number().int().positive().max(100).optional(),
+    prewarm: external_exports.boolean().optional()
   }).strict(),
   "dsh/sessionHistory": external_exports.object({
     sessionId: id4,
@@ -30219,7 +30220,7 @@ var AcpRemoteGateway = class {
       const path = String(call.params.path || "");
       const backend = typeof call.params.backend === "string" ? call.params.backend : "antigravity";
       if (backend === "antigravity") {
-        if (path.trim() !== "") {
+        if (path.trim() !== "" && call.params.prewarm !== false) {
           const cwd2 = await this.requireExistingDirectory(path);
           this.requireAcp("antigravity").prewarmSession?.(cwd2);
         }

@@ -108,7 +108,10 @@ export function createAntigravitySession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'antigravity' },
+      values: { backend: 'antigravity', imageLimits: {
+        maxImageBytes: 8 * 1024 * 1024, maxImagesPerMessage: 4, maxMessageImageBytes: 32 * 1024 * 1024,
+        maxImagePixels: 40_000_000, maxImageDimension: 8192, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+      } },
     },
   }
 }
@@ -145,7 +148,6 @@ export async function createAntigravityWorkspaceSession(
   const session = createAntigravitySession({
     acpSessionId: created.sessionId,
     cwd: path,
-    title: workspace.title,
   })
   return {
     workspace: { ...workspace, sessionIds: [session.sessionId], updatedAt: new Date().toISOString() },
@@ -225,23 +227,26 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     return appendUserDelta(messages, sessionId, text, 'cursor-user-live')
   }
   if (kind === 'tool_call' || kind === 'tool_call_update') {
-    const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? 'tool'
-    const state = stringValue(update.status) === 'failed' ? 'failed'
-      : stringValue(update.status) === 'completed' ? 'finished'
-        : 'running'
-    const id = `cursor-tool:${stringValue(update.toolCallId) ?? toolName}`
-    const next: ToolActivity = {
-      kind: 'tool',
-      id,
-      sessionId,
-      toolName,
-      state,
-      createdAt: Date.now(),
-    }
+    const callId = stringValue(update.toolCallId) ?? stringValue(update.callId) ?? stringValue(update.name) ?? 'tool'
+    const turn = [...messages].reverse().find(item => item.kind === 'message' && item.role === 'user')?.id ?? String(cursorAssistantSeq)
+    const id = `cursor-tool:${turn}:${callId}`
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
+    const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
+    const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? previous?.toolName ?? 'tool'
+    const state = stringValue(update.status) === 'failed' ? 'failed'
+      : stringValue(update.status) === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished' : 'running'
+    const argumentsText = boundedDetail(update.rawInput ?? update.parameters)
+    const output = boundedDetail(update.rawOutput ?? update.output ?? update.content)
+    const next: ToolActivity = {
+      ...previous,
+      kind: 'tool', id, sessionId, toolName, state,
+      createdAt: previous?.createdAt ?? Date.now(),
+      ...(argumentsText === undefined ? {} : { arguments: argumentsText, callDetail: { text: argumentsText, format: 'code' } }),
+      ...(output === undefined ? {} : { resultDetail: { text: output, format: 'code' } }),
+    }
     if (existing >= 0) {
       const copy = messages.slice()
-      copy[existing] = { ...messages[existing]!, ...next }
+      copy[existing] = next
       return copy
     }
     return [...messages, next]
@@ -377,6 +382,14 @@ function appendUserDelta(messages: ChatItem[], sessionId: string, text: string, 
     text,
     createdAt: Date.now(),
   }]
+}
+
+function boundedDetail(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  try {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+    return text?.slice(0, 16_000)
+  } catch { return undefined }
 }
 
 function extractText(update: Record<string, unknown>): string | undefined {

@@ -279,3 +279,9 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+Android also supports AGY workspaces through the independently enabled Antigravity ACP backend:
+Host catalog discovery, new conversations, durable history, live replies, title refresh, reconnect,
+and text/image prompts. PNG/JPEG/WebP/GIF images are limited to 8 MiB each and four per message;
+images use the Host's private temporary cache. See [Android notes](apps/android/README.md#agy-workspaces)
+for validation limits.

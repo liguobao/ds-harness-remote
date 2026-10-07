@@ -106,3 +106,11 @@ ds-harness-remote:
 2. Host 侧按 session 保留可分页的展示用 History（不写 DSH SessionStore）
 3. 审批 / 提问 UI 与 `agent.acp.respond` 真机矩阵
 4. 跨机长时间稳定性与 WebRTC/Relay 丢帧回归
+
+## Android AGY (2026-10-07)
+
+Android 的 `antigravity` 工作区独立使用 AGY catalog/history/prompt 与 ACP stream。首次连接
+和刷新均发现 Host 既有目录与会话；新建会话保持空白，回复后更新标题，重连重新加载历史并
+订阅 stream。图片通过私有 tmp 缓存与有界 ACP transfer；不调用 Harness Prompt 或写入
+SessionStore。批量读取列表不触发预热，选中目录才预热。Hermes 打包及真实 AGY 的
+in-process 数据链路已验证；Android 真机与加密跨设备验收尚未完成。

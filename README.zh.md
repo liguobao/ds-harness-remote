@@ -258,3 +258,7 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+Android 也支持独立启用的 AGY 工作区：Host 目录与会话发现、新建对话、历史恢复、流式回复、
+标题刷新、重连及文字/图片 Prompt。PNG/JPEG/WebP/GIF 图片每张上限 8 MiB、每次最多四张，
+使用 Host 私有临时缓存。验证范围见 [Android 说明](apps/android/README.md#agy-workspaces)。

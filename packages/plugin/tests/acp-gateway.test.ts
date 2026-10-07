@@ -84,6 +84,8 @@ describe('AcpRemoteGateway', () => {
       })
       await list(process.cwd())
       expect(acp.prewarmSession).toHaveBeenCalledWith(await realpath(process.cwd()))
+      await gateway.call('warm-connection', { method: 'dsh/sessionList', params: { path: process.cwd(), backend: 'antigravity', prewarm: false } })
+      expect(acp.prewarmSession).toHaveBeenCalledTimes(1)
       await list('')
       await list(process.cwd(), 'cursor')
       await expect(list('/nonexistent-agy-prewarm-directory')).rejects.toMatchObject({ code: 'CURSOR_PATH_NOT_ALLOWED' })

@@ -1039,7 +1039,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu}>
         <ModalSurface onClose={closePlusMenu}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={closePlusMenu} /></View>
-            {session.backend !== 'cursor' && session.backend !== 'antigravity' && (
+            {sessionImageLimits(session) !== undefined && (
               <View style={styles.plusCardRow}>
                 <Pressable
                   accessibilityRole="button"

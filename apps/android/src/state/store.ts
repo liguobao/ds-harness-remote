@@ -46,6 +46,7 @@ import {
   updateCodexSession,
   withCodexPermission,
 } from '../services/codex'
+import { loadAntigravityCatalog, mergeAntigravityCatalog, readAntigravityHistory, type AntigravityCatalog } from '../services/antigravity'
 import {
   applyCursorFrame,
   createAntigravitySession,
@@ -442,6 +443,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           codexError = friendlyError(error)
         }
       }
+      let agyCatalog: AntigravityCatalog | undefined
+      let agyError: string | undefined
+      if (connection.hasAntigravity()) {
+        try { agyCatalog = await loadAntigravityCatalog(connection.requireAntigravity(), get().workspaces) }
+        catch (error) { agyError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
       set(state => {
         const codexWorkspaces = codexError === undefined
@@ -456,9 +463,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
         const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
-        const antigravityWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'antigravity')
+        const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const antigravityWorkspaces = agy.workspaces
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
-        const antigravitySessions = state.sessions.filter(session => session.backend === 'antigravity')
+        const antigravitySessions = agy.sessions
         const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
         return {
           workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
@@ -467,7 +475,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           selectedSession: state.selectedSession === undefined
             ? undefined
             : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-          ...(codexError === undefined ? {} : { error: codexError }),
+          ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
         }
       })
     } catch (error) {
@@ -488,8 +496,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   async connectDevice(device, options = {}) {
     const { config, identity } = get()
     if (config === undefined || identity === undefined) return false
-    // Cursor sessions live only in Client memory (no Host catalog). Keep them
-    // across reconnect so the open chat and workspace list survive.
+    const sameHost = get().selectedDevice?.deviceId === device.deviceId
+    // In-memory ACP sessions belong to one Host; keep them only across its reconnect.
     set(state => ({
       selectedDevice: device,
       connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
@@ -500,8 +508,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       codexAvailable: false,
       cursorAvailable: false,
       antigravityAvailable: false,
-      workspaces: state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity'),
-      sessions: state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity'),
+      workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity') : [],
+      sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity') : [],
+      ...(sameHost ? {} : { selectedSession: undefined, messages: {} }),
       archivedSessionIds: [],
       sessionModels: undefined,
       error: undefined,
@@ -568,6 +577,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           codexError = friendlyError(error)
         }
       }
+      let agyCatalog: AntigravityCatalog | undefined
+      let agyError: string | undefined
+      if (connection.hasAntigravity()) {
+        try { agyCatalog = await loadAntigravityCatalog(connection.requireAntigravity(), get().workspaces) }
+        catch (error) { agyError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
       const connectionNetworkDetails = await connection.getNetworkDetails().catch(() => undefined)
       set(state => {
@@ -577,9 +592,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           return withBestCodexPermission(session, previous, savedCodexPermissions)
         })
         const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
-        const antigravityWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'antigravity')
+        const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const antigravityWorkspaces = agy.workspaces
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
-        const antigravitySessions = state.sessions.filter(session => session.backend === 'antigravity')
+        const antigravitySessions = agy.sessions
         const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
         const selectedSession = state.selectedSession === undefined
           ? undefined
@@ -599,14 +615,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastConnectedDeviceId: device.deviceId,
           pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: connection.getStats() ?? { mode: 'Relay', connected: true } },
-          ...(codexError === undefined ? {} : { error: codexError }),
+          ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
         }
       })
       await saveLastConnectedDeviceId(device.deviceId)
       // Re-bind ACP stream after the secure channel is back so live frames resume
       // without requiring a fresh openSession tap.
       const resumed = get().selectedSession
-      if ((resumed?.backend === 'cursor' && connection.hasCursor()) || (resumed?.backend === 'antigravity' && connection.hasAntigravity())) {
+      if (resumed?.backend === 'antigravity' && connection.hasAntigravity()) {
+        await get().openSession(resumed)
+      } else if (resumed?.backend === 'cursor' && connection.hasCursor()) {
         await ensureCursorStream(resumed).catch(() => undefined)
       }
       return true
@@ -667,6 +685,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       hostDescriptor: undefined,
       codexAvailable: false,
       cursorAvailable: false,
+      antigravityAvailable: false,
       workspaces: [],
       archivedSessionIds: [],
       sessions: [],
@@ -736,24 +755,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (session.backend === 'cursor' || session.backend === 'antigravity') {
         await closeActiveCodexStream()
+        await closeActiveCursorStream()
+        set({ selectedSession: session, sessionModels: undefined, historyHasMore: false })
         const acpClient = session.backend === 'antigravity'
           ? connection.requireAntigravity()
           : connection.requireCursor()
         const [history] = await Promise.all([
           session.backend === 'antigravity'
-            ? acpClient.loadSessionHistory(cursorNativeId(session), 'antigravity')
+            ? readAntigravityHistory(acpClient, cursorNativeId(session))
             : Promise.resolve([] as unknown[]),
           ensureCursorStream(session),
         ])
         const items = foldAcpHistory(history, session.sessionId)
         set(state => ({
-          selectedSession: session,
+          selectedSession: state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : session,
           sessions: state.sessions.some(item => item.sessionId === session.sessionId)
-            ? state.sessions.map(item => item.sessionId === session.sessionId ? session : item)
+            ? state.sessions
             : [session, ...state.sessions],
           messages: {
             ...state.messages,
-            [session.sessionId]: mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
+            [session.sessionId]: session.backend === 'antigravity' && !session.running
+              ? items
+              : mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
           },
           sessionModels: undefined,
           historyHasMore: false,
@@ -895,7 +918,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         const session = createAntigravitySession({
           acpSessionId: created.sessionId,
           cwd: workspace.path,
-          title: workspace.title,
         })
         set(state => ({
           sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
@@ -1001,6 +1023,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return true
       }
+      if (session.backend === 'cursor' || session.backend === 'antigravity') throw new Error(zhCN.messageActions.unavailable)
       const selected = await connection.requireProxy().sessionSelectModel(session.sessionId, selection)
       set(state => ({
         sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
@@ -1015,6 +1038,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectPermission(preset) {
     const session = get().selectedSession
+    if (session?.backend === 'cursor' || session?.backend === 'antigravity') return false
     if (session === undefined || get().connection.phase !== 'connected') return false
     set({ permissionSelecting: true, error: undefined })
     try {
@@ -1059,6 +1083,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async loadAgentPresets() {
+    const backend = get().selectedSession?.backend
+    if (backend === 'cursor' || backend === 'antigravity') return false
     if (get().connection.phase !== 'connected') return false
     if (get().agentPresetLoading) return false
     set({ agentPresetLoading: true, error: undefined })
@@ -1075,7 +1101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectAgentPreset(preset) {
     const session = get().selectedSession
     if (session === undefined || get().connection.phase !== 'connected') return false
-    if (session.backend === 'codex') return false
+    if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity') return false
     set({ agentPresetSelecting: true, error: undefined })
     try {
       const committed = await connection.requireProxy().agentPresetSelect(session.sessionId, preset)
@@ -1228,7 +1254,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           deviceName: device.name,
           key,
           workspaceId: workspace.workspaceId,
-          backend: workspace.backend === 'codex' ? 'codex' as const : 'harness' as const,
+          backend: workspace.backend ?? 'harness',
           title: workspace.title,
           path: workspace.path,
           addedAt: Date.now(),
@@ -1284,7 +1310,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
-    if (session.backend === 'cursor') {
+    if (session.backend === 'cursor' || session.backend === 'antigravity') {
       set({ historyHasMore: false, historyLoadingOlder: false })
       return
     }
@@ -1345,11 +1371,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (backend === 'antigravity') {
         if (!connection.hasAntigravity()) throw new Error(zhCN.runtime.antigravityUnavailable)
         const workspace = createAntigravityWorkspace(path)
-        set(state => ({
-          workspaces: [...state.workspaces.filter(item => item.workspaceId !== workspace.workspaceId), workspace],
-          busyAction: undefined,
-        }))
-        return workspace
+        const catalog = await loadAntigravityCatalog(connection.requireAntigravity(), [...get().workspaces, workspace], path)
+        let created = workspace
+        set(state => {
+          const merged = mergeAntigravityCatalog(catalog, state.workspaces, state.sessions)
+          created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+          return {
+            workspaces: [...state.workspaces.filter(item => item.backend !== 'antigravity'), ...merged.workspaces],
+            sessions: [...state.sessions.filter(item => item.backend !== 'antigravity'), ...merged.sessions],
+            busyAction: undefined,
+          }
+        })
+        return created
       }
       const proxy = connection.requireProxy()
       const { workspace } = await proxy.workspaceCreate(path)
@@ -1369,7 +1402,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     const text = input.trim()
     if (session === undefined || (text.length === 0 && images.length === 0)) return false
-    if (session.backend !== 'codex' && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
+    if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
       set({ busyAction: 'command', error: undefined })
       try {
         // Commands are not prompts: never fabricate an optimistic user turn.
@@ -1457,15 +1490,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           }))
         }
       } else if (session.backend === 'cursor' || session.backend === 'antigravity') {
-        if (images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
+        if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
         // Always re-bind the ACP stream on the current RemoteClientCore before
         // prompting. After WebRTC flaps / Metro reload the module-level handle
         // can point at a dead core while RPC still works on a new one.
         await ensureCursorStream(session)
         set(state => ({
-          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true } : item),
+          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true, blank: false, title: item.blank ? text.slice(0, 60) || zhCN.chat.unnamedImage : item.title } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId
-            ? { ...state.selectedSession, running: true }
+            ? { ...state.selectedSession, running: true, blank: false, title: state.selectedSession.blank ? text.slice(0, 60) || zhCN.chat.unnamedImage : state.selectedSession.title }
             : state.selectedSession,
         }))
         // Host may return immediately with stopReason=in_progress so frames can
@@ -1473,7 +1506,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         const acpClient = session.backend === 'antigravity'
           ? connection.requireAntigravity()
           : connection.requireCursor()
-        const promptResult = await acpClient.prompt(cursorNativeId(session), text)
+        const promptResult = await acpClient.prompt(cursorNativeId(session), text, undefined, images.map(image => ({
+          type: 'image' as const, mimeType: image.mediaType, data: image.data,
+        })), session.backend)
         const inProgress = isRecord(promptResult)
           && promptResult.accepted === true
           && promptResult.stopReason === 'in_progress'
@@ -1503,6 +1538,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...state.messages,
           [session.sessionId]: (state.messages[session.sessionId] ?? []).filter(item => item.id !== optimistic.id),
         },
+        ...(session.backend === 'cursor' || session.backend === 'antigravity' ? {
+          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
+          selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
+        } : {}),
         busyAction: undefined,
         error: friendlyError(error),
       }))
@@ -1716,6 +1755,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,
         cursorAvailable: false,
+        antigravityAvailable: false,
       })
     }
   },
@@ -1777,6 +1817,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity')) return
     const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
+    if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
     const update = params === undefined
       ? undefined
       : (isRecord(params.update) ? params.update : params)
@@ -1804,8 +1845,29 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         : {}),
     }))
+    if (session.backend === 'antigravity' && kind === 'prompt_completed') void refreshAntigravityCatalog()
   },
 }))
+
+async function refreshAntigravityCatalog(): Promise<void> {
+  if (!connection.hasAntigravity()) return
+  const client = connection.requireAntigravity()
+  const deviceId = useAppStore.getState().selectedDevice?.deviceId
+  try {
+    const catalog = await loadAntigravityCatalog(client, useAppStore.getState().workspaces)
+    if (!connection.hasAntigravity() || connection.requireAntigravity() !== client || useAppStore.getState().selectedDevice?.deviceId !== deviceId) return
+    useAppStore.setState(state => {
+      const merged = mergeAntigravityCatalog(catalog, state.workspaces, state.sessions)
+      return {
+        workspaces: [...state.workspaces.filter(item => item.backend !== 'antigravity'), ...merged.workspaces],
+        sessions: [...state.sessions.filter(item => item.backend !== 'antigravity'), ...merged.sessions],
+        selectedSession: state.selectedSession?.backend === 'antigravity'
+          ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
+          : state.selectedSession,
+      }
+    })
+  } catch { /* Keep the live projection when AGY is still persisting its summary. */ }
+}
 
 async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
   const stream = activeCodexStream
@@ -1939,7 +2001,7 @@ async function rememberRecentWorkspace(session: RemoteSession): Promise<void> {
     deviceName: device.name,
     key,
     workspaceId: workspace.workspaceId,
-    backend: workspace.backend === 'codex' ? 'codex' : 'harness',
+    backend: workspace.backend ?? 'harness',
     title: workspace.title,
     path: workspace.path,
     addedAt: Date.now(),

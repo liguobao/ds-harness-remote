@@ -262,7 +262,7 @@ export class AcpRemoteGateway {
       if (backend === 'antigravity') {
         // Workspace selection loads history before the user presses New.
         // Prepare one idle process in that directory without awaiting startup.
-        if (path.trim() !== '') {
+        if (path.trim() !== '' && call.params.prewarm !== false) {
           const cwd = await this.requireExistingDirectory(path)
           this.requireAcp('antigravity').prewarmSession?.(cwd)
         }
