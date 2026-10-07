@@ -9,7 +9,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -121,7 +121,7 @@ __export(external_exports, {
   void: () => voidType
 });
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {
@@ -255,7 +255,7 @@ var getParsedType = (data2) => {
   }
 };
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -373,7 +373,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -476,7 +476,7 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -485,7 +485,7 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data: data2, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -595,14 +595,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -7718,11 +7718,11 @@ var ApiProxySwitch = class {
   }
 };
 
-// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/cryptoNode.js
+// node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto2 = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/webcrypto.js
+// node_modules/@noble/ciphers/esm/webcrypto.js
 function randomBytes2(bytesLength = 32) {
   if (crypto2 && typeof crypto2.getRandomValues === "function") {
     return crypto2.getRandomValues(new Uint8Array(bytesLength));
@@ -7733,11 +7733,11 @@ function randomBytes2(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/cryptoNode.js
+// node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc2 from "node:crypto";
 var crypto3 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
 
-// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -7864,7 +7864,7 @@ function randomBytes3(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
+// node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE3) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE3);
@@ -7986,7 +7986,7 @@ var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_u64.js
+// node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -8021,7 +8021,7 @@ var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0
 var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
+// node_modules/@noble/hashes/esm/sha2.js
 var K512 = /* @__PURE__ */ (() => split([
   "0x428a2f98d728ae22",
   "0x7137449123ef65cd",
@@ -8221,7 +8221,7 @@ var SHA512 = class extends HashMD {
 };
 var sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/utils.js
+// node_modules/@noble/curves/esm/utils.js
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
 function _abool2(value, title = "") {
@@ -8334,7 +8334,7 @@ function memoized(fn) {
   };
 }
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/modular.js
+// node_modules/@noble/curves/esm/abstract/modular.js
 var _0n2 = BigInt(0);
 var _1n2 = BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -8660,7 +8660,7 @@ function Field(ORDER, bitLenOrOpts, isLE3 = false, opts = {}) {
   return Object.freeze(f);
 }
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/curve.js
+// node_modules/@noble/curves/esm/abstract/curve.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 function negateCt(condition, item) {
@@ -8923,7 +8923,7 @@ function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
   return { CURVE, Fp: Fp2, Fn: Fn2 };
 }
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/edwards.js
+// node_modules/@noble/curves/esm/abstract/edwards.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 var _2n2 = BigInt(2);
@@ -9474,7 +9474,7 @@ function twistedEdwards(c) {
   return _eddsa_new_output_to_legacy(c, EDDSA);
 }
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/montgomery.js
+// node_modules/@noble/curves/esm/abstract/montgomery.js
 var _0n5 = BigInt(0);
 var _1n5 = BigInt(1);
 var _2n3 = BigInt(2);
@@ -9594,7 +9594,7 @@ function montgomery(curveDef) {
   };
 }
 
-// ../../node_modules/.pnpm/@noble+curves@1.9.7/node_modules/@noble/curves/esm/ed25519.js
+// node_modules/@noble/curves/esm/ed25519.js
 var _0n6 = /* @__PURE__ */ BigInt(0);
 var _1n6 = BigInt(1);
 var _2n4 = BigInt(2);
@@ -9829,7 +9829,7 @@ _RistrettoPoint.ZERO = /* @__PURE__ */ (() => new _RistrettoPoint(ed25519.Point.
 _RistrettoPoint.Fp = /* @__PURE__ */ (() => Fp)();
 _RistrettoPoint.Fn = /* @__PURE__ */ (() => Fn)();
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/constants.js
+// node_modules/@lukeburns/clatterjs/dist/constants.js
 var MAX_KEY_LEN = 32;
 var MAX_TAG_LEN = 16;
 var MAX_MESSAGE_LEN = 65535;
@@ -9839,7 +9839,7 @@ var MAX_TOKENS_PER_HS_MESSAGE = 8;
 var MAX_HS_MESSAGES_PER_ROLE = 8;
 var HYBRID_DUAL_LAYER = new TextEncoder().encode("clatter.hybrid_dual_layer.outer");
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/errors.js
+// node_modules/@lukeburns/clatterjs/dist/errors.js
 var CipherError = class extends Error {
   code;
   constructor(code, message) {
@@ -9875,7 +9875,7 @@ var TransportError = class extends Error {
   }
 };
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/handshakePattern.js
+// node_modules/@lukeburns/clatterjs/dist/handshakePattern.js
 function checkMsgLens(initiator, responder) {
   for (const g of initiator) {
     if (g.length > MAX_TOKENS_PER_HS_MESSAGE) {
@@ -10044,7 +10044,7 @@ var HandshakePattern = class _HandshakePattern {
   }
 };
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/cipherState.js
+// node_modules/@lukeburns/clatterjs/dist/cipherState.js
 var U64_MAX = 0xfffffffffffffffn;
 var CipherState = class {
   C;
@@ -10116,7 +10116,7 @@ var CipherStates = class {
   }
 };
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/symmetricState.js
+// node_modules/@lukeburns/clatterjs/dist/symmetricState.js
 function deriveCipherKey(temp, C) {
   return temp.slice(0, C.keyLen);
 }
@@ -10203,7 +10203,7 @@ function concat2(a, b) {
   return o;
 }
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/transportState.js
+// node_modules/@lukeburns/clatterjs/dist/transportState.js
 function mapCipher(e) {
   if (e instanceof TransportError)
     return e;
@@ -10365,7 +10365,7 @@ var TransportState = class {
   }
 };
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_u64.js
+// node_modules/@noble/hashes/_u64.js
 var U32_MASK642 = /* @__PURE__ */ (() => BigInt(2 ** 32 - 1))();
 var _32n2 = /* @__PURE__ */ BigInt(32);
 function fromBig2(n, le = false) {
@@ -10410,7 +10410,7 @@ var add4H2 = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 
 var add5L2 = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H2 = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/utils.js
+// node_modules/@noble/hashes/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -10585,7 +10585,7 @@ var oidNist = (suffix) => ({
   oid: Uint8Array.from([6, 9, 96, 134, 72, 1, 101, 3, 4, 2, suffix])
 });
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_md.js
+// node_modules/@noble/hashes/_md.js
 function Chi2(a, b, c) {
   return a & b ^ ~a & c;
 }
@@ -10716,7 +10716,7 @@ var SHA512_IV2 = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/sha2.js
+// node_modules/@noble/hashes/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -11113,7 +11113,7 @@ var sha5122 = /* @__PURE__ */ createHasher2(
   /* @__PURE__ */ oidNist(3)
 );
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/utils.js
+// node_modules/@noble/curves/utils.js
 function aarray(item, title, inner = () => {
 }) {
   if (!Array.isArray(item))
@@ -11232,7 +11232,7 @@ function validateObject2(object, fields = {}, optFields = {}, title = "object") 
   iter(optFields, true);
 }
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/modular.js
+// node_modules/@noble/curves/abstract/modular.js
 var _0n8 = /* @__PURE__ */ BigInt(0);
 var _1n8 = /* @__PURE__ */ BigInt(1);
 var _2n5 = /* @__PURE__ */ BigInt(2);
@@ -11661,7 +11661,7 @@ function Field2(ORDER, opts = {}) {
   return new _Field(ORDER, opts);
 }
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/curve.js
+// node_modules/@noble/curves/abstract/curve.js
 var _0n9 = /* @__PURE__ */ BigInt(0);
 var _1n9 = /* @__PURE__ */ BigInt(1);
 var _4n3 = /* @__PURE__ */ BigInt(4);
@@ -12048,7 +12048,7 @@ function createKeygen(randomSecretKey, getPublicKey) {
   };
 }
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/edwards.js
+// node_modules/@noble/curves/abstract/edwards.js
 var _0n10 = /* @__PURE__ */ BigInt(0);
 var _1n10 = /* @__PURE__ */ BigInt(1);
 var _2n6 = /* @__PURE__ */ BigInt(2);
@@ -12342,7 +12342,7 @@ function edwards2(params, extraOpts = {}) {
   return Point;
 }
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/abstract/montgomery.js
+// node_modules/@noble/curves/abstract/montgomery.js
 var _0n11 = /* @__PURE__ */ BigInt(0);
 var _1n11 = /* @__PURE__ */ BigInt(1);
 var _2n7 = /* @__PURE__ */ BigInt(2);
@@ -12489,7 +12489,7 @@ function montgomery2(curveDef) {
   });
 }
 
-// ../../node_modules/.pnpm/@noble+curves@2.3.0/node_modules/@noble/curves/ed25519.js
+// node_modules/@noble/curves/ed25519.js
 var _0n12 = /* @__PURE__ */ BigInt(0);
 var _1n12 = /* @__PURE__ */ BigInt(1);
 var _2n8 = /* @__PURE__ */ BigInt(2);
@@ -12575,7 +12575,7 @@ var x255192 = /* @__PURE__ */ (() => {
   });
 })();
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/dhX25519.js
+// node_modules/@lukeburns/clatterjs/dist/dhX25519.js
 var PK = 32;
 var X25519_NAME = "25519";
 function x25519Keygen(rng) {
@@ -12589,12 +12589,12 @@ function dhPubKeyLen() {
   return PK;
 }
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/protocolNames.js
+// node_modules/@lukeburns/clatterjs/dist/protocolNames.js
 function nqProtocolName(patternName, cipher, hash) {
   return `Noise_${patternName}_${X25519_NAME}_${cipher.name}_${hash.name}`;
 }
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/nqHandshake.js
+// node_modules/@lukeburns/clatterjs/dist/nqHandshake.js
 var PK2 = () => dhPubKeyLen();
 var NqHandshake = class {
   pattern;
@@ -12967,7 +12967,7 @@ function raiseInv() {
   throw new HandshakeError("InvalidState");
 }
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/_blake.js
+// node_modules/@noble/hashes/_blake.js
 var BSIGMA = /* @__PURE__ */ Uint8Array.from([
   0,
   1,
@@ -13242,7 +13242,7 @@ function G2s(a, b, c, d, x) {
   return { a, b, c, d };
 }
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/blake2.js
+// node_modules/@noble/hashes/blake2.js
 var B2B_IV = /* @__PURE__ */ Uint32Array.from([
   4089235720,
   1779033703,
@@ -13675,7 +13675,7 @@ var _BLAKE2s = class extends _BLAKE2 {
 };
 var blake2s = /* @__PURE__ */ createHasher2((opts) => new _BLAKE2s(opts));
 
-// ../../node_modules/.pnpm/@noble+hashes@2.3.0/node_modules/@noble/hashes/hmac.js
+// node_modules/@noble/hashes/hmac.js
 var _HMAC = class {
   oHash;
   iHash;
@@ -13752,7 +13752,7 @@ var hmac = /* @__PURE__ */ (() => {
   return hmac_;
 })();
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/crypto/hash.js
+// node_modules/@lukeburns/clatterjs/dist/crypto/hash.js
 function makeHash(name2, hash, hashLen, blockLen) {
   const doHash = (data2) => hash.create().update(data2).digest();
   const hmac1 = (key, data2) => hmac(hash, key, data2);
@@ -13787,7 +13787,7 @@ var sha512H = makeHash("SHA512", sha5122, 64, 128);
 var blake2bH = makeHash("BLAKE2b", blake2b, 64, 128);
 var blake2sH = makeHash("BLAKE2s", blake2s, 32, 64);
 
-// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/utils.js
+// node_modules/@noble/ciphers/utils.js
 function isBytes4(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -13954,7 +13954,7 @@ function copyBytes4(bytes) {
   return Uint8Array.from(abytes4(bytes));
 }
 
-// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/_arx.js
+// node_modules/@noble/ciphers/_arx.js
 var encodeStr = (str) => Uint8Array.from(str.split(""), (c) => c.charCodeAt(0));
 var sigma16_32 = /* @__PURE__ */ (() => swap32IfBE2(u322(encodeStr("expand 16-byte k"))))();
 var sigma32_32 = /* @__PURE__ */ (() => swap32IfBE2(u322(encodeStr("expand 32-byte k"))))();
@@ -14081,7 +14081,7 @@ function createCipher(core, opts) {
   };
 }
 
-// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/_poly1305.js
+// node_modules/@noble/ciphers/_poly1305.js
 function u8to16(a, i) {
   return a[i++] & 255 | (a[i++] & 255) << 8;
 }
@@ -14332,7 +14332,7 @@ var Poly1305 = class {
 };
 var poly1305 = /* @__PURE__ */ wrapMacConstructor(32, (key) => new Poly1305(key));
 
-// ../../node_modules/.pnpm/@noble+ciphers@2.3.0/node_modules/@noble/ciphers/chacha.js
+// node_modules/@noble/ciphers/chacha.js
 function chachaCore(s2, k, n, out, cnt, rounds = 20) {
   let y00 = s2[0], y01 = s2[1], y02 = s2[2], y03 = s2[3], y04 = k[0], y05 = k[1], y06 = k[2], y07 = k[3], y08 = k[4], y09 = k[5], y10 = k[6], y11 = k[7], y12 = cnt, y13 = n[0], y14 = n[1], y15 = n[2];
   let x00 = y00, x01 = y01, x02 = y02, x03 = y03, x04 = y04, x05 = y05, x06 = y06, x07 = y07, x08 = y08, x09 = y09, x10 = y10, x11 = y11, x12 = y12, x13 = y13, x14 = y14, x15 = y15;
@@ -14482,7 +14482,7 @@ var chacha20poly1305 = /* @__PURE__ */ wrapCipher(
   /* @__PURE__ */ _poly1305_aead(chacha20)
 );
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/crypto/cipher.js
+// node_modules/@lukeburns/clatterjs/dist/crypto/cipher.js
 var U64_MAX2 = 0xfffffffffffffffn;
 function chachaNonce(n) {
   const b = new Uint8Array(12);
@@ -14544,7 +14544,7 @@ var chachaPoly = /* @__PURE__ */ (() => {
   };
 })();
 
-// ../../node_modules/.pnpm/@lukeburns+clatterjs@1.0.0/node_modules/@lukeburns/clatterjs/dist/noiseNq.js
+// node_modules/@lukeburns/clatterjs/dist/noiseNq.js
 function noiseIk() {
   return new HandshakePattern("IK", [], [
     1

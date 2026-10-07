@@ -23,18 +23,18 @@
     mod
   ));
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js
+  // node_modules/qrcode/lib/can-promise.js
   var require_can_promise = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/can-promise.js"(exports, module) {
+    "node_modules/qrcode/lib/can-promise.js"(exports, module) {
       module.exports = function() {
         return typeof Promise == "function" && Promise.prototype && Promise.prototype.then;
       };
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js
+  // node_modules/qrcode/lib/core/utils.js
   var require_utils = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/utils.js"(exports) {
+    "node_modules/qrcode/lib/core/utils.js"(exports) {
       var toSJISFunction, CODEWORDS_COUNT = [
         0,
         // Not used
@@ -107,9 +107,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js
+  // node_modules/qrcode/lib/core/error-correction-level.js
   var require_error_correction_level = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
+    "node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
       exports.L = { bit: 1 };
       exports.M = { bit: 0 };
       exports.Q = { bit: 3 };
@@ -149,9 +149,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js
+  // node_modules/qrcode/lib/core/bit-buffer.js
   var require_bit_buffer = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
+    "node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
       function BitBuffer() {
         this.buffer = [], this.length = 0;
       }
@@ -176,9 +176,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js
+  // node_modules/qrcode/lib/core/bit-matrix.js
   var require_bit_matrix = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
+    "node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
       function BitMatrix(size) {
         if (!size || size < 1)
           throw new Error("BitMatrix size must be defined and greater than 0");
@@ -201,9 +201,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js
+  // node_modules/qrcode/lib/core/alignment-pattern.js
   var require_alignment_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
+    "node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize;
       exports.getRowColCoords = function(version) {
         if (version === 1) return [];
@@ -224,9 +224,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js
+  // node_modules/qrcode/lib/core/finder-pattern.js
   var require_finder_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
+    "node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
       var getSymbolSize = require_utils().getSymbolSize, FINDER_PATTERN_SIZE = 7;
       exports.getPositions = function(version) {
         let size = getSymbolSize(version);
@@ -242,9 +242,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js
+  // node_modules/qrcode/lib/core/mask-pattern.js
   var require_mask_pattern = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
+    "node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
       exports.Patterns = {
         PATTERN000: 0,
         PATTERN001: 1,
@@ -342,9 +342,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js
+  // node_modules/qrcode/lib/core/error-correction-code.js
   var require_error_correction_code = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
+    "node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
       var ECLevel = require_error_correction_level(), EC_BLOCKS_TABLE = [
         // L  M  Q  H
         1,
@@ -701,9 +701,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js
+  // node_modules/qrcode/lib/core/galois-field.js
   var require_galois_field = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/galois-field.js"(exports) {
+    "node_modules/qrcode/lib/core/galois-field.js"(exports) {
       var EXP_TABLE = new Uint8Array(512), LOG_TABLE = new Uint8Array(256);
       (function() {
         let x = 1;
@@ -725,9 +725,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js
+  // node_modules/qrcode/lib/core/polynomial.js
   var require_polynomial = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/polynomial.js"(exports) {
+    "node_modules/qrcode/lib/core/polynomial.js"(exports) {
       var GF = require_galois_field();
       exports.mul = function(p1, p2) {
         let coeff = new Uint8Array(p1.length + p2.length - 1);
@@ -757,9 +757,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js
+  // node_modules/qrcode/lib/core/reed-solomon-encoder.js
   var require_reed_solomon_encoder = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
+    "node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
       var Polynomial = require_polynomial();
       function ReedSolomonEncoder(degree) {
         this.genPoly = void 0, this.degree = degree, this.degree && this.initialize(this.degree);
@@ -783,18 +783,18 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js
+  // node_modules/qrcode/lib/core/version-check.js
   var require_version_check = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version-check.js"(exports) {
+    "node_modules/qrcode/lib/core/version-check.js"(exports) {
       exports.isValid = function(version) {
         return !isNaN(version) && version >= 1 && version <= 40;
       };
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js
+  // node_modules/qrcode/lib/core/regex.js
   var require_regex = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/regex.js"(exports) {
+    "node_modules/qrcode/lib/core/regex.js"(exports) {
       var numeric = "[0-9]+", alphanumeric = "[A-Z $%*+\\-./:]+", kanji = "(?:[u3000-u303F]|[u3040-u309F]|[u30A0-u30FF]|[uFF00-uFFEF]|[u4E00-u9FAF]|[u2605-u2606]|[u2190-u2195]|u203B|[u2010u2015u2018u2019u2025u2026u201Cu201Du2225u2260]|[u0391-u0451]|[u00A7u00A8u00B1u00B4u00D7u00F7])+";
       kanji = kanji.replace(/u/g, "\\u");
       var byte = "(?:(?![A-Z0-9 $%*+\\-./:]|" + kanji + `)(?:.|[\r
@@ -817,9 +817,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js
+  // node_modules/qrcode/lib/core/mode.js
   var require_mode = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/mode.js"(exports) {
+    "node_modules/qrcode/lib/core/mode.js"(exports) {
       var VersionCheck = require_version_check(), Regex = require_regex();
       exports.NUMERIC = {
         id: "Numeric",
@@ -888,9 +888,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js
+  // node_modules/qrcode/lib/core/version.js
   var require_version = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/version.js"(exports) {
+    "node_modules/qrcode/lib/core/version.js"(exports) {
       var Utils = require_utils(), ECCode = require_error_correction_code(), ECLevel = require_error_correction_level(), Mode = require_mode(), VersionCheck = require_version_check(), G18 = 7973, G18_BCH = Utils.getBCHDigit(G18);
       function getBestVersionForDataLength(mode, length, errorCorrectionLevel) {
         for (let currentVersion = 1; currentVersion <= 40; currentVersion++)
@@ -957,9 +957,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js
+  // node_modules/qrcode/lib/core/format-info.js
   var require_format_info = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/format-info.js"(exports) {
+    "node_modules/qrcode/lib/core/format-info.js"(exports) {
       var Utils = require_utils(), G15 = 1335, G15_MASK = 21522, G15_BCH = Utils.getBCHDigit(G15);
       exports.getEncodedBits = function(errorCorrectionLevel, mask) {
         let data = errorCorrectionLevel.bit << 3 | mask, d = data << 10;
@@ -970,9 +970,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js
+  // node_modules/qrcode/lib/core/numeric-data.js
   var require_numeric_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
+    "node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
       var Mode = require_mode();
       function NumericData(data) {
         this.mode = Mode.NUMERIC, this.data = data.toString();
@@ -997,9 +997,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js
+  // node_modules/qrcode/lib/core/alphanumeric-data.js
   var require_alphanumeric_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
+    "node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
       var Mode = require_mode(), ALPHA_NUM_CHARS = [
         "0",
         "1",
@@ -1071,9 +1071,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js
+  // node_modules/qrcode/lib/core/byte-data.js
   var require_byte_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
+    "node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
       var Mode = require_mode();
       function ByteData(data) {
         this.mode = Mode.BYTE, typeof data == "string" ? this.data = new TextEncoder().encode(data) : this.data = new Uint8Array(data);
@@ -1095,9 +1095,9 @@
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js
+  // node_modules/qrcode/lib/core/kanji-data.js
   var require_kanji_data = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
+    "node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
       var Mode = require_mode(), Utils = require_utils();
       function KanjiData(data) {
         this.mode = Mode.KANJI, this.data = data;
@@ -1131,9 +1131,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js
+  // node_modules/dijkstrajs/dijkstra.js
   var require_dijkstra = __commonJS({
-    "../../node_modules/.pnpm/dijkstrajs@1.0.3/node_modules/dijkstrajs/dijkstra.js"(exports, module) {
+    "node_modules/dijkstrajs/dijkstra.js"(exports, module) {
       "use strict";
       var dijkstra = {
         single_source_shortest_paths: function(graph, s, d) {
@@ -1201,9 +1201,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js
+  // node_modules/qrcode/lib/core/segments.js
   var require_segments = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/segments.js"(exports) {
+    "node_modules/qrcode/lib/core/segments.js"(exports) {
       var Mode = require_mode(), NumericData = require_numeric_data(), AlphanumericData = require_alphanumeric_data(), ByteData = require_byte_data(), KanjiData = require_kanji_data(), Regex = require_regex(), Utils = require_utils(), dijkstra = require_dijkstra();
       function getStringByteLength(str) {
         return unescape(encodeURIComponent(str)).length;
@@ -1334,9 +1334,9 @@ Make sure your charset is UTF-8`
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js
+  // node_modules/qrcode/lib/core/qrcode.js
   var require_qrcode = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/core/qrcode.js"(exports) {
+    "node_modules/qrcode/lib/core/qrcode.js"(exports) {
       var Utils = require_utils(), ECLevel = require_error_correction_level(), BitBuffer = require_bit_buffer(), BitMatrix = require_bit_matrix(), AlignmentPattern = require_alignment_pattern(), FinderPattern = require_finder_pattern(), MaskPattern = require_mask_pattern(), ECCode = require_error_correction_code(), ReedSolomonEncoder = require_reed_solomon_encoder(), Version = require_version(), FormatInfo = require_format_info(), Mode = require_mode(), Segments = require_segments();
       function setupFinderPattern(matrix, version) {
         let size = matrix.size, pos = FinderPattern.getPositions(version);
@@ -1464,9 +1464,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js
+  // node_modules/qrcode/lib/renderer/utils.js
   var require_utils2 = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/utils.js"(exports) {
+    "node_modules/qrcode/lib/renderer/utils.js"(exports) {
       function hex2rgba(hex) {
         if (typeof hex == "number" && (hex = hex.toString()), typeof hex != "string")
           throw new Error("Color should be defined as hex string");
@@ -1522,9 +1522,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js
+  // node_modules/qrcode/lib/renderer/canvas.js
   var require_canvas = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/canvas.js"(exports) {
+    "node_modules/qrcode/lib/renderer/canvas.js"(exports) {
       var Utils = require_utils2();
       function clearCanvas(ctx, canvas, size) {
         ctx.clearRect(0, 0, canvas.width, canvas.height), canvas.style || (canvas.style = {}), canvas.height = size, canvas.width = size, canvas.style.height = size + "px", canvas.style.width = size + "px";
@@ -1551,9 +1551,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js
+  // node_modules/qrcode/lib/renderer/svg-tag.js
   var require_svg_tag = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
+    "node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
       var Utils = require_utils2();
       function getColorAttrib(color, attrib) {
         let alpha = color.a / 255, str = attrib + '="' + color.hex + '"';
@@ -1579,9 +1579,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // ../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js
+  // node_modules/qrcode/lib/browser.js
   var require_browser = __commonJS({
-    "../../node_modules/.pnpm/qrcode@1.5.4/node_modules/qrcode/lib/browser.js"(exports) {
+    "node_modules/qrcode/lib/browser.js"(exports) {
       var canPromise = require_can_promise(), QRCode2 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
       function renderCanvas(renderFunc, canvas, text, opts, cb) {
         let args = [].slice.call(arguments, 1), argsNum = args.length, isLastArgCb = typeof args[argsNum - 1] == "function";

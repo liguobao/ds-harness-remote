@@ -81,8 +81,8 @@ jobs:
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build
 
-      - name: Verify committed Host bundle
-        run: git diff --exit-code -- packages/plugin/dist/index.js
+      - name: Verify committed Plugin bundles
+        run: git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/client.github.js
 
       - name: Check types
         run: pnpm -r check

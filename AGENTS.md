@@ -50,6 +50,10 @@ docs/
 构建脚本，所以根 `index.js`、`packages/plugin/dist/index.js`、`client.github.js` 与
 `packages/plugin/bin/ds-harness-remote.js` 是需要提交的发布入口。
 
+Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm isolated / hoisted 安装布局
+造成已提交 JS 差异；保留 source map 的真实路径以便本地调试。CI 重建后必须同时检查
+`packages/plugin/dist/index.js` 和 `packages/plugin/dist/client.github.js` 与提交版本一致。
+
 空的 Web/UI 预留目录不应创建。Expo 生成的 `.expo/web` cache、`.webp` 图片格式和 `packages/webrtc` 不属于 Remote Web 项目。
 
 ## Current Status
