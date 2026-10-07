@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, utimes, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -59,10 +59,10 @@ describe('TranscriptLoader', () => {
     try {
       const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
       for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty], ['active-untitled', workspace]]) {
-        insert.run(id, '', JSON.stringify([`file://${path}`]), 0, createdAt)
+        insert.run(id, '', JSON.stringify([pathToFileURL(path).href]), 0, createdAt)
       }
       db.prepare('UPDATE conversation_summaries SET step_count = 2 WHERE conversation_id = ?').run('active-untitled')
-      insert.run('normal-session', 'Normal', JSON.stringify([`file://${workspace}`]), 2, createdAt)
+      insert.run('normal-session', 'Normal', JSON.stringify([pathToFileURL(workspace).href]), 2, createdAt)
     } finally {
       db.close()
     }
@@ -128,6 +128,38 @@ describe('TranscriptLoader', () => {
       db.close()
     }
     expect(await discoverAntigravityWorkspaces(dbPath, base)).toEqual([project])
+  })
+
+  it('matches decoded workspace URIs exactly and applies the limit after scoping', async () => {
+    const project = join(base, '项目 with spaces')
+    const other = `${project}-other`
+    const { db, dbPath } = createDatabase()
+    try {
+      const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
+      insert.run('foreign-session', 'Foreign', JSON.stringify([pathToFileURL(other).href]), 2, '2026-10-07T00:01:00Z')
+      insert.run('local-session', 'Local', JSON.stringify([pathToFileURL(project).href]), 2, createdAt)
+      insert.run('malformed-session', 'Malformed', 'not-json', 2, createdAt)
+    } finally { db.close() }
+    expect(await discoverAntigravitySessions(project, 1, base, dbPath)).toMatchObject([
+      { conversationId: 'local-session', title: 'Local' },
+    ])
+    expect(await discoverAntigravitySessions(join(base, 'unrelated'), 10, base, dbPath)).toEqual([])
+  })
+
+  it('does not infer a workspace from unrelated transcripts when the database is missing', async () => {
+    await writeTranscript('foreign-session', [{ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Foreign' }])
+    expect(await discoverAntigravitySessions(join(base, 'project'), 10, base, join(base, 'missing.db'))).toEqual([])
+  })
+
+  it('rejects traversal and symlinked transcripts outside the AGY brain', async () => {
+    await writeTranscript('outside-session', [{ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Outside' }])
+    const brain = join(base, 'brain')
+    await mkdir(brain)
+    await symlink(join(base, 'outside-session'), join(brain, 'linked-session'), process.platform === 'win32' ? 'junction' : 'dir')
+    expect(await loadTranscriptEvents('../outside-session', 'remote', brain)).toEqual([])
+    expect(await loadTranscriptEvents('..\\outside-session', 'remote', brain)).toEqual([])
+    expect(await loadTranscriptEvents('linked-session', 'remote', brain)).toEqual([])
+    expect(await discoverAntigravitySessions('', 10, brain, join(base, 'missing.db'))).toEqual([])
   })
 
   it('hydrates tool calls with a valid name and callId, including unnamed tools', async () => {

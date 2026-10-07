@@ -1,4 +1,4 @@
-import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures } from '@dsh-remote/client-core'
+import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { strings } from '../locales/i18n'
@@ -97,8 +97,9 @@ export class AndroidRemoteConnection {
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
-    this.codexAvailable = false
+        this.codexAvailable = false
         this.cursor = undefined
+        this.acpBackends.clear()
         this.sessionTools = undefined
         if (!replacingFallback) options.onClose?.()
       })
@@ -135,20 +136,7 @@ export class AndroidRemoteConnection {
         }
         this.muxHandler?.(frame)
       }
-      const capabilities = new Set(features.capabilities)
-      if (capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')) {
-        this.codex = new CodexRemoteClient(core)
-        this.codexAvailable = true
-      }
-      if (capabilities.has('agent.acp.v1')) {
-        this.cursor = new AgentAcpClient(core)
-        if (features.workspaceTypes?.some(item => item.id === 'antigravity' && item.available)) {
-          this.acpBackends.add('antigravity')
-        }
-        if (features.workspaceTypes?.some(item => item.id === 'cursor' && item.available)) {
-          this.acpBackends.add('cursor')
-        }
-      }
+      this.applyBackendFeatures(core, features)
       if (features.remoteGateway) {
         this.sessionTools = new HarnessSessionTools(new RemoteTypertGateway(core))
         const alpha = new HarnessAlphaClient(
@@ -187,14 +175,20 @@ export class AndroidRemoteConnection {
     const core = this.core
     const features = await probeRemoteHostFeatures(core)
     if (this.core !== core) return
-    const capabilities = new Set(features.capabilities)
-    this.codexAvailable = capabilities.has('codex.appserver.v1') && capabilities.has('codex.appserver.transfer.v1')
+    this.applyBackendFeatures(core, features)
+  }
+
+  private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
+    this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
+      && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core)
-    if (capabilities.has('agent.acp.v1')) this.cursor ??= new AgentAcpClient(core)
     this.acpBackends.clear()
-    for (const item of features.workspaceTypes ?? []) {
-      if (item.available && (item.id === 'cursor' || item.id === 'antigravity')) this.acpBackends.add(item.id)
+    for (const backend of ['cursor', 'antigravity'] as const) {
+      if (remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, backend, `agent.acp.${backend}.v1`)) {
+        this.acpBackends.add(backend)
+      }
     }
+    if (this.acpBackends.size > 0) this.cursor ??= new AgentAcpClient(core)
   }
 
   /** Harness business client; only available while connected. */

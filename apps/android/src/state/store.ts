@@ -789,6 +789,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (session.backend === 'cursor' || session.backend === 'antigravity') {
         await closeActiveCodexStream()
         await closeActiveCursorStream()
+        if (!current()) return
         set({ selectedSession: session, sessionModels: undefined, historyHasMore: false })
         const acpClient = session.backend === 'antigravity'
           ? connection.requireAntigravity()
@@ -797,8 +798,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           session.backend === 'antigravity'
             ? readAntigravityHistory(acpClient, cursorNativeId(session))
             : Promise.resolve([] as unknown[]),
-          ensureCursorStream(session),
+          ensureCursorStream(session, current),
         ])
+        if (!current()) return
         const items = foldAcpHistory(history, session.sessionId)
         set(state => ({
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : session,
@@ -1556,7 +1558,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Always re-bind the ACP stream on the current RemoteClientCore before
         // prompting. After WebRTC flaps / Metro reload the module-level handle
         // can point at a dead core while RPC still works on a new one.
-        await ensureCursorStream(session)
+        const streamGeneration = sessionLoadGeneration
+        await ensureCursorStream(session, () => streamGeneration === sessionLoadGeneration
+          && get().selectedSession?.sessionId === session.sessionId)
         set(state => ({
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true, blank: false, title: item.blank ? text.slice(0, 60) || zhCN.chat.unnamedImage : item.title } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId
@@ -1982,16 +1986,18 @@ async function closeActiveCursorStream(notifyRemote = true): Promise<void> {
 }
 
 /** Open (or refresh) the ACP event stream for the active session. */
-async function ensureCursorStream(session: RemoteSession): Promise<void> {
+async function ensureCursorStream(session: RemoteSession, current: () => boolean = () => true): Promise<void> {
   await closeActiveCursorStream()
+  if (!current()) return
   const client = session.backend === 'antigravity'
     ? connection.requireAntigravity()
     : connection.requireCursor()
   const nativeId = cursorNativeId(session)
   const stream = await client.openStream(
     nativeId,
-    frame => useAppStore.getState().handleCursorFrame(frame),
+    frame => { if (current()) useAppStore.getState().handleCursorFrame(frame) },
     closed => {
+      if (!current()) return
       if (useAppStore.getState().selectedSession?.sessionId !== session.sessionId) return
       if (activeCursorStream?.streamId !== stream.streamId) return
       activeCursorStream = undefined
@@ -2007,11 +2013,12 @@ async function ensureCursorStream(session: RemoteSession): Promise<void> {
       if (closed.reason === 'peer-disconnected') return
       const phase = useAppStore.getState().connection.phase
       if (phase !== 'connected') return
-      const current = useAppStore.getState().selectedSession
-      if (current?.sessionId !== session.sessionId || (current.backend !== 'cursor' && current.backend !== 'antigravity')) return
-      void ensureCursorStream(current).catch(() => undefined)
+      const selected = useAppStore.getState().selectedSession
+      if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity')) return
+      void ensureCursorStream(selected, current).catch(() => undefined)
     },
   )
+  if (!current()) { await stream.close().catch(() => undefined); return }
   activeCursorStream = stream
 }
 

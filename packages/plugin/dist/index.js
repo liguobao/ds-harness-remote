@@ -4731,7 +4731,7 @@ var LoopbackHost = class {
         const response = handle.response;
         let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
         if (chunk === null && !response.readableEnded && !response.destroyed) {
-          await new Promise((resolve5, reject) => {
+          await new Promise((resolve6, reject) => {
             const timer = setTimeout(() => finish(new Error("timeout")), 2e4);
             const ready = () => finish();
             const fail5 = () => finish(new Error("closed"));
@@ -4741,7 +4741,7 @@ var LoopbackHost = class {
               response.off("end", ready);
               response.off("close", ready);
               response.off("error", fail5);
-              error === void 0 ? resolve5() : reject(error);
+              error === void 0 ? resolve6() : reject(error);
             };
             response.once("readable", ready);
             response.once("end", ready);
@@ -4772,22 +4772,22 @@ var LoopbackHost = class {
           this.close(value.id);
           throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
         }
-        await new Promise((resolve5, reject) => handle.socket.send(data2, { binary: value.binary }, (error) => error ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve5()));
+        await new Promise((resolve6, reject) => handle.socket.send(data2, { binary: value.binary }, (error) => error ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve6()));
         return { sent: true };
       }
       if (value.op === "ws.read") {
         if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
         handle.reading = true;
         try {
-          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve5) => {
+          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve6) => {
             const timer = setTimeout(() => {
               handle.wake = void 0;
-              resolve5();
+              resolve6();
             }, 2e4);
             handle.wake = () => {
               clearTimeout(timer);
               handle.wake = void 0;
-              resolve5();
+              resolve6();
             };
           });
           let bytes = 0;
@@ -4834,7 +4834,7 @@ var LoopbackHost = class {
   openHttp(value) {
     const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
     if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const headers = Object.fromEntries(cleanHeaders(value.headers));
       let handle;
       const request = httpRequest({
@@ -4853,7 +4853,7 @@ var LoopbackHost = class {
         handle.response = response;
         response.on("error", () => void 0);
         clearTimeout(timer);
-        resolve5({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
+        resolve6({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
       });
       const timer = setTimeout(() => {
         request.destroy();
@@ -4869,7 +4869,7 @@ var LoopbackHost = class {
     });
   }
   openWs(value) {
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const socket = new WebSocket2(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
         headers: Object.fromEntries(cleanHeaders(value.headers)),
         followRedirects: false,
@@ -4879,7 +4879,7 @@ var LoopbackHost = class {
       });
       const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
       this.handles.set(value.id, handle);
-      socket.once("open", () => resolve5({ protocol: socket.protocol }));
+      socket.once("open", () => resolve6({ protocol: socket.protocol }));
       socket.on("message", (data2, binary) => {
         if (handle.closed) return;
         const message = { data: Buffer.from(data2).toString("base64"), binary };
@@ -4938,7 +4938,7 @@ var LoopbackPreview = class {
       for (const client of running.ws.clients) client.terminate();
       running.ws.close();
       running.server.closeAllConnections();
-      await new Promise((resolve5) => running.server.close(() => resolve5()));
+      await new Promise((resolve6) => running.server.close(() => resolve6()));
     }
     this.servers.clear();
   }
@@ -4993,11 +4993,11 @@ var LoopbackPreview = class {
         void this.release(id5);
       });
     });
-    await new Promise((resolve5, reject) => {
+    await new Promise((resolve6, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => {
         server.off("error", reject);
-        resolve5();
+        resolve6();
       });
     });
     const address = server.address();
@@ -5063,10 +5063,10 @@ var LoopbackPreview = class {
       while (!signal.aborted) {
         const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id5 }, signal);
         if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
-          await new Promise((resolve5, reject) => {
+          await new Promise((resolve6, reject) => {
             const ready = () => {
               cleanup();
-              resolve5();
+              resolve6();
             };
             const closed = () => {
               cleanup();
@@ -5126,7 +5126,7 @@ var LoopbackPreview = class {
           const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id5 }, signal);
           for (const message of result.messages) {
             if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
-            await new Promise((resolve5, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error) => error ? reject(error) : resolve5()));
+            await new Promise((resolve6, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error) => error ? reject(error) : resolve6()));
           }
           if (result.closed) break;
         }
@@ -5143,6 +5143,14 @@ var LoopbackPreview = class {
 
 // ../client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
+function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id5, capability) {
+  if (!capabilities.includes(capability))
+    return false;
+  if (workspaceTypes === void 0)
+    return true;
+  const entries = workspaceTypes.filter((item) => item.id === id5);
+  return entries.length === 1 && entries[0]?.capability === capability && entries[0].available;
+}
 var RemoteGatewayError = class extends Error {
   code;
   details;
@@ -5952,13 +5960,13 @@ var RemoteClientCore = class {
       throw rpcAbortedError(method, signal.reason);
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
     const request = createRpcRequest(method, params);
-    const result = new Promise((resolve5, reject) => {
+    const result = new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const pending = {
         method,
-        resolve: resolve5,
+        resolve: resolve6,
         reject,
         timer
       };
@@ -6081,7 +6089,7 @@ async function waitForRelayCapacity(socket) {
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
     if (socket.readyState !== 1 || Date.now() - started > 1e4)
       throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve5) => setTimeout(resolve5, 10));
+    await new Promise((resolve6) => setTimeout(resolve6, 10));
   }
   if (socket.readyState !== 1)
     throw new Error("Relay transport closed");
@@ -6540,8 +6548,8 @@ var RtcDataChannelTransport = class {
     if (this.connectPromise !== void 0)
       return this.connectPromise;
     this.armAbort(signal);
-    this.connectPromise = new Promise((resolve5, reject) => {
-      this.openResolve = resolve5;
+    this.connectPromise = new Promise((resolve6, reject) => {
+      this.openResolve = resolve6;
       this.openReject = reject;
       this.negotiateTimer = setTimeout(() => {
         void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
@@ -6756,9 +6764,9 @@ var RtcDataChannelTransport = class {
       if (this.closed || this.opened)
         return;
       this.opened = true;
-      const resolve5 = this.openResolve;
+      const resolve6 = this.openResolve;
       this.clearNegotiation();
-      void this.resolveSelectedTransport().then(() => resolve5?.());
+      void this.resolveSelectedTransport().then(() => resolve6?.());
     };
     channel.onmessage = (event) => {
       if (this.closed || !this.opened)
@@ -7152,7 +7160,7 @@ function asError(error) {
   return error instanceof Error ? error : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
 }
 function sleep(ms) {
-  return new Promise((resolve5) => setTimeout(resolve5, ms));
+  return new Promise((resolve6) => setTimeout(resolve6, ms));
 }
 
 // ../webrtc/dist/adaptive-transport.js
@@ -7193,8 +7201,8 @@ var AdaptiveTransport = class extends BaseTransport {
     this.socket = new WebSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
-    await new Promise((resolve5, reject) => {
-      this.readyResolve = resolve5;
+    await new Promise((resolve6, reject) => {
+      this.readyResolve = resolve6;
       this.readyReject = reject;
       this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
       const socket = this.socket;
@@ -14809,7 +14817,7 @@ var ClientSecureTransport = class {
   }
 };
 async function waitForResponder(inner, noise) {
-  await new Promise((resolve5, reject) => {
+  await new Promise((resolve6, reject) => {
     let settled = false;
     const timer = setTimeout(() => finish(new Error("Noise IK handshake timed out.")), 1e4);
     const unsubscribe = inner.onHandshake((step, data2) => {
@@ -14828,7 +14836,7 @@ async function waitForResponder(inner, noise) {
       settled = true;
       clearTimeout(timer);
       unsubscribe();
-      if (error === void 0) resolve5();
+      if (error === void 0) resolve6();
       else reject(error);
     };
     void inner.sendHandshake(1, noise.writeHandshake()).catch((error) => {
@@ -15347,7 +15355,7 @@ var AsyncFrameQueue = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve5) => this.waiters.push(resolve5));
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
       if (next.done) return;
       yield next.value;
     }
@@ -15747,7 +15755,7 @@ var AsyncValueQueue = class {
         if (this.error !== void 0) throw this.error;
         return;
       }
-      const next = await new Promise((resolve5) => this.waiters.push(resolve5));
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
       if (next.done) {
         if (this.error !== void 0) throw this.error;
         return;
@@ -18424,7 +18432,7 @@ var AsyncValueQueue2 = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve5) => this.waiters.push(resolve5));
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
       if (next.done) return;
       yield next.value;
     }
@@ -19892,7 +19900,7 @@ var AsyncValueQueue3 = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve5) => this.waiters.push(resolve5));
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
       if (next.done) return;
       yield next.value;
     }
@@ -19936,7 +19944,7 @@ var ServerCredentialStore = class {
       } catch (error) {
         if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-        await new Promise((resolve5) => setTimeout(resolve5, 50));
+        await new Promise((resolve6) => setTimeout(resolve6, 50));
       }
     }
     try {
@@ -20145,7 +20153,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.27";
+var PLUGIN_VERSION = "0.5.0";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -20970,8 +20978,8 @@ var ExternalNativePeerConnection = class {
   request(method, payload) {
     if (this.closed) return Promise.reject(new Error("native rtc helper is closed"));
     const id5 = this.nextRequestId++;
-    const promise = new Promise((resolve5, reject) => {
-      this.pending.set(id5, { resolve: resolve5, reject });
+    const promise = new Promise((resolve6, reject) => {
+      this.pending.set(id5, { resolve: resolve6, reject });
     });
     this.write({ id: id5, method, payload });
     return promise;
@@ -21765,10 +21773,10 @@ function parseRouteTarget(value) {
 async function detectRouteHostIpv4(target2, timeoutMs) {
   const socket = createSocket("udp4");
   try {
-    return await new Promise((resolve5, reject) => {
+    return await new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         cleanup();
-        resolve5(void 0);
+        resolve6(void 0);
       }, timeoutMs);
       const cleanup = () => {
         clearTimeout(timer);
@@ -21782,7 +21790,7 @@ async function detectRouteHostIpv4(target2, timeoutMs) {
       socket.connect(target2.port, target2.host, () => {
         cleanup();
         const address = socket.address();
-        resolve5(typeof address === "string" ? void 0 : address.address);
+        resolve6(typeof address === "string" ? void 0 : address.address);
       });
     });
   } finally {
@@ -23042,9 +23050,11 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const remoteV1 = capabilities.has("harness.remote.v1");
   const remoteV3 = capabilities.has("harness.remote.v3");
   const terminal = capabilities.has("harness.terminal.v1");
-  const codex = capabilities.has("codex.appserver.v1");
-  const cursor2 = capabilities.has("agent.acp.cursor.v1");
-  const antigravity = capabilities.has("agent.acp.antigravity.v1");
+  const workspaceTypes = "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
+  const available = (id5, capability) => remoteWorkspaceTypeAvailable(value.capabilities, workspaceTypes, id5, capability);
+  const codex = available("codex", "codex.appserver.v1");
+  const cursor2 = available("cursor", "agent.acp.cursor.v1");
+  const antigravity = available("antigravity", "agent.acp.antigravity.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
@@ -23053,7 +23063,6 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
-  const workspaceTypes = isRecord10(value) && "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
   return {
     commandList: remoteGateway || apiProxy && fallback.commandList,
     fileViewer: capabilities.has("fileviewer.read.v1"),
@@ -23069,7 +23078,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
 }
 async function waitForCodexFrames(stream, signal) {
   if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
-  await new Promise((resolve5, reject) => {
+  await new Promise((resolve6, reject) => {
     const previousWake = stream.wake;
     const timer = setTimeout(done, 25e3);
     const onAbort = () => {
@@ -23083,7 +23092,7 @@ async function waitForCodexFrames(stream, signal) {
     }
     function done() {
       cleanup();
-      resolve5();
+      resolve6();
     }
     stream.wake = () => {
       previousWake();
@@ -23525,15 +23534,15 @@ var CodexAppServerClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
+    await new Promise((resolve6) => {
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve5();
+        resolve6();
       }, 2e3);
       timer.unref?.();
       child.once("exit", () => {
         clearTimeout(timer);
-        resolve5();
+        resolve6();
       });
       child.kill("SIGTERM");
     });
@@ -23589,13 +23598,13 @@ var CodexAppServerClient = class {
   }
   request(method, params, timeoutMs) {
     const id5 = this.nextId++;
-    const result = new Promise((resolve5, reject) => {
+    const result = new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id5);
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer.unref?.();
-      this.pending.set(id5, { resolve: resolve5, reject, timer });
+      this.pending.set(id5, { resolve: resolve6, reject, timer });
     });
     try {
       this.write({ id: id5, method, params });
@@ -25182,7 +25191,7 @@ function isActiveWriterMessage(message) {
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { readdir as readdir2, realpath as realpath2, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir5 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute3, join as join9, relative as relative2, resolve as resolve2 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute4, join as join9, relative as relative3, resolve as resolve3 } from "node:path";
 
 // src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
@@ -25259,15 +25268,15 @@ var CursorAcpClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
+    await new Promise((resolve6) => {
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve5();
+        resolve6();
       }, 2e3);
       timer.unref?.();
       child.once("exit", () => {
         clearTimeout(timer);
-        resolve5();
+        resolve6();
       });
       child.kill("SIGTERM");
     });
@@ -25323,13 +25332,13 @@ var CursorAcpClient = class {
   }
   request(method, params, timeoutMs) {
     const id5 = this.nextId++;
-    const result = new Promise((resolve5, reject) => {
+    const result = new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id5);
         reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
       }, timeoutMs);
       timer.unref?.();
-      this.pending.set(id5, { resolve: resolve5, reject, timer });
+      this.pending.set(id5, { resolve: resolve6, reject, timer });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id5, method, params });
@@ -25897,15 +25906,15 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
+    await new Promise((resolve6) => {
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve5();
+        resolve6();
       }, 2e3);
       timer.unref?.();
       child.once("exit", () => {
         clearTimeout(timer);
-        resolve5();
+        resolve6();
       });
       child.kill("SIGTERM");
     });
@@ -25930,7 +25939,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.stderrBytes = 0;
     let initResolved = false;
     let rejectInit;
-    const initPromise = new Promise((resolve5, reject) => {
+    const initPromise = new Promise((resolve6, reject) => {
       rejectInit = reject;
       const timer = setTimeout(() => {
         if (!initResolved) {
@@ -25949,7 +25958,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
               this.watcher = new TranscriptWatcher(conversationId);
               this.watcher.start();
             }
-            resolve5();
+            resolve6();
           }
         });
       };
@@ -26005,7 +26014,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.currentPromptPending) {
       throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
     }
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = void 0;
@@ -26013,7 +26022,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         }
       }, timeoutMs);
       timer.unref?.();
-      this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
+      this.currentPromptPending = { sessionId, resolve: resolve6, reject, timer };
       const payload = {
         event: "user",
         message: { content: promptText }
@@ -26190,7 +26199,7 @@ var schemas2 = {
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
 function parseAcpCall(method, params) {
-  if (!(method in schemas2)) {
+  if (!Object.prototype.hasOwnProperty.call(schemas2, method)) {
     throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
   }
   const schema = schemas2[method];
@@ -26211,7 +26220,8 @@ function isSessionMutation(method) {
 
 // src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join8, relative as relative2, resolve as resolve2, sep } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir4 } from "node:os";
 function cleanUserPrompt(raw) {
   if (!raw) return "";
@@ -26223,9 +26233,10 @@ function cleanUserPrompt(raw) {
   return raw.trim();
 }
 async function loadTranscriptEvents(conversationId, sessionId, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
   let content = "";
   try {
+    const filePath = await transcriptPath(baseDir, conversationId);
+    if (filePath === void 0 || (await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
     content = await fs3.readFile(filePath, "utf-8");
   } catch {
     return [];
@@ -26373,12 +26384,10 @@ async function discoverAntigravityWorkspaces(dbPath = join8(homedir4(), ".gemini
         for (const u of uris) {
           if (typeof u === "string" && u.startsWith("file://")) {
             try {
-              const parsed = new URL(u);
-              let p = decodeURIComponent(parsed.pathname);
-              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
-                p = p.slice(1);
-              }
-              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
+              const p = fileURLToPath2(u);
+              const imageRelative = relative2(AGY_IMAGE_ROOT, p);
+              const imageCache = imageRelative === "" || !isAbsolute3(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
+              if (!imageCache) paths.add(p);
             } catch {
             }
           }
@@ -26398,9 +26407,9 @@ async function discoverAntigravityWorkspaces(dbPath = join8(homedir4(), ".gemini
   return verified;
 }
 async function readTranscriptSummary(baseDir, conversationId) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
-  const path = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
   try {
+    const path = await transcriptPath(baseDir, conversationId);
+    if (path === void 0) return void 0;
     const stat8 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     try {
@@ -26421,35 +26430,33 @@ async function readTranscriptSummary(baseDir, conversationId) {
   }
 }
 async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain"), dbPath = join8(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve2(workspacePath);
   try {
     await fs3.stat(dbPath);
-    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
-    const params = [];
-    if (workspacePath && workspacePath.trim() !== "") {
-      sql += " AND workspace_uris LIKE ?";
-      params.push(`%${workspacePath.trim()}%`);
+    const rows = await querySqliteJson(
+      dbPath,
+      "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC;"
+    );
+    const summaries = [];
+    for (const row of rows) {
+      if (requestedWorkspace !== void 0 && !workspaceMatches(row.workspace_uris, requestedWorkspace)) continue;
+      const transcript = row.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, row.conversation_id);
+      if (!row.step_count && !row.title?.trim()) {
+        if (transcript !== void 0) summaries.push(transcript);
+        continue;
+      }
+      const time = row.last_modified_time ? new Date(row.last_modified_time).getTime() : Date.now();
+      summaries.push({
+        conversationId: row.conversation_id,
+        title: row.title?.trim() || transcript?.title || "Untitled Session",
+        createdAt: time,
+        updatedAt: time
+      });
     }
-    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
-    params.push(limit);
-    const rows = await querySqliteJson(dbPath, sql, params);
-    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
-    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
-    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
-    if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = await Promise.all(rows.map(async (r) => {
-        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
-        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
-        return {
-          conversationId: r.conversation_id,
-          title: r.title?.trim() || transcript?.title || "Untitled Session",
-          createdAt: time,
-          updatedAt: time
-        };
-      }));
-      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-    }
+    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
   } catch {
   }
+  if (requestedWorkspace !== void 0) return [];
   let dirEntries;
   try {
     dirEntries = await fs3.readdir(baseDir);
@@ -26459,10 +26466,11 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
   const results = [];
   for (const entry of dirEntries) {
     if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join8(baseDir, entry, ".system_generated/logs/transcript.jsonl");
     try {
-      const s2 = await fs3.stat(transcriptPath);
-      const handle = await fs3.open(transcriptPath, "r");
+      const path = await transcriptPath(baseDir, entry);
+      if (path === void 0) continue;
+      const s2 = await fs3.stat(path);
+      const handle = await fs3.open(path, "r");
       try {
         const buf = Buffer.alloc(4096);
         const { bytesRead } = await handle.read(buf, 0, 4096, 0);
@@ -26489,6 +26497,32 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
   }
   results.sort((a, b) => b.updatedAt - a.updatedAt);
   return results.slice(0, limit);
+}
+function workspaceMatches(rawUris, requestedWorkspace) {
+  if (rawUris === void 0) return false;
+  try {
+    const uris = JSON.parse(rawUris);
+    return Array.isArray(uris) && uris.some((uri) => {
+      if (typeof uri !== "string") return false;
+      try {
+        return resolve2(fileURLToPath2(uri)) === requestedWorkspace;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+async function transcriptPath(baseDir, conversationId) {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
+  try {
+    const root = await fs3.realpath(baseDir);
+    const expected = join8(root, conversationId, ".system_generated", "logs", "transcript.jsonl");
+    return await fs3.realpath(expected) === expected ? expected : void 0;
+  } catch {
+    return void 0;
+  }
 }
 
 // src/acp/peer-bridge.ts
@@ -26825,7 +26859,7 @@ var AcpRemoteGateway = class {
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
   turnCatchUp = /* @__PURE__ */ new Map();
   startPromise;
-  startingClients = /* @__PURE__ */ new Set();
+  startingClients = /* @__PURE__ */ new Map();
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends() {
     if (!this.config.enabled) return [];
@@ -27151,11 +27185,12 @@ var AcpRemoteGateway = class {
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return;
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
-    await this.startPromise?.catch(() => void 0);
     const changed = new Set(previous.backends.filter((item) => {
       const next = config.backends.find((candidate) => candidate.id === item.id);
       return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next);
     }).map((item) => item.id));
+    await Promise.all([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
+    await this.startPromise?.catch(() => void 0);
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
     for (const id5 of sessions) {
@@ -27189,7 +27224,7 @@ var AcpRemoteGateway = class {
     this.recentFrames.clear();
     this.turnCatchUp.clear();
     this.approvals.clear();
-    await Promise.all([...this.startingClients].map((client) => client.close()));
+    await Promise.all([...this.startingClients.keys()].map((client) => client.close()));
     await this.disposeAllInstances();
     this.available = false;
     this.state = "disabled";
@@ -27200,7 +27235,7 @@ var AcpRemoteGateway = class {
       if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
       let lastError;
       for (const binary of cursorBinaryCandidates(candidate.command)) {
-        if (this.closed) return;
+        if (this.closed || !this.backendCurrent(candidate)) return;
         try {
           await this.launchBackendCandidate(candidate, binary);
           return;
@@ -27212,6 +27247,10 @@ var AcpRemoteGateway = class {
       throw lastError;
     }));
     if (this.closed) return;
+    if (this.enabledBackends().length === 0) {
+      this.state = "disabled";
+      return;
+    }
     if (this.isAvailable()) {
       this.state = "ready";
       this.unavailableCode = void 0;
@@ -27221,13 +27260,16 @@ var AcpRemoteGateway = class {
     const failure3 = results.find((result) => result.status === "rejected");
     throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
+  backendCurrent(backend) {
+    return this.config.enabled && backend.enabled && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
+  }
   async launchBackendCandidate(backend, binary) {
     const id5 = backend.id;
     const acp = this.createAcp(binary, this.logger, backend);
-    this.startingClients.add(acp);
+    this.startingClients.set(acp, backend);
     try {
       await acp.start();
-      if (this.closed) {
+      if (this.closed || !this.backendCurrent(backend)) {
         await acp.close();
         return;
       }
@@ -27249,7 +27291,7 @@ var AcpRemoteGateway = class {
     if (prev !== void 0) {
       await this.disposeInstance(prev);
     }
-    if (this.closed) {
+    if (this.closed || !this.backendCurrent(backend)) {
       unsubscribeInbound();
       unsubscribeUnavailable();
       await acp.close();
@@ -27448,7 +27490,7 @@ var AcpRemoteGateway = class {
     this.claimSession(connectionId, sessionId);
   }
   async requireExistingDirectory(path) {
-    if (!isAbsolute3(path)) {
+    if (!isAbsolute4(path)) {
       throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
     }
     try {
@@ -27466,7 +27508,7 @@ var AcpRemoteGateway = class {
   async listDirectory(path) {
     const home = homedir5();
     const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join9(home, path.slice(2)) : path;
-    const canonical = await this.requireExistingDirectory(isAbsolute3(target2) ? target2 : resolve2(target2));
+    const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
     const names = await readdir2(canonical);
     const entries = [];
     let truncated = false;
@@ -27562,9 +27604,9 @@ function buildCrumbs(path, home) {
       path: current,
       hidden: false
     });
-    const parent = resolve2(current, "..");
+    const parent = resolve3(current, "..");
     if (parent === current) break;
-    if (home !== "" && relative2(home, current) === "" && current !== home) break;
+    if (home !== "" && relative3(home, current) === "" && current !== home) break;
     current = parent;
     if (crumbs2.length >= 32) break;
   }
@@ -28785,7 +28827,7 @@ var HostServerConnection = class {
     this.controlFrameLimits = {};
     let acknowledged = false;
     let messageQueue = Promise.resolve();
-    await new Promise((resolve5, reject) => {
+    await new Promise((resolve6, reject) => {
       let settled = false;
       const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
       const finish = (error) => {
@@ -28794,7 +28836,7 @@ var HostServerConnection = class {
         clearTimeout(helloTimer);
         this.online = false;
         if (this.socket === socket) this.socket = void 0;
-        void this.dropTunnels().finally(() => error === void 0 ? resolve5() : reject(error));
+        void this.dropTunnels().finally(() => error === void 0 ? resolve6() : reject(error));
       };
       socket.onopen = () => {
         this.sendControl("hello", {
@@ -29332,14 +29374,14 @@ var HostServerConnection = class {
   waitBeforeRetry(baseDelay) {
     const spread = baseDelay * this.config.reconnect.jitter;
     const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2));
-    return new Promise((resolve5) => {
+    return new Promise((resolve6) => {
       const timer = setTimeout(() => {
         this.retryWake = void 0;
-        resolve5();
+        resolve6();
       }, delay);
       this.retryWake = () => {
         clearTimeout(timer);
-        resolve5();
+        resolve6();
       };
     });
   }
@@ -29558,18 +29600,18 @@ function closeCode(code) {
 // src/remote-directory-browser.ts
 import { readdir as readdir3, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6, platform as platform2 } from "node:os";
-import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute4, parse, resolve as resolve3 } from "node:path";
+import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute5, parse, resolve as resolve4 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve3(homedir6());
-  const target2 = path === void 0 || path.trim() === "" ? home : resolve3(path);
-  if (!isAbsolute4(target2)) throw new Error("The remote directory path must be absolute.");
+  const home = resolve4(homedir6());
+  const target2 = path === void 0 || path.trim() === "" ? home : resolve4(path);
+  if (!isAbsolute5(target2)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir3(target2, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve3(target2, row.name);
+    const child = resolve4(target2, row.name);
     let directory = row.isDirectory();
     if (!directory && row.isSymbolicLink()) directory = await stat5(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
@@ -29594,7 +29636,7 @@ function crumbs(path) {
     current = dirname5(current);
   }
   for (const segment of segments) {
-    current = resolve3(current, segment);
+    current = resolve4(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -30381,7 +30423,7 @@ function frameSessionId(frame) {
   return typeof payload.sessionId === "string" && payload.sessionId.length > 0 ? payload.sessionId : void 0;
 }
 function withTimeout(promise, ms, message) {
-  return new Promise((resolve5, reject) => {
+  return new Promise((resolve6, reject) => {
     const timer = setTimeout(() => {
       reject(new RpcError("TIMEOUT", message, void 0, true));
     }, ms);
@@ -30389,7 +30431,7 @@ function withTimeout(promise, ms, message) {
     promise.then(
       (value) => {
         clearTimeout(timer);
-        resolve5(value);
+        resolve6(value);
       },
       (error) => {
         clearTimeout(timer);
@@ -30886,7 +30928,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 // src/codex-workspace-bridge.ts
 import { spawn as spawn5 } from "node:child_process";
 import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join10, relative as relative3, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join10, relative as relative4, resolve as resolve5 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -30917,7 +30959,7 @@ var AsyncQueue = class {
     const value = this.values.shift();
     if (value !== void 0) return Promise.resolve({ done: false, value });
     if (this.ended) return Promise.resolve({ done: true, value: void 0 });
-    return new Promise((resolve5) => this.waiters.push(resolve5));
+    return new Promise((resolve6) => this.waiters.push(resolve6));
   }
   [Symbol.asyncIterator]() {
     return this;
@@ -31198,15 +31240,15 @@ var CodexWorkspaceBridge = class {
     }
   }
   async safePath(root, path, directory) {
-    const candidate = isAbsolute5(path) ? resolve4(path) : resolve4(root, path);
-    const rel = relative3(root, candidate);
-    if (rel.startsWith("..") || isAbsolute5(rel)) throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
+    const candidate = isAbsolute6(path) ? resolve5(path) : resolve5(root, path);
+    const rel = relative4(root, candidate);
+    if (rel.startsWith("..") || isAbsolute6(rel)) throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
       const info = await lstat(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath3(candidate);
-      const canonicalRel = relative3(root, canonical);
-      if (canonicalRel.startsWith("..") || isAbsolute5(canonicalRel)) throw new Error();
+      const canonicalRel = relative4(root, canonical);
+      if (canonicalRel.startsWith("..") || isAbsolute6(canonicalRel)) throw new Error();
       if (directory && !info.isDirectory()) throw new Error();
       return canonical;
     } catch {
@@ -31249,14 +31291,14 @@ function pipeTerminalSpawner() {
     child.stdout.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
     child.stderr.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
     child.on("error", () => queue.end());
-    const completed = new Promise((resolve5) => {
+    const completed = new Promise((resolve6) => {
       child.on("error", () => {
         queue.end();
-        resolve5({ exitCode: null });
+        resolve6({ exitCode: null });
       });
       child.on("exit", (code) => {
         queue.end();
-        resolve5({ exitCode: code });
+        resolve6({ exitCode: code });
       });
     });
     return {
@@ -31972,7 +32014,7 @@ function resolveDependencies(input2) {
     stdout: input2.stdout ?? process.stdout,
     stderr: input2.stderr ?? process.stderr,
     now: input2.now ?? Date.now,
-    wait: input2.wait ?? ((milliseconds) => new Promise((resolve5) => setTimeout(resolve5, milliseconds))),
+    wait: input2.wait ?? ((milliseconds) => new Promise((resolve6) => setTimeout(resolve6, milliseconds))),
     renderQr: input2.renderQr ?? renderTerminalQr,
     createIdentityStore: input2.createIdentityStore ?? ((options) => new IdentityStore(options)),
     createHostApi: input2.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
@@ -32420,7 +32462,7 @@ function errorCode5(error) {
   return "CONNECTION_FAILED";
 }
 function wait(milliseconds) {
-  return new Promise((resolve5) => setTimeout(resolve5, milliseconds));
+  return new Promise((resolve6) => setTimeout(resolve6, milliseconds));
 }
 
 // src/remote-file-content-provider.ts

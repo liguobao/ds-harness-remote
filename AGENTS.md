@@ -241,15 +241,25 @@ ACP 后台启动不得阻塞 Harness Remote 注册或 Client 初始化；能力�
 `acp/virtual-harness.ts` 必须可用于浏览器，禁止依赖 Node filesystem、AGY 数据库或本机
 transcript fallback；工作区和历史只从 Host ACP 接口读取。新 AGY 工作区 ID 使用
 `antigravity:cwd:`，ID 生成和 catalog 投影必须显式指定 backend，不得默认生成 Cursor ID。
-不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无后端前缀的路径作为工作区 ID；旧通用 ACP capability 仅兼容
-Cursor，AGY 需独立 capability。含图片历史走有界 ACP transfer。
+不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无后端前缀的路径作为工作区 ID；Cursor 和 AGY
+分别需独立 capability。按用户说明 ACP 尚未使用，不增加旧 ACP 配置或 ID 迁移。含图片历史走有界 ACP transfer。
 独立 Remote Web runtime 仍在独立 Server 仓库，本仓库验证不等于跨站点或跨设备验收。
 
-本次兼容边界验证：Plugin/client-core 类型检查、Plugin build、DSH bundle 校验、浏览器
+此前兼容边界验证：Plugin/client-core 类型检查、Plugin build、DSH bundle 校验、浏览器
 platform bundle 与无 Node globals 的工作区/历史烟测通过；Plugin 相关 49 测试和 client-core
 44 测试通过。Plugin 全量为 360/361，通过外的既有 transcript-loader 测试依赖本机数据库并
 硬编码 Linux `/var/lib/dsh/workspace/ds-harness-remote` 路径，在本机 Mac 环境失败；未修改
 该 loader 或测试，不将全量 test 记为通过。
+
+0.5.0 审查更新（2026-10-07）：上述本机数据库依赖测试已改为隔离 fixture；全仓 check、
+test 和生产 build 通过，Plugin 42 文件 / 378 测试、Android 29 文件 / 323 测试、client-core
+4 文件 / 52 测试，全仓共 1082 测试。最后的 Desktop 分组与 Android Prompt 订阅修复后，
+Plugin build / DSH bundle 校验、Android check / 全量 test / Hermes export 再次通过。
+审查修复能力与就绪状态判断不一致、AGY 项目 URI 归属、transcript 越界与符号链接、
+ACP 启动中关闭及迟到会话结果覆盖。浏览器无 Node globals 的 ACP 工作区 / 历史烟测、
+npm 发布入口与 0.5.0 版本一致性校验通过；独立 Server 的 6 项 workspace type 契约测试
+通过，Server 当前仍将 Cursor / AGY 标记为缺少 Web adapter。未验证本次 Windows、原生
+APK / 真机或 AGY 加密跨设备 E2E。Metro 的 noble/hashes exports fallback 警告仍存在。
 
 ## Android AGY workspaces (2026-10-07)
 

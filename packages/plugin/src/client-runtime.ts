@@ -6,7 +6,7 @@ import {
   type CodexAppStreamClosedData,
   type RemoteWorkspaceTypeDescription,
 } from '@dsh-remote/protocol'
-import { AgentAcpClient, CodexRemoteClient, RemoteClientCore } from '@dsh-remote/client-core'
+import { AgentAcpClient, CodexRemoteClient, RemoteClientCore, remoteWorkspaceTypeAvailable } from '@dsh-remote/client-core'
 import {
   AdaptiveTransport,
   stunOnlyIceServers,
@@ -1547,9 +1547,11 @@ export async function probeRemoteHostFeatures(
   const remoteV1 = capabilities.has('harness.remote.v1')
   const remoteV3 = capabilities.has('harness.remote.v3')
   const terminal = capabilities.has('harness.terminal.v1')
-  const codex = capabilities.has('codex.appserver.v1')
-  const cursor = capabilities.has('agent.acp.cursor.v1')
-  const antigravity = capabilities.has('agent.acp.antigravity.v1')
+  const workspaceTypes = 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
+  const available = (id: string, capability: string) => remoteWorkspaceTypeAvailable(value.capabilities as string[], workspaceTypes, id, capability)
+  const codex = available('codex', 'codex.appserver.v1')
+  const cursor = available('cursor', 'agent.acp.cursor.v1')
+  const antigravity = available('antigravity', 'agent.acp.antigravity.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
@@ -1558,7 +1560,6 @@ export async function probeRemoteHostFeatures(
   if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
-  const workspaceTypes = isRecord(value) && 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
   return {
     commandList: remoteGateway || (apiProxy && fallback.commandList),
     fileViewer: capabilities.has('fileviewer.read.v1'),

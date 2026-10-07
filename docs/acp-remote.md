@@ -35,6 +35,11 @@ ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册
 重新检测通过后可以手动开启，不自动恢复为开启。命令可发现不代表已登录或协议就绪，
 真实 Remote 可用性仍以 `workspaceTypes.available` 为准。
 
+AGY 会话发现按数据库中的 file URI 解码后与项目目录完整匹配，支持编码目录名和
+原生路径分隔符。指定目录缺少数据库归属信息时返回空列表，不把所有 transcript
+推测为该目录的会话。历史读取限制在 AGY brain 内的真实 transcript，拒绝越界 ID
+和符号链接。切换会话后，客户端丢弃迟到的历史与订阅结果。
+
 ## 公共方法（allowlist）
 
 | 方法 | 用途 |
@@ -58,7 +63,8 @@ Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / e
 `dsh/` 扩展只存在于 ACP call 内，不注册到 Harness 或 Codex 业务 API。
 `virtual-harness.ts` 是可在浏览器使用的内存 UI 投影，不读取本机 AGY 文件；工作区和历史
 由 Host ACP 返回。AGY 工作区仅接受 `antigravity:cwd:` ID，不兼容旧 `cursor:cwd:` ID
-或无前缀路径。AGY 需 `agent.acp.antigravity.v1`，旧通用 ACP capability 只兼容 Cursor。
+或无前缀路径。Cursor / AGY 分别需 `agent.acp.cursor.v1` / `agent.acp.antigravity.v1`；
+`agent.acp.v1` 仅表示公共数据面，不据此推断后端。ACP 尚未发布使用，不增加旧配置或 ID 迁移。
 独立 Remote Web runtime 的接入和跨设备 E2E 仍待在独立 Server 仓库验证。
 
 ## 配置
@@ -85,7 +91,7 @@ ds-harness-remote:
 | `packages/plugin/src/acp/adapters/cursor.ts` | Cursor adapter 工厂 |
 | `packages/plugin/src/acp/virtual-harness.ts` | Desktop Virtual Harness（cwd → Workspace / Session / Composer） |
 | `packages/client-core/src/acp-client.ts` | 共享 Client（`AgentAcpClient`） |
-| `packages/plugin/src/client-runtime.ts` | 探测 `agent.acp.v1`、打开 Cursor Virtual Harness |
+| `packages/plugin/src/client-runtime.ts` | 探测独立后端 capability 和就绪状态、打开 Virtual Harness |
 | `packages/plugin/src/client.ts` | Remote 模态框列出 / 添加 Cursor 工作区 |
 
 ## Desktop 使用
@@ -98,7 +104,7 @@ ds-harness-remote:
 
 内存投影（不写入 SessionStore）：
 
-1. 探测 Host capability `agent.acp.v1` 后启用 Cursor 工作区分组。
+1. 探测 Host capability `agent.acp.cursor.v1` 并确认工作区类型就绪后启用 Cursor 工作区分组。
 2. 新建 Cursor workspace = 选择 Host 上已有绝对目录；会话经 `AgentAcpClient`（`agent.acp.*`）创建与流式更新。
 3. 文本 Prompt / cancel / approval（`allow-once` | `reject-once`）；暂不支持图片。
 4. Workspace backend id 仍为 `'cursor'`（仅 UI）；线协议为 `agent.acp.*`。

@@ -102,7 +102,7 @@ export class AcpRemoteGateway {
   private readonly turnCatchUp = new Map<string, Array<{ method: string; params: unknown }>>()
 
   private startPromise?: Promise<void>
-  private readonly startingClients = new Set<CursorAcpLike>()
+  private readonly startingClients = new Map<CursorAcpLike, ResolvedAcpBackendConfig>()
 
   constructor(
     public config: ResolvedAcpConfig,
@@ -497,11 +497,12 @@ export class AcpRemoteGateway {
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
-    await this.startPromise?.catch(() => undefined)
     const changed = new Set(previous.backends.filter(item => {
       const next = config.backends.find(candidate => candidate.id === item.id)
       return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
     }).map(item => item.id))
+    await Promise.all([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
+    await this.startPromise?.catch(() => undefined)
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const id of sessions) {
@@ -536,7 +537,7 @@ export class AcpRemoteGateway {
     this.recentFrames.clear()
     this.turnCatchUp.clear()
     this.approvals.clear()
-    await Promise.all([...this.startingClients].map(client => client.close()))
+    await Promise.all([...this.startingClients.keys()].map(client => client.close()))
     await this.disposeAllInstances()
     this.available = false
     this.state = 'disabled'
@@ -548,7 +549,7 @@ export class AcpRemoteGateway {
       if (this.backendInstances.get(candidate.id)?.client.isReady()) return
       let lastError: unknown
       for (const binary of cursorBinaryCandidates(candidate.command)) {
-        if (this.closed) return
+        if (this.closed || !this.backendCurrent(candidate)) return
         try {
           await this.launchBackendCandidate(candidate, binary)
           return
@@ -560,6 +561,7 @@ export class AcpRemoteGateway {
       throw lastError
     }))
     if (this.closed) return
+    if (this.enabledBackends().length === 0) { this.state = 'disabled'; return }
     if (this.isAvailable()) {
       this.state = 'ready'
       this.unavailableCode = undefined
@@ -570,13 +572,18 @@ export class AcpRemoteGateway {
     throw failure?.status === 'rejected' ? failure.reason : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'No ACP backend is available.')
   }
 
+  private backendCurrent(backend: ResolvedAcpBackendConfig): boolean {
+    return this.config.enabled && backend.enabled
+      && JSON.stringify(this.config.backends.find(item => item.id === backend.id)) === JSON.stringify(backend)
+  }
+
   private async launchBackendCandidate(backend: ResolvedAcpBackendConfig, binary: string): Promise<void> {
     const id = backend.id
     const acp = this.createAcp(binary, this.logger, backend)
-    this.startingClients.add(acp)
+    this.startingClients.set(acp, backend)
     try {
       await acp.start()
-      if (this.closed) {
+      if (this.closed || !this.backendCurrent(backend)) {
         await acp.close()
         return
       }
@@ -598,7 +605,7 @@ export class AcpRemoteGateway {
     if (prev !== undefined) {
       await this.disposeInstance(prev)
     }
-    if (this.closed) {
+    if (this.closed || !this.backendCurrent(backend)) {
       unsubscribeInbound()
       unsubscribeUnavailable()
       await acp.close()

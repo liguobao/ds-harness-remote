@@ -68,7 +68,7 @@ export function parseAcpCall(method: string, params: unknown): {
   method: AllowedAcpMethod
   params: Record<string, unknown>
 } {
-  if (!(method in schemas)) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
     throw new RpcError('METHOD_NOT_ALLOWED', 'The ACP method is not allowlisted for Remote.')
   }
   const schema = schemas[method as AllowedAcpMethod]

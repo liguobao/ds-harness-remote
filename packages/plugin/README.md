@@ -19,7 +19,7 @@ Continue DeepSeek Harness sessions and experimental Codex workspaces from anothe
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.4.27
+dsh plugin --profile web add -w ds-harness-remote@0.5.0
 ```
 
 ### dsh-TUI Host
@@ -27,7 +27,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.4.27
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.4.27
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.0
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
@@ -44,7 +44,7 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 
 ## Compatibility
 
-Plugin `0.4.27` targets DeepSeek Harness `dsh-v0.2.0-rc.2` and retains `dsh-v0.1.7-rc.1` compatibility; it also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
+Plugin `0.5.0` targets DeepSeek Harness `dsh-v0.2.0-rc.2` and retains `dsh-v0.1.7-rc.1` compatibility; it also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
 
 - `dsh-v0.1.1-rc.2` through the official legacy `ApiProxy`;
 - `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` through the official Typert Remote Gateway;

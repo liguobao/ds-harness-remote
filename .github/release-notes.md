@@ -1,23 +1,21 @@
 ## English
 
-- Fixes Harness version discovery when DSH is installed globally through an npm CLI symlink, restoring `harnessVersion` reporting for `dsh 0.2.0-rc.2` Hosts.
-- Retains the DeepSeek Harness 0.2.0 Desktop shell lookup and version-gated workspace compatibility paths.
-- Isolates development-service preview HTTP/WebSocket resources per Client and closes revoked-port connections immediately while preserving other allowed previews.
-- Publishes the Android app as version `0.4.27` with Android `versionCode 38`.
-
-### Thanks
-
-Thanks to [择梦舟 (@dreamfarer-space)](https://github.com/dreamfarer-space) for contributing [PR #86](https://github.com/liguobao/ds-harness-remote/pull/86) and [PR #87](https://github.com/liguobao/ds-harness-remote/pull/87), which improve per-client preview isolation and immediate loopback port revocation.
+- Adds Cursor and AGY workspaces with independent backend identifiers and the authenticated `agent.acp.*` API. Desktop/Web use memory-only UI projections; Android supports AGY conversation discovery, history, and image prompts.
+- Adds structured workspace type declarations while preserving existing Harness and CodeX capabilities and transports. New clients check both negotiated capabilities and workspace readiness.
+- Applies backend switches immediately, turns unavailable switches off, and cancels initialization when a backend is disabled.
+- Fixes AGY project scoping for encoded directory names and similarly named projects, confines transcript reads to the AGY brain directory, and rejects stale history or streams after navigation.
+- Retains existing Harness version detection, Session V3/legacy transport selection, encrypted Relay/WebRTC channels, and Android recovery behavior.
+- Updates the Plugin and Android app to `0.5.0`; Android `versionCode` is `39`.
+- Cross-device AGY, native APK/Windows, and independent Remote Web deployment acceptance remain separate from local validation.
 
 ## 中文
 
-- 修复 DSH 通过 npm 全局 CLI 符号链接安装时的 Harness 版本探测，恢复 `dsh 0.2.0-rc.2` Host 的 `harnessVersion` 上报。
-- 保留 DeepSeek Harness 0.2.0 Desktop 外壳探测及按版本选择的工作区兼容路径。
-- 隔离不同 Client 的开发服务预览 HTTP/WebSocket 资源，并在撤销端口时立即关闭已有连接，同时保留其他允许端口的预览。
-- 发布版本 `0.4.27` 的 Android App（Android `versionCode 38`）。
+- 新增 Cursor 与 AGY 工作区，使用独立后端标识和已认证的 `agent.acp.*` API。Desktop/Web 使用内存 UI 投影；Android 支持 AGY 会话发现、历史和图片 Prompt。
+- 新增结构化工作区类型声明，保留既有 Harness 与 CodeX 能力和传输协议。新客户端同时校验已协商能力与工作区就绪状态。
+- 后端开关立即生效，不可用开关显示关闭；关闭后端时取消正在进行的初始化。
+- 修复编码目录名和相似项目路径的 AGY 会话归属，限制 transcript 读取范围，并防止切换会话后的迟到历史或订阅覆盖当前会话。
+- 保留既有 Harness 版本探测、Session V3/legacy 数据面选择、Relay/WebRTC 加密通道及 Android 会话恢复行为。
+- Plugin 与 Android App 升级至 `0.5.0`，Android `versionCode` 为 `39`。
+- AGY 跨设备、原生 APK/Windows 以及独立 Remote Web 部署验收仍需另行完成。
 
-### 致谢
-
-感谢 [择梦舟（@dreamfarer-space）](https://github.com/dreamfarer-space) 贡献 [PR #86](https://github.com/liguobao/ds-harness-remote/pull/86) 和 [PR #87](https://github.com/liguobao/ds-harness-remote/pull/87)，改进了不同 Client 的预览隔离和端口撤销时的连接清理。
-
-[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.26...v0.4.27) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.4.27/README.md)
+[Full changelog / 完整改动](https://github.com/liguobao/ds-harness-remote/compare/v0.4.27...v0.5.0) · [Installation / 安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.0/README.md)

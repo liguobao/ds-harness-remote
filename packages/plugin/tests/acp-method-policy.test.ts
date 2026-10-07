@@ -27,6 +27,9 @@ describe('ACP method policy', () => {
     })).toMatchObject({ method: 'session/prompt' })
 
     expect(() => parseAcpCall('process/exec', {})).toThrow(RpcError)
+    for (const method of ['toString', 'constructor', '__proto__']) {
+      expect(() => parseAcpCall(method, {})).toThrow(RpcError)
+    }
     expect(() => parseAcpCall('session/prompt', {
       sessionId: 'sess_1',
       prompt: [{ type: 'image', data: 'aaaa' }],

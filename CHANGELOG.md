@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 - 2026-10-07
+
+- Adds independent Cursor and Antigravity workspace types over the authenticated `agent.acp.*` data plane, including Desktop/Web memory projections and Android AGY conversation history and image prompts.
+- Advertises structured `workspaceTypes` while preserving Harness and CodeX capability discovery for existing clients and Hosts.
+- Applies backend switches live, disables undiscoverable workspace switches, and cancels backend initialization when disabled.
+- Uses consistent capability and readiness checks on Desktop and Android; prevents late ACP history and subscriptions from replacing another conversation.
+- Matches AGY project URIs exactly, handles encoded directory names and native file paths, and confines restored transcripts to the AGY brain directory.
+- Replaces local-data-dependent AGY tests with isolated fixtures and preserves the main branch's Android session recovery improvements.
+- Advances the Plugin and Android app to `0.5.0` (Android `versionCode 39`).
+
 ## 0.4.27 - 2026-09-30
 
 - Fixes Harness version discovery for globally installed DSH CLI symlinks, so Hosts running `dsh 0.2.0-rc.2` report their Harness version again.

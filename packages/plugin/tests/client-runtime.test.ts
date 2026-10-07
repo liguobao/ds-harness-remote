@@ -121,6 +121,16 @@ describe('ClientModeRuntime Host account control', () => {
     })
   })
 
+  it.each(['cursor', 'antigravity'] as const)('uses %s workspace readiness alongside its independent capability', async backend => {
+    const capability = `agent.acp.${backend}.v1`
+    const client = { rpc: vi.fn(async () => ({ capabilities: ['harness.api.v1', capability],
+      workspaceTypes: [{ id: backend, name: backend, capability, available: false }] })) }
+    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: false })
+    client.rpc.mockResolvedValueOnce({ capabilities: ['harness.api.v1', capability],
+      workspaceTypes: [{ id: backend, name: backend, capability, available: true }] })
+    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: true })
+  })
+
   it('forwards only supported QR login providers to the Server API', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-qr-provider-'))
     directories.push(directory)

@@ -1,6 +1,8 @@
 import { AGY_IMAGE_ROOT, stripAgyImageReferences, agyImageReferences, readAgyImage } from './image-store.js'
 import { promises as fs } from 'node:fs'
-import { join } from 'node:path'
+import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import type { StepLogRecord } from './types.js'
 
@@ -30,9 +32,10 @@ export async function loadTranscriptEvents(
   sessionId: string,
   baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
 ): Promise<HydratedSessionEvent[]> {
-  const filePath = join(baseDir, conversationId, '.system_generated/logs/transcript.jsonl')
   let content = ''
   try {
+    const filePath = await transcriptPath(baseDir, conversationId)
+    if (filePath === undefined || (await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return []
     content = await fs.readFile(filePath, 'utf-8')
   } catch {
     return []
@@ -209,12 +212,11 @@ export async function discoverAntigravityWorkspaces(
         for (const u of uris) {
           if (typeof u === 'string' && u.startsWith('file://')) {
             try {
-              const parsed = new URL(u)
-              let p = decodeURIComponent(parsed.pathname)
-              if (process.platform === 'win32' && p.startsWith('/') && p.length > 2 && p[2] === ':') {
-                p = p.slice(1)
-              }
-              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + '/')) paths.add(p)
+              const p = fileURLToPath(u)
+              const imageRelative = relative(AGY_IMAGE_ROOT, p)
+              const imageCache = imageRelative === '' || (!isAbsolute(imageRelative)
+                && imageRelative !== '..' && !imageRelative.startsWith(`..${sep}`))
+              if (!imageCache) paths.add(p)
             } catch {
               // ignore
             }
@@ -239,9 +241,9 @@ export async function discoverAntigravityWorkspaces(
 }
 
 async function readTranscriptSummary(baseDir: string, conversationId: string): Promise<DiscoveredSession | undefined> {
-  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return undefined
-  const path = join(baseDir, conversationId, '.system_generated/logs/transcript.jsonl')
   try {
+    const path = await transcriptPath(baseDir, conversationId)
+    if (path === undefined) return undefined
     const stat = await fs.stat(path)
     const handle = await fs.open(path, 'r')
     try {
@@ -268,48 +270,42 @@ export async function discoverAntigravitySessions(
   baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
   dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
 ): Promise<DiscoveredSession[]> {
-  // 1. Try querying from conversation_summaries.db
+  const requestedWorkspace = workspacePath.trim() === '' ? undefined : resolve(workspacePath)
+  // Database URIs provide workspace authority. Decode them before comparing so
+  // percent-encoded names, path separators, and similarly named projects stay distinct.
   try {
     await fs.stat(dbPath)
-    let sql = 'SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != \'\')'
-    const params: Array<string | number> = []
-    if (workspacePath && workspacePath.trim() !== '') {
-      sql += ' AND workspace_uris LIKE ?'
-      params.push(`%${workspacePath.trim()}%`)
-    }
-    sql += ' ORDER BY last_modified_time DESC LIMIT ?;'
-    params.push(limit)
-
     interface DbSessionRow {
       conversation_id: string
       title?: string
+      workspace_uris?: string
       step_count?: number
       last_modified_time?: string
     }
-
-    const rows = await querySqliteJson<DbSessionRow>(dbPath, sql, params)
-    // Concurrent idle AGY processes can leave an empty summary for a durable
-    // conversation. Use its transcript, but only within the DB workspace filter.
-    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')")
-    const emptyRows = await querySqliteJson<DbSessionRow>(dbPath, emptySql, params)
-    const recovered = (await Promise.all(emptyRows.map(row => readTranscriptSummary(baseDir, row.conversation_id))))
-      .filter((item): item is DiscoveredSession => item !== undefined)
-    if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = await Promise.all(rows.map(async r => {
-        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now()
-        const transcript = r.title?.trim() ? undefined : await readTranscriptSummary(baseDir, r.conversation_id)
-        return {
-          conversationId: r.conversation_id,
-          title: r.title?.trim() || transcript?.title || 'Untitled Session',
-          createdAt: time,
-          updatedAt: time,
-        }
-      }))
-      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+    const rows = await querySqliteJson<DbSessionRow>(dbPath,
+      'SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC;')
+    const summaries: DiscoveredSession[] = []
+    for (const row of rows) {
+      if (requestedWorkspace !== undefined && !workspaceMatches(row.workspace_uris, requestedWorkspace)) continue
+      const transcript = row.title?.trim() ? undefined : await readTranscriptSummary(baseDir, row.conversation_id)
+      if (!row.step_count && !row.title?.trim()) {
+        if (transcript !== undefined) summaries.push(transcript)
+        continue
+      }
+      const time = row.last_modified_time ? new Date(row.last_modified_time).getTime() : Date.now()
+      summaries.push({
+        conversationId: row.conversation_id,
+        title: row.title?.trim() || transcript?.title || 'Untitled Session',
+        createdAt: time,
+        updatedAt: time,
+      })
     }
+    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
   } catch {
-    // fallback to filesystem scanning
+    // Unscoped discovery may fall back to transcript scanning without a database.
   }
+  // A transcript alone does not establish which project it belongs to.
+  if (requestedWorkspace !== undefined) return []
 
   // 2. Fallback to filesystem scanning
   let dirEntries: string[]
@@ -322,10 +318,11 @@ export async function discoverAntigravitySessions(
   const results: DiscoveredSession[] = []
   for (const entry of dirEntries) {
     if (entry === 'tempmediaStorage' || !entry.includes('-')) continue
-    const transcriptPath = join(baseDir, entry, '.system_generated/logs/transcript.jsonl')
     try {
-      const s = await fs.stat(transcriptPath)
-      const handle = await fs.open(transcriptPath, 'r')
+      const path = await transcriptPath(baseDir, entry)
+      if (path === undefined) continue
+      const s = await fs.stat(path)
+      const handle = await fs.open(path, 'r')
       try {
         const buf = Buffer.alloc(4096)
         const { bytesRead } = await handle.read(buf, 0, 4096, 0)
@@ -354,4 +351,25 @@ export async function discoverAntigravitySessions(
 
   results.sort((a, b) => b.updatedAt - a.updatedAt)
   return results.slice(0, limit)
+}
+
+function workspaceMatches(rawUris: string | undefined, requestedWorkspace: string): boolean {
+  if (rawUris === undefined) return false
+  try {
+    const uris: unknown = JSON.parse(rawUris)
+    return Array.isArray(uris) && uris.some(uri => {
+      if (typeof uri !== 'string') return false
+      try { return resolve(fileURLToPath(uri)) === requestedWorkspace } catch { return false }
+    })
+  } catch { return false }
+}
+
+/** Remote conversation ids can select only a real transcript inside the AGY brain. */
+async function transcriptPath(baseDir: string, conversationId: string): Promise<string | undefined> {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return undefined
+  try {
+    const root = await fs.realpath(baseDir)
+    const expected = join(root, conversationId, '.system_generated', 'logs', 'transcript.jsonl')
+    return await fs.realpath(expected) === expected ? expected : undefined
+  } catch { return undefined }
 }

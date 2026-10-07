@@ -35,6 +35,19 @@ export interface RemoteHostFeatures {
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
 }
 
+/** Optional type declarations refine negotiated capabilities; legacy Hosts omit them. */
+export function remoteWorkspaceTypeAvailable(
+  capabilities: readonly string[],
+  workspaceTypes: readonly RemoteWorkspaceTypeDescription[] | undefined,
+  id: string,
+  capability: string,
+): boolean {
+  if (!capabilities.includes(capability)) return false
+  if (workspaceTypes === undefined) return true
+  const entries = workspaceTypes.filter(item => item.id === id)
+  return entries.length === 1 && entries[0]?.capability === capability && entries[0].available
+}
+
 export interface RemoteGatewayFailure {
   code: string
   message: string

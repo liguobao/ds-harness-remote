@@ -7,11 +7,11 @@ const { proxy, transport, storage, authenticate, acp } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn() },
-  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn() },
   authenticate: vi.fn(),
 }))
-vi.mock('expo-haptics', () => ({}))
+vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
 vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => ['relay'] }))
 vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   requireProxy() { return proxy }
@@ -46,7 +46,8 @@ beforeEach(() => {
   transport.hasAntigravity.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
-  acp.openStream.mockImplementation(async () => ({ streamId: 'acp-test', close: vi.fn(async () => undefined) }))
+  acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })
+  acp.openStream.mockImplementation(async () => ({ streamId: 'acp-test', close: async () => undefined }))
   useAppStore.setState({ ...useAppStore.getInitialState(), selectedSession: session, sessions: [session],
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
   proxy.sessionHistory.mockResolvedValue(page([]))
@@ -156,6 +157,47 @@ describe('session restore state machine', () => {
     expect(acp.openStream).toHaveBeenCalledTimes(1)
     expect(acp.transferCall).toHaveBeenCalledTimes(backend === 'antigravity' ? 1 : 0)
   })
+  it('ignores AGY history completing after navigation to another conversation', async () => {
+    let finish!: (result: { events: unknown[] }) => void
+    acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const old = useAppStore.getState().openSession({ ...session, sessionId: 'antigravity:old', nativeId: 'old', backend: 'antigravity' })
+    await vi.waitFor(() => expect(acp.transferCall).toHaveBeenCalled())
+    expect(await useAppStore.getState().openSession({ ...session, sessionId: 'new' })).toBe(true)
+    finish({ events: [] })
+    expect(await old).toBe(false)
+    expect(useAppStore.getState().selectedSession?.sessionId).toBe('new')
+    expect(useAppStore.getState().messages['antigravity:old']).toBeUndefined()
+  })
+
+  it.each(['cursor', 'antigravity'] as const)('closes a late %s subscription after navigation', async backend => {
+    let finish!: (stream: { streamId: string; close: () => Promise<void> }) => void
+    acp.openStream.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const old = useAppStore.getState().openSession({ ...session, sessionId: `${backend}:old`, nativeId: 'old', backend })
+    await vi.waitFor(() => expect(acp.openStream).toHaveBeenCalled())
+    expect(await useAppStore.getState().openSession({ ...session, sessionId: `${backend}:new`, nativeId: 'new', backend })).toBe(true)
+    const close = vi.fn(async () => undefined)
+    finish({ streamId: 'old-stream', close })
+    expect(await old).toBe(false)
+    expect(close).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new`)
+  })
+
+  it.each(['cursor', 'antigravity'] as const)('keeps a late %s prompt subscription out of the new conversation', async backend => {
+    const selected = { ...session, sessionId: `${backend}:old`, nativeId: 'old', backend }
+    useAppStore.setState({ selectedSession: selected, sessions: [selected] })
+    let finish!: (stream: { streamId: string; close: () => Promise<void> }) => void
+    acp.openStream.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const sending = useAppStore.getState().sendMessage('hello')
+    await vi.waitFor(() => expect(acp.openStream).toHaveBeenCalled())
+    expect(await useAppStore.getState().openSession({ ...selected, sessionId: `${backend}:new`, nativeId: 'new' })).toBe(true)
+    const close = vi.fn(async () => undefined)
+    finish({ streamId: 'old-prompt-stream', close })
+    expect(await sending).toBe(true)
+    expect(close).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new`)
+    expect(acp.prompt).toHaveBeenCalledWith('old', 'hello', undefined, [], backend)
+  })
+
   it('does not let an older turn-start reopen a completed turn', () => {
     useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 20, { turn: 1 })))
     useAppStore.getState().handleMuxFrame(frame(entry('turn/start', 10, { turn: 1 })))

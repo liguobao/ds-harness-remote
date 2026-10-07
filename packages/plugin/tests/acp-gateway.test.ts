@@ -49,6 +49,30 @@ describe('AcpRemoteGateway', () => {
     await gateway.close()
   })
 
+  it('stops a starting backend when disabled and rejects its late initialization', async () => {
+    let finish!: () => void
+    const starting = readyAcp()
+    starting.start = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    starting.close = vi.fn(async () => { finish() })
+    const ready = readyAcp()
+    const factory = vi.fn(() => ready).mockReturnValueOnce(starting)
+    const config = { enabled: true, backends: [{ id: 'cursor', enabled: true, command: '/explicit/cursor', args: ['acp'] }] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), factory)
+    const startup = gateway.start()
+    await vi.waitFor(() => expect(starting.start).toHaveBeenCalledOnce())
+    await gateway.reconfigure({ ...config, backends: config.backends.map(item => ({ ...item, enabled: false })) })
+    await startup
+    expect(starting.close).toHaveBeenCalled()
+    expect(factory).toHaveBeenCalledOnce()
+    expect(gateway.isAvailable()).toBe(false)
+    expect(gateway.availableBackends()).toEqual([])
+    expect(gateway.status().state).toBe('disabled')
+    await gateway.reconfigure(config)
+    expect(factory).toHaveBeenCalledTimes(2)
+    expect(gateway.availableBackends()).toEqual(['cursor'])
+    await gateway.close()
+  })
+
   it('honors the global switch and independent backend launch settings', async () => {
     const factory = vi.fn(() => readyAcp())
     const backends = [

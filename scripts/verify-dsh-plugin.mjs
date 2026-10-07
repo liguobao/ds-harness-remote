@@ -12,6 +12,7 @@ const pluginComponentManifest = JSON.parse(readFileSync(join(root, 'packages/plu
 
 assert.equal(manifest.name, 'ds-harness-remote', 'root package must use the canonical DSH installation id')
 assert.equal(pluginManifest.name, manifest.name, 'root and npm plugin package ids must stay unified')
+assert.equal(pluginManifest.version, manifest.version, 'root and npm plugin versions must stay unified')
 assert.equal(componentManifest.name, manifest.name, 'root Component manifest must use the canonical plugin id')
 assert.equal(pluginComponentManifest.name, pluginManifest.name, 'npm Component manifest must use the canonical plugin id')
 assert.equal(componentManifest.version, manifest.version, 'root Component manifest version must match package.json')

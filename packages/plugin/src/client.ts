@@ -2128,25 +2128,11 @@ window.__ModuleLoader__.load({
       const visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3)
       const visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3)
       const visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3)
-      const workspaceTypeAvailable = (id: string, legacyAvailable: boolean | undefined): boolean => {
-        const workspaceTypes = status?.remoteFeatures?.workspaceTypes
-        // New Hosts expose the authoritative enabled-and-ready state through
-        // workspaceTypes. Only fall back to legacy booleans for old Hosts that
-        // do not send the structured list.
-        return workspaceTypes === undefined
-          ? legacyAvailable === true
-          : workspaceTypes.some(workspace => workspace.id === id && workspace.available)
-      }
-      const codexAvailable = workspaceTypeAvailable('codex', status?.remoteFeatures?.codex)
-      // ACP backends must be explicitly reported by the Host as enabled and
-      // ready. The legacy generic `agent.acp.v1` capability is insufficient
-      // to identify a particular backend and must not create a false group.
-      const cursorAvailable = status?.remoteFeatures?.workspaceTypes?.some(
-        workspace => workspace.id === 'cursor' && workspace.available,
-      ) === true
-      const antigravityAvailable = status?.remoteFeatures?.workspaceTypes?.some(
-        workspace => workspace.id === 'antigravity' && workspace.available,
-      ) === true
+      // Runtime features already validate both negotiated capabilities and
+      // workspace readiness, including the existing CodeX legacy fallback.
+      const codexAvailable = status?.remoteFeatures?.codex === true
+      const cursorAvailable = status?.remoteFeatures?.cursor === true
+      const antigravityAvailable = status?.remoteFeatures?.antigravity === true
       const selectedHostDetails = selectedHost === undefined ? undefined : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),

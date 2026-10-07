@@ -9,7 +9,8 @@ class FakeCore {
 
   async rpc(method: string, params?: unknown): Promise<unknown> {
     this.rpcCalls.push({ method, params })
-    if (method === 'harness.transport.describe') return { capabilities: testState.capabilities }
+    if (method === 'harness.transport.describe') return { capabilities: testState.capabilities,
+      ...(testState.workspaceTypes === undefined ? {} : { workspaceTypes: testState.workspaceTypes }) }
     if (method === 'harness.api.stream.open') return {}
     if (method === 'harness.api.stream.close') return {}
     if (method === 'harness.remote.stream.open') return {}
@@ -47,6 +48,7 @@ class FakeCore {
 
 const testState = vi.hoisted(() => ({
   capabilities: ['harness.api.v1'] as string[],
+  workspaceTypes: undefined as unknown,
   cores: [] as FakeCore[],
   connectGate: undefined as undefined | (() => Promise<void>),
 }))
@@ -92,6 +94,7 @@ const host: RemoteDevice = {
 describe('AndroidRemoteConnection Harness transport selection', () => {
   beforeEach(() => {
     testState.capabilities = ['harness.api.v1']
+    testState.workspaceTypes = undefined
     testState.cores.length = 0
     testState.connectGate = undefined
   })
@@ -126,6 +129,41 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
     } })
     await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(1))
     expect(() => connection.requireProxy()).toThrow()
+    await connection.close()
+  })
+
+  it.each(['cursor', 'antigravity'] as const)('requires %s capability and readiness and refreshes Host switches live', async backend => {
+    const capability = `agent.acp.${backend}.v1`
+    const type = { id: backend, name: backend, capability, available: false }
+    testState.capabilities = ['harness.api.v1', capability]
+    testState.workspaceTypes = [type]
+    const connection = new AndroidRemoteConnection()
+    const available = () => backend === 'cursor' ? connection.hasCursor() : connection.hasAntigravity()
+    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
+    expect(available()).toBe(false)
+    testState.workspaceTypes = [{ ...type, available: true }]
+    await connection.refreshBackends()
+    expect(available()).toBe(true)
+    testState.capabilities = ['harness.api.v1', 'agent.acp.v1']
+    await connection.refreshBackends()
+    expect(available()).toBe(false)
+    testState.capabilities = ['harness.api.v1', capability]
+    await connection.refreshBackends()
+    expect(available()).toBe(true)
+    testState.workspaceTypes = [{ ...type, available: false }]
+    await connection.refreshBackends()
+    expect(available()).toBe(false)
+    await connection.close()
+  })
+
+  it('preserves CodeX capability discovery for Hosts without workspaceTypes', async () => {
+    testState.capabilities = ['harness.api.v1', 'codex.appserver.v1', 'codex.appserver.transfer.v1']
+    const connection = new AndroidRemoteConnection()
+    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
+    expect(connection.hasCodex()).toBe(true)
+    testState.workspaceTypes = [{ id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: false }]
+    await connection.refreshBackends()
+    expect(connection.hasCodex()).toBe(false)
     await connection.close()
   })
 
