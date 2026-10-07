@@ -135,8 +135,10 @@ export async function loadTranscriptEvents(
   }
 
   if (turnOpen) {
-    push('step/end', { turn: currentTurn, step: 1 }, Date.now())
-    push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, Date.now())
+    // Hydration must not extend a settled turn until the time of the read.
+    const settledAt = events.at(-1)?.event.time ?? Date.now()
+    push('step/end', { turn: currentTurn, step: 1 }, settledAt)
+    push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, settledAt)
   }
 
   return events

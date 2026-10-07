@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { loadTranscriptEvents, cleanUserPrompt } from '../src/acp/adapters/antigravity/transcript-loader.js'
 
 describe('TranscriptLoader', () => {
+  it('restores the durable turn end timestamp instead of the history read time', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'agy-history-'))
+    try {
+      const logs = join(base, 'conversation', '.system_generated', 'logs')
+      await mkdir(logs, { recursive: true })
+      await writeFile(join(logs, 'transcript.jsonl'), [
+        { type: 'USER_INPUT', step_index: 1, created_at: '2026-09-29T09:10:00Z', content: 'ping' },
+        { type: 'PLANNER_RESPONSE', step_index: 2, created_at: '2026-09-29T09:10:04Z', content: 'pong' },
+      ].map(record => JSON.stringify(record)).join('\n'))
+      const events = await loadTranscriptEvents('conversation', 'acp:conversation', base)
+      expect(events.at(-1)?.event).toMatchObject({ type: 'turn/end', time: Date.parse('2026-09-29T09:10:04Z') })
+      expect(await loadTranscriptEvents('conversation', 'acp:conversation', base)).toEqual(events)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
   it('cleans user prompt wrapper tags', () => {
     const raw = '<USER_REQUEST>\n这个主机咋样\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\n...'
     expect(cleanUserPrompt(raw)).toBe('这个主机咋样')

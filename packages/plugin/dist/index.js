@@ -18532,8 +18532,9 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
     }
   }
   if (turnOpen) {
-    push("step/end", { turn: currentTurn, step: 1 }, Date.now());
-    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, Date.now());
+    const settledAt = events.at(-1)?.event.time ?? Date.now();
+    push("step/end", { turn: currentTurn, step: 1 }, settledAt);
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
   return events;
 }
