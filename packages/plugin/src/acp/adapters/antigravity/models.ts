@@ -1,0 +1,46 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+export interface AgySelection { provider: 'antigravity'; model: string; reasoningEffort?: string }
+interface Model { id: string; name: string; reasoning?: { efforts: Array<{ id: string; name: string }>; defaultEffort?: string } }
+export interface AgyCatalog { groups: Array<{ id: string; name: string; models: Model[] }>; variants: Map<string, string> }
+const exec = promisify(execFile)
+
+/** Model identifiers and effort variants come from the installed CLI, never a static catalog. */
+export function parseAgyModels(output: string): AgyCatalog {
+  const models = new Map<string, Model>()
+  const variants = new Map<string, string>()
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z0-9_.-]{1,128})\t([^\t]{1,256})$/)
+    if (!match) continue
+    const wireId = match[1]!
+    const suffix = wireId.match(/-(low|medium|high|xhigh|max|thinking)$/)?.[1]
+    const effort = suffix ?? (/\(Thinking\)$/i.test(match[2]!) ? 'thinking' : undefined)
+    const id = suffix ? wireId.slice(0, -(suffix.length + 1)) : wireId
+    const model = models.get(id) ?? { id, name: match[2]!.replace(/\s+\((Low|Medium|High|Xhigh|Max|Thinking)\)$/i, '') }
+    if (effort) {
+      model.reasoning ??= { efforts: [], defaultEffort: effort }
+      if (!model.reasoning.efforts.some(item => item.id === effort)) model.reasoning.efforts.push({ id: effort, name: effort[0]!.toUpperCase() + effort.slice(1) })
+    }
+    models.set(id, model)
+    variants.set(`${id}/${effort ?? ''}`, wireId)
+  }
+  if (!models.size) throw new Error('The installed AGY CLI did not return a model catalog.')
+  return { groups: [{ id: 'antigravity', name: 'Antigravity', models: [...models.values()] }], variants }
+}
+
+export async function readAgyModels(binary: string): Promise<AgyCatalog> {
+  try {
+    const result = await exec(binary, ['models'], { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8' })
+    return parseAgyModels(result.stdout)
+  } catch { throw new Error('The installed AGY model catalog is unavailable. Retry after checking the Host CLI.') }
+}
+
+export function agySelectionArgs(catalog: AgyCatalog, modelId: string, effort?: string): { selection: AgySelection; args: string[] } {
+  const model = catalog.groups[0]!.models.find(item => item.id === modelId)
+  const chosenEffort = effort ?? model?.reasoning?.defaultEffort
+  const wireId = catalog.variants.get(`${modelId}/${chosenEffort ?? ''}`)
+  if (!model || !wireId) throw new Error('The selected AGY model or reasoning effort is unavailable.')
+  return { selection: { provider: 'antigravity', model: modelId, ...(chosenEffort ? { reasoningEffort: chosenEffort } : {}) },
+    args: ['--model', wireId, ...(chosenEffort && chosenEffort !== 'thinking' ? ['--effort', chosenEffort] : [])] }
+}

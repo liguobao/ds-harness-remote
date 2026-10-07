@@ -1,3 +1,6 @@
+import { WorkspaceBridge, WorkspaceBridgeState, type RemoteTerminalSpawner } from '../workspace-bridge.js'
+import { TerminalPolicy } from '../terminal-policy.js'
+import { AcpWorkspaceTools } from './workspace-tools.js'
 import { randomUUID } from 'node:crypto'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -83,6 +86,10 @@ export class AcpRemoteGateway {
     unsubscribeInbound: () => void
     unsubscribeUnavailable: () => void
   }>()
+  private readonly sessionCwds = new Map<string, { backend: string; cwd: string }>()
+  private readonly workspaceState = new WorkspaceBridgeState()
+  private readonly terminalOwners = new Map<string, string>()
+  private readonly workspaceTools = new Map<string, AcpWorkspaceTools>()
   private readonly peers = new Map<string, AcpPeerBridge>()
   private readonly sessionOwners = new Map<string, string>()
   private readonly sessionBackends = new Map<string, string>()
@@ -114,6 +121,8 @@ export class AcpRemoteGateway {
       return new CursorAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
     },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
+    private readonly terminalEnabled: () => boolean = () => false,
+    private readonly terminalSpawner?: RemoteTerminalSpawner,
   ) {}
 
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
@@ -181,6 +190,21 @@ export class AcpRemoteGateway {
   createPeer(context: PeerConnectionContext, publish: PublishAcpFrame): AcpPeerBridge | undefined {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
+    const workspaceBridge = new WorkspaceBridge(async rawId => {
+      const match = rawId.match(/^(acp|cursor):(.+)$/)
+      const session = match ? this.sessionCwds.get(match[2]!) : undefined
+      const backend = match?.[1] === 'acp' ? 'antigravity' : 'cursor'
+      if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
+      this.requireAcp(backend)
+      this.requireSessionOwner(context.connectionId, match![2]!)
+      return session.cwd
+    }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
+      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor):/.test(value),
+      parse: value => typeof value === 'string' && /^(acp|cursor):[A-Za-z0-9_-]{1,240}$/.test(value)
+        ? { sessionId: value, nativeId: value } : undefined,
+    })
+    this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(workspaceBridge,
+      new TerminalPolicy(this.terminalEnabled, context.peerDeviceId, this.terminalOwners)))
     return bridge
   }
 
@@ -268,6 +292,10 @@ export class AcpRemoteGateway {
           this.requireAcp('antigravity').prewarmSession?.(cwd)
         }
         const items = await discoverAntigravitySessions(path, limit)
+        if (path) {
+          const cwd = await this.requireExistingDirectory(path)
+          for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd })
+        }
         this.logger.info('ACP session list fetched', { count: items.length })
         return { items }
       }
@@ -313,12 +341,18 @@ export class AcpRemoteGateway {
       if (sessionId !== undefined) {
         this.sessionOwners.set(sessionId, connectionId)
         this.sessionBackends.set(sessionId, requestedBackend)
+        this.sessionCwds.set(sessionId, { backend: requestedBackend, cwd })
       }
       return sanitizeSessionResult(result)
     }
 
     const sessionId = sessionIdFromParams(call.method, call.params)
     if (sessionId !== undefined) this.requireSessionAccess(connectionId, sessionId, call.method)
+
+    if (call.method === 'dsh/toolCall') {
+      this.requireSessionOwner(connectionId, sessionId!)
+      return this.tools(connectionId).call(sessionId!, String(call.params.backend), String(call.params.endpoint), call.params.args as Record<string, unknown>)
+    }
 
     if (call.method === 'session/prompt') {
       const selected = this.sessionBackends.get(sessionId!)
@@ -336,7 +370,7 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       const acp = this.requireAcp(targetBackend)
-      const result = await acp.call(call.method, call.params)
+      const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd } : {}) })
       const loadedId = readSessionId(result) ?? sessionId
       if (loadedId !== undefined) {
         this.sessionOwners.set(loadedId, connectionId)
@@ -366,7 +400,7 @@ export class AcpRemoteGateway {
     }
 
     const sessionBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
-    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params))
+    return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === 'string' ? call.params.backend : sessionBackend).call(call.method, call.params))
   }
 
   private async runPromptInBackground(sessionId: string, params: unknown): Promise<void> {
@@ -439,6 +473,8 @@ export class AcpRemoteGateway {
 
   dropPeer(connectionId: string): void {
     this.peers.delete(connectionId)
+    void this.workspaceTools.get(connectionId)?.close()
+    this.workspaceTools.delete(connectionId)
     for (const [sessionId, owner] of this.sessionOwners) {
       if (owner === connectionId) this.sessionOwners.delete(sessionId)
     }
@@ -448,6 +484,20 @@ export class AcpRemoteGateway {
         void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
       }
     }
+  }
+
+  private tools(connectionId: string): AcpWorkspaceTools {
+    const tools = this.workspaceTools.get(connectionId)
+    if (!tools) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP workspace connection is closed.')
+    return tools
+  }
+
+  async openToolStream(connectionId: string, sessionId: string, backend: string, endpoint: string, args: Record<string, unknown>, signal: AbortSignal) {
+    const session = this.sessionCwds.get(sessionId)
+    if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
+    this.requireAcp(backend)
+    this.requireSessionOwner(connectionId, sessionId)
+    return this.tools(connectionId).open(sessionId, backend, endpoint, args, signal)
   }
 
   /** Used by peer stream open to prove this connection may observe the session. */
@@ -505,8 +555,15 @@ export class AcpRemoteGateway {
     await this.startPromise?.catch(() => undefined)
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
-    for (const id of sessions) {
-      this.sessionOwners.delete(id)
+    for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
+    for (const [key, terminal] of this.workspaceState.terminals) {
+      if (changed.has(terminal.sessionId.startsWith('acp:') ? 'antigravity' : 'cursor')) {
+        void Promise.resolve(terminal.process?.terminate()).catch(() => undefined)
+        for (const queue of terminal.subscribers) queue.end()
+        this.workspaceState.terminals.delete(key)
+      }
+    }
+    for (const id of sessions) {      this.sessionOwners.delete(id)
       this.sessionBackends.delete(id)
       this.recentFrames.delete(id)
       this.turnCatchUp.delete(id)
@@ -532,6 +589,13 @@ export class AcpRemoteGateway {
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
+    this.sessionCwds.clear()
+    for (const terminal of this.workspaceState.terminals.values()) {
+      void Promise.resolve(terminal.process?.terminate()).catch(() => undefined)
+      for (const queue of terminal.subscribers) queue.end()
+    }
+    this.workspaceState.terminals.clear()
+    this.terminalOwners.clear()
     this.sessionOwners.clear()
     this.sessionBackends.clear()
     this.recentFrames.clear()

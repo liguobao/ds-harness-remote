@@ -91,7 +91,7 @@ export class HostPluginRuntime {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
-    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger)
+    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === undefined
         ? undefined
@@ -482,7 +482,9 @@ export class HostPluginRuntime {
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
     // Protocol support is stable during background warmup; workspaceTypes reports readiness.
     if (this.acp.enabledBackends().length > 0) {
-      capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1')
+      capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1', 'agent.acp.workspace-files.v1')
+      if (this.terminalEnabled) capabilities.push('agent.acp.terminal.v1')
+      if (this.acp.enabledBackends().includes('antigravity')) capabilities.push('agent.acp.antigravity.models.v1')
       for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`)
       }

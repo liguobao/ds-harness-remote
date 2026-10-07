@@ -5,6 +5,9 @@ import { RpcError } from '../src/safe-error.js'
 describe('ACP method policy', () => {
   it('exposes a fixed allowlist including initialize', () => {
     expect(ACP_METHOD_ALLOWLIST).toEqual([
+      'dsh/toolCall',
+      'dsh/sessionModels',
+      'dsh/selectModel',
       'initialize',
       'session/new',
       'session/load',

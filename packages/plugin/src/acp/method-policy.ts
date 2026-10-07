@@ -1,3 +1,5 @@
+import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS } from '@dsh-remote/protocol'
+export { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS } from '@dsh-remote/protocol'
 import { parseAcpImage } from './image-content.js'
 import { z } from 'zod'
 import { RpcError } from '../safe-error.js'
@@ -15,7 +17,16 @@ const imageBlock = z.object({ type: z.literal('image'), mimeType: z.enum(['image
 })
 const promptBlock = z.union([textBlock, imageBlock])
 
+export const acpToolStreamSchema = z.object({
+  backend: z.enum(['cursor', 'antigravity']), endpoint: z.enum(ACP_TOOL_STREAM_ENDPOINTS), args: z.record(z.unknown()),
+}).strict()
+
 const schemas = {
+  'dsh/toolCall': z.object({ sessionId: id, backend: z.enum(['cursor', 'antigravity']),
+    endpoint: z.enum(ACP_TOOL_CALL_ENDPOINTS), args: z.record(z.unknown()) }).strict(),
+  'dsh/sessionModels': z.object({ sessionId: id, backend: z.literal('antigravity') }).strict(),
+  'dsh/selectModel': z.object({ sessionId: id, backend: z.literal('antigravity'),
+    model: id, reasoningEffort: id.optional() }).strict(),
   'initialize': z.object({
     protocolVersion: z.number().int().positive().optional(),
     backend: z.string().min(1).max(64).optional(),
@@ -93,5 +104,5 @@ export function sessionIdFromParams(method: AllowedAcpMethod, params: Record<str
 }
 
 export function isSessionMutation(method: AllowedAcpMethod): boolean {
-  return method === 'session/prompt' || method === 'session/cancel'
+  return method === 'session/prompt' || method === 'session/cancel' || method === 'dsh/selectModel' || method === 'dsh/toolCall'
 }

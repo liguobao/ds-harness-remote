@@ -1565,3 +1565,39 @@ journal was truncated.
 `false` 仅关闭该次列表读取触发的空闲 CLI 预热，不改变后端选择、身份/权限校验或 catalog
 来源；Android 批量读取各目录时使用它，防止为每个目录启动一个进程。此字段不扩展 method
 allowlist，也不提供文件写入能力。
+
+### ACP shared workspace tools and live AGY models
+
+`agent.acp.workspace-files.v1` enables readonly workspace files. `agent.acp.terminal.v1`
+is advertised only while the Host Remote terminal setting is enabled. Both work for
+Cursor and Antigravity; session scope is supplied by the backend, never a client cwd.
+`agent.acp.antigravity.models.v1` enables the live installed AGY model catalog and
+confirmed per-conversation model/effort selection. Remote versions below `0.5.0`
+continue to ignore `workspaceTypes`; newer clients require these optional capabilities.
+
+- `agent.acp.call` method `dsh/toolCall` takes `{sessionId,backend,endpoint,args}`.
+  `sessionId` is the native ID; every scope in `args` must equal its UI ID
+  (`cursor:<nativeId>` or `acp:<nativeId>`). The fixed unary endpoints are
+  `workspaceFiles/list|stat|read|readBytes|readAll` and
+  `terminal/environment|shells|list|create|write|resize|rename|close`.
+- `agent.acp.stream.open` accepts an optional `tool:{backend,endpoint,args}` with
+  only `workspaceFiles/changes|terminal/follow|terminal/retain`. Tool values use
+  `agent.acp.frame` with the explicit `streamId` and
+  `frame:{method:"dsh/workspaceTool",params:{value}}`. Agent updates continue to
+  use session-scoped delivery. Existing stream close and disconnect cleanup apply;
+  late opens after cancellation release their subscriptions.
+- Host scopes come only from canonical session creation or the Host transcript
+  catalog. Missing scope, backend mismatch, cross-session IDs, path traversal and
+  symlinks outside the root fail closed. Terminals keep the shared native snapshots,
+  monotonic output sequences, device ownership and connection attachment policy.
+  Disconnect retains terminals for reconnect; domain shutdown ends its processes.
+- `dsh/sessionModels` takes `{sessionId,backend:"antigravity"}` and returns
+  `{current,routable,groups,failures}` in the existing session model shape.
+  `dsh/selectModel` additionally takes `{model,reasoningEffort?}` and returns
+  `{selected}` only after resuming the same AGY conversation with validated CLI
+  `--model`/`--effort` flags. Model IDs and effort variants come from `agy models`;
+  Thinking variants use their CLI model ID and do not pass an invalid `--effort thinking`.
+  Selection is rejected during a prompt or another model change. Until an explicit
+  choice is confirmed, `current.model` is `host-settings`; it does not claim a default
+  model that the Host has not reported. Existing Host configuration and permissions
+  remain active. Clients without these optional capabilities keep Host settings.

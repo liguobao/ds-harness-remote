@@ -4095,6 +4095,22 @@ var MAX_RPC_TEXT_INPUT_BYTES = 64 * 1024;
 var MAX_FILEVIEWER_RANGE_BYTES = 512 * 1024;
 var MIN_REPLAY_WINDOW_MS = 15 * 6e4;
 var MAX_ALPHA_STREAMS_PER_CONNECTION = 16;
+var ACP_TOOL_CALL_ENDPOINTS = [
+  "workspaceFiles/list",
+  "workspaceFiles/stat",
+  "workspaceFiles/read",
+  "workspaceFiles/readBytes",
+  "workspaceFiles/readAll",
+  "terminal/environment",
+  "terminal/shells",
+  "terminal/list",
+  "terminal/create",
+  "terminal/write",
+  "terminal/resize",
+  "terminal/rename",
+  "terminal/close"
+];
+var ACP_TOOL_STREAM_ENDPOINTS = ["workspaceFiles/changes", "terminal/follow", "terminal/retain"];
 var MAX_ACP_PROMPT_BYTES = 64 * 1024;
 var MAX_ACP_UPDATE_BYTES = 512 * 1024;
 var SECURE_FRAGMENT_MAGIC = new Uint8Array([68, 83, 72, 70]);
@@ -5754,6 +5770,27 @@ var AgentAcpClient = class {
       ...result === void 0 ? {} : { result }
     }, signal);
   }
+  async sessionModels(sessionId, backend, signal) {
+    return this.call("dsh/sessionModels", { sessionId, backend }, signal);
+  }
+  async selectModel(sessionId, backend, selection, signal) {
+    if (selection.provider !== backend)
+      throw new RemoteGatewayError("INVALID_MESSAGE", "The model provider does not match the ACP backend.");
+    await this.call("session/load", { sessionId, backend }, signal);
+    const result = await this.call("dsh/selectModel", {
+      sessionId,
+      backend,
+      model: selection.model,
+      ...selection.reasoningEffort === void 0 ? {} : { reasoningEffort: selection.reasoningEffort }
+    }, signal);
+    if (!isRecord2(result) || !isRecord2(result.selected) || result.selected.provider !== backend || typeof result.selected.model !== "string") {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP did not confirm the selected model.");
+    }
+    return result.selected;
+  }
+  async workspaceToolCall(sessionId, backend, endpoint, args, signal) {
+    return this.call("dsh/toolCall", { sessionId, backend, endpoint, args }, signal);
+  }
   async listWorkspaces(backend, signal) {
     const result = await this.call("dsh/workspaceList", {
       ...backend === void 0 ? {} : { backend }
@@ -5801,12 +5838,12 @@ var AgentAcpClient = class {
   async listDirectory(path, signal) {
     return this.call("dsh/directoryList", { path }, signal);
   }
-  async openStream(sessionId, onFrame, onClosed, signal) {
+  async openStream(sessionId, onFrame, onClosed, signal, tool) {
     const streamId = createRemoteId();
     const unsubscribe = this.core.onEvent((event) => {
       if (event.event === "agent.acp.frame" && isRecord2(event.data)) {
         const data2 = event.data;
-        if (!frameMatchesSubscription(data2, streamId, sessionId))
+        if (tool ? data2.streamId !== streamId : !frameMatchesSubscription(data2, streamId, sessionId))
           return;
         onFrame(data2);
       }
@@ -5815,7 +5852,12 @@ var AgentAcpClient = class {
       }
     });
     try {
-      await this.core.rpc("agent.acp.stream.open", { streamId, sessionId }, signal);
+      await this.core.rpc("agent.acp.stream.open", { streamId, sessionId, ...tool ? { tool } : {} }, signal);
+      if (signal?.aborted) {
+        unsubscribe();
+        await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+        throw signal.reason;
+      }
     } catch (error) {
       unsubscribe();
       throw error;
@@ -18630,6 +18672,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async dispatch(endpoint, payload, signal) {
     try {
       const args = carrierArgs2(payload);
+      if (ACP_TOOL_CALL_ENDPOINTS.some((item) => item === endpoint)) {
+        if (!this.client.workspaceToolCall) return business2(failure2("method-not-found", "The Host does not support ACP workspace tools."));
+        const sessionId = requiredString2(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
+        return business2(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint, args, signal));
+      }
       switch (endpoint) {
         case "$events/result":
           return business2(await this.answerRemoteEvent(args, signal));
@@ -18675,11 +18722,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business2(failure2("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
         case "session/attachment":
           return business2(await this.attachment(requestArg2(args)));
-        case "session/modelCatalog":
-          return business2(success2(modelCatalog2(this.backend)));
+        case "session/modelCatalog": {
+          const sessionId = await this.preferredSessionId();
+          if (this.backend !== "antigravity" || !sessionId) return business2(success2(modelCatalog2(this.backend)));
+          const models = await this.hostSessionModels(sessionId);
+          return business2(success2({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
+        }
         case "session/models": {
           const rawId = extractSessionId(requestArg2(args));
           nativeAcpId(rawId, this.backend);
+          if (this.backend === "antigravity") return business2(success2(await this.hostSessionModels(rawId)));
           const catalog = modelCatalog2(this.backend);
           return business2(success2({
             current: this.modelSelection(rawId),
@@ -18714,6 +18766,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async open(endpoint, payload, signal) {
     const args = carrierArgs2(payload);
+    if (ACP_TOOL_STREAM_ENDPOINTS.some((item) => item === endpoint)) {
+      const sessionId = requiredString2(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
+      const queue = new AsyncValueQueue3(signal);
+      const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), (frame) => {
+        if (frame.frame.method === "dsh/workspaceTool") queue.push(record4(frame.frame.params).value);
+      }, () => queue.close(), signal, { backend: this.backend, endpoint, args });
+      return queue.iterate(() => {
+        void stream.close().catch(() => void 0);
+      });
+    }
     if (endpoint === "workspace/follow") return this.workspaceFollow(signal);
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg2(args), signal);
@@ -19500,13 +19562,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const selection = this.modelSelection(sessionId);
     return { lastUsed: selection, next: selection };
   }
+  async hostSessionModels(sessionId) {
+    if (this.backend !== "antigravity" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
+    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), "antigravity");
+    this.selectedModels.set(sessionId, models.current);
+    return models;
+  }
   async selectModel(request) {
     const sessionId = extractSessionId(request);
     nativeAcpId(sessionId, this.backend);
     const provider = requiredString2(request.provider, "provider");
     const model = requiredString2(request.model, "model");
     const reasoningEffort = string3(request.reasoningEffort);
-    const catalog = modelCatalog2(this.backend);
+    const catalog = this.backend === "antigravity" ? await this.hostSessionModels(sessionId) : modelCatalog2(this.backend);
     const group = catalog.groups.find((g) => g.id === provider);
     const targetModel = group?.models.find((m) => m.id === model);
     if (group === void 0 || targetModel === void 0) {
@@ -19521,10 +19589,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       model,
       ...reasoningEffort === void 0 ? {} : { reasoningEffort }
     };
-    this.selectedModels.set(sessionId, selected);
+    if (this.backend === "antigravity") {
+      if (!this.client.selectModel) return failure2("model-unavailable", "The Host does not support ACP model selection.");
+      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), "antigravity", selected);
+      this.selectedModels.set(sessionId, confirmed);
+    } else return failure2("model-unavailable", "Cursor model selection follows Host settings.");
     const seq = this.nextProjectionSeq();
     this.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
-    return success2({ selected });
+    return success2({ selected: this.modelSelection(sessionId) });
   }
   publishWorkspaceBaseline() {
     for (const queue of this.workspaceStreams) {
@@ -19693,34 +19765,6 @@ function nativeWorkspace2(view) {
     updatedAt: view.updatedAt
   };
 }
-function antigravityModel(id5, name2, effortIds, defaultEffort) {
-  return {
-    id: id5,
-    name: name2,
-    reasoning: {
-      efforts: effortIds.map((effort) => ({ id: effort, name: reasoningEffortName2(effort) })),
-      defaultEffort
-    }
-  };
-}
-function reasoningEffortName2(effort) {
-  const names = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    thinking: "Thinking"
-  };
-  return names[effort] ?? effort;
-}
-var ANTIGRAVITY_MODELS = [
-  antigravityModel("gemini-3.8-flash", "Gemini 3.8 Flash", ["high", "medium", "low"], "high"),
-  antigravityModel("gemini-3.7-flash", "Gemini 3.7 Flash", ["high", "medium", "low"], "high"),
-  antigravityModel("gemini-3.6-flash", "Gemini 3.6 Flash", ["high", "medium", "low"], "high"),
-  antigravityModel("gemini-3.1-pro", "Gemini 3.1 Pro", ["high", "low"], "high"),
-  antigravityModel("claude-sonnet-4-6", "Claude Sonnet 4.6", ["thinking"], "thinking"),
-  antigravityModel("claude-opus-4-6", "Claude Opus 4.6", ["thinking"], "thinking"),
-  antigravityModel("gpt-oss-120b", "GPT-OSS 120B", ["medium"], "medium")
-];
 var CURSOR_MODELS = [
   { id: "auto", name: "Auto" },
   { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet" },
@@ -19732,8 +19776,8 @@ var CURSOR_MODELS = [
 function modelCatalog2(backend = "cursor") {
   const provider = backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
   const name2 = backend === "antigravity" ? "Antigravity" : "Cursor";
-  const models = backend === "antigravity" ? ANTIGRAVITY_MODELS : CURSOR_MODELS;
-  const defaultModel = models[0].id;
+  const models = backend === "antigravity" ? [] : CURSOR_MODELS;
+  const defaultModel = models[0]?.id ?? "host-settings";
   return {
     default: { provider, model: defaultModel },
     routableProviders: [provider],
@@ -25187,14 +25231,596 @@ function isActiveWriterMessage(message) {
   return message.toLowerCase().includes("active writer");
 }
 
+// src/workspace-bridge.ts
+import { spawn as spawn3 } from "node:child_process";
+import { realpath as realpath2, lstat, readdir as readdir2, readFile as readFile4, stat as stat4, watch } from "node:fs/promises";
+import { isAbsolute as isAbsolute3, join as join6, relative as relative2, resolve as resolve2 } from "node:path";
+var MAX_READ_BYTES = 4 * 1024 * 1024;
+var MAX_INPUT_BYTES = 64 * 1024;
+var MAX_COLS = 240;
+var MAX_ROWS = 100;
+var MAX_TERMINALS = 256;
+var MAX_SCREEN_BYTES = 256 * 1024;
+var TERMINAL_SCROLLBACK = 2e3;
+var TERMINAL_TYPE = "xterm-256color";
+var WorkspaceBridgeState = class {
+  terminals = /* @__PURE__ */ new Map();
+};
+var DEFAULT_SHELL = process.platform === "win32" ? { path: "cmd.exe", args: [], name: "Command Prompt" } : { path: "/bin/sh", args: [], name: "sh" };
+var AsyncQueue = class {
+  values = [];
+  waiters = [];
+  ended = false;
+  push(value) {
+    if (this.ended) return;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ done: false, value });
+    else this.values.push(value);
+  }
+  end() {
+    this.ended = true;
+    while (this.waiters.length) this.waiters.shift()({ done: true, value: void 0 });
+  }
+  next() {
+    const value = this.values.shift();
+    if (value !== void 0) return Promise.resolve({ done: false, value });
+    if (this.ended) return Promise.resolve({ done: true, value: void 0 });
+    return new Promise((resolve6) => this.waiters.push(resolve6));
+  }
+  [Symbol.asyncIterator]() {
+    return this;
+  }
+};
+var WorkspaceBridge = class {
+  constructor(resolveCwd, terminalEnabled, state = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner(), scope) {
+    this.resolveCwd = resolveCwd;
+    this.terminalEnabled = terminalEnabled;
+    this.scope = scope;
+    this.terminals = state.terminals;
+    this.spawnTerminal = spawnTerminal;
+  }
+  terminals;
+  ownedSubscribers = /* @__PURE__ */ new Set();
+  spawnTerminal;
+  isScope(value) {
+    return this.scope.parse(value) !== void 0;
+  }
+  async call(endpoint, payload, signal) {
+    const args = argsOf(payload);
+    const scope = args.workspaceFileScopeId;
+    const rawSession = args.agentId ?? args.sessionId;
+    const raw = scope ?? rawSession;
+    const session = this.scope.parse(raw);
+    if (session === void 0) {
+      if (this.scope.owns(raw)) throw this.scopeError("SESSION_INVALID", "The CodeX session identifier is invalid.");
+      return void 0;
+    }
+    if (endpoint.startsWith("workspaceFiles/")) return this.fileCall(endpoint, session.sessionId, args, signal);
+    if (endpoint.startsWith("terminal/")) return this.terminalCall(endpoint, session.sessionId, args, signal);
+    return void 0;
+  }
+  async open(endpoint, payload, signal) {
+    const args = argsOf(payload);
+    const raw = args.workspaceFileScopeId ?? args.agentId ?? args.sessionId;
+    const session = this.scope.parse(raw);
+    if (session === void 0) {
+      if (this.scope.owns(raw)) throw this.scopeError("SESSION_INVALID", "The CodeX session identifier is invalid.");
+      return void 0;
+    }
+    if (endpoint === "workspaceFiles/changes") return this.watchChanges(session.sessionId, args, signal);
+    if (endpoint === "terminal/retain") return this.retain(session.sessionId, args, signal);
+    if (endpoint === "terminal/follow") return this.follow(session.sessionId, args, signal);
+    return void 0;
+  }
+  async closeAll() {
+    for (const queue of this.ownedSubscribers) queue.end();
+    this.ownedSubscribers.clear();
+  }
+  async fileCall(endpoint, sessionId, args, signal) {
+    const root = await this.rootFor(sessionId, signal);
+    const path = typeof args.path === "string" ? args.path : ".";
+    signal.throwIfAborted();
+    const target2 = await this.safePath(root, path, endpoint === "workspaceFiles/list");
+    try {
+      if (endpoint === "workspaceFiles/list") {
+        const entries = await readdir2(target2, { withFileTypes: true });
+        const result = [];
+        for (const entry of entries.slice(0, 500)) {
+          const item = join6(target2, entry.name);
+          const info2 = await lstat(item);
+          if (info2.isSymbolicLink()) continue;
+          result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
+        }
+        return { ok: true, value: { path, entries: result, truncated: entries.length > 500 } };
+      }
+      const info = await stat4(target2);
+      const absolutePath = target2;
+      const version = `${info.mtimeMs}:${info.size}`;
+      if (endpoint === "workspaceFiles/stat") {
+        return { ok: true, value: { absolutePath, version, bytes: info.size } };
+      }
+      if (!info.isFile()) throw this.scopeError("WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
+      const offset = readOffset(args);
+      const limit = readLimit(args);
+      const bytes = await readFile4(target2);
+      if (bytes.byteLength > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
+      if (endpoint === "workspaceFiles/readBytes") {
+        const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
+        return {
+          ok: true,
+          value: {
+            absolutePath,
+            version,
+            bytes: bytes.length,
+            offset,
+            data: slice2.toString("base64"),
+            eof: offset + slice2.length >= bytes.length
+          }
+        };
+      }
+      const text = bytes.toString("utf8");
+      const slice = text.slice(offset, offset + limit);
+      return { ok: true, value: { absolutePath: target2, version: `${info.mtimeMs}:${info.size}`, text: slice, offset, lines: slice.split("\n").length, eof: offset + slice.length >= text.length } };
+    } catch (error) {
+      if (error instanceof RpcError) throw error;
+      throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX workspace file is unavailable.");
+    }
+  }
+  async watchChanges(sessionId, args, signal) {
+    const root = await this.rootFor(sessionId, signal);
+    const target2 = await this.safePath(root, typeof args.path === "string" ? args.path : ".", true);
+    const queue = new AsyncQueue();
+    signal.throwIfAborted();
+    const watcher = watch(target2, { recursive: false });
+    const abort = () => {
+      watcher.return?.();
+      queue.end();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    void (async () => {
+      try {
+        for await (const event of watcher) queue.push({ kind: "change", type: event.eventType, path: event.filename ?? "" });
+      } catch {
+      } finally {
+        signal.removeEventListener("abort", abort);
+        queue.end();
+      }
+    })();
+    return queue;
+  }
+  /**
+   * `terminal/retain` only acknowledges the retention window: it never takes
+   * input ownership and never replays output. Recovery reads the next snapshot.
+   */
+  async retain(sessionId, args, signal) {
+    this.assertTerminalEnabled();
+    await this.rootFor(sessionId, signal);
+    signal.throwIfAborted();
+    this.requireTerminal(sessionId, String(args.id));
+    const queue = new AsyncQueue();
+    queue.push({ type: "retained" });
+    this.ownedSubscribers.add(queue);
+    signal.addEventListener("abort", () => {
+      this.ownedSubscribers.delete(queue);
+      queue.end();
+    }, { once: true });
+    return queue;
+  }
+  /** `terminal/follow` takes input ownership and starts with a screen snapshot. */
+  async follow(sessionId, args, signal) {
+    this.assertTerminalEnabled();
+    await this.rootFor(sessionId, signal);
+    signal.throwIfAborted();
+    const attachmentId = typeof args.attachmentId === "string" && args.attachmentId.length > 0 ? args.attachmentId : void 0;
+    if (attachmentId === void 0) throw new RpcError("INVALID_MESSAGE", "The terminal attachment is invalid.");
+    const terminal = this.requireTerminal(sessionId, String(args.id));
+    const queue = new AsyncQueue();
+    if (terminal.controllerId !== attachmentId) {
+      terminal.controllerId = attachmentId;
+      this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
+    }
+    queue.push({ type: "snapshot", sequence: terminal.sequence, screen: screenOf(terminal), info: terminalInfo(terminal) });
+    terminal.subscribers.add(queue);
+    this.ownedSubscribers.add(queue);
+    signal.addEventListener("abort", () => {
+      terminal.subscribers.delete(queue);
+      this.ownedSubscribers.delete(queue);
+      queue.end();
+      if (terminal.controllerId === attachmentId) {
+        terminal.controllerId = void 0;
+        this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
+      }
+    }, { once: true });
+    return queue;
+  }
+  async terminalCall(endpoint, sessionId, args, signal) {
+    this.assertTerminalEnabled();
+    const cwd2 = await this.rootFor(sessionId, signal);
+    signal.throwIfAborted();
+    this.assertTerminalEnabled();
+    if (endpoint === "terminal/environment") {
+      return { ok: true, value: { cwd: cwd2, maxInputBytes: MAX_INPUT_BYTES, maxCols: MAX_COLS, maxRows: MAX_ROWS, scrollback: TERMINAL_SCROLLBACK } };
+    }
+    if (endpoint === "terminal/shells") return { ok: true, value: [shellInfo(DEFAULT_SHELL)] };
+    if (endpoint === "terminal/list") return { ok: true, value: [...this.terminals.values()].filter((item) => item.sessionId === sessionId).map(terminalInfo) };
+    if (endpoint === "terminal/create") return this.createTerminal(sessionId, cwd2, args);
+    const id5 = stringId(args.id);
+    const terminal = this.requireTerminal(sessionId, id5);
+    if (endpoint === "terminal/write") {
+      const data2 = typeof args.data === "string" ? args.data : "";
+      if (Buffer.byteLength(data2) > MAX_INPUT_BYTES) throw new RpcError("INVALID_MESSAGE", "Terminal input is too large.");
+      if (terminal.process === void 0) throw this.scopeError("TERMINAL_NOT_FOUND", "The CodeX terminal is no longer available.");
+      await terminal.process.write(data2);
+      return { ok: true };
+    }
+    if (endpoint === "terminal/resize") {
+      terminal.cols = bounded(args.cols, terminal.cols, MAX_COLS);
+      terminal.rows = bounded(args.rows, terminal.rows, MAX_ROWS);
+      await terminal.process?.resize(terminal.cols, terminal.rows);
+      return { ok: true };
+    }
+    if (endpoint === "terminal/rename") {
+      if (typeof args.title === "string" && args.title.length > 0) terminal.title = args.title.slice(0, 128);
+      return { ok: true };
+    }
+    if (endpoint === "terminal/close") {
+      this.disposeTerminal(terminal);
+      this.terminals.delete(`${sessionId}/${id5}`);
+      return { ok: true };
+    }
+    throw new RpcError("METHOD_NOT_FOUND", "The requested terminal method does not exist.");
+  }
+  async createTerminal(sessionId, cwd2, args) {
+    const request = isRecord14(args.request) ? args.request : {};
+    const id5 = stringId(request.id);
+    if ([...this.terminals.values()].some((item) => item.sessionId === sessionId && item.id === id5)) throw new RpcError("REQUEST_CONFLICT", "The terminal id is already active.");
+    if (this.terminals.size >= MAX_TERMINALS) throw new RpcError("RATE_LIMITED", "Too many remote terminals are active.", void 0, true);
+    if (request.shellPath !== void 0 && request.shellPath !== DEFAULT_SHELL.path) throw new RpcError("INVALID_MESSAGE", "The requested shell is not available for this workspace.");
+    const cols = bounded(request.cols, 80, MAX_COLS);
+    const rows = bounded(request.rows, 24, MAX_ROWS);
+    const terminal = {
+      sessionId,
+      id: id5,
+      title: DEFAULT_SHELL.name,
+      shell: DEFAULT_SHELL,
+      cwd: cwd2,
+      cols,
+      rows,
+      sequence: 0,
+      screen: [],
+      screenBytes: 0,
+      truncated: false,
+      subscribers: /* @__PURE__ */ new Set(),
+      state: "running",
+      exitCode: null
+    };
+    this.terminals.set(`${sessionId}/${id5}`, terminal);
+    try {
+      terminal.process = await this.spawnTerminal({
+        argv: [DEFAULT_SHELL.path, ...DEFAULT_SHELL.args],
+        cwd: cwd2,
+        cols,
+        rows,
+        terminalType: TERMINAL_TYPE,
+        env: { DSH_SESSION_ID: sessionId }
+      });
+    } catch {
+      this.terminals.delete(`${sessionId}/${id5}`);
+      throw this.scopeError("TERMINAL_UNAVAILABLE", "The CodeX terminal could not be started.");
+    }
+    void this.pump(terminal, terminal.process);
+    return { ok: true, value: terminalInfo(terminal) };
+  }
+  /** Streams process output as ordered `output` frames, then reports the exit. */
+  async pump(terminal, process2) {
+    try {
+      for await (const chunk of process2.output) {
+        if (chunk.length === 0) continue;
+        terminal.sequence += 1;
+        this.appendScreen(terminal, chunk);
+        this.emit(terminal, { type: "output", sequence: terminal.sequence, data: chunk });
+      }
+    } catch {
+      terminal.state = "failed";
+      terminal.error = "The terminal output stream failed.";
+    }
+    const outcome = await process2.completed;
+    terminal.exitCode = outcome.exitCode;
+    if (terminal.state === "running") terminal.state = "exited";
+    this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
+    this.endSubscribers(terminal);
+  }
+  appendScreen(terminal, chunk) {
+    terminal.screen.push(chunk);
+    terminal.screenBytes += Buffer.byteLength(chunk);
+    while (terminal.screenBytes > MAX_SCREEN_BYTES && terminal.screen.length > 1) {
+      terminal.screenBytes -= Buffer.byteLength(terminal.screen.shift());
+      terminal.truncated = true;
+    }
+  }
+  scopeError(code, message) {
+    return new RpcError(`${this.scope.domain}_${code}`, message.replaceAll("CodeX", this.scope.domain === "CODEX" ? "CodeX" : this.scope.domain));
+  }
+  async rootFor(sessionId, signal) {
+    const parsed = this.scope.parse(sessionId);
+    if (!parsed) throw this.scopeError("SESSION_INVALID", "The CodeX session identifier is invalid.");
+    const cwd2 = await this.resolveCwd(parsed.nativeId, signal);
+    if (!cwd2) throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX thread has no available workspace.");
+    try {
+      const root = await realpath2(cwd2);
+      const info = await stat4(root);
+      if (!info.isDirectory()) throw new Error();
+      return root;
+    } catch {
+      throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX workspace is unavailable.");
+    }
+  }
+  async safePath(root, path, directory) {
+    const candidate = isAbsolute3(path) ? resolve2(path) : resolve2(root, path);
+    const rel = relative2(root, candidate);
+    if (rel.startsWith("..") || isAbsolute3(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
+    try {
+      const info = await lstat(candidate);
+      if (info.isSymbolicLink()) throw new Error();
+      const canonical = await realpath2(candidate);
+      const canonicalRel = relative2(root, canonical);
+      if (canonicalRel.startsWith("..") || isAbsolute3(canonicalRel)) throw new Error();
+      if (directory && !info.isDirectory()) throw new Error();
+      return canonical;
+    } catch {
+      throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");
+    }
+  }
+  emit(terminal, value) {
+    for (const subscriber of terminal.subscribers) subscriber.push(value);
+  }
+  endSubscribers(terminal) {
+    for (const subscriber of terminal.subscribers) subscriber.end();
+    terminal.subscribers.clear();
+  }
+  requireTerminal(sessionId, id5) {
+    const terminal = this.terminals.get(`${sessionId}/${id5}`);
+    if (!terminal) throw this.scopeError("TERMINAL_NOT_FOUND", "The CodeX terminal is no longer available.");
+    return terminal;
+  }
+  assertTerminalEnabled() {
+    if (!this.terminalEnabled()) throw new RpcError("TERMINAL_DISABLED", "Remote terminal is disabled on this Host.");
+  }
+  disposeTerminal(terminal) {
+    void Promise.resolve(terminal.process?.terminate()).catch(() => void 0);
+    if (terminal.state === "running") {
+      terminal.state = "exited";
+      this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
+    }
+    this.endSubscribers(terminal);
+  }
+};
+function pipeTerminalSpawner() {
+  return async (spec) => {
+    const child = spawn3(spec.argv[0], spec.argv.slice(1), {
+      cwd: spec.cwd,
+      stdio: "pipe",
+      windowsHide: true,
+      env: { ...process.env, ...spec.env }
+    });
+    const queue = new AsyncQueue();
+    child.stdout.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
+    child.stderr.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
+    child.on("error", () => queue.end());
+    const completed = new Promise((resolve6) => {
+      child.on("error", () => {
+        queue.end();
+        resolve6({ exitCode: null });
+      });
+      child.on("exit", (code) => {
+        queue.end();
+        resolve6({ exitCode: code });
+      });
+    });
+    return {
+      output: queue,
+      write: (data2) => {
+        child.stdin.write(data2);
+      },
+      resize: () => void 0,
+      terminate: () => {
+        if (!child.killed) child.kill();
+      },
+      completed
+    };
+  };
+}
+function subprocessTerminalSpawner(subprocess) {
+  return async (spec) => {
+    const handle = await subprocess.spawnTerminal({
+      argv: [...spec.argv],
+      cwd: spec.cwd,
+      cols: spec.cols,
+      rows: spec.rows,
+      terminalType: spec.terminalType,
+      env: spec.env
+    });
+    const queue = new AsyncQueue();
+    handle.output.setEncoding?.("utf8");
+    handle.output.on("data", (chunk) => queue.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")));
+    handle.output.once("close", () => queue.end());
+    handle.output.once("error", () => queue.end());
+    return {
+      output: queue,
+      write: (data2) => handle.write(data2),
+      resize: (cols, rows) => handle.resize(cols, rows),
+      terminate: () => handle.terminate(),
+      completed: handle.done.then((outcome) => ({ exitCode: typeof outcome?.exitCode === "number" ? outcome.exitCode : null })).catch(() => ({ exitCode: null }))
+    };
+  };
+}
+function shellInfo(shell) {
+  return { path: shell.path, args: [...shell.args], name: shell.name };
+}
+function terminalInfo(terminal) {
+  return {
+    id: terminal.id,
+    title: terminal.title,
+    shell: shellInfo(terminal.shell),
+    cwd: terminal.cwd,
+    cols: terminal.cols,
+    rows: terminal.rows,
+    state: terminal.state,
+    exitCode: terminal.exitCode,
+    ...terminal.error === void 0 ? {} : { error: terminal.error },
+    ...terminal.controllerId === void 0 ? {} : { controllerId: terminal.controllerId }
+  };
+}
+function screenOf(terminal) {
+  return (terminal.truncated ? "\x1Bc" : "") + terminal.screen.join("");
+}
+function argsOf(payload) {
+  const value = isRecord14(payload) ? payload : {};
+  return isRecord14(value.args) ? value.args : value;
+}
+function isRecord14(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function stringId(value) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) throw new RpcError("INVALID_MESSAGE", "The terminal identifier is invalid.");
+  return value;
+}
+function bounded(value, fallback, max) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, max) : fallback;
+}
+function byteOrLineRange(args) {
+  const options = isRecord14(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord14(options.range)) return options.range;
+  return isRecord14(args.range) ? args.range : args;
+}
+function readOffset(args) {
+  const range = byteOrLineRange(args);
+  return typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
+}
+function readLimit(args) {
+  const range = byteOrLineRange(args);
+  const value = typeof range.length === "number" ? range.length : range.limit;
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES;
+}
+
+// src/codex/session-id.ts
+function parseCodexSessionId(value) {
+  if (typeof value !== "string") return void 0;
+  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
+  return match === null ? void 0 : { sessionId: value, threadId: match[1] };
+}
+
+// src/terminal-policy.ts
+var TERMINAL_CALLS = /* @__PURE__ */ new Set([
+  "terminal/environment",
+  "terminal/shells",
+  "terminal/list",
+  "terminal/create",
+  "terminal/write",
+  "terminal/resize",
+  "terminal/rename",
+  "terminal/close"
+]);
+var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
+var id3 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var TerminalPolicy = class {
+  constructor(enabled, deviceId, owners) {
+    this.enabled = enabled;
+    this.deviceId = deviceId;
+    this.owners = owners;
+  }
+  attachments = /* @__PURE__ */ new Map();
+  check(endpoint, payload) {
+    if (!(typeof this.enabled === "function" ? this.enabled() : this.enabled)) throw new RpcError(
+      "TERMINAL_DISABLED",
+      "Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / \u8FDC\u7A0B\u7EC8\u7AEF\u672A\u5F00\u542F\uFF0C\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002"
+    );
+    const args = external_exports.object({ args: external_exports.record(external_exports.unknown()) }).strict().parse(payload).args;
+    const rawSessionId = args.agentId ?? args.sessionId;
+    const sessionId = id3.parse(rawSessionId);
+    const codexSession = parseCodexSessionId(sessionId);
+    void codexSession;
+    if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
+    const request = endpoint === "terminal/create" ? external_exports.object({ id: id3 }).passthrough().parse(args.request) : void 0;
+    const terminalId = id3.parse(request?.id ?? args.id);
+    const key = `${sessionId}/${terminalId}`;
+    if (endpoint === "terminal/create") {
+      if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
+      if (!this.owners.has(key) && this.owners.size >= 256) throw new RpcError("RATE_LIMITED", "Too many retained remote terminals.");
+      const created = !this.owners.has(key);
+      this.owners.set(key, this.deviceId);
+      return { key, created };
+    }
+    if (this.owners.get(key) !== this.deviceId) this.deny();
+    if (endpoint === "terminal/follow") this.attachments.set(key, id3.parse(args.attachmentId));
+    if (endpoint === "terminal/write" || endpoint === "terminal/resize") {
+      if (this.attachments.get(key) !== id3.parse(args.attachmentId)) this.deny();
+    }
+    return { key };
+  }
+  result(endpoint, payload, result, reservation) {
+    if (reservation.key !== void 0 && (!result.ok && reservation.created || result.ok && endpoint === "terminal/close")) {
+      this.owners.delete(reservation.key);
+      this.attachments.delete(reservation.key);
+    }
+    if (endpoint === "terminal/list" && result.ok && Array.isArray(result.value)) {
+      const args = payload.args;
+      const session = args.sessionId ?? args.agentId;
+      return { ok: true, value: result.value.filter((value) => typeof value?.id === "string" && this.owners.get(`${session}/${value.id}`) === this.deviceId) };
+    }
+    return result;
+  }
+  deny() {
+    throw new RpcError("PERMISSION_DENIED", "This terminal or input attachment belongs to another connection or device.");
+  }
+};
+
+// src/acp/workspace-tools.ts
+var AcpWorkspaceTools = class {
+  constructor(bridge, terminal) {
+    this.bridge = bridge;
+    this.terminal = terminal;
+  }
+  payload(sessionId, backend, args) {
+    const scopedId = `${backend === "antigravity" ? "acp" : "cursor"}:${sessionId}`;
+    const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter((id5) => id5 !== void 0);
+    if (!ids.length || ids.some((id5) => id5 !== scopedId)) throw new RpcError("PERMISSION_DENIED", "The tool scope does not match the ACP session.");
+    return { args };
+  }
+  async call(sessionId, backend, endpoint, args) {
+    const payload = this.payload(sessionId, backend, args);
+    const reservation = endpoint.startsWith("terminal/") ? this.terminal.check(endpoint, payload) : void 0;
+    try {
+      const result = await this.bridge.call(endpoint, payload, AbortSignal.timeout(6e4));
+      if (!result) throw new RpcError("METHOD_NOT_ALLOWED", "The ACP workspace tool is unavailable.");
+      const checked = reservation ? this.terminal.result(endpoint, payload, result, reservation) : result;
+      if (!checked.ok) throw new RpcError(checked.error.code, checked.error.message);
+      return checked.value;
+    } catch (error) {
+      if (reservation) this.terminal.result(endpoint, payload, { ok: false, error: { code: "FAILED", message: "", details: {} } }, reservation);
+      throw error;
+    }
+  }
+  async open(sessionId, backend, endpoint, args, signal) {
+    const payload = this.payload(sessionId, backend, args);
+    if (endpoint.startsWith("terminal/")) this.terminal.check(endpoint, payload);
+    const source = await this.bridge.open(endpoint, payload, signal);
+    if (!source) throw new RpcError("METHOD_NOT_ALLOWED", "The ACP tool stream is unavailable.");
+    return source;
+  }
+  close() {
+    return this.bridge.closeAll();
+  }
+};
+
 // src/acp/gateway.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { readdir as readdir2, realpath as realpath2, stat as stat4 } from "node:fs/promises";
+import { readdir as readdir3, realpath as realpath3, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir5 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute4, join as join9, relative as relative3, resolve as resolve3 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute5, join as join10, relative as relative4, resolve as resolve4 } from "node:path";
 
 // src/acp/adapters/cursor-process.ts
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 import { Buffer as Buffer4 } from "node:buffer";
 var ACP_REQUEST_TIMEOUT_MS = 6e4;
 var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
@@ -25209,7 +25835,7 @@ var CursorAcpError = class extends Error {
   }
 };
 var CursorAcpClient = class {
-  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
+  constructor(binary, logger, spawnAcp = (binary2) => spawn4(binary2, options.args ?? ["acp"], {
     cwd: options.cwd,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -25381,7 +26007,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord14(value)) {
+    if (!isRecord15(value)) {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
       return;
     }
@@ -25426,7 +26052,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value) {
-  if (!isRecord14(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "Cursor ACP authentication failed.";
@@ -25434,19 +26060,63 @@ function safeUpstreamError2(value) {
   if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
   return "Cursor ACP rejected the request.";
 }
-function isRecord14(value) {
+function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/adapters/antigravity/models.ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+var exec = promisify(execFile);
+function parseAgyModels(output) {
+  const models = /* @__PURE__ */ new Map();
+  const variants = /* @__PURE__ */ new Map();
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z0-9_.-]{1,128})\t([^\t]{1,256})$/);
+    if (!match) continue;
+    const wireId = match[1];
+    const suffix = wireId.match(/-(low|medium|high|xhigh|max|thinking)$/)?.[1];
+    const effort = suffix ?? (/\(Thinking\)$/i.test(match[2]) ? "thinking" : void 0);
+    const id5 = suffix ? wireId.slice(0, -(suffix.length + 1)) : wireId;
+    const model = models.get(id5) ?? { id: id5, name: match[2].replace(/\s+\((Low|Medium|High|Xhigh|Max|Thinking)\)$/i, "") };
+    if (effort) {
+      model.reasoning ??= { efforts: [], defaultEffort: effort };
+      if (!model.reasoning.efforts.some((item) => item.id === effort)) model.reasoning.efforts.push({ id: effort, name: effort[0].toUpperCase() + effort.slice(1) });
+    }
+    models.set(id5, model);
+    variants.set(`${id5}/${effort ?? ""}`, wireId);
+  }
+  if (!models.size) throw new Error("The installed AGY CLI did not return a model catalog.");
+  return { groups: [{ id: "antigravity", name: "Antigravity", models: [...models.values()] }], variants };
+}
+async function readAgyModels(binary) {
+  try {
+    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8" });
+    return parseAgyModels(result.stdout);
+  } catch {
+    throw new Error("The installed AGY model catalog is unavailable. Retry after checking the Host CLI.");
+  }
+}
+function agySelectionArgs(catalog, modelId, effort) {
+  const model = catalog.groups[0].models.find((item) => item.id === modelId);
+  const chosenEffort = effort ?? model?.reasoning?.defaultEffort;
+  const wireId = catalog.variants.get(`${modelId}/${chosenEffort ?? ""}`);
+  if (!model || !wireId) throw new Error("The selected AGY model or reasoning effort is unavailable.");
+  return {
+    selection: { provider: "antigravity", model: modelId, ...chosenEffort ? { reasoningEffort: chosenEffort } : {} },
+    args: ["--model", wireId, ...chosenEffort && chosenEffort !== "thinking" ? ["--effort", chosenEffort] : []]
+  };
 }
 
 // src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join6, basename as basename3 } from "node:path";
+import { join as join7, basename as basename3 } from "node:path";
 import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
 var TTL = 24 * 60 * 60 * 1e3;
-var AGY_IMAGE_ROOT = join6(realpathSync2(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
+var AGY_IMAGE_ROOT = join7(realpathSync2(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
 var stagingChain = Promise.resolve();
 var sessionFolder = (sessionId) => createHash2("sha256").update(sessionId).digest("hex");
 async function privateDirectory(path) {
@@ -25468,12 +26138,12 @@ async function stageImages(sessionId, images, root) {
   let total = 0;
   for (const entry of await fs.readdir(root)) {
     if (!/^[0-9a-f]{64}$/.test(entry)) continue;
-    const dir = join6(root, entry);
+    const dir = join7(root, entry);
     const info = await fs.lstat(dir);
     if (!info.isDirectory() || info.isSymbolicLink()) continue;
     for (const name2 of await fs.readdir(dir)) {
       if (!IMAGE_NAME.test(name2)) continue;
-      const path = join6(dir, name2);
+      const path = join7(dir, name2);
       const file = await fs.lstat(path);
       if (!file.isFile() || file.isSymbolicLink()) continue;
       if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
@@ -25482,12 +26152,12 @@ async function stageImages(sessionId, images, root) {
   }
   const parsed = images.map(parseAcpImage);
   if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
-  const directory = join6(root, sessionFolder(sessionId));
+  const directory = join7(root, sessionFolder(sessionId));
   await privateDirectory(directory);
   const paths = [];
   try {
     for (const image of parsed) {
-      const path = join6(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
+      const path = join7(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
       await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
       paths.push(path);
     }
@@ -25519,10 +26189,10 @@ function agyImageReferences(text) {
 }
 async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
   const name2 = basename3(path);
-  if (!IMAGE_NAME.test(name2) || path !== join6(root, sessionFolder(sessionId), name2)) return void 0;
+  if (!IMAGE_NAME.test(name2) || path !== join7(root, sessionFolder(sessionId), name2)) return void 0;
   try {
     await privateDirectory(root);
-    await privateDirectory(join6(root, sessionFolder(sessionId)));
+    await privateDirectory(join7(root, sessionFolder(sessionId)));
     const info = await fs.lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
     const file = await fs.open(path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
@@ -25541,23 +26211,23 @@ async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
 }
 
 // src/acp/adapters/antigravity-process.ts
-import { spawn as spawn4 } from "node:child_process";
+import { spawn as spawn5 } from "node:child_process";
 import { Buffer as Buffer5 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/antigravity/transcript-watcher.ts
 import { promises as fs2 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 import { EventEmitter } from "node:events";
 import { homedir as homedir3 } from "node:os";
 var TranscriptWatcher = class extends EventEmitter {
-  constructor(conversationId, baseDir = join7(homedir3(), ".gemini/antigravity-cli/brain")) {
+  constructor(conversationId, baseDir = join8(homedir3(), ".gemini/antigravity-cli/brain")) {
     super();
     this.conversationId = conversationId;
     this.baseDir = baseDir;
-    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join7(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
+    const brainDir = join8(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join8(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join8(brainDir, "transcript_full.jsonl");
   }
   offset = 0;
   lineRemainder = "";
@@ -25711,7 +26381,7 @@ function resolveAntigravityBinary(preferred) {
   return "agy";
 }
 var AntigravityAcpClient = class _AntigravityAcpClient {
-  constructor(binary = "agy", logger, spawnAcp = (bin, args, cwd2) => spawn4(bin, args, {
+  constructor(binary = "agy", logger, spawnAcp = (bin, args, cwd2) => spawn5(bin, args, {
     cwd: cwd2,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -25720,6 +26390,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
+    this.readModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)));
     this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
     this.cwd = options.cwd ?? process.cwd();
     this.sessionWorker = options.sessionWorker === true;
@@ -25745,6 +26416,9 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   spareCwd;
   args;
   cwd;
+  readModels;
+  selections = /* @__PURE__ */ new Map();
+  selecting = /* @__PURE__ */ new Set();
   currentPromptPending;
   start() {
     if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
@@ -25757,9 +26431,11 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   isReady() {
     return this.ready;
   }
-  prepareSession(conversationId, cwd2 = this.cwd) {
+  prepareSession(conversationId, cwd2 = this.cwd, selectionArgs) {
+    if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
     const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
-      args: this.args,
+      args: selectionArgs ? [...withoutSelectionArgs(this.args), ...selectionArgs] : this.args,
+      readModels: this.readModels,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd: cwd2,
@@ -25837,11 +26513,52 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       this.warmNextSession(cwd2);
       return { sessionId: sessionId2 };
     }
+    if (method === "dsh/sessionModels") {
+      const sessionId2 = String(params.sessionId);
+      const catalog = await this.readModels();
+      return {
+        current: this.selections.get(sessionId2) ?? { provider: "antigravity", model: "host-settings" },
+        routable: true,
+        groups: catalog.groups,
+        failures: []
+      };
+    }
+    if (method === "dsh/selectModel") {
+      const p = params;
+      if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A model change is already in progress.");
+      const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : void 0);
+      if (!current) throw new AntigravityAcpError("SESSION_MISMATCH", "Load the conversation before selecting its model.");
+      if (current.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
+      this.selecting.add(p.sessionId);
+      try {
+        const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort);
+        const replacement = await this.prepareSession(p.sessionId, current.cwd, chosen.args);
+        if (current.currentPromptPending) {
+          await replacement.close();
+          throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A reply started during model selection.");
+        }
+        this.sessions.set(p.sessionId, replacement);
+        this.selections.set(p.sessionId, chosen.selection);
+        if (current !== this) await current.close();
+        else {
+          this.watcher?.stop();
+          this.watcher = void 0;
+          const child = this.process;
+          this.process = void 0;
+          child?.stdout.removeAllListeners("data");
+          if (child && !child.killed) child.kill("SIGTERM");
+        }
+        return { selected: chosen.selection };
+      } finally {
+        this.selecting.delete(p.sessionId);
+      }
+    }
     const sessionId = typeof params?.sessionId === "string" ? params.sessionId : void 0;
-    if (!this.sessionWorker && sessionId !== void 0 && sessionId !== this.activeConversationId) {
+    if (sessionId !== void 0 && this.selecting.has(sessionId)) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A model change is in progress.");
+    if (!this.sessionWorker && sessionId !== void 0 && (sessionId !== this.activeConversationId || this.sessions.has(sessionId))) {
       let worker = this.sessions.get(sessionId);
       if (worker === void 0) {
-        worker = await this.prepareSession(sessionId);
+        worker = await this.prepareSession(sessionId, typeof params.cwd === "string" ? params.cwd : this.cwd);
         this.sessions.set(sessionId, worker);
       }
       return worker.call(method, params, timeoutMs);
@@ -25974,6 +26691,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer5.byteLength(chunk));
     });
     child.on("error", (error) => {
+      if (this.process !== child) return;
       this.ready = false;
       if (!initResolved) {
         rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause: error }));
@@ -26135,9 +26853,21 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
   }
 };
+function withoutSelectionArgs(args) {
+  const filtered = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--model" || args[i] === "--effort") {
+      i++;
+      continue;
+    }
+    if (args[i].startsWith("--model=") || args[i].startsWith("--effort=")) continue;
+    filtered.push(args[i]);
+  }
+  return filtered;
+}
 
 // src/acp/method-policy.ts
-var id3 = external_exports.string().min(1).max(256);
+var id4 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
 var mode = external_exports.enum(["agent", "plan", "ask"]);
 var textBlock = external_exports.object({
@@ -26153,7 +26883,25 @@ var imageBlock = external_exports.object({ type: external_exports.literal("image
   }
 });
 var promptBlock = external_exports.union([textBlock, imageBlock]);
+var acpToolStreamSchema = external_exports.object({
+  backend: external_exports.enum(["cursor", "antigravity"]),
+  endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
+  args: external_exports.record(external_exports.unknown())
+}).strict();
 var schemas2 = {
+  "dsh/toolCall": external_exports.object({
+    sessionId: id4,
+    backend: external_exports.enum(["cursor", "antigravity"]),
+    endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
+    args: external_exports.record(external_exports.unknown())
+  }).strict(),
+  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.literal("antigravity") }).strict(),
+  "dsh/selectModel": external_exports.object({
+    sessionId: id4,
+    backend: external_exports.literal("antigravity"),
+    model: id4,
+    reasoningEffort: id4.optional()
+  }).strict(),
   "initialize": external_exports.object({
     protocolVersion: external_exports.number().int().positive().optional(),
     backend: external_exports.string().min(1).max(64).optional(),
@@ -26169,16 +26917,16 @@ var schemas2 = {
     mode: mode.optional()
   }).strict(),
   "session/load": external_exports.object({
-    sessionId: id3,
+    sessionId: id4,
     backend: external_exports.string().min(1).max(64).optional()
   }).strict(),
   "session/prompt": external_exports.object({
-    sessionId: id3,
+    sessionId: id4,
     backend: external_exports.enum(["cursor", "antigravity"]).optional(),
     prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
   "session/cancel": external_exports.object({
-    sessionId: id3
+    sessionId: id4
   }).strict(),
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
@@ -26193,7 +26941,7 @@ var schemas2 = {
     prewarm: external_exports.boolean().optional()
   }).strict(),
   "dsh/sessionHistory": external_exports.object({
-    sessionId: id3,
+    sessionId: id4,
     backend: external_exports.string().min(1).max(64).optional()
   }).strict()
 };
@@ -26215,12 +26963,12 @@ function sessionIdFromParams(method, params) {
   return void 0;
 }
 function isSessionMutation(method) {
-  return method === "session/prompt" || method === "session/cancel";
+  return method === "session/prompt" || method === "session/cancel" || method === "dsh/selectModel" || method === "dsh/toolCall";
 }
 
 // src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute3, join as join8, relative as relative2, resolve as resolve2, sep } from "node:path";
+import { isAbsolute as isAbsolute4, join as join9, relative as relative3, resolve as resolve3, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir4 } from "node:os";
 function cleanUserPrompt(raw) {
@@ -26232,7 +26980,7 @@ function cleanUserPrompt(raw) {
   }
   return raw.trim();
 }
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain")) {
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join9(homedir4(), ".gemini/antigravity-cli/brain")) {
   let content = "";
   try {
     const filePath = await transcriptPath(baseDir, conversationId);
@@ -26352,9 +27100,9 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
+    const { execFile: execFile2 } = await import("node:child_process");
+    const { promisify: promisify2 } = await import("node:util");
+    const execFileAsync = promisify2(execFile2);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
@@ -26366,7 +27114,7 @@ async function querySqliteJson(dbPath, sql, params = []) {
     return [];
   }
 }
-async function discoverAntigravityWorkspaces(dbPath = join8(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain")) {
+async function discoverAntigravityWorkspaces(dbPath = join9(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join9(homedir4(), ".gemini/antigravity-cli/brain")) {
   try {
     await fs3.stat(dbPath);
   } catch {
@@ -26385,8 +27133,8 @@ async function discoverAntigravityWorkspaces(dbPath = join8(homedir4(), ".gemini
           if (typeof u === "string" && u.startsWith("file://")) {
             try {
               const p = fileURLToPath2(u);
-              const imageRelative = relative2(AGY_IMAGE_ROOT, p);
-              const imageCache = imageRelative === "" || !isAbsolute3(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
+              const imageRelative = relative3(AGY_IMAGE_ROOT, p);
+              const imageCache = imageRelative === "" || !isAbsolute4(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
               if (!imageCache) paths.add(p);
             } catch {
             }
@@ -26429,8 +27177,8 @@ async function readTranscriptSummary(baseDir, conversationId) {
     return void 0;
   }
 }
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain"), dbPath = join8(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db")) {
-  const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve2(workspacePath);
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join9(homedir4(), ".gemini/antigravity-cli/brain"), dbPath = join9(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve3(workspacePath);
   try {
     await fs3.stat(dbPath);
     const rows = await querySqliteJson(
@@ -26505,7 +27253,7 @@ function workspaceMatches(rawUris, requestedWorkspace) {
     return Array.isArray(uris) && uris.some((uri) => {
       if (typeof uri !== "string") return false;
       try {
-        return resolve2(fileURLToPath2(uri)) === requestedWorkspace;
+        return resolve3(fileURLToPath2(uri)) === requestedWorkspace;
       } catch {
         return false;
       }
@@ -26518,7 +27266,7 @@ async function transcriptPath(baseDir, conversationId) {
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
   try {
     const root = await fs3.realpath(baseDir);
-    const expected = join8(root, conversationId, ".system_generated", "logs", "transcript.jsonl");
+    const expected = join9(root, conversationId, ".system_generated", "logs", "transcript.jsonl");
     return await fs3.realpath(expected) === expected ? expected : void 0;
   } catch {
     return void 0;
@@ -26529,7 +27277,8 @@ async function transcriptPath(baseDir, conversationId) {
 import { Buffer as Buffer6 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
-  sessionId: external_exports.string().min(1).max(256)
+  sessionId: external_exports.string().min(1).max(256),
+  tool: acpToolStreamSchema.optional()
 }).strict();
 var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var transferOpenSchema2 = external_exports.object({
@@ -26555,6 +27304,7 @@ var AcpPeerBridge = class {
     this.publish = publish;
     this.logger = logger;
   }
+  toolControllers = /* @__PURE__ */ new Map();
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
@@ -26589,8 +27339,49 @@ var AcpPeerBridge = class {
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId);
     this.streams.set(params.streamId, params.sessionId);
-    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+    if (params.tool) {
+      const controller = new AbortController();
+      this.toolControllers.set(params.streamId, controller);
+      try {
+        const source = await this.domain.openToolStream(
+          this.context.connectionId,
+          params.sessionId,
+          params.tool.backend,
+          params.tool.endpoint,
+          params.tool.args,
+          controller.signal
+        );
+        if (controller.signal.aborted || this.closed) {
+          controller.abort();
+          return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
+        }
+        void this.followTool(params.streamId, source, controller);
+      } catch (error) {
+        controller.abort();
+        this.streams.delete(params.streamId);
+        this.toolControllers.delete(params.streamId);
+        throw error;
+      }
+    } else await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
+  }
+  async followTool(streamId, source, controller) {
+    let reason = "completed";
+    try {
+      for await (const value of source) {
+        if (controller.signal.aborted || this.closed) break;
+        const data2 = { streamId, frame: { method: "dsh/workspaceTool", params: { value } } };
+        if (Buffer6.byteLength(JSON.stringify(data2)) > MAX_SECURE_MESSAGE_BYTES) throw new Error("Oversized workspace tool frame");
+        await this.publish("agent.acp.frame", data2);
+      }
+    } catch {
+      reason = "failed";
+    } finally {
+      this.streams.delete(streamId);
+      this.toolControllers.delete(streamId);
+      controller.abort();
+      if (!this.closed) await this.publish("agent.acp.stream.closed", { streamId, reason }).catch(() => void 0);
+    }
   }
   /** Whether this peer has at least one live stream observing the session. */
   hasStreamFor(sessionId) {
@@ -26602,6 +27393,8 @@ var AcpPeerBridge = class {
   closeStream(input2) {
     const params = streamCloseSchema2.parse(input2);
     this.streams.delete(params.streamId);
+    this.toolControllers.get(params.streamId)?.abort();
+    this.toolControllers.delete(params.streamId);
     return { closed: true, streamId: params.streamId };
   }
   openTransfer(input2) {
@@ -26720,7 +27513,7 @@ var AcpPeerBridge = class {
   }
   async publishInbound(sessionId, frame) {
     if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
-    const streamIds = [...this.streams.entries()].filter(([, targetSessionId]) => targetSessionId === sessionId).map(([streamId]) => streamId);
+    const streamIds = [...this.streams.entries()].filter(([id5, targetSessionId]) => !this.toolControllers.has(id5) && targetSessionId === sessionId).map(([streamId]) => streamId);
     if (streamIds.length === 0) {
       this.logger?.warn("Publishing ACP frame without an open stream; using session-scoped delivery", {
         method: frame.method
@@ -26748,7 +27541,11 @@ var AcpPeerBridge = class {
   async failStreams(reason = "failed", sessions) {
     if (this.closed) return;
     const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id5]) => id5);
-    for (const id5 of streamIds) this.streams.delete(id5);
+    for (const id5 of streamIds) {
+      this.streams.delete(id5);
+      this.toolControllers.get(id5)?.abort();
+      this.toolControllers.delete(id5);
+    }
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
@@ -26761,6 +27558,8 @@ var AcpPeerBridge = class {
     this.closed = true;
     const streamIds = [...this.streams.keys()];
     this.streams.clear();
+    for (const controller of this.toolControllers.values()) controller.abort();
+    this.toolControllers.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
@@ -26792,15 +27591,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord15(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error) {
-  if (isRecord15(error) && typeof error.code === "string") return error.code;
+  if (isRecord16(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod2(input2) {
-  return isRecord15(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+  return isRecord16(input2) && typeof input2.method === "string" ? input2.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -26834,13 +27633,19 @@ var AcpRemoteGateway = class {
       return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
     }
     return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
+  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner) {
     this.config = config;
     this.logger = logger;
     this.createAcp = createAcp;
     this.restartDelaysMs = restartDelaysMs;
+    this.terminalEnabled = terminalEnabled;
+    this.terminalSpawner = terminalSpawner;
   }
   backendInstances = /* @__PURE__ */ new Map();
+  sessionCwds = /* @__PURE__ */ new Map();
+  workspaceState = new WorkspaceBridgeState();
+  terminalOwners = /* @__PURE__ */ new Map();
+  workspaceTools = /* @__PURE__ */ new Map();
   peers = /* @__PURE__ */ new Map();
   sessionOwners = /* @__PURE__ */ new Map();
   sessionBackends = /* @__PURE__ */ new Map();
@@ -26913,6 +27718,23 @@ var AcpRemoteGateway = class {
   createPeer(context, publish) {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
+    const workspaceBridge = new WorkspaceBridge(async (rawId) => {
+      const match = rawId.match(/^(acp|cursor):(.+)$/);
+      const session = match ? this.sessionCwds.get(match[2]) : void 0;
+      const backend = match?.[1] === "acp" ? "antigravity" : "cursor";
+      if (!session || session.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+      this.requireAcp(backend);
+      this.requireSessionOwner(context.connectionId, match[2]);
+      return session.cwd;
+    }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
+      domain: "ACP",
+      owns: (value) => typeof value === "string" && /^(acp|cursor):/.test(value),
+      parse: (value) => typeof value === "string" && /^(acp|cursor):[A-Za-z0-9_-]{1,240}$/.test(value) ? { sessionId: value, nativeId: value } : void 0
+    });
+    this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(
+      workspaceBridge,
+      new TerminalPolicy(this.terminalEnabled, context.peerDeviceId, this.terminalOwners)
+    ));
     return bridge;
   }
   async call(connectionId, input2) {
@@ -26944,7 +27766,7 @@ var AcpRemoteGateway = class {
       if (cwd2) candidates.add(cwd2);
       for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
         try {
-          const s2 = await stat4(candidate);
+          const s2 = await stat5(candidate);
           if (s2.isDirectory()) candidates.add(candidate);
         } catch {
         }
@@ -26986,6 +27808,10 @@ var AcpRemoteGateway = class {
           this.requireAcp("antigravity").prewarmSession?.(cwd2);
         }
         const items = await discoverAntigravitySessions(path, limit);
+        if (path) {
+          const cwd2 = await this.requireExistingDirectory(path);
+          for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd: cwd2 });
+        }
         this.logger.info("ACP session list fetched", { count: items.length });
         return { items };
       }
@@ -27021,17 +27847,22 @@ var AcpRemoteGateway = class {
       if (sessionId2 !== void 0) {
         this.sessionOwners.set(sessionId2, connectionId);
         this.sessionBackends.set(sessionId2, requestedBackend);
+        this.sessionCwds.set(sessionId2, { backend: requestedBackend, cwd: cwd2 });
       }
       return sanitizeSessionResult(result);
     }
     const sessionId = sessionIdFromParams(call.method, call.params);
     if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
+    if (call.method === "dsh/toolCall") {
+      this.requireSessionOwner(connectionId, sessionId);
+      return this.tools(connectionId).call(sessionId, String(call.params.backend), String(call.params.endpoint), call.params.args);
+    }
     if (call.method === "session/prompt") {
       const selected = this.sessionBackends.get(sessionId);
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord16(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord17(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
@@ -27041,7 +27872,7 @@ var AcpRemoteGateway = class {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
       const acp = this.requireAcp(targetBackend);
-      const result = await acp.call(call.method, call.params);
+      const result = await acp.call(call.method, { ...call.params, ...sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId).cwd } : {} });
       const loadedId = readSessionId(result) ?? sessionId;
       if (loadedId !== void 0) {
         this.sessionOwners.set(loadedId, connectionId);
@@ -27064,7 +27895,7 @@ var AcpRemoteGateway = class {
       return { accepted: true, stopReason: "in_progress" };
     }
     const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
-    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params));
+    return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === "string" ? call.params.backend : sessionBackend).call(call.method, call.params));
   }
   async runPromptInBackground(sessionId, params) {
     try {
@@ -27072,7 +27903,7 @@ var AcpRemoteGateway = class {
       const acp = this.requireAcp(sessionBackend);
       const result = await acp.call("session/prompt", params);
       await this.inboundChain;
-      const stopReason = isRecord16(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const stopReason = isRecord17(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -27129,6 +27960,8 @@ var AcpRemoteGateway = class {
   }
   dropPeer(connectionId) {
     this.peers.delete(connectionId);
+    void this.workspaceTools.get(connectionId)?.close();
+    this.workspaceTools.delete(connectionId);
     for (const [sessionId, owner] of this.sessionOwners) {
       if (owner === connectionId) this.sessionOwners.delete(sessionId);
     }
@@ -27138,6 +27971,18 @@ var AcpRemoteGateway = class {
         void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
       }
     }
+  }
+  tools(connectionId) {
+    const tools = this.workspaceTools.get(connectionId);
+    if (!tools) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP workspace connection is closed.");
+    return tools;
+  }
+  async openToolStream(connectionId, sessionId, backend, endpoint, args, signal) {
+    const session = this.sessionCwds.get(sessionId);
+    if (!session || session.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+    this.requireAcp(backend);
+    this.requireSessionOwner(connectionId, sessionId);
+    return this.tools(connectionId).open(sessionId, backend, endpoint, args, signal);
   }
   /** Used by peer stream open to prove this connection may observe the session. */
   assertStreamable(connectionId, sessionId) {
@@ -27193,6 +28038,14 @@ var AcpRemoteGateway = class {
     await this.startPromise?.catch(() => void 0);
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
+    for (const [id5, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id5);
+    for (const [key, terminal] of this.workspaceState.terminals) {
+      if (changed.has(terminal.sessionId.startsWith("acp:") ? "antigravity" : "cursor")) {
+        void Promise.resolve(terminal.process?.terminate()).catch(() => void 0);
+        for (const queue of terminal.subscribers) queue.end();
+        this.workspaceState.terminals.delete(key);
+      }
+    }
     for (const id5 of sessions) {
       this.sessionOwners.delete(id5);
       this.sessionBackends.delete(id5);
@@ -27219,6 +28072,13 @@ var AcpRemoteGateway = class {
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
     for (const peer of this.peers.values()) await peer.closeAll();
     this.peers.clear();
+    this.sessionCwds.clear();
+    for (const terminal of this.workspaceState.terminals.values()) {
+      void Promise.resolve(terminal.process?.terminate()).catch(() => void 0);
+      for (const queue of terminal.subscribers) queue.end();
+    }
+    this.workspaceState.terminals.clear();
+    this.terminalOwners.clear();
     this.sessionOwners.clear();
     this.sessionBackends.clear();
     this.recentFrames.clear();
@@ -27336,7 +28196,7 @@ var AcpRemoteGateway = class {
         requestHandle,
         sessionId,
         upstreamMethod: message.method,
-        ...isRecord16(message.params) ? message.params : {}
+        ...isRecord17(message.params) ? message.params : {}
       }
     };
     if (owner !== void 0) {
@@ -27372,8 +28232,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list = this.turnCatchUp.get(sessionId);
     if (list === void 0 || frame.method !== "session/update") return;
-    const params = isRecord16(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord16(params.update) ? params.update : params;
+    const params = isRecord17(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord17(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list.push({ method: frame.method, params: frame.params });
@@ -27490,12 +28350,12 @@ var AcpRemoteGateway = class {
     this.claimSession(connectionId, sessionId);
   }
   async requireExistingDirectory(path) {
-    if (!isAbsolute4(path)) {
+    if (!isAbsolute5(path)) {
       throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
     }
     try {
-      const canonical = await realpath2(path);
-      const info = await stat4(canonical);
+      const canonical = await realpath3(path);
+      const info = await stat5(canonical);
       if (!info.isDirectory()) {
         throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
       }
@@ -27507,9 +28367,9 @@ var AcpRemoteGateway = class {
   }
   async listDirectory(path) {
     const home = homedir5();
-    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join9(home, path.slice(2)) : path;
-    const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
-    const names = await readdir2(canonical);
+    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join10(home, path.slice(2)) : path;
+    const canonical = await this.requireExistingDirectory(isAbsolute5(target2) ? target2 : resolve4(target2));
+    const names = await readdir3(canonical);
     const entries = [];
     let truncated = false;
     for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
@@ -27517,9 +28377,9 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join9(canonical, name2);
+      const child = join10(canonical, name2);
       try {
-        const info = await stat4(child);
+        const info = await stat5(child);
         if (!info.isDirectory()) continue;
         entries.push({ name: name2, path: child, hidden: name2.startsWith(".") });
       } catch {
@@ -27546,13 +28406,13 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input2) {
-  if (!isRecord16(input2) || typeof input2.method !== "string") {
+  if (!isRecord17(input2) || typeof input2.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input2.method, params: input2.params ?? {} };
 }
 function parseRespondEnvelope(input2) {
-  if (!isRecord16(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
+  if (!isRecord17(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
   }
   const decision = input2.decision;
@@ -27579,16 +28439,16 @@ function mapPermissionDecision(decision, method) {
   return { outcome: { outcome: "selected", optionId: decision } };
 }
 function readSessionId(value) {
-  if (!isRecord16(value)) return void 0;
+  if (!isRecord17(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord16(value)) return void 0;
-  if (isRecord16(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord17(value)) return void 0;
+  if (isRecord17(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord16(value)) return value;
+  if (!isRecord17(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
@@ -27604,9 +28464,9 @@ function buildCrumbs(path, home) {
       path: current,
       hidden: false
     });
-    const parent = resolve3(current, "..");
+    const parent = resolve4(current, "..");
     if (parent === current) break;
-    if (home !== "" && relative3(home, current) === "" && current !== home) break;
+    if (home !== "" && relative4(home, current) === "" && current !== home) break;
     current = parent;
     if (crumbs2.length >= 32) break;
   }
@@ -27616,13 +28476,13 @@ function cursorBinaryCandidates(configured) {
   const userHome = homedir5();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join9(userHome, ".local", "bin", "agy"),
+      join10(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join9(userHome, ".local", "bin", "agent"),
+      join10(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
@@ -27640,7 +28500,7 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list;
 }
-function isRecord16(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -27998,11 +28858,11 @@ function editableConfig(config) {
     ...config.acp === void 0 ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }
   };
 }
-function isRecord17(value) {
+function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record6(value) {
-  if (!isRecord17(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord18(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -28053,78 +28913,6 @@ function redact(value, key = "") {
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
-
-// src/codex/session-id.ts
-function parseCodexSessionId(value) {
-  if (typeof value !== "string") return void 0;
-  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
-  return match === null ? void 0 : { sessionId: value, threadId: match[1] };
-}
-
-// src/terminal-policy.ts
-var TERMINAL_CALLS = /* @__PURE__ */ new Set([
-  "terminal/environment",
-  "terminal/shells",
-  "terminal/list",
-  "terminal/create",
-  "terminal/write",
-  "terminal/resize",
-  "terminal/rename",
-  "terminal/close"
-]);
-var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
-var id4 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
-var TerminalPolicy = class {
-  constructor(enabled, deviceId, owners) {
-    this.enabled = enabled;
-    this.deviceId = deviceId;
-    this.owners = owners;
-  }
-  attachments = /* @__PURE__ */ new Map();
-  check(endpoint, payload) {
-    if (!(typeof this.enabled === "function" ? this.enabled() : this.enabled)) throw new RpcError(
-      "TERMINAL_DISABLED",
-      "Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / \u8FDC\u7A0B\u7EC8\u7AEF\u672A\u5F00\u542F\uFF0C\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002"
-    );
-    const args = external_exports.object({ args: external_exports.record(external_exports.unknown()) }).strict().parse(payload).args;
-    const rawSessionId = args.agentId ?? args.sessionId;
-    const sessionId = id4.parse(rawSessionId);
-    const codexSession = parseCodexSessionId(sessionId);
-    void codexSession;
-    if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request = endpoint === "terminal/create" ? external_exports.object({ id: id4 }).passthrough().parse(args.request) : void 0;
-    const terminalId = id4.parse(request?.id ?? args.id);
-    const key = `${sessionId}/${terminalId}`;
-    if (endpoint === "terminal/create") {
-      if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
-      if (!this.owners.has(key) && this.owners.size >= 256) throw new RpcError("RATE_LIMITED", "Too many retained remote terminals.");
-      const created = !this.owners.has(key);
-      this.owners.set(key, this.deviceId);
-      return { key, created };
-    }
-    if (this.owners.get(key) !== this.deviceId) this.deny();
-    if (endpoint === "terminal/follow") this.attachments.set(key, id4.parse(args.attachmentId));
-    if (endpoint === "terminal/write" || endpoint === "terminal/resize") {
-      if (this.attachments.get(key) !== id4.parse(args.attachmentId)) this.deny();
-    }
-    return { key };
-  }
-  result(endpoint, payload, result, reservation) {
-    if (reservation.key !== void 0 && (!result.ok && reservation.created || result.ok && endpoint === "terminal/close")) {
-      this.owners.delete(reservation.key);
-      this.attachments.delete(reservation.key);
-    }
-    if (endpoint === "terminal/list" && result.ok && Array.isArray(result.value)) {
-      const args = payload.args;
-      const session = args.sessionId ?? args.agentId;
-      return { ok: true, value: result.value.filter((value) => typeof value?.id === "string" && this.owners.get(`${session}/${value.id}`) === this.deviceId) };
-    }
-    return result;
-  }
-  deny() {
-    throw new RpcError("PERMISSION_DENIED", "This terminal or input attachment belongs to another connection or device.");
-  }
-};
 
 // src/service.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
@@ -29598,22 +30386,22 @@ function closeCode(code) {
 }
 
 // src/remote-directory-browser.ts
-import { readdir as readdir3, stat as stat5 } from "node:fs/promises";
+import { readdir as readdir4, stat as stat6 } from "node:fs/promises";
 import { homedir as homedir6, platform as platform2 } from "node:os";
-import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute5, parse, resolve as resolve4 } from "node:path";
+import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute6, parse, resolve as resolve5 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve4(homedir6());
-  const target2 = path === void 0 || path.trim() === "" ? home : resolve4(path);
-  if (!isAbsolute5(target2)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir3(target2, { withFileTypes: true });
+  const home = resolve5(homedir6());
+  const target2 = path === void 0 || path.trim() === "" ? home : resolve5(path);
+  if (!isAbsolute6(target2)) throw new Error("The remote directory path must be absolute.");
+  const rows = await readdir4(target2, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve4(target2, row.name);
+    const child = resolve5(target2, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat5(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat6(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -29636,7 +30424,7 @@ function crumbs(path) {
     current = dirname5(current);
   }
   for (const segment of segments) {
-    current = resolve4(current, segment);
+    current = resolve5(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -30840,11 +31628,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord18(payload) || !isRecord18(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord19(payload) || !isRecord19(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord18(payload) || !isRecord18(payload.args)) return payload;
+  if (!isRecord19(payload) || !isRecord19(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -30912,13 +31700,13 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record7(payload);
-  const args = isRecord18(root.args) ? root.args : root;
+  const args = isRecord19(root.args) ? root.args : root;
   return record7(args.request ?? args._request ?? args);
 }
 function record7(value) {
-  return isRecord18(value) ? value : {};
+  return isRecord19(value) ? value : {};
 }
-function isRecord18(value) {
+function isRecord19(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -30926,466 +31714,21 @@ function isRecord18(value) {
 import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/codex-workspace-bridge.ts
-import { spawn as spawn5 } from "node:child_process";
-import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute6, join as join10, relative as relative4, resolve as resolve5 } from "node:path";
-var MAX_READ_BYTES = 4 * 1024 * 1024;
-var MAX_INPUT_BYTES = 64 * 1024;
-var MAX_COLS = 240;
-var MAX_ROWS = 100;
-var MAX_TERMINALS = 256;
-var MAX_SCREEN_BYTES = 256 * 1024;
-var TERMINAL_SCROLLBACK = 2e3;
-var TERMINAL_TYPE = "xterm-256color";
-var CodexWorkspaceState = class {
-  terminals = /* @__PURE__ */ new Map();
-};
-var DEFAULT_SHELL = process.platform === "win32" ? { path: "cmd.exe", args: [], name: "Command Prompt" } : { path: "/bin/sh", args: [], name: "sh" };
-var AsyncQueue = class {
-  values = [];
-  waiters = [];
-  ended = false;
-  push(value) {
-    if (this.ended) return;
-    const waiter = this.waiters.shift();
-    if (waiter) waiter({ done: false, value });
-    else this.values.push(value);
+var CodexWorkspaceBridge = class extends WorkspaceBridge {
+  constructor(resolveCwd, terminalEnabled, state = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner()) {
+    super(resolveCwd, terminalEnabled, state, spawnTerminal, {
+      parse: (value) => {
+        const parsed = parseCodexSessionId(value);
+        return parsed ? { sessionId: parsed.sessionId, nativeId: parsed.threadId } : void 0;
+      },
+      domain: "CODEX",
+      owns: (value) => typeof value === "string" && value.startsWith("codex:")
+    });
   }
-  end() {
-    this.ended = true;
-    while (this.waiters.length) this.waiters.shift()({ done: true, value: void 0 });
-  }
-  next() {
-    const value = this.values.shift();
-    if (value !== void 0) return Promise.resolve({ done: false, value });
-    if (this.ended) return Promise.resolve({ done: true, value: void 0 });
-    return new Promise((resolve6) => this.waiters.push(resolve6));
-  }
-  [Symbol.asyncIterator]() {
-    return this;
-  }
-};
-var CodexWorkspaceBridge = class {
-  constructor(resolveCwd, terminalEnabled, state = new CodexWorkspaceState(), spawnTerminal = pipeTerminalSpawner()) {
-    this.resolveCwd = resolveCwd;
-    this.terminalEnabled = terminalEnabled;
-    this.terminals = state.terminals;
-    this.spawnTerminal = spawnTerminal;
-  }
-  terminals;
-  ownedSubscribers = /* @__PURE__ */ new Set();
-  spawnTerminal;
   isCodeXScope(value) {
-    return parseCodexSessionId(value) !== void 0;
-  }
-  async call(endpoint, payload, signal) {
-    const args = argsOf(payload);
-    const scope = args.workspaceFileScopeId;
-    const session = args.agentId ?? args.sessionId;
-    const raw = scope ?? session;
-    const codex = parseCodexSessionId(raw);
-    if (codex === void 0) {
-      if (typeof raw === "string" && raw.startsWith("codex:")) throw new RpcError("CODEX_SESSION_INVALID", "The CodeX session identifier is invalid.");
-      return void 0;
-    }
-    if (endpoint.startsWith("workspaceFiles/")) return this.fileCall(endpoint, codex.sessionId, args, signal);
-    if (endpoint.startsWith("terminal/")) return this.terminalCall(endpoint, codex.sessionId, args, signal);
-    return void 0;
-  }
-  async open(endpoint, payload, signal) {
-    const args = argsOf(payload);
-    const raw = args.workspaceFileScopeId ?? args.agentId ?? args.sessionId;
-    const codex = parseCodexSessionId(raw);
-    if (codex === void 0) {
-      if (typeof raw === "string" && raw.startsWith("codex:")) throw new RpcError("CODEX_SESSION_INVALID", "The CodeX session identifier is invalid.");
-      return void 0;
-    }
-    if (endpoint === "workspaceFiles/changes") return this.watchChanges(codex.sessionId, args, signal);
-    if (endpoint === "terminal/retain") return this.retain(codex.sessionId, args, signal);
-    if (endpoint === "terminal/follow") return this.follow(codex.sessionId, args, signal);
-    return void 0;
-  }
-  async closeAll() {
-    for (const queue of this.ownedSubscribers) queue.end();
-    this.ownedSubscribers.clear();
-  }
-  async fileCall(endpoint, sessionId, args, signal) {
-    const root = await this.rootFor(sessionId, signal);
-    const path = typeof args.path === "string" ? args.path : ".";
-    const target2 = await this.safePath(root, path, endpoint === "workspaceFiles/list");
-    try {
-      if (endpoint === "workspaceFiles/list") {
-        const entries = await readdir4(target2, { withFileTypes: true });
-        const result = [];
-        for (const entry of entries.slice(0, 500)) {
-          const item = join10(target2, entry.name);
-          const info2 = await lstat(item);
-          if (info2.isSymbolicLink()) continue;
-          result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
-        }
-        return { ok: true, value: { path, entries: result, truncated: entries.length > 500 } };
-      }
-      const info = await stat6(target2);
-      const absolutePath = target2;
-      const version = `${info.mtimeMs}:${info.size}`;
-      if (endpoint === "workspaceFiles/stat") {
-        return { ok: true, value: { absolutePath, version, bytes: info.size } };
-      }
-      if (!info.isFile()) throw new RpcError("CODEX_WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
-      const offset = readOffset(args);
-      const limit = readLimit(args);
-      const bytes = await readFile4(target2);
-      if (bytes.byteLength > MAX_READ_BYTES) throw new RpcError("CODEX_WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
-      if (endpoint === "workspaceFiles/readBytes") {
-        const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
-        return {
-          ok: true,
-          value: {
-            absolutePath,
-            version,
-            bytes: bytes.length,
-            offset,
-            data: slice2.toString("base64"),
-            eof: offset + slice2.length >= bytes.length
-          }
-        };
-      }
-      const text = bytes.toString("utf8");
-      const slice = text.slice(offset, offset + limit);
-      return { ok: true, value: { absolutePath: target2, version: `${info.mtimeMs}:${info.size}`, text: slice, offset, lines: slice.split("\n").length, eof: offset + slice.length >= text.length } };
-    } catch (error) {
-      if (error instanceof RpcError) throw error;
-      throw new RpcError("CODEX_WORKSPACE_UNAVAILABLE", "The CodeX workspace file is unavailable.");
-    }
-  }
-  async watchChanges(sessionId, args, signal) {
-    const root = await this.rootFor(sessionId, signal);
-    const target2 = await this.safePath(root, typeof args.path === "string" ? args.path : ".", true);
-    const queue = new AsyncQueue();
-    const watcher = watch(target2, { recursive: false });
-    const abort = () => {
-      watcher.return?.();
-      queue.end();
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    void (async () => {
-      try {
-        for await (const event of watcher) queue.push({ type: event.eventType, path: event.filename ?? "" });
-      } catch {
-      } finally {
-        signal.removeEventListener("abort", abort);
-        queue.end();
-      }
-    })();
-    return queue;
-  }
-  /**
-   * `terminal/retain` only acknowledges the retention window: it never takes
-   * input ownership and never replays output. Recovery reads the next snapshot.
-   */
-  async retain(sessionId, args, signal) {
-    this.assertTerminalEnabled();
-    await this.rootFor(sessionId, signal);
-    this.requireTerminal(sessionId, String(args.id));
-    const queue = new AsyncQueue();
-    queue.push({ type: "retained" });
-    this.ownedSubscribers.add(queue);
-    signal.addEventListener("abort", () => {
-      this.ownedSubscribers.delete(queue);
-      queue.end();
-    }, { once: true });
-    return queue;
-  }
-  /** `terminal/follow` takes input ownership and starts with a screen snapshot. */
-  async follow(sessionId, args, signal) {
-    this.assertTerminalEnabled();
-    await this.rootFor(sessionId, signal);
-    const attachmentId = typeof args.attachmentId === "string" && args.attachmentId.length > 0 ? args.attachmentId : void 0;
-    if (attachmentId === void 0) throw new RpcError("INVALID_MESSAGE", "The terminal attachment is invalid.");
-    const terminal = this.requireTerminal(sessionId, String(args.id));
-    const queue = new AsyncQueue();
-    if (terminal.controllerId !== attachmentId) {
-      terminal.controllerId = attachmentId;
-      this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
-    }
-    queue.push({ type: "snapshot", sequence: terminal.sequence, screen: screenOf(terminal), info: terminalInfo(terminal) });
-    terminal.subscribers.add(queue);
-    this.ownedSubscribers.add(queue);
-    signal.addEventListener("abort", () => {
-      terminal.subscribers.delete(queue);
-      this.ownedSubscribers.delete(queue);
-      queue.end();
-      if (terminal.controllerId === attachmentId) {
-        terminal.controllerId = void 0;
-        this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
-      }
-    }, { once: true });
-    return queue;
-  }
-  async terminalCall(endpoint, sessionId, args, signal) {
-    this.assertTerminalEnabled();
-    const cwd2 = await this.rootFor(sessionId, signal);
-    if (endpoint === "terminal/environment") {
-      return { ok: true, value: { cwd: cwd2, maxInputBytes: MAX_INPUT_BYTES, maxCols: MAX_COLS, maxRows: MAX_ROWS, scrollback: TERMINAL_SCROLLBACK } };
-    }
-    if (endpoint === "terminal/shells") return { ok: true, value: [shellInfo(DEFAULT_SHELL)] };
-    if (endpoint === "terminal/list") return { ok: true, value: [...this.terminals.values()].filter((item) => item.sessionId === sessionId).map(terminalInfo) };
-    if (endpoint === "terminal/create") return this.createTerminal(sessionId, cwd2, args);
-    const id5 = stringId(args.id);
-    const terminal = this.requireTerminal(sessionId, id5);
-    if (endpoint === "terminal/write") {
-      const data2 = typeof args.data === "string" ? args.data : "";
-      if (Buffer.byteLength(data2) > MAX_INPUT_BYTES) throw new RpcError("INVALID_MESSAGE", "Terminal input is too large.");
-      if (terminal.process === void 0) throw new RpcError("CODEX_TERMINAL_NOT_FOUND", "The CodeX terminal is no longer available.");
-      await terminal.process.write(data2);
-      return { ok: true };
-    }
-    if (endpoint === "terminal/resize") {
-      terminal.cols = bounded(args.cols, terminal.cols, MAX_COLS);
-      terminal.rows = bounded(args.rows, terminal.rows, MAX_ROWS);
-      await terminal.process?.resize(terminal.cols, terminal.rows);
-      return { ok: true };
-    }
-    if (endpoint === "terminal/rename") {
-      if (typeof args.title === "string" && args.title.length > 0) terminal.title = args.title.slice(0, 128);
-      return { ok: true };
-    }
-    if (endpoint === "terminal/close") {
-      this.disposeTerminal(terminal);
-      this.terminals.delete(`${sessionId}/${id5}`);
-      return { ok: true };
-    }
-    throw new RpcError("METHOD_NOT_FOUND", "The requested terminal method does not exist.");
-  }
-  async createTerminal(sessionId, cwd2, args) {
-    const request = isRecord19(args.request) ? args.request : {};
-    const id5 = stringId(request.id);
-    if ([...this.terminals.values()].some((item) => item.sessionId === sessionId && item.id === id5)) throw new RpcError("REQUEST_CONFLICT", "The terminal id is already active.");
-    if (this.terminals.size >= MAX_TERMINALS) throw new RpcError("RATE_LIMITED", "Too many remote terminals are active.", void 0, true);
-    if (request.shellPath !== void 0 && request.shellPath !== DEFAULT_SHELL.path) throw new RpcError("INVALID_MESSAGE", "The requested shell is not available for this workspace.");
-    const cols = bounded(request.cols, 80, MAX_COLS);
-    const rows = bounded(request.rows, 24, MAX_ROWS);
-    const terminal = {
-      sessionId,
-      id: id5,
-      title: DEFAULT_SHELL.name,
-      shell: DEFAULT_SHELL,
-      cwd: cwd2,
-      cols,
-      rows,
-      sequence: 0,
-      screen: [],
-      screenBytes: 0,
-      truncated: false,
-      subscribers: /* @__PURE__ */ new Set(),
-      state: "running",
-      exitCode: null
-    };
-    this.terminals.set(`${sessionId}/${id5}`, terminal);
-    try {
-      terminal.process = await this.spawnTerminal({
-        argv: [DEFAULT_SHELL.path, ...DEFAULT_SHELL.args],
-        cwd: cwd2,
-        cols,
-        rows,
-        terminalType: TERMINAL_TYPE,
-        env: { DSH_SESSION_ID: sessionId }
-      });
-    } catch {
-      this.terminals.delete(`${sessionId}/${id5}`);
-      throw new RpcError("CODEX_TERMINAL_UNAVAILABLE", "The CodeX terminal could not be started.");
-    }
-    void this.pump(terminal, terminal.process);
-    return { ok: true, value: terminalInfo(terminal) };
-  }
-  /** Streams process output as ordered `output` frames, then reports the exit. */
-  async pump(terminal, process2) {
-    try {
-      for await (const chunk of process2.output) {
-        if (chunk.length === 0) continue;
-        terminal.sequence += 1;
-        this.appendScreen(terminal, chunk);
-        this.emit(terminal, { type: "output", sequence: terminal.sequence, data: chunk });
-      }
-    } catch {
-      terminal.state = "failed";
-      terminal.error = "The terminal output stream failed.";
-    }
-    const outcome = await process2.completed;
-    terminal.exitCode = outcome.exitCode;
-    if (terminal.state === "running") terminal.state = "exited";
-    this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
-    this.endSubscribers(terminal);
-  }
-  appendScreen(terminal, chunk) {
-    terminal.screen.push(chunk);
-    terminal.screenBytes += Buffer.byteLength(chunk);
-    while (terminal.screenBytes > MAX_SCREEN_BYTES && terminal.screen.length > 1) {
-      terminal.screenBytes -= Buffer.byteLength(terminal.screen.shift());
-      terminal.truncated = true;
-    }
-  }
-  async rootFor(sessionId, signal) {
-    const parsed = parseCodexSessionId(sessionId);
-    if (!parsed) throw new RpcError("CODEX_SESSION_INVALID", "The CodeX session identifier is invalid.");
-    const cwd2 = await this.resolveCwd(parsed.threadId, signal);
-    if (!cwd2) throw new RpcError("CODEX_WORKSPACE_UNAVAILABLE", "The CodeX thread has no available workspace.");
-    try {
-      const root = await realpath3(cwd2);
-      const info = await stat6(root);
-      if (!info.isDirectory()) throw new Error();
-      return root;
-    } catch {
-      throw new RpcError("CODEX_WORKSPACE_UNAVAILABLE", "The CodeX workspace is unavailable.");
-    }
-  }
-  async safePath(root, path, directory) {
-    const candidate = isAbsolute6(path) ? resolve5(path) : resolve5(root, path);
-    const rel = relative4(root, candidate);
-    if (rel.startsWith("..") || isAbsolute6(rel)) throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
-    try {
-      const info = await lstat(candidate);
-      if (info.isSymbolicLink()) throw new Error();
-      const canonical = await realpath3(candidate);
-      const canonicalRel = relative4(root, canonical);
-      if (canonicalRel.startsWith("..") || isAbsolute6(canonicalRel)) throw new Error();
-      if (directory && !info.isDirectory()) throw new Error();
-      return canonical;
-    } catch {
-      throw new RpcError("CODEX_WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");
-    }
-  }
-  emit(terminal, value) {
-    for (const subscriber of terminal.subscribers) subscriber.push(value);
-  }
-  endSubscribers(terminal) {
-    for (const subscriber of terminal.subscribers) subscriber.end();
-    terminal.subscribers.clear();
-  }
-  requireTerminal(sessionId, id5) {
-    const terminal = this.terminals.get(`${sessionId}/${id5}`);
-    if (!terminal) throw new RpcError("CODEX_TERMINAL_NOT_FOUND", "The CodeX terminal is no longer available.");
-    return terminal;
-  }
-  assertTerminalEnabled() {
-    if (!this.terminalEnabled()) throw new RpcError("TERMINAL_DISABLED", "Remote terminal is disabled on this Host.");
-  }
-  disposeTerminal(terminal) {
-    void Promise.resolve(terminal.process?.terminate()).catch(() => void 0);
-    if (terminal.state === "running") {
-      terminal.state = "exited";
-      this.emit(terminal, { type: "state", info: terminalInfo(terminal) });
-    }
-    this.endSubscribers(terminal);
+    return this.isScope(value);
   }
 };
-function pipeTerminalSpawner() {
-  return async (spec) => {
-    const child = spawn5(spec.argv[0], spec.argv.slice(1), {
-      cwd: spec.cwd,
-      stdio: "pipe",
-      windowsHide: true,
-      env: { ...process.env, ...spec.env }
-    });
-    const queue = new AsyncQueue();
-    child.stdout.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
-    child.stderr.on("data", (data2) => queue.push(Buffer.from(data2).toString("utf8")));
-    child.on("error", () => queue.end());
-    const completed = new Promise((resolve6) => {
-      child.on("error", () => {
-        queue.end();
-        resolve6({ exitCode: null });
-      });
-      child.on("exit", (code) => {
-        queue.end();
-        resolve6({ exitCode: code });
-      });
-    });
-    return {
-      output: queue,
-      write: (data2) => {
-        child.stdin.write(data2);
-      },
-      resize: () => void 0,
-      terminate: () => {
-        if (!child.killed) child.kill();
-      },
-      completed
-    };
-  };
-}
-function subprocessTerminalSpawner(subprocess) {
-  return async (spec) => {
-    const handle = await subprocess.spawnTerminal({
-      argv: [...spec.argv],
-      cwd: spec.cwd,
-      cols: spec.cols,
-      rows: spec.rows,
-      terminalType: spec.terminalType,
-      env: spec.env
-    });
-    const queue = new AsyncQueue();
-    handle.output.setEncoding?.("utf8");
-    handle.output.on("data", (chunk) => queue.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")));
-    handle.output.once("close", () => queue.end());
-    handle.output.once("error", () => queue.end());
-    return {
-      output: queue,
-      write: (data2) => handle.write(data2),
-      resize: (cols, rows) => handle.resize(cols, rows),
-      terminate: () => handle.terminate(),
-      completed: handle.done.then((outcome) => ({ exitCode: typeof outcome?.exitCode === "number" ? outcome.exitCode : null })).catch(() => ({ exitCode: null }))
-    };
-  };
-}
-function shellInfo(shell) {
-  return { path: shell.path, args: [...shell.args], name: shell.name };
-}
-function terminalInfo(terminal) {
-  return {
-    id: terminal.id,
-    title: terminal.title,
-    shell: shellInfo(terminal.shell),
-    cwd: terminal.cwd,
-    cols: terminal.cols,
-    rows: terminal.rows,
-    state: terminal.state,
-    exitCode: terminal.exitCode,
-    ...terminal.error === void 0 ? {} : { error: terminal.error },
-    ...terminal.controllerId === void 0 ? {} : { controllerId: terminal.controllerId }
-  };
-}
-function screenOf(terminal) {
-  return (terminal.truncated ? "\x1Bc" : "") + terminal.screen.join("");
-}
-function argsOf(payload) {
-  const value = isRecord19(payload) ? payload : {};
-  return isRecord19(value.args) ? value.args : value;
-}
-function isRecord19(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function stringId(value) {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) throw new RpcError("INVALID_MESSAGE", "The terminal identifier is invalid.");
-  return value;
-}
-function bounded(value, fallback, max) {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, max) : fallback;
-}
-function byteOrLineRange(args) {
-  const options = isRecord19(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord19(options.range)) return options.range;
-  return isRecord19(args.range) ? args.range : args;
-}
-function readOffset(args) {
-  const range = byteOrLineRange(args);
-  return typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
-}
-function readLimit(args) {
-  const range = byteOrLineRange(args);
-  const value = typeof range.length === "number" ? range.length : range.limit;
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES;
-}
 
 // src/service.ts
 var HostPluginRuntime = class {
@@ -31400,7 +31743,7 @@ var HostPluginRuntime = class {
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
     this.codex = new CodexRemoteDomain(config.codex, logger);
-    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger);
+    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
         this.apiProxy,
@@ -31465,7 +31808,7 @@ var HostPluginRuntime = class {
   closed = false;
   codex;
   acp;
-  codexWorkspaceState = new CodexWorkspaceState();
+  codexWorkspaceState = new WorkspaceBridgeState();
   localCodexPeer;
   localCodexPublish = async () => void 0;
   localAcpPeer;
@@ -31761,7 +32104,9 @@ var HostPluginRuntime = class {
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
     if (this.acp.enabledBackends().length > 0) {
-      capabilities.push("agent.acp.v1", "agent.acp.transfer.v1");
+      capabilities.push("agent.acp.v1", "agent.acp.transfer.v1", "agent.acp.workspace-files.v1");
+      if (this.terminalEnabled) capabilities.push("agent.acp.terminal.v1");
+      if (this.acp.enabledBackends().includes("antigravity")) capabilities.push("agent.acp.antigravity.models.v1");
       for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`);
       }

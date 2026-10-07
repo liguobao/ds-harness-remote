@@ -1,3 +1,4 @@
+import { acpToolStreamSchema } from './method-policy.js'
 import { Buffer } from 'node:buffer'
 import type {
   AgentAcpFrameData,
@@ -42,6 +43,7 @@ interface OutgoingTransfer {
 const streamOpenSchema = z.object({
   streamId: z.string().min(1).max(128),
   sessionId: z.string().min(1).max(256),
+  tool: acpToolStreamSchema.optional(),
 }).strict()
 const streamCloseSchema = z.object({ streamId: z.string().min(1).max(128) }).strict()
 const transferOpenSchema = z.object({
@@ -64,6 +66,7 @@ const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Per-authenticated-connection state for the Cursor Remote domain. */
 export class AcpPeerBridge {
+  private readonly toolControllers = new Map<string, AbortController>()
   private readonly streams = new Map<string, string>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
@@ -109,8 +112,40 @@ export class AcpPeerBridge {
     }
     this.domain.assertStreamable(this.context.connectionId, params.sessionId)
     this.streams.set(params.streamId, params.sessionId)
-    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
+    if (params.tool) {
+      const controller = new AbortController()
+      this.toolControllers.set(params.streamId, controller)
+      try {
+        const source = await this.domain.openToolStream(this.context.connectionId, params.sessionId, params.tool.backend,
+          params.tool.endpoint, params.tool.args, controller.signal)
+        if (controller.signal.aborted || this.closed) { controller.abort(); return { opened: true, streamId: params.streamId, sessionId: params.sessionId } }
+        void this.followTool(params.streamId, source, controller)
+      } catch (error) {
+        controller.abort()
+        this.streams.delete(params.streamId)
+        this.toolControllers.delete(params.streamId)
+        throw error
+      }
+    } else await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId }
+  }
+
+  private async followTool(streamId: string, source: AsyncIterable<unknown>, controller: AbortController): Promise<void> {
+    let reason: 'failed' | 'completed' = 'completed'
+    try {
+      for await (const value of source) {
+        if (controller.signal.aborted || this.closed) break
+        const data = { streamId, frame: { method: 'dsh/workspaceTool', params: { value } } }
+        if (Buffer.byteLength(JSON.stringify(data)) > MAX_SECURE_MESSAGE_BYTES) throw new Error('Oversized workspace tool frame')
+        await this.publish('agent.acp.frame', data)
+      }
+    } catch { reason = 'failed' }
+    finally {
+      this.streams.delete(streamId)
+      this.toolControllers.delete(streamId)
+      controller.abort()
+      if (!this.closed) await this.publish('agent.acp.stream.closed', { streamId, reason }).catch(() => undefined)
+    }
   }
 
   /** Whether this peer has at least one live stream observing the session. */
@@ -124,6 +159,8 @@ export class AcpPeerBridge {
   closeStream(input: unknown): { closed: true; streamId: string } {
     const params = streamCloseSchema.parse(input)
     this.streams.delete(params.streamId)
+    this.toolControllers.get(params.streamId)?.abort()
+    this.toolControllers.delete(params.streamId)
     return { closed: true, streamId: params.streamId }
   }
 
@@ -249,7 +286,7 @@ export class AcpPeerBridge {
   async publishInbound(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
     if (this.closed) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.')
     const streamIds = [...this.streams.entries()]
-      .filter(([, targetSessionId]) => targetSessionId === sessionId)
+      .filter(([id, targetSessionId]) => !this.toolControllers.has(id) && targetSessionId === sessionId)
       .map(([streamId]) => streamId)
     if (streamIds.length === 0) {
       this.logger?.warn('Publishing ACP frame without an open stream; using session-scoped delivery', {
@@ -282,7 +319,7 @@ export class AcpPeerBridge {
   async failStreams(reason: AgentAcpStreamClosedData['reason'] = 'failed', sessions?: ReadonlySet<string>): Promise<void> {
     if (this.closed) return
     const streamIds = [...this.streams].filter(([, sessionId]) => sessions === undefined || sessions.has(sessionId)).map(([id]) => id)
-    for (const id of streamIds) this.streams.delete(id)
+    for (const id of streamIds) { this.streams.delete(id); this.toolControllers.get(id)?.abort(); this.toolControllers.delete(id) }
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {
@@ -296,6 +333,8 @@ export class AcpPeerBridge {
     this.closed = true
     const streamIds = [...this.streams.keys()]
     this.streams.clear()
+    for (const controller of this.toolControllers.values()) controller.abort()
+    this.toolControllers.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {

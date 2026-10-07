@@ -1,3 +1,4 @@
+import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS, type AcpSessionModels, type AgentAcpStreamOpenParams } from '@dsh-remote/protocol'
 import { parseAcpImage, acpImageContent, acpImageLimits, type AcpImage } from './image-content.js'
 import type { ApiProxy, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AgentAcpClient } from '@dsh-remote/client-core'
@@ -78,6 +79,9 @@ interface PendingApproval {
 }
 
 export interface AcpClientLike {
+  sessionModels?(sessionId: string, backend: 'antigravity', signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: 'antigravity', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  workspaceToolCall?(sessionId: string, backend: 'cursor' | 'antigravity', endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
     mode?: 'agent' | 'plan' | 'ask',
@@ -95,6 +99,7 @@ export interface AcpClientLike {
     onFrame: (frame: AgentAcpFrameData) => void,
     onClosed?: (closed: AgentAcpStreamClosedData) => void,
     signal?: AbortSignal,
+    tool?: AgentAcpStreamOpenParams['tool'],
   ): Promise<{ close(): Promise<void> }>
   respond(
     requestHandle: string,
@@ -263,6 +268,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   async dispatch(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult> {
     try {
       const args = carrierArgs(payload)
+      if (ACP_TOOL_CALL_ENDPOINTS.some(item => item === endpoint)) {
+        if (!this.client.workspaceToolCall) return business(failure('method-not-found', 'The Host does not support ACP workspace tools.'))
+        const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, 'sessionId')
+        return business(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint as typeof ACP_TOOL_CALL_ENDPOINTS[number], args, signal))
+      }
       switch (endpoint) {
         case '$events/result': return business(await this.answerRemoteEvent(args, signal))
         case 'workspace/list': return business(success({
@@ -289,10 +299,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/rename': return business(await this.renameSession(requestArg(args)))
         case 'session/updateQueue': return business(failure('queue-item-not-found', `${this.backendLabel()} does not expose a DSH inbox queue.`))
         case 'session/attachment': return business(await this.attachment(requestArg(args)))
-        case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
+        case 'session/modelCatalog': {
+          const sessionId = await this.preferredSessionId()
+          if (this.backend !== 'antigravity' || !sessionId) return business(success(modelCatalog(this.backend)))
+          const models = await this.hostSessionModels(sessionId)
+          return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }))
+        }
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
           nativeAcpId(rawId, this.backend)
+          if (this.backend === 'antigravity') return business(success(await this.hostSessionModels(rawId)))
           const catalog = modelCatalog(this.backend)
           return business(success({
             current: this.modelSelection(rawId),
@@ -320,6 +336,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   async open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     const args = carrierArgs(payload)
+    if (ACP_TOOL_STREAM_ENDPOINTS.some(item => item === endpoint)) {
+      const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, 'sessionId')
+      const queue = new AsyncValueQueue(signal)
+      const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), frame => {
+        if (frame.frame.method === 'dsh/workspaceTool') queue.push(record(frame.frame.params).value)
+      }, () => queue.close(), signal, { backend: this.backend, endpoint: endpoint as typeof ACP_TOOL_STREAM_ENDPOINTS[number], args })
+      return queue.iterate(() => { void stream.close().catch(() => undefined) })
+    }
     if (endpoint === 'workspace/follow') return this.workspaceFollow(signal)
     if (endpoint === 'session/control') return this.sessionControl(signal)
     if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
@@ -1207,13 +1231,20 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return { lastUsed: selection, next: selection }
   }
 
+  private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
+    if (this.backend !== 'antigravity' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
+    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), 'antigravity')
+    this.selectedModels.set(sessionId, models.current)
+    return models
+  }
+
   private async selectModel(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
     nativeAcpId(sessionId, this.backend)
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
     const reasoningEffort = string(request.reasoningEffort)
-    const catalog = modelCatalog(this.backend)
+    const catalog = this.backend === 'antigravity' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
     const group = catalog.groups.find(g => g.id === provider)
     const targetModel = group?.models.find(m => m.id === model)
     if (group === undefined || targetModel === undefined) {
@@ -1228,10 +1259,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       model,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     }
-    this.selectedModels.set(sessionId, selected)
+    if (this.backend === 'antigravity') {
+      if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
+      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), 'antigravity', selected)
+      this.selectedModels.set(sessionId, confirmed)
+    } else return failure('model-unavailable', 'Cursor model selection follows Host settings.')
     const seq = this.nextProjectionSeq()
     this.publishProjection(sessionId, 'modelSelection', this.modelSelectionProjection(sessionId), seq)
-    return success({ selected })
+    return success({ selected: this.modelSelection(sessionId) })
   }
 
   private publishWorkspaceBaseline(): void {
@@ -1434,42 +1469,6 @@ export interface AcpModelView {
   }
 }
 
-function antigravityModel(
-  id: string,
-  name: string,
-  effortIds: string[],
-  defaultEffort: string,
-): AcpModelView {
-  return {
-    id,
-    name,
-    reasoning: {
-      efforts: effortIds.map(effort => ({ id: effort, name: reasoningEffortName(effort) })),
-      defaultEffort,
-    },
-  }
-}
-
-function reasoningEffortName(effort: string): string {
-  const names: Record<string, string> = {
-    low: 'Low',
-    medium: 'Medium',
-    high: 'High',
-    thinking: 'Thinking',
-  }
-  return names[effort] ?? effort
-}
-
-const ANTIGRAVITY_MODELS: AcpModelView[] = [
-  antigravityModel('gemini-3.8-flash', 'Gemini 3.8 Flash', ['high', 'medium', 'low'], 'high'),
-  antigravityModel('gemini-3.7-flash', 'Gemini 3.7 Flash', ['high', 'medium', 'low'], 'high'),
-  antigravityModel('gemini-3.6-flash', 'Gemini 3.6 Flash', ['high', 'medium', 'low'], 'high'),
-  antigravityModel('gemini-3.1-pro', 'Gemini 3.1 Pro', ['high', 'low'], 'high'),
-  antigravityModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', ['thinking'], 'thinking'),
-  antigravityModel('claude-opus-4-6', 'Claude Opus 4.6', ['thinking'], 'thinking'),
-  antigravityModel('gpt-oss-120b', 'GPT-OSS 120B', ['medium'], 'medium'),
-]
-
 const CURSOR_MODELS: AcpModelView[] = [
   { id: 'auto', name: 'Auto' },
   { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet' },
@@ -1487,8 +1486,8 @@ export function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor'): {
 } {
   const provider = backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
   const name = backend === 'antigravity' ? 'Antigravity' : 'Cursor'
-  const models = backend === 'antigravity' ? ANTIGRAVITY_MODELS : CURSOR_MODELS
-  const defaultModel = models[0]!.id
+  const models = backend === 'antigravity' ? [] : CURSOR_MODELS
+  const defaultModel = models[0]?.id ?? 'host-settings'
   return {
     default: { provider, model: defaultModel },
     routableProviders: [provider],

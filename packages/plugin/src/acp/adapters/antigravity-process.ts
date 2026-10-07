@@ -1,3 +1,4 @@
+import { readAgyModels, agySelectionArgs, type AgyCatalog, type AgySelection } from './antigravity/models.js'
 import { prepareAgyImageDirectory, stageAgyImages, agyImagePrompt } from './antigravity/image-store.js'
 import { parseAcpImage } from '../image-content.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -45,6 +46,7 @@ export interface AntigravityAcpClientOptions {
   sessionWorker?: boolean
   cwd?: string
   args?: string[]
+  readModels?: () => Promise<AgyCatalog>
 }
 
 /**
@@ -70,6 +72,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private spareCwd?: string
   private readonly args: string[]
   private readonly cwd: string
+  private readonly readModels: () => Promise<AgyCatalog>
+  private readonly selections = new Map<string, AgySelection>()
+  private readonly selecting = new Set<string>()
   private currentPromptPending?: {
     sessionId: string
     resolve: (result: unknown) => void
@@ -88,6 +93,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }),
     options: AntigravityAcpClientOptions = {},
   ) {
+    this.readModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)))
     this.args = options.args ?? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     this.cwd = options.cwd ?? process.cwd()
     this.sessionWorker = options.sessionWorker === true
@@ -105,9 +111,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   isReady(): boolean { return this.ready }
 
-  private prepareSession(conversationId?: string, cwd = this.cwd): Promise<AntigravityAcpClient> {
+  private prepareSession(conversationId?: string, cwd = this.cwd, selectionArgs?: string[]): Promise<AntigravityAcpClient> {
+    if (this.closed) return Promise.reject(new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.'))
     const worker = new AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
-      args: this.args,
+      args: selectionArgs ? [...withoutSelectionArgs(this.args), ...selectionArgs] : this.args,
+      readModels: this.readModels,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd,
@@ -185,12 +193,46 @@ export class AntigravityAcpClient implements CursorAcpLike {
       return { sessionId }
     }
 
+    if (method === 'dsh/sessionModels') {
+      const sessionId = String((params as Record<string, unknown>).sessionId)
+      const catalog = await this.readModels()
+      return { current: this.selections.get(sessionId) ?? { provider: 'antigravity', model: 'host-settings' },
+        routable: true, groups: catalog.groups, failures: [] }
+    }
+    if (method === 'dsh/selectModel') {
+      const p = params as { sessionId: string; model: string; reasoningEffort?: string }
+      if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A model change is already in progress.')
+      const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : undefined)
+      if (!current) throw new AntigravityAcpError('SESSION_MISMATCH', 'Load the conversation before selecting its model.')
+      if (current.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
+      this.selecting.add(p.sessionId)
+      try {
+        const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort)
+        // Resume the same conversation with real CLI flags. Keep the old process usable on startup failure.
+        const replacement = await this.prepareSession(p.sessionId, current.cwd, chosen.args)
+        if (current.currentPromptPending) { await replacement.close(); throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A reply started during model selection.') }
+        this.sessions.set(p.sessionId, replacement)
+        this.selections.set(p.sessionId, chosen.selection)
+        if (current !== this) await current.close()
+        else {
+          this.watcher?.stop()
+          this.watcher = undefined
+          const child = this.process
+          this.process = undefined
+          child?.stdout.removeAllListeners('data')
+          if (child && !child.killed) child.kill('SIGTERM')
+        }
+        return { selected: chosen.selection }
+      } finally { this.selecting.delete(p.sessionId) }
+    }
+
     const sessionId = typeof (params as Record<string, unknown>)?.sessionId === 'string'
       ? (params as Record<string, unknown>).sessionId as string : undefined
-    if (!this.sessionWorker && sessionId !== undefined && sessionId !== this.activeConversationId) {
+    if (sessionId !== undefined && this.selecting.has(sessionId)) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A model change is in progress.')
+    if (!this.sessionWorker && sessionId !== undefined && (sessionId !== this.activeConversationId || this.sessions.has(sessionId))) {
       let worker = this.sessions.get(sessionId)
       if (worker === undefined) {
-        worker = await this.prepareSession(sessionId)
+        worker = await this.prepareSession(sessionId, typeof (params as Record<string, unknown>).cwd === 'string' ? (params as Record<string, unknown>).cwd as string : this.cwd)
         this.sessions.set(sessionId, worker)
       }
       return worker.call(method, params, timeoutMs)
@@ -339,6 +381,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     })
 
     child.on('error', error => {
+      if (this.process !== child) return
       this.ready = false
       if (!initResolved) {
         rejectInit?.(new AntigravityAcpError('ANTIGRAVITY_BINARY_UNAVAILABLE', 'Failed to start the Antigravity CLI.', { cause: error }))
@@ -518,4 +561,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
       }
     }
   }
+}
+
+function withoutSelectionArgs(args: string[]): string[] {
+  const filtered: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--model' || args[i] === '--effort') { i++; continue }
+    if (args[i]!.startsWith('--model=') || args[i]!.startsWith('--effort=')) continue
+    filtered.push(args[i]!)
+  }
+  return filtered
 }

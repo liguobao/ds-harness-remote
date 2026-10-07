@@ -1,4 +1,8 @@
 import type {
+  AcpModelSelection,
+  AcpSessionModels,
+  AcpWorkspaceToolCallEndpoint,
+  AgentAcpStreamOpenParams,
   AgentAcpFrameData,
   AgentAcpStreamClosedData,
   AgentAcpTransferCommitResult,
@@ -57,6 +61,25 @@ export class AgentAcpClient {
       decision,
       ...(result === undefined ? {} : { result }),
     }, signal)
+  }
+
+  async sessionModels(sessionId: string, backend: 'antigravity', signal?: AbortSignal): Promise<AcpSessionModels> {
+    return this.call('dsh/sessionModels', { sessionId, backend }, signal) as Promise<AcpSessionModels>
+  }
+
+  async selectModel(sessionId: string, backend: 'antigravity', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
+    if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
+    await this.call('session/load', { sessionId, backend }, signal)
+    const result = await this.call('dsh/selectModel', { sessionId, backend, model: selection.model,
+      ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }) }, signal)
+    if (!isRecord(result) || !isRecord(result.selected) || result.selected.provider !== backend || typeof result.selected.model !== 'string') {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP did not confirm the selected model.')
+    }
+    return result.selected as unknown as AcpModelSelection
+  }
+
+  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    return this.call('dsh/toolCall', { sessionId, backend, endpoint, args }, signal)
   }
 
   async listWorkspaces(
@@ -139,12 +162,13 @@ export class AgentAcpClient {
     onFrame: (frame: AgentAcpFrameData) => void,
     onClosed?: (closed: AgentAcpStreamClosedData) => void,
     signal?: AbortSignal,
+    tool?: AgentAcpStreamOpenParams['tool'],
   ): Promise<AcpStream> {
     const streamId = createRemoteId()
     const unsubscribe = this.core.onEvent(event => {
       if (event.event === 'agent.acp.frame' && isRecord(event.data)) {
         const data = event.data as unknown as AgentAcpFrameData
-        if (!frameMatchesSubscription(data, streamId, sessionId)) return
+        if (tool ? data.streamId !== streamId : !frameMatchesSubscription(data, streamId, sessionId)) return
         onFrame(data)
       }
       if (event.event === 'agent.acp.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
@@ -152,7 +176,8 @@ export class AgentAcpClient {
       }
     })
     try {
-      await this.core.rpc('agent.acp.stream.open', { streamId, sessionId }, signal)
+      await this.core.rpc('agent.acp.stream.open', { streamId, sessionId, ...(tool ? { tool } : {}) }, signal)
+      if (signal?.aborted) { unsubscribe(); await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined); throw signal.reason }
     } catch (error) {
       unsubscribe()
       throw error
