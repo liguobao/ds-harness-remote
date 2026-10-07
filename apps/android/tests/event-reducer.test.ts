@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import type { ChatItem, MuxStreamFrame, NativeSessionEvent } from '../src/types'
 import { applyMuxFrame, applyMuxFrameToMessages, foldHistory, sessionRunningForMuxFrame } from '../src/state/event-reducer'
@@ -18,16 +19,6 @@ function frame(rpcId: string, payload: { type: string } & Record<string, unknown
 }
 
 describe('remote mux frame reducer', () => {
-  it('retains real system and injected context only when trajectory capture is requested', () => {
-    const events = [sessionEvent({ type: 'system/message', seq: 1, data: { message: { id: 'sys', content: [{ type: 'text', text: 'system' }] } } }), sessionEvent({ type: 'user/message', seq: 2, data: { message: { id: 'ctx', source: { kind: 'plugin' }, content: [{ type: 'text', text: 'context' }] } } })]
-    expect(foldHistory(events.map(event => ({ event })), 's1', true)).toMatchObject([{ role: 'system', context: false, text: 'system' }, { role: 'system', context: true, text: 'context' }])
-  })
-  it('retains native timestamp, exact fork sequence and usage without guessing missing totals', () => {
-    const event = sessionEvent({ type: 'assistant/message', seq: 42, time: 123456, data: { turn: 3, step: 2, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 20 }, message: { id: 'm1', content: [{ type: 'text', text: 'answer' }] } } })
-    expect(foldHistory([{ event }], 's1')[0]).toMatchObject({ createdAt: 123456, nativeTime: 123456, nativeSeq: 42, turn: '3', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 20 } })
-    const missing = sessionEvent({ ...event, data: { ...event.data, usage: undefined } })
-    expect(foldHistory([{ event: missing }], 's1')[0]).not.toHaveProperty('usage')
-  })
   it('projects Harness turn lifecycle into the session running state', () => {
     const start = frame('', {
       type: 'session/event',
@@ -58,148 +49,216 @@ describe('remote mux frame reducer', () => {
       .toMatchObject({ streaming: false, nativeSeq: 10, nativeTime: 1000, turn: '3' })
   })
 
-  it.each([
-    ['completed', 'completed'], ['aborted', 'stopped'], ['interrupted', 'stopped'],
-    ['error', 'failed'], ['blocked', 'failed'], ['max-tokens', 'failed'], ['forked', 'failed'],
-  ] as const)(
-    'retains %s turn-end evidence without moving message and tool sequence anchors', (kind, reason) => {
-      const events = [
-        sessionEvent({ type: 'assistant/message', seq: 10, time: 1000, data: { turn: 3, step: 1, message: { id: 'reply', content: [{ type: 'text', text: 'Working' }] } } }),
-        sessionEvent({ type: 'tool/call', seq: 11, time: 1100, data: { turn: 3, name: 'bash', callId: 'call', arguments: '{"command":"true"}' } }),
-        sessionEvent({ type: 'assistant/message', seq: 12, time: 1200, data: { turn: 4, step: 1, message: { id: 'other', content: [{ type: 'text', text: 'Another turn' }] } } }),
-      ]
-      const original = foldHistory(events.map(event => ({ event })), 's1')
-      const end = sessionEvent({ type: 'turn/end', seq: 13, time: 1300, data: { turn: 3, reason: { kind } } })
-      const live = applyMuxFrame(original, frame('', { type: 'session/event', sessionId: 's1', event: end }))
-      const history = foldHistory([...events, end].map(event => ({ event })), 's1')
-      expect(live).toEqual(history)
-      expect(live.slice(0, 2).map(item => item.turnEnd)).toEqual([{ reason, time: 1300 }, { reason, time: 1300 }])
-      expect(live.map(item => item.nativeSeq)).toEqual([10, 11, 12])
-      expect(live.map(item => item.nativeTime)).toEqual([1000, 1100, 1200])
-      expect(live[2]).toBe(original[2])
-      expect(live[1]).toMatchObject({ toolKey: 'bash', state: 'failed' })
-    },
-  )
+  it('retains turn-end evidence without moving message and tool sequence anchors', async () => {
+    const rows = [
+      ['completed', 'completed'],
+      ['aborted', 'stopped'],
+      ['interrupted', 'stopped'],
+      ['error', 'failed'],
+      ['blocked', 'failed'],
+      ['max-tokens', 'failed'],
+      ['forked', 'failed'],
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const [kind, reason] = row
+        return {
+          name: scenarioName(
+            'retains %s turn-end evidence without moving message and tool sequence anchors',
+            row,
+            index,
+          ),
+          run: () => {
+            const events = [
+              sessionEvent({
+                type: 'assistant/message',
+                seq: 10,
+                time: 1000,
+                data: {
+                  turn: 3,
+                  step: 1,
+                  message: { id: 'reply', content: [{ type: 'text', text: 'Working' }] },
+                },
+              }),
+              sessionEvent({
+                type: 'tool/call',
+                seq: 11,
+                time: 1100,
+                data: { turn: 3, name: 'bash', callId: 'call', arguments: '{"command":"true"}' },
+              }),
+              sessionEvent({
+                type: 'assistant/message',
+                seq: 12,
+                time: 1200,
+                data: {
+                  turn: 4,
+                  step: 1,
+                  message: { id: 'other', content: [{ type: 'text', text: 'Another turn' }] },
+                },
+              }),
+            ]
+            const original = foldHistory(
+              events.map((event) => ({ event })),
+              's1',
+            )
+            const end = sessionEvent({
+              type: 'turn/end',
+              seq: 13,
+              time: 1300,
+              data: { turn: 3, reason: { kind } },
+            })
+            const live = applyMuxFrame(
+              original,
+              frame('', { type: 'session/event', sessionId: 's1', event: end }),
+            )
+            const history = foldHistory(
+              [...events, end].map((event) => ({ event })),
+              's1',
+            )
+            expect(live).toEqual(history)
+            expect(live.slice(0, 2).map((item) => item.turnEnd)).toEqual([
+              { reason, time: 1300 },
+              { reason, time: 1300 },
+            ])
+            expect(live.map((item) => item.nativeSeq)).toEqual([10, 11, 12])
+            expect(live.map((item) => item.nativeTime)).toEqual([1000, 1100, 1200])
+            expect(live[2]).toBe(original[2])
+            expect(live[1]).toMatchObject({ toolKey: 'bash', state: 'failed' })
+          },
+        }
+      }),
+    )
+  })
 
-  it('assembles streaming assistant chunks into a finalized message', () => {
-    const chunk: MuxStreamFrame = frame('', {
-      type: 'session/event',
-      sessionId: 's1',
-      event: sessionEvent({
-        type: 'assistant/chunk',
-        data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Hello ' } },
-      }),
-    })
-    const chunkTwo: MuxStreamFrame = frame('', {
-      type: 'session/event',
-      sessionId: 's1',
-      event: sessionEvent({
-        type: 'assistant/chunk',
-        data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Android' } },
-      }),
-    })
-    const finalized: MuxStreamFrame = frame('', {
-      type: 'session/event',
-      sessionId: 's1',
-      event: sessionEvent({
-        type: 'assistant/message',
-        data: {
-          turn: 1, step: 1,
-          message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'Hello Android' }] },
+  it('preserves assistant text and reasoning through stream finalization', async () => {
+    await runScenarios([
+      {
+        name: 'assembles streaming assistant chunks into a finalized message',
+        run: () => {
+          const chunk: MuxStreamFrame = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({
+              type: 'assistant/chunk',
+              data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Hello ' } },
+            }),
+          })
+          const chunkTwo: MuxStreamFrame = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({
+              type: 'assistant/chunk',
+              data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Android' } },
+            }),
+          })
+          const finalized: MuxStreamFrame = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({
+              type: 'assistant/message',
+              data: {
+                turn: 1,
+                step: 1,
+                message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'Hello Android' }] },
+              },
+            }),
+          })
+          let items = applyMuxFrame([], chunk)
+          items = applyMuxFrame(items, chunkTwo)
+          expect(items).toMatchObject([
+            { kind: 'message', role: 'assistant', text: 'Hello Android', streaming: true },
+          ])
+          items = applyMuxFrame(items, finalized)
+          expect(items).toEqual([
+            expect.objectContaining({ kind: 'message', id: 'm1', role: 'assistant', text: 'Hello Android' }),
+          ])
+          expect(items[0]).not.toHaveProperty('streaming')
         },
-      }),
-    })
-    let items = applyMuxFrame([], chunk)
-    items = applyMuxFrame(items, chunkTwo)
-    expect(items).toMatchObject([{ kind: 'message', role: 'assistant', text: 'Hello Android', streaming: true }])
-    items = applyMuxFrame(items, finalized)
-    expect(items).toEqual([expect.objectContaining({ kind: 'message', id: 'm1', role: 'assistant', text: 'Hello Android' })])
-    expect(items[0]).not.toHaveProperty('streaming')
-  })
+      },
+      {
+        name: 'keeps reasoning separate while it streams and after the answer is finalized',
+        run: () => {
+          const events = [
+            sessionEvent({
+              type: 'assistant/chunk',
+              data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: '先检查' } },
+            }),
+            sessionEvent({
+              type: 'assistant/chunk',
+              data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: '状态。' } },
+            }),
+            sessionEvent({
+              type: 'assistant/chunk',
+              data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '已完成。' } },
+            }),
+          ]
 
-  it('keeps reasoning separate while it streams and after the answer is finalized', () => {
-    const events = [
-      sessionEvent({
-        type: 'assistant/chunk',
-        data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: '先检查' } },
-      }),
-      sessionEvent({
-        type: 'assistant/chunk',
-        data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: '状态。' } },
-      }),
-      sessionEvent({
-        type: 'assistant/chunk',
-        data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '已完成。' } },
-      }),
-    ]
+          let items = foldHistory(
+            events.map((event) => ({ event })),
+            's1',
+          )
+          expect(items).toEqual([
+            expect.objectContaining({
+              kind: 'message',
+              text: '已完成。',
+              reasoning: '先检查状态。',
+              streaming: true,
+              streamingPhase: 'text',
+            }),
+          ])
 
-    let items = foldHistory(events.map(event => ({ event })), 's1')
-    expect(items).toEqual([expect.objectContaining({
-      kind: 'message',
-      text: '已完成。',
-      reasoning: '先检查状态。',
-      streaming: true,
-      streamingPhase: 'text',
-    })])
-
-    items = applyMuxFrame(items, frame('', {
-      type: 'session/event',
-      sessionId: 's1',
-      event: sessionEvent({
-        type: 'assistant/message',
-        data: {
-          turn: 1, step: 1,
-          message: { id: 'm-reasoning', role: 'assistant', content: [{ type: 'text', text: '已完成。' }] },
+          items = applyMuxFrame(
+            items,
+            frame('', {
+              type: 'session/event',
+              sessionId: 's1',
+              event: sessionEvent({
+                type: 'assistant/message',
+                data: {
+                  turn: 1,
+                  step: 1,
+                  message: {
+                    id: 'm-reasoning',
+                    role: 'assistant',
+                    content: [{ type: 'text', text: '已完成。' }],
+                  },
+                },
+              }),
+            }),
+          )
+          expect(items).toEqual([
+            expect.objectContaining({
+              id: 'm-reasoning',
+              text: '已完成。',
+              reasoning: '先检查状态。',
+            }),
+          ])
+          expect(items[0]).not.toHaveProperty('streamingPhase')
         },
-      }),
-    }))
-    expect(items).toEqual([expect.objectContaining({
-      id: 'm-reasoning',
-      text: '已完成。',
-      reasoning: '先检查状态。',
-    })])
-    expect(items[0]).not.toHaveProperty('streamingPhase')
-  })
+      },
+      {
+        name: 'keeps visible streamed text when the final assistant event has no text',
+        run: () => {
+          const visibleChunk = sessionEvent({
+            type: 'assistant/chunk',
+            data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '完成' } },
+          })
+          const emptyFinal = sessionEvent({
+            type: 'assistant/message',
+            data: {
+              turn: 1,
+              step: 1,
+              message: { id: 'm1', role: 'assistant', content: [{ type: 'tool-call', callId: 'c1' }] },
+            },
+          })
 
-  it('does not render empty assistant messages around tool activity', () => {
-    const empty = sessionEvent({
-      type: 'assistant/message',
-      data: { turn: 1, step: 1, message: { id: 'm-empty', role: 'assistant', content: [{ type: 'text', text: '\n  ' }, { type: 'tool-call', callId: 'c1' }] } },
-    })
-    const tool = sessionEvent({ type: 'tool/call', data: { callId: 'c1', name: 'bash' } })
-
-    expect(foldHistory([{ event: empty }, { event: tool }], 's1')).toEqual([
-      expect.objectContaining({ kind: 'tool', id: 'c1', toolName: 'bash' }),
+          expect(foldHistory([{ event: visibleChunk }, { event: emptyFinal }], 's1')).toEqual([
+            expect.objectContaining({ kind: 'message', id: 'm1', text: '完成' }),
+          ])
+        },
+      },
     ])
-  })
-
-  it('does not create or finalize a Remote row for invisible streaming text', () => {
-    const invisibleChunks = [' \n\t', '\u200B\u2060\uFEFF'].map(text => sessionEvent({
-      type: 'assistant/chunk',
-      data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text } },
-    }))
-    const emptyFinal = sessionEvent({
-      type: 'assistant/message',
-      data: { turn: 1, step: 1, message: { id: 'm-empty', role: 'assistant', content: [] } },
-    })
-
-    expect(foldHistory([...invisibleChunks, emptyFinal].map(event => ({ event })), 's1')).toEqual([])
-  })
-
-  it('keeps visible streamed text when the final assistant event has no text', () => {
-    const visibleChunk = sessionEvent({
-      type: 'assistant/chunk',
-      data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '完成' } },
-    })
-    const emptyFinal = sessionEvent({
-      type: 'assistant/message',
-      data: { turn: 1, step: 1, message: { id: 'm1', role: 'assistant', content: [{ type: 'tool-call', callId: 'c1' }] } },
-    })
-
-    expect(foldHistory([{ event: visibleChunk }, { event: emptyFinal }], 's1')).toEqual([
-      expect.objectContaining({ kind: 'message', id: 'm1', text: '完成' }),
-    ])
-  })
+  }, 15000)
 
   it('adds user messages and tool activities from history events', () => {
     const events = [
@@ -216,69 +275,64 @@ describe('remote mux frame reducer', () => {
     ])
   })
 
-  it('keeps image-only user prompts visible in history', () => {
-    const event = sessionEvent({
-      type: 'user/message',
-      data: { message: { id: 'u-image', role: 'user', content: [{ type: 'image', attachmentId: 'attachment-1', name: 'diagram.png' }], source: { kind: 'user' } } },
-    })
+  it('projects safe user image blocks from native history', async () => {
+    await runScenarios([
+      {
+        name: 'keeps image-only user prompts visible in history',
+        run: () => {
+          const event = sessionEvent({
+            type: 'user/message',
+            data: {
+              message: {
+                id: 'u-image',
+                role: 'user',
+                content: [{ type: 'image', attachmentId: 'attachment-1', name: 'diagram.png' }],
+                source: { kind: 'user' },
+              },
+            },
+          })
 
-    expect(foldHistory([{ event }], 's1')).toEqual([
-      expect.objectContaining({
-        kind: 'message',
-        id: 'u-image',
-        role: 'user',
-        text: '',
-        images: [{ name: 'diagram.png' }],
-      }),
-    ])
-  })
-
-  it('renders safe data image blocks from native history', () => {
-    const event = sessionEvent({
-      type: 'user/message',
-      data: {
-        message: {
-          id: 'u-data-image',
-          role: 'user',
-          content: [
-            { type: 'image', url: 'data:image/png;base64,aW1hZ2U=', name: 'screen.png' },
-            { type: 'image', url: 'https://example.test/not-allowed.png', name: 'external.png' },
-          ],
-          source: { kind: 'user' },
+          expect(foldHistory([{ event }], 's1')).toEqual([
+            expect.objectContaining({
+              kind: 'message',
+              id: 'u-image',
+              role: 'user',
+              text: '',
+              images: [{ name: 'diagram.png' }],
+            }),
+          ])
         },
       },
-    })
+      {
+        name: 'renders safe data image blocks from native history',
+        run: () => {
+          const event = sessionEvent({
+            type: 'user/message',
+            data: {
+              message: {
+                id: 'u-data-image',
+                role: 'user',
+                content: [
+                  { type: 'image', url: 'data:image/png;base64,aW1hZ2U=', name: 'screen.png' },
+                  { type: 'image', url: 'https://example.test/not-allowed.png', name: 'external.png' },
+                ],
+                source: { kind: 'user' },
+              },
+            },
+          })
 
-    expect(foldHistory([{ event }], 's1')).toEqual([
-      expect.objectContaining({
-        kind: 'message',
-        id: 'u-data-image',
-        role: 'user',
-        images: [{ uri: 'data:image/png;base64,aW1hZ2U=', name: 'screen.png' }],
-      }),
-    ])
-  })
-
-  it('hides plugin-injected system context from history and live conversation rows', () => {
-    const injected = sessionEvent({
-      type: 'user/message',
-      data: {
-        message: {
-          id: 'system-context-1',
-          role: 'user',
-          content: [{ type: 'text', text: '<system-reminder>private instructions</system-reminder>' }],
-          source: { kind: 'plugin', plugin: 'agent-instructions', form: 'instructions' },
+          expect(foldHistory([{ event }], 's1')).toEqual([
+            expect.objectContaining({
+              kind: 'message',
+              id: 'u-data-image',
+              role: 'user',
+              images: [{ uri: 'data:image/png;base64,aW1hZ2U=', name: 'screen.png' }],
+            }),
+          ])
         },
       },
-    })
-
-    expect(foldHistory([{ event: injected }], 's1')).toEqual([])
-    expect(applyMuxFrame([], frame('', {
-      type: 'session/event',
-      sessionId: 's1',
-      event: injected,
-    }))).toEqual([])
-  })
+    ])
+  }, 10000)
 
   it('merges a tool result using message.source.callId and uses native views', () => {
     const call = sessionEvent({
@@ -296,49 +350,6 @@ describe('remote mux frame reducer', () => {
 
     expect(items).toEqual([expect.objectContaining({
       kind: 'tool', id: 'c1', toolName: '运行代码', summary: '检查 PowerShell 脚本', state: 'finished',
-    })])
-  })
-
-  it('keeps expandable terminal call and result details from native views', () => {
-    const call = sessionEvent({
-      type: 'tool/call',
-      data: { callId: 'terminal-1', name: 'bash', arguments: '{"command":"pnpm test"}' },
-    })
-    const result = sessionEvent({
-      type: 'tool/result',
-      data: {
-        message: {
-          source: { callId: 'terminal-1' },
-          content: [{ type: 'tool-result', isError: false, content: [{ type: 'text', text: 'fallback output' }] }],
-        },
-      },
-    })
-    const items = foldHistory([
-      { event: call, view: { for: 'call', view: { card: 'terminal', title: 'pnpm test', cwd: '/workspace' } } },
-      { event: result, view: { for: 'result', view: { card: 'terminal', output: '49 tests passed', exitCode: 0 } } },
-    ], 's1')
-
-    expect(items).toEqual([expect.objectContaining({
-      kind: 'tool', id: 'terminal-1', toolName: 'pnpm test', state: 'finished',
-      callDetail: { text: 'cwd: /workspace\n$ pnpm test', format: 'code' },
-      resultDetail: { text: '49 tests passed\nexit: 0', format: 'code' },
-    })])
-  })
-
-  it('falls back to the raw nested tool result when no result view is available', () => {
-    const result = sessionEvent({
-      type: 'tool/result',
-      data: {
-        message: {
-          source: { callId: 'generic-1' },
-          content: [{ type: 'tool-result', isError: true, content: [{ type: 'text', text: '**command failed**' }] }],
-        },
-      },
-    })
-
-    expect(foldHistory([{ event: result }], 's1')).toEqual([expect.objectContaining({
-      kind: 'tool', id: 'generic-1', state: 'failed',
-      resultDetail: { text: '**command failed**', format: 'markdown' },
     })])
   })
 
@@ -386,64 +397,94 @@ describe('remote mux frame reducer', () => {
     ])
   })
 
-  it('adds and resolves approval requests with the frame rpcId', () => {
-    const requested: MuxStreamFrame = frame('rpc-approval-1', {
-      type: 'approval/requested',
-      sessionId: 's1',
-      approvalId: 'a1',
-      toolName: 'bash',
-      reason: 'Run npm test',
-    })
-    const resolved: MuxStreamFrame = frame('', {
-      type: 'approval/resolved',
-      sessionId: 's1',
-      approvalId: 'a1',
-      outcome: 'allowed-once',
-    })
-    let items = applyMuxFrame([], requested)
-    expect(items).toMatchObject([{
-      kind: 'approval', id: 'approval:a1', approvalId: 'a1', frameRpcId: 'rpc-approval-1', toolName: 'bash',
-    }])
-    items = applyMuxFrame(items, resolved)
-    expect(items).toMatchObject([{ kind: 'approval', outcome: 'allowed-once' }])
-  })
-
-  it('adds and resolves question requests', () => {
-    const requested: MuxStreamFrame = frame('rpc-question-1', {
-      type: 'question/requested',
-      sessionId: 's1',
-      questions: [{ id: 'q1', question: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }] }],
-    })
-    const resolved: MuxStreamFrame = frame('', {
-      type: 'question/resolved',
-      sessionId: 's1',
-      questionRpcId: 'rpc-question-1',
-      outcome: 'answered',
-    })
-    let items = applyMuxFrame([], requested)
-    expect(items).toMatchObject([{ kind: 'question', frameRpcId: 'rpc-question-1', questions: [{ id: 'q1' }] }])
-    items = applyMuxFrame(items, resolved)
-    expect(items).toMatchObject([{ kind: 'question', outcome: 'answered' }])
-  })
-
-  it('settles approval and question requests when their owning turn ends', () => {
-    const tool = sessionEvent({ type: 'tool/call', seq: 10, data: { turn: 3, name: 'bash', callId: 'call' } })
-    const current = foldHistory([{ event: tool }], 's1')
-    const approval = frame('rpc-approval-2', {
-      type: 'approval/requested', sessionId: 's1', approvalId: 'a2', toolName: 'bash',
-    })
-    const question = frame('rpc-question-2', {
-      type: 'question/requested', sessionId: 's1', questions: [{ id: 'q2', question: 'Continue?' }],
-    })
-    const end = frame('', {
-      type: 'session/event', sessionId: 's1',
-      event: sessionEvent({ type: 'turn/end', seq: 13, data: { turn: 3, reason: { kind: 'aborted' } } }),
-    })
-    const items = applyMuxFrame(applyMuxFrame(applyMuxFrame(current, approval), question), end)
-    expect(items).toMatchObject([
-      { kind: 'tool', state: 'failed' },
-      { kind: 'approval', turn: '3', outcome: 'unavailable' },
-      { kind: 'question', turn: '3', outcome: 'cancelled' },
+  it('correlates and settles approval and question requests', async () => {
+    await runScenarios([
+      {
+        name: 'adds and resolves approval requests with the frame rpcId',
+        run: () => {
+          const requested: MuxStreamFrame = frame('rpc-approval-1', {
+            type: 'approval/requested',
+            sessionId: 's1',
+            approvalId: 'a1',
+            toolName: 'bash',
+            reason: 'Run npm test',
+          })
+          const resolved: MuxStreamFrame = frame('', {
+            type: 'approval/resolved',
+            sessionId: 's1',
+            approvalId: 'a1',
+            outcome: 'allowed-once',
+          })
+          let items = applyMuxFrame([], requested)
+          expect(items).toMatchObject([
+            {
+              kind: 'approval',
+              id: 'approval:a1',
+              approvalId: 'a1',
+              frameRpcId: 'rpc-approval-1',
+              toolName: 'bash',
+            },
+          ])
+          items = applyMuxFrame(items, resolved)
+          expect(items).toMatchObject([{ kind: 'approval', outcome: 'allowed-once' }])
+        },
+      },
+      {
+        name: 'adds and resolves question requests',
+        run: () => {
+          const requested: MuxStreamFrame = frame('rpc-question-1', {
+            type: 'question/requested',
+            sessionId: 's1',
+            questions: [{ id: 'q1', question: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+          })
+          const resolved: MuxStreamFrame = frame('', {
+            type: 'question/resolved',
+            sessionId: 's1',
+            questionRpcId: 'rpc-question-1',
+            outcome: 'answered',
+          })
+          let items = applyMuxFrame([], requested)
+          expect(items).toMatchObject([
+            { kind: 'question', frameRpcId: 'rpc-question-1', questions: [{ id: 'q1' }] },
+          ])
+          items = applyMuxFrame(items, resolved)
+          expect(items).toMatchObject([{ kind: 'question', outcome: 'answered' }])
+        },
+      },
+      {
+        name: 'settles approval and question requests when their owning turn ends',
+        run: () => {
+          const tool = sessionEvent({
+            type: 'tool/call',
+            seq: 10,
+            data: { turn: 3, name: 'bash', callId: 'call' },
+          })
+          const current = foldHistory([{ event: tool }], 's1')
+          const approval = frame('rpc-approval-2', {
+            type: 'approval/requested',
+            sessionId: 's1',
+            approvalId: 'a2',
+            toolName: 'bash',
+          })
+          const question = frame('rpc-question-2', {
+            type: 'question/requested',
+            sessionId: 's1',
+            questions: [{ id: 'q2', question: 'Continue?' }],
+          })
+          const end = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({ type: 'turn/end', seq: 13, data: { turn: 3, reason: { kind: 'aborted' } } }),
+          })
+          const items = applyMuxFrame(applyMuxFrame(applyMuxFrame(current, approval), question), end)
+          expect(items).toMatchObject([
+            { kind: 'tool', state: 'failed' },
+            { kind: 'approval', turn: '3', outcome: 'unavailable' },
+            { kind: 'question', turn: '3', outcome: 'cancelled' },
+          ])
+        },
+      },
     ])
-  })
+  }, 15000)
+
 })

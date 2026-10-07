@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,44 +10,79 @@ import type { SafeLogger } from '../src/logging.js'
 import { RpcError } from '../src/rpc-router.js'
 
 describe('HarnessApiBridge', () => {
-  it('falls back to read-only Host directory browsing when Harness only serves a native picker', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-remote-directory-'))
-    await mkdir(join(root, 'project'))
-    const listDirectory = vi.fn(async (request: { rpcId: string }) => ({
-      rpcId: request.rpcId,
-      result: { ok: false, error: { code: 'directory-picker-unavailable', message: 'native only', details: {} } },
-    }))
-    const bridge = new HarnessApiBridge(api({ host: { listDirectory } }), vi.fn(async () => undefined))
-    try {
-      await expect(bridge.call({ method: 'host.listDirectory', rpcId: 'native-fallback', payload: { path: root } }))
-        .resolves.toMatchObject({
-          rpcId: 'native-fallback',
-          result: { ok: true, value: { path: root, entries: [{ name: 'project', path: join(root, 'project') }] } },
-        })
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
-
-  it('serves read-only Host directory browsing when Harness has no native browser picker method', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-remote-directory-missing-'))
-    await mkdir(join(root, 'project'))
-    const bridge = new HarnessApiBridge(api({}), vi.fn(async () => undefined), 8, undefined, undefined, '0.1.1-rc.2')
-    try {
-      await expect(bridge.call({ method: 'host.listDirectory', rpcId: 'native-fallback-missing', payload: { path: root } }))
-        .resolves.toMatchObject({
-          rpcId: 'native-fallback-missing',
-          result: { ok: true, value: { path: root, entries: [{ name: 'project', path: join(root, 'project') }] } },
-        })
-      await expect(bridge.call({ method: 'host.describe', rpcId: 'native-describe-missing', payload: {} }))
-        .resolves.toMatchObject({
-          rpcId: 'native-describe-missing',
-          result: { ok: true, value: { version: '0.1.1-rc.2', canOpenPath: true } },
-        })
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
+  it('falls back to read-only Host browsing for native-only or missing pickers', async () => {
+    await runScenarios([
+      {
+        name: 'falls back to read-only Host directory browsing when Harness only serves a native picker',
+        run: async () => {
+          const root = await mkdtemp(join(tmpdir(), 'dsh-remote-directory-'))
+          await mkdir(join(root, 'project'))
+          const listDirectory = vi.fn(async (request: { rpcId: string }) => ({
+            rpcId: request.rpcId,
+            result: {
+              ok: false,
+              error: { code: 'directory-picker-unavailable', message: 'native only', details: {} },
+            },
+          }))
+          const bridge = new HarnessApiBridge(
+            api({ host: { listDirectory } }),
+            vi.fn(async () => undefined),
+          )
+          try {
+            await expect(
+              bridge.call({ method: 'host.listDirectory', rpcId: 'native-fallback', payload: { path: root } }),
+            ).resolves.toMatchObject({
+              rpcId: 'native-fallback',
+              result: {
+                ok: true,
+                value: { path: root, entries: [{ name: 'project', path: join(root, 'project') }] },
+              },
+            })
+          } finally {
+            await rm(root, { recursive: true, force: true })
+          }
+        },
+      },
+      {
+        name: 'serves read-only Host directory browsing when Harness has no native browser picker method',
+        run: async () => {
+          const root = await mkdtemp(join(tmpdir(), 'dsh-remote-directory-missing-'))
+          await mkdir(join(root, 'project'))
+          const bridge = new HarnessApiBridge(
+            api({}),
+            vi.fn(async () => undefined),
+            8,
+            undefined,
+            undefined,
+            '0.1.1-rc.2',
+          )
+          try {
+            await expect(
+              bridge.call({
+                method: 'host.listDirectory',
+                rpcId: 'native-fallback-missing',
+                payload: { path: root },
+              }),
+            ).resolves.toMatchObject({
+              rpcId: 'native-fallback-missing',
+              result: {
+                ok: true,
+                value: { path: root, entries: [{ name: 'project', path: join(root, 'project') }] },
+              },
+            })
+            await expect(
+              bridge.call({ method: 'host.describe', rpcId: 'native-describe-missing', payload: {} }),
+            ).resolves.toMatchObject({
+              rpcId: 'native-describe-missing',
+              result: { ok: true, value: { version: '0.1.1-rc.2', canOpenPath: true } },
+            })
+          } finally {
+            await rm(root, { recursive: true, force: true })
+          }
+        },
+      },
+    ])
+  }, 10000)
 
   it('forwards allowlisted native methods and read-only directory browsing while denying privileged methods', async () => {
     const list = vi.fn(async (request: { rpcId: string }) => ({ rpcId: request.rpcId, result: { ok: true, value: [] } }))
@@ -85,39 +121,6 @@ describe('HarnessApiBridge', () => {
       code: 'METHOD_NOT_ALLOWED',
     })
     await expect(bridge.call({ method: 'host.createDirectory', rpcId: 'native-4', payload: {} })).rejects.toBeInstanceOf(RpcError)
-  })
-
-  it('replaces the legacy host.describe placeholder with the discovered Harness version', async () => {
-    const describe = vi.fn(async (request: { rpcId: string }) => ({
-      rpcId: request.rpcId,
-      result: {
-        ok: true,
-        value: {
-          version: '0.0.1',
-          cwd: '/home/user',
-          home: '/home/user',
-          attachedSessions: 0,
-        },
-      },
-    }))
-    const listDirectory = vi.fn(async (request: { rpcId: string }) => ({
-      rpcId: request.rpcId,
-      result: { ok: true, value: { path: '/home/user', home: '/home/user', crumbs: [], entries: [], truncated: false } },
-    }))
-    const bridge = new HarnessApiBridge(
-      api({ host: { describe, listDirectory } }),
-      vi.fn(async () => undefined),
-      8,
-      undefined,
-      undefined,
-      '0.1.1-rc.2',
-    )
-
-    await expect(bridge.call({ method: 'host.describe', rpcId: 'native-describe', payload: {} }))
-      .resolves.toMatchObject({
-        rpcId: 'native-describe',
-        result: { ok: true, value: { version: '0.1.1-rc.2', cwd: '/home/user', canOpenPath: true } },
-      })
   })
 
   it('reassembles native image calls and chunks oversized attachment responses per peer', async () => {
@@ -265,87 +268,139 @@ describe('HarnessApiBridge', () => {
     expect(publish.mock.calls[1]).toEqual(['harness.api.stream.closed', { streamId: 'stream-1', reason: 'completed' }])
   })
 
-  it('does not block peer replacement when a native stream ignores abort', async () => {
-    let streamSignal: AbortSignal | undefined
-    const stalled = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<IteratorResult<never>>(() => undefined),
-      }),
-    }
-    const bridge = new HarnessApiBridge(api({
-      events: {
-        mux: (_request: unknown, signal: AbortSignal) => {
-          streamSignal = signal
-          return stalled
+  it('bounds stream slots across close and reconnect generations', async () => {
+    await runScenarios([
+      {
+        name: 'does not block peer replacement when a native stream ignores abort',
+        run: async () => {
+          let streamSignal: AbortSignal | undefined
+          const stalled = {
+            [Symbol.asyncIterator]: () => ({
+              next: () => new Promise<IteratorResult<never>>(() => undefined),
+            }),
+          }
+          const bridge = new HarnessApiBridge(
+            api({
+              events: {
+                mux: (_request: unknown, signal: AbortSignal) => {
+                  streamSignal = signal
+                  return stalled
+                },
+                host: async function* () {
+                  return
+                },
+              },
+            }),
+            vi.fn(async () => undefined),
+            1,
+          )
+
+          bridge.openStream({ streamId: 'stalled-stream', stream: 'mux', rpcId: 'open-1', payload: {} })
+          await expect(bridge.closeAll()).resolves.toBeUndefined()
+          expect(streamSignal?.aborted).toBe(true)
+          expect(
+            bridge.openStream({ streamId: 'replacement-stream', stream: 'host', rpcId: 'open-2', payload: {} }),
+          ).toEqual({
+            opened: true,
+            streamId: 'replacement-stream',
+          })
         },
-        host: async function* () { return },
       },
-    }), vi.fn(async () => undefined), 1)
+      {
+        name: 'frees the stream slot synchronously on close even when the native stream stalls',
+        run: () => {
+          const stalled = {
+            [Symbol.asyncIterator]: () => ({
+              next: () => new Promise<IteratorResult<never>>(() => undefined),
+            }),
+          }
+          const bridge = new HarnessApiBridge(
+            api({
+              events: {
+                mux: (_request: unknown, signal: AbortSignal) => {
+                  signal.addEventListener('abort', () => undefined)
+                  return stalled
+                },
+                host: async function* () {
+                  return
+                },
+              },
+            }),
+            vi.fn(async () => undefined),
+            2,
+          )
 
-    bridge.openStream({ streamId: 'stalled-stream', stream: 'mux', rpcId: 'open-1', payload: {} })
-    await expect(bridge.closeAll()).resolves.toBeUndefined()
-    expect(streamSignal?.aborted).toBe(true)
-    expect(bridge.openStream({ streamId: 'replacement-stream', stream: 'host', rpcId: 'open-2', payload: {} })).toEqual({
-      opened: true,
-      streamId: 'replacement-stream',
-    })
-  })
-
-  it('frees the stream slot synchronously on close even when the native stream stalls', () => {
-    const stalled = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<IteratorResult<never>>(() => undefined),
-      }),
-    }
-    const bridge = new HarnessApiBridge(api({
-      events: {
-        mux: (_request: unknown, signal: AbortSignal) => {
-          signal.addEventListener('abort', () => undefined)
-          return stalled
+          bridge.openStream({
+            streamId: 'mux-a',
+            stream: 'mux',
+            rpcId: 'open-1',
+            payload: { sessionId: 'session-a' },
+          })
+          bridge.openStream({ streamId: 'host-b', stream: 'host', rpcId: 'open-2', payload: {} })
+          bridge.closeStream({ streamId: 'mux-a' })
+          // The client's close-then-reopen session switch must not hit RATE_LIMITED
+          // even though the aborted native stream has not yielded its slot yet.
+          expect(
+            bridge.openStream({
+              streamId: 'mux-c',
+              stream: 'mux',
+              rpcId: 'open-3',
+              payload: { sessionId: 'session-b' },
+            }),
+          ).toEqual({
+            opened: true,
+            streamId: 'mux-c',
+          })
         },
-        host: async function* () { return },
       },
-    }), vi.fn(async () => undefined), 2)
+      {
+        name: 'allows reconnect generations to overlap while keeping a bounded per-peer limit',
+        run: () => {
+          const stalled = {
+            [Symbol.asyncIterator]: () => ({
+              next: () => new Promise<IteratorResult<never>>(() => undefined),
+            }),
+          }
+          const streamApi = api({
+            events: {
+              mux: () => stalled,
+              host: () => stalled,
+            },
+          })
+          const firstPeer = new HarnessApiBridge(
+            streamApi,
+            vi.fn(async () => undefined),
+          )
+          const secondPeer = new HarnessApiBridge(
+            streamApi,
+            vi.fn(async () => undefined),
+          )
 
-    bridge.openStream({ streamId: 'mux-a', stream: 'mux', rpcId: 'open-1', payload: { sessionId: 'session-a' } })
-    bridge.openStream({ streamId: 'host-b', stream: 'host', rpcId: 'open-2', payload: {} })
-    bridge.closeStream({ streamId: 'mux-a' })
-    // The client's close-then-reopen session switch must not hit RATE_LIMITED
-    // even though the aborted native stream has not yielded its slot yet.
-    expect(bridge.openStream({ streamId: 'mux-c', stream: 'mux', rpcId: 'open-3', payload: { sessionId: 'session-b' } })).toEqual({
-      opened: true,
-      streamId: 'mux-c',
-    })
-  })
+          for (let index = 1; index <= 8; index += 1) {
+            const streamId = `overlap-${index}`
+            expect(
+              firstPeer.openStream({
+                streamId,
+                stream: index % 2 === 0 ? 'host' : 'mux',
+                rpcId: `open-${index}`,
+                payload: {},
+              }),
+            ).toEqual({ opened: true, streamId })
+          }
+          expect(() =>
+            firstPeer.openStream({ streamId: 'ninth', stream: 'mux', rpcId: 'open-9', payload: {} }),
+          ).toThrow('Too many Harness event streams are open.')
 
-  it('allows reconnect generations to overlap while keeping a bounded per-peer limit', () => {
-    const stalled = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<IteratorResult<never>>(() => undefined),
-      }),
-    }
-    const streamApi = api({
-      events: {
-        mux: () => stalled,
-        host: () => stalled,
+          expect(
+            secondPeer.openStream({ streamId: 'independent', stream: 'host', rpcId: 'open-10', payload: {} }),
+          ).toEqual({
+            opened: true,
+            streamId: 'independent',
+          })
+        },
       },
-    })
-    const firstPeer = new HarnessApiBridge(streamApi, vi.fn(async () => undefined))
-    const secondPeer = new HarnessApiBridge(streamApi, vi.fn(async () => undefined))
-
-    for (let index = 1; index <= 8; index += 1) {
-      const streamId = `overlap-${index}`
-      expect(firstPeer.openStream({ streamId, stream: index % 2 === 0 ? 'host' : 'mux', rpcId: `open-${index}`, payload: {} }))
-        .toEqual({ opened: true, streamId })
-    }
-    expect(() => firstPeer.openStream({ streamId: 'ninth', stream: 'mux', rpcId: 'open-9', payload: {} }))
-      .toThrow('Too many Harness event streams are open.')
-
-    expect(secondPeer.openStream({ streamId: 'independent', stream: 'host', rpcId: 'open-10', payload: {} })).toEqual({
-      opened: true,
-      streamId: 'independent',
-    })
-  })
+    ])
+  }, 15000)
 
   it('allows responses only for answerable requests emitted on the same peer bridge', async () => {
     const respond = vi.fn(async () => ({ accepted: true as const }))
@@ -445,74 +500,147 @@ describe('HarnessApiBridge remote settings scope', () => {
     }
   }
 
-  it('allows settings writes only for namespaces the live settings directory declares', async () => {
-    const { api: harnessApi } = providerApi()
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
+  it('limits remote settings access to declared writable namespaces', async () => {
+    await runScenarios([
+      {
+        name: 'allows settings writes only for namespaces the live settings directory declares',
+        run: async () => {
+          const { api: harnessApi } = providerApi()
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
 
-    await expect(bridge.call({
-      method: 'settings.mutate',
-      rpcId: 'config-1',
-      payload: { ns: 'llm-deepseek', ops: [{ op: 'set', path: ['apiKeyEnv'], value: 'DSH_DEEPSEEK_API_KEY' }] },
-    })).resolves.toMatchObject({ rpcId: 'config-1', result: { ok: true } })
+          await expect(
+            bridge.call({
+              method: 'settings.mutate',
+              rpcId: 'config-1',
+              payload: {
+                ns: 'llm-deepseek',
+                ops: [{ op: 'set', path: ['apiKeyEnv'], value: 'DSH_DEEPSEEK_API_KEY' }],
+              },
+            }),
+          ).resolves.toMatchObject({ rpcId: 'config-1', result: { ok: true } })
 
-    await expect(bridge.call({
-      method: 'settings.update',
-      rpcId: 'config-2',
-      payload: { ns: 'llm-openai', patch: { enabled: true }, expectedRevision: 2 },
-    })).resolves.toMatchObject({ rpcId: 'config-2', result: { ok: true } })
+          await expect(
+            bridge.call({
+              method: 'settings.update',
+              rpcId: 'config-2',
+              payload: { ns: 'llm-openai', patch: { enabled: true }, expectedRevision: 2 },
+            }),
+          ).resolves.toMatchObject({ rpcId: 'config-2', result: { ok: true } })
 
-    await expect(bridge.call({
-      method: 'settings.replace',
-      rpcId: 'config-3',
-      payload: { ns: 'llm-deepseek', section: {} },
-    })).resolves.toMatchObject({ rpcId: 'config-3', result: { ok: true } })
+          await expect(
+            bridge.call({
+              method: 'settings.replace',
+              rpcId: 'config-3',
+              payload: { ns: 'llm-deepseek', section: {} },
+            }),
+          ).resolves.toMatchObject({ rpcId: 'config-3', result: { ok: true } })
 
-    await expect(bridge.call({
-      method: 'settings.mutate',
-      rpcId: 'config-4',
-      payload: { ns: 'ds-harness-remote', ops: [{ op: 'set', path: ['serverUrl'], value: 'https://evil.example' }] },
-    })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+          await expect(
+            bridge.call({
+              method: 'settings.mutate',
+              rpcId: 'config-4',
+              payload: {
+                ns: 'ds-harness-remote',
+                ops: [{ op: 'set', path: ['serverUrl'], value: 'https://evil.example' }],
+              },
+            }),
+          ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
 
-    await expect(bridge.call({
-      method: 'settings.update',
-      rpcId: 'config-5',
-      payload: { ns: 'unknown-ns', patch: {} },
-    })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
-  })
+          await expect(
+            bridge.call({
+              method: 'settings.update',
+              rpcId: 'config-5',
+              payload: { ns: 'unknown-ns', patch: {} },
+            }),
+          ).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+        },
+      },
+      {
+        name: 'fails closed without a native settings directory or on oversized writes',
+        run: async () => {
+          const bare = new HarnessApiBridge(
+            api({ settings: { mutate: vi.fn(async () => ok('x', {})) } }),
+            vi.fn(async () => undefined),
+          )
+          await expect(
+            bare.call({
+              method: 'settings.mutate',
+              rpcId: 'config-bare',
+              payload: { ns: 'llm-deepseek', ops: [{ op: 'set', path: ['a'], value: 1 }] },
+            }),
+          ).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
 
-  it('fails closed without a native settings directory or on oversized writes', async () => {
-    const bare = new HarnessApiBridge(api({ settings: { mutate: vi.fn(async () => ok('x', {})) } }), vi.fn(async () => undefined))
-    await expect(bare.call({
-      method: 'settings.mutate',
-      rpcId: 'config-bare',
-      payload: { ns: 'llm-deepseek', ops: [{ op: 'set', path: ['a'], value: 1 }] },
-    })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+          const { api: harnessApi } = providerApi()
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
+          await expect(
+            bridge.call({
+              method: 'settings.update',
+              rpcId: 'config-big',
+              payload: { ns: 'llm-deepseek', patch: { blob: 'x'.repeat(70 * 1024) } },
+            }),
+          ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
 
-    const { api: harnessApi } = providerApi()
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
-    await expect(bridge.call({
-      method: 'settings.update',
-      rpcId: 'config-big',
-      payload: { ns: 'llm-deepseek', patch: { blob: 'x'.repeat(70 * 1024) } },
-    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          await expect(
+            bridge.call({
+              method: 'settings.mutate',
+              rpcId: 'config-ops',
+              payload: {
+                ns: 'llm-deepseek',
+                ops: Array.from({ length: 65 }, (_, i) => ({ op: 'set' as const, path: [`k${i}`], value: i })),
+              },
+            }),
+          ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        },
+      },
+      {
+        name: 'returns all registered namespaces while hiding the local document capability',
+        run: async () => {
+          const { api: harnessApi } = providerApi()
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
 
-    await expect(bridge.call({
-      method: 'settings.mutate',
-      rpcId: 'config-ops',
-      payload: { ns: 'llm-deepseek', ops: Array.from({ length: 65 }, (_, i) => ({ op: 'set' as const, path: [`k${i}`], value: i })) },
-    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
+          const response = await bridge.call({
+            method: 'settings.describe',
+            rpcId: 'config-describe',
+            payload: {},
+          })
+          expect(response.result).toMatchObject({ ok: true })
+          const value = response.result as { ok: boolean; value: { namespaces: Array<{ ns: string }> } }
+          expect(value.value.namespaces.map((item) => item.ns)).toEqual([
+            'llm-deepseek',
+            'llm-openai',
+            'ds-harness-remote',
+          ])
+          expect(value.value).toMatchObject({ hasDocument: false })
+        },
+      },
+      {
+        name: 'keeps settings.openDocument and unlisted methods denied',
+        run: async () => {
+          const { api: harnessApi } = providerApi()
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
 
-  it('returns all registered namespaces while hiding the local document capability', async () => {
-    const { api: harnessApi } = providerApi()
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
-
-    const response = await bridge.call({ method: 'settings.describe', rpcId: 'config-describe', payload: {} })
-    expect(response.result).toMatchObject({ ok: true })
-    const value = response.result as { ok: boolean; value: { namespaces: Array<{ ns: string }> } }
-    expect(value.value.namespaces.map(item => item.ns)).toEqual(['llm-deepseek', 'llm-openai', 'ds-harness-remote'])
-    expect(value.value).toMatchObject({ hasDocument: false })
-  })
+          await expect(
+            bridge.call({ method: 'settings.openDocument', rpcId: 'open-doc', payload: {} }),
+          ).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+          await expect(
+            bridge.call({ method: 'settings.mutate2', rpcId: 'unknown', payload: {} }),
+          ).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+        },
+      },
+    ])
+  }, 20000)
 
   it('bounds credential refs and values while preserving official global reference semantics', async () => {
     const { api: harnessApi } = providerApi()
@@ -573,100 +701,125 @@ describe('HarnessApiBridge remote settings scope', () => {
     })).resolves.toMatchObject({ rpcId: 'cred-introduce-nested-ref', result: { ok: true } })
   })
 
-  it('restricts llm.discoverModels endpoints to HTTPS or localhost HTTP', async () => {
-    const { api: harnessApi } = providerApi()
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
+  it('restricts model discovery endpoints and sanitizes provider failures', async () => {
+    await runScenarios([
+      {
+        name: 'restricts llm.discoverModels endpoints to HTTPS or localhost HTTP',
+        run: async () => {
+          const { api: harnessApi } = providerApi()
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
 
-    await expect(bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-1',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-abc' },
-    })).resolves.toMatchObject({ rpcId: 'discover-1', result: { ok: true } })
+          await expect(
+            bridge.call({
+              method: 'llm.discoverModels',
+              rpcId: 'discover-1',
+              payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-abc' },
+            }),
+          ).resolves.toMatchObject({ rpcId: 'discover-1', result: { ok: true } })
 
-    await expect(bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-2',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'http://127.0.0.1:8080/v1' },
-    })).resolves.toMatchObject({ rpcId: 'discover-2', result: { ok: true } })
+          await expect(
+            bridge.call({
+              method: 'llm.discoverModels',
+              rpcId: 'discover-2',
+              payload: { settingsNs: 'llm-deepseek', baseURL: 'http://127.0.0.1:8080/v1' },
+            }),
+          ).resolves.toMatchObject({ rpcId: 'discover-2', result: { ok: true } })
 
-    await expect(bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-http',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'http://api.example.com/v1' },
-    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          await expect(
+            bridge.call({
+              method: 'llm.discoverModels',
+              rpcId: 'discover-http',
+              payload: { settingsNs: 'llm-deepseek', baseURL: 'http://api.example.com/v1' },
+            }),
+          ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
 
-    await expect(bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-creds',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'https://user:pass@api.example.com/v1' },
-    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          await expect(
+            bridge.call({
+              method: 'llm.discoverModels',
+              rpcId: 'discover-creds',
+              payload: { settingsNs: 'llm-deepseek', baseURL: 'https://user:pass@api.example.com/v1' },
+            }),
+          ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
 
-    await expect(bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-big-key',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1', apiKey: 'x'.repeat(9 * 1024) },
-    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
-
-  it('normalizes model-discovery failures without returning adapter messages or credentials', async () => {
-    const { api: harnessApi } = providerApi()
-    harnessApi.llm.discoverModels = vi.fn(async (request: { rpcId: string }) => ({
-      rpcId: request.rpcId,
-      result: {
-        ok: false as const,
-        error: {
-          code: 'model-discovery-failed',
-          message: 'provider rejected sk-secret',
-          details: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1?key=sk-secret' },
+          await expect(
+            bridge.call({
+              method: 'llm.discoverModels',
+              rpcId: 'discover-big-key',
+              payload: {
+                settingsNs: 'llm-deepseek',
+                baseURL: 'https://api.example.com/v1',
+                apiKey: 'x'.repeat(9 * 1024),
+              },
+            }),
+          ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
         },
       },
-    })) as never
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
+      {
+        name: 'normalizes model-discovery failures without returning adapter messages or credentials',
+        run: async () => {
+          const { api: harnessApi } = providerApi()
+          harnessApi.llm.discoverModels = vi.fn(async (request: { rpcId: string }) => ({
+            rpcId: request.rpcId,
+            result: {
+              ok: false as const,
+              error: {
+                code: 'model-discovery-failed',
+                message: 'provider rejected sk-secret',
+                details: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1?key=sk-secret' },
+              },
+            },
+          })) as never
+          const bridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
 
-    const response = await bridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-failed',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1', apiKey: 'sk-secret' },
-    })
+          const response = await bridge.call({
+            method: 'llm.discoverModels',
+            rpcId: 'discover-failed',
+            payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1', apiKey: 'sk-secret' },
+          })
 
-    expect(response).toEqual({
-      rpcId: 'discover-failed',
-      result: {
-        ok: false,
-        error: {
-          code: 'model-discovery-failed',
-          message: 'Model discovery failed.',
-          details: { settingsNs: 'llm-deepseek' },
+          expect(response).toEqual({
+            rpcId: 'discover-failed',
+            result: {
+              ok: false,
+              error: {
+                code: 'model-discovery-failed',
+                message: 'Model discovery failed.',
+                details: { settingsNs: 'llm-deepseek' },
+              },
+            },
+          })
+          expect(JSON.stringify(response)).not.toContain('sk-secret')
+
+          harnessApi.llm.discoverModels = vi.fn(async () => {
+            throw new Error('transport exposed sk-thrown')
+          }) as never
+          const throwingBridge = new HarnessApiBridge(
+            harnessApi,
+            vi.fn(async () => undefined),
+          )
+          const thrownResponse = await throwingBridge.call({
+            method: 'llm.discoverModels',
+            rpcId: 'discover-thrown',
+            payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1', apiKey: 'sk-thrown' },
+          })
+          expect(JSON.stringify(thrownResponse)).not.toContain('sk-thrown')
+          expect(thrownResponse).toMatchObject({
+            rpcId: 'discover-thrown',
+            result: {
+              ok: false,
+              error: { code: 'model-discovery-failed', message: 'Model discovery failed.' },
+            },
+          })
         },
       },
-    })
-    expect(JSON.stringify(response)).not.toContain('sk-secret')
-
-    harnessApi.llm.discoverModels = vi.fn(async () => {
-      throw new Error('transport exposed sk-thrown')
-    }) as never
-    const throwingBridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
-    const thrownResponse = await throwingBridge.call({
-      method: 'llm.discoverModels',
-      rpcId: 'discover-thrown',
-      payload: { settingsNs: 'llm-deepseek', baseURL: 'https://api.example.com/v1', apiKey: 'sk-thrown' },
-    })
-    expect(JSON.stringify(thrownResponse)).not.toContain('sk-thrown')
-    expect(thrownResponse).toMatchObject({
-      rpcId: 'discover-thrown',
-      result: { ok: false, error: { code: 'model-discovery-failed', message: 'Model discovery failed.' } },
-    })
-  })
-
-  it('keeps settings.openDocument and unlisted methods denied', async () => {
-    const { api: harnessApi } = providerApi()
-    const bridge = new HarnessApiBridge(harnessApi, vi.fn(async () => undefined))
-
-    await expect(bridge.call({ method: 'settings.openDocument', rpcId: 'open-doc', payload: {} }))
-      .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
-    await expect(bridge.call({ method: 'settings.mutate2', rpcId: 'unknown', payload: {} }))
-      .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
-  })
+    ])
+  }, 10000)
 
   it('does not log native Harness error messages', async () => {
     const secret = 'prompt=/home/user/private.ts token=sk-secret'

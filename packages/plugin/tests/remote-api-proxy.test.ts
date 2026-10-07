@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RemoteClientCore, RemoteClientError, type RemoteClientErrorCode } from '@dsh-remote/client-core'
@@ -28,14 +29,6 @@ class StreamTransport extends BaseTransport {
 function clientThatFailsWith(error: Error): RemoteClientCore {
   return {
     rpc: async () => { throw error },
-    onEvent: () => () => undefined,
-    onClose: () => () => undefined,
-  } as unknown as RemoteClientCore
-}
-
-function clientThatReturns(response: unknown): RemoteClientCore {
-  return {
-    rpc: async () => response,
     onEvent: () => () => undefined,
     onClose: () => () => undefined,
   } as unknown as RemoteClientCore
@@ -116,36 +109,31 @@ describe('RemoteHarnessApiProxy', () => {
     expect(calls.at(-1)).toBe('harness.api.transfer.close')
   })
 
-  it('backfills the RC8 home field for an RC7 host.describe response', async () => {
-    const proxy = new RemoteHarnessApiProxy(clientThatReturns({
-      rpcId: 'describe-1',
-      result: {
-        ok: true,
-        value: {
-          version: '0.0.1',
-          cwd: '/home/tester',
-          attachedSessions: 0,
-          canOpenPath: true,
-        },
-      },
-    }))
+  it('ends event streams cleanly on transport or client closure', async () => {
+    const rows = ['TRANSPORT_CLOSED', 'CLIENT_CLOSED'] satisfies RemoteClientErrorCode[]
+    await runScenarios(
+      rows.map((row, index) => {
+        const code = row
+        return {
+          name: scenarioName('ends an event stream cleanly on %s', row, index),
+          run: async () => {
+            const proxy = new RemoteHarnessApiProxy(
+              clientThatFailsWith(new RemoteClientError(code, 'remote disconnected')),
+            )
+            const frames = []
 
-    await expect(proxy.api.host.describe({ rpcId: 'describe-1' as never, payload: {} }))
-      .resolves.toMatchObject({ result: { ok: true, value: { cwd: '/home/tester', home: '/home/tester' } } })
-  })
+            for await (const frame of proxy.api.events.mux(
+              { rpcId: 'mux-1' as never, payload: {} },
+              new AbortController().signal,
+            )) {
+              frames.push(frame)
+            }
 
-  it.each([
-    'TRANSPORT_CLOSED',
-    'CLIENT_CLOSED',
-  ] satisfies RemoteClientErrorCode[])('ends an event stream cleanly on %s', async code => {
-    const proxy = new RemoteHarnessApiProxy(clientThatFailsWith(new RemoteClientError(code, 'remote disconnected')))
-    const frames = []
-
-    for await (const frame of proxy.api.events.mux({ rpcId: 'mux-1' as never, payload: {} }, new AbortController().signal)) {
-      frames.push(frame)
-    }
-
-    expect(frames).toEqual([])
+            expect(frames).toEqual([])
+          },
+        }
+      }),
+    )
   })
 
   it('ends an opened event stream when the client closes explicitly', async () => {

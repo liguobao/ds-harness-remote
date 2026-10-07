@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createStatusFeed,
@@ -10,46 +11,61 @@ interface FakeStatus { mode: 'local' | 'remote'; seq?: number }
 const CLOSED = 2
 const CONNECTING = 0
 
-afterEach(() => {
+const cleanupContract1 = () => {
   vi.useRealTimers()
-})
+}
+afterEach(cleanupContract1)
 
 describe('browser status feed', () => {
-  it('pushes frames to every subscriber over one connection and never reads status', () => {
-    const { feed, sources, readStatus } = stubFeed()
-    const first: FakeStatus[] = []
-    const second: FakeStatus[] = []
+  it('shares one status stream and replays it to late subscribers', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'pushes frames to every subscriber over one connection and never reads status',
+          run: () => {
+            const { feed, sources, readStatus } = stubFeed()
+            const first: FakeStatus[] = []
+            const second: FakeStatus[] = []
 
-    feed.subscribe(status => first.push(status))
-    feed.subscribe(status => second.push(status))
+            feed.subscribe((status) => first.push(status))
+            feed.subscribe((status) => second.push(status))
 
-    expect(sources.urls).toEqual(['/status.events'])
-    expect(feed.getSnapshot()).toBeUndefined()
+            expect(sources.urls).toEqual(['/status.events'])
+            expect(feed.getSnapshot()).toBeUndefined()
 
-    sources.latest.message(JSON.stringify({ mode: 'remote', seq: 1 }))
+            sources.latest.message(JSON.stringify({ mode: 'remote', seq: 1 }))
 
-    expect(first).toEqual([{ mode: 'remote', seq: 1 }])
-    expect(second).toEqual([{ mode: 'remote', seq: 1 }])
-    // The pushed value is referentially stable between frames.
-    expect(feed.getSnapshot()).toBe(first[0])
-    expect(feed.getSnapshot()).toBe(feed.getSnapshot())
+            expect(first).toEqual([{ mode: 'remote', seq: 1 }])
+            expect(second).toEqual([{ mode: 'remote', seq: 1 }])
+            // The pushed value is referentially stable between frames.
+            expect(feed.getSnapshot()).toBe(first[0])
+            expect(feed.getSnapshot()).toBe(feed.getSnapshot())
 
-    sources.latest.message(JSON.stringify({ mode: 'remote', seq: 2 }))
-    expect(feed.getSnapshot()).toEqual({ mode: 'remote', seq: 2 })
-    expect(readStatus).not.toHaveBeenCalled()
-  })
+            sources.latest.message(JSON.stringify({ mode: 'remote', seq: 2 }))
+            expect(feed.getSnapshot()).toEqual({ mode: 'remote', seq: 2 })
+            expect(readStatus).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'replays the latest status to a late subscriber without opening a second stream',
+          run: () => {
+            const { feed, sources } = stubFeed()
+            feed.subscribe(() => undefined)
+            sources.latest.message(JSON.stringify({ mode: 'remote' }))
 
-  it('replays the latest status to a late subscriber without opening a second stream', () => {
-    const { feed, sources } = stubFeed()
-    feed.subscribe(() => undefined)
-    sources.latest.message(JSON.stringify({ mode: 'remote' }))
+            const late: FakeStatus[] = []
+            feed.subscribe((status) => late.push(status))
 
-    const late: FakeStatus[] = []
-    feed.subscribe(status => late.push(status))
-
-    expect(late).toEqual([{ mode: 'remote' }])
-    expect(sources.urls).toHaveLength(1)
-  })
+            expect(late).toEqual([{ mode: 'remote' }])
+            expect(sources.urls).toHaveLength(1)
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 10000)
 
   it('ignores a frame that is not a JSON object', () => {
     const { feed, sources } = stubFeed()
@@ -75,93 +91,135 @@ describe('browser status feed', () => {
     expect(sources.latest.closed).toBe(false)
   })
 
-  it('polls the unary status endpoint when the host closes the stream for good', async () => {
-    vi.useFakeTimers()
-    let status: FakeStatus = { mode: 'remote', seq: 1 }
-    const { feed, sources, readStatus } = stubFeed(async () => status)
-    const seen: FakeStatus[] = []
+  it('falls back to bounded status polling after carrier failures', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'polls the unary status endpoint when the host closes the stream for good',
+          run: async () => {
+            vi.useFakeTimers()
+            let status: FakeStatus = { mode: 'remote', seq: 1 }
+            const { feed, sources, readStatus } = stubFeed(async () => status)
+            const seen: FakeStatus[] = []
 
-    feed.subscribe(next => seen.push(next))
-    sources.latest.fail(CLOSED)
-    await flush()
+            feed.subscribe((next) => seen.push(next))
+            sources.latest.fail(CLOSED)
+            await flush()
 
-    expect(readStatus).toHaveBeenCalledTimes(1)
-    expect(seen).toEqual([{ mode: 'remote', seq: 1 }])
+            expect(readStatus).toHaveBeenCalledTimes(1)
+            expect(seen).toEqual([{ mode: 'remote', seq: 1 }])
 
-    status = { mode: 'remote', seq: 2 }
-    await vi.advanceTimersByTimeAsync(100)
-    expect(readStatus).toHaveBeenCalledTimes(2)
-    expect(seen).toEqual([{ mode: 'remote', seq: 1 }, { mode: 'remote', seq: 2 }])
-  })
+            status = { mode: 'remote', seq: 2 }
+            await vi.advanceTimersByTimeAsync(100)
+            expect(readStatus).toHaveBeenCalledTimes(2)
+            expect(seen).toEqual([
+              { mode: 'remote', seq: 1 },
+              { mode: 'remote', seq: 2 },
+            ])
+          },
+        },
+        {
+          name: 'keeps the last status while the fallback read fails',
+          run: async () => {
+            vi.useFakeTimers()
+            const { feed, sources } = stubFeed(async () => {
+              throw new Error('control route down')
+            })
 
-  it('keeps the last status while the fallback read fails', async () => {
-    vi.useFakeTimers()
-    const { feed, sources } = stubFeed(async () => { throw new Error('control route down') })
+            feed.subscribe(() => undefined)
+            sources.latest.fail(CLOSED)
+            await vi.advanceTimersByTimeAsync(300)
 
-    feed.subscribe(() => undefined)
-    sources.latest.fail(CLOSED)
-    await vi.advanceTimersByTimeAsync(300)
+            expect(feed.getSnapshot()).toBeUndefined()
+          },
+        },
+        {
+          name: 'polls when the stream never delivers a first frame',
+          run: async () => {
+            vi.useFakeTimers()
+            const { feed, readStatus } = stubFeed(undefined, { openTimeoutMs: 50 })
+            feed.subscribe(() => undefined)
 
-    expect(feed.getSnapshot()).toBeUndefined()
-  })
+            await vi.advanceTimersByTimeAsync(40)
+            expect(readStatus).not.toHaveBeenCalled()
 
-  it('polls when the stream never delivers a first frame', async () => {
-    vi.useFakeTimers()
-    const { feed, readStatus } = stubFeed(undefined, { openTimeoutMs: 50 })
-    feed.subscribe(() => undefined)
+            await vi.advanceTimersByTimeAsync(20)
+            expect(readStatus).toHaveBeenCalledTimes(1)
+          },
+        },
+        {
+          name: 'polls when the carrier provides no EventSource',
+          run: async () => {
+            vi.useFakeTimers()
+            const reasons: string[] = []
+            const { feed, readStatus } = stubFeed(undefined, {
+              createSource: () => {
+                throw new ReferenceError('EventSource is not defined')
+              },
+              onFallback: (reason) => reasons.push(reason),
+            })
 
-    await vi.advanceTimersByTimeAsync(40)
-    expect(readStatus).not.toHaveBeenCalled()
+            feed.subscribe(() => undefined)
+            await flush()
 
-    await vi.advanceTimersByTimeAsync(20)
-    expect(readStatus).toHaveBeenCalledTimes(1)
-  })
+            expect(reasons).toEqual(['unsupported'])
+            expect(readStatus).toHaveBeenCalledTimes(1)
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 20000)
 
-  it('polls when the carrier provides no EventSource', async () => {
-    vi.useFakeTimers()
-    const reasons: string[] = []
-    const { feed, readStatus } = stubFeed(undefined, {
-      createSource: () => { throw new ReferenceError('EventSource is not defined') },
-      onFallback: reason => reasons.push(reason),
-    })
+  it('releases status listeners and transports on disposal', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'reports the fallback reason once and closes the stream with the last subscriber',
+          run: async () => {
+            vi.useFakeTimers()
+            const reasons: string[] = []
+            const { feed, sources, readStatus } = stubFeed(undefined, {
+              onFallback: (reason) => reasons.push(reason),
+            })
 
-    feed.subscribe(() => undefined)
-    await flush()
+            const unsubscribe = feed.subscribe(() => undefined)
+            sources.latest.fail(CLOSED)
+            sources.latest.fail(CLOSED)
+            await flush()
+            expect(reasons).toEqual(['unavailable'])
 
-    expect(reasons).toEqual(['unsupported'])
-    expect(readStatus).toHaveBeenCalledTimes(1)
-  })
+            unsubscribe()
+            await vi.advanceTimersByTimeAsync(300)
+            expect(readStatus).toHaveBeenCalledTimes(1)
 
-  it('reports the fallback reason once and closes the stream with the last subscriber', async () => {
-    vi.useFakeTimers()
-    const reasons: string[] = []
-    const { feed, sources, readStatus } = stubFeed(undefined, { onFallback: reason => reasons.push(reason) })
+            feed.subscribe(() => undefined)
+            expect(sources.urls).toHaveLength(2)
+          },
+        },
+        {
+          name: 'drops its listeners and transport on close',
+          run: () => {
+            const { feed, sources } = stubFeed()
+            const seen: FakeStatus[] = []
+            feed.subscribe((status) => seen.push(status))
 
-    const unsubscribe = feed.subscribe(() => undefined)
-    sources.latest.fail(CLOSED)
-    sources.latest.fail(CLOSED)
-    await flush()
-    expect(reasons).toEqual(['unavailable'])
+            feed.close()
+            sources.latest.message(JSON.stringify({ mode: 'remote' }))
 
-    unsubscribe()
-    await vi.advanceTimersByTimeAsync(300)
-    expect(readStatus).toHaveBeenCalledTimes(1)
+            expect(seen).toEqual([])
+            expect(sources.latest.closed).toBe(true)
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 10000)
 
-    feed.subscribe(() => undefined)
-    expect(sources.urls).toHaveLength(2)
-  })
-
-  it('drops its listeners and transport on close', () => {
-    const { feed, sources } = stubFeed()
-    const seen: FakeStatus[] = []
-    feed.subscribe(status => seen.push(status))
-
-    feed.close()
-    sources.latest.message(JSON.stringify({ mode: 'remote' }))
-
-    expect(seen).toEqual([])
-    expect(sources.latest.closed).toBe(true)
-  })
 })
 
 function stubFeed(

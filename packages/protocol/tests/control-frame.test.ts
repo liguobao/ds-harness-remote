@@ -1,9 +1,8 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import {
-  type ControlFrame,
   type HelloPayload,
   type HelloAckPayload,
-  type ConnectRequestPayload,
   type ConnectIncomingPayload,
   type RelayPayload,
   type SignalPayload,
@@ -15,6 +14,9 @@ import {
   createControlFrame,
   parseControlFrame,
 } from '../src/index.js'
+
+// Shared conformance fixtures cover the baseline envelopes, hello/connect/relay
+// payloads and errors. Keep only additional boundaries and factory checks here.
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -54,49 +56,31 @@ const validPayloads: Record<string, unknown> = {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('control frame envelope', () => {
-  it('accepts a valid envelope with v=1', () => {
-    const frame = makeFrame('ping', { nonce: 'test' })
-    expect(parseControlFrame(frame)).toMatchObject({ v: 1 })
-  })
-
-  it('rejects v !== 1', () => {
-    expect(() => parseControlFrame(makeFrame('ping', { nonce: 'test' }, 0))).toThrow()
-    expect(() => parseControlFrame(makeFrame('ping', { nonce: 'test' }, 2))).toThrow()
-  })
-
-  it('rejects missing id', () => {
-    const frame = { v: 1, type: 'ping', timestamp: Date.now(), payload: { nonce: 'test' } }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
-
-  it('rejects empty id', () => {
-    const frame = { v: 1, id: '', type: 'ping', timestamp: Date.now(), payload: { nonce: 'test' } }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
-
-  it('rejects missing type', () => {
-    const frame = { v: 1, id: 'x', timestamp: Date.now(), payload: { nonce: 'test' } }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
-
-  it('rejects unknown type', () => {
-    expect(() => parseControlFrame(makeFrame('unknown.type', {}))).toThrow()
-  })
-
-  it('rejects missing timestamp', () => {
-    const frame = { v: 1, id: 'x', type: 'ping', payload: { nonce: 'test' } }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
-
-  it('rejects non-positive timestamp', () => {
-    const frame = { v: 1, id: 'x', type: 'ping', timestamp: 0, payload: { nonce: 'test' } }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
-
-  it('rejects extra fields in envelope', () => {
-    const frame = { v: 1, id: 'x', type: 'ping', timestamp: Date.now(), payload: { nonce: 'test' }, extra: true }
-    expect(() => parseControlFrame(frame)).toThrow()
-  })
+  it('rejects invalid control frame envelope fields', async () => {
+    await runScenarios([
+      {
+        name: 'rejects v !== 1',
+        run: () => {
+          expect(() => parseControlFrame(makeFrame('ping', { nonce: 'test' }, 0))).toThrow()
+          expect(() => parseControlFrame(makeFrame('ping', { nonce: 'test' }, 2))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty id',
+        run: () => {
+          const frame = { v: 1, id: '', type: 'ping', timestamp: Date.now(), payload: { nonce: 'test' } }
+          expect(() => parseControlFrame(frame)).toThrow()
+        },
+      },
+      {
+        name: 'rejects non-positive timestamp',
+        run: () => {
+          const frame = { v: 1, id: 'x', type: 'ping', timestamp: 0, payload: { nonce: 'test' } }
+          expect(() => parseControlFrame(frame)).toThrow()
+        },
+      },
+    ])
+  }, 15000)
 
   it('round-trips through createControlFrame', () => {
     const original = createControlFrame('ping', { nonce: 'abc' })
@@ -125,51 +109,59 @@ describe('hello payload validation', () => {
     capabilities: ['transport.relay'],
   }
 
-  it('accepts valid hello payload', () => {
-    expect(parseControlFrame(makeFrame('hello', valid))).toBeDefined()
-  })
+  it('accepts additive hello metadata within version bounds', async () => {
+    await runScenarios([
+      {
+        name: 'accepts Host hello with harnessVersion',
+        run: () => {
+          const frame = parseControlFrame(
+            makeFrame('hello', {
+              ...valid,
+              role: 'host',
+              harnessVersion: '0.1.0-rc.8',
+            }),
+          )
+          expect(frame.payload).toMatchObject({ harnessVersion: '0.1.0-rc.8' })
+        },
+      },
+      {
+        name: 'accepts protocol versions at both safe integer boundaries',
+        run: () => {
+          expect(parseControlFrame(makeFrame('hello', { ...valid, protocols: [0] }))).toBeDefined()
+          expect(
+            parseControlFrame(
+              makeFrame('hello', {
+                ...valid,
+                protocols: [Number.MAX_SAFE_INTEGER],
+              }),
+            ),
+          ).toBeDefined()
+        },
+      },
+      {
+        name: 'accepts unknown capabilities for additive negotiation',
+        run: () => {
+          expect(
+            parseControlFrame(
+              makeFrame('hello', {
+                ...valid,
+                capabilities: ['transport.relay', 'example.future.v1'],
+              }),
+            ),
+          ).toBeDefined()
+        },
+      },
+      {
+        name: 'returns parsed payload with stripped unknown fields',
+        run: () => {
+          const withExtra = { ...valid, unknownField: 'should-be-stripped' }
+          const result = parseControlFrame(makeFrame('hello', withExtra))
+          expect(result.payload).not.toHaveProperty('unknownField')
+        },
+      },
+    ])
+  }, 20000)
 
-  it('accepts hello with host role', () => {
-    expect(parseControlFrame(makeFrame('hello', { ...valid, role: 'host' }))).toBeDefined()
-  })
-
-  it('accepts hello without clientVersion (optional per spec)', () => {
-    expect(parseControlFrame(makeFrame('hello', valid))).toBeDefined()
-  })
-
-  it('accepts hello with clientVersion', () => {
-    expect(parseControlFrame(makeFrame('hello', { ...valid, clientVersion: '0.2.24' }))).toBeDefined()
-  })
-
-  it('accepts Host hello with harnessVersion', () => {
-    const frame = parseControlFrame(makeFrame('hello', {
-      ...valid,
-      role: 'host',
-      harnessVersion: '0.1.0-rc.8',
-    }))
-    expect(frame.payload).toMatchObject({ harnessVersion: '0.1.0-rc.8' })
-  })
-
-  it('accepts protocol versions at both safe integer boundaries', () => {
-    expect(parseControlFrame(makeFrame('hello', { ...valid, protocols: [0] }))).toBeDefined()
-    expect(parseControlFrame(makeFrame('hello', {
-      ...valid,
-      protocols: [Number.MAX_SAFE_INTEGER],
-    }))).toBeDefined()
-  })
-
-  it('accepts unknown capabilities for additive negotiation', () => {
-    expect(parseControlFrame(makeFrame('hello', {
-      ...valid,
-      capabilities: ['transport.relay', 'example.future.v1'],
-    }))).toBeDefined()
-  })
-
-  it('returns parsed payload with stripped unknown fields', () => {
-    const withExtra = { ...valid, unknownField: 'should-be-stripped' }
-    const result = parseControlFrame(makeFrame('hello', withExtra))
-    expect(result.payload).not.toHaveProperty('unknownField')
-  })
 })
 
 describe('hello.ack payload validation', () => {
@@ -181,10 +173,6 @@ describe('hello.ack payload validation', () => {
     maxControlFrameBytes: 65536,
     maxRelayFrameBytes: 1048576,
   }
-
-  it('accepts valid hello.ack payload', () => {
-    expect(parseControlFrame(makeFrame('hello.ack', valid))).toBeDefined()
-  })
 
   it('accepts hello.ack with optional webrtc fields', () => {
     const withWebrtc = {
@@ -205,44 +193,6 @@ describe('hello.ack payload validation', () => {
   })
 })
 
-describe('connect.incoming payload validation', () => {
-  const valid: ConnectIncomingPayload = {
-    connectionId: 'conn-1',
-    clientDeviceId: 'client-1',
-    clientIdentityKey: 'key-1',
-    authorization: 'account',
-    preferredTransports: ['relay'],
-  }
-
-  it('accepts valid connect.incoming', () => {
-    expect(parseControlFrame(makeFrame('connect.incoming', valid))).toBeDefined()
-  })
-})
-
-describe('relay payload validation', () => {
-  const valid: RelayPayload = {
-    connectionId: 'conn-1',
-    targetDeviceId: 'host-1',
-    counter: 42,
-    ciphertext: 'encrypted',
-  }
-
-  it('accepts valid relay', () => {
-    expect(parseControlFrame(makeFrame('relay', valid))).toBeDefined()
-  })
-
-  it('accepts relay with counter = 0', () => {
-    expect(parseControlFrame(makeFrame('relay', { ...valid, counter: 0 }))).toBeDefined()
-  })
-
-  it('accepts relay with counter = Number.MAX_SAFE_INTEGER', () => {
-    expect(parseControlFrame(makeFrame('relay', {
-      ...valid,
-      counter: Number.MAX_SAFE_INTEGER,
-    }))).toBeDefined()
-  })
-})
-
 describe('signal.ice payload validation', () => {
   const valid: SignalIcePayload = {
     connectionId: 'conn-1',
@@ -254,22 +204,36 @@ describe('signal.ice payload validation', () => {
     },
   }
 
-  it('accepts valid signal.ice', () => {
-    expect(parseControlFrame(makeFrame('signal.ice', valid))).toBeDefined()
-  })
+  it('normalizes valid ICE candidate variants', async () => {
+    await runScenarios([
+      {
+        name: 'accepts valid signal.ice',
+        run: () => {
+          expect(parseControlFrame(makeFrame('signal.ice', valid))).toBeDefined()
+        },
+      },
+      {
+        name: 'accepts candidate with null sdpMid',
+        run: () => {
+          const withNull = { ...valid, candidate: { ...valid.candidate, sdpMid: null } }
+          expect(parseControlFrame(makeFrame('signal.ice', withNull))).toBeDefined()
+        },
+      },
+      {
+        name: 'normalizes invalid native sdpMLineIndex values to null',
+        run: () => {
+          const parsed = parseControlFrame(
+            makeFrame('signal.ice', {
+              ...valid,
+              candidate: { ...valid.candidate, sdpMLineIndex: 1.167066568144e-312 },
+            }),
+          )
+          expect(parsed.payload.candidate.sdpMLineIndex).toBeNull()
+        },
+      },
+    ])
+  }, 15000)
 
-  it('accepts candidate with null sdpMid', () => {
-    const withNull = { ...valid, candidate: { ...valid.candidate, sdpMid: null } }
-    expect(parseControlFrame(makeFrame('signal.ice', withNull))).toBeDefined()
-  })
-
-  it('normalizes invalid native sdpMLineIndex values to null', () => {
-    const parsed = parseControlFrame(makeFrame('signal.ice', {
-      ...valid,
-      candidate: { ...valid.candidate, sdpMLineIndex: 1.167066568144e-312 },
-    }))
-    expect(parsed.payload.candidate.sdpMLineIndex).toBeNull()
-  })
 })
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -277,186 +241,229 @@ describe('signal.ice payload validation', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('hello payload rejection', () => {
-  it('rejects invalid role', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      role: 'admin',
-    }))).toThrow()
-  })
+  it('rejects invalid hello identity and negotiation fields', async () => {
+    await runScenarios([
+      {
+        name: 'rejects invalid role',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                role: 'admin',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing role',
+        run: () => {
+          const { role, ...noRole } = validPayloads['hello'] as HelloPayload
+          expect(() => parseControlFrame(makeFrame('hello', noRole))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty deviceId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                deviceId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing accessToken',
+        run: () => {
+          const { accessToken, ...noToken } = validPayloads['hello'] as HelloPayload
+          expect(() => parseControlFrame(makeFrame('hello', noToken))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty protocols',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                protocols: [],
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects protocol versions outside the safe integer range',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                protocols: [-1],
+              }),
+            ),
+          ).toThrow()
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                protocols: [Number.MAX_SAFE_INTEGER + 1],
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty and duplicate capabilities',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                capabilities: [''],
+              }),
+            ),
+          ).toThrow()
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello', {
+                ...(validPayloads['hello'] as HelloPayload),
+                capabilities: ['transport.relay', 'transport.relay'],
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing protocols',
+        run: () => {
+          const { protocols, ...noProtocols } = validPayloads['hello'] as HelloPayload
+          expect(() => parseControlFrame(makeFrame('hello', noProtocols))).toThrow()
+        },
+      },
+    ])
+  }, 40000)
 
-  it('rejects missing role', () => {
-    const { role, ...noRole } = validPayloads['hello'] as HelloPayload
-    expect(() => parseControlFrame(makeFrame('hello', noRole))).toThrow()
-  })
-
-  it('rejects empty deviceId', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      deviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects missing deviceId', () => {
-    const { deviceId, ...noDeviceId } = validPayloads['hello'] as HelloPayload
-    expect(() => parseControlFrame(makeFrame('hello', noDeviceId))).toThrow()
-  })
-
-  it('rejects empty accessToken', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      accessToken: '',
-    }))).toThrow()
-  })
-
-  it('rejects missing accessToken', () => {
-    const { accessToken, ...noToken } = validPayloads['hello'] as HelloPayload
-    expect(() => parseControlFrame(makeFrame('hello', noToken))).toThrow()
-  })
-
-  it('rejects empty protocols', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      protocols: [],
-    }))).toThrow()
-  })
-
-  it('rejects protocol versions outside the safe integer range', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      protocols: [-1],
-    }))).toThrow()
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      protocols: [Number.MAX_SAFE_INTEGER + 1],
-    }))).toThrow()
-  })
-
-  it('rejects duplicate protocol versions', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      protocols: [1, 1],
-    }))).toThrow()
-  })
-
-  it('rejects empty and duplicate capabilities', () => {
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      capabilities: [''],
-    }))).toThrow()
-    expect(() => parseControlFrame(makeFrame('hello', {
-      ...validPayloads['hello'] as HelloPayload,
-      capabilities: ['transport.relay', 'transport.relay'],
-    }))).toThrow()
-  })
-
-  it('rejects missing protocols', () => {
-    const { protocols, ...noProtocols } = validPayloads['hello'] as HelloPayload
-    expect(() => parseControlFrame(makeFrame('hello', noProtocols))).toThrow()
-  })
 })
 
 describe('hello.ack payload rejection', () => {
-  it('rejects protocol !== 1', () => {
-    expect(() => parseControlFrame(makeFrame('hello.ack', {
-      ...validPayloads['hello.ack'] as HelloAckPayload,
-      protocol: 2,
-    }))).toThrow()
-  })
+  it('rejects invalid hello acknowledgement limits', async () => {
+    await runScenarios([
+      {
+        name: 'rejects empty serverVersion',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello.ack', {
+                ...(validPayloads['hello.ack'] as HelloAckPayload),
+                serverVersion: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects zero heartbeatIntervalMs',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello.ack', {
+                ...(validPayloads['hello.ack'] as HelloAckPayload),
+                heartbeatIntervalMs: 0,
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects negative maxControlFrameBytes',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('hello.ack', {
+                ...(validPayloads['hello.ack'] as HelloAckPayload),
+                maxControlFrameBytes: -1,
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+    ])
+  }, 15000)
 
-  it('rejects empty serverVersion', () => {
-    expect(() => parseControlFrame(makeFrame('hello.ack', {
-      ...validPayloads['hello.ack'] as HelloAckPayload,
-      serverVersion: '',
-    }))).toThrow()
-  })
-
-  it('rejects zero heartbeatIntervalMs', () => {
-    expect(() => parseControlFrame(makeFrame('hello.ack', {
-      ...validPayloads['hello.ack'] as HelloAckPayload,
-      heartbeatIntervalMs: 0,
-    }))).toThrow()
-  })
-
-  it('rejects negative maxControlFrameBytes', () => {
-    expect(() => parseControlFrame(makeFrame('hello.ack', {
-      ...validPayloads['hello.ack'] as HelloAckPayload,
-      maxControlFrameBytes: -1,
-    }))).toThrow()
-  })
-})
-
-describe('connect.request payload rejection', () => {
-  it('rejects empty hostDeviceId', () => {
-    expect(() => parseControlFrame(makeFrame('connect.request', {
-      ...validPayloads['connect.request'] as ConnectRequestPayload,
-      hostDeviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects empty preferredTransports', () => {
-    expect(() => parseControlFrame(makeFrame('connect.request', {
-      ...validPayloads['connect.request'] as ConnectRequestPayload,
-      preferredTransports: [],
-    }))).toThrow()
-  })
-
-  it('rejects invalid transport value', () => {
-    expect(() => parseControlFrame(makeFrame('connect.request', {
-      ...validPayloads['connect.request'] as ConnectRequestPayload,
-      preferredTransports: ['udp'],
-    }))).toThrow()
-  })
 })
 
 describe('connect.incoming payload rejection', () => {
   const valid = validPayloads['connect.incoming'] as ConnectIncomingPayload
 
-  it('rejects authorization !== "account"', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      authorization: 'device',
-    }))).toThrow()
-  })
+  it('rejects invalid incoming connection authorization and routing', async () => {
+    await runScenarios([
+      {
+        name: 'rejects empty authorization',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('connect.incoming', {
+                ...valid,
+                authorization: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing authorization',
+        run: () => {
+          const { authorization, ...noAuth } = valid
+          expect(() => parseControlFrame(makeFrame('connect.incoming', noAuth))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty connectionId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('connect.incoming', {
+                ...valid,
+                connectionId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty clientDeviceId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('connect.incoming', {
+                ...valid,
+                clientDeviceId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty preferredTransports',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('connect.incoming', {
+                ...valid,
+                preferredTransports: [],
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+    ])
+  }, 25000)
 
-  it('rejects empty authorization', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      authorization: '',
-    }))).toThrow()
-  })
-
-  it('rejects missing authorization', () => {
-    const { authorization, ...noAuth } = valid
-    expect(() => parseControlFrame(makeFrame('connect.incoming', noAuth))).toThrow()
-  })
-
-  it('rejects empty connectionId', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      connectionId: '',
-    }))).toThrow()
-  })
-
-  it('rejects empty clientDeviceId', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      clientDeviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects empty clientIdentityKey', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      clientIdentityKey: '',
-    }))).toThrow()
-  })
-
-  it('rejects empty preferredTransports', () => {
-    expect(() => parseControlFrame(makeFrame('connect.incoming', {
-      ...valid,
-      preferredTransports: [],
-    }))).toThrow()
-  })
 })
 
 describe('relay payload rejection', () => {
@@ -468,59 +475,55 @@ describe('relay payload rejection', () => {
       connectionId: '',
     }))).toThrow()
   })
-
-  it('rejects empty targetDeviceId', () => {
-    expect(() => parseControlFrame(makeFrame('relay', {
-      ...valid,
-      targetDeviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects negative counter', () => {
-    expect(() => parseControlFrame(makeFrame('relay', {
-      ...valid,
-      counter: -1,
-    }))).toThrow()
-  })
-
-  it('rejects counters outside the safe integer range', () => {
-    expect(() => parseControlFrame(makeFrame('relay', {
-      ...valid,
-      counter: Number.MAX_SAFE_INTEGER + 1,
-    }))).toThrow()
-  })
-
-  it('rejects empty ciphertext', () => {
-    expect(() => parseControlFrame(makeFrame('relay', {
-      ...valid,
-      ciphertext: '',
-    }))).toThrow()
-  })
 })
 
 describe('signal payload rejection', () => {
   const valid = validPayloads['signal.offer'] as SignalPayload
 
-  it('rejects empty connectionId', () => {
-    expect(() => parseControlFrame(makeFrame('signal.offer', {
-      ...valid,
-      connectionId: '',
-    }))).toThrow()
-  })
+  it('rejects invalid SDP signal routing and content', async () => {
+    await runScenarios([
+      {
+        name: 'rejects empty connectionId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('signal.offer', {
+                ...valid,
+                connectionId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty targetDeviceId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('signal.offer', {
+                ...valid,
+                targetDeviceId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty sdp',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('signal.offer', {
+                ...valid,
+                sdp: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+    ])
+  }, 15000)
 
-  it('rejects empty targetDeviceId', () => {
-    expect(() => parseControlFrame(makeFrame('signal.offer', {
-      ...valid,
-      targetDeviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects empty sdp', () => {
-    expect(() => parseControlFrame(makeFrame('signal.offer', {
-      ...valid,
-      sdp: '',
-    }))).toThrow()
-  })
 })
 
 describe('transport.selected payload rejection', () => {
@@ -533,77 +536,113 @@ describe('transport.selected payload rejection', () => {
     })).payload).toMatchObject({ transport: 'lan' })
   })
 
-  it('rejects empty connectionId', () => {
-    expect(() => parseControlFrame(makeFrame('transport.selected', {
-      ...valid,
-      connectionId: '',
-    }))).toThrow()
-  })
+  it('rejects invalid selected transport payloads', async () => {
+    await runScenarios([
+      {
+        name: 'rejects empty connectionId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                connectionId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty targetDeviceId',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                targetDeviceId: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects invalid transport',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                transport: 'direct',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing transport',
+        run: () => {
+          const { transport, ...noTransport } = valid
+          expect(() => parseControlFrame(makeFrame('transport.selected', noTransport))).toThrow()
+        },
+      },
+    ])
+  }, 20000)
 
-  it('rejects empty targetDeviceId', () => {
-    expect(() => parseControlFrame(makeFrame('transport.selected', {
-      ...valid,
-      targetDeviceId: '',
-    }))).toThrow()
-  })
-
-  it('rejects invalid transport', () => {
-    expect(() => parseControlFrame(makeFrame('transport.selected', {
-      ...valid,
-      transport: 'direct',
-    }))).toThrow()
-  })
-
-  it('rejects missing transport', () => {
-    const { transport, ...noTransport } = valid
-    expect(() => parseControlFrame(makeFrame('transport.selected', noTransport))).toThrow()
-  })
 })
 
 describe('ping/pong payload rejection', () => {
-  it('rejects empty nonce in ping', () => {
-    expect(() => parseControlFrame(makeFrame('ping', { nonce: '' }))).toThrow()
-  })
+  it('requires nonempty ping and pong nonces', async () => {
+    await runScenarios([
+      {
+        name: 'rejects empty nonce in ping',
+        run: () => {
+          expect(() => parseControlFrame(makeFrame('ping', { nonce: '' }))).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing nonce in ping',
+        run: () => {
+          expect(() => parseControlFrame(makeFrame('ping', {}))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty nonce in pong',
+        run: () => {
+          expect(() => parseControlFrame(makeFrame('pong', { nonce: '' }))).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing nonce in pong',
+        run: () => {
+          expect(() => parseControlFrame(makeFrame('pong', {}))).toThrow()
+        },
+      },
+    ])
+  }, 20000)
 
-  it('rejects missing nonce in ping', () => {
-    expect(() => parseControlFrame(makeFrame('ping', {}))).toThrow()
-  })
-
-  it('rejects empty nonce in pong', () => {
-    expect(() => parseControlFrame(makeFrame('pong', { nonce: '' }))).toThrow()
-  })
-
-  it('rejects missing nonce in pong', () => {
-    expect(() => parseControlFrame(makeFrame('pong', {}))).toThrow()
-  })
 })
 
 describe('error payload rejection', () => {
   const valid = validPayloads['error'] as ControlErrorPayload
 
-  it('rejects empty code', () => {
-    expect(() => parseControlFrame(makeFrame('error', {
-      ...valid,
-      code: '',
-    }))).toThrow()
-  })
+  it('requires error codes and messages', async () => {
+    await runScenarios([
+      {
+        name: 'rejects missing code',
+        run: () => {
+          const { code, ...noCode } = valid
+          expect(() => parseControlFrame(makeFrame('error', noCode))).toThrow()
+        },
+      },
+      {
+        name: 'rejects missing message',
+        run: () => {
+          const { message, ...noMessage } = valid
+          expect(() => parseControlFrame(makeFrame('error', noMessage))).toThrow()
+        },
+      },
+    ])
+  }, 10000)
 
-  it('rejects missing code', () => {
-    const { code, ...noCode } = valid
-    expect(() => parseControlFrame(makeFrame('error', noCode))).toThrow()
-  })
-
-  it('rejects empty message', () => {
-    expect(() => parseControlFrame(makeFrame('error', {
-      ...valid,
-      message: '',
-    }))).toThrow()
-  })
-
-  it('rejects missing message', () => {
-    const { message, ...noMessage } = valid
-    expect(() => parseControlFrame(makeFrame('error', noMessage))).toThrow()
-  })
 })
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -619,9 +658,5 @@ describe('golden vectors', () => {
       'transport.selected', 'ping', 'pong', 'error',
     ]
     expect([...expected].sort()).toEqual([...Array.from(controlFrameTypes)].sort())
-  })
-
-  it('protocol version is 1', () => {
-    expect(PROTOCOL_VERSION).toBe(1)
   })
 })

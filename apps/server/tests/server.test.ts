@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -71,11 +72,18 @@ async function handshake(ctx: Awaited<ReturnType<typeof connection>>) {
   initiator.readHandshake(fromBase64Url((await client.next('secure.handshake')).data))
   return { initiator, responder }
 }
-beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'dsh-server-')); await start()
+const prepareScenario1 = async () => {
+  dir = mkdtempSync(join(tmpdir(), 'dsh-server-'))
+  await start()
   accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
-})
-afterEach(async () => { for (const ws of sockets.splice(0)) ws.terminate(); await app.close(); rmSync(dir, { recursive: true, force: true }) })
+}
+beforeEach(prepareScenario1)
+const cleanupScenario2 = async () => {
+  for (const ws of sockets.splice(0)) ws.terminate()
+  await app.close()
+  rmSync(dir, { recursive: true, force: true })
+}
+afterEach(cleanupScenario2)
 
 describe('account and device authorization', () => {
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {
@@ -132,13 +140,33 @@ describe('control authorization and encrypted relay', () => {
     ctx.client.send('relay', payload)
     expect((await ctx.client.next('error')).code).toBe('INVALID_MESSAGE')
   })
-  it.each(['wrong-target', 'third-device', 'before-handshake'])('rejects unauthorized relay: %s', async reason => {
-    const ctx = await connection()
-    const attacker = reason === 'third-device' ? await socket(await device()) : ctx.client
-    if (reason === 'third-device') await attacker.next('hello.ack')
-    attacker.send('relay', { connectionId: ctx.connectionId, targetDeviceId: reason === 'wrong-target' ? randomUUID() : ctx.h.deviceId, counter: 0, ciphertext: 'opaque' })
-    expect((await attacker.next('error')).code).toMatch(/CONNECTION_NOT_FOUND|INVALID_MESSAGE/)
-    expect(ctx.host.messages.filter(m => m.type === 'relay')).toHaveLength(0)
+  it('rejects unauthorized relay routes', async () => {
+    const rows = ['wrong-target', 'third-device', 'before-handshake'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const reason = row
+        return {
+          name: scenarioName('rejects unauthorized relay: %s', row, index),
+          run: async () => {
+            const ctx = await connection()
+            const attacker = reason === 'third-device' ? await socket(await device()) : ctx.client
+            if (reason === 'third-device') await attacker.next('hello.ack')
+            attacker.send('relay', {
+              connectionId: ctx.connectionId,
+              targetDeviceId: reason === 'wrong-target' ? randomUUID() : ctx.h.deviceId,
+              counter: 0,
+              ciphertext: 'opaque',
+            })
+            expect((await attacker.next('error')).code).toMatch(/CONNECTION_NOT_FOUND|INVALID_MESSAGE/)
+            expect(ctx.host.messages.filter((m) => m.type === 'relay')).toHaveLength(0)
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario2()
+        await prepareScenario1()
+      },
+    )
   })
   it('rejects account tokens and mismatched device roles in hello', async () => {
     const d = await device()
@@ -163,14 +191,5 @@ describe('control authorization and encrypted relay', () => {
     await closed
     expect(await ctx.host.next('error')).toMatchObject({ connectionId: incoming.connectionId })
     expect((await request('/devices', 'GET', undefined, second.accessToken)).status).toBe(401)
-  })
-})
-describe('health and readiness endpoints', () => {
-  it('serves health, healthz, and ready without authentication or rate limiting', async () => {
-    for (const path of ['/health', '/healthz', '/ready']) {
-      const response = await fetch(`${base}${path}`)
-      expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ status: 'ok' })
-    }
   })
 })

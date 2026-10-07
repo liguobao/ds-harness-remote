@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { createServer, type Server } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -17,47 +18,85 @@ import { PluginControlRuntime } from '../src/control-runtime.js'
 
 const servers: Server[] = []
 
-afterEach(async () => {
+const cleanupContract1 = async () => {
   vi.useRealTimers()
-  await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => {
-    server.closeAllConnections()
-    server.close(() => { resolve() })
-  })))
-})
+  await Promise.all(
+    servers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections()
+          server.close(() => {
+            resolve()
+          })
+        }),
+    ),
+  )
+}
+afterEach(cleanupContract1)
 
 describe('loopback status event stream', () => {
-  it('writes the retry hint and the current status as the first frame', async () => {
-    const stream = new ControlStatusStream(async () => ({ mode: 'remote', connected: true }), { retryMs: 3_000 })
-    const response = fakeResponse()
+  it('sends status baselines and changes to current and late subscribers', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'writes the retry hint and the current status as the first frame',
+          run: async () => {
+            const stream = new ControlStatusStream(async () => ({ mode: 'remote', connected: true }), {
+              retryMs: 3_000,
+            })
+            const response = fakeResponse()
 
-    await stream.handle(response.response)
+            await stream.handle(response.response)
 
-    expect(response.statusCode).toBe(200)
-    expect(response.headers).toMatchObject({ 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
-    expect(response.chunks).toEqual([
-      'retry: 3000\n\n',
-      'data: {"mode":"remote","connected":true}\n\n',
-    ])
-    stream.close()
-  })
+            expect(response.statusCode).toBe(200)
+            expect(response.headers).toMatchObject({
+              'content-type': 'text/event-stream',
+              'cache-control': 'no-store',
+            })
+            expect(response.chunks).toEqual(['retry: 3000\n\n', 'data: {"mode":"remote","connected":true}\n\n'])
+            stream.close()
+          },
+        },
+        {
+          name: 'pushes a frame only when the sampled status changes',
+          run: async () => {
+            vi.useFakeTimers()
+            let status: Record<string, unknown> = { mode: 'local' }
+            const readStatus = vi.fn(async () => status)
+            const stream = new ControlStatusStream(readStatus, { sampleIntervalMs: 10 })
+            const response = fakeResponse()
+            await stream.handle(response.response)
 
-  it('pushes a frame only when the sampled status changes', async () => {
-    vi.useFakeTimers()
-    let status: Record<string, unknown> = { mode: 'local' }
-    const readStatus = vi.fn(async () => status)
-    const stream = new ControlStatusStream(readStatus, { sampleIntervalMs: 10 })
-    const response = fakeResponse()
-    await stream.handle(response.response)
+            await vi.advanceTimersByTimeAsync(35)
+            expect(readStatus).toHaveBeenCalledTimes(4)
+            expect(response.chunks).toHaveLength(2)
 
-    await vi.advanceTimersByTimeAsync(35)
-    expect(readStatus).toHaveBeenCalledTimes(4)
-    expect(response.chunks).toHaveLength(2)
+            status = { mode: 'remote' }
+            await vi.advanceTimersByTimeAsync(10)
+            expect(response.chunks.at(-1)).toBe('data: {"mode":"remote"}\n\n')
+            stream.close()
+          },
+        },
+        {
+          name: 'serves a late subscriber the current status without waiting for a change',
+          run: async () => {
+            const stream = new ControlStatusStream(async () => ({ mode: 'remote' }))
+            const first = fakeResponse()
+            await stream.handle(first.response)
+            const second = fakeResponse()
 
-    status = { mode: 'remote' }
-    await vi.advanceTimersByTimeAsync(10)
-    expect(response.chunks.at(-1)).toBe('data: {"mode":"remote"}\n\n')
-    stream.close()
-  })
+            await stream.handle(second.response)
+
+            expect(second.chunks.at(-1)).toBe('data: {"mode":"remote"}\n\n')
+            stream.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 15000)
 
   it('keeps an idle connection alive with a comment frame', async () => {
     vi.useFakeTimers()
@@ -74,31 +113,78 @@ describe('loopback status event stream', () => {
     stream.close()
   })
 
-  it('stops sampling when the client disconnects', async () => {
-    vi.useFakeTimers()
-    const readStatus = vi.fn(async () => ({ mode: 'local' }))
-    const stream = new ControlStatusStream(readStatus, { sampleIntervalMs: 10 })
-    const response = fakeResponse()
-    await stream.handle(response.response)
+  it('cleans up disconnected, failed and disposed status streams', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'stops sampling when the client disconnects',
+          run: async () => {
+            vi.useFakeTimers()
+            const readStatus = vi.fn(async () => ({ mode: 'local' }))
+            const stream = new ControlStatusStream(readStatus, { sampleIntervalMs: 10 })
+            const response = fakeResponse()
+            await stream.handle(response.response)
 
-    response.disconnect()
-    await vi.advanceTimersByTimeAsync(100)
+            response.disconnect()
+            await vi.advanceTimersByTimeAsync(100)
 
-    expect(readStatus).toHaveBeenCalledTimes(1)
-    stream.close()
-  })
+            expect(readStatus).toHaveBeenCalledTimes(1)
+            stream.close()
+          },
+        },
+        {
+          name: 'drops a subscriber whose response fails and ends every stream on close',
+          run: async () => {
+            vi.useFakeTimers()
+            const broken = fakeResponse({ failWrites: true })
+            const healthy = fakeResponse()
+            const stream = new ControlStatusStream(async () => ({ mode: 'local' }), { sampleIntervalMs: 10 })
+            await stream.handle(broken.response)
+            await stream.handle(healthy.response)
+            const writesBefore = broken.writes
 
-  it('serves a late subscriber the current status without waiting for a change', async () => {
-    const stream = new ControlStatusStream(async () => ({ mode: 'remote' }))
-    const first = fakeResponse()
-    await stream.handle(first.response)
-    const second = fakeResponse()
+            await vi.advanceTimersByTimeAsync(30)
 
-    await stream.handle(second.response)
+            expect(broken.writes).toBe(writesBefore)
+            expect(healthy.chunks.length).toBeGreaterThanOrEqual(2)
 
-    expect(second.chunks.at(-1)).toBe('data: {"mode":"remote"}\n\n')
-    stream.close()
-  })
+            stream.close()
+            expect(healthy.ended).toBe(true)
+            const refused = fakeResponse()
+            await stream.handle(refused.response)
+            expect(refused.statusCode).toBe(503)
+          },
+        },
+        {
+          name: 'ends an open stream when the control route is disposed',
+          run: async () => {
+            const stream = new ControlStatusStream(async () => ({ mode: 'remote' }))
+            const route = captureRoute()
+            const dispose = registerControlRoute(
+              connectionHandle(),
+              async () => ({ ok: true, value: {} }),
+              route.webServer,
+              stream,
+            )
+            const base = await listen((req, res) => {
+              route.handle(req, res)
+            })
+
+            const response = await fetch(`${base}${STATUS_STREAM_PATH}`)
+            const reader = response.body!.getReader()
+            await readText(reader, (text) => text.includes('data: '))
+
+            await dispose()
+
+            await expect(reader.read()).resolves.toMatchObject({ done: true })
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 15000)
 
   it('keeps the connection open when the status read fails', async () => {
     vi.useFakeTimers()
@@ -116,27 +202,6 @@ describe('loopback status event stream', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(response.chunks.at(-1)).toBe('data: {"mode":"remote"}\n\n')
     stream.close()
-  })
-
-  it('drops a subscriber whose response fails and ends every stream on close', async () => {
-    vi.useFakeTimers()
-    const broken = fakeResponse({ failWrites: true })
-    const healthy = fakeResponse()
-    const stream = new ControlStatusStream(async () => ({ mode: 'local' }), { sampleIntervalMs: 10 })
-    await stream.handle(broken.response)
-    await stream.handle(healthy.response)
-    const writesBefore = broken.writes
-
-    await vi.advanceTimersByTimeAsync(30)
-
-    expect(broken.writes).toBe(writesBefore)
-    expect(healthy.chunks.length).toBeGreaterThanOrEqual(2)
-
-    stream.close()
-    expect(healthy.ended).toBe(true)
-    const refused = fakeResponse()
-    await stream.handle(refused.response)
-    expect(refused.statusCode).toBe(503)
   })
 
   it('serves the stream over the registered loopback route and keeps the RPC path intact', async () => {
@@ -210,20 +275,6 @@ describe('loopback status event stream', () => {
     await expect(response.text()).resolves.toBe('unauthorized')
   })
 
-  it('ends an open stream when the control route is disposed', async () => {
-    const stream = new ControlStatusStream(async () => ({ mode: 'remote' }))
-    const route = captureRoute()
-    const dispose = registerControlRoute(connectionHandle(), async () => ({ ok: true, value: {} }), route.webServer, stream)
-    const base = await listen((req, res) => { route.handle(req, res) })
-
-    const response = await fetch(`${base}${STATUS_STREAM_PATH}`)
-    const reader = response.body!.getReader()
-    await readText(reader, text => text.includes('data: '))
-
-    await dispose()
-
-    await expect(reader.read()).resolves.toMatchObject({ done: true })
-  })
 })
 
 interface FakeResponse {

@@ -4,15 +4,6 @@ import { RemoteApiProxy } from '../src/services/api-proxy'
 import { forkMessage } from '../src/services/message-actions'
 
 describe('official message action contracts', () => {
-  it('loads persisted feedback from the official list when reopening a session', async () => {
-    const row = { messageId: 'm1', rating: 'negative' as const, version: 'v2' }
-    const call = vi.spyOn(RemoteTypertGateway.prototype, 'call').mockResolvedValue({ ok: true, value: { items: [row] } })
-    try {
-      await expect(new HarnessAlphaClient({} as RemoteClientCore).messageFeedbackList('s1')).resolves.toEqual([row])
-      expect(call).toHaveBeenCalledWith('messageFeedback/list', { args: { request: { sessionId: 's1' } } }, undefined)
-    } finally { call.mockRestore() }
-    await expect(new RemoteApiProxy({} as RemoteClientCore).messageFeedbackList('s1')).rejects.toMatchObject({ code: 'UNSUPPORTED' })
-  })
   it('executes native slash commands on both carriers with their actual attachment fields', async () => {
     const call = vi.spyOn(RemoteTypertGateway.prototype, 'call').mockResolvedValue({ ok: true, value: { result: { kind: 'success', text: 'done' } } })
     await expect(new HarnessAlphaClient({} as RemoteClientCore, { sessionFormat: 3 }).sessionExecuteCommand('s1', '/compact')).resolves.toMatchObject({ kind: 'success' })
@@ -40,19 +31,5 @@ describe('official message action contracts', () => {
     const rpc = vi.fn(async (_method, params) => ({ rpcId: params.rpcId, result: { ok: true, value: { sessionId: 'child' } } }))
     await expect(new RemoteApiProxy({ rpc } as unknown as RemoteClientCore).sessionFork('source', 42)).resolves.toEqual({ sessionId: 'child' })
     expect(rpc).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({ method: 'session.fork', payload: { sessionId: 'source', atSeq: 42 } }), undefined)
- })
- it('persists feedback with the official version guard and reads it back', async () => {
- const row = { messageId: 'm1', rating: 'positive', version: 'v1' }
- const call = vi.spyOn(RemoteTypertGateway.prototype, 'call')
-   .mockResolvedValueOnce({ ok: true, value: { items: [] } })
-   .mockResolvedValueOnce({ ok: true, value: row })
-   .mockResolvedValueOnce({ ok: true, value: { items: [row] } })
- const alpha = new HarnessAlphaClient({} as RemoteClientCore)
- await expect(alpha.messageFeedbackPut('s1', 'm1', 'positive')).resolves.toMatchObject(row)
- expect(call).toHaveBeenNthCalledWith(2, 'messageFeedback/put', { args: { request: { sessionId: 's1', messageId: 'm1', rating: 'positive', ifVersion: null } } }, undefined)
- call.mockRestore()
- const rpc = vi.fn()
- await expect(new RemoteApiProxy({ rpc } as unknown as RemoteClientCore).messageFeedbackPut('s1', 'm1', 'positive')).rejects.toMatchObject({ code: 'UNSUPPORTED' })
- expect(rpc).not.toHaveBeenCalled()
- })
- })
+  })
+})

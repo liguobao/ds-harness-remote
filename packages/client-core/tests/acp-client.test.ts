@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
@@ -33,23 +34,48 @@ describe('ACP image transfer', () => {
     expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
   })
 
-  it('fails closed on a mismatched response chunk and releases the transfer', async () => {
-    let transferId = ''
-    const rpc = vi.fn(async (method: string, params: any) => {
-      if (method === 'agent.acp.transfer.open') transferId = params.transferId
-      if (method === 'agent.acp.transfer.commit') return { kind: 'chunked', transferId, totalBytes: 2, totalChunks: 1 }
-      if (method === 'agent.acp.transfer.read') return { transferId: 'another-transfer', index: 0, data: 'e30=' }
-      return {}
-    })
-    const client = new AgentAcpClient({ rpc } as never)
-    await expect(client.transferCall('dsh/sessionHistory', { sessionId: 'agy-session' })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
-    expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
-  })
+  it('releases failed or mismatched ACP response transfers', async () => {
+    await runScenarios([
+      {
+        name: 'fails closed on a mismatched response chunk and releases the transfer',
+        run: async () => {
+          let transferId = ''
+          const rpc = vi.fn(async (method: string, params: any) => {
+            if (method === 'agent.acp.transfer.open') transferId = params.transferId
+            if (method === 'agent.acp.transfer.commit')
+              return { kind: 'chunked', transferId, totalBytes: 2, totalChunks: 1 }
+            if (method === 'agent.acp.transfer.read')
+              return { transferId: 'another-transfer', index: 0, data: 'e30=' }
+            return {}
+          })
+          const client = new AgentAcpClient({ rpc } as never)
+          await expect(
+            client.transferCall('dsh/sessionHistory', { sessionId: 'agy-session' }),
+          ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+          expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
+        },
+      },
+      {
+        name: 'closes an unfinished transfer when a chunk fails',
+        run: async () => {
+          const rpc = vi.fn(async (method: string) => {
+            if (method === 'agent.acp.transfer.chunk') throw new Error('disconnected')
+            return {}
+          })
+          const client = new AgentAcpClient({ rpc } as never)
+          await expect(
+            client.prompt(
+              'agy-session',
+              '',
+              undefined,
+              [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+              'antigravity',
+            ),
+          ).rejects.toThrow('disconnected')
+          expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
+        },
+      },
+    ])
+  }, 10000)
 
-  it('closes an unfinished transfer when a chunk fails', async () => {
-    const rpc = vi.fn(async (method: string) => { if (method === 'agent.acp.transfer.chunk') throw new Error('disconnected'); return {} })
-    const client = new AgentAcpClient({ rpc } as never)
-    await expect(client.prompt('agy-session', '', undefined, [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }], 'antigravity')).rejects.toThrow('disconnected')
-    expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
-  })
 })

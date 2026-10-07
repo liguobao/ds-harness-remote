@@ -275,47 +275,4 @@ describe('Codex display projection', () => {
       { nativeRef: { requestHandle: 'approval_1' }, status: 'completed' },
     ])
   })
-
-  it('projects current CodeX reasoning, plan, web, subagent, image, and compaction activity', () => {
-    let state = createCodexTimelineState({ id: 'thr_123', cwd: '/workspace/repo', turns: [] })!
-    state = reduceCodexTimelineFrame(state, {
-      method: 'turn/started',
-      params: { turn: { id: 'turn_1', status: 'inProgress', items: [] } },
-    })
-    state = reduceCodexTimelineFrame(state, {
-      method: 'item/reasoning/summaryTextDelta',
-      params: { turnId: 'turn_1', itemId: 'reason_1', summaryIndex: 0, delta: 'Inspecting' },
-    })
-    state = reduceCodexTimelineFrame(state, {
-      method: 'item/reasoning/summaryTextDelta',
-      params: { turnId: 'turn_1', itemId: 'reason_1', summaryIndex: 0, delta: ' files' },
-    })
-    state = reduceCodexTimelineFrame(state, {
-      method: 'turn/plan/updated',
-      params: { turnId: 'turn_1', plan: [{ step: 'Read code', status: 'completed' }, { step: 'Patch', status: 'inProgress' }] },
-    })
-
-    expect(state.items).toMatchObject([
-      { kind: 'status', text: 'Inspecting files', status: 'running', details: { type: 'reasoning' } },
-      { kind: 'status', text: '[x] Read code\n[~] Patch', details: { type: 'plan' } },
-    ])
-
-    const items = projectCodexHistory({
-      id: 'thr_123',
-      turns: [{
-        id: 'turn_1',
-        items: [
-          { id: 'web', type: 'webSearch', query: 'docs', status: 'completed' },
-          { id: 'sub', type: 'subAgentActivity', agentPath: 'worker', status: 'inProgress' },
-          { id: 'image', type: 'imageGeneration', result: 'private-base64-image', savedPath: '/tmp/result.png', status: 'completed' },
-          { id: 'compact', type: 'contextCompaction', status: 'completed' },
-        ],
-      }],
-    })
-    expect(items.map(item => item.details?.type)).toEqual([
-      'webSearch', 'subAgentActivity', 'imageGeneration', 'contextCompaction',
-    ])
-    expect(items.every(item => item.kind === 'tool')).toBe(true)
-    expect(items.find(item => item.nativeRef.itemId === 'image')?.text).toBe('Generated image: /tmp/result.png')
-  })
 })

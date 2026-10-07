@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,9 +10,10 @@ import { ServerCredentialStore } from '../src/server-credentials.js'
 
 const directories: string[] = []
 
-afterEach(async () => {
-  await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
-})
+const cleanupContract1 = async () => {
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+}
+afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
   it('starts a GitHub QR login through the provider-aware Server endpoint', async () => {
@@ -116,122 +118,150 @@ describe('HostServerApi', () => {
     })
   })
 
-  it('logs in, authorizes Host registration, persists device credentials, and authenticates peer lookup', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-api-'))
-    directories.push(directory)
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input)
-      calls.push({ url, init })
-      if (url.endsWith('/auth/login')) return json({
-        token: 'web-account-token-value',
-        expiresAt: Date.now() + 600_000,
-        account: 'host@example.com',
-        profile: {},
-        isAdmin: false,
-      })
-      if (url.endsWith('/devices/register')) return json(tokens())
-      if (url.endsWith('/devices/client-1')) return json({
-        deviceId: 'client-1',
-        name: 'Browser',
-        role: 'client',
-        platform: 'web',
-        identityKey: generateKeyPair(new Uint8Array(32).fill(4)).publicKey,
-        membershipId: 'membership-1',
-      })
-      throw new Error(`unexpected request: ${url}`)
-    }) as unknown as typeof fetch
-    const store = new ServerCredentialStore(directory)
-    const api = new HostServerApi('https://dsh.r2049.cn/', store, fetchMock)
-    api.setHarnessVersion('0.1.0-rc.8')
-    const identity = hostIdentity()
+  it('authorizes Host enrollment through account, code or owned-role credentials', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'logs in, authorizes Host registration, persists device credentials, and authenticates peer lookup',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-server-api-'))
+            directories.push(directory)
+            const calls: Array<{ url: string; init?: RequestInit }> = []
+            const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+              const url = String(input)
+              calls.push({ url, init })
+              if (url.endsWith('/auth/login'))
+                return json({
+                  token: 'web-account-token-value',
+                  expiresAt: Date.now() + 600_000,
+                  account: 'host@example.com',
+                  profile: {},
+                  isAdmin: false,
+                })
+              if (url.endsWith('/devices/register')) return json(tokens())
+              if (url.endsWith('/devices/client-1'))
+                return json({
+                  deviceId: 'client-1',
+                  name: 'Browser',
+                  role: 'client',
+                  platform: 'web',
+                  identityKey: generateKeyPair(new Uint8Array(32).fill(4)).publicKey,
+                  membershipId: 'membership-1',
+                })
+              throw new Error(`unexpected request: ${url}`)
+            }) as unknown as typeof fetch
+            const store = new ServerCredentialStore(directory)
+            const api = new HostServerApi('https://dsh.r2049.cn/', store, fetchMock)
+            api.setHarnessVersion('0.1.0-rc.8')
+            const identity = hostIdentity()
 
-    await api.authorizeWithAccount(identity, 'host@example.com', 'correct horse battery staple')
-    await api.deviceFor('client-1')
+            await api.authorizeWithAccount(identity, 'host@example.com', 'correct horse battery staple')
+            await api.deviceFor('client-1')
 
-    expect(calls[0]?.url).toBe('https://dsh.r2049.cn/api/v1/auth/login')
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
-      email: 'host@example.com', password: 'correct horse battery staple',
-    })
-    expect(calls[1]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register')
-    expect(calls[1]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
-    const registeredDevice = JSON.parse(String(calls[1]?.init?.body))
-    expect(registeredDevice).toMatchObject({
-      v: 1,
-      device: { deviceId: identity.deviceId, role: 'host', identityKey: identity.publicKey },
-    })
-    expect(registeredDevice.device).toHaveProperty('harnessVersion', '0.1.0-rc.8')
-    expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
-    const stored = await readFile(join(directory, 'server-credentials.json'), 'utf8')
-    expect(stored).toContain('host@example.com')
-    expect(stored).not.toContain('correct horse battery staple')
-    expect(stored).not.toContain('web-account-token-value')
-    if (process.platform !== 'win32') {
-      expect((await stat(join(directory, 'server-credentials.json'))).mode & 0o777).toBe(0o600)
-    }
+            expect(calls[0]?.url).toBe('https://dsh.r2049.cn/api/v1/auth/login')
+            expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+              email: 'host@example.com',
+              password: 'correct horse battery staple',
+            })
+            expect(calls[1]?.url).toBe('https://dsh.r2049.cn/api/v1/devices/register')
+            expect(calls[1]?.init?.headers).toMatchObject({ Authorization: 'Bearer web-account-token-value' })
+            const registeredDevice = JSON.parse(String(calls[1]?.init?.body))
+            expect(registeredDevice).toMatchObject({
+              v: 1,
+              device: { deviceId: identity.deviceId, role: 'host', identityKey: identity.publicKey },
+            })
+            expect(registeredDevice.device).toHaveProperty('harnessVersion', '0.1.0-rc.8')
+            expect(calls[2]?.init?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
+            const stored = await readFile(join(directory, 'server-credentials.json'), 'utf8')
+            expect(stored).toContain('host@example.com')
+            expect(stored).not.toContain('correct horse battery staple')
+            expect(stored).not.toContain('web-account-token-value')
+            if (process.platform !== 'win32') {
+              expect((await stat(join(directory, 'server-credentials.json'))).mode & 0o777).toBe(0o600)
+            }
 
-    const reloaded = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
-    await reloaded.authenticate(identity)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(reloaded.currentAuthorization()).toMatchObject({ method: 'account', account: 'host@example.com' })
-  })
+            const reloaded = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            await reloaded.authenticate(identity)
+            expect(fetchMock).toHaveBeenCalledTimes(3)
+            expect(reloaded.currentAuthorization()).toMatchObject({
+              method: 'account',
+              account: 'host@example.com',
+            })
+          },
+        },
+        {
+          name: 'registers a Host with a one-time account enrollment code',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-server-code-'))
+            directories.push(directory)
+            const fetchMock = vi.fn(async () => json(tokens())) as unknown as typeof fetch
+            const store = new ServerCredentialStore(directory)
+            const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            api.setHarnessVersion('0.1.0-rc.8')
+            const identity = hostIdentity()
 
-  it('registers a Host with a one-time account enrollment code', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-code-'))
-    directories.push(directory)
-    const fetchMock = vi.fn(async () => json(tokens())) as unknown as typeof fetch
-    const store = new ServerCredentialStore(directory)
-    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
-    api.setHarnessVersion('0.1.0-rc.8')
-    const identity = hostIdentity()
+            await expect(api.authorizeHostWithCode(identity, 'abcd-efgh')).resolves.toEqual({
+              method: 'host_registration_code',
+            })
 
-    await expect(api.authorizeHostWithCode(identity, 'abcd-efgh')).resolves.toEqual({
-      method: 'host_registration_code',
-    })
+            expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe(
+              'https://dsh.r2049.cn/api/v1/devices/register-with-code',
+            )
+            expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))).toMatchObject({
+              code: 'ABCD-EFGH',
+              device: {
+                deviceId: identity.deviceId,
+                role: 'host',
+                identityKey: identity.publicKey,
+                harnessVersion: '0.1.0-rc.8',
+              },
+            })
+            await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
+              authorizationMethod: 'host_registration_code',
+            })
+          },
+        },
+        {
+          name: 'authorizes the opposite role from an already owned device credential',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-server-owned-role-'))
+            directories.push(directory)
+            const fetchMock = vi.fn(async () => json(tokens())) as unknown as typeof fetch
+            const store = new ServerCredentialStore(directory)
+            const api = new ClientServerApi('https://dsh.r2049.cn', store, fetchMock)
+            api.setHarnessVersion('0.1.0-rc.8')
+            const identity = hostIdentity()
 
-    expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe('https://dsh.r2049.cn/api/v1/devices/register-with-code')
-    expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))).toMatchObject({
-      code: 'ABCD-EFGH',
-      device: {
-        deviceId: identity.deviceId,
-        role: 'host',
-        identityKey: identity.publicKey,
-        harnessVersion: '0.1.0-rc.8',
+            await expect(
+              api.authorizeOwnedRole(identity, 'authorizing-device-token', 'owner@example.com'),
+            ).resolves.toEqual({
+              method: 'owned_device',
+              account: 'owner@example.com',
+            })
+
+            expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe(
+              'https://dsh.r2049.cn/api/v1/devices/register-owned-role',
+            )
+            expect(vi.mocked(fetchMock).mock.calls[0]?.[1]?.headers).toMatchObject({
+              Authorization: 'Bearer authorizing-device-token',
+            })
+            const registeredDevice = JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))
+            expect(registeredDevice).toMatchObject({
+              device: { deviceId: identity.deviceId, role: 'client' },
+            })
+            expect(registeredDevice.device).not.toHaveProperty('harnessVersion')
+            await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
+              authorizationMethod: 'owned_device',
+              account: 'owner@example.com',
+            })
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
       },
-    })
-    await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
-      authorizationMethod: 'host_registration_code',
-    })
-  })
-
-  it('authorizes the opposite role from an already owned device credential', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-owned-role-'))
-    directories.push(directory)
-    const fetchMock = vi.fn(async () => json(tokens())) as unknown as typeof fetch
-    const store = new ServerCredentialStore(directory)
-    const api = new ClientServerApi('https://dsh.r2049.cn', store, fetchMock)
-    api.setHarnessVersion('0.1.0-rc.8')
-    const identity = hostIdentity()
-
-    await expect(api.authorizeOwnedRole(identity, 'authorizing-device-token', 'owner@example.com')).resolves.toEqual({
-      method: 'owned_device',
-      account: 'owner@example.com',
-    })
-
-    expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe('https://dsh.r2049.cn/api/v1/devices/register-owned-role')
-    expect(vi.mocked(fetchMock).mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer authorizing-device-token',
-    })
-    const registeredDevice = JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))
-    expect(registeredDevice).toMatchObject({
-      device: { deviceId: identity.deviceId, role: 'client' },
-    })
-    expect(registeredDevice.device).not.toHaveProperty('harnessVersion')
-    await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
-      authorizationMethod: 'owned_device',
-      account: 'owner@example.com',
-    })
-  })
+    )
+  }, 15000)
 
   it('revokes the current Server device before clearing local credentials', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-sign-out-'))
@@ -270,82 +300,138 @@ describe('HostServerApi', () => {
     await expect(api.authenticate(hostIdentity())).rejects.toMatchObject({ code: 'ACCOUNT_AUTH_REQUIRED', retryable: false })
   })
 
-  it('rotates an expiring access token through the refresh endpoint', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-refresh-'))
-    directories.push(directory)
-    const identity = hostIdentity()
-    const store = new ServerCredentialStore(directory)
-    await store.save({
-      serverUrl: 'https://dsh.r2049.cn',
-      deviceId: identity.deviceId,
-      authorizationMethod: 'account',
-      account: 'host@example.com',
-      ...tokens({ accessTokenExpiresAt: Date.now() + 1_000 }),
-    })
-    const fetchMock = vi.fn(async () => json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }))) as unknown as typeof fetch
-    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+  it('single-flights credential rotation and releases failed refresh locks', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'rotates an expiring access token through the refresh endpoint',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-server-refresh-'))
+            directories.push(directory)
+            const identity = hostIdentity()
+            const store = new ServerCredentialStore(directory)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'account',
+              account: 'host@example.com',
+              ...tokens({ accessTokenExpiresAt: Date.now() + 1_000 }),
+            })
+            const fetchMock = vi.fn(async () =>
+              json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' })),
+            ) as unknown as typeof fetch
+            const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
 
-    await expect(api.authenticate(identity)).resolves.toMatchObject({ accessToken: 'rotated-access-value' })
-    await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({ account: 'host@example.com' })
-    expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))).toMatchObject({
-      deviceId: identity.deviceId,
-      refreshToken: 'refresh-token-value',
-    })
-  })
-
-  it('serializes expired-token refresh across independent API/store instances', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-refresh-'))
-    directories.push(directory)
-    const identity = hostIdentity()
-    const store = new ServerCredentialStore(directory)
-    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
-      authorizationMethod: 'owned_device', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
-    const fetchMock = vi.fn(async () => {
-      await new Promise(resolve => setTimeout(resolve, 75))
-      return json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }))
-    }) as unknown as typeof fetch
-    const first = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
-    const second = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
-    const results = await Promise.all([first.authenticate(identity), second.authenticate(identity)])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(results.map(result => result.accessToken)).toEqual(['rotated-access-value', 'rotated-access-value'])
-    expect(results[1]?.authorizationMethod).toBe('owned_device')
-  })
-
-  it('shares a rotation between explicit handshake recovery and authenticate', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-recovery-'))
-    directories.push(directory)
-    const identity = hostIdentity()
-    const store = new ServerCredentialStore(directory)
-    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
-      authorizationMethod: 'account', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
-    const fetchMock = vi.fn(async () => {
-      await new Promise(resolve => setTimeout(resolve, 75))
-      return json(tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }))
-    }) as unknown as typeof fetch
-    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
-    api.bindIdentity(identity)
-    const results = await Promise.all([
-      api.refreshCredentials('access-token-value'), api.authenticate(identity),
-      api.refreshCredentials('access-token-value'),
-    ])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(results.every(result => result.accessToken === 'rotated-access-value')).toBe(true)
-  })
-
-  it('preserves refresh rejection and releases the lock without retrying the token', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-rejected-refresh-'))
-    directories.push(directory)
-    const identity = hostIdentity()
-    const store = new ServerCredentialStore(directory)
-    await store.save({ serverUrl: 'https://dsh.r2049.cn', deviceId: identity.deviceId,
-      authorizationMethod: 'account', ...tokens({ accessTokenExpiresAt: Date.now() - 1 }) })
-    const fetchMock = vi.fn(async () => errorJson('AUTH_INVALID', 'refresh token reuse detected', 401)) as unknown as typeof fetch
-    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
-    await expect(api.authenticate(identity)).rejects.toMatchObject({ code: 'AUTH_INVALID', phase: 'credential_refresh', retryable: false })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    await expect(stat(join(directory, 'server-credentials.json.refresh-lock'))).rejects.toMatchObject({ code: 'ENOENT' })
-  })
+            await expect(api.authenticate(identity)).resolves.toMatchObject({
+              accessToken: 'rotated-access-value',
+            })
+            await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
+              account: 'host@example.com',
+            })
+            expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[0]?.[1]?.body))).toMatchObject({
+              deviceId: identity.deviceId,
+              refreshToken: 'refresh-token-value',
+            })
+          },
+        },
+        {
+          name: 'serializes expired-token refresh across independent API/store instances',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-refresh-'))
+            directories.push(directory)
+            const identity = hostIdentity()
+            const store = new ServerCredentialStore(directory)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'owned_device',
+              ...tokens({ accessTokenExpiresAt: Date.now() - 1 }),
+            })
+            const fetchMock = vi.fn(async () => {
+              await new Promise((resolve) => setTimeout(resolve, 75))
+              return json(
+                tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }),
+              )
+            }) as unknown as typeof fetch
+            const first = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            const second = new HostServerApi(
+              'https://dsh.r2049.cn',
+              new ServerCredentialStore(directory),
+              fetchMock,
+            )
+            const results = await Promise.all([first.authenticate(identity), second.authenticate(identity)])
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            expect(results.map((result) => result.accessToken)).toEqual([
+              'rotated-access-value',
+              'rotated-access-value',
+            ])
+            expect(results[1]?.authorizationMethod).toBe('owned_device')
+          },
+        },
+        {
+          name: 'shares a rotation between explicit handshake recovery and authenticate',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-shared-recovery-'))
+            directories.push(directory)
+            const identity = hostIdentity()
+            const store = new ServerCredentialStore(directory)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'account',
+              ...tokens({ accessTokenExpiresAt: Date.now() - 1 }),
+            })
+            const fetchMock = vi.fn(async () => {
+              await new Promise((resolve) => setTimeout(resolve, 75))
+              return json(
+                tokens({ accessToken: 'rotated-access-value', refreshToken: 'rotated-refresh-value' }),
+              )
+            }) as unknown as typeof fetch
+            const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            api.bindIdentity(identity)
+            const results = await Promise.all([
+              api.refreshCredentials('access-token-value'),
+              api.authenticate(identity),
+              api.refreshCredentials('access-token-value'),
+            ])
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            expect(results.every((result) => result.accessToken === 'rotated-access-value')).toBe(true)
+          },
+        },
+        {
+          name: 'preserves refresh rejection and releases the lock without retrying the token',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-rejected-refresh-'))
+            directories.push(directory)
+            const identity = hostIdentity()
+            const store = new ServerCredentialStore(directory)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'account',
+              ...tokens({ accessTokenExpiresAt: Date.now() - 1 }),
+            })
+            const fetchMock = vi.fn(async () =>
+              errorJson('AUTH_INVALID', 'refresh token reuse detected', 401),
+            ) as unknown as typeof fetch
+            const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            await expect(api.authenticate(identity)).rejects.toMatchObject({
+              code: 'AUTH_INVALID',
+              phase: 'credential_refresh',
+              retryable: false,
+            })
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            await expect(stat(join(directory, 'server-credentials.json.refresh-lock'))).rejects.toMatchObject({
+              code: 'ENOENT',
+            })
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 20000)
 
   it('registers the local remote-mode identity as a client device', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-client-'))

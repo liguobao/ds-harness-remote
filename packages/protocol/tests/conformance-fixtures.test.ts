@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
   acceptNegotiatedCapabilities,
   browserAuthorizationExchangeRequestSchema,
@@ -18,18 +19,39 @@ import { loadProtocolFixtures, type ProtocolFixtureCase } from './conformance-fi
 
 const suites = await loadProtocolFixtures()
 
-describe.each(suites)('$name conformance fixtures', suite => {
-  it.each(suite.cases)('$name', testCase => {
-    const execute = () => executeFixture(testCase)
-    if (!testCase.expect.accepted) {
-      expect(execute).toThrow()
-      return
+for (const suite of suites) {
+  describe(`${suite.name} conformance fixtures`, () => {
+    const contracts = new Map<string, ProtocolFixtureCase[]>()
+    for (const testCase of suite.cases) {
+      const input = fixtureInput(testCase)
+      const contract = testCase.operation === 'parseControlFrame'
+        ? `${testCase.operation}:${input.type ?? 'envelope'}`
+        : testCase.operation
+      const cases = contracts.get(contract) ?? []
+      cases.push(testCase)
+      contracts.set(contract, cases)
     }
-    const result = execute()
-    if ('selected' in testCase.expect) expect(result ?? null).toEqual(testCase.expect.selected)
-    if ('value' in testCase.expect) expect(result).toEqual(testCase.expect.value)
+    for (const [contract, cases] of contracts) {
+      it(contract, async () => {
+        await runScenarios(
+          cases.map((testCase) => ({
+            name: testCase.name,
+            run: () => {
+              const execute = () => executeFixture(testCase)
+              if (!testCase.expect.accepted) {
+                expect(execute).toThrow()
+                return
+              }
+              const result = execute()
+              if ('selected' in testCase.expect) expect(result ?? null).toEqual(testCase.expect.selected)
+              if ('value' in testCase.expect) expect(result).toEqual(testCase.expect.value)
+            },
+          })),
+        )
+      })
+    }
   })
-})
+}
 
 function executeFixture(testCase: ProtocolFixtureCase): unknown {
   const input = fixtureInput(testCase)

@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RTC_CHUNK_HEADER_BYTES,
@@ -48,7 +49,8 @@ function chunkFrame(
 }
 
 describe('RtcChunkCodec', () => {
-  afterEach(() => vi.useRealTimers())
+  const cleanupScenario1 = () => vi.useRealTimers()
+afterEach(cleanupScenario1)
 
   it('passes a small payload through without a chunk header', () => {
     const codec = new RtcChunkCodec()
@@ -120,24 +122,40 @@ describe('RtcChunkCodec', () => {
     expect(receivedByA[0]).toEqual(bToA)
   })
 
-  it('rejects messages above the reassembly limit', () => {
-    const codec = new RtcChunkCodec()
-    expect(() => codec.encode(bytes(RTC_CHUNK_MAX_MESSAGE_BYTES + 1))).toThrow(/limit/)
-  })
+  it('enforces outbound and inbound reassembly size bounds', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'rejects messages above the reassembly limit',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            expect(() => codec.encode(bytes(RTC_CHUNK_MAX_MESSAGE_BYTES + 1))).toThrow(/limit/)
+          },
+        },
+        {
+          name: 'enforces the reassembly limit for inbound frames',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            const maxChunks = Math.ceil(RTC_CHUNK_MAX_MESSAGE_BYTES / RTC_CHUNK_PAYLOAD_BYTES)
 
-  it('enforces the reassembly limit for inbound frames', () => {
-    const codec = new RtcChunkCodec()
-    const maxChunks = Math.ceil(RTC_CHUNK_MAX_MESSAGE_BYTES / RTC_CHUNK_PAYLOAD_BYTES)
-
-    expect(() => codec.decode(chunkFrame(0, maxChunks + 1))).toThrow(/metadata/)
-    expect(() => codec.decode(new Uint8Array(RTC_CHUNK_MAX_MESSAGE_BYTES + 1))).toThrow(/limit/)
-  })
-
-  it('rejects an oversized final chunk', () => {
-    const codec = new RtcChunkCodec()
-    expect(codec.decode(chunkFrame(0, 2))).toBeUndefined()
-    expect(() => codec.decode(chunkFrame(1, 2, RTC_CHUNK_PAYLOAD_BYTES + 1))).toThrow(/length/)
-  })
+            expect(() => codec.decode(chunkFrame(0, maxChunks + 1))).toThrow(/metadata/)
+            expect(() => codec.decode(new Uint8Array(RTC_CHUNK_MAX_MESSAGE_BYTES + 1))).toThrow(/limit/)
+          },
+        },
+        {
+          name: 'rejects an oversized final chunk',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            expect(codec.decode(chunkFrame(0, 2))).toBeUndefined()
+            expect(() => codec.decode(chunkFrame(1, 2, RTC_CHUNK_PAYLOAD_BYTES + 1))).toThrow(/length/)
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
+      },
+    )
+  }, 15000)
 
   it('rejects a chunk with a truncated header', () => {
     const codec = new RtcChunkCodec()
@@ -147,67 +165,125 @@ describe('RtcChunkCodec', () => {
     expect(() => codec.decode(frame)).toThrow(/header/)
   })
 
-  it.each([
-    ['a zero message ID', chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 0)],
-    ['one total chunk', chunkFrame(0, 1)],
-    ['an index equal to the total', chunkFrame(2, 2)],
-  ])('rejects invalid metadata with %s', (_name, frame) => {
-    expect(() => new RtcChunkCodec().decode(frame)).toThrow(/metadata/)
+  it('rejects invalid chunk metadata', async () => {
+    const rows = [
+      ['a zero message ID', chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 0)],
+      ['one total chunk', chunkFrame(0, 1)],
+      ['an index equal to the total', chunkFrame(2, 2)],
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const [_name, frame] = row
+        return {
+          name: scenarioName('rejects invalid metadata with %s', row, index),
+          run: () => {
+            expect(() => new RtcChunkCodec().decode(frame)).toThrow(/metadata/)
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
+      },
+    )
   })
 
-  it.each([
-    ['a short non-final chunk', chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES - 1)],
-    ['an empty final chunk', chunkFrame(1, 2, 0)],
-  ])('rejects invalid chunk length with %s', (_name, frame) => {
-    expect(() => new RtcChunkCodec().decode(frame)).toThrow(/length/)
+  it('rejects invalid chunk lengths', async () => {
+    const rows = [
+      ['a short non-final chunk', chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES - 1)],
+      ['an empty final chunk', chunkFrame(1, 2, 0)],
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const [_name, frame] = row
+        return {
+          name: scenarioName('rejects invalid chunk length with %s', row, index),
+          run: () => {
+            expect(() => new RtcChunkCodec().decode(frame)).toThrow(/length/)
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
+      },
+    )
   })
 
-  it('rejects an out-of-order first chunk', () => {
-    const codec = new RtcChunkCodec()
-    expect(() => codec.decode(chunkFrame(1, 2, 1))).toThrow(/sequence/)
-  })
+  it('rejects chunk sequence violations and clears invalid assemblies', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'rejects an out-of-order first chunk',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            expect(() => codec.decode(chunkFrame(1, 2, 1))).toThrow(/sequence/)
+          },
+        },
+        {
+          name: 'rejects a duplicate chunk and clears the invalid assembly',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            const first = chunkFrame(0, 2)
+            expect(codec.decode(first)).toBeUndefined()
+            expect(() => codec.decode(first)).toThrow(/sequence/)
 
-  it('rejects a duplicate chunk and clears the invalid assembly', () => {
-    const codec = new RtcChunkCodec()
-    const first = chunkFrame(0, 2)
-    expect(codec.decode(first)).toBeUndefined()
-    expect(() => codec.decode(first)).toThrow(/sequence/)
+            expect(codec.decode(first)).toBeUndefined()
+            expect(codec.decode(chunkFrame(1, 2, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
+          },
+        },
+        {
+          name: 'rejects a changed total and clears the invalid assembly',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            expect(codec.decode(chunkFrame(0, 3))).toBeUndefined()
+            expect(() => codec.decode(chunkFrame(1, 2, 1))).toThrow(/sequence/)
 
-    expect(codec.decode(first)).toBeUndefined()
-    expect(codec.decode(chunkFrame(1, 2, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
-  })
+            expect(codec.decode(chunkFrame(0, 2))).toBeUndefined()
+            expect(codec.decode(chunkFrame(1, 2, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
+      },
+    )
+  }, 15000)
 
-  it('rejects a changed total and clears the invalid assembly', () => {
-    const codec = new RtcChunkCodec()
-    expect(codec.decode(chunkFrame(0, 3))).toBeUndefined()
-    expect(() => codec.decode(chunkFrame(1, 2, 1))).toThrow(/sequence/)
+  it('bounds and prunes incomplete assemblies', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'limits incomplete message assemblies and admits a new one after completion',
+          run: () => {
+            const codec = new RtcChunkCodec()
+            for (let messageId = 1; messageId <= 8; messageId += 1) {
+              expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, messageId))).toBeUndefined()
+            }
+            expect(() => codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toThrow(/sequence/)
 
-    expect(codec.decode(chunkFrame(0, 2))).toBeUndefined()
-    expect(codec.decode(chunkFrame(1, 2, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
-  })
+            expect(codec.decode(chunkFrame(1, 2, 1, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
+            expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toBeUndefined()
+          },
+        },
+        {
+          name: 'prunes stale incomplete assemblies before enforcing the in-flight limit',
+          run: () => {
+            vi.useFakeTimers()
+            vi.setSystemTime(0)
+            const codec = new RtcChunkCodec()
+            for (let messageId = 1; messageId <= 8; messageId += 1) {
+              expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, messageId))).toBeUndefined()
+            }
 
-  it('limits incomplete message assemblies and admits a new one after completion', () => {
-    const codec = new RtcChunkCodec()
-    for (let messageId = 1; messageId <= 8; messageId += 1) {
-      expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, messageId))).toBeUndefined()
-    }
-    expect(() => codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toThrow(/sequence/)
-
-    expect(codec.decode(chunkFrame(1, 2, 1, 1))).toHaveLength(RTC_CHUNK_PAYLOAD_BYTES + 1)
-    expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toBeUndefined()
-  })
-
-  it('prunes stale incomplete assemblies before enforcing the in-flight limit', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(0)
-    const codec = new RtcChunkCodec()
-    for (let messageId = 1; messageId <= 8; messageId += 1) {
-      expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, messageId))).toBeUndefined()
-    }
-
-    vi.setSystemTime(30_001)
-    expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toBeUndefined()
-  })
+            vi.setSystemTime(30_001)
+            expect(codec.decode(chunkFrame(0, 2, RTC_CHUNK_PAYLOAD_BYTES, 9))).toBeUndefined()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
+      },
+    )
+  }, 10000)
 
   it('round-trips a message at the reassembly limit', () => {
     const encoder = new RtcChunkCodec()

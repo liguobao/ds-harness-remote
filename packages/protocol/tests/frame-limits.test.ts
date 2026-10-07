@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import {
   PROTOCOL_VERSION,
@@ -13,65 +14,70 @@ import {
 const MAX_IN_FLIGHT_SECURE_MESSAGES = 8
 
 describe('protocol limit constants', () => {
-  it('PROTOCOL_VERSION is 1', () => {
-    expect(PROTOCOL_VERSION).toBe(1)
-  })
+  it('preserves secure fragment and independent transfer budgets', async () => {
+    await runScenarios([
+      {
+        name: 'PROTOCOL_VERSION is 1',
+        run: () => {
+          expect(PROTOCOL_VERSION).toBe(1)
+        },
+      },
+      {
+        name: 'SECURE_FRAGMENT_CHUNK_BYTES is 48 KiB',
+        run: () => {
+          expect(SECURE_FRAGMENT_CHUNK_BYTES).toBe(48 * 1024)
+        },
+      },
+      {
+        name: 'MAX_SECURE_MESSAGE_BYTES is 4 MiB',
+        run: () => {
+          expect(MAX_SECURE_MESSAGE_BYTES).toBe(4 * 1024 * 1024)
+        },
+      },
+      {
+        name: 'keeps image transfers bounded without raising the secure-message limit',
+        run: () => {
+          expect(HARNESS_API_TRANSFER_CHUNK_BYTES).toBe(512 * 1024)
+          expect(MAX_HARNESS_API_TRANSFER_BYTES).toBe(288 * 1024 * 1024)
+          expect(HARNESS_API_TRANSFER_CHUNK_BYTES).toBeLessThan(MAX_SECURE_MESSAGE_BYTES)
+        },
+      },
+      {
+        name: 'keeps Codex history transfers in an independent bounded domain',
+        run: () => {
+          expect(CODEX_APP_TRANSFER_CHUNK_BYTES).toBe(512 * 1024)
+          expect(MAX_CODEX_APP_TRANSFER_BYTES).toBe(288 * 1024 * 1024)
+          expect(CODEX_APP_TRANSFER_CHUNK_BYTES).toBeLessThan(MAX_SECURE_MESSAGE_BYTES)
+        },
+      },
+    ])
+  }, 25000)
 
-  it('SECURE_FRAGMENT_CHUNK_BYTES is 48 KiB', () => {
-    expect(SECURE_FRAGMENT_CHUNK_BYTES).toBe(48 * 1024)
-  })
-
-  it('MAX_SECURE_MESSAGE_BYTES is 4 MiB', () => {
-    expect(MAX_SECURE_MESSAGE_BYTES).toBe(4 * 1024 * 1024)
-  })
-
-  it('keeps image transfers bounded without raising the secure-message limit', () => {
-    expect(HARNESS_API_TRANSFER_CHUNK_BYTES).toBe(512 * 1024)
-    expect(MAX_HARNESS_API_TRANSFER_BYTES).toBe(288 * 1024 * 1024)
-    expect(HARNESS_API_TRANSFER_CHUNK_BYTES).toBeLessThan(MAX_SECURE_MESSAGE_BYTES)
-  })
-
-  it('keeps Codex history transfers in an independent bounded domain', () => {
-    expect(CODEX_APP_TRANSFER_CHUNK_BYTES).toBe(512 * 1024)
-    expect(MAX_CODEX_APP_TRANSFER_BYTES).toBe(288 * 1024 * 1024)
-    expect(CODEX_APP_TRANSFER_CHUNK_BYTES).toBeLessThan(MAX_SECURE_MESSAGE_BYTES)
-  })
 })
 
 describe('SecureMessageCodec message size limit', () => {
-  it('accepts message at exactly MAX_SECURE_MESSAGE_BYTES', () => {
-    const codec = new SecureMessageCodec()
-    const message = new Uint8Array(MAX_SECURE_MESSAGE_BYTES)
-    const frames = codec.encode(message)
-    expect(frames.length).toBeGreaterThan(0)
-  })
+  it('enforces the secure message size boundary', async () => {
+    await runScenarios([
+      {
+        name: 'accepts message at exactly MAX_SECURE_MESSAGE_BYTES',
+        run: () => {
+          const codec = new SecureMessageCodec()
+          const message = new Uint8Array(MAX_SECURE_MESSAGE_BYTES)
+          const frames = codec.encode(message)
+          expect(frames.length).toBeGreaterThan(0)
+        },
+      },
+      {
+        name: 'rejects message exceeding MAX_SECURE_MESSAGE_BYTES',
+        run: () => {
+          const codec = new SecureMessageCodec()
+          const message = new Uint8Array(MAX_SECURE_MESSAGE_BYTES + 1)
+          expect(() => codec.encode(message)).toThrow('Secure message exceeds the reassembly limit.')
+        },
+      },
+    ])
+  }, 10000)
 
-  it('rejects message exceeding MAX_SECURE_MESSAGE_BYTES', () => {
-    const codec = new SecureMessageCodec()
-    const message = new Uint8Array(MAX_SECURE_MESSAGE_BYTES + 1)
-    expect(() => codec.encode(message)).toThrow('Secure message exceeds the reassembly limit.')
-  })
-
-  it('rejects message far exceeding limit', () => {
-    const codec = new SecureMessageCodec()
-    const message = new Uint8Array(MAX_SECURE_MESSAGE_BYTES * 2)
-    expect(() => codec.encode(message)).toThrow('Secure message exceeds the reassembly limit.')
-  })
-
-  it('accepts small messages without fragmentation', () => {
-    const codec = new SecureMessageCodec()
-    const message = new Uint8Array(100)
-    const frames = codec.encode(message)
-    expect(frames).toHaveLength(1)
-    expect(frames[0]).toEqual(message)
-  })
-
-  it('fragments messages larger than SECURE_FRAGMENT_CHUNK_BYTES', () => {
-    const codec = new SecureMessageCodec()
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES + 1)
-    const frames = codec.encode(message)
-    expect(frames.length).toBeGreaterThan(1)
-  })
 })
 
 describe('SecureMessageCodec fragment reassembly limits', () => {
@@ -91,29 +97,38 @@ describe('SecureMessageCodec fragment reassembly limits', () => {
     expect(() => decoder.decode(allFrames[8]![0]!)).toThrow('Secure fragment sequence is invalid.')
   })
 
-  it('rejects out-of-order fragments', () => {
-    const encoder = new SecureMessageCodec()
-    const decoder = new SecureMessageCodec()
+  it('rejects repeated or unordered fragments', async () => {
+    await runScenarios([
+      {
+        name: 'rejects out-of-order fragments',
+        run: () => {
+          const encoder = new SecureMessageCodec()
+          const decoder = new SecureMessageCodec()
 
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES * 3)
-    const frames = encoder.encode(message)
-    expect(frames).toHaveLength(3)
+          const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES * 3)
+          const frames = encoder.encode(message)
+          expect(frames).toHaveLength(3)
 
-    decoder.decode(frames[0]!)
-    expect(() => decoder.decode(frames[2]!)).toThrow('Secure fragment sequence is invalid.')
-  })
+          decoder.decode(frames[0]!)
+          expect(() => decoder.decode(frames[2]!)).toThrow('Secure fragment sequence is invalid.')
+        },
+      },
+      {
+        name: 'rejects duplicate fragment index',
+        run: () => {
+          const encoder = new SecureMessageCodec()
+          const decoder = new SecureMessageCodec()
 
-  it('rejects duplicate fragment index', () => {
-    const encoder = new SecureMessageCodec()
-    const decoder = new SecureMessageCodec()
+          const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES * 2)
+          const frames = encoder.encode(message)
+          expect(frames).toHaveLength(2)
 
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES * 2)
-    const frames = encoder.encode(message)
-    expect(frames).toHaveLength(2)
-
-    decoder.decode(frames[0]!)
-    expect(() => decoder.decode(frames[0]!)).toThrow('Secure fragment sequence is invalid.')
-  })
+          decoder.decode(frames[0]!)
+          expect(() => decoder.decode(frames[0]!)).toThrow('Secure fragment sequence is invalid.')
+        },
+      },
+    ])
+  }, 10000)
 
   it('rejects fragment with wrong chunk size', () => {
     const encoder = new SecureMessageCodec()
@@ -130,16 +145,111 @@ describe('SecureMessageCodec fragment reassembly limits', () => {
 })
 
 describe('SecureMessageCodec fragment header validation', () => {
-  it('rejects fragment with invalid version', () => {
-    const codec = new SecureMessageCodec()
+  it('rejects malformed fragment metadata', async () => {
+    await runScenarios([
+      {
+        name: 'rejects fragment with invalid version',
+        run: () => {
+          const codec = new SecureMessageCodec()
 
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES + 1)
-    const frames = new SecureMessageCodec().encode(message)
-    const corrupted = new Uint8Array(frames[0]!)
-    corrupted[4] = 99
+          const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES + 1)
+          const frames = new SecureMessageCodec().encode(message)
+          const corrupted = new Uint8Array(frames[0]!)
+          corrupted[4] = 99
 
-    expect(() => codec.decode(corrupted)).toThrow('Secure fragment header is invalid.')
-  })
+          expect(() => codec.decode(corrupted)).toThrow('Secure fragment header is invalid.')
+        },
+      },
+      {
+        name: 'rejects fragment with messageId = 0',
+        run: () => {
+          const codec = new SecureMessageCodec()
+
+          const fragment = new Uint8Array(17 + 100)
+          fragment.set([0x44, 0x53, 0x48, 0x46])
+          fragment[4] = 1
+          const view = new DataView(fragment.buffer)
+          view.setUint32(5, 0)
+          view.setUint16(9, 0)
+          view.setUint16(11, 2)
+          view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
+
+          expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
+        },
+      },
+      {
+        name: 'rejects fragment with total < 2',
+        run: () => {
+          const codec = new SecureMessageCodec()
+
+          const fragment = new Uint8Array(17 + 100)
+          fragment.set([0x44, 0x53, 0x48, 0x46])
+          fragment[4] = 1
+          const view = new DataView(fragment.buffer)
+          view.setUint32(5, 1)
+          view.setUint16(9, 0)
+          view.setUint16(11, 1)
+          view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
+
+          expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
+        },
+      },
+      {
+        name: 'rejects fragment with index >= total',
+        run: () => {
+          const codec = new SecureMessageCodec()
+
+          const fragment = new Uint8Array(17 + 100)
+          fragment.set([0x44, 0x53, 0x48, 0x46])
+          fragment[4] = 1
+          const view = new DataView(fragment.buffer)
+          view.setUint32(5, 1)
+          view.setUint16(9, 2)
+          view.setUint16(11, 2)
+          view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
+
+          expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
+        },
+      },
+      {
+        name: 'rejects fragment with totalBytes <= SECURE_FRAGMENT_CHUNK_BYTES',
+        run: () => {
+          const codec = new SecureMessageCodec()
+
+          const fragment = new Uint8Array(17 + 100)
+          fragment.set([0x44, 0x53, 0x48, 0x46])
+          fragment[4] = 1
+          const view = new DataView(fragment.buffer)
+          view.setUint32(5, 1)
+          view.setUint16(9, 0)
+          view.setUint16(11, 2)
+          view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES)
+
+          expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
+        },
+      },
+      {
+        name: 'rejects fragment with totalBytes > MAX_SECURE_MESSAGE_BYTES',
+        run: () => {
+          const codec = new SecureMessageCodec()
+
+          const totalBytes = MAX_SECURE_MESSAGE_BYTES + 1
+          const total = Math.ceil(totalBytes / SECURE_FRAGMENT_CHUNK_BYTES)
+
+          const fragment = new Uint8Array(17 + SECURE_FRAGMENT_CHUNK_BYTES)
+          fragment.set([0x44, 0x53, 0x48, 0x46])
+          fragment[4] = 1
+          const view = new DataView(fragment.buffer)
+          view.setUint32(5, 1)
+          view.setUint16(9, 0)
+          view.setUint16(11, total)
+          view.setUint32(13, totalBytes)
+
+          expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
+        },
+      },
+    ])
+  }, 30000)
 
   // KNOWN BUG: Same magic-prefix collision issue as above
   it.fails('treats message smaller than header size as non-fragment', () => {
@@ -151,83 +261,6 @@ describe('SecureMessageCodec fragment header validation', () => {
     expect(codec.decode(tiny)).toEqual(tiny)
   })
 
-  it('rejects fragment with messageId = 0', () => {
-    const codec = new SecureMessageCodec()
-
-    const fragment = new Uint8Array(17 + 100)
-    fragment.set([0x44, 0x53, 0x48, 0x46])
-    fragment[4] = 1
-    const view = new DataView(fragment.buffer)
-    view.setUint32(5, 0)
-    view.setUint16(9, 0)
-    view.setUint16(11, 2)
-    view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
-
-    expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
-  })
-
-  it('rejects fragment with total < 2', () => {
-    const codec = new SecureMessageCodec()
-
-    const fragment = new Uint8Array(17 + 100)
-    fragment.set([0x44, 0x53, 0x48, 0x46])
-    fragment[4] = 1
-    const view = new DataView(fragment.buffer)
-    view.setUint32(5, 1)
-    view.setUint16(9, 0)
-    view.setUint16(11, 1)
-    view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
-
-    expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
-  })
-
-  it('rejects fragment with index >= total', () => {
-    const codec = new SecureMessageCodec()
-
-    const fragment = new Uint8Array(17 + 100)
-    fragment.set([0x44, 0x53, 0x48, 0x46])
-    fragment[4] = 1
-    const view = new DataView(fragment.buffer)
-    view.setUint32(5, 1)
-    view.setUint16(9, 2)
-    view.setUint16(11, 2)
-    view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES + 100)
-
-    expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
-  })
-
-  it('rejects fragment with totalBytes <= SECURE_FRAGMENT_CHUNK_BYTES', () => {
-    const codec = new SecureMessageCodec()
-
-    const fragment = new Uint8Array(17 + 100)
-    fragment.set([0x44, 0x53, 0x48, 0x46])
-    fragment[4] = 1
-    const view = new DataView(fragment.buffer)
-    view.setUint32(5, 1)
-    view.setUint16(9, 0)
-    view.setUint16(11, 2)
-    view.setUint32(13, SECURE_FRAGMENT_CHUNK_BYTES)
-
-    expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
-  })
-
-  it('rejects fragment with totalBytes > MAX_SECURE_MESSAGE_BYTES', () => {
-    const codec = new SecureMessageCodec()
-
-    const totalBytes = MAX_SECURE_MESSAGE_BYTES + 1
-    const total = Math.ceil(totalBytes / SECURE_FRAGMENT_CHUNK_BYTES)
-
-    const fragment = new Uint8Array(17 + SECURE_FRAGMENT_CHUNK_BYTES)
-    fragment.set([0x44, 0x53, 0x48, 0x46])
-    fragment[4] = 1
-    const view = new DataView(fragment.buffer)
-    view.setUint32(5, 1)
-    view.setUint16(9, 0)
-    view.setUint16(11, total)
-    view.setUint32(13, totalBytes)
-
-    expect(() => codec.decode(fragment)).toThrow('Secure fragment metadata is invalid.')
-  })
 })
 
 describe('SecureMessageCodec round-trip integrity', () => {
@@ -285,9 +318,7 @@ describe('SecureMessageCodec round-trip integrity', () => {
 
       const frames = encoder.encode(message)
 
-      if (size <= SECURE_FRAGMENT_CHUNK_BYTES) {
-        expect(frames).toHaveLength(1)
-      }
+      expect(frames).toHaveLength(Math.ceil(size / SECURE_FRAGMENT_CHUNK_BYTES))
 
       let result: Uint8Array | undefined
       for (const frame of frames) {
@@ -323,34 +354,5 @@ describe('SecureMessageCodec round-trip integrity', () => {
 
     expect(result).toBeDefined()
     expect(result!.byteLength).toBe(message2.byteLength)
-  })
-
-  it('handles fragment chunk boundary exactly', () => {
-    const encoder = new SecureMessageCodec()
-    const decoder = new SecureMessageCodec()
-
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES)
-    const frames = encoder.encode(message)
-
-    expect(frames).toHaveLength(1)
-
-    const result = decoder.decode(frames[0]!)
-    expect(result).toEqual(message)
-  })
-
-  it('handles fragment chunk boundary + 1', () => {
-    const encoder = new SecureMessageCodec()
-    const decoder = new SecureMessageCodec()
-
-    const message = new Uint8Array(SECURE_FRAGMENT_CHUNK_BYTES + 1)
-    const frames = encoder.encode(message)
-
-    expect(frames).toHaveLength(2)
-
-    decoder.decode(frames[0]!)
-    const result = decoder.decode(frames[1]!)
-
-    expect(result).toBeDefined()
-    expect(result!.byteLength).toBe(message.byteLength)
   })
 })

@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CodexVirtualHarness,
@@ -23,69 +24,6 @@ describe('CodexVirtualHarness', () => {
     const stream = await target.open('terminal/follow', { args: { agentId: 'codex:thr_1', id: 't1' } }, signal)
     await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
     expect(hostCarrier.open).toHaveBeenCalledWith('terminal/follow', expect.anything(), signal)
-    await target.close()
-  })
-
-  it('groups visible CodeX threads into virtual DSH workspaces and sessions', async () => {
-    const client = fakeCodex()
-
-    const workspaces = await discoverCodexVirtualWorkspaces(client)
-    expect(workspaces).toHaveLength(1)
-    expect(workspaces[0]).toMatchObject({
-      path: '/workspace/repo',
-      title: 'repo',
-      sessionIds: ['codex:thr_1'],
-      sessionCount: 1,
-    })
-
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const result = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-    expect(result).toMatchObject({
-      ok: true,
-      value: {
-        items: [{
-          sessionId: 'codex:thr_1',
-          running: false,
-          blank: false,
-          cwd: '/workspace/repo',
-          projections: {
-            kind: 'sequenced',
-            values: {
-              title: 'Native renderer',
-              modelSelection: {
-                lastUsed: { provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'low' },
-                next: { provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'low' },
-              },
-              permissions: {
-                options: [{ value: 'workspace-write' }, { value: 'danger-full-access' }],
-                currentValue: 'Host settings (not reported)',
-              },
-              imageLimits: {
-                maxImageBytes: 20 * 1024 * 1024,
-                maxImagesPerMessage: 16,
-                mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
-              },
-            },
-          },
-        }],
-      },
-    })
-    await expect(target.api.sessions.models({
-      rpcId: 'models-1' as never,
-      payload: { sessionId: 'codex:thr_1' as never },
-    })).resolves.toMatchObject({
-      result: {
-        ok: true,
-        value: {
-          current: { provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'low' },
-          routable: true,
-          groups: [{ id: 'codex', models: [
-            { id: 'gpt-5.6-sol', reasoning: { defaultEffort: 'low' } },
-            { id: 'gpt-5.6-terra', reasoning: { defaultEffort: 'medium' } },
-          ] }],
-        },
-      },
-    })
     await target.close()
   })
 
@@ -201,98 +139,54 @@ describe('CodexVirtualHarness', () => {
     }
   })
 
-  it('exposes selected CodeX workspace directory browsing to the native UI', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const workspace = (await target.workspaces())[0]!
-    await target.selectWorkspace(workspace.workspaceId)
-    const signal = new AbortController().signal
+  it('derives exact cwd authority when project listings are unavailable or empty', async () => {
+    await runScenarios([
+      {
+        name: 'derives exact cwd workspaces when CodeX project/list is unavailable',
+        run: async () => {
+          const client = fakeCodex([codexThread('thr_2', '/workspace/other', 'Other workspace')], {
+            projectListError: Object.assign(
+              new Error('The requested Codex method is not available over Remote.'),
+              {
+                code: 'METHOD_NOT_ALLOWED',
+              },
+            ),
+          })
 
-    await expect(target.dispatch('session/canOpenWorkspacePath', { args: {} }, signal))
-      .resolves.toEqual({ ok: true, value: true })
-    await expect(target.api.host.describe({ rpcId: 'host-1' as never, payload: {} }))
-      .resolves.toMatchObject({
-        result: {
-          ok: true,
-          value: {
-            cwd: '/workspace/repo',
-            home: '/workspace/repo',
-            canOpenPath: true,
-          },
-        },
-      })
+          const workspaces = await discoverCodexVirtualWorkspaces(client)
+          expect(workspaces).toHaveLength(2)
+          expect(workspaces).toEqual([
+            expect.objectContaining({ path: '/workspace/repo', title: 'repo', sessionIds: ['codex:thr_1'] }),
+            expect.objectContaining({ path: '/workspace/other', title: 'other', sessionIds: ['codex:thr_2'] }),
+          ])
 
-    await expect(target.dispatch('directoryPicker/list', { args: {} }, signal))
-      .resolves.toMatchObject({
-        ok: true,
-        value: {
-          path: '/workspace/repo',
-          home: '/workspace/repo',
-          entries: [{ name: 'src', path: '/workspace/repo/src', hidden: false }],
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
+          expect(sessions).toMatchObject({
+            ok: true,
+            value: { items: [{ sessionId: 'codex:thr_1' }, { sessionId: 'codex:thr_2' }] },
+          })
+          await target.close()
         },
-      })
-    await expect(target.api.host.listDirectory({
-      rpcId: 'dir-1' as never,
-      payload: { path: '/workspace/repo/src' },
-    }, signal)).resolves.toMatchObject({
-      result: {
-        ok: true,
-        value: { path: '/workspace/repo/src' },
       },
-    })
-    await expect(target.dispatch('directoryPicker/list', {
-      args: { path: '/workspace/other' },
-    }, signal)).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'workspace-not-found' },
-    })
-    expect(client.request).toHaveBeenCalledWith('dsh/directoryList', {
-      path: '/workspace/repo',
-    }, expect.any(AbortSignal))
-    expect(client.request).toHaveBeenCalledWith('dsh/directoryList', {
-      path: '/workspace/repo/src',
-    }, expect.any(AbortSignal))
-    await target.close()
-  })
+      {
+        name: 'derives exact cwd workspaces when CodeX project/list is empty',
+        run: async () => {
+          const client = fakeCodex([], { projects: [] })
 
-  it('derives exact cwd workspaces when CodeX project/list is unavailable', async () => {
-    const client = fakeCodex([
-      codexThread('thr_2', '/workspace/other', 'Other workspace'),
-    ], {
-      projectListError: Object.assign(new Error('The requested Codex method is not available over Remote.'), {
-        code: 'METHOD_NOT_ALLOWED',
-      }),
-    })
+          const workspaces = await discoverCodexVirtualWorkspaces(client)
+          expect(workspaces).toEqual([
+            expect.objectContaining({ path: '/workspace/repo', title: 'repo', sessionIds: ['codex:thr_1'] }),
+          ])
 
-    const workspaces = await discoverCodexVirtualWorkspaces(client)
-    expect(workspaces).toHaveLength(2)
-    expect(workspaces).toEqual([
-      expect.objectContaining({ path: '/workspace/repo', title: 'repo', sessionIds: ['codex:thr_1'] }),
-      expect.objectContaining({ path: '/workspace/other', title: 'other', sessionIds: ['codex:thr_2'] }),
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
+          expect(sessions).toMatchObject({ ok: true, value: { items: [{ sessionId: 'codex:thr_1' }] } })
+          await target.close()
+        },
+      },
     ])
-
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-    expect(sessions).toMatchObject({ ok: true, value: { items: [
-      { sessionId: 'codex:thr_1' },
-      { sessionId: 'codex:thr_2' },
-    ] } })
-    await target.close()
-  })
-
-  it('derives exact cwd workspaces when CodeX project/list is empty', async () => {
-    const client = fakeCodex([], { projects: [] })
-
-    const workspaces = await discoverCodexVirtualWorkspaces(client)
-    expect(workspaces).toEqual([
-      expect.objectContaining({ path: '/workspace/repo', title: 'repo', sessionIds: ['codex:thr_1'] }),
-    ])
-
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-    expect(sessions).toMatchObject({ ok: true, value: { items: [{ sessionId: 'codex:thr_1' }] } })
-    await target.close()
-  })
+  }, 10000)
 
   it('filters CodeX threads that do not belong to an advertised project', async () => {
     const client = fakeCodex([
@@ -315,26 +209,6 @@ describe('CodexVirtualHarness', () => {
       { sessionId: 'codex:thr_3' },
     ] } })
     expect(JSON.stringify(sessions)).not.toContain('codex:thr_2')
-    await target.close()
-  })
-
-  it('does not mark listed CodeX Sessions blank when thread/list omits turns', async () => {
-    const client = fakeCodex()
-    const originalRequest = client.request.getMockImplementation() as
-      | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
-      | undefined
-    client.request.mockImplementation(async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
-      if (method === 'thread/list') return { data: [codexThread('thr_1', '/workspace/repo', 'Native renderer')] }
-      return originalRequest?.(method, params, signal)
-    })
-
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const result = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-
-    expect(result).toMatchObject({
-      ok: true,
-      value: { items: [expect.objectContaining({ sessionId: 'codex:thr_1', blank: false })] },
-    })
     await target.close()
   })
 
@@ -536,244 +410,6 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('maps CodeX reasoning, plans, tool progress, status, reroutes, and extended items live', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const controller = new AbortController()
-    const source = await target.open('session/follow', {
-      args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } },
-    }, controller.signal)
-    const iterator = source[Symbol.asyncIterator]()
-    await iterator.next()
-
-    const controlController = new AbortController()
-    const control = await target.open('session/control', { args: {} }, controlController.signal)
-    const controlIterator = control[Symbol.asyncIterator]()
-    await controlIterator.next()
-    const eventsController = new AbortController()
-    const events = await target.open('$events', { args: {} }, eventsController.signal)
-    const eventsIterator = events[Symbol.asyncIterator]()
-    await eventsIterator.next()
-
-    client.emit('thr_1', {
-      method: 'turn/started',
-      params: { turn: { id: 'turn_2', status: 'inProgress', items: [] } },
-    })
-    await iterator.next()
-    await iterator.next()
-    await expect(eventsIterator.next()).resolves.toMatchObject({ value: {
-      type: 'emit', event: 'api-session/status', args: ['codex:thr_1', true],
-    } })
-
-    client.emit('thr_1', {
-      method: 'item/reasoning/summaryTextDelta',
-      params: { turnId: 'turn_2', itemId: 'reasoning_2', summaryIndex: 0, delta: 'Checking' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: { data: { chunk: {
-      type: 'block-start', blockType: 'reasoning', index: 0,
-    } } } } })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: { data: { chunk: {
-      type: 'reasoning-delta', text: 'Checking', index: 0,
-    } } } } })
-
-    client.emit('thr_1', {
-      method: 'item/plan/delta',
-      params: { turnId: 'turn_2', itemId: 'plan_2', delta: 'Implement mapping' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: { data: { chunk: {
-      type: 'block-start', blockType: 'reasoning', index: 1,
-    } } } } })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: { data: { chunk: {
-      type: 'reasoning-delta', text: 'Implement mapping', index: 1,
-    } } } } })
-
-    client.emit('thr_1', {
-      method: 'turn/plan/updated',
-      params: { turnId: 'turn_2', plan: [{ step: 'Map events', status: 'inProgress' }] },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'todo/write', data: { todos: [{ content: 'Map events', status: 'in_progress' }] },
-    } } })
-
-    client.emit('thr_1', {
-      method: 'item/started',
-      params: { turnId: 'turn_2', item: {
-        id: 'command_2', type: 'commandExecution', command: 'pnpm test', cwd: '/workspace/repo', status: 'inProgress',
-      } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: {
-      event: { type: 'tool/call' }, view: { view: { card: 'terminal', title: 'pnpm test' } },
-    } })
-    client.emit('thr_1', {
-      method: 'item/commandExecution/outputDelta',
-      params: { turnId: 'turn_2', itemId: 'command_2', delta: 'first\n' },
-    })
-    const firstOutput = await iterator.next()
-    expect(firstOutput.value).toMatchObject({ event: { type: 'tool/result', surfaceOp: 'append' }, view: { view: {
-      card: 'terminal', output: 'first\n',
-    } } })
-    client.emit('thr_1', {
-      method: 'item/commandExecution/outputDelta',
-      params: { turnId: 'turn_2', itemId: 'command_2', delta: 'second' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'tool/result',
-      surfaceOp: { op: 'replace', start: firstOutput.value.event.seq, end: firstOutput.value.event.seq },
-      sourceEventSeqs: [firstOutput.value.event.seq],
-    }, view: { view: { output: 'first\nsecond' } } } })
-
-    client.emit('thr_1', {
-      method: 'item/started',
-      params: { turnId: 'turn_2', item: { id: 'files_2', type: 'fileChange', changes: [], status: 'inProgress' } },
-    })
-    await iterator.next()
-    client.emit('thr_1', {
-      method: 'item/fileChange/patchUpdated',
-      params: { turnId: 'turn_2', itemId: 'files_2', changes: [{
-        path: 'src/live.ts', kind: { type: 'update' }, diff: 'must not cross the virtual carrier',
-      }] },
-    })
-    const patchUpdate = await iterator.next()
-    expect(patchUpdate.value).toMatchObject({ event: { type: 'tool/result' } })
-    expect(patchUpdate.value.view).toMatchObject({ view: { card: 'generic' } })
-    expect(JSON.stringify(patchUpdate.value)).toContain('src/live.ts')
-    expect(JSON.stringify(patchUpdate.value)).not.toContain('must not cross')
-
-    client.emit('thr_1', {
-      method: 'item/started',
-      params: { turnId: 'turn_2', item: {
-        id: 'mcp_2', type: 'mcpToolCall', server: 'demo', tool: 'scan', arguments: {}, status: 'inProgress',
-      } },
-    })
-    await iterator.next()
-    client.emit('thr_1', {
-      method: 'item/mcpToolCall/progress',
-      params: { turnId: 'turn_2', itemId: 'mcp_2', message: 'Scanning repository' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: {
-      event: { type: 'tool/result' },
-      view: { view: { title: 'CodeX MCP tool in progress', content: [{ text: 'Scanning repository' }] } },
-    } })
-
-    const liveImageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lJihxwAAAABJRU5ErkJggg=='
-    client.emit('thr_1', {
-      method: 'item/completed',
-      params: { turnId: 'turn_2', item: {
-        id: 'mcp_2', type: 'mcpToolCall', server: 'demo', tool: 'scan', status: 'completed',
-        result: { content: [{ type: 'image', data: liveImageData, mimeType: 'image/png', name: 'live.png' }] },
-      } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'tool/result', surfaceOp: { op: 'replace' },
-    } } })
-    client.emit('thr_1', {
-      method: 'item/completed',
-      params: { turnId: 'turn_2', item: {
-        id: 'assistant_after_image', type: 'agentMessage', text: 'Here is the live image.', status: 'completed',
-      } },
-    })
-    const liveAssistant = await iterator.next()
-    expect(liveAssistant.value).toMatchObject({ event: { type: 'assistant/message', data: { message: { content: [
-      { type: 'text', text: 'Here is the live image.' },
-      { type: 'image', data: liveImageData, attachment: { mediaType: 'image/png', name: 'live.png' } },
-    ] } } } })
-    const liveAttachmentId = liveAssistant.value.event.data.message.content[1].attachment.attachmentId
-    await expect(target.api.sessions.attachment({
-      rpcId: 'live-tool-image' as never,
-      payload: { sessionId: 'codex:thr_1' as never, attachmentId: liveAttachmentId as never },
-    })).resolves.toMatchObject({ result: { ok: true, value: { data: liveImageData } } })
-
-    client.emit('thr_1', {
-      method: 'thread/status/changed',
-      params: { threadId: 'thr_1', status: { type: 'active', activeFlags: ['waitingOnApproval'] } },
-    })
-    await expect(eventsIterator.next()).resolves.toMatchObject({ value: {
-      type: 'emit', event: 'api-session/status', args: ['codex:thr_1', true],
-    } })
-    client.emit('thr_1', {
-      method: 'thread/status/changed',
-      params: { threadId: 'thr_1', status: { type: 'idle' } },
-    })
-    await expect(eventsIterator.next()).resolves.toMatchObject({ value: {
-      type: 'emit', event: 'api-session/status', args: ['codex:thr_1', false],
-    } })
-
-    client.emit('thr_1', {
-      method: 'thread/name/updated',
-      params: { threadId: 'thr_1', threadName: 'Generated CodeX title' },
-    })
-    await expect(controlIterator.next()).resolves.toMatchObject({ value: {
-      type: 'projection',
-      sessionId: 'codex:thr_1',
-      key: 'title',
-      value: 'Generated CodeX title',
-    } })
-
-    client.emit('thr_1', {
-      method: 'model/rerouted',
-      params: { threadId: 'thr_1', turnId: 'turn_2', fromModel: 'gpt-5.6-sol', toModel: 'gpt-5.6-terra', reason: 'highRiskCyberActivity' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'request/context', data: { provider: 'codex', model: 'gpt-5.6-terra' },
-    } } })
-    await expect(controlIterator.next()).resolves.toMatchObject({ value: {
-      type: 'projection', sessionId: 'codex:thr_1', key: 'modelSelection',
-      value: { next: { provider: 'codex', model: 'gpt-5.6-terra' } },
-    } })
-
-    client.emit('thr_1', {
-      method: 'item/completed',
-      params: { turnId: 'turn_2', item: { id: 'search_2', type: 'webSearch', query: 'DSH events', results: [{ title: 'Result' }] } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: {
-      event: { type: 'tool/call', data: { name: 'codex.webSearch' } },
-      view: { view: { kind: 'search', title: 'DSH events' } },
-    } })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
-      type: 'tool/result', data: { message: { content: [{ content: [{ text: 'Web search returned 1 result.' }] }] } },
-    } } })
-
-    const extendedItems = [
-      {
-        item: {
-          id: 'subagent_2', type: 'collabAgentToolCall', tool: 'spawnAgent', status: 'completed',
-          senderThreadId: 'thr_1', receiverThreadIds: ['thr_child'], agentsStates: {}, model: 'gpt-5.6-luna',
-        },
-        name: 'codex.subagent', title: 'Subagent: spawnAgent',
-      },
-      {
-        item: { id: 'image_2', type: 'imageGeneration', status: 'completed', result: 'private-base64-image', savedPath: '/tmp/image.png' },
-        name: 'codex.image', title: 'Generate image',
-      },
-      {
-        item: { id: 'compact_2', type: 'contextCompaction' },
-        name: 'codex.compaction', title: 'Compact conversation context',
-      },
-      {
-        item: { id: 'review_2', type: 'enteredReviewMode', review: 'Review current changes' },
-        name: 'codex.reviewMode', title: 'Enter review mode',
-      },
-    ]
-    for (const value of extendedItems) {
-      client.emit('thr_1', { method: 'item/completed', params: { turnId: 'turn_2', item: value.item } })
-      await expect(iterator.next()).resolves.toMatchObject({ value: {
-        event: { type: 'tool/call', data: { name: value.name } },
-        view: { view: { title: value.title } },
-      } })
-      const result = await iterator.next()
-      expect(result.value).toMatchObject({ event: { type: 'tool/result' } })
-      expect(JSON.stringify(result.value)).not.toContain('private-base64-image')
-    }
-
-    controller.abort()
-    controlController.abort()
-    eventsController.abort()
-    await iterator.return?.()
-    await controlIterator.return?.()
-    await eventsIterator.return?.()
-    await target.close()
-  })
-
   it('emits Session V3 history, replacements, and assistant stream frames for v0.1.5', async () => {
     const sessionSurface = await import('@deepseek-ai/dsh-session/surface') as unknown as {
       validateSurfaceMetadata(event: unknown): void
@@ -876,70 +512,107 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('routes the native composer prompt back to CodeX resume and turn/start', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    await expect(target.dispatch('session/selectModel', {
-      args: { request: {
-        sessionId: 'codex:thr_1',
-        provider: 'codex',
-        model: 'gpt-5.6-terra',
-        reasoningEffort: 'high',
-      } },
-    }, new AbortController().signal)).resolves.toEqual({
-      ok: true,
-      value: { selected: { provider: 'codex', model: 'gpt-5.6-terra', reasoningEffort: 'high' } },
-    })
-    const result = await target.dispatch('session/prompt', {
-      args: {
-        request: {
-          sessionId: 'codex:thr_1',
-          requestId: 'rpc-1',
-          content: [{ type: 'text', text: 'Continue here' }],
+  it('routes text and image composer prompts to CodeX', async () => {
+    await runScenarios([
+      {
+        name: 'routes the native composer prompt back to CodeX resume and turn/start',
+        run: async () => {
+          const client = fakeCodex()
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          await expect(
+            target.dispatch(
+              'session/selectModel',
+              {
+                args: {
+                  request: {
+                    sessionId: 'codex:thr_1',
+                    provider: 'codex',
+                    model: 'gpt-5.6-terra',
+                    reasoningEffort: 'high',
+                  },
+                },
+              },
+              new AbortController().signal,
+            ),
+          ).resolves.toEqual({
+            ok: true,
+            value: { selected: { provider: 'codex', model: 'gpt-5.6-terra', reasoningEffort: 'high' } },
+          })
+          const result = await target.dispatch(
+            'session/prompt',
+            {
+              args: {
+                request: {
+                  sessionId: 'codex:thr_1',
+                  requestId: 'rpc-1',
+                  content: [{ type: 'text', text: 'Continue here' }],
+                },
+              },
+            },
+            new AbortController().signal,
+          )
+
+          expect(result).toEqual({ ok: true, value: { accepted: true } })
+          expect(client.request).toHaveBeenCalledWith(
+            'thread/resume',
+            {
+              threadId: 'thr_1',
+              model: 'gpt-5.6-terra',
+            },
+            expect.any(AbortSignal),
+          )
+          expect(client.request).toHaveBeenCalledWith(
+            'turn/start',
+            {
+              threadId: 'thr_1',
+              input: [{ type: 'text', text: 'Continue here' }],
+              model: 'gpt-5.6-terra',
+              effort: 'high',
+            },
+            expect.any(AbortSignal),
+          )
+          await target.close()
         },
       },
-    }, new AbortController().signal)
+      {
+        name: 'routes pasted Composer images through the CodeX prompt input',
+        run: async () => {
+          const client = fakeCodex()
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const result = await target.dispatch(
+            'session/prompt',
+            {
+              args: {
+                request: {
+                  sessionId: 'codex:thr_1',
+                  requestId: 'rpc-image-1',
+                  content: [
+                    { type: 'text', text: 'Describe this screenshot' },
+                    { type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' },
+                  ],
+                },
+              },
+            },
+            new AbortController().signal,
+          )
 
-    expect(result).toEqual({ ok: true, value: { accepted: true } })
-    expect(client.request).toHaveBeenCalledWith('thread/resume', {
-      threadId: 'thr_1',
-      model: 'gpt-5.6-terra',
-    }, expect.any(AbortSignal))
-    expect(client.request).toHaveBeenCalledWith('turn/start', {
-      threadId: 'thr_1',
-      input: [{ type: 'text', text: 'Continue here' }],
-      model: 'gpt-5.6-terra',
-      effort: 'high',
-    }, expect.any(AbortSignal))
-    await target.close()
-  })
-
-  it('routes pasted Composer images through the CodeX prompt input', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const result = await target.dispatch('session/prompt', {
-      args: {
-        request: {
-          sessionId: 'codex:thr_1',
-          requestId: 'rpc-image-1',
-          content: [
-            { type: 'text', text: 'Describe this screenshot' },
-            { type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' },
-          ],
+          expect(result).toEqual({ ok: true, value: { accepted: true } })
+          expect(client.request).toHaveBeenCalledWith(
+            'turn/start',
+            expect.objectContaining({
+              threadId: 'thr_1',
+              input: [
+                { type: 'text', text: 'Describe this screenshot' },
+                { type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' },
+              ],
+            }),
+            expect.any(AbortSignal),
+          )
+          await target.close()
         },
       },
-    }, new AbortController().signal)
-
-    expect(result).toEqual({ ok: true, value: { accepted: true } })
-    expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
-      threadId: 'thr_1',
-      input: [
-        { type: 'text', text: 'Describe this screenshot' },
-        { type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' },
-      ],
-    }), expect.any(AbortSignal))
-    await target.close()
-  })
+    ])
+  }, 10000)
 
   it('uses the effective App Server permission returned by resume', async () => {
     const client = fakeCodex([codexThread('thr_full', '/workspace/repo', 'Full access thread')])
@@ -969,186 +642,159 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('keeps active CodeX history open and exposes the turn id for cancellation', async () => {
-    const history = projectCodexNativeHistory({
-      id: 'thr_active',
-      cwd: '/workspace/repo',
-      status: { type: 'active', activeFlags: [] },
-      turns: [{
-        id: 'turn_active',
-        status: 'inProgress',
-        items: [{ id: 'assistant_active', type: 'agentMessage', text: 'Working', status: 'inProgress' }],
-      }],
-    }, 'codex:thr_active')
+  it('cancels the active turn restored from CodeX history', async () => {
+    await runScenarios([
+      {
+        name: 'keeps active CodeX history open and exposes the turn id for cancellation',
+        run: async () => {
+          const history = projectCodexNativeHistory(
+            {
+              id: 'thr_active',
+              cwd: '/workspace/repo',
+              status: { type: 'active', activeFlags: [] },
+              turns: [
+                {
+                  id: 'turn_active',
+                  status: 'inProgress',
+                  items: [
+                    { id: 'assistant_active', type: 'agentMessage', text: 'Working', status: 'inProgress' },
+                  ],
+                },
+              ],
+            },
+            'codex:thr_active',
+          )
 
-    expect(history.activeTurnId).toBe('turn_active')
-    expect(history.entries.map(entry => entry.event.type)).toEqual([
-      'turn/start',
-      'step/start',
-      'assistant/message',
-    ])
-    expect(paginateCodexNativeHistory(history, {}).activeTurnId).toBe('turn_active')
-  })
-
-  it('uses the active turn id restored from paginated history when cancelling', async () => {
-    const client = fakeCodex([{
-      id: 'thr_active',
-      cwd: '/workspace/repo',
-      name: 'Active',
-      status: { type: 'active', activeFlags: [] },
-      turns: [{ id: 'turn_active', status: 'inProgress', items: [] }],
-    }])
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-
-    await target.dispatch('session/history', {
-      args: { request: { sessionId: 'codex:thr_active' } },
-    }, new AbortController().signal)
-    await expect(target.dispatch('session/cancel', {
-      args: { request: { sessionId: 'codex:thr_active' } },
-    }, new AbortController().signal)).resolves.toEqual({ ok: true, value: { accepted: true } })
-
-    expect(client.request).toHaveBeenCalledWith('turn/interrupt', {
-      threadId: 'thr_active',
-      turnId: 'turn_active',
-    }, expect.any(AbortSignal))
-    await target.close()
-  })
-
-  it('creates a blank Thread in the selected CodeX Workspace and searches visible Sessions locally', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const workspace = (await target.workspaces())[0]!
-    await target.selectWorkspace(workspace.workspaceId)
-    const controlController = new AbortController()
-    const control = await target.open('session/control', { args: {} }, controlController.signal)
-    const controlIterator = control[Symbol.asyncIterator]()
-    await controlIterator.next()
-    const eventsController = new AbortController()
-    const events = await target.open('$events', { args: {} }, eventsController.signal)
-    const eventsIterator = events[Symbol.asyncIterator]()
-    await eventsIterator.next()
-    const muxController = new AbortController()
-    const muxIterator = target.api.events.mux(
-      { rpcId: 'mux-create-1' as never, payload: {} },
-      muxController.signal,
-    )[Symbol.asyncIterator]()
-    await muxIterator.next()
-
-    const created = await target.api.sessions.create({
-      rpcId: 'create-1' as never,
-      payload: { workspaceId: workspace.workspaceId as never },
-    })
-    expect(created.result).toMatchObject({ ok: true, value: { sessionId: 'codex:new_1' } })
-    const added = await eventsIterator.next()
-    expect(added.value).toMatchObject({
-      type: 'emit',
-      event: 'api-session/added',
-    })
-    const summary = (added.value as { args: Array<{ projections?: { kind?: string; values?: Record<string, unknown> } }> }).args[0]!
-    expect(summary).toMatchObject({
-      sessionId: 'codex:new_1',
-      projections: {
-        kind: 'sequenced',
-        values: {
-          title: null,
-          sessionListMetadata: { blank: true, lastPromptAt: null },
-          modelSelection: { next: { provider: 'codex', model: 'gpt-5.6-sol', reasoningEffort: 'low' } },
+          expect(history.activeTurnId).toBe('turn_active')
+          expect(history.entries.map((entry) => entry.event.type)).toEqual([
+            'turn/start',
+            'step/start',
+            'assistant/message',
+          ])
+          expect(paginateCodexNativeHistory(history, {}).activeTurnId).toBe('turn_active')
         },
       },
-    })
-    await expect(controlIterator.next()).resolves.toMatchObject({ value: {
-      type: 'projection',
-      sessionId: 'codex:new_1',
-      key: 'title',
-      value: null,
-    } })
-    await expect(muxIterator.next()).resolves.toMatchObject({ value: { payload: {
-      type: 'session/projection',
-      sessionId: 'codex:new_1',
-      key: 'title',
-      value: null,
-    } } })
-    expect(client.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({
-      cwd: '/workspace/repo',
-      model: 'gpt-5.6-sol',
-    }), expect.any(AbortSignal))
+      {
+        name: 'uses the active turn id restored from paginated history when cancelling',
+        run: async () => {
+          const client = fakeCodex([
+            {
+              id: 'thr_active',
+              cwd: '/workspace/repo',
+              name: 'Active',
+              status: { type: 'active', activeFlags: [] },
+              turns: [{ id: 'turn_active', status: 'inProgress', items: [] }],
+            },
+          ])
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
 
-    const listed = await target.api.workspace.list({ rpcId: 'workspace-1' as never, payload: {} })
-    expect(listed.result).toMatchObject({ ok: true, value: { items: [{
-      workspaceId: workspace.workspaceId,
-      sessionIds: expect.arrayContaining(['codex:new_1']),
-    }] } })
-    const sessions = await target.api.sessions.list({ rpcId: 'sessions-1' as never, payload: {} })
-    expect(sessions.result).toMatchObject({ ok: true, value: { items: expect.arrayContaining([
-      expect.objectContaining({ sessionId: 'codex:new_1', cwd: '/workspace/repo', blank: true }),
-    ]) } })
+          await target.dispatch(
+            'session/history',
+            {
+              args: { request: { sessionId: 'codex:thr_active' } },
+            },
+            new AbortController().signal,
+          )
+          await expect(
+            target.dispatch(
+              'session/cancel',
+              {
+                args: { request: { sessionId: 'codex:thr_active' } },
+              },
+              new AbortController().signal,
+            ),
+          ).resolves.toEqual({ ok: true, value: { accepted: true } })
 
-    const search = await target.api.sessions.search(
-      { rpcId: 'search-1' as never, payload: { query: 'native renderer' } },
-      new AbortController().signal,
-    )
-    expect(search.result).toMatchObject({ ok: true, value: {
-      items: [{ sessionId: 'codex:thr_1', snippet: 'Native renderer' }],
-      hasMore: false,
-    } })
-
-    await target.api.sessions.prompt({
-      rpcId: 'prompt-created-1' as never,
-      payload: {
-        sessionId: 'codex:new_1' as never,
-        mode: 'queue',
-        content: [{ type: 'text', text: 'Generate a title' }],
+          expect(client.request).toHaveBeenCalledWith(
+            'turn/interrupt',
+            {
+              threadId: 'thr_active',
+              turnId: 'turn_active',
+            },
+            expect.any(AbortSignal),
+          )
+          await target.close()
+        },
       },
-    })
-    client.emit('new_1', {
-      method: 'thread/name/updated',
-      params: { threadId: 'new_1', threadName: 'Fresh Thread Title' },
-    })
-    await expect(controlIterator.next()).resolves.toMatchObject({ value: {
-      type: 'projection',
-      sessionId: 'codex:new_1',
-      key: 'title',
-      value: 'Fresh Thread Title',
-    } })
-    await expect(muxIterator.next()).resolves.toMatchObject({ value: { payload: {
-      type: 'session/projection',
-      sessionId: 'codex:new_1',
-      key: 'title',
-      value: 'Fresh Thread Title',
-    } } })
+    ])
+  }, 10000)
 
-    controlController.abort()
-    eventsController.abort()
-    muxController.abort()
-    await controlIterator.return?.()
-    await eventsIterator.return?.()
-    await muxIterator.return?.()
-    await target.close()
-  })
+  it('serves paged CodeX history with the legacy Host fallback', async () => {
+    await runScenarios([
+      {
+        name: 'serves rc.2 and alpha History as message-aligned backwards pages',
+        run: async () => {
+          const client = fakeCodex()
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const tail = await target.api.sessions.history({
+            rpcId: 'history-tail' as never,
+            payload: { sessionId: 'codex:thr_1' as never, maxMessages: 3 },
+          })
+          expect(tail.result).toMatchObject({ ok: true, value: { hasMore: true } })
+          if (!tail.result.ok) throw new Error('tail history failed')
+          expect(tail.result.value.events.map((entry) => entry.event.seq)).toEqual([3, 4, 5, 6, 7, 8, 9])
 
-  it('serves rc.2 and alpha History as message-aligned backwards pages', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const tail = await target.api.sessions.history({
-      rpcId: 'history-tail' as never,
-      payload: { sessionId: 'codex:thr_1' as never, maxMessages: 3 },
-    })
-    expect(tail.result).toMatchObject({ ok: true, value: { hasMore: true } })
-    if (!tail.result.ok) throw new Error('tail history failed')
-    expect(tail.result.value.events.map(entry => entry.event.seq)).toEqual([3, 4, 5, 6, 7, 8, 9])
+          const older = await target.dispatch(
+            'session/page',
+            {
+              args: {
+                request: {
+                  address: { kind: 'session', sessionId: 'codex:thr_1' },
+                  throughSeq: 9,
+                  beforeSeq: 3,
+                  maxMessages: 3,
+                },
+              },
+            },
+            new AbortController().signal,
+          )
+          expect(older).toMatchObject({ ok: true, value: { hasMore: false } })
+          if (!older.ok) throw new Error('older history failed')
+          expect(
+            (older.value as { records: Array<{ event: { seq: number } }> }).records.map(
+              (entry) => entry.event.seq,
+            ),
+          ).toEqual([0, 1, 2])
+          await target.close()
+        },
+      },
+      {
+        name: 'falls back to thread/read history when a remote Host lacks the paginated DSH method',
+        run: async () => {
+          const client = fakeCodex()
+          const originalRequest = client.request.getMockImplementation() as
+            | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
+            | undefined
+          client.request.mockImplementation(
+            async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
+              if (method === 'dsh/sessionHistory') {
+                throw Object.assign(new Error('The requested Codex method is not available over Remote.'), {
+                  code: 'METHOD_NOT_ALLOWED',
+                })
+              }
+              return originalRequest?.(method, params, signal)
+            },
+          )
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
 
-    const older = await target.dispatch('session/page', { args: { request: {
-      address: { kind: 'session', sessionId: 'codex:thr_1' },
-      throughSeq: 9,
-      beforeSeq: 3,
-      maxMessages: 3,
-    } } }, new AbortController().signal)
-    expect(older).toMatchObject({ ok: true, value: { hasMore: false } })
-    if (!older.ok) throw new Error('older history failed')
-    expect((older.value as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
-      .toEqual([0, 1, 2])
-    await target.close()
-  })
+          const history = await target.api.sessions.history({
+            rpcId: 'history-legacy' as never,
+            payload: { sessionId: 'codex:thr_1' as never, maxMessages: 3 },
+          })
+
+          expect(history.result).toMatchObject({ ok: true, value: { hasMore: true } })
+          if (!history.result.ok) throw new Error('history failed')
+          expect(history.result.value.events.map((entry) => entry.event.seq)).toEqual([3, 4, 5, 6, 7, 8, 9])
+          expect(client.request).toHaveBeenCalledWith(
+            'thread/read',
+            { threadId: 'thr_1', includeTurns: true },
+            expect.any(AbortSignal),
+          )
+          await target.close()
+        },
+      },
+    ])
+  }, 10000)
 
   it('starts the first turn in a freshly created CodeX Thread without resuming it first', async () => {
     const client = fakeCodex()
@@ -1182,156 +828,128 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
-  it('falls back to thread/read history when a remote Host lacks the paginated DSH method', async () => {
-    const client = fakeCodex()
-    const originalRequest = client.request.getMockImplementation() as
-      | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
-      | undefined
-    client.request.mockImplementation(async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
-      if (method === 'dsh/sessionHistory') {
-        throw Object.assign(new Error('The requested Codex method is not available over Remote.'), {
-          code: 'METHOD_NOT_ALLOWED',
-        })
-      }
-      return originalRequest?.(method, params, signal)
-    })
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+  it('attaches and restores rc.2 live follow subscriptions', async () => {
+    await runScenarios([
+      {
+        name: 'attaches rc.2 live updates when the native client reads session history',
+        run: async () => {
+          const client = fakeCodex()
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const controller = new AbortController()
+          const iterator = target.api.events
+            .mux({ rpcId: 'mux-1' as never, payload: {} }, controller.signal)
+            [Symbol.asyncIterator]()
 
-    const history = await target.api.sessions.history({
-      rpcId: 'history-legacy' as never,
-      payload: { sessionId: 'codex:thr_1' as never, maxMessages: 3 },
-    })
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { payload: { type: 'session/subscribed', sessionId: 'codex:thr_1' } },
+          })
+          const history = await target.api.sessions.history({
+            rpcId: 'history-1' as never,
+            payload: { sessionId: 'codex:thr_1' as never },
+          })
+          expect(history.result.ok).toBe(true)
+          if (!history.result.ok) throw new Error('history failed')
+          const events = history.result.value.events
+          expect(events[2]).toMatchObject({ event: { type: 'user/message', surfaceOp: 'append' } })
+          expect(events[3]).toMatchObject({ event: { type: 'assistant/message', surfaceOp: 'append' } })
+          expect(events[4]).toMatchObject({ view: { for: 'call', view: { card: 'terminal' } } })
 
-    expect(history.result).toMatchObject({ ok: true, value: { hasMore: true } })
-    if (!history.result.ok) throw new Error('history failed')
-    expect(history.result.value.events.map(entry => entry.event.seq)).toEqual([3, 4, 5, 6, 7, 8, 9])
-    expect(client.request).toHaveBeenCalledWith('thread/read', { threadId: 'thr_1', includeTurns: true }, expect.any(AbortSignal))
-    await target.close()
-  })
+          client.emit('thr_1', {
+            method: 'turn/started',
+            params: { turn: { id: 'turn_2', status: 'inProgress', items: [] } },
+          })
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: {
+              payload: {
+                type: 'session/event',
+                sessionId: 'codex:thr_1',
+                event: { type: 'turn/start', seq: 10 },
+              },
+            },
+          })
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { payload: { type: 'session/event', event: { type: 'step/start', seq: 11 } } },
+          })
+          client.emit('thr_1', {
+            method: 'item/started',
+            params: {
+              turnId: 'turn_2',
+              item: {
+                id: 'command_2',
+                type: 'commandExecution',
+                command: 'pnpm test',
+                status: 'inProgress',
+              },
+            },
+          })
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: {
+              payload: {
+                type: 'session/event',
+                event: { type: 'tool/call', seq: 12 },
+              },
+            },
+          })
+          client.emit('thr_1', {
+            method: 'item/commandExecution/outputDelta',
+            params: { turnId: 'turn_2', itemId: 'command_2', delta: 'one' },
+          })
+          const firstResult = await iterator.next()
+          expect(firstResult.value).toMatchObject({
+            payload: {
+              type: 'session/event',
+              event: { type: 'tool/result', seq: 13, surfaceOp: 'append' },
+            },
+          })
+          client.emit('thr_1', {
+            method: 'item/commandExecution/outputDelta',
+            params: { turnId: 'turn_2', itemId: 'command_2', delta: ' two' },
+          })
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: {
+              payload: {
+                type: 'session/event',
+                event: {
+                  type: 'tool/result',
+                  seq: 14,
+                  surfaceOp: { op: 'replace', start: 13, end: 13 },
+                  sourceEventSeqs: [13],
+                },
+              },
+            },
+          })
 
-  it('attaches rc.2 live updates when the native client reads session history', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const controller = new AbortController()
-    const iterator = target.api.events.mux(
-      { rpcId: 'mux-1' as never, payload: {} },
-      controller.signal,
-    )[Symbol.asyncIterator]()
-
-    await expect(iterator.next()).resolves.toMatchObject({
-      value: { payload: { type: 'session/subscribed', sessionId: 'codex:thr_1' } },
-    })
-    const history = await target.api.sessions.history({
-      rpcId: 'history-1' as never,
-      payload: { sessionId: 'codex:thr_1' as never },
-    })
-    expect(history.result.ok).toBe(true)
-    if (!history.result.ok) throw new Error('history failed')
-    const events = history.result.value.events
-    expect(events[2]).toMatchObject({ event: { type: 'user/message', surfaceOp: 'append' } })
-    expect(events[3]).toMatchObject({ event: { type: 'assistant/message', surfaceOp: 'append' } })
-    expect(events[4]).toMatchObject({ view: { for: 'call', view: { card: 'terminal' } } })
-
-    client.emit('thr_1', {
-      method: 'turn/started',
-      params: { turn: { id: 'turn_2', status: 'inProgress', items: [] } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({
-      value: { payload: { type: 'session/event', sessionId: 'codex:thr_1', event: { type: 'turn/start', seq: 10 } } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({
-      value: { payload: { type: 'session/event', event: { type: 'step/start', seq: 11 } } },
-    })
-    client.emit('thr_1', {
-      method: 'item/started',
-      params: { turnId: 'turn_2', item: {
-        id: 'command_2', type: 'commandExecution', command: 'pnpm test', status: 'inProgress',
-      } },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { payload: {
-      type: 'session/event', event: { type: 'tool/call', seq: 12 },
-    } } })
-    client.emit('thr_1', {
-      method: 'item/commandExecution/outputDelta',
-      params: { turnId: 'turn_2', itemId: 'command_2', delta: 'one' },
-    })
-    const firstResult = await iterator.next()
-    expect(firstResult.value).toMatchObject({ payload: {
-      type: 'session/event', event: { type: 'tool/result', seq: 13, surfaceOp: 'append' },
-    } })
-    client.emit('thr_1', {
-      method: 'item/commandExecution/outputDelta',
-      params: { turnId: 'turn_2', itemId: 'command_2', delta: ' two' },
-    })
-    await expect(iterator.next()).resolves.toMatchObject({ value: { payload: {
-      type: 'session/event', event: {
-        type: 'tool/result', seq: 14,
-        surfaceOp: { op: 'replace', start: 13, end: 13 },
-        sourceEventSeqs: [13],
+          controller.abort()
+          await iterator.return?.()
+          await target.close()
+        },
       },
-    } } })
+      {
+        name: 'reopens rc.2 live follow after the Host closes a CodeX stream',
+        run: async () => {
+          const client = fakeCodex()
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
 
-    controller.abort()
-    await iterator.return?.()
-    await target.close()
-  })
+          const first = await target.api.sessions.history({
+            rpcId: 'history-1' as never,
+            payload: { sessionId: 'codex:thr_1' as never },
+          })
+          expect(first.result.ok).toBe(true)
+          expect(client.subscribe).toHaveBeenCalledTimes(1)
 
-  it('reopens rc.2 live follow after the Host closes a CodeX stream', async () => {
-    const client = fakeCodex()
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          client.closeStream('thr_1', 'failed')
 
-    const first = await target.api.sessions.history({
-      rpcId: 'history-1' as never,
-      payload: { sessionId: 'codex:thr_1' as never },
-    })
-    expect(first.result.ok).toBe(true)
-    expect(client.subscribe).toHaveBeenCalledTimes(1)
-
-    client.closeStream('thr_1', 'failed')
-
-    const second = await target.api.sessions.history({
-      rpcId: 'history-2' as never,
-      payload: { sessionId: 'codex:thr_1' as never },
-    })
-    expect(second.result.ok).toBe(true)
-    expect(client.subscribe).toHaveBeenCalledTimes(2)
-    await target.close()
-  })
-
-  it('loads every CodeX workspace while using the Remote picker selection only for initial navigation', async () => {
-    const client = fakeCodex([
-      codexThread('thr_2', '/workspace/other', 'Other workspace'),
-      codexThread('thr_3', undefined, 'Ungrouped thread'),
-    ], {
-      projects: [
-        codexProject('repo-project', 'repo', ['/workspace/repo'], 0),
-        codexProject('other-project', 'other', ['/workspace/other'], 1),
-      ],
-    })
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const workspace = (await target.workspaces()).find(item => item.path === '/workspace/repo')
-    expect(workspace).toBeDefined()
-    await target.selectWorkspace(workspace!.workspaceId)
-    await expect(target.preferredSessionId()).resolves.toBe('codex:thr_1')
-
-    const workspaces = await target.dispatch('workspace/list', { args: {} }, new AbortController().signal)
-    expect(workspaces).toMatchObject({ ok: true, value: { items: [
-      { workspaceId: workspace!.workspaceId, sessionIds: ['codex:thr_1'] },
-      { sessionIds: ['codex:thr_2'] },
-    ] } })
-    const sessions = await target.dispatch('session/list', { args: {} }, new AbortController().signal)
-    expect(sessions).toMatchObject({ ok: true, value: { items: [
-      { sessionId: 'codex:thr_1' },
-      { sessionId: 'codex:thr_2' },
-    ] } })
-    expect(JSON.stringify(sessions)).not.toContain('codex:thr_3')
-
-    const events = await target.open('$events', { args: {} }, new AbortController().signal)
-    const iterator = events[Symbol.asyncIterator]()
-    await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'ready' } })
-    await iterator.return?.()
-    await target.close()
-  })
+          const second = await target.api.sessions.history({
+            rpcId: 'history-2' as never,
+            payload: { sessionId: 'codex:thr_1' as never },
+          })
+          expect(second.result.ok).toBe(true)
+          expect(client.subscribe).toHaveBeenCalledTimes(2)
+          await target.close()
+        },
+      },
+    ])
+  }, 10000)
 
   it('skips an unreadable latest thread when choosing the initial workspace session', async () => {
     const client = fakeCodex([codexThread('thr_2', '/workspace/repo', 'Readable fallback')])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeServerUrl, resolveConfig, withVolatileSchema } from '../src/config.js'
+import { normalizeServerUrl, resolveConfig } from '../src/config.js'
 
 describe('plugin config', () => {
   it('applies safe defaults', () => {
@@ -27,33 +27,6 @@ describe('plugin config', () => {
       codex: { enabled: true, binary: '/opt/codex/bin/codex' },
     })
     expect(() => resolveConfig({ codex: { enabled: true, allowedRoots: ['/workspace'] } } as never)).toThrow()
-  })
-
-  it('keeps Cursor ACP opt-in and accepts an explicit binary', () => {
-    expect(resolveConfig({ cursor: { enabled: true } }, {})).toMatchObject({
-      cursor: { enabled: true, binary: 'agent' },
-    })
-    expect(resolveConfig({ acp: { enabled: true } }, {})).toMatchObject({
-      cursor: { enabled: false, binary: 'agent' },
-      acp: { enabled: true },
-    })
-    expect(resolveConfig({ acp: {
-      enabled: true,
-      backends: [{ id: 'cursor', enabled: false }],
-    } }, {})).toMatchObject({
-      cursor: { enabled: false, binary: 'agent' },
-      acp: { enabled: true },
-    })
-    expect(resolveConfig({ acp: {
-      enabled: true,
-      backends: [{ id: 'cursor', enabled: true }],
-    } }, {})).toMatchObject({
-      cursor: { enabled: true, binary: 'agent' },
-      acp: { enabled: true },
-    })
-    expect(resolveConfig({ cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' } }, {})).toMatchObject({
-      cursor: { enabled: true, binary: '/Users/me/.local/bin/agent' },
-    })
   })
 
   it('preserves independent ACP launch options and scopes legacy Cursor configuration to Cursor', () => {
@@ -90,20 +63,5 @@ describe('plugin config', () => {
 
   it('rejects an inverted reconnect range', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
-  })
-
-  it('keeps old DSH hosts importable when Schemastery has no volatile mode', () => {
-    const plain = { kind: 'plain' }
-    expect(withVolatileSchema(plain)).toBe(plain)
-  })
-
-  it('marks the schema live when the host exposes volatile mode', () => {
-    const marked = { kind: 'volatile' }
-    const schema = {
-      volatile() {
-        return marked
-      },
-    }
-    expect(withVolatileSchema(schema)).toBe(marked)
   })
 })

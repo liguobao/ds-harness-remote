@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import {
   automaticPreferredTransports,
@@ -7,27 +8,38 @@ import {
 } from '../src/lib/network-route'
 
 describe('automatic transport routing', () => {
-  it('prefers LAN before every fallback on local or unknown networks', () => {
-    expect(automaticPreferredTransports('local')).toEqual(['lan', 'p2p', 'turn', 'relay'])
-    expect(automaticPreferredTransports('unknown')).toEqual(['lan', 'p2p', 'turn', 'relay'])
-  })
-
-  it('keeps P2P, TURN, and Relay available off the local network', () => {
-    expect(automaticPreferredTransports('remote')).toEqual(['p2p', 'turn', 'relay'])
-  })
+  it('orders transports according to confirmed network routes', async () => {
+    await runScenarios([
+      {
+        name: 'prefers LAN before every fallback on local or unknown networks',
+        run: () => {
+          expect(automaticPreferredTransports('local')).toEqual(['lan', 'p2p', 'turn', 'relay'])
+          expect(automaticPreferredTransports('unknown')).toEqual(['lan', 'p2p', 'turn', 'relay'])
+        },
+      },
+      {
+        name: 'keeps P2P, TURN, and Relay available off the local network',
+        run: () => {
+          expect(automaticPreferredTransports('remote')).toEqual(['p2p', 'turn', 'relay'])
+        },
+      },
+      {
+        name: 'classifies Wi-Fi and Ethernet as local routes',
+        run: () => {
+          expect(networkRouteForNativeType('wifi')).toBe('local')
+          expect(networkRouteForNativeType('ethernet')).toBe('local')
+          expect(networkRouteForNativeType('cellular')).toBe('remote')
+          expect(networkRouteForNativeType('unknown')).toBe('unknown')
+        },
+      },
+    ])
+  }, 15000)
 
   it('shows every available fallback in connection progress', () => {
     expect(initialProbeTransports(['lan', 'p2p', 'turn', 'relay'])).toEqual(['lan', 'p2p', 'turn', 'relay'])
     expect(initialProbeTransports(['p2p', 'turn', 'relay'])).toEqual(['p2p', 'turn', 'relay'])
     expect(initialProbeTransports(['turn', 'relay'])).toEqual(['turn', 'relay'])
     expect(initialProbeTransports(['relay'])).toEqual(['relay'])
-  })
-
-  it('classifies Wi-Fi and Ethernet as local routes', () => {
-    expect(networkRouteForNativeType('wifi')).toBe('local')
-    expect(networkRouteForNativeType('ethernet')).toBe('local')
-    expect(networkRouteForNativeType('cellular')).toBe('remote')
-    expect(networkRouteForNativeType('unknown')).toBe('unknown')
   })
 
   it('renegotiates only between confirmed local and remote routes', () => {

@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   RtcDataChannel,
@@ -142,85 +143,130 @@ function turnStats(): RtcStatsEntry[] {
 }
 
 describe('detectSelectedTransport', () => {
-  it('classifies a selected private host-to-host pair as LAN on the wire', () => {
-    expect(detectSelectedPath(asStats(lanStats()))).toEqual({ transport: 'lan', mode: 'LAN' })
-    expect(detectSelectedTransport(asStats(lanStats()))).toBe('lan')
-    expect(inspectSelectedPath(asStats(lanStats()))).toMatchObject({
-      localCandidateType: 'host',
-      remoteCandidateType: 'host',
-      localAddress: '192.168.1.20:51001',
-      remoteAddress: '192.168.1.30:51002',
-      protocol: 'udp',
-      currentRoundTripTimeMs: 12,
-      availableOutgoingBitrate: 8_500_000,
-      bytesSent: 2_048,
-      bytesReceived: 4_096,
-    })
-    expect(inspectCandidatePairs(asStats(lanStats()))).toMatchObject({
-      total: 1,
-      byState: { succeeded: 1 },
-      byLocalType: { host: 1 },
-      byRemoteType: { host: 1 },
-      byLocalScope: { private: 1 },
-      byRemoteScope: { private: 1 },
-    })
-  })
+  it('classifies selected candidate pairs as LAN, P2P or TURN', async () => {
+    await runScenarios([
+      {
+        name: 'classifies a selected private host-to-host pair as LAN on the wire',
+        run: () => {
+          expect(detectSelectedPath(asStats(lanStats()))).toEqual({ transport: 'lan', mode: 'LAN' })
+          expect(detectSelectedTransport(asStats(lanStats()))).toBe('lan')
+          expect(inspectSelectedPath(asStats(lanStats()))).toMatchObject({
+            localCandidateType: 'host',
+            remoteCandidateType: 'host',
+            localAddress: '192.168.1.20:51001',
+            remoteAddress: '192.168.1.30:51002',
+            protocol: 'udp',
+            currentRoundTripTimeMs: 12,
+            availableOutgoingBitrate: 8_500_000,
+            bytesSent: 2_048,
+            bytesReceived: 4_096,
+          })
+          expect(inspectCandidatePairs(asStats(lanStats()))).toMatchObject({
+            total: 1,
+            byState: { succeeded: 1 },
+            byLocalType: { host: 1 },
+            byRemoteType: { host: 1 },
+            byLocalScope: { private: 1 },
+            byRemoteScope: { private: 1 },
+          })
+        },
+      },
+      {
+        name: 'classifies a private host-to-peer-reflexive pair as LAN',
+        run: () => {
+          expect(detectSelectedPath(asStats(privatePeerReflexiveLanStats()))).toEqual({
+            transport: 'lan',
+            mode: 'LAN',
+          })
+          expect(inspectSelectedPath(asStats(privatePeerReflexiveLanStats()))).toMatchObject({
+            localCandidateType: 'host',
+            remoteCandidateType: 'prflx',
+            localAddressScope: 'private',
+            remoteAddressScope: 'private',
+          })
+        },
+      },
+      {
+        name: 'keeps a public peer-reflexive pair classified as P2P',
+        run: () => {
+          expect(detectSelectedPath(asStats(publicPeerReflexiveP2pStats()))).toEqual({
+            transport: 'p2p',
+            mode: 'P2P',
+          })
+        },
+      },
+      {
+        name: 'classifies an address-hidden peer-reflexive candidate beside a private host as LAN',
+        run: () => {
+          expect(detectSelectedPath(asStats(hiddenPeerReflexiveLanStats()))).toEqual({
+            transport: 'lan',
+            mode: 'LAN',
+          })
+        },
+      },
+      {
+        name: 'classifies a loopback host beside an address-hidden prflx candidate as LAN',
+        run: () => {
+          expect(
+            detectSelectedPath(
+              asStats([
+                { type: 'local-candidate', candidateType: 'prflx', id: 'lc' },
+                { type: 'remote-candidate', candidateType: 'host', address: '127.0.0.1', id: 'rc' },
+                {
+                  type: 'candidate-pair',
+                  selected: true,
+                  nominated: true,
+                  localCandidateId: 'lc',
+                  remoteCandidateId: 'rc',
+                },
+              ]),
+            ),
+          ).toEqual({ transport: 'lan', mode: 'LAN' })
+        },
+      },
+      {
+        name: 'classifies a Tailscale IPv6 overlay pair as P2P',
+        run: () => {
+          expect(detectSelectedPath(asStats(tailscaleP2pStats()))).toEqual({ transport: 'p2p', mode: 'P2P' })
+          expect(inspectSelectedPath(asStats(tailscaleP2pStats()))).toMatchObject({
+            localCandidateType: 'prflx',
+            remoteCandidateType: 'host',
+            remoteAddressScope: 'cgnat',
+          })
+        },
+      },
+      {
+        name: 'does not treat host-to-host Tailscale overlay candidates as LAN',
+        run: () => {
+          expect(detectSelectedPath(asStats(tailscaleP2pStats('host')))).toEqual({
+            transport: 'p2p',
+            mode: 'P2P',
+          })
+        },
+      },
+      {
+        name: 'detects p2p from a selected host/srflx candidate pair',
+        run: () => {
+          expect(detectSelectedTransport(asStats(p2pStats()))).toBe('p2p')
+        },
+      },
+      {
+        name: 'detects turn when any selected candidate is a relay candidate',
+        run: () => {
+          expect(detectSelectedTransport(asStats(turnStats()))).toBe('turn')
+        },
+      },
+      {
+        name: 'returns undefined when no selected pair exists',
+        run: () => {
+          expect(
+            detectSelectedTransport(asStats([{ type: 'local-candidate', candidateType: 'host', id: 'lc' }])),
+          ).toBeUndefined()
+        },
+      },
+    ])
+  }, 50000)
 
-  it('classifies a private host-to-peer-reflexive pair as LAN', () => {
-    expect(detectSelectedPath(asStats(privatePeerReflexiveLanStats())))
-      .toEqual({ transport: 'lan', mode: 'LAN' })
-    expect(inspectSelectedPath(asStats(privatePeerReflexiveLanStats()))).toMatchObject({
-      localCandidateType: 'host',
-      remoteCandidateType: 'prflx',
-      localAddressScope: 'private',
-      remoteAddressScope: 'private',
-    })
-  })
-
-  it('keeps a public peer-reflexive pair classified as P2P', () => {
-    expect(detectSelectedPath(asStats(publicPeerReflexiveP2pStats())))
-      .toEqual({ transport: 'p2p', mode: 'P2P' })
-  })
-
-  it('classifies an address-hidden peer-reflexive candidate beside a private host as LAN', () => {
-    expect(detectSelectedPath(asStats(hiddenPeerReflexiveLanStats())))
-      .toEqual({ transport: 'lan', mode: 'LAN' })
-  })
-
-  it('classifies a loopback host beside an address-hidden prflx candidate as LAN', () => {
-    expect(detectSelectedPath(asStats([
-      { type: 'local-candidate', candidateType: 'prflx', id: 'lc' },
-      { type: 'remote-candidate', candidateType: 'host', address: '127.0.0.1', id: 'rc' },
-      { type: 'candidate-pair', selected: true, nominated: true, localCandidateId: 'lc', remoteCandidateId: 'rc' },
-    ]))).toEqual({ transport: 'lan', mode: 'LAN' })
-  })
-
-  it('classifies a Tailscale IPv6 overlay pair as P2P', () => {
-    expect(detectSelectedPath(asStats(tailscaleP2pStats())))
-      .toEqual({ transport: 'p2p', mode: 'P2P' })
-    expect(inspectSelectedPath(asStats(tailscaleP2pStats()))).toMatchObject({
-      localCandidateType: 'prflx',
-      remoteCandidateType: 'host',
-      remoteAddressScope: 'cgnat',
-    })
-  })
-
-  it('does not treat host-to-host Tailscale overlay candidates as LAN', () => {
-    expect(detectSelectedPath(asStats(tailscaleP2pStats('host'))))
-      .toEqual({ transport: 'p2p', mode: 'P2P' })
-  })
-
-  it('detects p2p from a selected host/srflx candidate pair', () => {
-    expect(detectSelectedTransport(asStats(p2pStats()))).toBe('p2p')
-  })
-
-  it('detects turn when any selected candidate is a relay candidate', () => {
-    expect(detectSelectedTransport(asStats(turnStats()))).toBe('turn')
-  })
-
-  it('returns undefined when no selected pair exists', () => {
-    expect(detectSelectedTransport(asStats([{ type: 'local-candidate', candidateType: 'host', id: 'lc' }]))).toBeUndefined()
-  })
 })
 
 describe('stunOnlyIceServers', () => {
@@ -349,76 +395,85 @@ describe('RtcDataChannelTransport initiator', () => {
     await transport.close()
   })
 
-  it('does not treat continued sends as a stalled DataChannel queue', async () => {
-    vi.useFakeTimers()
-    try {
-      const pc = new FakePeerConnection()
-      pc.stats = lanStats()
-      const transport = new RtcDataChannelTransport({
-        role: 'initiator',
-        factory: factoryFor(pc),
-        onSignal: () => undefined,
-        sendTimeoutMs: 5_000,
-      })
-      const connecting = transport.connect()
-      await vi.advanceTimersByTimeAsync(0)
-      transport.handleSignal({ type: 'answer', sdp: 'v=0 answer' })
-      await vi.advanceTimersByTimeAsync(0)
-      const channel = pc.channels[0]!
-      channel.open()
-      await connecting
+  it('keeps an active or unmonitored send queue connected', async () => {
+    await runScenarios([
+      {
+        name: 'does not treat continued sends as a stalled DataChannel queue',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            const pc = new FakePeerConnection()
+            pc.stats = lanStats()
+            const transport = new RtcDataChannelTransport({
+              role: 'initiator',
+              factory: factoryFor(pc),
+              onSignal: () => undefined,
+              sendTimeoutMs: 5_000,
+            })
+            const connecting = transport.connect()
+            await vi.advanceTimersByTimeAsync(0)
+            transport.handleSignal({ type: 'answer', sdp: 'v=0 answer' })
+            await vi.advanceTimersByTimeAsync(0)
+            const channel = pc.channels[0]!
+            channel.open()
+            await connecting
 
-      channel.bufferedAmount = 10
-      await transport.send(new Uint8Array([1]))
-      await vi.advanceTimersByTimeAsync(4_000)
+            channel.bufferedAmount = 10
+            await transport.send(new Uint8Array([1]))
+            await vi.advanceTimersByTimeAsync(4_000)
 
-      // Loading a conversation sends more requests while earlier writes are
-      // still draining. The newer send must refresh the watchdog baseline;
-      // it is evidence of active traffic, not evidence that the first write
-      // has been stuck for five seconds.
-      channel.bufferedAmount = 20
-      await transport.send(new Uint8Array([2]))
-      await vi.advanceTimersByTimeAsync(1_100)
-      expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
+            // Loading a conversation sends more requests while earlier writes are
+            // still draining. The newer send must refresh the watchdog baseline;
+            // it is evidence of active traffic, not evidence that the first write
+            // has been stuck for five seconds.
+            channel.bufferedAmount = 20
+            await transport.send(new Uint8Array([2]))
+            await vi.advanceTimersByTimeAsync(1_100)
+            expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
 
-      channel.bufferedAmount = 0
-      await vi.advanceTimersByTimeAsync(4_000)
-      expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
-      await transport.close()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
+            channel.bufferedAmount = 0
+            await vi.advanceTimersByTimeAsync(4_000)
+            expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
+            await transport.close()
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'does not infer a dead connection from bufferedAmount by default',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            const pc = new FakePeerConnection()
+            pc.stats = lanStats()
+            const transport = new RtcDataChannelTransport({
+              role: 'initiator',
+              factory: factoryFor(pc),
+              onSignal: () => undefined,
+            })
+            const connecting = transport.connect()
+            await vi.advanceTimersByTimeAsync(0)
+            transport.handleSignal({ type: 'answer', sdp: 'v=0 answer' })
+            await vi.advanceTimersByTimeAsync(0)
+            const channel = pc.channels[0]!
+            channel.open()
+            await connecting
 
-  it('does not infer a dead connection from bufferedAmount by default', async () => {
-    vi.useFakeTimers()
-    try {
-      const pc = new FakePeerConnection()
-      pc.stats = lanStats()
-      const transport = new RtcDataChannelTransport({
-        role: 'initiator',
-        factory: factoryFor(pc),
-        onSignal: () => undefined,
-      })
-      const connecting = transport.connect()
-      await vi.advanceTimersByTimeAsync(0)
-      transport.handleSignal({ type: 'answer', sdp: 'v=0 answer' })
-      await vi.advanceTimersByTimeAsync(0)
-      const channel = pc.channels[0]!
-      channel.open()
-      await connecting
-
-      // React Native may retain a positive bufferedAmount even after SCTP has
-      // delivered the frame. It is not an acknowledgement or liveness signal.
-      channel.bufferedAmount = 64 * 1024
-      await transport.send(new Uint8Array([1, 2, 3]))
-      await vi.advanceTimersByTimeAsync(60_000)
-      expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
-      await transport.close()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
+            // React Native may retain a positive bufferedAmount even after SCTP has
+            // delivered the frame. It is not an acknowledgement or liveness signal.
+            channel.bufferedAmount = 64 * 1024
+            await transport.send(new Uint8Array([1, 2, 3]))
+            await vi.advanceTimersByTimeAsync(60_000)
+            expect(transport.getStats()).toMatchObject({ mode: 'LAN', connected: true })
+            await transport.close()
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+      },
+    ])
+  }, 10000)
 
   it('detects turn from the selected candidate pair', async () => {
     const pc = new FakePeerConnection()

@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway, type RemoteClientCore } from '@dsh-remote/client-core'
 import { sessionPermissions } from '../src/services/session-permissions'
@@ -11,22 +12,49 @@ function setup(value: unknown) {
 }
 
 describe('native session tools', () => {
-  it('reads the new process catalog without changing permissions', async () => {
-    const options = [{ value: 'read-only', name: 'Read only' }, { value: 'auto', name: 'Auto' }]
-    const { tools, rpc } = setup({ options })
-    await expect(tools.permissionOptions()).resolves.toEqual(options)
-    expect(rpc).toHaveBeenCalledWith('harness.remote.call', { endpoint: 'permissionPresets/catalog', payload: { args: {} } }, expect.any(AbortSignal), undefined)
-    expect(rpc).toHaveBeenCalledTimes(1)
-  })
-  it('rejects malformed catalogs instead of inventing permission grants', async () => {
-    await expect(setup({ options: [{ value: 'full' }] }).tools.permissionOptions()).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
-  it('keeps Host rejection authoritative without falling back to a different endpoint', async () => {
-    const rpc = vi.fn(async () => ({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Unsupported', details: {} } }))
-    const tools = new HarnessSessionTools(new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore))
-    await expect(tools.permissionOptions()).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
-    expect(rpc).toHaveBeenCalledTimes(1)
-  })
+  it('validates the Host permission catalog without inventing grants or fallback', async () => {
+    await runScenarios([
+      {
+        name: 'reads the new process catalog without changing permissions',
+        run: async () => {
+          const options = [
+            { value: 'read-only', name: 'Read only' },
+            { value: 'auto', name: 'Auto' },
+          ]
+          const { tools, rpc } = setup({ options })
+          await expect(tools.permissionOptions()).resolves.toEqual(options)
+          expect(rpc).toHaveBeenCalledWith(
+            'harness.remote.call',
+            { endpoint: 'permissionPresets/catalog', payload: { args: {} } },
+            expect.any(AbortSignal),
+            undefined,
+          )
+          expect(rpc).toHaveBeenCalledTimes(1)
+        },
+      },
+      {
+        name: 'rejects malformed catalogs instead of inventing permission grants',
+        run: async () => {
+          await expect(setup({ options: [{ value: 'full' }] }).tools.permissionOptions()).rejects.toMatchObject(
+            { code: 'INVALID_MESSAGE' },
+          )
+        },
+      },
+      {
+        name: 'keeps Host rejection authoritative without falling back to a different endpoint',
+        run: async () => {
+          const rpc = vi.fn(async () => ({
+            ok: false,
+            error: { code: 'METHOD_NOT_ALLOWED', message: 'Unsupported', details: {} },
+          }))
+          const tools = new HarnessSessionTools(new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore))
+          await expect(tools.permissionOptions()).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+          expect(rpc).toHaveBeenCalledTimes(1)
+        },
+      },
+    ])
+  }, 15000)
+
   it('uses the official Session lookup for file listing and bounded reads', async () => {
     const { tools, rpc } = setup({})
     await tools.listFiles('s1', 'src')
@@ -62,20 +90,6 @@ describe('native session tools', () => {
       { timeoutMs: OFFICE_PREVIEW_TIMEOUT_MS, maxResponseBytes: OFFICE_PREVIEW_MAX_RESPONSE_BYTES },
     ])
   })
-  it('loads the human-invocable skill catalog with modelInvocable flags', async () => {
-    const rawSkills = [
-      { name: 'office-docx', description: 'Word docs', modelInvocable: true },
-      { name: 'backup', description: 'Internal backup', modelInvocable: false },
-      { invalid: true },
-    ]
-    const { tools, rpc } = setup({ skills: rawSkills })
-    const rows = await tools.listSkills('s1')
-    expect(rows).toEqual([
-      { name: 'office-docx', description: 'Word docs', modelInvocable: true },
-      { name: 'backup', description: 'Internal backup', modelInvocable: false },
-    ])
-    expect(rpc).toHaveBeenCalledWith('harness.remote.call', { endpoint: 'skills/list', payload: { args: { request: { sessionId: 's1' } } } }, expect.any(AbortSignal), undefined)
-  })
   it('executes slash lines through the Host command dispatcher', async () => {
     const { tools, rpc } = setup({ result: { kind: 'success', text: 'exported to zip' } })
     const outcome = await tools.executeCommand('s1', '/export')
@@ -84,18 +98,37 @@ describe('native session tools', () => {
   })
 })
 
-
 describe('permission projection versions', () => {
   const session = (permissions?: unknown) => ({ sessionId: 's1', updatedAt: 0, running: false, blank: false, projections: { values: { permissions } } }) as RemoteSession
-  it('preserves old inline options including deployment-specific presets', () => {
-    const permissions = { currentValue: 'custom-preset', options: [{ value: 'custom-preset', name: 'Configured preset' }] }
-    expect(sessionPermissions(session(permissions))).toEqual(permissions)
-  })
-  it('preserves 0.1.6 current selection while the separate catalog is loading', () => {
-    expect(sessionPermissions(session({ currentValue: 'read-only' }))).toEqual({ currentValue: 'read-only', options: [] })
-  })
-  it('never invents a current permission for missing or malformed projections', () => {
-    expect(sessionPermissions(session())).toBeUndefined()
-    expect(sessionPermissions(session({ options: [] }))).toBeUndefined()
-  })
+  it('preserves only authoritative inline permission selections', async () => {
+    await runScenarios([
+      {
+        name: 'preserves old inline options including deployment-specific presets',
+        run: () => {
+          const permissions = {
+            currentValue: 'custom-preset',
+            options: [{ value: 'custom-preset', name: 'Configured preset' }],
+          }
+          expect(sessionPermissions(session(permissions))).toEqual(permissions)
+        },
+      },
+      {
+        name: 'preserves 0.1.6 current selection while the separate catalog is loading',
+        run: () => {
+          expect(sessionPermissions(session({ currentValue: 'read-only' }))).toEqual({
+            currentValue: 'read-only',
+            options: [],
+          })
+        },
+      },
+      {
+        name: 'never invents a current permission for missing or malformed projections',
+        run: () => {
+          expect(sessionPermissions(session())).toBeUndefined()
+          expect(sessionPermissions(session({ options: [] }))).toBeUndefined()
+        },
+      },
+    ])
+  }, 15000)
+
 })

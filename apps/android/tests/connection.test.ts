@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 class FakeCore {
@@ -92,12 +93,13 @@ const host: RemoteDevice = {
 }
 
 describe('AndroidRemoteConnection Harness transport selection', () => {
-  beforeEach(() => {
+  const prepareScenario1 = () => {
     testState.capabilities = ['harness.api.v1']
     testState.workspaceTypes = undefined
     testState.cores.length = 0
     testState.connectGate = undefined
-  })
+  }
+beforeEach(prepareScenario1)
 
   it('does not let a late connection attempt overwrite or close its replacement', async () => {
     const connection = new AndroidRemoteConnection()
@@ -132,28 +134,54 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
     await connection.close()
   })
 
-  it.each(['cursor', 'antigravity'] as const)('requires %s capability and readiness and refreshes Host switches live', async backend => {
-    const capability = `agent.acp.${backend}.v1`
-    const type = { id: backend, name: backend, capability, available: false }
-    testState.capabilities = ['harness.api.v1', capability]
-    testState.workspaceTypes = [type]
-    const connection = new AndroidRemoteConnection()
-    const available = () => backend === 'cursor' ? connection.hasCursor() : connection.hasAntigravity()
-    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
-    expect(available()).toBe(false)
-    testState.workspaceTypes = [{ ...type, available: true }]
-    await connection.refreshBackends()
-    expect(available()).toBe(true)
-    testState.capabilities = ['harness.api.v1', 'agent.acp.v1']
-    await connection.refreshBackends()
-    expect(available()).toBe(false)
-    testState.capabilities = ['harness.api.v1', capability]
-    await connection.refreshBackends()
-    expect(available()).toBe(true)
-    testState.workspaceTypes = [{ ...type, available: false }]
-    await connection.refreshBackends()
-    expect(available()).toBe(false)
-    await connection.close()
+  it('requires independent backend capability and readiness and refreshes Host switches live', async () => {
+    const rows = ['cursor', 'antigravity'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const backend = row
+        return {
+          name: scenarioName(
+            'requires %s capability and readiness and refreshes Host switches live',
+            row,
+            index,
+          ),
+          run: async () => {
+            const capability = `agent.acp.${backend}.v1`
+            const type = { id: backend, name: backend, capability, available: false }
+            testState.capabilities = ['harness.api.v1', capability]
+            testState.workspaceTypes = [type]
+            const connection = new AndroidRemoteConnection()
+            const available = () =>
+              backend === 'cursor' ? connection.hasCursor() : connection.hasAntigravity()
+            await connection.connect(
+              'https://server.example.com',
+              identity,
+              host,
+              'access-token',
+              () => undefined,
+              { forceRelay: true },
+            )
+            expect(available()).toBe(false)
+            testState.workspaceTypes = [{ ...type, available: true }]
+            await connection.refreshBackends()
+            expect(available()).toBe(true)
+            testState.capabilities = ['harness.api.v1', 'agent.acp.v1']
+            await connection.refreshBackends()
+            expect(available()).toBe(false)
+            testState.capabilities = ['harness.api.v1', capability]
+            await connection.refreshBackends()
+            expect(available()).toBe(true)
+            testState.workspaceTypes = [{ ...type, available: false }]
+            await connection.refreshBackends()
+            expect(available()).toBe(false)
+            await connection.close()
+          },
+        }
+      }),
+      async () => {
+        await prepareScenario1()
+      },
+    )
   })
 
   it('preserves CodeX capability discovery for Hosts without workspaceTypes', async () => {

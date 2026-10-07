@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -74,21 +75,47 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
-  it.each(['0.1.5-rc.1', '0.2.0-rc.1'])('selects the renamed command attachment field for a %s Host', async version => {
-    const dispatch = vi.fn(async (_endpoint: string, payload: { args: Record<string, unknown> }) => {
-      expect(payload.args).toEqual({ agentId: 'session-1', line: '/goal complete', submittedAttachments: [] })
-      return { ok: true as const, value: { commandId: 'cmd-0.1.5' } }
-    })
-    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, version)
+  it('selects command attachment fields for modern Host versions', async () => {
+    const rows = ['0.1.5-rc.1', '0.2.0-rc.1'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const version = row
+        return {
+          name: scenarioName('selects the renamed command attachment field for a %s Host', row, index),
+          run: async () => {
+            const dispatch = vi.fn(async (_endpoint: string, payload: { args: Record<string, unknown> }) => {
+              expect(payload.args).toEqual({
+                agentId: 'session-1',
+                line: '/goal complete',
+                submittedAttachments: [],
+              })
+              return { ok: true as const, value: { commandId: 'cmd-0.1.5' } }
+            })
+            const bridge = new HarnessRemoteBridge(
+              gateway({ dispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              version,
+            )
 
-    await expect(bridge.call({
-      endpoint: 'commands/execute',
-      payload: { args: { agentId: 'session-1', line: '/goal complete', images: [] } },
-    })).resolves.toEqual({ ok: true, value: { commandId: 'cmd-0.1.5' } })
-    expect(dispatch).toHaveBeenCalledWith('commands/execute', {
-      args: { agentId: 'session-1', line: '/goal complete', submittedAttachments: [] },
-    }, expect.any(AbortSignal))
-    expect(dispatch).toHaveBeenCalledOnce()
+            await expect(
+              bridge.call({
+                endpoint: 'commands/execute',
+                payload: { args: { agentId: 'session-1', line: '/goal complete', images: [] } },
+              }),
+            ).resolves.toEqual({ ok: true, value: { commandId: 'cmd-0.1.5' } })
+            expect(dispatch).toHaveBeenCalledWith(
+              'commands/execute',
+              {
+                args: { agentId: 'session-1', line: '/goal complete', submittedAttachments: [] },
+              },
+              expect.any(AbortSignal),
+            )
+            expect(dispatch).toHaveBeenCalledOnce()
+          },
+        }
+      }),
+    )
   })
 
   it('publishes alpha stream frames and an explicit terminal event', async () => {
@@ -122,26 +149,41 @@ describe('HarnessRemoteBridge', () => {
     ])
   })
 
-  it.each(['0.1.7-rc.1', '0.2.0-rc.1'])('adds the workspace root to legacy file-change subscriptions on %s', async version => {
-    const open = vi.fn(async () => (async function* () {
-      yield { kind: 'ready' }
-    })())
-    const bridge = new HarnessRemoteBridge(
-      gateway({ open }),
-      vi.fn(async () => undefined),
-      undefined,
-      version,
-    )
+  it('adds the workspace root to legacy file-change subscriptions on compatible Hosts', async () => {
+    const rows = ['0.1.7-rc.1', '0.2.0-rc.1'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const version = row
+        return {
+          name: scenarioName('adds the workspace root to legacy file-change subscriptions on %s', row, index),
+          run: async () => {
+            const open = vi.fn(async () =>
+              (async function* () {
+                yield { kind: 'ready' }
+              })(),
+            )
+            const bridge = new HarnessRemoteBridge(
+              gateway({ open }),
+              vi.fn(async () => undefined),
+              undefined,
+              version,
+            )
 
-    await expect(bridge.openStream({
-      streamId: 'file-changes-017',
-      endpoint: 'workspaceFiles/changes',
-      payload: { args: { workspaceFileScopeId: 'session-1' } },
-    })).resolves.toEqual({ opened: true, streamId: 'file-changes-017' })
-    expect(open).toHaveBeenCalledWith(
-      'workspaceFiles/changes',
-      { args: { workspaceFileScopeId: 'session-1', path: '.' } },
-      expect.any(AbortSignal),
+            await expect(
+              bridge.openStream({
+                streamId: 'file-changes-017',
+                endpoint: 'workspaceFiles/changes',
+                payload: { args: { workspaceFileScopeId: 'session-1' } },
+              }),
+            ).resolves.toEqual({ opened: true, streamId: 'file-changes-017' })
+            expect(open).toHaveBeenCalledWith(
+              'workspaceFiles/changes',
+              { args: { workspaceFileScopeId: 'session-1', path: '.' } },
+              expect.any(AbortSignal),
+            )
+          },
+        }
+      }),
     )
   })
 
@@ -168,32 +210,47 @@ describe('HarnessRemoteBridge', () => {
     )
   })
 
-  it.each(['0.1.7-rc.1', '0.2.0-rc.1'])('nests readBytes ranges for a %s Host', async version => {
-    const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
-    const bridge = new HarnessRemoteBridge(
-      gateway({ dispatch }),
-      vi.fn(async () => undefined),
-      undefined,
-      version,
-    )
+  it('nests readBytes ranges for modern Host versions', async () => {
+    const rows = ['0.1.7-rc.1', '0.2.0-rc.1'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const version = row
+        return {
+          name: scenarioName('nests readBytes ranges for a %s Host', row, index),
+          run: async () => {
+            const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
+            const bridge = new HarnessRemoteBridge(
+              gateway({ dispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              version,
+            )
 
-    await bridge.call({
-      endpoint: 'workspaceFiles/readBytes',
-      payload: {
-        args: {
-          workspaceFileScopeId: 'session-1',
-          path: '/tmp/a.bin',
-          range: { offset: 0, length: 1024 },
-        },
-      },
-    })
-    expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', {
-      args: {
-        workspaceFileScopeId: 'session-1',
-        path: '/tmp/a.bin',
-        options: { range: { offset: 0, length: 1024 } },
-      },
-    }, expect.any(AbortSignal))
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: '/tmp/a.bin',
+                  range: { offset: 0, length: 1024 },
+                },
+              },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: '/tmp/a.bin',
+                  options: { range: { offset: 0, length: 1024 } },
+                },
+              },
+              expect.any(AbortSignal),
+            )
+          },
+        }
+      }),
+    )
   })
 
   it('keeps the legacy readBytes range shape for older Hosts', async () => {

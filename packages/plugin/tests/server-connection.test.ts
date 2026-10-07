@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url } from '@dsh-remote/crypto'
 import { createControlFrame, createRpcRequest, decodeMessage, encodeMessage, type RemoteMessage } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
@@ -269,123 +270,200 @@ describe('HostServerConnection', () => {
     await server.stop()
   })
 
-  it.each(['recover', 'reject-again', 'refresh-rejected', 'revoked', 'revoked-frame', 'replaced', 'replaced-before-ack', 'stopped'] as const)(
-    'handles control authentication recovery: %s', async scenario => {
-      const keys = generateKeyPair(new Uint8Array(32).fill(24))
-      const sockets: FakeWebSocket[] = []
-      const api = {
-        baseUrl: 'https://dsh.r2049.cn',
-        authenticate: vi.fn(async () => ({ accessToken: sockets.length === 0 ? 'old-access-value' : 'new-access-value' })),
-        refreshCredentials: vi.fn(async () => {
-          if (scenario === 'refresh-rejected') throw new ServerApiError('AUTH_INVALID', 'refresh rejected', false, 401, 'credential_refresh')
-        }),
-        clearAuthorization: vi.fn(async () => undefined),
-      } as unknown as HostServerApi
-      const logs = logger()
-      const server = new HostServerConnection(
-        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
-        { schemaVersion: 1, deviceId: 'host-recovery', name: 'Host', fingerprint: 'HOST', ...keys },
-        { trustedPeer: vi.fn() } as unknown as IdentityStore, api,
-        { close: vi.fn(async () => undefined) } as unknown as ConnectionController, logs,
-        () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
-      )
-      try {
-        server.start()
-        await flush()
-        sockets[0]!.open()
-        if (scenario === 'replaced') {
-          sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-first')))
-          await flush()
+  it('recovers control authentication only within the authorized retry budget', async () => {
+    const rows = [
+      'recover',
+      'reject-again',
+      'refresh-rejected',
+      'revoked',
+      'revoked-frame',
+      'replaced',
+      'replaced-before-ack',
+      'stopped',
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const scenario = row
+        return {
+          name: scenarioName('handles control authentication recovery: %s', row, index),
+          run: async () => {
+            const keys = generateKeyPair(new Uint8Array(32).fill(24))
+            const sockets: FakeWebSocket[] = []
+            const api = {
+              baseUrl: 'https://dsh.r2049.cn',
+              authenticate: vi.fn(async () => ({
+                accessToken: sockets.length === 0 ? 'old-access-value' : 'new-access-value',
+              })),
+              refreshCredentials: vi.fn(async () => {
+                if (scenario === 'refresh-rejected')
+                  throw new ServerApiError('AUTH_INVALID', 'refresh rejected', false, 401, 'credential_refresh')
+              }),
+              clearAuthorization: vi.fn(async () => undefined),
+            } as unknown as HostServerApi
+            const logs = logger()
+            const server = new HostServerConnection(
+              { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
+              { schemaVersion: 1, deviceId: 'host-recovery', name: 'Host', fingerprint: 'HOST', ...keys },
+              { trustedPeer: vi.fn() } as unknown as IdentityStore,
+              api,
+              { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+              logs,
+              () => {
+                const socket = new FakeWebSocket()
+                sockets.push(socket)
+                return socket
+              },
+            )
+            try {
+              server.start()
+              await flush()
+              sockets[0]!.open()
+              if (scenario === 'replaced') {
+                sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-first')))
+                await flush()
+              }
+              if (scenario === 'stopped') await server.stop()
+              else if (scenario === 'revoked-frame') {
+                sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-revoked')))
+                await flush()
+                sockets[0]!.receive(
+                  createControlFrame('error', {
+                    code: 'DEVICE_REVOKED',
+                    message: 'device revoked',
+                    retryable: false,
+                  }),
+                )
+              } else {
+                sockets[0]!.close(scenario.startsWith('replaced') ? 4003 : scenario === 'revoked' ? 4004 : 4002)
+              }
+              await flush()
+              if (scenario === 'recover' || scenario === 'reject-again') {
+                expect(sockets).toHaveLength(2)
+                expect(api.refreshCredentials).toHaveBeenCalledWith('old-access-value')
+                sockets[1]!.open()
+                expect(JSON.parse(sockets[1]!.sent[0]!).payload.accessToken).toBe('new-access-value')
+                if (scenario === 'recover') {
+                  sockets[1]!.receive(createControlFrame('hello.ack', helloAck('control-recovered')))
+                  await flush()
+                  expect(server.isOnline()).toBe(true)
+                  expect(server.lastError()).toBeUndefined()
+                } else {
+                  sockets[1]!.close(4002)
+                  await new Promise((resolve) => setTimeout(resolve, 20))
+                  expect(sockets).toHaveLength(2)
+                  expect(server.lastError()).toBe('AUTH_INVALID')
+                  expect(server.isReconnecting()).toBe(false)
+                }
+                expect(api.refreshCredentials).toHaveBeenCalledTimes(1)
+              } else {
+                await new Promise((resolve) => setTimeout(resolve, 20))
+                expect(sockets).toHaveLength(1)
+                expect(server.isReconnecting()).toBe(false)
+                expect(api.refreshCredentials).toHaveBeenCalledTimes(scenario === 'refresh-rejected' ? 1 : 0)
+                expect(api.clearAuthorization).toHaveBeenCalledTimes(scenario.startsWith('revoked') ? 1 : 0)
+                if (scenario !== 'stopped')
+                  expect(server.lastError()).toBe(
+                    scenario.startsWith('replaced')
+                      ? 'CONNECTION_REPLACED'
+                      : scenario.startsWith('revoked')
+                        ? 'DEVICE_REVOKED'
+                        : 'AUTH_INVALID',
+                  )
+                if (scenario === 'refresh-rejected')
+                  expect(logs.warn).toHaveBeenCalledWith('server control connection failed', {
+                    code: 'AUTH_INVALID',
+                    retryable: false,
+                    phase: 'credential_refresh',
+                  })
+              }
+            } finally {
+              await server.stop()
+            }
+          },
         }
-        if (scenario === 'stopped') await server.stop()
-        else if (scenario === 'revoked-frame') {
-          sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-revoked')))
-          await flush()
-          sockets[0]!.receive(createControlFrame('error', {
-            code: 'DEVICE_REVOKED',
-            message: 'device revoked',
-            retryable: false,
-          }))
-        } else {
-          sockets[0]!.close(scenario.startsWith('replaced') ? 4003 : scenario === 'revoked' ? 4004 : 4002)
-        }
-        await flush()
-        if (scenario === 'recover' || scenario === 'reject-again') {
-          expect(sockets).toHaveLength(2)
-          expect(api.refreshCredentials).toHaveBeenCalledWith('old-access-value')
-          sockets[1]!.open()
-          expect(JSON.parse(sockets[1]!.sent[0]!).payload.accessToken).toBe('new-access-value')
-          if (scenario === 'recover') {
-            sockets[1]!.receive(createControlFrame('hello.ack', helloAck('control-recovered')))
-            await flush()
-            expect(server.isOnline()).toBe(true)
-            expect(server.lastError()).toBeUndefined()
-          } else {
-            sockets[1]!.close(4002)
-            await new Promise(resolve => setTimeout(resolve, 20))
-            expect(sockets).toHaveLength(2)
-            expect(server.lastError()).toBe('AUTH_INVALID')
-            expect(server.isReconnecting()).toBe(false)
-          }
-          expect(api.refreshCredentials).toHaveBeenCalledTimes(1)
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 20))
-          expect(sockets).toHaveLength(1)
-          expect(server.isReconnecting()).toBe(false)
-          expect(api.refreshCredentials).toHaveBeenCalledTimes(scenario === 'refresh-rejected' ? 1 : 0)
-          expect(api.clearAuthorization).toHaveBeenCalledTimes(scenario.startsWith('revoked') ? 1 : 0)
-          if (scenario !== 'stopped') expect(server.lastError()).toBe(
-            scenario.startsWith('replaced') ? 'CONNECTION_REPLACED' : scenario.startsWith('revoked') ? 'DEVICE_REVOKED' : 'AUTH_INVALID',
-          )
-          if (scenario === 'refresh-rejected') expect(logs.warn).toHaveBeenCalledWith(
-            'server control connection failed', { code: 'AUTH_INVALID', retryable: false, phase: 'credential_refresh' },
-          )
-        }
-      } finally { await server.stop() }
-    },
-  )
+      }),
+    )
+  })
 
-  it.each(['RATE_LIMITED', 'CONNECTION_FAILED'])(
-    'recovers after a retryable refresh failure (%s) without spending the handshake retry', async code => {
-      const sockets: FakeWebSocket[] = []
-      let accessToken = 'old-access-value'
-      const refreshCredentials = vi.fn()
-        .mockRejectedValueOnce(new ServerApiError(code, 'temporary refresh failure', true, code === 'RATE_LIMITED' ? 429 : undefined, 'credential_refresh'))
-        .mockImplementation(async () => { accessToken = 'new-access-value' })
-      const api = {
-        baseUrl: 'https://dsh.r2049.cn',
-        authenticate: vi.fn(async () => ({ accessToken })),
-        refreshCredentials,
-      } as unknown as HostServerApi
-      const server = new HostServerConnection(
-        { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
-        { schemaVersion: 1, deviceId: 'host-retry-refresh', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
-        { trustedPeer: vi.fn() } as unknown as IdentityStore, api,
-        { close: vi.fn(async () => undefined) } as unknown as ConnectionController, logger(),
-        () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
-      )
-      try {
-        server.start()
-        await vi.waitFor(() => expect(sockets).toHaveLength(1))
-        sockets[0]!.open()
-        sockets[0]!.close(4002)
-        await vi.waitFor(() => expect(sockets).toHaveLength(2))
-        expect(server.lastError()).toBe(code)
-        expect(server.isReconnecting()).toBe(true)
-        sockets[1]!.open()
-        expect(JSON.parse(sockets[1]!.sent[0]!).payload.accessToken).toBe('old-access-value')
-        sockets[1]!.close(4002)
-        await vi.waitFor(() => expect(sockets).toHaveLength(3))
-        expect(refreshCredentials).toHaveBeenCalledTimes(2)
-        expect(refreshCredentials).toHaveBeenNthCalledWith(2, 'old-access-value')
-        sockets[2]!.open()
-        expect(JSON.parse(sockets[2]!.sent[0]!).payload.accessToken).toBe('new-access-value')
-        sockets[2]!.receive(createControlFrame('hello.ack', helloAck('control-retry-refresh')))
-        await vi.waitFor(() => expect(server.isOnline()).toBe(true))
-        expect(server.lastError()).toBeUndefined()
-      } finally { await server.stop() }
-    },
-  )
+  it('recovers retryable refresh failures without spending the handshake retry', async () => {
+    const rows = ['RATE_LIMITED', 'CONNECTION_FAILED'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const code = row
+        return {
+          name: scenarioName(
+            'recovers after a retryable refresh failure (%s) without spending the handshake retry',
+            row,
+            index,
+          ),
+          run: async () => {
+            const sockets: FakeWebSocket[] = []
+            let accessToken = 'old-access-value'
+            const refreshCredentials = vi
+              .fn()
+              .mockRejectedValueOnce(
+                new ServerApiError(
+                  code,
+                  'temporary refresh failure',
+                  true,
+                  code === 'RATE_LIMITED' ? 429 : undefined,
+                  'credential_refresh',
+                ),
+              )
+              .mockImplementation(async () => {
+                accessToken = 'new-access-value'
+              })
+            const api = {
+              baseUrl: 'https://dsh.r2049.cn',
+              authenticate: vi.fn(async () => ({ accessToken })),
+              refreshCredentials,
+            } as unknown as HostServerApi
+            const server = new HostServerConnection(
+              { ...config(), reconnect: { enabled: true, initialDelayMs: 1, maxDelayMs: 1, jitter: 0 } },
+              {
+                schemaVersion: 1,
+                deviceId: 'host-retry-refresh',
+                name: 'Host',
+                fingerprint: 'HOST',
+                ...generateKeyPair(),
+              },
+              { trustedPeer: vi.fn() } as unknown as IdentityStore,
+              api,
+              { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+              logger(),
+              () => {
+                const socket = new FakeWebSocket()
+                sockets.push(socket)
+                return socket
+              },
+            )
+            try {
+              server.start()
+              await vi.waitFor(() => expect(sockets).toHaveLength(1))
+              sockets[0]!.open()
+              sockets[0]!.close(4002)
+              await vi.waitFor(() => expect(sockets).toHaveLength(2))
+              expect(server.lastError()).toBe(code)
+              expect(server.isReconnecting()).toBe(true)
+              sockets[1]!.open()
+              expect(JSON.parse(sockets[1]!.sent[0]!).payload.accessToken).toBe('old-access-value')
+              sockets[1]!.close(4002)
+              await vi.waitFor(() => expect(sockets).toHaveLength(3))
+              expect(refreshCredentials).toHaveBeenCalledTimes(2)
+              expect(refreshCredentials).toHaveBeenNthCalledWith(2, 'old-access-value')
+              sockets[2]!.open()
+              expect(JSON.parse(sockets[2]!.sent[0]!).payload.accessToken).toBe('new-access-value')
+              sockets[2]!.receive(createControlFrame('hello.ack', helloAck('control-retry-refresh')))
+              await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+              expect(server.lastError()).toBeUndefined()
+            } finally {
+              await server.stop()
+            }
+          },
+        }
+      }),
+    )
+  })
 
   it('disconnects an authenticated peer when its selected WebRTC channel fails', async () => {
     const keys = generateKeyPair(new Uint8Array(32).fill(15))
@@ -594,47 +672,58 @@ describe('HostServerConnection', () => {
     }))
   })
 
-  it.each([
-    { negotiated: 'transport.turn', selected: 'p2p' as const, relay: true },
-    { negotiated: 'transport.p2p', selected: 'turn' as const, relay: false },
-  ])('rejects $selected when only $negotiated was negotiated', async ({ negotiated, selected, relay }) => {
-    const server = new HostServerConnection(
-      config(),
-      {} as HostIdentity,
-      {} as IdentityStore,
-      {} as HostServerApi,
-      {} as ConnectionController,
-      logger(),
+  it('rejects selected transports outside negotiated capabilities', async () => {
+    const rows = [
+      { negotiated: 'transport.turn', selected: 'p2p' as const, relay: true },
+      { negotiated: 'transport.p2p', selected: 'turn' as const, relay: false },
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const { negotiated, selected, relay } = row
+        return {
+          name: scenarioName('rejects $selected when only $negotiated was negotiated', row, index),
+          run: async () => {
+            const server = new HostServerConnection(
+              config(),
+              {} as HostIdentity,
+              {} as IdentityStore,
+              {} as HostServerApi,
+              {} as ConnectionController,
+              logger(),
+            )
+            const rtc = {
+              close: vi.fn(async () => undefined),
+              diagnostics: vi.fn(() => undefined),
+            }
+            const tunnel = {
+              connectionId: 'connection-1',
+              peer: { deviceId: 'client-1' },
+              noise: { destroy: vi.fn() },
+              rtc,
+              transport: 'negotiating',
+            }
+            const internals = server as unknown as {
+              negotiatedCapabilities: string[]
+              tunnels: Map<string, unknown>
+              handleRtcOpened(value: unknown, transport: 'lan' | 'p2p' | 'turn'): void
+            }
+            internals.negotiatedCapabilities = relay ? [negotiated, 'transport.relay'] : [negotiated]
+            internals.tunnels.set(tunnel.connectionId, tunnel)
+
+            internals.handleRtcOpened(tunnel, selected)
+            await flush()
+
+            expect(rtc.close).toHaveBeenCalledOnce()
+            if (relay) {
+              expect(tunnel).toMatchObject({ transport: 'relay', rtc: undefined })
+            } else {
+              expect(internals.tunnels.has(tunnel.connectionId)).toBe(false)
+              expect(tunnel.noise.destroy).toHaveBeenCalledOnce()
+            }
+          },
+        }
+      }),
     )
-    const rtc = {
-      close: vi.fn(async () => undefined),
-      diagnostics: vi.fn(() => undefined),
-    }
-    const tunnel = {
-      connectionId: 'connection-1',
-      peer: { deviceId: 'client-1' },
-      noise: { destroy: vi.fn() },
-      rtc,
-      transport: 'negotiating',
-    }
-    const internals = server as unknown as {
-      negotiatedCapabilities: string[]
-      tunnels: Map<string, unknown>
-      handleRtcOpened(value: unknown, transport: 'lan' | 'p2p' | 'turn'): void
-    }
-    internals.negotiatedCapabilities = relay ? [negotiated, 'transport.relay'] : [negotiated]
-    internals.tunnels.set(tunnel.connectionId, tunnel)
-
-    internals.handleRtcOpened(tunnel, selected)
-    await flush()
-
-    expect(rtc.close).toHaveBeenCalledOnce()
-    if (relay) {
-      expect(tunnel).toMatchObject({ transport: 'relay', rtc: undefined })
-    } else {
-      expect(internals.tunnels.has(tunnel.connectionId)).toBe(false)
-      expect(tunnel.noise.destroy).toHaveBeenCalledOnce()
-    }
   })
 })
 

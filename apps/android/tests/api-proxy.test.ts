@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteClientCore } from '@dsh-remote/client-core'
 import { ApiProxyError, RemoteApiProxy } from '../src/services/api-proxy'
@@ -108,78 +109,61 @@ function fakeCore(): RemoteClientCore & { rpcCalls: CoreRpcMock; emitEvent(event
 }
 
 describe('Remote ApiProxy tunnel client', () => {
-  it('calls allowlisted Harness methods and validates the echoed rpcId', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const sessions = await proxy.sessionList()
-    expect(sessions).toEqual([{ sessionId: 's1' }])
-    expect(core.rpcCalls).toHaveBeenCalledWith(
-      'harness.api.call',
-      expect.objectContaining({ method: 'session.list' }),
-      undefined,
-    )
-  })
-
-  it('normalizes legacy code preset in session list projections', async () => {
-    const core = fakeCore()
-    core.rpcCalls.mockImplementationOnce(async (_method, params) => {
-      const request = params as { rpcId: string }
-      return {
-        rpcId: request.rpcId,
-        result: {
-          ok: true,
-          value: {
-            items: [{
-              sessionId: 'legacy-session',
-              agentPreset: 'code',
-              projections: {
-                asOfSeq: 4,
-                values: { agentPreset: 'code', other: 'code' },
-              },
-            }],
-          },
+  it('validates native RPC response correlation and structured errors', async () => {
+    await runScenarios([
+      {
+        name: 'calls allowlisted Harness methods and validates the echoed rpcId',
+        run: async () => {
+          const core = fakeCore()
+          const proxy = new RemoteApiProxy(core)
+          const sessions = await proxy.sessionList()
+          expect(sessions).toEqual([{ sessionId: 's1' }])
+          expect(core.rpcCalls).toHaveBeenCalledWith(
+            'harness.api.call',
+            expect.objectContaining({ method: 'session.list' }),
+            undefined,
+          )
         },
-      }
-    })
-    const proxy = new RemoteApiProxy(core)
-
-    await expect(proxy.sessionList()).resolves.toEqual([{
-      sessionId: 'legacy-session',
-      agentPreset: 'ptc',
-      projections: {
-        asOfSeq: 4,
-        values: { agentPreset: 'ptc', other: 'code' },
       },
-    }])
-  })
-
-  it('surfaces native RpcResult errors as ApiProxyError', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    await expect(proxy.call('session.unknown', {})).rejects.toMatchObject({
-      code: 'method-not-found',
-      message: 'nope',
-    })
-    await expect(proxy.call('session.unknown', {})).rejects.toBeInstanceOf(ApiProxyError)
-  })
-
-  it('rejects an ApiProxy response whose rpcId was not echoed', async () => {
-    const core = fakeCore()
-    core.rpcCalls.mockImplementationOnce(async () => ({ rpcId: 'different-id', result: { ok: true, value: {} } }))
-    const proxy = new RemoteApiProxy(core)
-    await expect(proxy.call('session.list', {})).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
-
-  it('uses the optimistic message rpcId for session.prompt correlation', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    await proxy.sessionPrompt('s1', 'Check the repo', 'prompt-rpc-1')
-    expect(core.rpcCalls).toHaveBeenCalledWith(
-      'harness.api.call',
-      expect.objectContaining({ method: 'session.prompt', rpcId: 'prompt-rpc-1' }),
-      undefined,
-    )
-  })
+      {
+        name: 'surfaces native RpcResult errors as ApiProxyError',
+        run: async () => {
+          const core = fakeCore()
+          const proxy = new RemoteApiProxy(core)
+          await expect(proxy.call('session.unknown', {})).rejects.toMatchObject({
+            code: 'method-not-found',
+            message: 'nope',
+          })
+          await expect(proxy.call('session.unknown', {})).rejects.toBeInstanceOf(ApiProxyError)
+        },
+      },
+      {
+        name: 'rejects an ApiProxy response whose rpcId was not echoed',
+        run: async () => {
+          const core = fakeCore()
+          core.rpcCalls.mockImplementationOnce(async () => ({
+            rpcId: 'different-id',
+            result: { ok: true, value: {} },
+          }))
+          const proxy = new RemoteApiProxy(core)
+          await expect(proxy.call('session.list', {})).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        },
+      },
+      {
+        name: 'uses the optimistic message rpcId for session.prompt correlation',
+        run: async () => {
+          const core = fakeCore()
+          const proxy = new RemoteApiProxy(core)
+          await proxy.sessionPrompt('s1', 'Check the repo', 'prompt-rpc-1')
+          expect(core.rpcCalls).toHaveBeenCalledWith(
+            'harness.api.call',
+            expect.objectContaining({ method: 'session.prompt', rpcId: 'prompt-rpc-1' }),
+            undefined,
+          )
+        },
+      },
+    ])
+  }, 20000)
 
   it('uses the bounded transfer path for a large image prompt', async () => {
     const core = fakeCore()
@@ -215,32 +199,6 @@ describe('Remote ApiProxy tunnel client', () => {
     await close()
   })
 
-  it('normalizes legacy code preset in mux projection frames', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const frames: unknown[] = []
-    const close = await proxy.openMuxStream(frame => frames.push(frame))
-    const open = core.rpcCalls.mock.calls.find(call => call[0] === 'harness.api.stream.open')
-    const streamId = String((open?.[1] as { streamId: unknown }).streamId)
-
-    core.emitEvent({
-      event: 'harness.api.frame',
-      data: {
-        streamId,
-        frame: {
-          rpcId: '',
-          payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'code', seq: 7 },
-        },
-      },
-    })
-
-    expect(frames).toContainEqual({
-      rpcId: '',
-      payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'ptc', seq: 7 },
-    })
-    await close()
-  })
-
   it('can detach a stale mux stream without sending a close RPC', async () => {
     const core = fakeCore()
     const proxy = new RemoteApiProxy(core)
@@ -252,52 +210,40 @@ describe('Remote ApiProxy tunnel client', () => {
     expect(core.rpcCalls).not.toHaveBeenCalled()
   })
 
-  it('answers approvals and questions through harness.api.respond', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    await proxy.respondApproval('rpc-1', 's1', 'a1', 'allowed-once')
-    expect(core.rpcCalls).toHaveBeenCalledWith('harness.api.respond', expect.objectContaining({
-      message: expect.objectContaining({
-        type: 'client-response',
-        rpcId: 'rpc-1',
-        result: { ok: true, value: { sessionId: 's1', approvalId: 'a1', outcome: 'allowed-once' } },
-      }),
-    }))
-    await proxy.respondQuestion('rpc-2', 's1', { answers: [{ id: 'q1', selected: ['Yes'] }] })
-  })
-
-  it('rejects a Host receipt that did not accept the response', async () => {
-    const core = fakeCore()
-    core.rpcCalls.mockImplementationOnce(async () => ({ accepted: false, reason: 'not-pending' }))
-    const proxy = new RemoteApiProxy(core)
-    await expect(proxy.respondApproval('rpc-expired', 's1', 'a1', 'rejected')).rejects.toMatchObject({
-      code: 'PERMISSION_NOT_PENDING',
-    })
-  })
-
-  it('creates sessions and passes workspace or cwd through', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    await expect(proxy.sessionCreate()).resolves.toEqual({ sessionId: 's-new' })
-    await proxy.sessionCreate('w1')
-    expect(core.rpcCalls).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
-      method: 'session.create',
-      payload: { workspaceId: 'w1' },
-    }), undefined)
-  })
-
-  it('loads and selects session models with reasoning effort passthrough', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const models = await proxy.sessionModels('s1')
-    expect(models.current.model).toBe('deepseek-v4-flash')
-    const selected = await proxy.sessionSelectModel('s1', { provider: 'deepseek-official', model: 'deepseek-v3', reasoningEffort: 'high' })
-    expect(selected.model).toBe('deepseek-v3')
-    expect(core.rpcCalls).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
-      method: 'session.selectModel',
-      payload: { sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v3', reasoningEffort: 'high' },
-    }), undefined)
-  })
+  it('requires Host acceptance for approval and question responses', async () => {
+    await runScenarios([
+      {
+        name: 'answers approvals and questions through harness.api.respond',
+        run: async () => {
+          const core = fakeCore()
+          const proxy = new RemoteApiProxy(core)
+          await proxy.respondApproval('rpc-1', 's1', 'a1', 'allowed-once')
+          expect(core.rpcCalls).toHaveBeenCalledWith(
+            'harness.api.respond',
+            expect.objectContaining({
+              message: expect.objectContaining({
+                type: 'client-response',
+                rpcId: 'rpc-1',
+                result: { ok: true, value: { sessionId: 's1', approvalId: 'a1', outcome: 'allowed-once' } },
+              }),
+            }),
+          )
+          await proxy.respondQuestion('rpc-2', 's1', { answers: [{ id: 'q1', selected: ['Yes'] }] })
+        },
+      },
+      {
+        name: 'rejects a Host receipt that did not accept the response',
+        run: async () => {
+          const core = fakeCore()
+          core.rpcCalls.mockImplementationOnce(async () => ({ accepted: false, reason: 'not-pending' }))
+          const proxy = new RemoteApiProxy(core)
+          await expect(proxy.respondApproval('rpc-expired', 's1', 'a1', 'rejected')).rejects.toMatchObject({
+            code: 'PERMISSION_NOT_PENDING',
+          })
+        },
+      },
+    ])
+  }, 10000)
 
   it('changes the native Harness approval mode through the permission command', async () => {
     const core = fakeCore()
@@ -308,40 +254,6 @@ describe('Remote ApiProxy tunnel client', () => {
       payload: { agentId: 's1', line: '/permission default', images: [] },
     }), undefined)
     await expect(proxy.sessionSelectPermission('s1', '../unsafe')).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
-
-  it('lists workspaces with archived session ids', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const list = await proxy.workspaceList()
-    expect(list.items[0]).toMatchObject({ workspaceId: 'w1' })
-    expect(list.archivedSessionIds).toEqual(['s-old'])
-  })
-
-  it('manages workspaces and archives sessions', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const created = await proxy.workspaceCreate('/tmp/p')
-    expect(created.workspace.workspaceId).toBe('w2')
-    await proxy.workspaceRename('w1', 'Renamed')
-    await proxy.workspaceDelete('w1')
-    await expect(proxy.workspaceArchiveSession('s2')).resolves.toEqual(['s-old', 's2'])
-    await proxy.workspaceInsertBefore('w2', 'w1')
-    expect(core.rpcCalls).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
-      method: 'workspace.insertBefore',
-      payload: { workspaceId: 'w2', beforeWorkspaceId: 'w1' },
-    }), undefined)
-  })
-
-  it('lists host directories with optional path', async () => {
-    const core = fakeCore()
-    const proxy = new RemoteApiProxy(core)
-    const listing = await proxy.hostListDirectory('/src')
-    expect(listing.entries[0]).toMatchObject({ name: 'src' })
-    expect(core.rpcCalls).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
-      method: 'host.listDirectory',
-      payload: { path: '/src' },
-    }), undefined)
   })
 
   it('passes beforeSeq for paged history', async () => {

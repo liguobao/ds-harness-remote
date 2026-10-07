@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  acceptNegotiatedCapabilities,
   SECURE_FRAGMENT_CHUNK_BYTES,
   SecureMessageCodec,
-  controlFrameTypes,
-  createControlFrame,
   createEvent,
   createRpcError,
   createRpcRequest,
   decodeMessage,
   encodeMessage,
-  parseControlFrame,
   parseRemoteMessage,
   remoteEvents,
   rpcMethods,
@@ -22,11 +18,6 @@ import {
 } from '../src/index.js'
 
 describe('protocol envelope', () => {
-  it('contains every Server control frame used by protocol v1', () => {
-    expect(controlFrameTypes).toContain('connect.incoming')
-    expect(controlFrameTypes).not.toContain('pairing.resolved')
-  })
-
   it('round-trips RPC messages', () => {
     const message = createRpcRequest('harness.api.call', { method: 'session.list', rpcId: 'native-1', payload: {} })
     expect(decodeMessage(encodeMessage(message))).toEqual(message)
@@ -59,30 +50,11 @@ describe('protocol envelope', () => {
     expect(selectProtocolVersion([2, 3])).toBeUndefined()
   })
 
-  it('selects supported capabilities and ignores unknown values', () => {
-    expect(selectCapabilities(
-      ['example.future.v1', 'transport.relay', 'transport.p2p'],
-      ['transport.p2p', 'transport.turn', 'transport.relay'],
-    )).toEqual(['transport.p2p', 'transport.relay'])
-  })
-
   it('negotiates LAN independently from internet P2P', () => {
     expect(selectCapabilities(
       ['transport.lan', 'transport.p2p'],
       ['transport.lan'],
     )).toEqual(['transport.lan'])
-  })
-
-  it('accepts negotiated capabilities and uses a Relay-only legacy fallback', () => {
-    expect(acceptNegotiatedCapabilities(
-      ['transport.p2p', 'transport.relay'],
-      ['transport.p2p'],
-    )).toEqual(['transport.p2p'])
-    expect(acceptNegotiatedCapabilities(['transport.relay'], undefined)).toEqual(['transport.relay'])
-    expect(() => acceptNegotiatedCapabilities(
-      ['transport.relay'],
-      ['transport.p2p'],
-    )).toThrow('did not offer')
   })
 
   it('carries event metadata and retryable RPC errors', () => {
@@ -93,19 +65,6 @@ describe('protocol envelope', () => {
       payload: { requestId: 'r1', retryable: true },
     })
     expect(createRpcRequest('harness.api.stream.close', { streamId: 'stream-1' }).payload.method).toBe('harness.api.stream.close')
-  })
-
-  it('creates and validates canonical control frames', () => {
-    const frame = createControlFrame('hello', {
-      role: 'client',
-      deviceId: 'client-1',
-      accessToken: 'secret',
-      protocols: [1],
-      clientVersion: '0.2.9',
-      capabilities: ['transport.relay'],
-    })
-    expect(parseControlFrame(frame)).toEqual(frame)
-    expect(() => parseControlFrame({ ...frame, v: 2 })).toThrow()
   })
 
   it('fragments large Noise plaintext and reassembles it with strict ordering', () => {

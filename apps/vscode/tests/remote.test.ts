@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 class FakeCore {
@@ -100,100 +101,140 @@ const host = {
 }
 
 describe('RemoteConnection close state', () => {
-  beforeEach(() => {
+  const prepareContract1 = () => {
     testState.cores.length = 0
     testState.blockStreamOpen = false
     testState.capabilities = ['harness.api.v1']
-  })
+  }
+beforeEach(prepareContract1)
 
-  it('cleans the core and notifies the UI after an unexpected close', async () => {
-    const connection = new RemoteConnection()
-    const closed = vi.fn()
-    connection.onClose(closed)
-    await connection.connect('https://server.example.com', identity, host, 'access-token', true)
-    const core = testState.cores[0]!
+  it('disposes closed connections during streaming and initialization', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'cleans the core and notifies the UI after an unexpected close',
+          run: async () => {
+            const connection = new RemoteConnection()
+            const closed = vi.fn()
+            connection.onClose(closed)
+            await connection.connect('https://server.example.com', identity, host, 'access-token', true)
+            const core = testState.cores[0]!
 
-    core.drop()
-    await vi.waitFor(() => expect(core.closeCount).toBe(1))
+            core.drop()
+            await vi.waitFor(() => expect(core.closeCount).toBe(1))
 
-    expect(connection.connectedHost).toBeUndefined()
-    expect(core.calls).toContain('harness.api.stream.close')
-    expect(closed).toHaveBeenCalledOnce()
-  })
+            expect(connection.connectedHost).toBeUndefined()
+            expect(core.calls).toContain('harness.api.stream.close')
+            expect(closed).toHaveBeenCalledOnce()
+          },
+        },
+        {
+          name: 'does not report an explicit close as an unexpected close',
+          run: async () => {
+            const connection = new RemoteConnection()
+            const closed = vi.fn()
+            connection.onClose(closed)
+            await connection.connect('https://server.example.com', identity, host, 'access-token', true)
 
-  it('does not report an explicit close as an unexpected close', async () => {
-    const connection = new RemoteConnection()
-    const closed = vi.fn()
-    connection.onClose(closed)
-    await connection.connect('https://server.example.com', identity, host, 'access-token', true)
+            await connection.close()
 
-    await connection.close()
+            expect(connection.connectedHost).toBeUndefined()
+            expect(closed).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'cleans connection state when the core closes during mux initialization',
+          run: async () => {
+            testState.blockStreamOpen = true
+            const connection = new RemoteConnection()
+            const closed = vi.fn()
+            connection.onClose(closed)
 
-    expect(connection.connectedHost).toBeUndefined()
-    expect(closed).not.toHaveBeenCalled()
-  })
+            const connecting = connection.connect(
+              'https://server.example.com',
+              identity,
+              host,
+              'access-token',
+              true,
+            )
+            await vi.waitFor(() => expect(testState.cores[0]?.calls).toContain('harness.api.stream.open'))
+            const core = testState.cores[0]!
+            core.drop()
 
-  it('cleans connection state when the core closes during mux initialization', async () => {
-    testState.blockStreamOpen = true
-    const connection = new RemoteConnection()
-    const closed = vi.fn()
-    connection.onClose(closed)
+            await expect(connecting).rejects.toThrow('Connection closed.')
+            expect(connection.connectedHost).toBeUndefined()
+            expect(core.closeCount).toBe(1)
+            expect(closed).toHaveBeenCalledOnce()
+          },
+        },
+        {
+          name: 'clears the alpha client after an unexpected close',
+          run: async () => {
+            testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+            const connection = new RemoteConnection()
+            await connection.connect('https://server.example.com', identity, host, 'access-token', true)
+            const core = testState.cores[0]!
 
-    const connecting = connection.connect('https://server.example.com', identity, host, 'access-token', true)
-    await vi.waitFor(() => expect(testState.cores[0]?.calls).toContain('harness.api.stream.open'))
-    const core = testState.cores[0]!
-    core.drop()
+            core.drop()
+            await vi.waitFor(() => expect(core.closeCount).toBe(1))
 
-    await expect(connecting).rejects.toThrow('Connection closed.')
-    expect(connection.connectedHost).toBeUndefined()
-    expect(core.closeCount).toBe(1)
-    expect(closed).toHaveBeenCalledOnce()
-  })
-
-  it('sends the complete Host command payload when changing approval mode', async () => {
-    const connection = new RemoteConnection()
-    await connection.connect('https://server.example.com', identity, host, 'access-token', true)
-    const core = testState.cores[0]!
-
-    await connection.selectPermission('session-1', 'default')
-
-    expect(core.rpcCalls).toContainEqual({
-      method: 'harness.api.call',
-      params: expect.objectContaining({
-        method: 'commands.execute',
-        payload: { agentId: 'session-1', line: '/permission default', images: [] },
-      }),
-    })
-  })
-
-  it('uses the v0.1.2 Typert Remote command payload when changing approval mode', async () => {
-    testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
-    const connection = new RemoteConnection()
-    await connection.connect('https://server.example.com', identity, host, 'access-token', true)
-    const core = testState.cores[0]!
-
-    await connection.selectPermission('session-1', 'default')
-
-    expect(core.calls).not.toContain('harness.api.stream.open')
-    expect(core.rpcCalls).toContainEqual({
-      method: 'harness.remote.call',
-      params: {
-        endpoint: 'commands/execute',
-        payload: { args: { agentId: 'session-1', line: '/permission default', images: [] } },
+            await expect(connection.sessions()).rejects.toThrow('Connect to a host first.')
+            expect(core.rpcCalls.filter((call) => call.method === 'harness.remote.call')).toHaveLength(0)
+          },
+        },
+      ],
+      async () => {
+        await prepareContract1()
       },
-    })
-  })
+    )
+  }, 20000)
 
-  it('clears the alpha client after an unexpected close', async () => {
-    testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
-    const connection = new RemoteConnection()
-    await connection.connect('https://server.example.com', identity, host, 'access-token', true)
-    const core = testState.cores[0]!
+  it('sends authoritative permission commands through both Harness carriers', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'sends the complete Host command payload when changing approval mode',
+          run: async () => {
+            const connection = new RemoteConnection()
+            await connection.connect('https://server.example.com', identity, host, 'access-token', true)
+            const core = testState.cores[0]!
 
-    core.drop()
-    await vi.waitFor(() => expect(core.closeCount).toBe(1))
+            await connection.selectPermission('session-1', 'default')
 
-    await expect(connection.sessions()).rejects.toThrow('Connect to a host first.')
-    expect(core.rpcCalls.filter(call => call.method === 'harness.remote.call')).toHaveLength(0)
-  })
+            expect(core.rpcCalls).toContainEqual({
+              method: 'harness.api.call',
+              params: expect.objectContaining({
+                method: 'commands.execute',
+                payload: { agentId: 'session-1', line: '/permission default', images: [] },
+              }),
+            })
+          },
+        },
+        {
+          name: 'uses the v0.1.2 Typert Remote command payload when changing approval mode',
+          run: async () => {
+            testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+            const connection = new RemoteConnection()
+            await connection.connect('https://server.example.com', identity, host, 'access-token', true)
+            const core = testState.cores[0]!
+
+            await connection.selectPermission('session-1', 'default')
+
+            expect(core.calls).not.toContain('harness.api.stream.open')
+            expect(core.rpcCalls).toContainEqual({
+              method: 'harness.remote.call',
+              params: {
+                endpoint: 'commands/execute',
+                payload: { args: { agentId: 'session-1', line: '/permission default', images: [] } },
+              },
+            })
+          },
+        },
+      ],
+      async () => {
+        await prepareContract1()
+      },
+    )
+  }, 10000)
+
 })

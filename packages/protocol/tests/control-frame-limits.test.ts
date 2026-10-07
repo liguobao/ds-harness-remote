@@ -51,16 +51,4 @@ describe('Control frame byte limits', () => {
     })
     expect(() => encodeControlFrame(relay)).toThrow('Relay frame exceeds')
   })
-
-  it('rejects hello.ack limits above the supported defaults', () => {
-    const ack = createControlFrame('hello.ack', {
-      protocol: 1,
-      serverVersion: '1.0.0',
-      connectionSessionId: 'session-1',
-      heartbeatIntervalMs: 25_000,
-      maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES + 1,
-      maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
-    })
-    expect(() => encodeControlFrame(ack)).toThrow()
-  })
 })

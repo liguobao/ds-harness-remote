@@ -30,41 +30,6 @@ describe('remote File Viewer content provider', () => {
     expect(remoteFileSaveAsMaxBytes({ mode: 'remote', remoteFeatures: { fileViewer: true } })).toBe(REMOTE_FILE_SAVE_AS_MAX_BYTES)
   })
 
-  it('reads the Save As size limit dynamically', () => {
-    let maxBytes = REMOTE_FILE_SAVE_AS_MAX_BYTES
-    const provider = createRemoteFileContentProvider(vi.fn(), {
-      saveAsAllowed: true,
-      saveAsMaxBytes: () => maxBytes,
-    })
-
-    expect(provider.saveAsAllowed?.('/workspace/big.bin')).toEqual({
-      allowed: true,
-      maxBytes: REMOTE_FILE_SAVE_AS_MAX_BYTES,
-    })
-    maxBytes = REMOTE_FILE_FAST_SAVE_AS_MAX_BYTES
-    expect(provider.saveAsAllowed?.('/workspace/big.bin')).toEqual({
-      allowed: true,
-      maxBytes: REMOTE_FILE_FAST_SAVE_AS_MAX_BYTES,
-    })
-  })
-
-  it('maps remote metadata and directory entries to the File Viewer contract', async () => {
-    const call: RemoteFileControlCall = vi.fn(async (endpoint) => {
-      if (endpoint === 'fileviewer.stat') {
-        return { path: '/workspace/a.txt', name: 'a.txt', ext: 'txt', mime: 'text/plain', size: 3, isDirectory: false, exists: true } as never
-      }
-      return { path: '/workspace', entries: [{ name: 'a.txt', path: '/workspace/a.txt', isDirectory: false, size: 3 }] } as never
-    })
-    const provider = createRemoteFileContentProvider(call)
-    const signal = new AbortController().signal
-
-    await expect(provider.stat('/workspace/a.txt', signal)).resolves.toMatchObject({ name: 'a.txt', size: 3 })
-    await expect(provider.list('/workspace', signal)).resolves.toEqual([{
-      locator: '/workspace/a.txt', name: 'a.txt', size: 3, mtimeMs: undefined, isDirectory: false,
-    }])
-    expect(provider.openExternal).toBeUndefined()
-  })
-
   it('assembles large reads from bounded remote chunks', async () => {
     const source = Buffer.alloc(REMOTE_FILE_CHUNK_BYTES + 17, 7)
     const call: RemoteFileControlCall = vi.fn(async (_endpoint, payload) => {

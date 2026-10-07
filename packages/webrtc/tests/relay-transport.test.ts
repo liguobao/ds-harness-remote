@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createControlFrame } from '@dsh-remote/protocol'
 import {
@@ -44,12 +45,13 @@ class FakeWebSocket {
   }
 }
 
-afterEach(() => {
+const cleanupScenario1 = () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   FakeWebSocket.latest = undefined
-})
+}
+afterEach(cleanupScenario1)
 
 describe('RelayTransport control handshake', () => {
   it('waits for authorization and sends canonical relay frames', async () => {
@@ -261,50 +263,64 @@ describe('AdaptiveTransport capability negotiation', () => {
     await connecting
   })
 
-  it.each([
-    {
-      name: 'preserves LAN when LAN was negotiated',
-      capabilities: ['transport.lan', 'transport.p2p'],
-      selected: 'lan' as const,
-      expected: 'lan',
-    },
-    {
-      name: 'downgrades LAN for an older P2P-only server',
-      capabilities: ['transport.p2p'],
-      selected: 'lan' as const,
-      expected: 'p2p',
-    },
-    {
-      name: 'falls back when TURN-only negotiation selects P2P',
-      capabilities: ['transport.turn', 'transport.relay'],
-      selected: 'p2p' as const,
-      expected: 'relay',
-    },
-    {
-      name: 'rejects when P2P-only negotiation selects TURN',
-      capabilities: ['transport.p2p'],
-      selected: 'turn' as const,
-      expected: 'reject',
-    },
-  ])('$name', async ({ capabilities, selected, expected }) => {
-    vi.stubGlobal('WebSocket', FakeWebSocket)
-    vi.spyOn(RtcDataChannelTransport.prototype, 'connect').mockResolvedValue()
-    vi.spyOn(RtcDataChannelTransport.prototype, 'selectedTransport').mockReturnValue(selected)
-    vi.spyOn(RtcDataChannelTransport.prototype, 'diagnostics').mockReturnValue({} as never)
-    vi.spyOn(RtcDataChannelTransport.prototype, 'close').mockResolvedValue()
-    const transport = createAdaptiveTransport()
-    const connecting = transport.connect()
-    const socket = FakeWebSocket.latest!
-    socket.open()
-    socket.receive(helloAck({ capabilities }))
-    await Promise.resolve()
-    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
-    if (expected === 'reject') {
-      await expect(connecting).rejects.toThrow(`WebRTC selected unnegotiated transport: ${selected}`)
-    } else {
-      await connecting
-      expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: expected })
-    }
+  it('rejects selected transports outside negotiated capabilities', async () => {
+    const rows = [
+      {
+        name: 'preserves LAN when LAN was negotiated',
+        capabilities: ['transport.lan', 'transport.p2p'],
+        selected: 'lan' as const,
+        expected: 'lan',
+      },
+      {
+        name: 'downgrades LAN for an older P2P-only server',
+        capabilities: ['transport.p2p'],
+        selected: 'lan' as const,
+        expected: 'p2p',
+      },
+      {
+        name: 'falls back when TURN-only negotiation selects P2P',
+        capabilities: ['transport.turn', 'transport.relay'],
+        selected: 'p2p' as const,
+        expected: 'relay',
+      },
+      {
+        name: 'rejects when P2P-only negotiation selects TURN',
+        capabilities: ['transport.p2p'],
+        selected: 'turn' as const,
+        expected: 'reject',
+      },
+    ] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const { capabilities, selected, expected } = row
+        return {
+          name: scenarioName('$name', row, index),
+          run: async () => {
+            vi.stubGlobal('WebSocket', FakeWebSocket)
+            vi.spyOn(RtcDataChannelTransport.prototype, 'connect').mockResolvedValue()
+            vi.spyOn(RtcDataChannelTransport.prototype, 'selectedTransport').mockReturnValue(selected)
+            vi.spyOn(RtcDataChannelTransport.prototype, 'diagnostics').mockReturnValue({} as never)
+            vi.spyOn(RtcDataChannelTransport.prototype, 'close').mockResolvedValue()
+            const transport = createAdaptiveTransport()
+            const connecting = transport.connect()
+            const socket = FakeWebSocket.latest!
+            socket.open()
+            socket.receive(helloAck({ capabilities }))
+            await Promise.resolve()
+            socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+            if (expected === 'reject') {
+              await expect(connecting).rejects.toThrow(`WebRTC selected unnegotiated transport: ${selected}`)
+            } else {
+              await connecting
+              expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: expected })
+            }
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
+      },
+    )
   })
 
   it('rejects P2P-only negotiation when WebRTC is disabled', async () => {

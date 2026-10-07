@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEvent, createRpcError, createRpcResponse, encodeMessage } from '@dsh-remote/protocol'
 import { BaseTransport } from '@dsh-remote/webrtc'
@@ -31,9 +32,10 @@ class LoopbackTransport extends BaseTransport {
   drop() { this.emitClose() }
 }
 
-afterEach(() => {
+const cleanupContract1 = () => {
   vi.useRealTimers()
-})
+}
+afterEach(cleanupContract1)
 
 describe('RemoteClientCore', () => {
   it('matches responses to pending RPC calls', async () => {
@@ -46,142 +48,224 @@ describe('RemoteClientCore', () => {
     await expect(call).resolves.toEqual({ ok: true })
   })
 
-  it('uses TRANSPORT_CLOSED when the transport terminates a pending RPC', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    let closed = false
-    client.onClose(() => { closed = true })
-    const call = client.rpc('harness.api.call', {})
+  it('terminates pending RPCs with the correct close reason', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'uses TRANSPORT_CLOSED when the transport terminates a pending RPC',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            let closed = false
+            client.onClose(() => {
+              closed = true
+            })
+            const call = client.rpc('harness.api.call', {})
 
-    transport.drop()
+            transport.drop()
 
-    await expect(call).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'TRANSPORT_CLOSED',
-    })
-    expect(closed).toBe(true)
-  })
+            await expect(call).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'TRANSPORT_CLOSED',
+            })
+            expect(closed).toBe(true)
+          },
+        },
+        {
+          name: 'uses CLIENT_CLOSED when close terminates a pending RPC',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            const call = client.rpc('harness.api.call', {})
 
-  it('uses CLIENT_CLOSED when close terminates a pending RPC', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    const call = client.rpc('harness.api.call', {})
+            await client.close()
 
-    await client.close()
+            await expect(call).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'CLIENT_CLOSED',
+            })
+          },
+        },
+        {
+          name: 'rejects pending RPCs before a failing transport close completes',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            transport.closeError = new Error('transport close failed')
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            const closed = vi.fn()
+            client.onClose(closed)
+            const call = client.rpc('harness.api.call', {})
+            const termination = expect(call).rejects.toMatchObject({ code: 'CLIENT_CLOSED' })
 
-    await expect(call).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'CLIENT_CLOSED',
-    })
-  })
+            const closing = client.close()
+            expect(closed).toHaveBeenCalledOnce()
+            await expect(closing).rejects.toThrow('transport close failed')
+            await termination
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 15000)
 
-  it('rejects pending RPCs before a failing transport close completes', async () => {
-    const transport = new LoopbackTransport()
-    transport.closeError = new Error('transport close failed')
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    const closed = vi.fn()
-    client.onClose(closed)
-    const call = client.rpc('harness.api.call', {})
-    const termination = expect(call).rejects.toMatchObject({ code: 'CLIENT_CLOSED' })
+  it('enforces RPC deadlines even while send is pending', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'uses RPC_TIMEOUT when a pending RPC reaches its deadline',
+          run: async () => {
+            vi.useFakeTimers()
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport, 1_000)
+            await client.connect()
+            const call = client.rpc('harness.api.call', {})
+            const termination = expect(call).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'RPC_TIMEOUT',
+            })
 
-    const closing = client.close()
-    expect(closed).toHaveBeenCalledOnce()
-    await expect(closing).rejects.toThrow('transport close failed')
-    await termination
-  })
+            await vi.advanceTimersByTimeAsync(1_000)
 
-  it('uses RPC_TIMEOUT when a pending RPC reaches its deadline', async () => {
-    vi.useFakeTimers()
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport, 1_000)
-    await client.connect()
-    const call = client.rpc('harness.api.call', {})
-    const termination = expect(call).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'RPC_TIMEOUT',
-    })
+            await termination
+          },
+        },
+        {
+          name: 'allows a per-call timeout longer than the client default',
+          run: async () => {
+            vi.useFakeTimers()
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport, 1_000)
+            await client.connect()
+            const call = client.rpc(
+              'agent.acp.call',
+              { method: 'session/prompt', params: {} },
+              undefined,
+              5_000,
+            )
+            const pending = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
 
-    await vi.advanceTimersByTimeAsync(1_000)
+            await vi.advanceTimersByTimeAsync(1_000)
+            await Promise.resolve()
+            await vi.advanceTimersByTimeAsync(4_000)
 
-    await termination
-  })
+            await pending
+          },
+        },
+        {
+          name: 'times out even when transport.send never settles',
+          run: async () => {
+            vi.useFakeTimers()
+            const transport = new LoopbackTransport()
+            transport.sendGate = new Promise<void>(() => undefined)
+            const client = new RemoteClientCore(transport, 1_000)
+            await client.connect()
+            const call = client.rpc('harness.api.call', {})
+            const termination = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
 
-  it('allows a per-call timeout longer than the client default', async () => {
-    vi.useFakeTimers()
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport, 1_000)
-    await client.connect()
-    const call = client.rpc('agent.acp.call', { method: 'session/prompt', params: {} }, undefined, 5_000)
-    const pending = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
+            await vi.advanceTimersByTimeAsync(1_000)
 
-    await vi.advanceTimersByTimeAsync(1_000)
-    await Promise.resolve()
-    await vi.advanceTimersByTimeAsync(4_000)
+            await termination
+          },
+        },
+        {
+          name: 'applies a per-call deadline while ordinary calls keep the client-wide one',
+          run: async () => {
+            vi.useFakeTimers()
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport, 1_000)
+            await client.connect()
+            const ordinary = client.rpc('harness.remote.call', {})
+            const ordinaryTermination = expect(ordinary).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'RPC_TIMEOUT',
+              message: 'RPC harness.remote.call timed out after 1000ms',
+            })
+            const extended = client.rpc('harness.remote.call', {}, undefined, { timeoutMs: 5_000 })
+            const extendedTermination = expect(extended).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'RPC_TIMEOUT',
+              message: 'RPC harness.remote.call timed out after 5000ms',
+            })
 
-    await pending
-  })
+            await vi.advanceTimersByTimeAsync(1_000)
+            await ordinaryTermination
+            await vi.advanceTimersByTimeAsync(4_000)
 
-  it('times out even when transport.send never settles', async () => {
-    vi.useFakeTimers()
-    const transport = new LoopbackTransport()
-    transport.sendGate = new Promise<void>(() => undefined)
-    const client = new RemoteClientCore(transport, 1_000)
-    await client.connect()
-    const call = client.rpc('harness.api.call', {})
-    const termination = expect(call).rejects.toMatchObject({ code: 'RPC_TIMEOUT' })
+            await extendedTermination
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 20000)
 
-    await vi.advanceTimersByTimeAsync(1_000)
+  it('aborts pending RPCs and preserves the abort reason', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'uses RPC_ABORTED and preserves the abort reason as the cause',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            const controller = new AbortController()
+            await client.connect()
+            const call = client.rpc('harness.api.call', {}, controller.signal)
+            const reason = new Error('cancelled by caller')
 
-    await termination
-  })
+            controller.abort(reason)
 
-  it('uses RPC_ABORTED and preserves the abort reason as the cause', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    const controller = new AbortController()
-    await client.connect()
-    const call = client.rpc('harness.api.call', {}, controller.signal)
-    const reason = new Error('cancelled by caller')
+            await expect(call).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'RPC_ABORTED',
+              cause: reason,
+            })
+          },
+        },
+        {
+          name: 'aborts even when transport.send never settles',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            transport.sendGate = new Promise<void>(() => undefined)
+            const client = new RemoteClientCore(transport)
+            const controller = new AbortController()
+            await client.connect()
+            const call = client.rpc('harness.api.call', {}, controller.signal)
 
-    controller.abort(reason)
+            controller.abort()
 
-    await expect(call).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'RPC_ABORTED',
-      cause: reason,
-    })
-  })
+            await expect(call).rejects.toMatchObject({ code: 'RPC_ABORTED' })
+          },
+        },
+        {
+          name: 'uses RPC_ABORTED for an already-aborted signal',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            const controller = new AbortController()
+            controller.abort('cancelled before dispatch')
+            await client.connect()
 
-  it('aborts even when transport.send never settles', async () => {
-    const transport = new LoopbackTransport()
-    transport.sendGate = new Promise<void>(() => undefined)
-    const client = new RemoteClientCore(transport)
-    const controller = new AbortController()
-    await client.connect()
-    const call = client.rpc('harness.api.call', {}, controller.signal)
-
-    controller.abort()
-
-    await expect(call).rejects.toMatchObject({ code: 'RPC_ABORTED' })
-  })
-
-  it('uses RPC_ABORTED for an already-aborted signal', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    const controller = new AbortController()
-    controller.abort('cancelled before dispatch')
-    await client.connect()
-
-    await expect(client.rpc('harness.api.call', {}, controller.signal)).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'RPC_ABORTED',
-      cause: 'cancelled before dispatch',
-    })
-    expect(transport.sent).toHaveLength(0)
-  })
+            await expect(client.rpc('harness.api.call', {}, controller.signal)).rejects.toMatchObject({
+              name: 'RemoteClientError',
+              code: 'RPC_ABORTED',
+              cause: 'cancelled before dispatch',
+            })
+            expect(transport.sent).toHaveLength(0)
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 15000)
 
   it('keeps the first termination reason when send fails after transport close', async () => {
     let rejectSend!: (error: Error) => void
@@ -211,83 +295,87 @@ describe('RemoteClientCore', () => {
     transport.push(encodeMessage(createRpcResponse(request.id, { late: true })))
   })
 
-  it('applies a per-call deadline while ordinary calls keep the client-wide one', async () => {
-    vi.useFakeTimers()
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport, 1_000)
-    await client.connect()
-    const ordinary = client.rpc('harness.remote.call', {})
-    const ordinaryTermination = expect(ordinary).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'RPC_TIMEOUT',
-      message: 'RPC harness.remote.call timed out after 1000ms',
-    })
-    const extended = client.rpc('harness.remote.call', {}, undefined, { timeoutMs: 5_000 })
-    const extendedTermination = expect(extended).rejects.toMatchObject({
-      name: 'RemoteClientError',
-      code: 'RPC_TIMEOUT',
-      message: 'RPC harness.remote.call timed out after 5000ms',
-    })
-
-    await vi.advanceTimersByTimeAsync(1_000)
-    await ordinaryTermination
-    await vi.advanceTimersByTimeAsync(4_000)
-
-    await extendedTermination
-  })
 })
 
 describe('Remote Host feature probing', () => {
-  it('recognizes v0.1.2 Typert Remote Gateway capabilities', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    const probing = probeRemoteHostFeatures(client)
-    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+  it('negotiates compatible Typert session generations', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'recognizes v0.1.2 Typert Remote Gateway capabilities',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            const probing = probeRemoteHostFeatures(client)
+            const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
 
-    transport.push(encodeMessage(createRpcResponse(request.id, {
-      capabilities: ['harness.remote.v1', 'harness.remote.transfer.v1'],
-    })))
+            transport.push(
+              encodeMessage(
+                createRpcResponse(request.id, {
+                  capabilities: ['harness.remote.v1', 'harness.remote.transfer.v1'],
+                }),
+              ),
+            )
 
-    await expect(probing).resolves.toMatchObject({
-      apiProxy: false,
-      remoteGateway: true,
-      remoteTransfer: true,
-    })
-  })
+            await expect(probing).resolves.toMatchObject({
+              apiProxy: false,
+              remoteGateway: true,
+              remoteTransfer: true,
+            })
+          },
+        },
+        {
+          name: 'recognizes the v0.1.5 Session V3 Typert capability',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            const probing = probeRemoteHostFeatures(client)
+            const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
 
-  it('recognizes the v0.1.5 Session V3 Typert capability', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    const probing = probeRemoteHostFeatures(client)
-    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+            transport.push(
+              encodeMessage(
+                createRpcResponse(request.id, {
+                  capabilities: ['harness.remote.v3', 'harness.remote.transfer.v1'],
+                }),
+              ),
+            )
 
-    transport.push(encodeMessage(createRpcResponse(request.id, {
-      capabilities: ['harness.remote.v3', 'harness.remote.transfer.v1'],
-    })))
+            await expect(probing).resolves.toMatchObject({
+              apiProxy: false,
+              remoteGateway: true,
+              sessionFormat: 3,
+              remoteTransfer: true,
+            })
+          },
+        },
+        {
+          name: 'rejects a Host that advertises conflicting Session generations',
+          run: async () => {
+            const transport = new LoopbackTransport()
+            const client = new RemoteClientCore(transport)
+            await client.connect()
+            const probing = probeRemoteHostFeatures(client)
+            const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
 
-    await expect(probing).resolves.toMatchObject({
-      apiProxy: false,
-      remoteGateway: true,
-      sessionFormat: 3,
-      remoteTransfer: true,
-    })
-  })
+            transport.push(
+              encodeMessage(
+                createRpcResponse(request.id, {
+                  capabilities: ['harness.remote.v1', 'harness.remote.v3'],
+                }),
+              ),
+            )
 
-  it('rejects a Host that advertises conflicting Session generations', async () => {
-    const transport = new LoopbackTransport()
-    const client = new RemoteClientCore(transport)
-    await client.connect()
-    const probing = probeRemoteHostFeatures(client)
-    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
-
-    transport.push(encodeMessage(createRpcResponse(request.id, {
-      capabilities: ['harness.remote.v1', 'harness.remote.v3'],
-    })))
-
-    await expect(probing).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-  })
+            await expect(probing).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 15000)
 
   it('falls back to ApiProxy for legacy Hosts without describe', async () => {
     const transport = new LoopbackTransport()
@@ -424,99 +512,121 @@ describe('RemoteTypertGateway', () => {
     await termination
   })
 
-  it('rejects an oversized transferred response before allocating it', async () => {
-    const methods: string[] = []
-    let transferId = ''
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      methods.push(method)
-      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
-      if (method === 'harness.remote.transfer.open') {
-        transferId = (params as { transferId: string }).transferId
-        return { opened: true }
-      }
-      if (method === 'harness.remote.transfer.commit') {
-        return { kind: 'chunked', transferId, totalBytes: 100 * 1024 * 1024, totalChunks: 200 }
-      }
-      return { accepted: true }
-    })
-    const client = { rpc } as unknown as RemoteClientCore
+  it('validates bounded transfer response descriptors and lengths', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'rejects an oversized transferred response before allocating it',
+          run: async () => {
+            const methods: string[] = []
+            let transferId = ''
+            const rpc = vi.fn(async (method: string, params: unknown) => {
+              methods.push(method)
+              if (method === 'harness.remote.call')
+                throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+              if (method === 'harness.remote.transfer.open') {
+                transferId = (params as { transferId: string }).transferId
+                return { opened: true }
+              }
+              if (method === 'harness.remote.transfer.commit') {
+                return { kind: 'chunked', transferId, totalBytes: 100 * 1024 * 1024, totalChunks: 200 }
+              }
+              return { accepted: true }
+            })
+            const client = { rpc } as unknown as RemoteClientCore
 
-    await expect(new RemoteTypertGateway(client).call(
-      'officeToPdf/render',
-      { args: {} },
-      undefined,
-      { timeoutMs: 120_000, maxResponseBytes: 12 * 1024 * 1024 },
-    )).rejects.toMatchObject({
-      code: 'RESPONSE_TOO_LARGE',
-      details: { totalBytes: 100 * 1024 * 1024, maxResponseBytes: 12 * 1024 * 1024 },
-    })
-    expect(methods).not.toContain('harness.remote.transfer.read')
-    expect(methods).toContain('harness.remote.transfer.close')
-  })
+            await expect(
+              new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }, undefined, {
+                timeoutMs: 120_000,
+                maxResponseBytes: 12 * 1024 * 1024,
+              }),
+            ).rejects.toMatchObject({
+              code: 'RESPONSE_TOO_LARGE',
+              details: { totalBytes: 100 * 1024 * 1024, maxResponseBytes: 12 * 1024 * 1024 },
+            })
+            expect(methods).not.toContain('harness.remote.transfer.read')
+            expect(methods).toContain('harness.remote.transfer.close')
+          },
+        },
+        {
+          name: 'finishes a transferred response inside the requested limit',
+          run: async () => {
+            let transferId = ''
+            const rpc = vi.fn(async (method: string, params: unknown) => {
+              if (method === 'harness.remote.call')
+                throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+              if (method === 'harness.remote.transfer.open') {
+                transferId = (params as { transferId: string }).transferId
+                return { opened: true }
+              }
+              if (method === 'harness.remote.transfer.commit') {
+                return { kind: 'chunked', transferId, totalBytes: 11, totalChunks: 1 }
+              }
+              if (method === 'harness.remote.transfer.read')
+                return { transferId, index: 0, data: btoa('{"ok":true}') }
+              return { accepted: true }
+            })
+            const client = { rpc } as unknown as RemoteClientCore
 
-  it('finishes a transferred response inside the requested limit', async () => {
-    let transferId = ''
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
-      if (method === 'harness.remote.transfer.open') {
-        transferId = (params as { transferId: string }).transferId
-        return { opened: true }
-      }
-      if (method === 'harness.remote.transfer.commit') {
-        return { kind: 'chunked', transferId, totalBytes: 11, totalChunks: 1 }
-      }
-      if (method === 'harness.remote.transfer.read') return { transferId, index: 0, data: btoa('{"ok":true}') }
-      return { accepted: true }
-    })
-    const client = { rpc } as unknown as RemoteClientCore
+            await expect(
+              new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }, undefined, {
+                maxResponseBytes: 1024,
+              }),
+            ).resolves.toBeUndefined()
+          },
+        },
+        {
+          name: 'refuses an invalid transfer response limit instead of silently uncapping it',
+          run: async () => {
+            const rpc = vi.fn(async (method: string) => {
+              if (method === 'harness.remote.call')
+                throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+              return { opened: true }
+            })
+            const client = { rpc } as unknown as RemoteClientCore
 
-    await expect(new RemoteTypertGateway(client).call(
-      'officeToPdf/render',
-      { args: {} },
-      undefined,
-      { maxResponseBytes: 1024 },
-    )).resolves.toBeUndefined()
-  })
+            for (const maxResponseBytes of [Number.POSITIVE_INFINITY, 0, -1, 1.5]) {
+              await expect(
+                new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }, undefined, {
+                  maxResponseBytes,
+                }),
+              ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+            }
+            expect(rpc).toHaveBeenCalledTimes(4)
+          },
+        },
+        {
+          name: 'rejects an invalid transferred descriptor before reading it',
+          run: async () => {
+            let transferId = ''
+            const methods: string[] = []
+            const rpc = vi.fn(async (method: string, params: unknown) => {
+              methods.push(method)
+              if (method === 'harness.remote.call')
+                throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+              if (method === 'harness.remote.transfer.open') {
+                transferId = (params as { transferId: string }).transferId
+                return { opened: true }
+              }
+              if (method === 'harness.remote.transfer.commit') {
+                return { kind: 'chunked', transferId, totalBytes: 11.5, totalChunks: 1 }
+              }
+              return { accepted: true }
+            })
+            const client = { rpc } as unknown as RemoteClientCore
 
-  it('refuses an invalid transfer response limit instead of silently uncapping it', async () => {
-    const rpc = vi.fn(async (method: string) => {
-      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
-      return { opened: true }
-    })
-    const client = { rpc } as unknown as RemoteClientCore
-
-    for (const maxResponseBytes of [Number.POSITIVE_INFINITY, 0, -1, 1.5]) {
-      await expect(new RemoteTypertGateway(client).call(
-        'officeToPdf/render',
-        { args: {} },
-        undefined,
-        { maxResponseBytes },
-      )).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-    }
-    expect(rpc).toHaveBeenCalledTimes(4)
-  })
-
-  it('rejects an invalid transferred descriptor before reading it', async () => {
-    let transferId = ''
-    const methods: string[] = []
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      methods.push(method)
-      if (method === 'harness.remote.call') throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
-      if (method === 'harness.remote.transfer.open') {
-        transferId = (params as { transferId: string }).transferId
-        return { opened: true }
-      }
-      if (method === 'harness.remote.transfer.commit') {
-        return { kind: 'chunked', transferId, totalBytes: 11.5, totalChunks: 1 }
-      }
-      return { accepted: true }
-    })
-    const client = { rpc } as unknown as RemoteClientCore
-
-    await expect(new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }))
-      .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-    expect(methods).not.toContain('harness.remote.transfer.read')
-  })
+            await expect(
+              new RemoteTypertGateway(client).call('officeToPdf/render', { args: {} }),
+            ).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+            expect(methods).not.toContain('harness.remote.transfer.read')
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  }, 20000)
 
   it('routes Remote stream frames and closes the stream on iterator return', async () => {
     const transport = new LoopbackTransport()
@@ -681,46 +791,76 @@ describe('HarnessAlphaClient', () => {
     await client.close()
   })
 
-  it('normalizes legacy code preset in session list projections', async () => {
-    const core = new ScriptedCore()
-    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+  it('normalizes legacy code presets in history and live frames', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'normalizes legacy code preset in session list projections',
+          run: async () => {
+            const core = new ScriptedCore()
+            const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
 
-    const sessions = await client.sessionList()
+            const sessions = await client.sessionList()
 
-    expect(sessions).toEqual([expect.objectContaining({
-      sessionId: 'legacy-session',
-      agentPreset: 'ptc',
-      projections: {
-        asOfSeq: 4,
-        values: { agentPreset: 'ptc', other: 'code' },
+            expect(sessions).toEqual([
+              expect.objectContaining({
+                sessionId: 'legacy-session',
+                agentPreset: 'ptc',
+                projections: {
+                  asOfSeq: 4,
+                  values: { agentPreset: 'ptc', other: 'code' },
+                },
+              }),
+            ])
+          },
+        },
+        {
+          name: 'normalizes legacy code preset in live projection frames',
+          run: async () => {
+            const core = new ScriptedCore()
+            const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+            const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, (frame) =>
+              frames.push(frame),
+            )
+
+            client.start()
+            await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
+            core.emit({
+              event: 'harness.remote.frame',
+              data: {
+                streamId: core.streamIdFor('session/control'),
+                hasValue: true,
+                value: {
+                  type: 'projection',
+                  sessionId: 'legacy-session',
+                  key: 'agentPreset',
+                  value: 'code',
+                  seq: 7,
+                },
+              },
+            })
+
+            await vi.waitFor(() => {
+              expect(frames).toContainEqual({
+                rpcId: '',
+                payload: {
+                  type: 'session/projection',
+                  sessionId: 'legacy-session',
+                  key: 'agentPreset',
+                  value: 'ptc',
+                  seq: 7,
+                },
+              })
+            })
+            await client.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
       },
-    })])
-  })
-
-  it('normalizes legacy code preset in live projection frames', async () => {
-    const core = new ScriptedCore()
-    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
-    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, frame => frames.push(frame))
-
-    client.start()
-    await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
-    core.emit({
-      event: 'harness.remote.frame',
-      data: {
-        streamId: core.streamIdFor('session/control'),
-        hasValue: true,
-        value: { type: 'projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'code', seq: 7 },
-      },
-    })
-
-    await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        rpcId: '',
-        payload: { type: 'session/projection', sessionId: 'legacy-session', key: 'agentPreset', value: 'ptc', seq: 7 },
-      })
-    })
-    await client.close()
-  })
+    )
+  }, 10000)
 
   it('maps alpha approval waterfalls to legacy client frames and answers through $events/result', async () => {
     const core = new ScriptedCore()

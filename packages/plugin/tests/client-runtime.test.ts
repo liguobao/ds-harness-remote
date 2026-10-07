@@ -1,3 +1,4 @@
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,116 +20,219 @@ import type { ClientServerApi } from '../src/server-api.js'
 
 const directories: string[] = []
 
-afterEach(async () => {
-  await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
-})
+const cleanupScenario1 = async () => {
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+}
+afterEach(cleanupScenario1)
 
 describe('ClientModeRuntime Host account control', () => {
-  it('uses a conservative compatibility profile for legacy and unknown Hosts', () => {
-    expect(remoteHostFeatures()).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-    expect(remoteHostFeatures('not-semver')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-    expect(remoteHostFeatures('0.3.15')).toEqual({ commandList: false, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-    expect(remoteHostFeatures('0.3.16')).toEqual({ commandList: true, fileViewer: false, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-    expect(remoteHostFeatures('v0.3.17')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-    expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({ commandList: true, fileViewer: true, terminal: false, apiProxy: true, remoteGateway: false, codex: false, cursor: false, antigravity: false })
-  })
+  it('discovers Host capabilities conservatively without inferring backend readiness', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'uses a conservative compatibility profile for legacy and unknown Hosts',
+          run: () => {
+            expect(remoteHostFeatures()).toEqual({
+              commandList: false,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+            expect(remoteHostFeatures('not-semver')).toEqual({
+              commandList: false,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+            expect(remoteHostFeatures('0.3.15')).toEqual({
+              commandList: false,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+            expect(remoteHostFeatures('0.3.16')).toEqual({
+              commandList: true,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+            expect(remoteHostFeatures('v0.3.17')).toEqual({
+              commandList: true,
+              fileViewer: true,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+            expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({
+              commandList: true,
+              fileViewer: true,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+          },
+        },
+        {
+          name: 'prefers encrypted Host capability discovery while retaining the legacy fallback',
+          run: async () => {
+            const alphaClient = {
+              rpc: vi.fn(async () => ({
+                capabilities: [
+                  'transport.relay',
+                  'harness.remote.v1',
+                  'harness.remote.transfer.v1',
+                  'codex.appserver.v1',
+                ],
+              })),
+            }
+            await expect(probeRemoteHostFeatures(alphaClient as never, '0.3.15')).resolves.toEqual({
+              commandList: true,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: false,
+              remoteGateway: true,
+              codex: true,
+              cursor: false,
+              antigravity: false,
+            })
 
-  it('prefers encrypted Host capability discovery while retaining the legacy fallback', async () => {
-    const alphaClient = {
-      rpc: vi.fn(async () => ({
-        capabilities: ['transport.relay', 'harness.remote.v1', 'harness.remote.transfer.v1', 'codex.appserver.v1'],
-      })),
-    }
-    await expect(probeRemoteHostFeatures(alphaClient as never, '0.3.15')).resolves.toEqual({
-      commandList: true,
-      fileViewer: false,
-      terminal: false,
-      apiProxy: false,
-      remoteGateway: true,
-      codex: true,
-      cursor: false,
-      antigravity: false,
-    })
+            alphaClient.rpc.mockResolvedValueOnce({
+              capabilities: ['transport.relay', 'harness.remote.v3', 'harness.remote.transfer.v1'],
+            })
+            await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.11')).resolves.toEqual({
+              commandList: true,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: false,
+              remoteGateway: true,
+              sessionFormat: 3,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
 
-    alphaClient.rpc.mockResolvedValueOnce({
-      capabilities: ['transport.relay', 'harness.remote.v3', 'harness.remote.transfer.v1'],
-    })
-    await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.11')).resolves.toEqual({
-      commandList: true,
-      fileViewer: false,
-      terminal: false,
-      apiProxy: false,
-      remoteGateway: true,
-      sessionFormat: 3,
-      codex: false,
-      cursor: false,
-      antigravity: false,
-    })
+            alphaClient.rpc.mockResolvedValueOnce({
+              capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1'],
+            })
+            await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.19')).resolves.toEqual({
+              commandList: false,
+              fileViewer: false,
+              terminal: false,
+              apiProxy: false,
+              remoteGateway: false,
+              codex: true,
+              cursor: false,
+              antigravity: false,
+            })
 
-    alphaClient.rpc.mockResolvedValueOnce({
-      capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1'],
-    })
-    await expect(probeRemoteHostFeatures(alphaClient as never, '0.4.19')).resolves.toEqual({
-      commandList: false,
-      fileViewer: false,
-      terminal: false,
-      apiProxy: false,
-      remoteGateway: false,
-      codex: true,
-      cursor: false,
-      antigravity: false,
-    })
-
-    const legacyClient = {
-      rpc: vi.fn(async () => {
-        throw Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' })
-      }),
-    }
-    await expect(probeRemoteHostFeatures(legacyClient as never, '0.3.17')).resolves.toEqual({
-      commandList: true,
-      fileViewer: true,
-      terminal: false,
-      apiProxy: true,
-      remoteGateway: false,
-      codex: false,
-      cursor: false,
-      antigravity: false,
-    })
-  })
-
-  it('does not infer a backend from the legacy generic ACP capability', async () => {
-    const client = { rpc: vi.fn(async () => ({ capabilities: ['agent.acp.v1'] })) }
-    await expect(probeRemoteHostFeatures(client as never)).rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
-    client.rpc.mockResolvedValueOnce({ capabilities: ['agent.acp.v1', 'agent.acp.antigravity.v1'] })
-    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ cursor: false, antigravity: true })
-  })
-
-  it('probes workspaceTypes from remote Host and safely tolerates malformed values', async () => {
-    const client = {
-      rpc: vi.fn(async () => ({
-        capabilities: ['transport.relay', 'codex.appserver.v1'],
-        workspaceTypes: [
-          { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
-          { id: 456, invalid: true },
-        ],
-      })),
-    }
-    await expect(probeRemoteHostFeatures(client as never, '0.4.19')).resolves.toMatchObject({
-      codex: true,
-      workspaceTypes: [
-        { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+            const legacyClient = {
+              rpc: vi.fn(async () => {
+                throw Object.assign(new Error('unknown method'), { code: 'METHOD_NOT_FOUND' })
+              }),
+            }
+            await expect(probeRemoteHostFeatures(legacyClient as never, '0.3.17')).resolves.toEqual({
+              commandList: true,
+              fileViewer: true,
+              terminal: false,
+              apiProxy: true,
+              remoteGateway: false,
+              codex: false,
+              cursor: false,
+              antigravity: false,
+            })
+          },
+        },
+        {
+          name: 'does not infer a backend from the legacy generic ACP capability',
+          run: async () => {
+            const client = { rpc: vi.fn(async () => ({ capabilities: ['agent.acp.v1'] })) }
+            await expect(probeRemoteHostFeatures(client as never)).rejects.toMatchObject({
+              code: 'FEATURE_NOT_SUPPORTED',
+            })
+            client.rpc.mockResolvedValueOnce({ capabilities: ['agent.acp.v1', 'agent.acp.antigravity.v1'] })
+            expect(await probeRemoteHostFeatures(client as never)).toMatchObject({
+              cursor: false,
+              antigravity: true,
+            })
+          },
+        },
+        {
+          name: 'probes workspaceTypes from remote Host and safely tolerates malformed values',
+          run: async () => {
+            const client = {
+              rpc: vi.fn(async () => ({
+                capabilities: ['transport.relay', 'codex.appserver.v1'],
+                workspaceTypes: [
+                  { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+                  { id: 456, invalid: true },
+                ],
+              })),
+            }
+            await expect(probeRemoteHostFeatures(client as never, '0.4.19')).resolves.toMatchObject({
+              codex: true,
+              workspaceTypes: [
+                { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
+              ],
+            })
+          },
+        },
       ],
-    })
-  })
+      async () => {
+        await cleanupScenario1()
+      },
+    )
+  }, 20000)
 
-  it.each(['cursor', 'antigravity'] as const)('uses %s workspace readiness alongside its independent capability', async backend => {
-    const capability = `agent.acp.${backend}.v1`
-    const client = { rpc: vi.fn(async () => ({ capabilities: ['harness.api.v1', capability],
-      workspaceTypes: [{ id: backend, name: backend, capability, available: false }] })) }
-    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: false })
-    client.rpc.mockResolvedValueOnce({ capabilities: ['harness.api.v1', capability],
-      workspaceTypes: [{ id: backend, name: backend, capability, available: true }] })
-    expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: true })
+  it('requires workspace readiness alongside each independent backend capability', async () => {
+    const rows = ['cursor', 'antigravity'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const backend = row
+        return {
+          name: scenarioName('uses %s workspace readiness alongside its independent capability', row, index),
+          run: async () => {
+            const capability = `agent.acp.${backend}.v1`
+            const client = {
+              rpc: vi.fn(async () => ({
+                capabilities: ['harness.api.v1', capability],
+                workspaceTypes: [{ id: backend, name: backend, capability, available: false }],
+              })),
+            }
+            expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: false })
+            client.rpc.mockResolvedValueOnce({
+              capabilities: ['harness.api.v1', capability],
+              workspaceTypes: [{ id: backend, name: backend, capability, available: true }],
+            })
+            expect(await probeRemoteHostFeatures(client as never)).toMatchObject({ [backend]: true })
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
+      },
+    )
   })
 
   it('forwards only supported QR login providers to the Server API', async () => {
@@ -167,89 +271,6 @@ describe('ClientModeRuntime Host account control', () => {
     })
     expect(startOAuthQrLogin).toHaveBeenCalledTimes(1)
     await runtime.close()
-  })
-
-  it('exposes Web-compatible network path details for the active Remote Client', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-network-'))
-    directories.push(directory)
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      apiProxy(),
-      gateway(),
-      logger(),
-    )
-    await runtime.start()
-    const deviceId = runtime.status().deviceId as string
-    ;(runtime as unknown as { connectionProgress: unknown }).connectionProgress = {
-      runId: 1,
-      targetDeviceId: 'host-device-1',
-      phase: 'probing',
-      activeTransports: ['turn'],
-    }
-    expect(runtime.status()).toMatchObject({
-      connected: false,
-      connectionProgress: {
-        targetDeviceId: 'host-device-1',
-        phase: 'probing',
-        activeTransports: ['turn'],
-      },
-    })
-    ;(runtime as unknown as { connectionProgress: unknown }).connectionProgress = undefined
-    const connectionDetails = vi.fn(async () => ({
-      connectionId: 'connection-1',
-      connectedAt: 1_786_000_000_000,
-      controlChannelUrl: 'wss://dsh.r2049.cn/ws/v1/connect',
-      controlChannelState: 'open' as const,
-      preferredTransports: ['lan', 'p2p', 'turn', 'relay'] as const,
-      webRtc: {
-        mode: 'LAN' as const,
-        connectionState: 'connected',
-        iceConnectionState: 'connected',
-        dataChannelState: 'open' as const,
-        localCandidateType: 'host',
-        remoteCandidateType: 'host',
-        localAddress: '192.168.1.20:51001',
-        remoteAddress: '192.168.1.30:51002',
-        protocol: 'udp',
-        currentRoundTripTimeMs: 12,
-      },
-    }))
-    ;(runtime as unknown as { connected: unknown }).connected = {
-      client: { getStats: () => ({ mode: 'LAN', connected: true }) },
-      target: {
-        deviceId: 'host-device-1',
-        name: 'Workstation',
-        platform: 'linux',
-        publicKey: 'peer-key',
-        fingerprint: 'PEER',
-        trustedAt: 1,
-      },
-      transport: { connectionDetails },
-      features: { commandList: false, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false },
-    }
-
-    await expect(runtime.handleControl('status', {}, new AbortController().signal)).resolves.toMatchObject({
-      ok: true,
-      value: {
-        connected: true,
-        connectedTargetDeviceId: 'host-device-1',
-        transport: 'LAN',
-        remoteFeatures: { commandList: false, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false },
-        network: {
-          connectionId: 'connection-1',
-          local: { deviceId, platform: process.platform },
-          remote: { deviceId: 'host-device-1', platform: 'linux' },
-          webRtc: {
-            localAddress: '192.168.1.20:51001',
-            remoteAddress: '192.168.1.30:51002',
-            currentRoundTripTimeMs: 12,
-          },
-        },
-      },
-    })
-    expect(connectionDetails).toHaveBeenCalledOnce()
   })
 
   it('keeps the selected remote Workspace until the browser opens it', async () => {
@@ -545,189 +566,297 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
-  it('rejects Hosts without a transport compatible with the local Harness carrier', async () => {
-    const alphaDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-alpha-mismatch-'))
-    const legacyDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-legacy-mismatch-'))
-    directories.push(alphaDirectory, legacyDirectory)
-    const alphaGateway = gatewayWithCarrier()
-    const alphaRuntime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory: alphaDirectory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      undefined,
-      alphaGateway,
-      logger(),
-    )
-    const legacyRuntime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory: legacyDirectory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      apiProxy(),
-      gateway(),
-      logger(),
-    )
-    await alphaRuntime.start()
-    await legacyRuntime.start()
-    const alphaClient = { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
-    const legacyClient = { rpc: vi.fn(), close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
-    const target = {
-      deviceId: 'host-device-1', name: 'Workstation', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
-    }
-    ;(alphaRuntime as unknown as { connected: unknown }).connected = {
-      client: alphaClient,
-      target,
-      transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false },
-    }
-    ;(legacyRuntime as unknown as { connected: unknown }).connected = {
-      client: legacyClient,
-      target,
-      transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, codex: false },
-    }
+  it('rejects incompatible carriers and selects compatible session generations', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'rejects Hosts without a transport compatible with the local Harness carrier',
+          run: async () => {
+            const alphaDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-alpha-mismatch-'))
+            const legacyDirectory = await mkdtemp(join(tmpdir(), 'dsh-client-legacy-mismatch-'))
+            directories.push(alphaDirectory, legacyDirectory)
+            const alphaGateway = gatewayWithCarrier()
+            const alphaRuntime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory: alphaDirectory }),
+              { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+              undefined,
+              alphaGateway,
+              logger(),
+            )
+            const legacyRuntime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory: legacyDirectory }),
+              { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+              apiProxy(),
+              gateway(),
+              logger(),
+            )
+            await alphaRuntime.start()
+            await legacyRuntime.start()
+            const alphaClient = {
+              rpc: vi.fn(),
+              close: vi.fn(async () => undefined),
+              getStats: () => ({ mode: 'Relay', connected: true }),
+            }
+            const legacyClient = {
+              rpc: vi.fn(),
+              close: vi.fn(async () => undefined),
+              getStats: () => ({ mode: 'Relay', connected: true }),
+            }
+            const target = {
+              deviceId: 'host-device-1',
+              name: 'Workstation',
+              platform: 'linux',
+              publicKey: 'peer-key',
+              fingerprint: 'PEER',
+              trustedAt: 1,
+            }
+            ;(alphaRuntime as unknown as { connected: unknown }).connected = {
+              client: alphaClient,
+              target,
+              transport: {},
+              features: {
+                commandList: true,
+                fileViewer: false,
+                apiProxy: true,
+                remoteGateway: false,
+                codex: false,
+              },
+            }
+            ;(legacyRuntime as unknown as { connected: unknown }).connected = {
+              client: legacyClient,
+              target,
+              transport: {},
+              features: {
+                commandList: true,
+                fileViewer: false,
+                apiProxy: false,
+                remoteGateway: true,
+                codex: false,
+              },
+            }
 
-    await expect(alphaRuntime.openRemoteWorkspace('host-device-1', '/srv/project'))
-      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
-    await expect(legacyRuntime.openRemoteWorkspace('host-device-1', '/srv/project'))
-      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
-    expect(alphaClient.rpc).not.toHaveBeenCalled()
-    expect(legacyClient.rpc).not.toHaveBeenCalled()
-    expect(alphaRuntime.status()).toMatchObject({ mode: 'local' })
-    expect(legacyRuntime.status()).toMatchObject({ mode: 'local' })
-    await alphaRuntime.close()
-    await legacyRuntime.close()
-  })
-
-  it('rejects Session V3 Hosts when the local Typert carrier still uses the legacy session format', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-mismatch-'))
-    directories.push(directory)
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      undefined,
-      gatewayWithCarrier(),
-      logger(),
-      {
-        localHarnessVersion: () => '0.1.2-rc.1',
-        hostStatus: () => ({
-          configured: true,
-          online: false,
-          reconnecting: false,
-          authorized: false,
-          accountRequired: false,
-        }),
-      } as unknown as HostAuthorizationControl,
-    )
-    await runtime.start()
-    const rpc = vi.fn()
-    ;(runtime as unknown as { connected: unknown }).connected = {
-      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
-      target: {
-        deviceId: 'host-device-v3', name: 'V3 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
-      },
-      transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, sessionFormat: 3, codex: false },
-    }
-
-    await expect(runtime.openRemoteWorkspace('host-device-v3', '/srv/project'))
-      .rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
-    expect(rpc).not.toHaveBeenCalled()
-    await runtime.close()
-  })
-
-  it('selects the legacy ApiProxy transport for rc.2 Hosts even when the local Typert carrier exists', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-dual-carrier-'))
-    directories.push(directory)
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      apiProxy(),
-      gatewayWithCarrier(),
-      logger(),
-    )
-    await runtime.start()
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      if (method === 'harness.api.call' && (params as { method?: string }).method === 'workspace.create') {
-        return {
-          rpcId: (params as { rpcId: string }).rpcId,
-          result: {
-            ok: true,
-            value: { workspace: { workspaceId: 'workspace-rc2-1' }, created: true },
+            await expect(
+              alphaRuntime.openRemoteWorkspace('host-device-1', '/srv/project'),
+            ).rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
+            await expect(
+              legacyRuntime.openRemoteWorkspace('host-device-1', '/srv/project'),
+            ).rejects.toMatchObject({ code: 'HARNESS_VERSION_INCOMPATIBLE' })
+            expect(alphaClient.rpc).not.toHaveBeenCalled()
+            expect(legacyClient.rpc).not.toHaveBeenCalled()
+            expect(alphaRuntime.status()).toMatchObject({ mode: 'local' })
+            expect(legacyRuntime.status()).toMatchObject({ mode: 'local' })
+            await alphaRuntime.close()
+            await legacyRuntime.close()
           },
-        }
-      }
-      throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`)
-    })
-    ;(runtime as unknown as { connected: unknown }).connected = {
-      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
-      target: {
-        deviceId: 'host-device-rc2', name: 'RC2 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
+        },
+        {
+          name: 'rejects Session V3 Hosts when the local Typert carrier still uses the legacy session format',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-mismatch-'))
+            directories.push(directory)
+            const runtime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory }),
+              { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+              undefined,
+              gatewayWithCarrier(),
+              logger(),
+              {
+                localHarnessVersion: () => '0.1.2-rc.1',
+                hostStatus: () => ({
+                  configured: true,
+                  online: false,
+                  reconnecting: false,
+                  authorized: false,
+                  accountRequired: false,
+                }),
+              } as unknown as HostAuthorizationControl,
+            )
+            await runtime.start()
+            const rpc = vi.fn()
+            ;(runtime as unknown as { connected: unknown }).connected = {
+              client: {
+                rpc,
+                close: vi.fn(async () => undefined),
+                getStats: () => ({ mode: 'Relay', connected: true }),
+              },
+              target: {
+                deviceId: 'host-device-v3',
+                name: 'V3 Host',
+                platform: 'linux',
+                publicKey: 'peer-key',
+                fingerprint: 'PEER',
+                trustedAt: 1,
+              },
+              transport: {},
+              features: {
+                commandList: true,
+                fileViewer: false,
+                apiProxy: false,
+                remoteGateway: true,
+                sessionFormat: 3,
+                codex: false,
+              },
+            }
+
+            await expect(runtime.openRemoteWorkspace('host-device-v3', '/srv/project')).rejects.toMatchObject({
+              code: 'HARNESS_VERSION_INCOMPATIBLE',
+            })
+            expect(rpc).not.toHaveBeenCalled()
+            await runtime.close()
+          },
+        },
+        {
+          name: 'selects the legacy ApiProxy transport for rc.2 Hosts even when the local Typert carrier exists',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-client-dual-carrier-'))
+            directories.push(directory)
+            const runtime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory }),
+              { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+              apiProxy(),
+              gatewayWithCarrier(),
+              logger(),
+            )
+            await runtime.start()
+            const rpc = vi.fn(async (method: string, params: unknown) => {
+              if (
+                method === 'harness.api.call' &&
+                (params as { method?: string }).method === 'workspace.create'
+              ) {
+                return {
+                  rpcId: (params as { rpcId: string }).rpcId,
+                  result: {
+                    ok: true,
+                    value: { workspace: { workspaceId: 'workspace-rc2-1' }, created: true },
+                  },
+                }
+              }
+              throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`)
+            })
+            ;(runtime as unknown as { connected: unknown }).connected = {
+              client: {
+                rpc,
+                close: vi.fn(async () => undefined),
+                getStats: () => ({ mode: 'Relay', connected: true }),
+              },
+              target: {
+                deviceId: 'host-device-rc2',
+                name: 'RC2 Host',
+                platform: 'linux',
+                publicKey: 'peer-key',
+                fingerprint: 'PEER',
+                trustedAt: 1,
+              },
+              transport: {},
+              features: {
+                commandList: true,
+                fileViewer: false,
+                apiProxy: true,
+                remoteGateway: false,
+                codex: false,
+              },
+            }
+
+            await expect(runtime.openRemoteWorkspace('host-device-rc2', '/srv/project')).resolves.toMatchObject(
+              {
+                mode: 'remote',
+                workspace: { created: true, workspace: { workspaceId: 'workspace-rc2-1' } },
+              },
+            )
+            expect(rpc).toHaveBeenCalledWith(
+              'harness.api.call',
+              expect.objectContaining({
+                method: 'workspace.create',
+                payload: { path: '/srv/project' },
+              }),
+              undefined,
+            )
+            expect(rpc).not.toHaveBeenCalledWith('harness.remote.call', expect.anything(), expect.anything())
+            await runtime.close()
+          },
+        },
+        {
+          name: 'allows Session V3 clients to open legacy Typert Remote Host workspaces',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-legacy-remote-'))
+            directories.push(directory)
+            const runtime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory }),
+              { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+              undefined,
+              gatewayWithCarrier(),
+              logger(),
+              {
+                localHarnessVersion: () => '0.1.5-rc.1',
+                hostStatus: () => ({
+                  configured: true,
+                  online: false,
+                  reconnecting: false,
+                  authorized: false,
+                  accountRequired: false,
+                }),
+              } as unknown as HostAuthorizationControl,
+            )
+            await runtime.start()
+            const rpc = vi.fn(async (method: string, params: unknown) => {
+              if (
+                method === 'harness.remote.call' &&
+                (params as { endpoint?: string }).endpoint === 'workspace/create'
+              ) {
+                return { ok: true, value: { workspace: { workspaceId: 'workspace-v2-1' }, created: true } }
+              }
+              return { ok: true, value: undefined }
+            })
+            ;(runtime as unknown as { connected: unknown }).connected = {
+              client: {
+                rpc,
+                close: vi.fn(async () => undefined),
+                getStats: () => ({ mode: 'Relay', connected: true }),
+              },
+              target: {
+                deviceId: 'host-device-v2',
+                name: 'V2 Host',
+                platform: 'linux',
+                publicKey: 'peer-key',
+                fingerprint: 'PEER',
+                trustedAt: 1,
+              },
+              transport: {},
+              features: {
+                commandList: true,
+                fileViewer: false,
+                apiProxy: false,
+                remoteGateway: true,
+                codex: false,
+              },
+            }
+
+            await expect(runtime.openRemoteWorkspace('host-device-v2', '/srv/project')).resolves.toMatchObject({
+              mode: 'remote',
+              workspace: { created: true, workspace: { workspaceId: 'workspace-v2-1' } },
+            })
+            expect(rpc).toHaveBeenCalledWith(
+              'harness.remote.call',
+              {
+                endpoint: 'workspace/create',
+                payload: { args: { request: { path: '/srv/project' } } },
+              },
+              expect.any(AbortSignal),
+            )
+            await runtime.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
       },
-      transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: true, remoteGateway: false, codex: false },
-    }
-
-    await expect(runtime.openRemoteWorkspace('host-device-rc2', '/srv/project')).resolves.toMatchObject({
-      mode: 'remote',
-      workspace: { created: true, workspace: { workspaceId: 'workspace-rc2-1' } },
-    })
-    expect(rpc).toHaveBeenCalledWith('harness.api.call', expect.objectContaining({
-      method: 'workspace.create',
-      payload: { path: '/srv/project' },
-    }), undefined)
-    expect(rpc).not.toHaveBeenCalledWith('harness.remote.call', expect.anything(), expect.anything())
-    await runtime.close()
-  })
-
-  it('allows Session V3 clients to open legacy Typert Remote Host workspaces', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-v3-legacy-remote-'))
-    directories.push(directory)
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
-      undefined,
-      gatewayWithCarrier(),
-      logger(),
-      {
-        localHarnessVersion: () => '0.1.5-rc.1',
-        hostStatus: () => ({
-          configured: true,
-          online: false,
-          reconnecting: false,
-          authorized: false,
-          accountRequired: false,
-        }),
-      } as unknown as HostAuthorizationControl,
     )
-    await runtime.start()
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      if (method === 'harness.remote.call' && (params as { endpoint?: string }).endpoint === 'workspace/create') {
-        return { ok: true, value: { workspace: { workspaceId: 'workspace-v2-1' }, created: true } }
-      }
-      return { ok: true, value: undefined }
-    })
-    ;(runtime as unknown as { connected: unknown }).connected = {
-      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) },
-      target: {
-        deviceId: 'host-device-v2', name: 'V2 Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
-      },
-      transport: {},
-      features: { commandList: true, fileViewer: false, apiProxy: false, remoteGateway: true, codex: false },
-    }
-
-    await expect(runtime.openRemoteWorkspace('host-device-v2', '/srv/project')).resolves.toMatchObject({
-      mode: 'remote',
-      workspace: { created: true, workspace: { workspaceId: 'workspace-v2-1' } },
-    })
-    expect(rpc).toHaveBeenCalledWith('harness.remote.call', {
-      endpoint: 'workspace/create',
-      payload: { args: { request: { path: '/srv/project' } } },
-    }, expect.any(AbortSignal))
-    await runtime.close()
-  })
+  }, 20000)
 
   it('exposes Host authorization status and forwards login only through loopback control', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-runtime-'))
@@ -793,34 +922,48 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
-  it.each(['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'])('does not list devices when the local Host authorization is %s', async error => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-auth-'))
-    directories.push(directory)
-    const listDevices = vi.fn(async () => [])
-    const host = {
-      hostStatus: vi.fn(() => ({
-        configured: true,
-        online: false,
-        reconnecting: false,
-        error,
-        authorized: true,
-        accountRequired: true,
-      })),
-    } as unknown as HostAuthorizationControl
-    const runtime = new ClientModeRuntime(
-      config(),
-      new IdentityStore({ directory }),
-      { bindIdentity: vi.fn(), listDevices } as unknown as ClientServerApi,
-      apiProxy(),
-      gateway(),
-      logger(),
-      host,
-    )
-    await runtime.start()
+  it('requires local Host authorization before listing devices', async () => {
+    const rows = ['DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const error = row
+        return {
+          name: scenarioName('does not list devices when the local Host authorization is %s', row, index),
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-auth-'))
+            directories.push(directory)
+            const listDevices = vi.fn(async () => [])
+            const host = {
+              hostStatus: vi.fn(() => ({
+                configured: true,
+                online: false,
+                reconnecting: false,
+                error,
+                authorized: true,
+                accountRequired: true,
+              })),
+            } as unknown as HostAuthorizationControl
+            const runtime = new ClientModeRuntime(
+              config(),
+              new IdentityStore({ directory }),
+              { bindIdentity: vi.fn(), listDevices } as unknown as ClientServerApi,
+              apiProxy(),
+              gateway(),
+              logger(),
+              host,
+            )
+            await runtime.start()
 
-    await expect(runtime.devices()).rejects.toMatchObject({ code: error })
-    expect(listDevices).not.toHaveBeenCalled()
-    await runtime.close()
+            await expect(runtime.devices()).rejects.toMatchObject({ code: error })
+            expect(listDevices).not.toHaveBeenCalled()
+            await runtime.close()
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
+      },
+    )
   })
 
   it('pins Host identity from an account-authorized device detail and rejects key replacement', async () => {

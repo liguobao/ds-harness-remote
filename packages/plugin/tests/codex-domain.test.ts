@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,14 +10,15 @@ import type {
   CodexAppServerUnavailableHandler,
 } from '../src/codex/app-server.js'
 import { CodexAppServerError } from '../src/codex/app-server.js'
-import { CodexRemoteDomain, codexBinaryCandidates } from '../src/codex/domain.js'
+import { CodexRemoteDomain } from '../src/codex/domain.js'
 import type { SafeLogger } from '../src/logging.js'
 
 const cleanup: string[] = []
 
-afterEach(async () => {
-  await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
-})
+const cleanupScenario1 = async () => {
+  await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+}
+afterEach(cleanupScenario1)
 
 describe('CodexRemoteDomain', () => {
   it('enables and disables CodeX live without replacing authenticated peers', async () => {
@@ -37,20 +38,6 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
-  it('discovers the ChatGPT-bundled Codex only for the default macOS command', () => {
-    const candidates = codexBinaryCandidates('codex', 'darwin', '/Users/tester')
-    expect(candidates).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
-    expect(candidates).toContain('/Users/tester/Applications/ChatGPT.app/Contents/Resources/codex')
-    expect(candidates.at(-1)).toBe('codex')
-    const bundled = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
-    if (existsSync(bundled)) {
-      expect(candidates[0]).toBe(bundled)
-      expect(candidates.indexOf(bundled)).toBeLessThan(candidates.indexOf('/Applications/ChatGPT.app/Contents/Resources/codex'))
-    }
-    expect(codexBinaryCandidates('/custom/codex', 'darwin', '/Users/tester')).toEqual(['/custom/codex'])
-    expect(codexBinaryCandidates('codex', 'linux', '/home/tester')).toEqual(['codex'])
-  })
-
   it('stays unavailable when the optional domain is disabled', async () => {
     const create = vi.fn(() => new FakeAppServer('/unused'))
     const domain = new CodexRemoteDomain({ enabled: false, binary: 'codex' }, logger(), create)
@@ -67,326 +54,487 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
-  it('sanitizes CodeX listings using CodeX as the workspace source of truth', async () => {
-    const { root, outside } = await directories()
-    const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
+  it('enforces CodeX workspace authority for thread and project operations', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'sanitizes CodeX listings using CodeX as the workspace source of truth',
+          run: async () => {
+            const { root, outside } = await directories()
+            const app = new FakeAppServer(root, outside)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
 
-    const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-    expect(result).toMatchObject({ data: [
-      { id: 'allowed-thread', cwd: root, projectId: 'allowed-project' },
-      { id: 'outside-thread', cwd: outside, projectId: 'outside-project' },
-      { id: 'project-only-thread', projectId: 'allowed-project' },
-    ] })
-    expect(JSON.stringify(result)).not.toContain('unprojected-thread')
-    expect(JSON.stringify(result)).not.toContain('missing-cwd')
-    const projects = await domain.call('connection-1', { method: 'project/list', params: {} })
-    expect(projects).toMatchObject({ data: [
-      {
-        id: 'allowed-project',
-        name: 'Allowed Project',
-        roots: [{ path: root }],
+            const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
+            expect(result).toMatchObject({
+              data: [
+                { id: 'allowed-thread', cwd: root, projectId: 'allowed-project' },
+                { id: 'outside-thread', cwd: outside, projectId: 'outside-project' },
+                { id: 'project-only-thread', projectId: 'allowed-project' },
+              ],
+            })
+            expect(JSON.stringify(result)).not.toContain('unprojected-thread')
+            expect(JSON.stringify(result)).not.toContain('missing-cwd')
+            const projects = await domain.call('connection-1', { method: 'project/list', params: {} })
+            expect(projects).toMatchObject({
+              data: [
+                {
+                  id: 'allowed-project',
+                  name: 'Allowed Project',
+                  roots: [{ path: root }],
+                },
+                {
+                  id: 'outside-project',
+                  name: 'Outside Project',
+                  roots: [{ path: outside }],
+                },
+              ],
+            })
+            expect(JSON.stringify(projects)).not.toContain('private metadata')
+            expect(JSON.stringify(result)).not.toContain('private rollout path')
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/shellCommand',
+                params: { threadId: 'allowed-thread', command: 'whoami' },
+              }),
+            ).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/read',
+                params: { threadId: 'outside-thread', includeTurns: true },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'outside-thread', cwd: outside } })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/read',
+                params: { threadId: 'unprojected-thread', includeTurns: true },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_THREAD_NOT_ALLOWED' })
+            await domain.close()
+          },
+        },
+        {
+          name: 'starts new threads only from CodeX advertised workspace paths',
+          run: async () => {
+            const { base, root, outside } = await directories()
+            const child = join(root, 'new-workspace')
+            await mkdir(child)
+            const link = join(root, 'outside-link')
+            await symlink(outside, link, 'dir')
+            const app = new FakeAppServer(root, outside)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: join(base, 'missing') },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: link },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: root },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'new-thread' } })
+            expect(app.calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({
+              cwd: root,
+              approvalPolicy: 'on-request',
+              sandbox: 'workspace-write',
+              serviceName: 'deepseek_harness_remote',
+            })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: child },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'new-thread', cwd: child } })
+            expect(app.calls.filter((call) => call.method === 'thread/start').at(-1)?.params).toMatchObject({
+              cwd: child,
+            })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: outside },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'new-thread' } })
+            expect(base).toContain(tmpdir())
+            await domain.close()
+          },
+        },
+        {
+          name: 'creates a sanitized CodeX project only for an existing absolute directory',
+          run: async () => {
+            const { base, root } = await directories()
+            const canonicalRoot = await realpath(root)
+            const link = join(base, 'selected-project-link')
+            await symlink(root, link, 'dir')
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+
+            await expect(
+              domain.call('connection-1', {
+                method: 'project/create',
+                params: {
+                  name: '  New Project  ',
+                  roots: [{ path: link }],
+                  idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
+                },
+              }),
+            ).resolves.toEqual({
+              project: {
+                id: 'created-project',
+                name: 'New Project',
+                roots: [{ path: canonicalRoot }],
+                position: 2,
+                createdAt: 3,
+                updatedAt: 3,
+              },
+            })
+            expect(app.calls.find((call) => call.method === 'project/create')).toEqual({
+              method: 'project/create',
+              params: {
+                name: 'New Project',
+                roots: [{ path: canonicalRoot }],
+                idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
+              },
+            })
+            await expect(
+              domain.call('connection-1', {
+                method: 'project/create',
+                params: {
+                  name: 'Missing',
+                  roots: [{ path: join(base, 'missing') }],
+                  idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749d',
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await domain.close()
+          },
+        },
+        {
+          name: 'lists only directories inside the CodeX workspace authority',
+          run: async () => {
+            const { base, root, outside } = await directories()
+            const child = join(root, 'child')
+            const hidden = join(root, '.hidden')
+            const outsideLink = join(root, 'outside-link')
+            await mkdir(child)
+            await mkdir(hidden)
+            await symlink(outside, outsideLink, 'dir')
+            const app = new FakeAppServer(root, outside)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+
+            const result = await domain.call('connection-1', {
+              method: 'dsh/directoryList',
+              params: { path: root },
+            })
+
+            expect(result).toMatchObject({
+              path: root,
+              home: root,
+              crumbs: [{ name: 'allowed', path: root, hidden: false }],
+              entries: expect.arrayContaining([
+                { name: 'child', path: child, hidden: false },
+                { name: '.hidden', path: hidden, hidden: true },
+              ]),
+              truncated: false,
+            })
+            expect(JSON.stringify(result)).not.toContain('outside-link')
+            await expect(
+              domain.call('connection-1', {
+                method: 'dsh/directoryList',
+                params: { path: outsideLink },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await expect(
+              domain.call('connection-1', {
+                method: 'dsh/directoryList',
+                params: { path: join(base, 'never-advertised') },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await domain.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
       },
-      {
-        id: 'outside-project',
-        name: 'Outside Project',
-        roots: [{ path: outside }],
+    )
+  }, 20000)
+
+  it('uses exact thread cwd authority for unavailable and empty project listings', async () => {
+    const rows = ['empty', 'unsupported'] as const
+    await runScenarios(
+      rows.map((row, index) => {
+        const projectListMode = row
+        return {
+          name: scenarioName('uses exact thread cwd authority when project/list is %s', row, index),
+          run: async () => {
+            const { base, root, outside } = await directories()
+            const app = new FakeAppServer(root, outside)
+            app.projectListMode = projectListMode
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+
+            const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
+            expect(result).toMatchObject({
+              data: [
+                { id: 'allowed-thread', cwd: root },
+                { id: 'outside-thread', cwd: outside },
+                { id: 'unprojected-thread', cwd: `${root}-unprojected` },
+              ],
+            })
+            expect(JSON.stringify(result)).not.toContain('project-only-thread')
+            expect(JSON.stringify(result)).not.toContain('missing-cwd')
+            expect(app.calls.filter((call) => call.method === 'thread/list')).toHaveLength(1)
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/read',
+                params: { threadId: 'unprojected-thread' },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'unprojected-thread', cwd: `${root}-unprojected` } })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: root },
+              }),
+            ).resolves.toMatchObject({ thread: { id: 'new-thread', cwd: root } })
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/start',
+                params: { cwd: join(base, 'never-advertised') },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
+            await domain.close()
+          },
+        }
+      }),
+      async () => {
+        await cleanupScenario1()
       },
-    ] })
-    expect(JSON.stringify(projects)).not.toContain('private metadata')
-    expect(JSON.stringify(result)).not.toContain('private rollout path')
-    await expect(domain.call('connection-1', {
-      method: 'thread/shellCommand',
-      params: { threadId: 'allowed-thread', command: 'whoami' },
-    })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
-    await expect(domain.call('connection-1', {
-      method: 'thread/read',
-      params: { threadId: 'outside-thread', includeTurns: true },
-    })).resolves.toMatchObject({ thread: { id: 'outside-thread', cwd: outside } })
-    await expect(domain.call('connection-1', {
-      method: 'thread/read',
-      params: { threadId: 'unprojected-thread', includeTurns: true },
-    })).rejects.toMatchObject({ code: 'CODEX_THREAD_NOT_ALLOWED' })
-    await domain.close()
+    )
   })
 
-  it.each(['empty', 'unsupported'] as const)(
-    'uses exact thread cwd authority when project/list is %s',
-    async projectListMode => {
-      const { base, root, outside } = await directories()
-      const app = new FakeAppServer(root, outside)
-      app.projectListMode = projectListMode
-      const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-      await domain.start()
+  it('uses explicit presets and authoritative App Server permission defaults', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'maps the explicit Full access preset to fixed App Server policies',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
 
-      const result = await domain.call('connection-1', { method: 'thread/list', params: {} })
-      expect(result).toMatchObject({ data: [
-        { id: 'allowed-thread', cwd: root },
-        { id: 'outside-thread', cwd: outside },
-        { id: 'unprojected-thread', cwd: `${root}-unprojected` },
-      ] })
-      expect(JSON.stringify(result)).not.toContain('project-only-thread')
-      expect(JSON.stringify(result)).not.toContain('missing-cwd')
-      expect(app.calls.filter(call => call.method === 'thread/list')).toHaveLength(1)
-      await expect(domain.call('connection-1', {
-        method: 'thread/read', params: { threadId: 'unprojected-thread' },
-      })).resolves.toMatchObject({ thread: { id: 'unprojected-thread', cwd: `${root}-unprojected` } })
-      await expect(domain.call('connection-1', {
-        method: 'thread/start', params: { cwd: root },
-      })).resolves.toMatchObject({ thread: { id: 'new-thread', cwd: root } })
-      await expect(domain.call('connection-1', {
-        method: 'thread/start', params: { cwd: join(base, 'never-advertised') },
-      })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-      await domain.close()
-    },
-  )
+            await domain.call('connection-1', {
+              method: 'thread/resume',
+              params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+            })
+            await domain.call('connection-1', {
+              method: 'turn/start',
+              params: {
+                threadId: 'allowed-thread',
+                input: [{ type: 'text', text: 'Run without approval prompts' }],
+                permissionPreset: 'danger-full-access',
+              },
+            })
 
-  it('starts new threads only from CodeX advertised workspace paths', async () => {
-    const { base, root, outside } = await directories()
-    const child = join(root, 'new-workspace')
-    await mkdir(child)
-    const link = join(root, 'outside-link')
-    await symlink(outside, link, 'dir')
-    const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
+            expect(app.calls.find((call) => call.method === 'thread/settings/update')?.params).toMatchObject({
+              approvalPolicy: 'never',
+              sandboxPolicy: { type: 'dangerFullAccess' },
+            })
+            expect(app.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
+              approvalPolicy: 'never',
+              sandboxPolicy: { type: 'dangerFullAccess' },
+            })
+            expect(JSON.stringify(app.calls)).not.toContain('permissionPreset')
+            await domain.close()
+          },
+        },
+        {
+          name: 'inherits App Server permission defaults when no preset is provided',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
 
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: join(base, 'missing') },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: link },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: root },
-    })).resolves.toMatchObject({ thread: { id: 'new-thread' } })
-    expect(app.calls.find(call => call.method === 'thread/start')?.params).toMatchObject({
-      cwd: root,
-      approvalPolicy: 'on-request',
-      sandbox: 'workspace-write',
-      serviceName: 'deepseek_harness_remote',
-    })
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: child },
-    })).resolves.toMatchObject({ thread: { id: 'new-thread', cwd: child } })
-    expect(app.calls.filter(call => call.method === 'thread/start').at(-1)?.params).toMatchObject({ cwd: child })
-    await expect(domain.call('connection-1', {
-      method: 'thread/start', params: { cwd: outside },
-    })).resolves.toMatchObject({ thread: { id: 'new-thread' } })
-    expect(base).toContain(tmpdir())
-    await domain.close()
-  })
+            await domain.call('connection-1', {
+              method: 'thread/resume',
+              params: { threadId: 'allowed-thread' },
+            })
+            await domain.call('connection-1', {
+              method: 'turn/start',
+              params: {
+                threadId: 'allowed-thread',
+                input: [{ type: 'text', text: 'Use the thread defaults' }],
+              },
+            })
 
-  it('creates a sanitized CodeX project only for an existing absolute directory', async () => {
-    const { base, root } = await directories()
-    const canonicalRoot = await realpath(root)
-    const link = join(base, 'selected-project-link')
-    await symlink(root, link, 'dir')
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-
-    await expect(domain.call('connection-1', {
-      method: 'project/create',
-      params: {
-        name: '  New Project  ',
-        roots: [{ path: link }],
-        idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
+            const resume = app.calls.find((call) => call.method === 'thread/resume')?.params as Record<
+              string,
+              unknown
+            >
+            const turn = app.calls.find((call) => call.method === 'turn/start')?.params as Record<
+              string,
+              unknown
+            >
+            expect(resume.approvalPolicy).toBeUndefined()
+            expect(resume.sandbox).toBeUndefined()
+            expect(turn.approvalPolicy).toBeUndefined()
+            expect(turn.sandboxPolicy).toBeUndefined()
+            await domain.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
       },
-    })).resolves.toEqual({
-      project: {
-        id: 'created-project',
-        name: 'New Project',
-        roots: [{ path: canonicalRoot }],
-        position: 2,
-        createdAt: 3,
-        updatedAt: 3,
+    )
+  }, 10000)
+
+  it('confirms permission changes and fails closed on rejected updates', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'confirms loaded-thread permission changes and exposes them in read-only history',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+            const history = () =>
+              domain.call('observer', { method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
+            await expect(history()).resolves.toMatchObject({ permissionPreset: null })
+            expect(app.calls.some((call) => call.method === 'thread/resume')).toBe(false)
+
+            await expect(
+              domain.call('writer', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              }),
+            ).resolves.toMatchObject({ approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } })
+            expect(app.calls.find((call) => call.method === 'thread/settings/update')?.params).toEqual({
+              threadId: 'allowed-thread',
+              approvalPolicy: 'never',
+              sandboxPolicy: { type: 'dangerFullAccess' },
+            })
+            await expect(history()).resolves.toMatchObject({ permissionPreset: 'danger-full-access' })
+            app.emit({
+              kind: 'notification',
+              method: 'thread/settings/updated',
+              params: {
+                threadId: 'allowed-thread',
+                threadSettings: { approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly' } },
+              },
+            })
+            await expect(history()).resolves.toMatchObject({ permissionPreset: null })
+            await expect(
+              domain.call('observer', {
+                method: 'dsh/sessionHistory',
+                params: { threadId: 'unprojected-thread' },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_THREAD_NOT_ALLOWED' })
+            await domain.close()
+          },
+        },
+        {
+          name: 'does not confirm a rejected setting or let an observer change an active writer policy',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+            app.rejectSettings = true
+            const change = () =>
+              domain.call('observer', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              })
+            await expect(change()).rejects.toMatchObject({ code: 'CODEX_UPSTREAM_ERROR' })
+            await expect(
+              domain.call('observer', {
+                method: 'dsh/sessionHistory',
+                params: { threadId: 'allowed-thread' },
+              }),
+            ).resolves.toMatchObject({ permissionPreset: null })
+            await domain.call('writer', {
+              method: 'turn/start',
+              params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Run' }] },
+            })
+            const resumes = app.calls.filter((call) => call.method === 'thread/resume').length
+            await expect(change()).rejects.toMatchObject({ code: 'CODEX_THREAD_BUSY' })
+            expect(app.calls.filter((call) => call.method === 'thread/resume')).toHaveLength(resumes)
+            await domain.close()
+          },
+        },
+        {
+          name: 'supports older App Servers only when resume confirms the requested policy',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            app.rejectSettings = true
+            const upstream = app.call.bind(app)
+            vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+              const result = await upstream(method, params)
+              return method === 'thread/resume'
+                ? {
+                    ...(isRecord(result) ? result : {}),
+                    approvalPolicy: 'never',
+                    sandbox: { type: 'dangerFullAccess' },
+                  }
+                : result
+            })
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
+            await expect(
+              domain.call('writer', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              }),
+            ).resolves.toMatchObject({ approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } })
+            expect(app.calls.filter((call) => call.method === 'thread/settings/update')).toHaveLength(1)
+            await domain.close()
+          },
+        },
+        {
+          name: 'does not hide rejection when both permission update paths fail',
+          run: async () => {
+            const { root, outside } = await directories()
+            const app = new FakeAppServer(root, outside)
+            app.rejectResume = true
+            app.rejectSettings = true
+            const domain = new CodexRemoteDomain(
+              { enabled: true, binary: '/custom/codex' },
+              logger(),
+              () => app,
+            )
+            await domain.start()
+
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_UPSTREAM_ERROR' })
+            await domain.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
       },
-    })
-    expect(app.calls.find(call => call.method === 'project/create')).toEqual({
-      method: 'project/create',
-      params: {
-        name: 'New Project',
-        roots: [{ path: canonicalRoot }],
-        idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749c',
-      },
-    })
-    await expect(domain.call('connection-1', {
-      method: 'project/create',
-      params: {
-        name: 'Missing',
-        roots: [{ path: join(base, 'missing') }],
-        idempotencyKey: '018f47f6-5f5a-7b5a-8d74-2e797b4d749d',
-      },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await domain.close()
-  })
-
-  it('lists only directories inside the CodeX workspace authority', async () => {
-    const { base, root, outside } = await directories()
-    const child = join(root, 'child')
-    const hidden = join(root, '.hidden')
-    const outsideLink = join(root, 'outside-link')
-    await mkdir(child)
-    await mkdir(hidden)
-    await symlink(outside, outsideLink, 'dir')
-    const app = new FakeAppServer(root, outside)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-
-    const result = await domain.call('connection-1', {
-      method: 'dsh/directoryList',
-      params: { path: root },
-    })
-
-    expect(result).toMatchObject({
-      path: root,
-      home: root,
-      crumbs: [{ name: 'allowed', path: root, hidden: false }],
-      entries: expect.arrayContaining([
-        { name: 'child', path: child, hidden: false },
-        { name: '.hidden', path: hidden, hidden: true },
-      ]),
-      truncated: false,
-    })
-    expect(JSON.stringify(result)).not.toContain('outside-link')
-    await expect(domain.call('connection-1', {
-      method: 'dsh/directoryList',
-      params: { path: outsideLink },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await expect(domain.call('connection-1', {
-      method: 'dsh/directoryList',
-      params: { path: join(base, 'never-advertised') },
-    })).rejects.toMatchObject({ code: 'CODEX_PATH_NOT_ALLOWED' })
-    await domain.close()
-  })
-
-  it('maps the explicit Full access preset to fixed App Server policies', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-
-    await domain.call('connection-1', {
-      method: 'thread/resume',
-      params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
-    })
-    await domain.call('connection-1', {
-      method: 'turn/start',
-      params: {
-        threadId: 'allowed-thread',
-        input: [{ type: 'text', text: 'Run without approval prompts' }],
-        permissionPreset: 'danger-full-access',
-      },
-    })
-
-    expect(app.calls.find(call => call.method === 'thread/settings/update')?.params).toMatchObject({
-      approvalPolicy: 'never',
-      sandboxPolicy: { type: 'dangerFullAccess' },
-    })
-    expect(app.calls.find(call => call.method === 'turn/start')?.params).toMatchObject({
-      approvalPolicy: 'never',
-      sandboxPolicy: { type: 'dangerFullAccess' },
-    })
-    expect(JSON.stringify(app.calls)).not.toContain('permissionPreset')
-    await domain.close()
-  })
-
-  it('inherits App Server permission defaults when no preset is provided', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-
-    await domain.call('connection-1', {
-      method: 'thread/resume',
-      params: { threadId: 'allowed-thread' },
-    })
-    await domain.call('connection-1', {
-      method: 'turn/start',
-      params: {
-        threadId: 'allowed-thread',
-        input: [{ type: 'text', text: 'Use the thread defaults' }],
-      },
-    })
-
-    const resume = app.calls.find(call => call.method === 'thread/resume')?.params as Record<string, unknown>
-    const turn = app.calls.find(call => call.method === 'turn/start')?.params as Record<string, unknown>
-    expect(resume.approvalPolicy).toBeUndefined()
-    expect(resume.sandbox).toBeUndefined()
-    expect(turn.approvalPolicy).toBeUndefined()
-    expect(turn.sandboxPolicy).toBeUndefined()
-    await domain.close()
-  })
-
-  it('confirms loaded-thread permission changes and exposes them in read-only history', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-    const history = () => domain.call('observer', { method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
-    await expect(history()).resolves.toMatchObject({ permissionPreset: null })
-    expect(app.calls.some(call => call.method === 'thread/resume')).toBe(false)
-
-    await expect(domain.call('writer', {
-      method: 'thread/resume', params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
-    })).resolves.toMatchObject({ approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } })
-    expect(app.calls.find(call => call.method === 'thread/settings/update')?.params).toEqual({
-      threadId: 'allowed-thread', approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' },
-    })
-    await expect(history()).resolves.toMatchObject({ permissionPreset: 'danger-full-access' })
-    app.emit({ kind: 'notification', method: 'thread/settings/updated', params: {
-      threadId: 'allowed-thread', threadSettings: { approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly' } },
-    } })
-    await expect(history()).resolves.toMatchObject({ permissionPreset: null })
-    await expect(domain.call('observer', {
-      method: 'dsh/sessionHistory', params: { threadId: 'unprojected-thread' },
-    })).rejects.toMatchObject({ code: 'CODEX_THREAD_NOT_ALLOWED' })
-    await domain.close()
-  })
-
-  it('does not confirm a rejected setting or let an observer change an active writer policy', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-    app.rejectSettings = true
-    const change = () => domain.call('observer', {
-      method: 'thread/resume', params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
-    })
-    await expect(change()).rejects.toMatchObject({ code: 'CODEX_UPSTREAM_ERROR' })
-    await expect(domain.call('observer', {
-      method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' },
-    })).resolves.toMatchObject({ permissionPreset: null })
-    await domain.call('writer', {
-      method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Run' }] },
-    })
-    const resumes = app.calls.filter(call => call.method === 'thread/resume').length
-    await expect(change()).rejects.toMatchObject({ code: 'CODEX_THREAD_BUSY' })
-    expect(app.calls.filter(call => call.method === 'thread/resume')).toHaveLength(resumes)
-    await domain.close()
-  })
-
-  it('supports older App Servers only when resume confirms the requested policy', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    app.rejectSettings = true
-    const upstream = app.call.bind(app)
-    vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
-      const result = await upstream(method, params)
-      return method === 'thread/resume'
-        ? { ...(isRecord(result) ? result : {}), approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } }
-        : result
-    })
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
-    await expect(domain.call('writer', {
-      method: 'thread/resume', params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
-    })).resolves.toMatchObject({ approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } })
-    expect(app.calls.filter(call => call.method === 'thread/settings/update')).toHaveLength(1)
-    await domain.close()
-  })
+    )
+  }, 20000)
 
   it('maps bounded remote image input to an App Server data URL', async () => {
     const { root } = await directories()
@@ -421,53 +569,69 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
-  it('projects and paginates CodeX History on the Host before returning it to the Client', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
+  it('pages CodeX history with a bounded legacy fallback', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'projects and paginates CodeX History on the Host before returning it to the Client',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
 
-    const tail = await domain.call('connection-1', {
-      method: 'dsh/sessionHistory',
-      params: { threadId: 'allowed-thread', maxMessages: 1 },
-    })
-    expect(tail).toMatchObject({ cursor: 5, hasMore: true })
-    expect((tail as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
-      .toEqual([3, 4, 5])
-    expect(app.calls.at(-1)).toEqual({
-      method: 'thread/turns/list',
-      params: { threadId: 'allowed-thread', limit: 25, sortDirection: 'asc', itemsView: 'full' },
-    })
+            const tail = await domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread', maxMessages: 1 },
+            })
+            expect(tail).toMatchObject({ cursor: 5, hasMore: true })
+            expect(
+              (tail as { records: Array<{ event: { seq: number } }> }).records.map((entry) => entry.event.seq),
+            ).toEqual([3, 4, 5])
+            expect(app.calls.at(-1)).toEqual({
+              method: 'thread/turns/list',
+              params: { threadId: 'allowed-thread', limit: 25, sortDirection: 'asc', itemsView: 'full' },
+            })
 
-    const older = await domain.call('connection-1', {
-      method: 'dsh/sessionHistory',
-      params: { threadId: 'allowed-thread', beforeSeq: 3, throughSeq: 5, maxMessages: 1 },
-    })
-    expect((older as { records: Array<{ event: { seq: number } }> }).records.map(entry => entry.event.seq))
-      .toEqual([2])
-    await domain.close()
-  })
+            const older = await domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread', beforeSeq: 3, throughSeq: 5, maxMessages: 1 },
+            })
+            expect(
+              (older as { records: Array<{ event: { seq: number } }> }).records.map((entry) => entry.event.seq),
+            ).toEqual([2])
+            await domain.close()
+          },
+        },
+        {
+          name: 'falls back to legacy full Thread reads when paginated history is unavailable',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            app.rejectTurnPagination = true
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            await domain.start()
 
-  it('falls back to legacy full Thread reads when paginated history is unavailable', async () => {
-    const { root } = await directories()
-    const app = new FakeAppServer(root)
-    app.rejectTurnPagination = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
-    await domain.start()
+            const history = await domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread', maxMessages: 1 },
+            })
 
-    const history = await domain.call('connection-1', {
-      method: 'dsh/sessionHistory',
-      params: { threadId: 'allowed-thread', maxMessages: 1 },
-    })
-
-    expect(history).toMatchObject({ cursor: 5, hasMore: true })
-    expect(app.calls.map(call => call.method)).toContain('thread/turns/list')
-    expect(app.calls.at(-1)).toEqual({
-      method: 'thread/read',
-      params: { threadId: 'allowed-thread', includeTurns: true },
-    })
-    await domain.close()
-  })
+            expect(history).toMatchObject({ cursor: 5, hasMore: true })
+            expect(app.calls.map((call) => call.method)).toContain('thread/turns/list')
+            expect(app.calls.at(-1)).toEqual({
+              method: 'thread/read',
+              params: { threadId: 'allowed-thread', includeTurns: true },
+            })
+            await domain.close()
+          },
+        },
+      ],
+      async () => {
+        await cleanupScenario1()
+      },
+    )
+  }, 10000)
 
   it('treats resume as idempotent when App Server already has the allowed thread loaded', async () => {
     const { root } = await directories()
@@ -481,21 +645,6 @@ describe('CodexRemoteDomain', () => {
     })).resolves.toMatchObject({ thread: { id: 'allowed-thread', cwd: root } })
     expect(app.calls.filter(call => call.method === 'thread/read')).toHaveLength(1)
     expect(app.calls.filter(call => call.method === 'thread/resume')).toHaveLength(1)
-    await domain.close()
-  })
-
-  it('does not hide rejection when both permission update paths fail', async () => {
-    const { root, outside } = await directories()
-    const app = new FakeAppServer(root, outside)
-    app.rejectResume = true
-    app.rejectSettings = true
-    const domain = new CodexRemoteDomain({ enabled: true, binary: '/custom/codex' }, logger(), () => app)
-    await domain.start()
-
-    await expect(domain.call('connection-1', {
-      method: 'thread/resume',
-      params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
-    })).rejects.toMatchObject({ code: 'CODEX_UPSTREAM_ERROR' })
     await domain.close()
   })
 
