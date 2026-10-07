@@ -432,6 +432,12 @@ describe('AcpVirtualHarness', () => {
         role: 'assistant',
         content: [{ type: 'text', text: 'Hello, World!' }],
       },
+      stream: [
+        { type: 'chunk', time: expect.any(Number), chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+        { type: 'chunk', time: expect.any(Number), chunk: { type: 'text-delta', index: 0, text: 'Hello, World!' } },
+        { type: 'chunk', time: expect.any(Number), chunk: { type: 'block-end', index: 0, block: { type: 'text', text: 'Hello, World!' } } },
+        { type: 'chunk', time: expect.any(Number), chunk: { type: 'finish', reason: { kind: 'stop' } } },
+      ],
     })
 
     followController.abort()

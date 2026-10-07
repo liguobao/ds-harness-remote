@@ -4271,24 +4271,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
           }
         });
         ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {
-          let disposed = !1, unsubscribeWorkspaces, unsubscribeSessions, selection, opening = !1, retainedReference, reconcile = () => {
+          let disposed = !1, unsubscribeWorkspaces, unsubscribeSessions, selection, opening = !1, reconcile = () => {
             if (disposed || opening || selection === void 0) return;
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();
             if (!workspacesReady(workspaceSnapshot) || !workspaceSnapshot.items.some((workspace) => workspace.workspaceId === pending.workspaceId)) return;
             let sessionSnapshot = ctx.sessions.list.getSnapshot(), isVirtualBackend = pending.backend === "codex" || pending.backend === "cursor" || pending.backend === "antigravity";
             if (isVirtualBackend && pending.sessionId !== void 0 && sessionSnapshot.phase !== "ready") return;
-            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0, (isVirtualBackend && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : ctx.workspaces.connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
+            opening = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), unsubscribeWorkspaces = void 0, unsubscribeSessions = void 0;
+            let navigation = ctx.get("uiWorkspace"), connectWorkspace = (workspaceId) => navigation !== void 0 ? navigation.connectWorkspace(workspaceId) : ctx.workspaces.connectWorkspace(workspaceId);
+            (isVirtualBackend && pending.sessionId !== void 0 && sessionSnapshot.ids.includes(pending.sessionId) ? Promise.resolve(pending.sessionId) : connectWorkspace(pending.workspaceId)).then(async (sessionId) => {
               if (!disposed) {
-                if (typeof ctx.workspaces.openSession == "function")
+                if (navigation !== void 0)
+                  navigation.openSession(sessionId);
+                else if (typeof ctx.workspaces.openSession == "function")
                   ctx.workspaces.openSession(sessionId);
                 else if (typeof ctx.sessions.open == "function")
                   ctx.sessions.open(sessionId);
-                else if (typeof ctx.sessions.retain == "function") {
-                  let reference = ctx.sessions.retain(sessionId, { source: "mainView" });
-                  retainedReference?.release(), retainedReference = reference, reference.ready?.catch((reason) => {
-                    disposed || console.warn("remote Session opening failed:", reason);
-                  });
-                } else
+                else
                   throw new Error("No supported Session open API is available.");
                 window.sessionStorage.removeItem(pendingWorkspaceSelectionKey), await control("workspace.selection.consume", pending).catch(() => {
                 });
@@ -4302,7 +4301,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             disposed || status.mode !== "remote" || pending === void 0 || status.target?.deviceId !== pending.targetDeviceId || (selection = pending, unsubscribeWorkspaces = ctx.workspaces.list.subscribe(reconcile), unsubscribeSessions = ctx.sessions.list.subscribe(reconcile), reconcile());
           }).catch(() => {
           }), () => {
-            disposed = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.(), retainedReference?.release(), retainedReference = void 0;
+            disposed = !0, unsubscribeWorkspaces?.(), unsubscribeSessions?.();
           };
         }, "ds-harness-remote: resume selected workspace"), ctx.inject(["fileViewer"], (fileViewerContext) => {
           let viewer = fileViewerContext.get("fileViewer");

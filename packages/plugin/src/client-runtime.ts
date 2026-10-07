@@ -1074,10 +1074,10 @@ export class ClientModeRuntime {
         this.pendingWorkspaceSelection = undefined
         void this.closeCodexVirtual()
         void this.closeCursorVirtual()
-        this.proxySwitch?.selectLocal()
-        this.gatewaySwitch.selectLocal()
+        this.proxySwitch?.disconnectRemote()
+        this.gatewaySwitch.disconnectRemote()
         void connectedClient.close().catch(() => undefined)
-        this.logger.warn('remote Harness transport closed; falling back to local mode', {
+        this.logger.warn('remote Harness transport closed; keeping Remote authority disconnected', {
           targetDeviceId: shortId(target.deviceId),
         })
       })

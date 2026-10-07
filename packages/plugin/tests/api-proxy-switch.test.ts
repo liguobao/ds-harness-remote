@@ -3,6 +3,24 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiProxySwitch } from '../src/api-proxy-switch.js'
 
 describe('ApiProxySwitch', () => {
+  it('keeps remote authority disconnected until reconnect or explicit exit', async () => {
+    const localList = vi.fn(async () => 'local')
+    const remoteList = vi.fn(async () => 'remote')
+    const local = api(localList)
+    const remote = api(remoteList)
+    const target = new ApiProxySwitch(local)
+    target.install()
+    target.selectRemote(remote, { deviceId: 'agy', name: 'AGY' })
+    target.disconnectRemote()
+    expect(target.status().mode).toBe('remote')
+    expect(() => callList(local, '1')).toThrow('Remote connection was lost')
+    expect(localList).not.toHaveBeenCalled()
+    expect(remoteList).not.toHaveBeenCalled()
+    target.selectRemote(remote, { deviceId: 'agy', name: 'AGY' })
+    await expect(callList(local, '2')).resolves.toBe('remote')
+    target.selectLocal()
+    await expect(callList(local, '3')).resolves.toBe('local')
+  })
   it('switches native session calls without replacing the official service identity', async () => {
     const localList = vi.fn(async () => 'local')
     const remoteList = vi.fn(async () => 'remote')

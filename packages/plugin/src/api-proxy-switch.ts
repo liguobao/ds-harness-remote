@@ -31,6 +31,7 @@ export class ApiProxySwitch {
   private target?: RemoteTarget
   private mode: HarnessMode = 'local'
   private installed = false
+  private disconnected = false
   private readonly local: ApiProxy
   private readonly originals: Map<typeof SWITCHED_DOMAINS[number], ApiProxy[typeof SWITCHED_DOMAINS[number]]>
   private readonly localRespond: ApiProxy['respond']
@@ -73,14 +74,20 @@ export class ApiProxySwitch {
   selectRemote(api: ApiProxy, target: RemoteTarget): void {
     if (!this.installed) throw new Error('The Harness API switch is not installed.')
     this.remote = api
+    this.disconnected = false
     this.target = { ...target }
     this.mode = 'remote'
   }
 
   selectLocal(): void {
+    this.disconnected = false
     this.mode = 'local'
     this.remote = undefined
     this.target = undefined
+  }
+
+  disconnectRemote(): void {
+    if (this.mode === 'remote') this.disconnected = true
   }
 
   status(): { mode: HarnessMode; target?: RemoteTarget } {
@@ -115,6 +122,7 @@ export class ApiProxySwitch {
   }
 
   private requireRemote(): ApiProxy {
+    if (this.disconnected) throw Object.assign(new Error('The Remote connection was lost. Reconnect to continue.'), { code: 'remote/disconnected' })
     if (this.remote === undefined) throw new Error('No remote Harness target is selected.')
     return this.remote
   }

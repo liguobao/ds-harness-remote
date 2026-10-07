@@ -154,6 +154,22 @@ export class TypertGatewaySwitch {
     this.target = undefined
   }
 
+  /** Keep the selected authority after transport loss; only explicit exit returns local. */
+  disconnectRemote(): void {
+    if (this.remoteInvoke === undefined) return
+    const error = () => Object.assign(new Error('The Remote connection was lost. Reconnect to continue.'), {
+      isDSHRemoteError: true as const,
+      code: 'remote/disconnected',
+      details: {},
+    })
+    this.remoteTarget = {
+      invoke: async () => { throw error() },
+      dispatch: async () => ({ ok: false, error: { code: 'remote/disconnected', message: error().message, details: {} } }),
+      open: async () => { throw error() },
+    }
+    this.remoteInvoke = this.remoteTarget.invoke
+  }
+
   restore(): void {
     if (!this.installed) return
     this.selectLocal()

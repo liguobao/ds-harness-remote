@@ -7616,6 +7616,7 @@ var ApiProxySwitch = class {
   target;
   mode = "local";
   installed = false;
+  disconnected = false;
   local;
   originals;
   localRespond;
@@ -7653,13 +7654,18 @@ var ApiProxySwitch = class {
   selectRemote(api, target2) {
     if (!this.installed) throw new Error("The Harness API switch is not installed.");
     this.remote = api;
+    this.disconnected = false;
     this.target = { ...target2 };
     this.mode = "remote";
   }
   selectLocal() {
+    this.disconnected = false;
     this.mode = "local";
     this.remote = void 0;
     this.target = void 0;
+  }
+  disconnectRemote() {
+    if (this.mode === "remote") this.disconnected = true;
   }
   status() {
     return { mode: this.mode, ...this.target === void 0 ? {} : { target: { ...this.target } } };
@@ -7689,6 +7695,7 @@ var ApiProxySwitch = class {
     return this.originals.get(domain);
   }
   requireRemote() {
+    if (this.disconnected) throw Object.assign(new Error("The Remote connection was lost. Reconnect to continue."), { code: "remote/disconnected" });
     if (this.remote === void 0) throw new Error("No remote Harness target is selected.");
     return this.remote;
   }
@@ -19388,7 +19395,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     const time = Date.now();
     const index = attempt.nextIndex++;
-    attempt.stream.push({ time, chunk });
+    attempt.stream.push({ type: "chunk", time, chunk });
     follow.assistantStreamRevision += 1;
     follow.queue.push({
       type: "assistant-stream",
@@ -20807,6 +20814,25 @@ var TypertGatewaySwitch = class {
     this.remoteTarget = void 0;
     this.remoteSupport = { execute: false, list: false };
     this.target = void 0;
+  }
+  /** Keep the selected authority after transport loss; only explicit exit returns local. */
+  disconnectRemote() {
+    if (this.remoteInvoke === void 0) return;
+    const error = () => Object.assign(new Error("The Remote connection was lost. Reconnect to continue."), {
+      isDSHRemoteError: true,
+      code: "remote/disconnected",
+      details: {}
+    });
+    this.remoteTarget = {
+      invoke: async () => {
+        throw error();
+      },
+      dispatch: async () => ({ ok: false, error: { code: "remote/disconnected", message: error().message, details: {} } }),
+      open: async () => {
+        throw error();
+      }
+    };
+    this.remoteInvoke = this.remoteTarget.invoke;
   }
   restore() {
     if (!this.installed) return;
@@ -22736,10 +22762,10 @@ var ClientModeRuntime = class {
         this.pendingWorkspaceSelection = void 0;
         void this.closeCodexVirtual();
         void this.closeCursorVirtual();
-        this.proxySwitch?.selectLocal();
-        this.gatewaySwitch.selectLocal();
+        this.proxySwitch?.disconnectRemote();
+        this.gatewaySwitch.disconnectRemote();
         void connectedClient.close().catch(() => void 0);
-        this.logger.warn("remote Harness transport closed; falling back to local mode", {
+        this.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
           targetDeviceId: shortId(target2.deviceId)
         });
       });

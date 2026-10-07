@@ -50,7 +50,7 @@ interface AssistantStreamAttempt {
   attemptId: string
   startedAfterSeq: number
   nextIndex: number
-  stream: Array<{ time: number; chunk: JsonRecord }>
+  stream: Array<{ type: 'chunk'; time: number; chunk: JsonRecord }>
 }
 
 interface FollowState {
@@ -890,7 +890,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     const time = Date.now()
     const index = attempt.nextIndex++
-    attempt.stream.push({ time, chunk })
+    // Durable streams use AssistantStreamRecord, unlike the timed chunks in
+    // the live feed. Without this discriminator the native reader treats a
+    // raw chunk as a packed run and throws while settling the conversation.
+    attempt.stream.push({ type: 'chunk', time, chunk })
     follow.assistantStreamRevision += 1
     follow.queue.push({
       type: 'assistant-stream',
