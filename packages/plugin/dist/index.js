@@ -18566,17 +18566,18 @@ async function querySqliteJson(dbPath, sql, params = []) {
     return [];
   }
 }
-async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
   try {
     await fs.stat(dbPath);
   } catch {
     return [];
   }
-  const sql = "SELECT DISTINCT workspace_uris FROM conversation_summaries WHERE (step_count > 0 OR title != '');";
+  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
   const rows = await querySqliteJson(dbPath, sql);
   const paths = /* @__PURE__ */ new Set();
   for (const row of rows) {
     if (!row?.workspace_uris) continue;
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
     try {
       const uris = JSON.parse(row.workspace_uris);
       if (Array.isArray(uris)) {
@@ -18607,6 +18608,29 @@ async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/
   }
   return verified;
 }
+async function readTranscriptSummary(baseDir, conversationId) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
+  const path = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  try {
+    const stat8 = await fs.stat(path);
+    const handle = await fs.open(path, "r");
+    try {
+      const buffer = Buffer.alloc(4096);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+      if (!firstLine) return void 0;
+      const record8 = JSON.parse(firstLine);
+      if (record8.type !== "USER_INPUT") return void 0;
+      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40);
+      if (!title) return void 0;
+      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
 async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain"), dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
   try {
     await fs.stat(dbPath);
@@ -18619,8 +18643,11 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
     sql += " ORDER BY last_modified_time DESC LIMIT ?;";
     params.push(limit);
     const rows = await querySqliteJson(dbPath, sql, params);
-    if (rows && rows.length > 0) {
-      return rows.map((r) => {
+    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
+    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
+    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
+    if (rows.length > 0 || emptyRows.length > 0) {
+      const summaries = rows.map((r) => {
         const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
         return {
           conversationId: r.conversation_id,
@@ -18629,6 +18656,7 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
           updatedAt: time
         };
       });
+      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
     }
   } catch {
   }
@@ -29073,6 +29101,13 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       if (this.spare === spare) this.spare = void 0;
     });
   }
+  prewarmSession(cwd2) {
+    if (this.sessionWorker || this.closed || this.spare !== void 0 && this.spareCwd === cwd2) return;
+    const previous = this.spare;
+    this.spare = void 0;
+    if (previous !== void 0) void previous.then((worker) => worker.close()).catch(() => void 0);
+    this.warmNextSession(cwd2);
+  }
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
     if (method === "initialize") {
@@ -29912,6 +29947,10 @@ var AcpRemoteGateway = class {
       const path = String(call.params.path || "");
       const backend = typeof call.params.backend === "string" ? call.params.backend : "antigravity";
       if (backend === "antigravity") {
+        if (path.trim() !== "") {
+          const cwd2 = await this.requireExistingDirectory(path);
+          this.requireAcp("antigravity").prewarmSession?.(cwd2);
+        }
         const items = await discoverAntigravitySessions(path, limit);
         this.logger.info("ACP session list fetched", { count: items.length, path });
         return { items };

@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
 import type { CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
@@ -26,6 +27,26 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('prewarms only a validated selected AGY directory while listing history', async () => {
+    const acp = readyAcp()
+    acp.prewarmSession = vi.fn()
+    const gateway = new AcpRemoteGateway({ enabled: true, binary: 'agy' }, silentLogger(), () => acp)
+    await gateway.start()
+    try {
+      const list = (path: string, backend = 'antigravity') => gateway.call('warm-connection', {
+        method: 'dsh/sessionList', params: { path, backend },
+      })
+      await list(process.cwd())
+      expect(acp.prewarmSession).toHaveBeenCalledWith(await realpath(process.cwd()))
+      await list('')
+      await list(process.cwd(), 'cursor')
+      await expect(list('/nonexistent-agy-prewarm-directory')).rejects.toMatchObject({ code: 'CURSOR_PATH_NOT_ALLOWED' })
+      expect(acp.prewarmSession).toHaveBeenCalledTimes(1)
+    } finally {
+      await gateway.close()
+    }
+  })
+
   it('answers initialize on the gateway without forwarding to Cursor', async () => {
     const acp = readyAcp()
     const gateway = new AcpRemoteGateway(

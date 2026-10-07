@@ -184,6 +184,7 @@ async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params:
 
 export async function discoverAntigravityWorkspaces(
   dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
+  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
 ): Promise<string[]> {
   try {
     await fs.stat(dbPath)
@@ -191,12 +192,13 @@ export async function discoverAntigravityWorkspaces(
     return []
   }
 
-  const sql = "SELECT DISTINCT workspace_uris FROM conversation_summaries WHERE (step_count > 0 OR title != '');"
-  const rows = await querySqliteJson<{ workspace_uris?: string }>(dbPath, sql)
+  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;"
+  const rows = await querySqliteJson<{ conversation_id: string; workspace_uris?: string; step_count?: number; title?: string }>(dbPath, sql)
   const paths = new Set<string>()
 
   for (const row of rows) {
     if (!row?.workspace_uris) continue
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue
     try {
       const uris = JSON.parse(row.workspace_uris)
       if (Array.isArray(uris)) {
@@ -232,6 +234,30 @@ export async function discoverAntigravityWorkspaces(
   return verified
 }
 
+async function readTranscriptSummary(baseDir: string, conversationId: string): Promise<DiscoveredSession | undefined> {
+  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return undefined
+  const path = join(baseDir, conversationId, '.system_generated/logs/transcript.jsonl')
+  try {
+    const stat = await fs.stat(path)
+    const handle = await fs.open(path, 'r')
+    try {
+      const buffer = Buffer.alloc(4096)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      const firstLine = buffer.subarray(0, bytesRead).toString('utf-8').split('\n')[0]
+      if (!firstLine) return undefined
+      const record = JSON.parse(firstLine) as StepLogRecord
+      if (record.type !== 'USER_INPUT') return undefined
+      const title = cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40)
+      if (!title) return undefined
+      return { conversationId, title, createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs, updatedAt: stat.mtimeMs }
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export async function discoverAntigravitySessions(
   workspacePath: string,
   limit: number = 30,
@@ -258,8 +284,14 @@ export async function discoverAntigravitySessions(
     }
 
     const rows = await querySqliteJson<DbSessionRow>(dbPath, sql, params)
-    if (rows && rows.length > 0) {
-      return rows.map(r => {
+    // Concurrent idle AGY processes can leave an empty summary for a durable
+    // conversation. Use its transcript, but only within the DB workspace filter.
+    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')")
+    const emptyRows = await querySqliteJson<DbSessionRow>(dbPath, emptySql, params)
+    const recovered = (await Promise.all(emptyRows.map(row => readTranscriptSummary(baseDir, row.conversation_id))))
+      .filter((item): item is DiscoveredSession => item !== undefined)
+    if (rows.length > 0 || emptyRows.length > 0) {
+      const summaries = rows.map(r => {
         const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now()
         return {
           conversationId: r.conversation_id,
@@ -268,6 +300,7 @@ export async function discoverAntigravitySessions(
           updatedAt: time,
         }
       })
+      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
     }
   } catch {
     // fallback to filesystem scanning

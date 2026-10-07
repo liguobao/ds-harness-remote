@@ -37,6 +37,8 @@ export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 export interface CursorAcpLike {
   start(): Promise<void>
   isReady(): boolean
+  /** Optional Host-local preparation; never a Cursor ACP wire method. */
+  prewarmSession?(cwd: string): void
   call(method: string, params: unknown, timeoutMs?: number): Promise<unknown>
   respond(id: string | number, result: unknown): Promise<void>
   respondError(id: string | number, code: number, message: string): Promise<void>

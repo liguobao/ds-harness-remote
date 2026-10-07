@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -21,6 +22,41 @@ describe('TranscriptLoader', () => {
       await rm(base, { recursive: true, force: true })
     }
   })
+  it('recovers workspace-scoped durable conversations with empty AGY summaries', async () => {
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
+    const { discoverAntigravitySessions, discoverAntigravityWorkspaces } = await import('../src/acp/adapters/antigravity/transcript-loader.js')
+    const base = await mkdtemp(join(tmpdir(), 'agy-summary-'))
+    const dbPath = join(base, 'summaries.db')
+    const workspace = join(base, 'project')
+    const other = join(base, 'other')
+    const empty = join(base, 'empty')
+    try {
+      for (const path of [workspace, other, empty]) await mkdir(path)
+      const db = new DatabaseSync(dbPath)
+      try {
+        db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, workspace_uris TEXT, step_count INTEGER, last_modified_time TEXT)')
+        const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
+        for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty]]) {
+          insert.run(id, '', JSON.stringify([`file://${path}`]), 0, '2026-10-07T00:00:00Z')
+        }
+        insert.run('normal-session', 'Normal', JSON.stringify([`file://${workspace}`]), 2, '2026-10-07T00:00:00Z')
+      } finally {
+        db.close()
+      }
+      for (const id of ['stale-session', 'other-session']) {
+        const logs = join(base, id, '.system_generated', 'logs')
+        await mkdir(logs, { recursive: true })
+        await writeFile(join(logs, 'transcript.jsonl'), JSON.stringify({ type: 'USER_INPUT', step_index: 1, created_at: '2026-10-07T00:00:00Z', content: 'Durable message' }) + '\n')
+      }
+      const sessions = await discoverAntigravitySessions(workspace, 30, base, dbPath)
+      expect(sessions.map(session => session.conversationId).sort()).toEqual(['normal-session', 'stale-session'])
+      expect(sessions.find(session => session.conversationId === 'stale-session')?.title).toBe('Durable message')
+      expect((await discoverAntigravityWorkspaces(dbPath, base)).sort()).toEqual([workspace, other].sort())
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
   it('cleans user prompt wrapper tags', () => {
     const raw = '<USER_REQUEST>\n这个主机咋样\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\n...'
     expect(cleanUserPrompt(raw)).toBe('这个主机咋样')

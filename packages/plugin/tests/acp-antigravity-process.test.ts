@@ -206,6 +206,34 @@ describe('AntigravityAcpClient', () => {
     expect(processes[1]!.child.kill).toHaveBeenCalled()
   })
 
+  it('prewarms the selected directory once and preserves claimed sessions', async () => {
+    const processes: ReturnType<typeof fakeProcess>[] = []
+    const directories: string[] = []
+    const writes = vi.fn()
+    const client = new AntigravityAcpClient('agy', logger(), (_bin, _args, cwd) => {
+      const fake = fakeProcess()
+      const index = processes.push(fake) - 1
+      directories.push(cwd!)
+      fake.stdin.on('data', writes)
+      queueMicrotask(() => fake.stdout.write(JSON.stringify({ event: 'init', conversation_id: `warm-${index}` }) + '\n'))
+      return fake.child
+    }, { cwd: '/host' })
+    await client.start()
+    const first = await client.call('session/new', { cwd: '/host' })
+    expect(first).toEqual({ sessionId: 'warm-0' })
+    client.prewarmSession('/selected')
+    client.prewarmSession('/selected')
+    await new Promise(resolve => setImmediate(resolve))
+    expect(directories).toEqual(['/host', '/host', '/selected'])
+    expect(processes[1]!.child.kill).toHaveBeenCalled()
+    expect(processes[0]!.child.kill).not.toHaveBeenCalled()
+    expect(writes).not.toHaveBeenCalled()
+    expect(await client.call('session/new', { cwd: '/selected' })).toEqual({ sessionId: 'warm-2' })
+    expect(processes[2]!.child.kill).not.toHaveBeenCalled()
+    await client.close()
+    for (const process of processes) expect(process.child.kill).toHaveBeenCalled()
+  })
+
   it('cancels pending prompt cleanly', async () => {
     const fake = fakeProcess()
     const client = new AntigravityAcpClient('agy', logger(), () => {

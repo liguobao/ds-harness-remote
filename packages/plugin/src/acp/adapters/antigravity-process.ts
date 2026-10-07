@@ -130,6 +130,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
     void spare.catch(() => { if (this.spare === spare) this.spare = undefined })
   }
 
+  prewarmSession(cwd: string): void {
+    if (this.sessionWorker || this.closed || (this.spare !== undefined && this.spareCwd === cwd)) return
+    const previous = this.spare
+    this.spare = undefined
+    if (previous !== undefined) void previous.then(worker => worker.close()).catch(() => undefined)
+    this.warmNextSession(cwd)
+  }
+
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new AntigravityAcpError('ANTIGRAVITY_UNAVAILABLE', 'Antigravity ACP is not ready.')
 

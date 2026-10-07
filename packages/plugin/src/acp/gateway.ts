@@ -241,6 +241,12 @@ export class AcpRemoteGateway {
       const path = String(call.params.path || '')
       const backend = typeof call.params.backend === 'string' ? call.params.backend : 'antigravity'
       if (backend === 'antigravity') {
+        // Workspace selection loads history before the user presses New.
+        // Prepare one idle process in that directory without awaiting startup.
+        if (path.trim() !== '') {
+          const cwd = await this.requireExistingDirectory(path)
+          this.requireAcp('antigravity').prewarmSession?.(cwd)
+        }
         const items = await discoverAntigravitySessions(path, limit)
         this.logger.info('ACP session list fetched', { count: items.length, path })
         return { items }
