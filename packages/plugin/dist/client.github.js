@@ -1994,8 +1994,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     checkingAcp: "Checking ACP\u2026",
     acpAvailable: "ACP available",
     acpUnavailable: "ACP unavailable",
-    agentBackends: "Agent backends",
-    acpHint: "Enable backends to connect. Changes apply immediately.",
+    agentBackends: "More Coding Agents",
+    acpDocumentation: "Read the documentation.",
+    acpHint: "Connect through ACP. ",
     acpCheckPassed: "Check passed",
     acpCheckFailed: "Check failed",
     addAcp: "Add ACP",
@@ -2246,8 +2247,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     checkingAcp: "\u6B63\u5728\u68C0\u6D4B ACP\u2026",
     acpAvailable: "ACP \u53EF\u7528",
     acpUnavailable: "ACP \u4E0D\u53EF\u7528",
-    agentBackends: "Agent \u540E\u7AEF",
-    acpHint: "\u542F\u7528\u540E\u53EF\u8FDE\u63A5\uFF0C\u4FEE\u6539\u7ACB\u5373\u751F\u6548\u3002",
+    agentBackends: "\u66F4\u591A Coding Agent",
+    acpDocumentation: "\u8BE6\u7EC6\u8BF7\u67E5\u9605\u3002",
+    acpHint: "\u901A\u8FC7 ACP \u7EDF\u4E00\u63A5\u5165\uFF0C",
     acpCheckPassed: "\u68C0\u6D4B\u901A\u8FC7",
     acpCheckFailed: "\u68C0\u6D4B\u5931\u8D25",
     addAcp: "\u6DFB\u52A0 ACP",
@@ -2641,7 +2643,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
               "div",
               { className: "dshRemoteAcpSummaryText" },
               React.createElement("strong", null, t("agentBackends")),
-              React.createElement("p", null, t("acpHint"))
+              React.createElement("p", null, t("acpHint"), React.createElement("a", {
+                href: "https://github.com/liguobao/ds-harness-remote/blob/feat/cursor-remote/docs/cursor-remote.md",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                onClick: (event) => event.stopPropagation()
+              }, t("acpDocumentation")))
             )
           ),
           React.createElement(
