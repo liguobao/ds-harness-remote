@@ -68,6 +68,7 @@ export interface RemoteHostFeatures {
   codex: boolean
   cursor: boolean
   antigravity: boolean
+  acpModelLoadsSession?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
 }
 
@@ -621,7 +622,7 @@ export class ClientModeRuntime {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    }, backend)
+    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [])
     let workspace: AcpVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId)
@@ -662,7 +663,7 @@ export class ClientModeRuntime {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    }, backend)
+    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [])
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath)
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
@@ -1570,6 +1571,7 @@ export async function probeRemoteHostFeatures(
     codex,
     cursor,
     antigravity,
+    ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }
 }

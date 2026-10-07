@@ -189,8 +189,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     core: ConstructorParameters<typeof AgentAcpClient>[0],
     host: { deviceId: string; name: string },
     backend: 'cursor' | 'antigravity' = 'cursor',
+    capabilities: readonly string[] = [],
   ): AcpVirtualHarness {
-    return new AcpVirtualHarness(new AgentAcpClient(core), host, backend)
+    return new AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend)
   }
 
   async workspaces(): Promise<AcpVirtualWorkspaceView[]> {
@@ -828,6 +829,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const update = isRecord(params.update) ? params.update : params
     const kind = string(update.sessionUpdate) ?? string(update.type)
     const session = this.sessions.get(follow.sessionId)
+    if (kind === 'model_selection' && isRecord(update.selected)
+      && update.selected.provider === this.backend && typeof update.selected.model === 'string') {
+      this.selectedModels.set(follow.sessionId, update.selected as unknown as AcpModelSelection)
+      this.publishProjection(follow.sessionId, 'modelSelection', this.modelSelectionProjection(follow.sessionId), this.nextProjectionSeq())
+      return
+    }
     if (kind === 'agent_message_chunk' || kind === 'agent_message') {
       const text = extractText(update)
       if (text === undefined || text.length === 0) return

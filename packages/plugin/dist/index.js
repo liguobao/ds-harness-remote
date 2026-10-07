@@ -5753,8 +5753,10 @@ function isRecord(value) {
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
-  constructor(core) {
+  capabilities;
+  constructor(core, capabilities = []) {
     this.core = core;
+    this.capabilities = capabilities;
   }
   async call(method, params = {}, signal) {
     const timeoutMs = method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0;
@@ -5776,7 +5778,9 @@ var AgentAcpClient = class {
   async selectModel(sessionId, backend, selection, signal) {
     if (selection.provider !== backend)
       throw new RemoteGatewayError("INVALID_MESSAGE", "The model provider does not match the ACP backend.");
-    await this.call("session/load", { sessionId, backend }, signal);
+    if (!this.capabilities.includes("agent.acp.antigravity.model-load.v1")) {
+      await this.call("session/load", { sessionId, backend }, signal);
+    }
     const result = await this.call("dsh/selectModel", {
       sessionId,
       backend,
@@ -18602,8 +18606,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   lastProjectionSeq = 0;
   imageAttachments = /* @__PURE__ */ new Map();
   closed = false;
-  static remote(core, host, backend = "cursor") {
-    return new _AcpVirtualHarness(new AgentAcpClient(core), host, backend);
+  static remote(core, host, backend = "cursor", capabilities = []) {
+    return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend);
   }
   async workspaces() {
     return [...this.workspaceById.values()];
@@ -19212,6 +19216,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const update = isRecord8(params.update) ? params.update : params;
     const kind = string3(update.sessionUpdate) ?? string3(update.type);
     const session = this.sessions.get(follow.sessionId);
+    if (kind === "model_selection" && isRecord8(update.selected) && update.selected.provider === this.backend && typeof update.selected.model === "string") {
+      this.selectedModels.set(follow.sessionId, update.selected);
+      this.publishProjection(follow.sessionId, "modelSelection", this.modelSelectionProjection(follow.sessionId), this.nextProjectionSeq());
+      return;
+    }
     if (kind === "agent_message_chunk" || kind === "agent_message") {
       const text = extractText(update);
       if (text === void 0 || text.length === 0) return;
@@ -22276,7 +22285,7 @@ var ClientModeRuntime = class {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    }, backend);
+    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : []);
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId);
@@ -22311,7 +22320,7 @@ var ClientModeRuntime = class {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    }, backend);
+    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : []);
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
@@ -23117,6 +23126,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     codex,
     cursor: cursor2,
     antigravity,
+    ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes }
   };
 }
@@ -26068,6 +26078,20 @@ function isRecord15(value) {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 var exec = promisify(execFile);
+function cachedAgyModels(load) {
+  let catalog;
+  let pending;
+  return () => {
+    if (catalog) return Promise.resolve(catalog);
+    pending ??= load().then((value) => {
+      catalog = value;
+      return value;
+    }).finally(() => {
+      pending = void 0;
+    });
+    return pending;
+  };
+}
 function parseAgyModels(output) {
   const models = /* @__PURE__ */ new Map();
   const variants = /* @__PURE__ */ new Map();
@@ -26390,7 +26414,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
-    this.readModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)));
+    const loadModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)));
+    this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels);
     this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
     this.cwd = options.cwd ?? process.cwd();
     this.sessionWorker = options.sessionWorker === true;
@@ -26527,20 +26552,23 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       const p = params;
       if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A model change is already in progress.");
       const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : void 0);
-      if (!current) throw new AntigravityAcpError("SESSION_MISMATCH", "Load the conversation before selecting its model.");
-      if (current.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
+      if (!current && !p.cwd) throw new AntigravityAcpError("SESSION_MISMATCH", "Load the conversation before selecting its model.");
+      if (current?.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
       this.selecting.add(p.sessionId);
       try {
         const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort);
-        const replacement = await this.prepareSession(p.sessionId, current.cwd, chosen.args);
-        if (current.currentPromptPending) {
+        const previous = this.selections.get(p.sessionId);
+        if (current?.isReady() && previous?.model === chosen.selection.model && previous.reasoningEffort === chosen.selection.reasoningEffort) return { selected: previous };
+        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd, chosen.args);
+        if (current?.currentPromptPending) {
           await replacement.close();
           throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A reply started during model selection.");
         }
         this.sessions.set(p.sessionId, replacement);
         this.selections.set(p.sessionId, chosen.selection);
-        if (current !== this) await current.close();
-        else {
+        replacement.selections.set(p.sessionId, chosen.selection);
+        if (current && current !== this) await current.close();
+        else if (current === this) {
           this.watcher?.stop();
           this.watcher = void 0;
           const child = this.process;
@@ -26548,6 +26576,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           child?.stdout.removeAllListeners("data");
           if (child && !child.killed) child.kill("SIGTERM");
         }
+        this.emitNotification("session/update", { sessionId: p.sessionId, update: { sessionUpdate: "model_selection", selected: chosen.selection } });
         return { selected: chosen.selection };
       } finally {
         this.selecting.delete(p.sessionId);
@@ -26732,6 +26761,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.currentPromptPending) {
       throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
     }
+    const selected = this.selections.get(sessionId);
+    if (selected) this.emitNotification("session/update", { sessionId, update: { sessionUpdate: "model_selection", selected } });
     return new Promise((resolve6, reject) => {
       const timer = setTimeout(() => {
         if (this.currentPromptPending) {
@@ -27069,8 +27100,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join9(h
           message: {
             id: `${sessionId}:${record8.step_index}`,
             role: "assistant",
-            content: contentBlocks2,
-            source: { kind: "model", provider: "google", model: "gemini" }
+            content: contentBlocks2
           },
           // Harness trajectory timing expects every assistant message to carry
           // an iterable stream, including messages restored from transcript.
@@ -27882,6 +27912,15 @@ var AcpRemoteGateway = class {
     }
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
+    }
+    if (call.method === "dsh/selectModel") {
+      const session = this.sessionCwds.get(sessionId);
+      if (!session || session.backend !== call.params.backend) {
+        throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+      }
+      const result = await this.requireAcp(session.backend).call(call.method, { ...call.params, cwd: session.cwd });
+      this.sessionBackends.set(sessionId, session.backend);
+      return sanitizeSessionResult(result);
     }
     if (call.method === "session/prompt" && sessionId !== void 0) {
       const ownerPeer = this.peers.get(connectionId);
@@ -32106,7 +32145,7 @@ var HostPluginRuntime = class {
     if (this.acp.enabledBackends().length > 0) {
       capabilities.push("agent.acp.v1", "agent.acp.transfer.v1", "agent.acp.workspace-files.v1");
       if (this.terminalEnabled) capabilities.push("agent.acp.terminal.v1");
-      if (this.acp.enabledBackends().includes("antigravity")) capabilities.push("agent.acp.antigravity.models.v1");
+      if (this.acp.enabledBackends().includes("antigravity")) capabilities.push("agent.acp.antigravity.models.v1", "agent.acp.antigravity.model-load.v1");
       for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`);
       }

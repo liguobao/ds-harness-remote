@@ -7,7 +7,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
 import { AntigravityAcpClient } from '../src/acp/adapters/antigravity-process.js'
-import { parseAgyModels } from '../src/acp/adapters/antigravity/models.js'
+import { cachedAgyModels, parseAgyModels } from '../src/acp/adapters/antigravity/models.js'
 import { parseAcpCall } from '../src/acp/method-policy.js'
 import type { SafeLogger } from '../src/logging.js'
 
@@ -59,6 +59,7 @@ it('AGY model acknowledgement follows CLI resume with validated live model and e
   const children: Array<{ child: ChildProcessWithoutNullStreams; args: string[]; cwd?: string }> = []
   let next = 0
   const catalog = parseAgyModels('gemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n')
+  const readModels = vi.fn(async () => catalog)
   const client = new AntigravityAcpClient('agy', logger, (_bin, args, cwd) => {
     const child = new EventEmitter() as ChildProcessWithoutNullStreams
     child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough()
@@ -69,7 +70,7 @@ it('AGY model acknowledgement follows CLI resume with validated live model and e
     queueMicrotask(() => (child.stdout as PassThrough).write(`${JSON.stringify({ event: 'init', conversation_id: id })}\n`))
     child.stdin.on('data', () => (child.stdout as PassThrough).write(`${JSON.stringify({ event: 'result', result: { status: 'SUCCESS', conversation_id: id } })}\n`))
     return child
-  }, { cwd: tmpdir(), readModels: async () => catalog })
+  }, { cwd: tmpdir(), readModels })
   try {
     await client.start()
     const created = await client.call('session/new', { cwd: tmpdir() }) as { sessionId: string }
@@ -86,5 +87,28 @@ it('AGY model acknowledgement follows CLI resume with validated live model and e
     const thinking = children.at(-1)!.args
     expect(thinking).toEqual(expect.arrayContaining(['--model', 'claude-opus-4-6-thinking']))
     expect(thinking).not.toContain('--effort')
+    const starts = children.length
+    await client.call('dsh/selectModel', { ...created, model: 'claude-opus-4-6', reasoningEffort: 'thinking' })
+    expect(children).toHaveLength(starts)
+    // A Host-discovered session resumes once, directly in the target model.
+    await client.call('dsh/selectModel', { sessionId: 'discovered', cwd: tmpdir(), model: 'gemini-3.8-flash', reasoningEffort: 'low' })
+    expect(children).toHaveLength(starts + 1)
+    expect(children.at(-1)!.args).toEqual(expect.arrayContaining(['--conversation', 'discovered', '--model', 'gemini-3.8-flash-low']))
+    expect(readModels).toHaveBeenCalledTimes(1)
   } finally { await client.close() }
+})
+
+it('AGY model catalog coalesces concurrent reads and retries failed discovery', async () => {
+  const catalog = parseAgyModels('live-model\tLive model\n')
+  let complete!: (value: typeof catalog) => void
+  const load = vi.fn().mockRejectedValueOnce(new Error('Unavailable')).mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  const read = cachedAgyModels(load)
+  await expect(read()).rejects.toThrow('Unavailable')
+  const first = read()
+  const second = read()
+  expect(first).toBe(second)
+  complete(catalog)
+  expect(await first).toBe(catalog)
+  expect(await read()).toBe(catalog)
+  expect(load).toHaveBeenCalledTimes(2)
 })

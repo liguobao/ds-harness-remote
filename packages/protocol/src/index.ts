@@ -64,6 +64,7 @@ export const ACP_CAPABILITY = 'agent.acp.v1' as const
 export const ACP_WORKSPACE_FILES_CAPABILITY = 'agent.acp.workspace-files.v1' as const
 export const ACP_TERMINAL_CAPABILITY = 'agent.acp.terminal.v1' as const
 export const ACP_ANTIGRAVITY_MODELS_CAPABILITY = 'agent.acp.antigravity.models.v1' as const
+export const ACP_ANTIGRAVITY_MODEL_LOAD_CAPABILITY = 'agent.acp.antigravity.model-load.v1' as const
 export const ACP_TOOL_CALL_ENDPOINTS = ['workspaceFiles/list', 'workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll',
   'terminal/environment', 'terminal/shells', 'terminal/list', 'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close'] as const
 export const ACP_TOOL_STREAM_ENDPOINTS = ['workspaceFiles/changes', 'terminal/follow', 'terminal/retain'] as const

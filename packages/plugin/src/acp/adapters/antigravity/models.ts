@@ -6,6 +6,18 @@ interface Model { id: string; name: string; reasoning?: { efforts: Array<{ id: s
 export interface AgyCatalog { groups: Array<{ id: string; name: string; models: Model[] }>; variants: Map<string, string> }
 const exec = promisify(execFile)
 
+/** The catalog belongs to the running Host backend, like the CodeX model directory. */
+export function cachedAgyModels(load: () => Promise<AgyCatalog>): () => Promise<AgyCatalog> {
+  let catalog: AgyCatalog | undefined
+  let pending: Promise<AgyCatalog> | undefined
+  return () => {
+    if (catalog) return Promise.resolve(catalog)
+    pending ??= load().then(value => { catalog = value; return value })
+      .finally(() => { pending = undefined })
+    return pending
+  }
+}
+
 /** Model identifiers and effort variants come from the installed CLI, never a static catalog. */
 export function parseAgyModels(output: string): AgyCatalog {
   const models = new Map<string, Model>()

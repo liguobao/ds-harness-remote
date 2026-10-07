@@ -1,4 +1,4 @@
-import { readAgyModels, agySelectionArgs, type AgyCatalog, type AgySelection } from './antigravity/models.js'
+import { readAgyModels, cachedAgyModels, agySelectionArgs, type AgyCatalog, type AgySelection } from './antigravity/models.js'
 import { prepareAgyImageDirectory, stageAgyImages, agyImagePrompt } from './antigravity/image-store.js'
 import { parseAcpImage } from '../image-content.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -93,7 +93,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }),
     options: AntigravityAcpClientOptions = {},
   ) {
-    this.readModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)))
+    const loadModels = options.readModels ?? (() => readAgyModels(resolveAntigravityBinary(this.binary)))
+    this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels)
     this.args = options.args ?? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     this.cwd = options.cwd ?? process.cwd()
     this.sessionWorker = options.sessionWorker === true
@@ -200,21 +201,25 @@ export class AntigravityAcpClient implements CursorAcpLike {
         routable: true, groups: catalog.groups, failures: [] }
     }
     if (method === 'dsh/selectModel') {
-      const p = params as { sessionId: string; model: string; reasoningEffort?: string }
+      const p = params as { sessionId: string; model: string; reasoningEffort?: string; cwd?: string }
       if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A model change is already in progress.')
       const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : undefined)
-      if (!current) throw new AntigravityAcpError('SESSION_MISMATCH', 'Load the conversation before selecting its model.')
-      if (current.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
+      if (!current && !p.cwd) throw new AntigravityAcpError('SESSION_MISMATCH', 'Load the conversation before selecting its model.')
+      if (current?.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
       this.selecting.add(p.sessionId)
       try {
         const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort)
+        const previous = this.selections.get(p.sessionId)
+        if (current?.isReady() && previous?.model === chosen.selection.model
+          && previous.reasoningEffort === chosen.selection.reasoningEffort) return { selected: previous }
         // Resume the same conversation with real CLI flags. Keep the old process usable on startup failure.
-        const replacement = await this.prepareSession(p.sessionId, current.cwd, chosen.args)
-        if (current.currentPromptPending) { await replacement.close(); throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A reply started during model selection.') }
+        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd!, chosen.args)
+        if (current?.currentPromptPending) { await replacement.close(); throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A reply started during model selection.') }
         this.sessions.set(p.sessionId, replacement)
         this.selections.set(p.sessionId, chosen.selection)
-        if (current !== this) await current.close()
-        else {
+        replacement.selections.set(p.sessionId, chosen.selection)
+        if (current && current !== this) await current.close()
+        else if (current === this) {
           this.watcher?.stop()
           this.watcher = undefined
           const child = this.process
@@ -222,6 +227,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
           child?.stdout.removeAllListeners('data')
           if (child && !child.killed) child.kill('SIGTERM')
         }
+        this.emitNotification('session/update', { sessionId: p.sessionId, update: { sessionUpdate: 'model_selection', selected: chosen.selection } })
         return { selected: chosen.selection }
       } finally { this.selecting.delete(p.sessionId) }
     }
@@ -425,6 +431,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.currentPromptPending) {
       throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
     }
+    const selected = this.selections.get(sessionId)
+    if (selected) this.emitNotification('session/update', { sessionId, update: { sessionUpdate: 'model_selection', selected } })
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.currentPromptPending) {

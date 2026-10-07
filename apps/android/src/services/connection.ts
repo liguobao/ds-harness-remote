@@ -188,7 +188,7 @@ export class AndroidRemoteConnection {
         this.acpBackends.add(backend)
       }
     }
-    if (this.acpBackends.size > 0) this.cursor ??= new AgentAcpClient(core)
+    if (this.acpBackends.size > 0) this.cursor ??= new AgentAcpClient(core, features.capabilities)
   }
 
   /** Harness business client; only available while connected. */

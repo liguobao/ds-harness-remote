@@ -36,7 +36,7 @@ export interface AcpStream {
 
 /** Shared Web/Android client for the generic Agent ACP domain in Remote. */
 export class AgentAcpClient {
-  constructor(private readonly core: RemoteClientCore) {}
+  constructor(private readonly core: RemoteClientCore, private readonly capabilities: readonly string[] = []) {}
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
     const timeoutMs = method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined
@@ -69,7 +69,9 @@ export class AgentAcpClient {
 
   async selectModel(sessionId: string, backend: 'antigravity', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
     if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
-    await this.call('session/load', { sessionId, backend }, signal)
+    if (!this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
+      await this.call('session/load', { sessionId, backend }, signal)
+    }
     const result = await this.call('dsh/selectModel', { sessionId, backend, model: selection.model,
       ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }) }, signal)
     if (!isRecord(result) || !isRecord(result.selected) || result.selected.provider !== backend || typeof result.selected.model !== 'string') {

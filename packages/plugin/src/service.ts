@@ -484,7 +484,7 @@ export class HostPluginRuntime {
     if (this.acp.enabledBackends().length > 0) {
       capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1', 'agent.acp.workspace-files.v1')
       if (this.terminalEnabled) capabilities.push('agent.acp.terminal.v1')
-      if (this.acp.enabledBackends().includes('antigravity')) capabilities.push('agent.acp.antigravity.models.v1')
+      if (this.acp.enabledBackends().includes('antigravity')) capabilities.push('agent.acp.antigravity.models.v1', 'agent.acp.antigravity.model-load.v1')
       for (const backend of this.acp.enabledBackends()) {
         capabilities.push(`agent.acp.${backend}.v1`)
       }

@@ -383,6 +383,18 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId)
     }
 
+    if (call.method === 'dsh/selectModel') {
+      const session = this.sessionCwds.get(sessionId!)
+      if (!session || session.backend !== call.params.backend) {
+        throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
+      }
+      // Resume straight into the target model. Loading the old model first
+      // starts a second CLI process that would immediately be discarded.
+      const result = await this.requireAcp(session.backend).call(call.method, { ...call.params, cwd: session.cwd })
+      this.sessionBackends.set(sessionId!, session.backend)
+      return sanitizeSessionResult(result)
+    }
+
     // session/prompt blocks until the upstream turn ends. Returning that RPC
     // only after completion prevents some Client transports from delivering
     // interleaved agent.acp.frame events (Android stays on "正在回复" with no

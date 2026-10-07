@@ -1601,3 +1601,14 @@ continue to ignore `workspaceTypes`; newer clients require these optional capabi
   choice is confirmed, `current.model` is `host-settings`; it does not claim a default
   model that the Host has not reported. Existing Host configuration and permissions
   remain active. Clients without these optional capabilities keep Host settings.
+  The live model directory is cached for the Host backend lifetime; concurrent
+  reads share discovery, failed discovery can retry, and reloading the backend
+  invalidates the cache. Selecting the confirmed model and effort again is a no-op.
+  Optional `agent.acp.antigravity.model-load.v1` means selection also loads a
+  Host-discovered conversation directly with its target model and canonical cwd;
+  clients may omit the preceding `session/load`. Without it, keep the load step.
+  The Host emits a session update `{sessionUpdate:"model_selection",selected}`
+  after confirming selection and before prompts with that selection. Clients
+  preserve the selected model in each turn's message source and do not relabel
+  earlier replies after a model change. AGY transcripts without model metadata
+  must not be assigned a fabricated historical model.

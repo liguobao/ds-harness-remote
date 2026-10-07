@@ -131,7 +131,6 @@ export async function loadTranscriptEvents(
           id: `${sessionId}:${record.step_index}`,
           role: 'assistant',
           content: contentBlocks,
-          source: { kind: 'model', provider: 'google', model: 'gemini' },
         },
         // Harness trajectory timing expects every assistant message to carry
         // an iterable stream, including messages restored from transcript.

@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
 describe('ACP image transfer', () => {
+  it('model selection loads once when negotiated and keeps the legacy load fallback', async () => {
+    for (const atomic of [false, true]) {
+      const selected = { provider: 'antigravity', model: 'live-model', reasoningEffort: 'low' }
+      const rpc = vi.fn(async (_method: string, params: any) => params.method === 'dsh/selectModel' ? { selected } : { sessionId: 'conversation' })
+      const client = new AgentAcpClient({ rpc } as never, atomic ? ['agent.acp.antigravity.model-load.v1'] : [])
+      expect(await client.selectModel('conversation', 'antigravity', selected)).toEqual(selected)
+      expect(rpc.mock.calls.map(([, params]) => params.method)).toEqual(atomic ? ['dsh/selectModel'] : ['session/load', 'dsh/selectModel'])
+    }
+  })
   it('loads bounded chunked history through the independent ACP domain', async () => {
     let transferId = ''
     const response = JSON.stringify({ events: [{ type: 'image', data: 'A'.repeat(800_000) }] })
