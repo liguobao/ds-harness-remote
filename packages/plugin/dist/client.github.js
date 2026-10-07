@@ -1990,11 +1990,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
     allowControlCurrentDevice: "Allow control of this device",
     allowControlDevice: "Allow control of device",
     connectedClientCount: "{count} connected",
-    checkAcp: "Check ACP",
+    checkAcp: "Check backend",
     checkingAcp: "Checking ACP\u2026",
     acpAvailable: "ACP available",
     acpUnavailable: "ACP unavailable",
-    acpHint: "Connect compatible coding agents through the Agent Client Protocol.",
+    agentBackends: "Agent backends",
+    acpHint: "Enable each backend here. CodeX uses App Server; Cursor and AGY use their ACP adapters. Restart DSH after changes.",
     acpCheckPassed: "Check passed",
     acpCheckFailed: "Check failed",
     addAcp: "Add ACP",
@@ -2241,11 +2242,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
     allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
     allowControlDevice: "\u5141\u8BB8\u63A7\u5236\u8BBE\u5907",
     connectedClientCount: "{count} \u53F0\u5DF2\u8FDE\u63A5",
-    checkAcp: "\u68C0\u6D4B ACP",
+    checkAcp: "\u68C0\u6D4B\u540E\u7AEF",
     checkingAcp: "\u6B63\u5728\u68C0\u6D4B ACP\u2026",
     acpAvailable: "ACP \u53EF\u7528",
     acpUnavailable: "ACP \u4E0D\u53EF\u7528",
-    acpHint: "\u901A\u8FC7 Agent Client Protocol \u8FDE\u63A5\u517C\u5BB9\u7684\u7F16\u7801 Agent\u3002",
+    agentBackends: "Agent \u540E\u7AEF",
+    acpHint: "\u5728\u8FD9\u91CC\u7EDF\u4E00\u542F\u7528\u5404\u4E2A\u540E\u7AEF\u3002CodeX \u4F7F\u7528 App Server\uFF0CCursor \u548C AGY \u4F7F\u7528\u5404\u81EA\u7684 ACP adapter\u3002\u4FEE\u6539\u540E\u91CD\u542F DSH \u751F\u6548\u3002",
     acpCheckPassed: "\u68C0\u6D4B\u901A\u8FC7",
     acpCheckFailed: "\u68C0\u6D4B\u5931\u8D25",
     addAcp: "\u6DFB\u52A0 ACP",
@@ -2464,8 +2466,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       }
       function RemotePluginOptions(props) {
-        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [codexEnabled, setCodexEnabled] = React.useState(!0), [cursorEnabled, setCursorEnabled] = React.useState(!1), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [codexBusy, setCodexBusy] = React.useState(!1), [cursorBusy, setCursorBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setCodexEnabled(view.config.codex?.enabled ?? !0), setCursorEnabled(view.config.cursor?.enabled ?? !1), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+        let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
+          setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
         }, load = async () => {
           let [view, status] = await Promise.all([
             props.control("settings.get"),
@@ -2526,28 +2528,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
           } finally {
             setBusy(!1);
           }
-        }, setCodexRemote = async (enabled) => {
-          let previous = codexEnabled;
-          setCodexEnabled(enabled), setCodexBusy(!0), setError(void 0), setNotice(void 0);
-          try {
-            let view = await props.control("settings.codex.set", { enabled });
-            applyView(view), setNotice({ key: "codexSaved" });
-          } catch (reason) {
-            setCodexEnabled(previous), setError(messageOf(reason));
-          } finally {
-            setCodexBusy(!1);
-          }
-        }, setCursorRemote = async (enabled) => {
-          let previous = cursorEnabled;
-          setCursorEnabled(enabled), setCursorBusy(!0), setError(void 0), setNotice(void 0);
-          try {
-            let view = await props.control("settings.cursor.set", { enabled });
-            applyView(view), setNotice({ key: "cursorSaved" });
-          } catch (reason) {
-            setCursorEnabled(previous), setError(messageOf(reason));
-          } finally {
-            setCursorBusy(!1);
-          }
         }, setTerminalRemote = async (enabled) => {
           let previous = terminalEnabled, portsDraft = previewPorts;
           setTerminalEnabled(enabled), setTerminalBusy(!0), setError(void 0), setNotice(void 0);
@@ -2575,10 +2555,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let view = await props.control("settings.get");
             applyView(view);
             let available = view.acpAvailability?.[backend] === !0;
-            if (!available) {
-              let disabledView = await props.control("settings.acp.set", { backend, enabled: !1 });
-              applyView(disabledView);
-            }
             setAcpCheckResults((current) => ({ ...current, [backend]: available })), setNotice({ key: available ? "acpAvailable" : "acpUnavailable" }), window.setTimeout(() => setAcpCheckResults((current) => ({ ...current, [backend]: void 0 })), 5e3);
           } catch (reason) {
             setError(messageOf(reason));
@@ -2655,40 +2631,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ),
             React.createElement("small", null, t("previewPortsHint"))
           )
-        ), codexSetting = React.createElement(
-          "div",
-          { className: "dshRemoteAuthorizationSetting" },
-          React.createElement(
-            "div",
-            null,
-            React.createElement("strong", null, t("codexRemote")),
-            React.createElement("p", null, t("codexRemoteHint"))
-          ),
-          React.createElement("input", {
-            type: "checkbox",
-            role: "switch",
-            disabled: busy || codexBusy || !writable,
-            "aria-label": t("codexRemote"),
-            checked: codexEnabled,
-            onChange: (event) => void setCodexRemote(event.target.checked)
-          })
-        ), cursorSetting = React.createElement(
-          "div",
-          { className: "dshRemoteAuthorizationSetting" },
-          React.createElement(
-            "div",
-            null,
-            React.createElement("strong", null, t("cursorRemote")),
-            React.createElement("p", null, t("cursorRemoteHint"))
-          ),
-          React.createElement("input", {
-            type: "checkbox",
-            role: "switch",
-            disabled: busy || cursorBusy || !writable,
-            "aria-label": t("cursorRemote"),
-            checked: cursorEnabled,
-            onChange: (event) => void setCursorRemote(event.target.checked)
-          })
         ), acpSetting = React.createElement(
           "details",
           { className: "dshRemoteAuthorizationSetting dshRemoteAcpSetting" },
@@ -2698,7 +2640,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement(
               "div",
               { className: "dshRemoteAcpSummaryText" },
-              React.createElement("strong", null, "ACP Agent backends"),
+              React.createElement("strong", null, t("agentBackends")),
               React.createElement("p", null, t("acpHint"))
             )
           ),
@@ -2708,7 +2650,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             acpBackends.map((item) => React.createElement(
               "div",
               { key: item.id, className: "dshRemoteAuthorizationSetting" },
-              React.createElement("span", null, item.id),
+              React.createElement("div", null, React.createElement("strong", null, item.id === "codex" ? "CodeX" : item.id === "cursor" ? "Cursor" : item.id === "antigravity" ? "AGY" : item.id), item.id === "codex" ? React.createElement("p", null, t("codexRemoteHint")) : null),
               React.createElement(
                 "span",
                 { className: "dshRemoteAcpCheckCell" },
@@ -2720,14 +2662,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   acpChecking[item.id] ? t("checkingAcp") : acpCheckResults[item.id] === void 0 ? t("checkAcp") : t(acpCheckResults[item.id] ? "acpCheckPassed" : "acpCheckFailed")
                 )
               ),
-              ["codex", "cursor", "kimi"].includes(item.id) ? null : React.createElement("a", { href: `#remove-acp-${item.id}`, className: "dshRemoteAcpRemoveLink", onClick: (event) => {
+              ["codex", "cursor", "antigravity"].includes(item.id) ? null : React.createElement("a", { href: `#remove-acp-${item.id}`, className: "dshRemoteAcpRemoveLink", onClick: (event) => {
                 event.preventDefault(), removeAcp(item.id);
               } }, t("removeAcp")),
               React.createElement("input", {
                 type: "checkbox",
                 role: "switch",
-                checked: settingsView?.config.acp?.enabled === !0 && item.enabled && acpAvailability[item.id] === !0,
-                disabled: busy || !writable || !acpAvailability[item.id],
+                checked: settingsView?.config.acp?.enabled === !0 && item.enabled,
+                "aria-label": item.id,
+                disabled: busy || !writable,
                 onChange: (event) => void props.control("settings.acp.set", { backend: item.id, enabled: event.target.checked }).then((view) => {
                   applyView(view), setAcpBackends((view.config.acp?.backends ?? []).map((v) => ({ id: v.id, enabled: v.enabled !== !1 })));
                 }).catch((reason) => setError(messageOf(reason)))
@@ -2823,8 +2766,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               developmentSetting,
-              codexSetting,
-              cursorSetting,
               acpSetting,
               React.createElement(
                 "div",
@@ -2928,8 +2869,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("p", null, t("serverUrlHint"))
               ),
               developmentSetting,
-              codexSetting,
-              cursorSetting,
               acpSetting,
               React.createElement("p", { className: "dshRemoteSettingsState" }, t("authorizeFromRemote")),
               writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),

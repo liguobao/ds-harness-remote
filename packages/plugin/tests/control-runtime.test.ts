@@ -99,6 +99,11 @@ describe('PluginControlRuntime settings setup', () => {
     })
     expect(settings.get()).toMatchObject({ codex: { enabled: false, binary: '/opt/codex' } })
 
+    await expect(handler('settings.acp.set', { backend: 'codex', enabled: true }, signal())).resolves.toMatchObject({ ok: true })
+    expect(resolveConfig(settings.get()).codex.enabled).toBe(true)
+    await handler('settings.acp.set', { backend: 'codex', enabled: false }, signal())
+    expect(resolveConfig(settings.get()).codex.enabled).toBe(false)
+
     await expect(handler('settings.cursor.set', { enabled: true }, signal())).resolves.toMatchObject({
       ok: true,
       value: { config: { cursor: { enabled: true, binary: 'agent' } } },

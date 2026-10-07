@@ -170,10 +170,13 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const parsed = configSchema.parse(input)
   const configuredCursorBackend = parsed.acp?.backends?.find(item => item.id === 'cursor')
   const legacyCursorEnabled = parsed.acp?.backend === 'cursor' ? parsed.acp.enabled : undefined
-  const cursorEnabled = parsed.cursor?.enabled
-    ?? configuredCursorBackend?.enabled
+  const cursorEnabled = configuredCursorBackend?.enabled
+    ?? parsed.cursor?.enabled
     ?? legacyCursorEnabled
     ?? false
+  const codexBackend = parsed.acp?.backends?.find(item => item.id === 'codex')
+  const codexEnabled = codexBackend?.enabled ?? parsed.codex?.enabled ?? true
+  const acpEnabled = parsed.acp?.enabled ?? true
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
@@ -199,29 +202,29 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       jitter: reconnect.jitter ?? 0.2,
     },
     codex: {
-      enabled: parsed.codex?.enabled ?? true,
-      binary: parsed.codex?.binary ?? 'codex',
+      enabled: acpEnabled && codexEnabled,
+      binary: codexBackend?.command ?? parsed.codex?.binary ?? 'codex',
     },
     cursor: {
       enabled: cursorEnabled,
-      binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? 'agent',
+      binary: configuredCursorBackend?.command ?? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? 'agent',
     },
     acp: {
-      enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false,
-      backends: [...new Set(['codex', 'cursor', 'kimi', 'antigravity', ...(parsed.acp?.backends?.map(item => item.id) ?? [])])].map(id => {
+      enabled: acpEnabled,
+      backends: [...new Set(['codex', 'cursor', 'antigravity', ...(parsed.acp?.backends?.filter(item => item.id !== 'kimi').map(item => item.id) ?? [])])].map(id => {
         const configured = parsed.acp?.backends?.find(item => item.id === id)
         const legacy = parsed.acp?.backend === id ? parsed.acp : undefined
-        const defaults: Record<string, string> = { codex: 'codex', cursor: 'agent', kimi: 'kimi', antigravity: 'agy' }
-        const cursorCommand = id === 'cursor'
+        const defaults: Record<string, string> = { codex: 'codex', cursor: 'agent', antigravity: 'agy' }
+        const cursorCommand = id === 'codex' ? parsed.codex?.binary : id === 'cursor'
           ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY
           : undefined
         const cwd = configured?.cwd ?? legacy?.cwd
         return {
           id,
           enabled: configured?.enabled ?? legacy?.enabled
-            ?? (parsed.acp === undefined ? id === 'cursor' && cursorEnabled : true),
+            ?? (id === 'codex' ? codexEnabled : id === 'cursor' ? cursorEnabled : parsed.acp !== undefined),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id] ?? id,
-          args: configured?.args ?? legacy?.args
+          args: id === 'codex' ? ['app-server'] : configured?.args ?? legacy?.args
             ?? (id === 'antigravity' ? ['--input-format', 'stream-json', '--output-format', 'stream-json'] : ['acp']),
           ...(cwd === undefined ? {} : { cwd }),
         }

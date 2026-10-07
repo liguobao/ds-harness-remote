@@ -291,3 +291,5 @@ Host catalog discovery, new conversations, durable history, live replies, title 
 and text/image prompts. PNG/JPEG/WebP/GIF images are limited to 8 MiB each and four per message;
 images use the Host's private temporary cache. See [Android notes](apps/android/README.md#agy-workspaces)
 for validation limits.
+
+Agent backend settings have one switch per backend: CodeX uses the existing App Server Remote domain, while Cursor and AGY use ACP adapters. CodeX is controlled by `acp.backends[id=codex].enabled` and `.command`; old `codex` settings are read only when no backend value exists. Kimi is not implemented and is omitted. Workspace entries appear only when the Host reports the backend ready. Restart DSH after changing backend settings.

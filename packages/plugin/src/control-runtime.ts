@@ -230,13 +230,7 @@ export class PluginControlRuntime {
     if (typeof enabled !== 'boolean') {
       throw new ClientModeError('INVALID_MESSAGE', 'Codex Remote enabled must be a boolean.')
     }
-    const current = editableConfig(resolveConfig(this.settings.get()))
-    const next = resolveConfig({
-      ...current,
-      codex: { ...current.codex, enabled },
-    })
-    await this.settings.replace(editableConfig(next))
-    return this.settingsView()
+    return this.setAcp({ backend: 'codex', enabled })
   }
 
   private async setCursor(payload: unknown): Promise<PluginSettingsView> {
@@ -272,6 +266,7 @@ export class PluginControlRuntime {
     await this.settings.replace({
       ...editableConfig(current),
       ...(backend === 'cursor' ? { cursor: { ...current.cursor, enabled } } : {}),
+      ...(backend === 'codex' ? { codex: { ...current.codex, enabled } } : {}),
       acp: { enabled: enabled || current.acp.enabled, backends },
     })
     return this.settingsView()
@@ -284,6 +279,7 @@ export class PluginControlRuntime {
       throw new ClientModeError('INVALID_MESSAGE', 'ACP name, command, and arguments are required.')
     }
     const current = resolveConfig(this.settings.get())
+    if (value.id === 'kimi') throw new ClientModeError('INVALID_MESSAGE', 'Kimi is not implemented.')
     if (current.acp?.backends.some(item => item.id === value.id)) throw new ClientModeError('INVALID_MESSAGE', 'ACP backend already exists.')
     const backends = [...(current.acp?.backends ?? []), { id: value.id, command: value.command, args: value.args, enabled: false }]
     const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
@@ -294,7 +290,7 @@ export class PluginControlRuntime {
   private async removeAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const id = record(payload).id
-    if (typeof id !== 'string' || ['codex', 'cursor', 'kimi'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
+    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
     const current = resolveConfig(this.settings.get())
     const backends = (current.acp?.backends ?? []).filter(item => item.id !== id)
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))

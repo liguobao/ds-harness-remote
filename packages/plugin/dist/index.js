@@ -20071,7 +20071,10 @@ function resolveConfig(input2 = {}, env = process.env) {
   const parsed = configSchema.parse(input2);
   const configuredCursorBackend = parsed.acp?.backends?.find((item) => item.id === "cursor");
   const legacyCursorEnabled = parsed.acp?.backend === "cursor" ? parsed.acp.enabled : void 0;
-  const cursorEnabled = parsed.cursor?.enabled ?? configuredCursorBackend?.enabled ?? legacyCursorEnabled ?? false;
+  const cursorEnabled = configuredCursorBackend?.enabled ?? parsed.cursor?.enabled ?? legacyCursorEnabled ?? false;
+  const codexBackend = parsed.acp?.backends?.find((item) => item.id === "codex");
+  const codexEnabled = codexBackend?.enabled ?? parsed.codex?.enabled ?? true;
+  const acpEnabled = parsed.acp?.enabled ?? true;
   const reconnect = typeof parsed.reconnect === "object" ? parsed.reconnect : {};
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER;
   const serverUrl = configuredServerUrl === void 0 ? void 0 : normalizeServerUrl(configuredServerUrl);
@@ -20097,26 +20100,26 @@ function resolveConfig(input2 = {}, env = process.env) {
       jitter: reconnect.jitter ?? 0.2
     },
     codex: {
-      enabled: parsed.codex?.enabled ?? true,
-      binary: parsed.codex?.binary ?? "codex"
+      enabled: acpEnabled && codexEnabled,
+      binary: codexBackend?.command ?? parsed.codex?.binary ?? "codex"
     },
     cursor: {
       enabled: cursorEnabled,
-      binary: parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
+      binary: configuredCursorBackend?.command ?? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY ?? "agent"
     },
     acp: {
-      enabled: parsed.acp?.enabled ?? parsed.cursor?.enabled ?? false,
-      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "kimi", "antigravity", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id5) => {
+      enabled: acpEnabled,
+      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id5) => {
         const configured = parsed.acp?.backends?.find((item) => item.id === id5);
         const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
-        const defaults = { codex: "codex", cursor: "agent", kimi: "kimi", antigravity: "agy" };
-        const cursorCommand = id5 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
+        const defaults = { codex: "codex", cursor: "agent", antigravity: "agy" };
+        const cursorCommand = id5 === "codex" ? parsed.codex?.binary : id5 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
         const cwd2 = configured?.cwd ?? legacy?.cwd;
         return {
           id: id5,
-          enabled: configured?.enabled ?? legacy?.enabled ?? (parsed.acp === void 0 ? id5 === "cursor" && cursorEnabled : true),
+          enabled: configured?.enabled ?? legacy?.enabled ?? (id5 === "codex" ? codexEnabled : id5 === "cursor" ? cursorEnabled : parsed.acp !== void 0),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id5] ?? id5,
-          args: configured?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
+          args: id5 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
           ...cwd2 === void 0 ? {} : { cwd: cwd2 }
         };
       })
@@ -23040,8 +23043,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const remoteV3 = capabilities.has("harness.remote.v3");
   const terminal = capabilities.has("harness.terminal.v1");
   const codex = capabilities.has("codex.appserver.v1");
-  const hasAcp = capabilities.has("agent.acp.v1");
-  const cursor2 = capabilities.has("agent.acp.cursor.v1") || hasAcp && !capabilities.has("agent.acp.antigravity.v1");
+  const cursor2 = capabilities.has("agent.acp.cursor.v1");
   const antigravity = capabilities.has("agent.acp.antigravity.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
@@ -23618,13 +23620,7 @@ var PluginControlRuntime = class {
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Codex Remote enabled must be a boolean.");
     }
-    const current = editableConfig(resolveConfig(this.settings.get()));
-    const next = resolveConfig({
-      ...current,
-      codex: { ...current.codex, enabled }
-    });
-    await this.settings.replace(editableConfig(next));
-    return this.settingsView();
+    return this.setAcp({ backend: "codex", enabled });
   }
   async setCursor(payload) {
     if (this.settings === void 0) {
@@ -23658,6 +23654,7 @@ var PluginControlRuntime = class {
     await this.settings.replace({
       ...editableConfig(current),
       ...backend === "cursor" ? { cursor: { ...current.cursor, enabled } } : {},
+      ...backend === "codex" ? { codex: { ...current.codex, enabled } } : {},
       acp: { enabled: enabled || current.acp.enabled, backends }
     });
     return this.settingsView();
@@ -23669,6 +23666,7 @@ var PluginControlRuntime = class {
       throw new ClientModeError("INVALID_MESSAGE", "ACP name, command, and arguments are required.");
     }
     const current = resolveConfig(this.settings.get());
+    if (value.id === "kimi") throw new ClientModeError("INVALID_MESSAGE", "Kimi is not implemented.");
     if (current.acp?.backends.some((item) => item.id === value.id)) throw new ClientModeError("INVALID_MESSAGE", "ACP backend already exists.");
     const backends = [...current.acp?.backends ?? [], { id: value.id, command: value.command, args: value.args, enabled: false }];
     const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } });
@@ -23678,7 +23676,7 @@ var PluginControlRuntime = class {
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const id5 = record6(payload).id;
-    if (typeof id5 !== "string" || ["codex", "cursor", "kimi"].includes(id5)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
+    if (typeof id5 !== "string" || ["codex", "cursor", "antigravity"].includes(id5)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
     const current = resolveConfig(this.settings.get());
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id5);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));

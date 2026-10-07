@@ -70,6 +70,15 @@ describe('plugin config', () => {
     })
   })
 
+  it('uses one CodeX backend setting and drops unimplemented Kimi', () => {
+    const config = resolveConfig({ codex: { enabled: true, binary: '/old/codex' }, acp: {
+      enabled: true, backends: [{ id: 'codex', enabled: false, command: '/new/codex' }, { id: 'kimi', enabled: true }],
+    } }, {})
+    expect(config.codex).toEqual({ enabled: false, binary: '/new/codex' })
+    expect(config.acp?.backends.some(item => item.id === 'kimi')).toBe(false)
+    expect(resolveConfig({ acp: { enabled: false, backends: [{ id: 'codex', enabled: true }] } }, {}).codex.enabled).toBe(false)
+  })
+
   it('rejects insecure non-local servers and embedded credentials', () => {
     expect(() => resolveConfig({ serverUrl: 'http://remote.example.com' })).toThrow(/HTTPS/)
     expect(() => resolveConfig({ serverUrl: 'https://user:password@remote.example.com' })).toThrow(/credentials/)

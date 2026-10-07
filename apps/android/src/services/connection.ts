@@ -123,10 +123,10 @@ export class AndroidRemoteConnection {
       }
       if (capabilities.has('agent.acp.v1')) {
         this.cursor = new AgentAcpClient(core)
-        if (capabilities.has('agent.acp.antigravity.v1')) {
+        if (features.workspaceTypes?.some(item => item.id === 'antigravity' && item.available)) {
           this.acpBackends.add('antigravity')
         }
-        if (capabilities.has('agent.acp.cursor.v1') || !capabilities.has('agent.acp.antigravity.v1')) {
+        if (features.workspaceTypes?.some(item => item.id === 'cursor' && item.available)) {
           this.acpBackends.add('cursor')
         }
       }

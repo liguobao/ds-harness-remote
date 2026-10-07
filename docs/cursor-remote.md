@@ -84,7 +84,7 @@ ds-harness-remote:
 
 ## Desktop 使用
 
-1. Host：设置中开启 **Cursor ACP adapter**（`cursor.enabled`），完成本机 `agent login`，**重启 DSH**。
+1. Host：设置中开启 **Agent 后端 → Cursor**（`acp.backends` 的 `cursor.enabled`），完成本机 `agent login`，**重启 DSH**。
 2. Client：侧栏 Remote → 选择在线 Host → 在 **Cursor virtual workspace** 分组点 `+`，浏览并确认 Host 上已有绝对目录。
 3. 打开后复用原生 Workspace / Session / Composer；会话 id 形如 `cursor:<acpSessionId>`，不写入 DSH SessionStore。
 

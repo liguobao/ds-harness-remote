@@ -494,11 +494,12 @@ const en = {
   allowControlCurrentDevice: 'Allow control of this device',
   allowControlDevice: 'Allow control of device',
   connectedClientCount: '{count} connected',
-  checkAcp: 'Check ACP',
+  checkAcp: 'Check backend',
   checkingAcp: 'Checking ACP…',
   acpAvailable: 'ACP available',
   acpUnavailable: 'ACP unavailable',
-  acpHint: 'Connect compatible coding agents through the Agent Client Protocol.',
+  agentBackends: 'Agent backends',
+  acpHint: 'Enable each backend here. CodeX uses App Server; Cursor and AGY use their ACP adapters. Restart DSH after changes.',
   acpCheckPassed: 'Check passed',
   acpCheckFailed: 'Check failed',
   addAcp: 'Add ACP',
@@ -748,11 +749,12 @@ const zh: Record<keyof typeof en, string> = {
   allowControlCurrentDevice: '允许控制当前设备',
   allowControlDevice: '允许控制设备',
   connectedClientCount: '{count} 台已连接',
-  checkAcp: '检测 ACP',
+  checkAcp: '检测后端',
   checkingAcp: '正在检测 ACP…',
   acpAvailable: 'ACP 可用',
   acpUnavailable: 'ACP 不可用',
-  acpHint: '通过 Agent Client Protocol 连接兼容的编码 Agent。',
+  agentBackends: 'Agent 后端',
+  acpHint: '在这里统一启用各个后端。CodeX 使用 App Server，Cursor 和 AGY 使用各自的 ACP adapter。修改后重启 DSH 生效。',
   acpCheckPassed: '检测通过',
   acpCheckFailed: '检测失败',
   addAcp: '添加 ACP',
@@ -1109,8 +1111,6 @@ window.__ModuleLoader__.load({
       const { t } = props
       const [open, setOpen] = React.useState(props.view === 'page')
       const [serverUrl, setServerUrl] = React.useState('')
-      const [codexEnabled, setCodexEnabled] = React.useState(true)
-      const [cursorEnabled, setCursorEnabled] = React.useState(false)
       const [portsBusy, setPortsBusy] = React.useState(false)
       const [previewPorts, setPreviewPorts] = React.useState('')
       const role = 'host' as const
@@ -1121,10 +1121,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [terminalEnabled, setTerminalEnabled] = React.useState(false)
       const [terminalBusy, setTerminalBusy] = React.useState(false)
-      const [codexBusy, setCodexBusy] = React.useState(false)
-      const [cursorBusy, setCursorBusy] = React.useState(false)
       const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
-      const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
       const [acpChecking, setAcpChecking] = React.useState<Record<string, boolean>>({})
       const [acpCheckResults, setAcpCheckResults] = React.useState<Record<string, boolean | undefined>>({})
       const [addingAcp, setAddingAcp] = React.useState(false)
@@ -1146,12 +1143,9 @@ window.__ModuleLoader__.load({
       const applyView = (view: PluginSettingsView): void => {
         setSettingsView(view)
         setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
-        setCodexEnabled(view.config.codex?.enabled ?? true)
-        setCursorEnabled(view.config.cursor?.enabled ?? false)
         setTerminalEnabled(view.config.terminal?.enabled ?? true)
         setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
         setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
-        setAcpAvailability(view.acpAvailability ?? {})
         setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
         setWritable(view.writable)
         setLoaded(true)
@@ -1247,42 +1241,6 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const setCodexRemote = async (enabled: boolean): Promise<void> => {
-        const previous = codexEnabled
-        setCodexEnabled(enabled)
-        setCodexBusy(true)
-        setError(undefined)
-        setNotice(undefined)
-        try {
-          const view = await props.control<PluginSettingsView>('settings.codex.set', { enabled })
-          applyView(view)
-          setNotice({ key: 'codexSaved' })
-        } catch (reason) {
-          setCodexEnabled(previous)
-          setError(messageOf(reason))
-        } finally {
-          setCodexBusy(false)
-        }
-      }
-
-      const setCursorRemote = async (enabled: boolean): Promise<void> => {
-        const previous = cursorEnabled
-        setCursorEnabled(enabled)
-        setCursorBusy(true)
-        setError(undefined)
-        setNotice(undefined)
-        try {
-          const view = await props.control<PluginSettingsView>('settings.cursor.set', { enabled })
-          applyView(view)
-          setNotice({ key: 'cursorSaved' })
-        } catch (reason) {
-          setCursorEnabled(previous)
-          setError(messageOf(reason))
-        } finally {
-          setCursorBusy(false)
-        }
-      }
-
       const setTerminalRemote = async (enabled: boolean): Promise<void> => {
         const previous = terminalEnabled
         const portsDraft = previewPorts
@@ -1327,10 +1285,6 @@ window.__ModuleLoader__.load({
           const view = await props.control<PluginSettingsView>('settings.get')
           applyView(view)
           const available = view.acpAvailability?.[backend] === true
-          if (!available) {
-            const disabledView = await props.control<PluginSettingsView>('settings.acp.set', { backend, enabled: false })
-            applyView(disabledView)
-          }
           setAcpCheckResults(current => ({ ...current, [backend]: available }))
           setNotice({ key: available ? 'acpAvailable' : 'acpUnavailable' })
           window.setTimeout(() => setAcpCheckResults(current => ({ ...current, [backend]: undefined })), 5_000)
@@ -1397,40 +1351,18 @@ window.__ModuleLoader__.load({
               onClick: () => void savePreviewPorts() }, t('developmentSave'))),
           React.createElement('small', null, t('previewPortsHint'))))
 
-      const codexSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('codexRemote')),
-          React.createElement('p', null, t('codexRemoteHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', disabled: busy || codexBusy || !writable,
-          'aria-label': t('codexRemote'),
-          checked: codexEnabled,
-          onChange: (event: Event) => void setCodexRemote((event.target as HTMLInputElement).checked),
-        }))
-
-      const cursorSetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('cursorRemote')),
-          React.createElement('p', null, t('cursorRemoteHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', disabled: busy || cursorBusy || !writable,
-          'aria-label': t('cursorRemote'),
-          checked: cursorEnabled,
-          onChange: (event: Event) => void setCursorRemote((event.target as HTMLInputElement).checked),
-        }))
-
       const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
         React.createElement('summary', null,
           React.createElement('div', { className: 'dshRemoteAcpSummaryText' },
-            React.createElement('strong', null, 'ACP Agent backends'),
+            React.createElement('strong', null, t('agentBackends')),
             React.createElement('p', null, t('acpHint')))),
         React.createElement('div', { className: 'dshRemoteAcpList' }, acpBackends.map(item => React.createElement('div', { key: item.id, className: 'dshRemoteAuthorizationSetting' },
-          React.createElement('span', null, item.id),
+          React.createElement('div', null, React.createElement('strong', null, item.id === 'codex' ? 'CodeX' : item.id === 'cursor' ? 'Cursor' : item.id === 'antigravity' ? 'AGY' : item.id), item.id === 'codex' ? React.createElement('p', null, t('codexRemoteHint')) : null),
           React.createElement('span', { className: 'dshRemoteAcpCheckCell' },
             React.createElement('a', { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? ' isChecking' : acpCheckResults[item.id] === undefined ? '' : acpCheckResults[item.id] ? ' isPassed' : ' isFailed'}`, onClick: (event: Event) => { event.preventDefault(); void checkAcp(item.id) } },
               acpChecking[item.id] ? t('checkingAcp') : acpCheckResults[item.id] === undefined ? t('checkAcp') : t(acpCheckResults[item.id] ? 'acpCheckPassed' : 'acpCheckFailed'))),
-          ['codex', 'cursor', 'kimi'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
-          React.createElement('input', { type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled && acpAvailability[item.id] === true, disabled: busy || !writable || !acpAvailability[item.id],
+          ['codex', 'cursor', 'antigravity'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
+          React.createElement('input', { type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled, 'aria-label': item.id, disabled: busy || !writable,
             onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason)))
           }))),
           addingAcp ? React.createElement('div', { className: 'dshRemoteAcpAddForm' },
@@ -1493,8 +1425,6 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         developmentSetting,
-        codexSetting,
-        cursorSetting,
         acpSetting,
         React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
           React.createElement('div', null,
@@ -1567,8 +1497,6 @@ window.__ModuleLoader__.load({
           }),
           React.createElement('p', null, t('serverUrlHint'))),
         developmentSetting,
-        codexSetting,
-        cursorSetting,
         acpSetting,
         React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
         !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,

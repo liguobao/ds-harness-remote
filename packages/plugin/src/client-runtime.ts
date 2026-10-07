@@ -1547,8 +1547,7 @@ export async function probeRemoteHostFeatures(
   const remoteV3 = capabilities.has('harness.remote.v3')
   const terminal = capabilities.has('harness.terminal.v1')
   const codex = capabilities.has('codex.appserver.v1')
-  const hasAcp = capabilities.has('agent.acp.v1')
-  const cursor = capabilities.has('agent.acp.cursor.v1') || (hasAcp && !capabilities.has('agent.acp.antigravity.v1'))
+  const cursor = capabilities.has('agent.acp.cursor.v1')
   const antigravity = capabilities.has('agent.acp.antigravity.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
