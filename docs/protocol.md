@@ -1119,7 +1119,9 @@ initialize / `authenticate(methodId: cursor_login)` 后，才宣告 `agent.acp.v
 `dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、
 不发送 prompt，也不注册客户端 Session；`session/new` 才领取预热进程。AGY 摘要数据库
 中零步数且无标题的记录若已有持久化 transcript，历史发现应按数据库中的工作区归属
-恢复该会话；没有 transcript 的空闲预热进程不显示为历史会话。`session/new`
+恢复该会话；没有 transcript 的空闲预热进程不显示为历史会话。Remote 在 AGY 回复完成
+和历史重新发现时读取持久化标题，并以有序 title projection 更新已有会话；AGY 标题
+为空时使用 transcript 中首条用户消息的摘要，不修改 AGY 数据库。`session/new`
 强制 `mcpServers: []`，cwd 必须经 `realpath` 确认为 Host 上已存在的绝对目录。Prompt 仅允许
 文本块。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
 `reject-once` / `cancel`）。有序 `session/update` 与 `session/request_permission` 经

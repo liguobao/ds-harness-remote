@@ -291,15 +291,16 @@ export async function discoverAntigravitySessions(
     const recovered = (await Promise.all(emptyRows.map(row => readTranscriptSummary(baseDir, row.conversation_id))))
       .filter((item): item is DiscoveredSession => item !== undefined)
     if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = rows.map(r => {
+      const summaries = await Promise.all(rows.map(async r => {
         const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now()
+        const transcript = r.title?.trim() ? undefined : await readTranscriptSummary(baseDir, r.conversation_id)
         return {
           conversationId: r.conversation_id,
-          title: r.title && r.title.trim() !== '' ? r.title.trim() : 'Untitled Session',
+          title: r.title?.trim() || transcript?.title || 'Untitled Session',
           createdAt: time,
           updatedAt: time,
         }
-      })
+      }))
       return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
     }
   } catch {

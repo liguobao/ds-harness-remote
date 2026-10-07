@@ -31,6 +31,7 @@ interface AcpSessionState {
   acpSessionId: string
   cwd: string
   title?: string
+  titleOverridden?: boolean
   blank: boolean
   running: boolean
   createdAt: number
@@ -495,6 +496,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     if (title === undefined) return failure('bad-request', 'A Session title is required.')
     session.title = title
+    session.titleOverridden = true
     session.updatedAt = Date.now()
     this.publishProjection(sessionId, 'title', title)
     return success({ sessionId })
@@ -836,6 +838,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         session.running = false
         session.updatedAt = Date.now()
         this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
+        if (kind === 'prompt_completed') void this.refreshSessionTitle(session)
       }
       this.closeFollowAfterRemoteStreamClosed(follow)
     }
@@ -1064,6 +1067,24 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return session
   }
 
+  private applyDiscoveredTitle(session: AcpSessionState, title: string): void {
+    const next = title.trim()
+    if (this.closed || session.titleOverridden || !next || next === 'Untitled Session' || next === session.title) return
+    session.title = next
+    this.publishProjection(session.sessionId, 'title', next)
+  }
+
+  private async refreshSessionTitle(session: AcpSessionState): Promise<void> {
+    if (this.backend !== 'antigravity' || this.closed || session.titleOverridden || this.client.listSessions === undefined) return
+    try {
+      const items = await this.client.listSessions(session.cwd, this.backend, 30)
+      const current = items.find(item => item.conversationId === session.acpSessionId)
+      if (current !== undefined && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title)
+    } catch {
+      // Title discovery must not delay or fail an already completed turn.
+    }
+  }
+
   private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
     if (this.backend !== 'antigravity') return
     try {
@@ -1087,6 +1108,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
         }
+        const existing = this.sessions.get(sessionId)
+        if (existing !== undefined) this.applyDiscoveredTitle(existing, item.title)
         if (!workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId)
         }

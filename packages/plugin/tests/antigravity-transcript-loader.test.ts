@@ -36,21 +36,23 @@ describe('TranscriptLoader', () => {
       try {
         db.exec('CREATE TABLE conversation_summaries (conversation_id TEXT, title TEXT, workspace_uris TEXT, step_count INTEGER, last_modified_time TEXT)')
         const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
-        for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty]]) {
+        for (const [id, path] of [['stale-session', workspace], ['other-session', other], ['idle-session', empty], ['active-untitled', workspace]]) {
           insert.run(id, '', JSON.stringify([`file://${path}`]), 0, '2026-10-07T00:00:00Z')
         }
+        db.prepare('UPDATE conversation_summaries SET step_count = 2 WHERE conversation_id = ?').run('active-untitled')
         insert.run('normal-session', 'Normal', JSON.stringify([`file://${workspace}`]), 2, '2026-10-07T00:00:00Z')
       } finally {
         db.close()
       }
-      for (const id of ['stale-session', 'other-session']) {
+      for (const id of ['stale-session', 'other-session', 'active-untitled']) {
         const logs = join(base, id, '.system_generated', 'logs')
         await mkdir(logs, { recursive: true })
         await writeFile(join(logs, 'transcript.jsonl'), JSON.stringify({ type: 'USER_INPUT', step_index: 1, created_at: '2026-10-07T00:00:00Z', content: 'Durable message' }) + '\n')
       }
       const sessions = await discoverAntigravitySessions(workspace, 30, base, dbPath)
-      expect(sessions.map(session => session.conversationId).sort()).toEqual(['normal-session', 'stale-session'])
+      expect(sessions.map(session => session.conversationId).sort()).toEqual(['active-untitled', 'normal-session', 'stale-session'])
       expect(sessions.find(session => session.conversationId === 'stale-session')?.title).toBe('Durable message')
+      expect(sessions.find(session => session.conversationId === 'active-untitled')?.title).toBe('Durable message')
       expect((await discoverAntigravityWorkspaces(dbPath, base)).sort()).toEqual([workspace, other].sort())
     } finally {
       await rm(base, { recursive: true, force: true })

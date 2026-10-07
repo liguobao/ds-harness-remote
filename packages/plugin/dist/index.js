@@ -18647,15 +18647,16 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
     const emptyRows = await querySqliteJson(dbPath, emptySql, params);
     const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
     if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = rows.map((r) => {
+      const summaries = await Promise.all(rows.map(async (r) => {
         const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
+        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
         return {
           conversationId: r.conversation_id,
-          title: r.title && r.title.trim() !== "" ? r.title.trim() : "Untitled Session",
+          title: r.title?.trim() || transcript?.title || "Untitled Session",
           createdAt: time,
           updatedAt: time
         };
-      });
+      }));
       return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
     }
   } catch {
@@ -19077,6 +19078,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     if (title === void 0) return failure2("bad-request", "A Session title is required.");
     session.title = title;
+    session.titleOverridden = true;
     session.updatedAt = Date.now();
     this.publishProjection(sessionId, "title", title);
     return success2({ sessionId });
@@ -19380,6 +19382,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         session.running = false;
         session.updatedAt = Date.now();
         this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+        if (kind === "prompt_completed") void this.refreshSessionTitle(session);
       }
       this.closeFollowAfterRemoteStreamClosed(follow);
     }
@@ -19577,6 +19580,21 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.sessions.set(session.sessionId, session);
     return session;
   }
+  applyDiscoveredTitle(session, title) {
+    const next = title.trim();
+    if (this.closed || session.titleOverridden || !next || next === "Untitled Session" || next === session.title) return;
+    session.title = next;
+    this.publishProjection(session.sessionId, "title", next);
+  }
+  async refreshSessionTitle(session) {
+    if (this.backend !== "antigravity" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
+    try {
+      const items = await this.client.listSessions(session.cwd, this.backend, 30);
+      const current = items.find((item) => item.conversationId === session.acpSessionId);
+      if (current !== void 0 && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title);
+    } catch {
+    }
+  }
   async discoverAndAttachSessions(workspace) {
     if (this.backend !== "antigravity") return;
     try {
@@ -19598,6 +19616,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
         }
+        const existing = this.sessions.get(sessionId);
+        if (existing !== void 0) this.applyDiscoveredTitle(existing, item.title);
         if (!workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId);
         }

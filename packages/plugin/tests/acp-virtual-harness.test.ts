@@ -52,6 +52,42 @@ describe('AcpVirtualHarness', () => {
     await target.close()
   })
 
+  it('refreshes existing AGY titles after completion and rediscovery without overwriting a manual title', async () => {
+    let inbound: ((frame: AgentAcpFrameData) => void) | undefined
+    const listSessions = vi.fn(async () => [{ conversationId: 'old', title: 'Old', createdAt: 1, updatedAt: 2 }])
+    const client = { ...fakeAcp(), listSessions,
+      openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => {
+        inbound = handler
+        return { close: async () => undefined }
+      }),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+    const signal = new AbortController().signal
+    try {
+      const workspace = await target.selectOrCreateWorkspace('/test')
+      const control = (await target.open('session/control', {}, signal))[Symbol.asyncIterator]()
+      await control.next()
+      await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
+      await control.next()
+      await target.open('session/follow', { args: { request: { sessionId: 'acp:acp_1' } } }, signal)
+      listSessions.mockResolvedValue([{ conversationId: 'acp_1', title: 'AGY generated title', createdAt: 1, updatedAt: 3 }])
+      inbound!({ frame: { method: 'session/update', params: { sessionId: 'acp_1', update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
+      const completed = (await control.next()).value as { seq: number }
+      expect(completed).toMatchObject({ type: 'projection', sessionId: 'acp:acp_1', key: 'title', value: 'AGY generated title' })
+      listSessions.mockResolvedValue([{ conversationId: 'acp_1', title: 'Updated AGY title', createdAt: 1, updatedAt: 4 }])
+      await target.dispatch('session/list', { args: {} }, signal)
+      const rediscovered = (await control.next()).value as { seq: number }
+      expect(rediscovered).toMatchObject({ key: 'title', value: 'Updated AGY title' })
+      expect(rediscovered.seq).toBeGreaterThan(completed.seq)
+      await target.dispatch('session/rename', { args: { request: { sessionId: 'acp:acp_1', title: 'Manual title' } } }, signal)
+      await control.next()
+      const listed = await target.dispatch('session/list', { args: {} }, signal)
+      expect(listed).toMatchObject({ ok: true, value: { items: expect.arrayContaining([expect.objectContaining({ sessionId: 'acp:acp_1', projections: expect.objectContaining({ values: expect.objectContaining({ title: 'Manual title' }) }) })]) } })
+    } finally {
+      await target.close()
+    }
+  })
+
   it('creates a cwd workspace and session with cursor ids', async () => {
     const client = fakeAcp()
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
