@@ -88,6 +88,28 @@ describe('AcpVirtualHarness', () => {
     }
   })
 
+  it('passes AGY images and exposes attachments only in their own Session', async () => {
+    const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
+    let onFrame: ((frame: AgentAcpFrameData) => void) | undefined
+    const client = { ...fakeAcp(), listSessions: vi.fn(async () => [{ conversationId: 'old', title: 'Old', createdAt: 1, updatedAt: 2 }]),
+      openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+    const signal = new AbortController().signal
+    try {
+      const workspace = await target.selectOrCreateWorkspace('/test')
+      await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
+      expect(await target.dispatch('session/prompt', { args: { request: { sessionId: 'acp:acp_1', content: [{ type: 'image', mediaType: 'image/png', data }] } } }, signal)).toMatchObject({ ok: true })
+      expect(client.prompt).toHaveBeenCalledWith('acp_1', '', signal, [{ type: 'image', mimeType: 'image/png', data }], 'antigravity')
+      const history = await target.dispatch('session/history', { args: { request: { sessionId: 'acp:acp_1' } } }, signal) as any
+      const image = history.value.records.find((entry: any) => entry.event.type === 'user/message').event.data.content[0]
+      expect(image).toMatchObject({ type: 'image', attachment: { mediaType: 'image/png', width: 1, height: 1 } })
+      expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'acp:acp_1', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: true, value: { data } })
+      expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'acp:old', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: false })
+      onFrame!({ frame: { method: 'session/update', params: { sessionId: 'acp_1', update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
+    } finally { await target.close() }
+  })
+
   it('creates a cwd workspace and session with cursor ids', async () => {
     const client = fakeAcp()
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
@@ -163,7 +185,7 @@ describe('AcpVirtualHarness', () => {
       } },
     }, new AbortController().signal)
     expect(prompted.ok).toBe(true)
-    expect(client.prompt).toHaveBeenCalledWith('acp_1', 'List files', expect.any(AbortSignal))
+    expect(client.prompt).toHaveBeenCalledWith('acp_1', 'List files', expect.any(AbortSignal), [], 'cursor')
     expect(client.openStream).toHaveBeenCalled()
     await target.close()
   })

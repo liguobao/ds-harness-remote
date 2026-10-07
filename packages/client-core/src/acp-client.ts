@@ -121,11 +121,9 @@ export class AgentAcpClient {
     }
   }
 
-  async prompt(sessionId: string, text: string, signal?: AbortSignal): Promise<unknown> {
-    return this.call('session/prompt', {
-      sessionId,
-      prompt: [{ type: 'text', text }],
-    }, signal)
+  async prompt(sessionId: string, text: string, signal?: AbortSignal, images: Array<{ type: 'image'; mimeType: string; data: string }> = [], backend?: AcpAgentBackend): Promise<unknown> {
+    const params = { sessionId, ...(backend === undefined ? {} : { backend }), prompt: [...(text.length > 0 ? [{ type: 'text', text }] : []), ...images] }
+    return images.length > 0 ? this.transferCall('session/prompt', params, signal) : this.call('session/prompt', params, signal)
   }
 
   async cancel(sessionId: string, signal?: AbortSignal): Promise<unknown> {
@@ -175,30 +173,39 @@ export class AgentAcpClient {
     }
     const transferId = createRemoteId()
     const totalChunks = Math.ceil(requestBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES)
-    await this.core.rpc('agent.acp.transfer.open', {
-      transferId,
-      totalBytes: requestBytes.byteLength,
-      totalChunks,
-    }, signal)
-    for (let index = 0; index < totalChunks; index += 1) {
-      const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES
-      const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
-      await this.core.rpc('agent.acp.transfer.chunk', {
+    try {
+      await this.core.rpc('agent.acp.transfer.open', {
         transferId,
-        index,
-        data: bytesToCanonicalBase64(requestBytes.subarray(start, end)),
+        totalBytes: requestBytes.byteLength,
+        totalChunks,
       }, signal)
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES
+        const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
+        await this.core.rpc('agent.acp.transfer.chunk', {
+          transferId,
+          index,
+          data: bytesToCanonicalBase64(requestBytes.subarray(start, end)),
+        }, signal)
+      }
+      const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal) as AgentAcpTransferCommitResult
+      if (commit.kind === 'inline') return commit.response
+      if (commit.kind !== 'chunked' || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES
+        || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer descriptor.')
+      const chunks: Uint8Array[] = []
+      for (let index = 0; index < commit.totalChunks; index += 1) {
+        const part = await this.core.rpc('agent.acp.transfer.read', { transferId, index }, signal) as AgentAcpTransferReadResult
+        if (part.transferId !== transferId || part.index !== index || typeof part.data !== 'string' || part.data.length > Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer chunk.')
+        const chunk = canonicalBase64ToBytes(part.data)
+        const expected = Math.min(AGENT_ACP_TRANSFER_CHUNK_BYTES, commit.totalBytes - index * AGENT_ACP_TRANSFER_CHUNK_BYTES)
+        if (chunk.length !== expected || bytesToCanonicalBase64(chunk) !== part.data) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer chunk size or encoding.')
+        chunks.push(chunk)
+      }
+      const bytes = concat(chunks, commit.totalBytes)
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+    } finally {
+      await this.core.rpc('agent.acp.transfer.close', { transferId }).catch(() => undefined)
     }
-    const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal) as AgentAcpTransferCommitResult
-    if (commit.kind === 'inline') return commit.response
-    const chunks: Uint8Array[] = []
-    for (let index = 0; index < commit.totalChunks; index += 1) {
-      const part = await this.core.rpc('agent.acp.transfer.read', { transferId, index }, signal) as AgentAcpTransferReadResult
-      chunks.push(canonicalBase64ToBytes(part.data))
-    }
-    await this.core.rpc('agent.acp.transfer.close', { transferId }).catch(() => undefined)
-    const bytes = concat(chunks, commit.totalBytes)
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   }
 }
 

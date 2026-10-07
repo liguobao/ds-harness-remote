@@ -1,3 +1,5 @@
+import { prepareAgyImageDirectory, stageAgyImages, agyImagePrompt } from './antigravity/image-store.js'
+import { parseAcpImage } from '../image-content.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
@@ -146,7 +148,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
         protocolVersion: 1,
         capabilities: {
           loadSession: true,
-          promptTypes: ['text'],
+          promptTypes: ['text', 'image'],
         },
         agentInfo: {
           name: 'antigravity',
@@ -205,8 +207,15 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/prompt') {
-      const p = params as { sessionId: string; prompt: Array<{ type: string; text: string }> }
-      const promptText = Array.isArray(p.prompt) ? p.prompt.map(item => item.text).join('\n') : String(params)
+      const p = params as { sessionId: string; prompt: Array<{ type: string; text?: string }> }
+      let promptText = p.prompt.filter(item => item.type === 'text').map(item => item.text ?? '').join('\n')
+      const images = p.prompt.filter(item => item.type === 'image').map(parseAcpImage)
+      if (images.length > 0) {
+        if (images.length > 4) throw new AntigravityAcpError('INVALID_MESSAGE', 'Too many AGY image attachments.')
+        if (this.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
+        const paths = await stageAgyImages(p.sessionId, images)
+        promptText = agyImagePrompt(promptText, paths)
+      }
       return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS)
     }
 
@@ -271,7 +280,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
       throw new AntigravityAcpError('ANTIGRAVITY_STARTING', 'Antigravity ACP is already starting.')
     }
     const bin = resolveAntigravityBinary(this.binary)
-    const args = ['--input-format', 'stream-json', '--output-format', 'stream-json']
+    const imageDirectory = await prepareAgyImageDirectory()
+    const args = ['--input-format', 'stream-json', '--output-format', 'stream-json', '--add-dir', imageDirectory]
     if (this.activeConversationId) {
       args.push('--conversation', this.activeConversationId)
     }
@@ -404,7 +414,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
         }
         this.handleAgyEvent(parsed)
       } catch (err) {
-        this.logger?.debug('Failed to parse agy stdout line', { line, error: String(err) })
+        this.logger?.debug('Failed to parse agy stdout line', { code: 'INVALID_AGY_STREAM_EVENT' })
       }
     }
   }

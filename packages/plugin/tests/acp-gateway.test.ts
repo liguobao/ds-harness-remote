@@ -47,6 +47,20 @@ describe('AcpRemoteGateway', () => {
     }
   })
 
+  it('rejects AGY images and mismatched backend labels on a Cursor-owned session', async () => {
+    const acp = readyAcp()
+    acp.call = vi.fn(async () => ({ sessionId: 'cursor-image-session' }))
+    const gateway = new AcpRemoteGateway({ enabled: true, binary: 'agent' }, silentLogger(), () => acp)
+    await gateway.start()
+    try {
+      await gateway.call('owner', { method: 'session/new', params: { cwd: process.cwd(), backend: 'cursor' } })
+      const prompt = [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' }]
+      await expect(gateway.call('owner', { method: 'session/prompt', params: { sessionId: 'cursor-image-session', backend: 'cursor', prompt } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      await expect(gateway.call('owner', { method: 'session/prompt', params: { sessionId: 'cursor-image-session', backend: 'antigravity', prompt } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      expect(acp.call).toHaveBeenCalledTimes(1)
+    } finally { await gateway.close() }
+  })
+
   it('answers initialize on the gateway without forwarding to Cursor', async () => {
     const acp = readyAcp()
     const gateway = new AcpRemoteGateway(

@@ -79,7 +79,7 @@ describe('AntigravityAcpClient', () => {
 
     const client = new AntigravityAcpClient('agy-custom', logger(), (bin, args) => {
       expect(bin).toBe('agy-custom')
-      expect(args).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json'])
+      expect(args).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json', '--add-dir', expect.any(String)])
       // Emit init event from agy
       setTimeout(() => {
         fake.stdout.write(`${JSON.stringify({
@@ -223,9 +223,8 @@ describe('AntigravityAcpClient', () => {
     expect(first).toEqual({ sessionId: 'warm-0' })
     client.prewarmSession('/selected')
     client.prewarmSession('/selected')
-    await new Promise(resolve => setImmediate(resolve))
-    expect(directories).toEqual(['/host', '/host', '/selected'])
-    expect(processes[1]!.child.kill).toHaveBeenCalled()
+    await vi.waitFor(() => expect(directories).toEqual(['/host', '/host', '/selected']))
+    await vi.waitFor(() => expect(processes[1]!.child.kill).toHaveBeenCalled())
     expect(processes[0]!.child.kill).not.toHaveBeenCalled()
     expect(writes).not.toHaveBeenCalled()
     expect(await client.call('session/new', { cwd: '/selected' })).toEqual({ sessionId: 'warm-2' })

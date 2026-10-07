@@ -197,7 +197,10 @@ configuration and implementation notes live in [Codex Remote technical notes](do
 Remote can also open Host-local Cursor Agent sessions through a backend-neutral Agent ACP gateway
 (`agent.acp.*`). Desktop reuses the native Workspace / Session / Composer shell; Android uses an
 in-memory Cursor workspace projection. Text prompts, streaming thought/message updates, cancel, and
-one-shot approvals are supported; image prompts are not.
+one-shot approvals are supported. Cursor image prompts are not supported. AGY workspaces accept
+PNG/JPEG/WebP/GIF images (8 MiB each, up to four per prompt) through a private Host temporary cache.
+AGY reads these files with its image tool; cached images can be restored with conversation history
+for up to 24 hours, unless the system clears temporary files earlier.
 
 The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
 `agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:

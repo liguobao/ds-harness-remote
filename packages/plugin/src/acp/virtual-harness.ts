@@ -1,3 +1,4 @@
+import { parseAcpImage, acpImageContent, acpImageLimits, type AcpImage } from './image-content.js'
 import type { ApiProxy, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AgentAcpClient } from '@dsh-remote/client-core'
 import type { AgentAcpFrameData, AgentAcpStreamClosedData } from '@dsh-remote/protocol'
@@ -83,7 +84,7 @@ export interface AcpClientLike {
     backend?: 'cursor' | 'antigravity',
     signal?: AbortSignal,
   ): Promise<{ sessionId: string; cwd?: string }>
-  prompt(sessionId: string, text: string, signal?: AbortSignal): Promise<unknown>
+  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: 'cursor' | 'antigravity'): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
@@ -167,6 +168,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private selectedWorkspaceId?: string
   private readonly selectedModels = new Map<string, AcpModelSelection>()
   private lastProjectionSeq = 0
+  private readonly imageAttachments = new Map<string, { sessionId: string; attachment: unknown; data: string }>()
   private closed = false
 
   constructor(
@@ -285,7 +287,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/cancel': return business(await this.cancel(requestArg(args), signal))
         case 'session/rename': return business(await this.renameSession(requestArg(args)))
         case 'session/updateQueue': return business(failure('queue-item-not-found', `${this.backendLabel()} does not expose a DSH inbox queue.`))
-        case 'session/attachment': return business(failure('attachment-error', `${this.backendLabel()} Remote accepts text prompts only.`))
+        case 'session/attachment': return business(await this.attachment(requestArg(args)))
         case 'session/modelCatalog': return business(success(modelCatalog(this.backend)))
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
@@ -348,6 +350,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       await follow.close?.().catch(() => undefined)
     }
     this.pendingApprovals.clear()
+    this.imageAttachments.clear()
   }
 
   private visibleWorkspaces(): AcpVirtualWorkspaceView[] {
@@ -453,7 +456,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.hydrateSession(session)
     const text = extractPromptText(array(request.content))
-    if (text === undefined) return failure('attachment-error', 'Remote accepts text prompts only.')
+    let images: AcpImage[]
+    try {
+      images = array(request.content).filter(part => record(part).type === 'image').map(parseAcpImage)
+      if (images.length > 4 || (images.length > 0 && this.backend !== 'antigravity') || array(request.content).some(part => !['text', 'image'].includes(String(record(part).type)))) throw new Error('Unsupported ACP content.')
+    } catch { return failure('attachment-error', 'Invalid or unsupported image attachment.') }
+    if (text === undefined && images.length === 0) return failure('attachment-error', 'A prompt or image is required.')
+    const imageBlocks = images.map(image => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.slice(6)}`))
+    this.cacheImageAttachments(sessionId, imageBlocks)
     const requestId = typeof request.requestId === 'string' && request.requestId.length > 0
       ? request.requestId
       : undefined
@@ -467,7 +477,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       this.pushEvent(follow, 'user/message', {
         id: `user:${Date.now()}`,
         role: 'user',
-        content: [{ type: 'text', text }],
+        content: [...(text ? [{ type: 'text', text }] : []), ...imageBlocks],
         source: requestId ? { kind: 'user', rpcId: requestId } : { kind: 'user' },
       })
     }
@@ -475,7 +485,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     session.running = true
     session.updatedAt = Date.now()
     this.emitRemoteEvent('api-session/status', [sessionId, true])
-    await this.client.prompt(session.acpSessionId, text, signal)
+    await this.client.prompt(session.acpSessionId, text ?? '', signal, images, this.backend)
     return success({ accepted: true })
   }
 
@@ -502,6 +512,26 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return success({ sessionId })
   }
 
+  private cacheImageAttachments(sessionId: string, content: unknown[]): void {
+    for (const value of content) {
+      const block = record(value)
+      const attachment = record(block.attachment)
+      if (block.type === 'image' && typeof attachment.attachmentId === 'string' && typeof block.data === 'string') {
+        this.imageAttachments.set(attachment.attachmentId, { sessionId, attachment, data: block.data })
+      }
+    }
+  }
+
+  private async attachment(request: JsonRecord): Promise<unknown> {
+    const sessionId = extractSessionId(request)
+    const attachmentId = string(request.attachmentId)
+    const session = this.ensureSessionRegistered(sessionId)
+    if (this.backend !== 'antigravity' || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this AGY Session.')
+    await this.hydrateSession(session)
+    const cached = this.imageAttachments.get(attachmentId)
+    return cached?.sessionId === sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure('attachment-error', 'The AGY image is unavailable or expired.')
+  }
+
   private async hydrateSession(session: AcpSessionState): Promise<void> {
     if (this.backend !== 'antigravity' || session.blank || session.events.length > 0) return
     let events: unknown[] = []
@@ -523,6 +553,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
       session.blank = false
       session.updatedAt = Date.now()
+      for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
     }
   }
 
@@ -544,11 +575,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: [],
-          },
+          imageLimits: acpImageLimits(this.backend),
         },
       },
     })
@@ -710,11 +737,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: [],
-          },
+          imageLimits: acpImageLimits(this.backend),
         },
       },
       assistantStream: { revision: 0 },
@@ -1182,11 +1205,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: [],
-          },
+          imageLimits: acpImageLimits(this.backend),
         },
       },
     }

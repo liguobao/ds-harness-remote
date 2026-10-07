@@ -291,6 +291,15 @@ export class AcpRemoteGateway {
     const sessionId = sessionIdFromParams(call.method, call.params)
     if (sessionId !== undefined) this.requireSessionAccess(connectionId, sessionId, call.method)
 
+    if (call.method === 'session/prompt') {
+      const selected = this.sessionBackends.get(sessionId!)
+      const requested = typeof call.params.backend === 'string' ? call.params.backend : selected ?? this.defaultBackend()
+      if (selected !== undefined && selected !== requested) throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      this.requireAcp(requested)
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && requested !== 'antigravity') throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
+      this.sessionBackends.set(sessionId!, requested)
+    }
+
     if (call.method === 'session/load') {
       const targetBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
       const acp = this.requireAcp(targetBackend)
@@ -695,7 +704,7 @@ export class AcpRemoteGateway {
       authMethods: [],
       capabilities: {
         loadSession: true,
-        promptTypes: ['text'],
+        promptTypes: actualBackend === 'antigravity' ? ['text', 'image'] : ['text'],
         methods: [...ACP_METHOD_ALLOWLIST],
       },
     }

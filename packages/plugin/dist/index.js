@@ -5154,9 +5154,9 @@ var RemoteGatewayError = class extends Error {
   }
 };
 function createRemoteId() {
-  const crypto3 = globalThis.crypto;
-  if (crypto3?.randomUUID !== void 0)
-    return crypto3.randomUUID();
+  const crypto4 = globalThis.crypto;
+  if (crypto4?.randomUUID !== void 0)
+    return crypto4.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -5783,11 +5783,9 @@ var AgentAcpClient = class {
       ...mode2 === void 0 ? {} : { mode: mode2 }
     };
   }
-  async prompt(sessionId, text, signal) {
-    return this.call("session/prompt", {
-      sessionId,
-      prompt: [{ type: "text", text }]
-    }, signal);
+  async prompt(sessionId, text, signal, images = [], backend) {
+    const params = { sessionId, ...backend === void 0 ? {} : { backend }, prompt: [...text.length > 0 ? [{ type: "text", text }] : [], ...images] };
+    return images.length > 0 ? this.transferCall("session/prompt", params, signal) : this.call("session/prompt", params, signal);
   }
   async cancel(sessionId, signal) {
     return this.call("session/cancel", { sessionId }, signal);
@@ -5829,31 +5827,42 @@ var AgentAcpClient = class {
     }
     const transferId = createRemoteId();
     const totalChunks = Math.ceil(requestBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES);
-    await this.core.rpc("agent.acp.transfer.open", {
-      transferId,
-      totalBytes: requestBytes.byteLength,
-      totalChunks
-    }, signal);
-    for (let index = 0; index < totalChunks; index += 1) {
-      const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
-      const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength);
-      await this.core.rpc("agent.acp.transfer.chunk", {
+    try {
+      await this.core.rpc("agent.acp.transfer.open", {
         transferId,
-        index,
-        data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
+        totalBytes: requestBytes.byteLength,
+        totalChunks
       }, signal);
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
+        const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength);
+        await this.core.rpc("agent.acp.transfer.chunk", {
+          transferId,
+          index,
+          data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
+        }, signal);
+      }
+      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal);
+      if (commit.kind === "inline")
+        return commit.response;
+      if (commit.kind !== "chunked" || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES))
+        throw new RemoteGatewayError("INVALID_RESPONSE", "Invalid ACP transfer descriptor.");
+      const chunks = [];
+      for (let index = 0; index < commit.totalChunks; index += 1) {
+        const part = await this.core.rpc("agent.acp.transfer.read", { transferId, index }, signal);
+        if (part.transferId !== transferId || part.index !== index || typeof part.data !== "string" || part.data.length > Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
+          throw new RemoteGatewayError("INVALID_RESPONSE", "Invalid ACP transfer chunk.");
+        const chunk = canonicalBase64ToBytes(part.data);
+        const expected = Math.min(AGENT_ACP_TRANSFER_CHUNK_BYTES, commit.totalBytes - index * AGENT_ACP_TRANSFER_CHUNK_BYTES);
+        if (chunk.length !== expected || bytesToCanonicalBase64(chunk) !== part.data)
+          throw new RemoteGatewayError("INVALID_RESPONSE", "Invalid ACP transfer chunk size or encoding.");
+        chunks.push(chunk);
+      }
+      const bytes = concat(chunks, commit.totalBytes);
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    } finally {
+      await this.core.rpc("agent.acp.transfer.close", { transferId }).catch(() => void 0);
     }
-    const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal);
-    if (commit.kind === "inline")
-      return commit.response;
-    const chunks = [];
-    for (let index = 0; index < commit.totalChunks; index += 1) {
-      const part = await this.core.rpc("agent.acp.transfer.read", { transferId, index }, signal);
-      chunks.push(canonicalBase64ToBytes(part.data));
-    }
-    await this.core.rpc("agent.acp.transfer.close", { transferId }).catch(() => void 0);
-    const bytes = concat(chunks, commit.totalBytes);
-    return JSON.parse(new TextDecoder().decode(bytes));
   }
 };
 function readString(value, key) {
@@ -7703,22 +7712,22 @@ var ApiProxySwitch = class {
 
 // ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
-var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
+var crypto2 = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
 // ../../node_modules/.pnpm/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/webcrypto.js
 function randomBytes2(bytesLength = 32) {
-  if (crypto && typeof crypto.getRandomValues === "function") {
-    return crypto.getRandomValues(new Uint8Array(bytesLength));
+  if (crypto2 && typeof crypto2.getRandomValues === "function") {
+    return crypto2.getRandomValues(new Uint8Array(bytesLength));
   }
-  if (crypto && typeof crypto.randomBytes === "function") {
-    return Uint8Array.from(crypto.randomBytes(bytesLength));
+  if (crypto2 && typeof crypto2.randomBytes === "function") {
+    return Uint8Array.from(crypto2.randomBytes(bytesLength));
   }
   throw new Error("crypto.getRandomValues must be defined");
 }
 
 // ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc2 from "node:crypto";
-var crypto2 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
+var crypto3 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
 
 // ../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
@@ -7838,11 +7847,11 @@ function createHasher(hashCons) {
   return hashC;
 }
 function randomBytes3(bytesLength = 32) {
-  if (crypto2 && typeof crypto2.getRandomValues === "function") {
-    return crypto2.getRandomValues(new Uint8Array(bytesLength));
+  if (crypto3 && typeof crypto3.getRandomValues === "function") {
+    return crypto3.getRandomValues(new Uint8Array(bytesLength));
   }
-  if (crypto2 && typeof crypto2.randomBytes === "function") {
-    return Uint8Array.from(crypto2.randomBytes(bytesLength));
+  if (crypto3 && typeof crypto3.randomBytes === "function") {
+    return Uint8Array.from(crypto3.randomBytes(bytesLength));
   }
   throw new Error("crypto.getRandomValues must be defined");
 }
@@ -18422,23 +18431,186 @@ var AsyncValueQueue2 = class {
   }
 };
 
+// src/acp/image-content.ts
+var AGY_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+var AGY_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+var AGY_MAX_IMAGES = 4;
+var AGY_MAX_MESSAGE_IMAGE_BYTES = 32 * 1024 * 1024;
+function parseAcpImage(value) {
+  const image = value;
+  const mimeType = image?.mimeType ?? image?.mediaType;
+  const data2 = image?.data;
+  if (image?.type !== "image" || typeof mimeType !== "string" || !AGY_IMAGE_MEDIA_TYPES.includes(mimeType) || typeof data2 !== "string" || data2.length === 0 || data2.length > Math.ceil(AGY_MAX_IMAGE_BYTES / 3) * 4 || data2.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data2)) throw new Error("Invalid AGY image attachment.");
+  const tail = data2.slice(-4);
+  if (btoa(atob(tail)) !== tail) throw new Error("Invalid AGY image base64.");
+  const bytes = imageByteLength(data2);
+  if (bytes > AGY_MAX_IMAGE_BYTES) throw new Error("AGY image attachment exceeds the size limit.");
+  const dimensions = imageDimensions2(mimeType, data2);
+  if (!dimensions || dimensions.width < 1 || dimensions.height < 1 || dimensions.width > 8192 || dimensions.height > 8192 || dimensions.width * dimensions.height > 4e7) throw new Error("Invalid AGY image dimensions or media type.");
+  return { type: "image", mimeType, data: data2 };
+}
+function imageByteLength(data2) {
+  return data2.length / 4 * 3 - (data2.endsWith("==") ? 2 : data2.endsWith("=") ? 1 : 0);
+}
+function imageDimensions2(mediaType, data2) {
+  const bytes = Uint8Array.from(atob(data2.slice(0, Math.min(data2.length, 256 * 1024))), (char) => char.charCodeAt(0));
+  const be16 = (i) => bytes[i] * 256 + bytes[i + 1];
+  const be32 = (i) => bytes[i] * 16777216 + bytes[i + 1] * 65536 + bytes[i + 2] * 256 + bytes[i + 3] >>> 0;
+  const le16 = (i) => bytes[i] + bytes[i + 1] * 256;
+  const le24 = (i) => bytes[i] + bytes[i + 1] * 256 + bytes[i + 2] * 65536;
+  const text = (i, n) => String.fromCharCode(...bytes.slice(i, i + n));
+  if (mediaType === "image/png" && bytes.length >= 24 && text(1, 3) === "PNG" && bytes[0] === 137 && text(12, 4) === "IHDR") return { width: be32(16), height: be32(20) };
+  if (mediaType === "image/gif" && bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(text(0, 6))) return { width: le16(6), height: le16(8) };
+  if (mediaType === "image/webp" && bytes.length >= 30 && text(0, 4) === "RIFF" && text(8, 4) === "WEBP") {
+    if (text(12, 4) === "VP8X") return { width: le24(24) + 1, height: le24(27) + 1 };
+    if (text(12, 4) === "VP8 " && bytes[23] === 157 && bytes[24] === 1 && bytes[25] === 42) return { width: le16(26) & 16383, height: le16(28) & 16383 };
+    if (text(12, 4) === "VP8L" && bytes[20] === 47) return { width: 1 + bytes[21] + ((bytes[22] & 63) << 8), height: 1 + (bytes[22] >> 6) + (bytes[23] << 2) + ((bytes[24] & 15) << 10) };
+  }
+  if (mediaType === "image/jpeg" && bytes[0] === 255 && bytes[1] === 216) {
+    for (let i = 2; i + 8 < bytes.length; ) {
+      if (bytes[i] !== 255) {
+        i++;
+        continue;
+      }
+      const marker = bytes[i + 1];
+      i += 2;
+      if (marker === 216 || marker === 217) continue;
+      const length = be16(i);
+      if (length < 2 || i + length > bytes.length) break;
+      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker)) return { width: be16(i + 5), height: be16(i + 3) };
+      i += length;
+    }
+  }
+  return void 0;
+}
+function acpImageContent(image, attachmentId) {
+  const dimensions = imageDimensions2(image.mimeType, image.data);
+  return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions }, mediaType: image.mimeType, data: image.data };
+}
+function acpImageLimits(backend) {
+  return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
+}
+
+// src/acp/adapters/antigravity/image-store.ts
+import { promises as fs, realpathSync, constants } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join2, basename as basename2 } from "node:path";
+import { createHash, randomUUID as randomUUID2 } from "node:crypto";
+var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
+var TTL = 24 * 60 * 60 * 1e3;
+var AGY_IMAGE_ROOT = join2(realpathSync(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
+var stagingChain = Promise.resolve();
+var sessionFolder = (sessionId) => createHash("sha256").update(sessionId).digest("hex");
+async function privateDirectory(path) {
+  await fs.mkdir(path, { recursive: true, mode: 448 });
+  const info = await fs.lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
+}
+async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
+  await privateDirectory(root);
+  return root;
+}
+function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
+  const result = stagingChain.then(() => stageImages(sessionId, images, root));
+  stagingChain = result.then(() => void 0, () => void 0);
+  return result;
+}
+async function stageImages(sessionId, images, root) {
+  await prepareAgyImageDirectory(root);
+  let total = 0;
+  for (const entry of await fs.readdir(root)) {
+    if (!/^[0-9a-f]{64}$/.test(entry)) continue;
+    const dir = join2(root, entry);
+    const info = await fs.lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) continue;
+    for (const name2 of await fs.readdir(dir)) {
+      if (!IMAGE_NAME.test(name2)) continue;
+      const path = join2(dir, name2);
+      const file = await fs.lstat(path);
+      if (!file.isFile() || file.isSymbolicLink()) continue;
+      if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
+      else total += file.size;
+    }
+  }
+  const parsed = images.map(parseAcpImage);
+  if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
+  const directory = join2(root, sessionFolder(sessionId));
+  await privateDirectory(directory);
+  const paths = [];
+  try {
+    for (const image of parsed) {
+      const path = join2(directory, `${randomUUID2()}.${EXTENSIONS[image.mimeType]}`);
+      await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
+      paths.push(path);
+    }
+    return paths;
+  } catch (error) {
+    await Promise.all(paths.map((path) => fs.unlink(path).catch(() => void 0)));
+    throw error;
+  }
+}
+function agyImagePrompt(text, paths) {
+  return `${text}
+<AGY_REMOTE_IMAGES>
+User attached images. Use view_file to inspect these images before answering.
+${JSON.stringify(paths)}
+</AGY_REMOTE_IMAGES>`;
+}
+function stripAgyImageReferences(text) {
+  return text.replace(/\n?<AGY_REMOTE_IMAGES>[\s\S]*?<\/AGY_REMOTE_IMAGES>/g, "").trim();
+}
+function agyImageReferences(text) {
+  const block = /<AGY_REMOTE_IMAGES>\n[^\n]*\n([^\n]+)\n<\/AGY_REMOTE_IMAGES>/.exec(text);
+  if (!block) return [];
+  try {
+    const value = JSON.parse(block[1]);
+    return Array.isArray(value) && value.length <= 4 ? value.filter((path) => typeof path === "string") : [];
+  } catch {
+    return [];
+  }
+}
+async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
+  const name2 = basename2(path);
+  if (!IMAGE_NAME.test(name2) || path !== join2(root, sessionFolder(sessionId), name2)) return void 0;
+  try {
+    await privateDirectory(root);
+    await privateDirectory(join2(root, sessionFolder(sessionId)));
+    const info = await fs.lstat(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
+    const file = await fs.open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const current = await file.stat();
+      if (current.ino !== info.ino || current.dev !== info.dev || current.size !== info.size) return void 0;
+      const mediaType = Object.entries(EXTENSIONS).find(([, ext]) => name2.endsWith(`.${ext}`))?.[0];
+      const image = parseAcpImage({ type: "image", mimeType: mediaType, data: (await file.readFile()).toString("base64") });
+      return acpImageContent(image, `agy-image:${name2}`);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
+
 // src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs } from "node:fs";
-import { join as join2 } from "node:path";
+import { promises as fs2 } from "node:fs";
+import { join as join3 } from "node:path";
 import { homedir } from "node:os";
 function cleanUserPrompt(raw) {
   if (!raw) return "";
+  raw = stripAgyImageReferences(raw);
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match && match[1]) {
     return match[1].trim();
   }
   return raw.trim();
 }
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join3(homedir(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join3(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
   let content = "";
   try {
-    content = await fs.readFile(filePath, "utf-8");
+    content = await fs2.readFile(filePath, "utf-8");
   } catch {
     return [];
   }
@@ -18480,10 +18652,11 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join2(h
       push("turn/start", { turn: currentTurn }, time);
       push("step/start", { turn: currentTurn, step: 1 }, time);
       const text = cleanUserPrompt(record8.content);
+      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
       push("user/message", {
         id: `user:${record8.step_index}`,
         role: "user",
-        content: [{ type: "text", text }],
+        content: [...text ? [{ type: "text", text }] : [], ...images],
         source: { kind: "user" }
       }, time, true);
     } else if (record8.type === "PLANNER_RESPONSE") {
@@ -18566,9 +18739,9 @@ async function querySqliteJson(dbPath, sql, params = []) {
     return [];
   }
 }
-async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join2(homedir(), ".gemini/antigravity-cli/brain")) {
+async function discoverAntigravityWorkspaces(dbPath = join3(homedir(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join3(homedir(), ".gemini/antigravity-cli/brain")) {
   try {
-    await fs.stat(dbPath);
+    await fs2.stat(dbPath);
   } catch {
     return [];
   }
@@ -18589,7 +18762,7 @@ async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/
               if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
                 p = p.slice(1);
               }
-              paths.add(p);
+              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
             } catch {
             }
           }
@@ -18601,7 +18774,7 @@ async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/
   const verified = [];
   for (const p of paths) {
     try {
-      const s2 = await fs.stat(p);
+      const s2 = await fs2.stat(p);
       if (s2.isDirectory()) verified.push(p);
     } catch {
     }
@@ -18610,10 +18783,10 @@ async function discoverAntigravityWorkspaces(dbPath = join2(homedir(), ".gemini/
 }
 async function readTranscriptSummary(baseDir, conversationId) {
   if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
-  const path = join2(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  const path = join3(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
   try {
-    const stat8 = await fs.stat(path);
-    const handle = await fs.open(path, "r");
+    const stat8 = await fs2.stat(path);
+    const handle = await fs2.open(path, "r");
     try {
       const buffer = Buffer.alloc(4096);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
@@ -18621,7 +18794,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (!firstLine) return void 0;
       const record8 = JSON.parse(firstLine);
       if (record8.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40);
+      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
       return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
     } finally {
@@ -18631,9 +18804,9 @@ async function readTranscriptSummary(baseDir, conversationId) {
     return void 0;
   }
 }
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join2(homedir(), ".gemini/antigravity-cli/brain"), dbPath = join2(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join3(homedir(), ".gemini/antigravity-cli/brain"), dbPath = join3(homedir(), ".gemini/antigravity-cli/conversation_summaries.db")) {
   try {
-    await fs.stat(dbPath);
+    await fs2.stat(dbPath);
     let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
     const params = [];
     if (workspacePath && workspacePath.trim() !== "") {
@@ -18663,17 +18836,17 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
   }
   let dirEntries;
   try {
-    dirEntries = await fs.readdir(baseDir);
+    dirEntries = await fs2.readdir(baseDir);
   } catch {
     return [];
   }
   const results = [];
   for (const entry of dirEntries) {
     if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join2(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    const transcriptPath = join3(baseDir, entry, ".system_generated/logs/transcript.jsonl");
     try {
-      const s2 = await fs.stat(transcriptPath);
-      const handle = await fs.open(transcriptPath, "r");
+      const s2 = await fs2.stat(transcriptPath);
+      const handle = await fs2.open(transcriptPath, "r");
       try {
         const buf = Buffer.alloc(4096);
         const { bytesRead } = await handle.read(buf, 0, 4096, 0);
@@ -18759,6 +18932,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   selectedWorkspaceId;
   selectedModels = /* @__PURE__ */ new Map();
   lastProjectionSeq = 0;
+  imageAttachments = /* @__PURE__ */ new Map();
   closed = false;
   static remote(core, host, backend = "cursor") {
     return new _AcpVirtualHarness(new AgentAcpClient(core), host, backend);
@@ -18874,7 +19048,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/updateQueue":
           return business2(failure2("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
         case "session/attachment":
-          return business2(failure2("attachment-error", `${this.backendLabel()} Remote accepts text prompts only.`));
+          return business2(await this.attachment(requestArg2(args)));
         case "session/modelCatalog":
           return business2(success2(modelCatalog2(this.backend)));
         case "session/models": {
@@ -18944,6 +19118,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       await follow.close?.().catch(() => void 0);
     }
     this.pendingApprovals.clear();
+    this.imageAttachments.clear();
   }
   visibleWorkspaces() {
     if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
@@ -19039,7 +19214,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session);
     const text = extractPromptText(array2(request.content));
-    if (text === void 0) return failure2("attachment-error", "Remote accepts text prompts only.");
+    let images;
+    try {
+      images = array2(request.content).filter((part) => record4(part).type === "image").map(parseAcpImage);
+      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" || array2(request.content).some((part) => !["text", "image"].includes(String(record4(part).type)))) throw new Error("Unsupported ACP content.");
+    } catch {
+      return failure2("attachment-error", "Invalid or unsupported image attachment.");
+    }
+    if (text === void 0 && images.length === 0) return failure2("attachment-error", "A prompt or image is required.");
+    const imageBlocks = images.map((image) => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice(6)}`));
+    this.cacheImageAttachments(sessionId, imageBlocks);
     const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
     await this.ensureFollow(session);
     const follow = [...this.follows].find((f) => f.sessionId === sessionId);
@@ -19051,7 +19235,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.pushEvent(follow, "user/message", {
         id: `user:${Date.now()}`,
         role: "user",
-        content: [{ type: "text", text }],
+        content: [...text ? [{ type: "text", text }] : [], ...imageBlocks],
         source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
       });
     }
@@ -19059,7 +19243,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     session.running = true;
     session.updatedAt = Date.now();
     this.emitRemoteEvent("api-session/status", [sessionId, true]);
-    await this.client.prompt(session.acpSessionId, text, signal);
+    await this.client.prompt(session.acpSessionId, text ?? "", signal, images, this.backend);
     return success2({ accepted: true });
   }
   async cancel(request, signal) {
@@ -19083,6 +19267,24 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishProjection(sessionId, "title", title);
     return success2({ sessionId });
   }
+  cacheImageAttachments(sessionId, content) {
+    for (const value of content) {
+      const block = record4(value);
+      const attachment = record4(block.attachment);
+      if (block.type === "image" && typeof attachment.attachmentId === "string" && typeof block.data === "string") {
+        this.imageAttachments.set(attachment.attachmentId, { sessionId, attachment, data: block.data });
+      }
+    }
+  }
+  async attachment(request) {
+    const sessionId = extractSessionId(request);
+    const attachmentId = string3(request.attachmentId);
+    const session = this.ensureSessionRegistered(sessionId);
+    if (this.backend !== "antigravity" || session === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this AGY Session.");
+    await this.hydrateSession(session);
+    const cached = this.imageAttachments.get(attachmentId);
+    return cached?.sessionId === sessionId ? success2({ attachment: cached.attachment, data: cached.data }) : failure2("attachment-error", "The AGY image is unavailable or expired.");
+  }
   async hydrateSession(session) {
     if (this.backend !== "antigravity" || session.blank || session.events.length > 0) return;
     let events = [];
@@ -19102,6 +19304,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       session.events = events;
       session.blank = false;
       session.updatedAt = Date.now();
+      for (const event of session.events) this.cacheImageAttachments(session.sessionId, array2(record4(event.event.data).content ?? record4(record4(event.event.data).message).content));
     }
   }
   async sessionHistory(request) {
@@ -19122,11 +19325,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: []
-          }
+          imageLimits: acpImageLimits(this.backend)
         }
       }
     });
@@ -19262,11 +19461,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: []
-          }
+          imageLimits: acpImageLimits(this.backend)
         }
       },
       assistantStream: { revision: 0 }
@@ -19679,11 +19874,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
-          imageLimits: {
-            maxImageBytes: 0,
-            maxImagesPerMessage: 0,
-            mediaTypes: []
-          }
+          imageLimits: acpImageLimits(this.backend)
         }
       }
     };
@@ -20110,7 +20301,7 @@ import { platform } from "node:os";
 
 // src/server-credentials.ts
 import { chmod, mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { dirname as dirname2, join as join4 } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -20125,7 +20316,7 @@ var credentialSchema = external_exports.object({
 var ServerCredentialStore = class {
   path;
   constructor(directory) {
-    this.path = join3(directory, "server-credentials.json");
+    this.path = join4(directory, "server-credentials.json");
   }
   /** Serialize the complete read/refresh/write transaction across processes.
    * Never steal an old lock: a suspended owner may still consume a one-use token.
@@ -20972,8 +21163,8 @@ import { networkInterfaces } from "node:os";
 
 // src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname as dirname3, join as join4 } from "node:path";
+import { existsSync, readdirSync, realpathSync as realpathSync2, statSync } from "node:fs";
+import { delimiter, dirname as dirname3, join as join5 } from "node:path";
 import { fileURLToPath } from "node:url";
 var cachedExternalFactory;
 var cachedExternalFactoryResolved = false;
@@ -20998,7 +21189,7 @@ function buildExternalNativeRtcFactory(nodeBinary, requireFrom = resolveNativeRt
 function resolveNativeRtcRequireFrom(moduleUrl = import.meta.url) {
   const modulePath = fileURLToPath(moduleUrl);
   try {
-    return realpathSync(modulePath);
+    return realpathSync2(modulePath);
   } catch {
     return modulePath;
   }
@@ -21024,21 +21215,21 @@ function nodeBinaryCandidates() {
   add3(process.env.DSH_REMOTE_NODE);
   add3(process.env.NODE);
   add3(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join4(part, process.platform === "win32" ? "node.exe" : "node"));
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join5(part, process.platform === "win32" ? "node.exe" : "node"));
   add3("/opt/homebrew/bin/node");
   add3("/usr/local/bin/node");
   add3("/usr/bin/node");
-  add3(join4(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join4(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add3(join4(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join5(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
-  const root = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
+  const root = join5(process.env.HOME ?? "", ".nvm", "versions", "node");
   if (root === "" || !existsSync(root)) return [];
   try {
-    return readdirSync(root).map((version) => join4(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root).map((version) => join5(root, version, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -23333,10 +23524,10 @@ import { hostname as hostname2 } from "node:os";
 import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname4, join as join5 } from "node:path";
+import { dirname as dirname4, join as join6 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -23365,14 +23556,14 @@ var IdentityStore = class {
   peers = /* @__PURE__ */ new Map();
   constructor(options = {}) {
     const env = options.env ?? process.env;
-    const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    this.directory = options.directory ?? join5(dshHome, "remote");
+    const dshHome = env.DSH_HOME || join6(options.homeDirectory ?? homedir2(), ".dsh");
+    this.directory = options.directory ?? join6(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
     await mkdir2(this.directory, { recursive: true, mode: 448 });
     await chmod2(this.directory, 448);
-    const devicePath = join5(this.directory, "device.json");
-    const keyPath = join5(this.directory, "device.key");
+    const devicePath = join6(this.directory, "device.json");
+    const keyPath = join6(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
     if (hasDevice !== hasKey) {
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
@@ -23441,7 +23632,7 @@ var IdentityStore = class {
     return removed;
   }
   async loadPeers() {
-    const path = join5(this.directory, "trusted-peers.json");
+    const path = join6(this.directory, "trusted-peers.json");
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
@@ -23457,7 +23648,7 @@ var IdentityStore = class {
     this.peers = peers;
   }
   async savePeers() {
-    await atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
+    await atomicJsonWrite(join6(this.directory, "trusted-peers.json"), {
       schemaVersion: 1,
       peers: [...this.peers.values()]
     }, 384);
@@ -23465,11 +23656,11 @@ var IdentityStore = class {
 };
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
-  const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join5(root, "servers", scope, role);
+  const scope = createHash2("sha256").update(origin).digest("hex").slice(0, 24);
+  return join6(root, "servers", scope, role);
 }
 function fingerprint(publicKey) {
-  const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
+  const compact = createHash2("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
   return compact.match(/.{1,4}/g).join(" ");
 }
 async function assertPrivateMode2(path) {
@@ -24120,7 +24311,7 @@ var TerminalPolicy = class {
 };
 
 // src/service.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 
 // src/connection-controller.ts
 var ConnectionController = class {
@@ -25593,7 +25784,7 @@ function closeCode(code) {
 // src/remote-directory-browser.ts
 import { readdir, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3, platform as platform2 } from "node:os";
-import { basename as basename2, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
+import { basename as basename3, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
@@ -25625,7 +25816,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root) {
-    segments.unshift(basename2(current));
+    segments.unshift(basename3(current));
     current = dirname5(current);
   }
   for (const segment of segments) {
@@ -26916,11 +27107,11 @@ function isRecord12(value) {
 }
 
 // src/codex/domain.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir4 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute3, join as join7, relative, resolve as resolve2 } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -27988,7 +28179,7 @@ var CodexRemoteDomain = class {
       await appServer.respond(message.id, { decision: "decline" });
       return;
     }
-    const requestHandle = randomUUID2();
+    const requestHandle = randomUUID3();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner.connectionId,
@@ -28368,17 +28559,17 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
-    join6(userHome, "Applications", "ChatGPT.app")
+    join7(userHome, "Applications", "ChatGPT.app")
   ].flatMap((chatGptApp) => {
-    const codexCli = join6(chatGptApp, "Contents", "Resources", "codex-cli");
+    const codexCli = join7(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join6(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync(join7(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord15(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
-      const candidate = join6(codexCli, manifest.entrypoint);
+      const candidate = join7(codexCli, manifest.entrypoint);
       if (!existsSync2(candidate)) return [];
-      accessSync(candidate, constants.X_OK);
+      accessSync(candidate, constants2.X_OK);
       return [candidate];
     } catch {
       return [];
@@ -28387,7 +28578,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   return [.../* @__PURE__ */ new Set([
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    join7(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
     configured
   ])];
 }
@@ -28504,7 +28695,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
+  const crumbs2 = [{ name: basename4(root) || root, path: root, hidden: false }];
   const remainder = relative(root, path);
   if (remainder === "") return crumbs2;
   let current = root;
@@ -28623,10 +28814,10 @@ function isActiveWriterMessage(message) {
 import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/acp/gateway.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 import { readdir as readdir3, realpath as realpath2, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute4, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
+import { basename as basename5, isAbsolute as isAbsolute4, join as join9, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
@@ -28878,18 +29069,18 @@ import { Buffer as Buffer5 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/antigravity/transcript-watcher.ts
-import { promises as fs2 } from "node:fs";
-import { join as join7 } from "node:path";
+import { promises as fs3 } from "node:fs";
+import { join as join8 } from "node:path";
 import { EventEmitter } from "node:events";
 import { homedir as homedir5 } from "node:os";
 var TranscriptWatcher = class extends EventEmitter {
-  constructor(conversationId, baseDir = join7(homedir5(), ".gemini/antigravity-cli/brain")) {
+  constructor(conversationId, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
     super();
     this.conversationId = conversationId;
     this.baseDir = baseDir;
-    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join7(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
+    const brainDir = join8(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join8(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join8(brainDir, "transcript_full.jsonl");
   }
   offset = 0;
   lineRemainder = "";
@@ -28936,12 +29127,12 @@ var TranscriptWatcher = class extends EventEmitter {
   async readNewLines() {
     let stat8;
     try {
-      stat8 = await fs2.stat(this.transcriptPath);
+      stat8 = await fs3.stat(this.transcriptPath);
     } catch {
       return;
     }
     if (stat8.size <= this.offset) return;
-    const handle = await fs2.open(this.transcriptPath, "r");
+    const handle = await fs3.open(this.transcriptPath, "r");
     try {
       const bytesToRead = stat8.size - this.offset;
       const buffer = Buffer.alloc(bytesToRead);
@@ -29005,7 +29196,7 @@ var TranscriptWatcher = class extends EventEmitter {
   }
   async enrichFromFullTranscript(record8) {
     try {
-      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
+      const content = await fs3.readFile(this.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
       for (const line of lines) {
         const trimmed = line.trim();
@@ -29135,7 +29326,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         protocolVersion: 1,
         capabilities: {
           loadSession: true,
-          promptTypes: ["text"]
+          promptTypes: ["text", "image"]
         },
         agentInfo: {
           name: "antigravity",
@@ -29190,7 +29381,14 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     if (method === "session/prompt") {
       const p = params;
-      const promptText = Array.isArray(p.prompt) ? p.prompt.map((item) => item.text).join("\n") : String(params);
+      let promptText = p.prompt.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n");
+      const images = p.prompt.filter((item) => item.type === "image").map(parseAcpImage);
+      if (images.length > 0) {
+        if (images.length > 4) throw new AntigravityAcpError("INVALID_MESSAGE", "Too many AGY image attachments.");
+        if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
+        const paths = await stageAgyImages(p.sessionId, images);
+        promptText = agyImagePrompt(promptText, paths);
+      }
       return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS2);
     }
     throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", `Method ${method} is not supported by Antigravity ACP adapter.`);
@@ -29246,7 +29444,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       throw new AntigravityAcpError("ANTIGRAVITY_STARTING", "Antigravity ACP is already starting.");
     }
     const bin = resolveAntigravityBinary(this.binary);
-    const args = ["--input-format", "stream-json", "--output-format", "stream-json"];
+    const imageDirectory = await prepareAgyImageDirectory();
+    const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--add-dir", imageDirectory];
     if (this.activeConversationId) {
       args.push("--conversation", this.activeConversationId);
     }
@@ -29367,7 +29566,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         }
         this.handleAgyEvent(parsed);
       } catch (err) {
-        this.logger?.debug("Failed to parse agy stdout line", { line, error: String(err) });
+        this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
       }
     }
   }
@@ -29460,10 +29659,19 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
 var id4 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
 var mode = external_exports.enum(["agent", "plan", "ask"]);
-var promptBlock = external_exports.object({
+var textBlock = external_exports.object({
   type: external_exports.literal("text"),
   text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
+var imageBlock = external_exports.object({ type: external_exports.literal("image"), mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
+  try {
+    parseAcpImage(value);
+    return true;
+  } catch {
+    return false;
+  }
+});
+var promptBlock = external_exports.union([textBlock, imageBlock]);
 var schemas2 = {
   "initialize": external_exports.object({
     protocolVersion: external_exports.number().int().positive().optional(),
@@ -29485,7 +29693,8 @@ var schemas2 = {
   }).strict(),
   "session/prompt": external_exports.object({
     sessionId: id4,
-    prompt: external_exports.array(promptBlock).min(1).max(16)
+    backend: external_exports.enum(["cursor", "antigravity"]).optional(),
+    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
   "session/cancel": external_exports.object({
     sessionId: id4
@@ -29956,7 +30165,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename4(p) || "workspace",
+          title: basename5(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -30005,6 +30214,14 @@ var AcpRemoteGateway = class {
     }
     const sessionId = sessionIdFromParams(call.method, call.params);
     if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
+    if (call.method === "session/prompt") {
+      const selected = this.sessionBackends.get(sessionId);
+      const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
+      if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      this.requireAcp(requested);
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      this.sessionBackends.set(sessionId, requested);
+    }
     if (call.method === "session/load") {
       const targetBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
       const acp = this.requireAcp(targetBackend);
@@ -30221,7 +30438,7 @@ var AcpRemoteGateway = class {
     if (sessionId !== "unknown" && !this.sessionBackends.has(sessionId)) {
       this.sessionBackends.set(sessionId, backend);
     }
-    const requestHandle = randomUUID3();
+    const requestHandle = randomUUID4();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? "unknown",
@@ -30371,7 +30588,7 @@ var AcpRemoteGateway = class {
       authMethods: [],
       capabilities: {
         loadSession: true,
-        promptTypes: ["text"],
+        promptTypes: actualBackend === "antigravity" ? ["text", "image"] : ["text"],
         methods: [...ACP_METHOD_ALLOWLIST]
       }
     };
@@ -30411,7 +30628,7 @@ var AcpRemoteGateway = class {
   }
   async listDirectory(path) {
     const home = homedir6();
-    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join8(home, path.slice(2)) : path;
+    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join9(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
     const names = await readdir3(canonical);
     const entries = [];
@@ -30421,7 +30638,7 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join8(canonical, name2);
+      const child = join9(canonical, name2);
       try {
         const info = await stat5(child);
         if (!info.isDirectory()) continue;
@@ -30504,7 +30721,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename4(current) || current,
+      name: current === home ? "~" : basename5(current) || current,
       path: current,
       hidden: false
     });
@@ -30520,13 +30737,13 @@ function cursorBinaryCandidates(configured) {
   const userHome = homedir6();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join8(userHome, ".local", "bin", "agy"),
+      join9(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join8(userHome, ".local", "bin", "agent"),
+      join9(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
@@ -30551,7 +30768,7 @@ function isRecord18(value) {
 // src/codex-workspace-bridge.ts
 import { spawn as spawn5 } from "node:child_process";
 import { realpath as realpath3, lstat, readdir as readdir4, readFile as readFile4, stat as stat6, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join9, relative as relative3, resolve as resolve4 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join10, relative as relative3, resolve as resolve4 } from "node:path";
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
@@ -30641,7 +30858,7 @@ var CodexWorkspaceBridge = class {
         const entries = await readdir4(target2, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
-          const item = join9(target2, entry.name);
+          const item = join10(target2, entry.name);
           const info2 = await lstat(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
@@ -31342,7 +31559,7 @@ var HostPluginRuntime = class {
     let reportedVersion;
     let errorCode6;
     try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID4(), payload: {} });
+      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID5(), payload: {} });
       if (response === void 0) throw new Error("ApiProxy is unavailable");
       if (!response.result.ok) {
         errorCode6 = response.result.error.code;
@@ -31462,7 +31679,7 @@ function isPlainRecord(value) {
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -31549,7 +31766,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join10(directory, "device.json"))) {
+  if (!await exists3(join11(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -31594,7 +31811,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join10(directory, "device.json"))) {
+  if (!await exists3(join11(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;

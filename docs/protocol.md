@@ -1122,8 +1122,17 @@ initialize / `authenticate(methodId: cursor_login)` 后，才宣告 `agent.acp.v
 恢复该会话；没有 transcript 的空闲预热进程不显示为历史会话。Remote 在 AGY 回复完成
 和历史重新发现时读取持久化标题，并以有序 title projection 更新已有会话；AGY 标题
 为空时使用 transcript 中首条用户消息的摘要，不修改 AGY 数据库。`session/new`
-强制 `mcpServers: []`，cwd 必须经 `realpath` 确认为 Host 上已存在的绝对目录。Prompt 仅允许
-文本块。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
+强制 `mcpServers: []`，cwd 必须经 `realpath` 确认为 Host 上已存在的绝对目录。Cursor Prompt
+仅允许文本块；AGY 还允许 `{ type: "image", mimeType, data }`（canonical base64、PNG/JPEG/WebP/GIF，
+每张最多 8 MiB，每次最多 4 张）。`session/prompt.backend` 可显式指定后端，必须与已有会话后端
+一致，图片不能转发到 Cursor。图片 Prompt 和含图片的 History 使用已有 ACP transfer 分块通道。
+按用户 2026-10-07 授权，Host 在 tmp 专用私有缓存按会话哈希目录和随机文件名保存图片，
+总量上限 512 MiB，拒绝越界和 symlink；24 小时后在后续上传时清理，系统也可能提前清理 tmp。
+AGY 1.3.0 的 stream-json 不接受 image block，Host 将缓存目录加入 AGY `--add-dir`，
+用 text 内的受限引用让其 `view_file` 读取图片。缓存目录不作为 Workspace 暴露。
+Remote 将图片投影到原生 user/message 与 session/attachment，仅返回所属 Session 引用的图片；
+历史从该 AGY transcript 的引用恢复仍有效的附件，用户文案移除内部缓存引用。
+不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
 `reject-once` / `cancel`）。有序 `session/update` 与 `session/request_permission` 经
 `agent.acp.frame` 下发。
 

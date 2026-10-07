@@ -1,13 +1,19 @@
+import { parseAcpImage } from './image-content.js'
 import { z } from 'zod'
 import { RpcError } from '../safe-error.js'
 
 const id = z.string().min(1).max(256)
 const cwd = z.string().min(1).max(4096)
 const mode = z.enum(['agent', 'plan', 'ask'])
-const promptBlock = z.object({
+const textBlock = z.object({
   type: z.literal('text'),
   text: z.string().min(1).max(256 * 1024),
 }).strict()
+
+const imageBlock = z.object({ type: z.literal('image'), mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine(value => {
+  try { parseAcpImage(value); return true } catch { return false }
+})
+const promptBlock = z.union([textBlock, imageBlock])
 
 const schemas = {
   'initialize': z.object({
@@ -30,7 +36,8 @@ const schemas = {
   }).strict(),
   'session/prompt': z.object({
     sessionId: id,
-    prompt: z.array(promptBlock).min(1).max(16),
+    backend: z.enum(['cursor', 'antigravity']).optional(),
+    prompt: z.array(promptBlock).min(1).max(16).refine(parts => parts.filter(part => part.type === 'image').length <= 4),
   }).strict(),
   'session/cancel': z.object({
     sessionId: id,

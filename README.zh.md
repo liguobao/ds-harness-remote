@@ -183,7 +183,9 @@ Codex 默认开启，也可以在 DeepSeek Remote 设置卡片关闭。高级配
 
 Remote 也可通过后端无关的 Agent ACP gateway（`agent.acp.*`）打开 Host 本机的 Cursor Agent 会话。
 Desktop 复用原生 Workspace / Session / Composer；Android 使用内存中的 Cursor 工作区投影。支持文本
-Prompt、思考/正文流式更新、中断与一次性审批；暂不支持图片 Prompt。
+Prompt、思考/正文流式更新、中断与一次性审批。Cursor 暂不支持图片 Prompt；AGY 工作区支持
+PNG/JPEG/WebP/GIF（每张 8 MiB、每次最多 4 张），图片保存到 Host 私有临时缓存，由 AGY 图片工具读取。
+历史中的图片可在 24 小时内恢复；系统提前清理 tmp 时图片将不可用。
 
 Cursor adapter **默认关闭**。在 DeepSeek Remote 设置中开启 `cursor.enabled`，在 Host 完成本机
 `agent login`（或配置 `CURSOR_API_KEY`）后重启 DSH。细节见

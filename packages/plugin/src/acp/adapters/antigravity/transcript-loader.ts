@@ -1,3 +1,4 @@
+import { AGY_IMAGE_ROOT, stripAgyImageReferences, agyImageReferences, readAgyImage } from './image-store.js'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -16,6 +17,7 @@ export interface HydratedSessionEvent {
 
 export function cleanUserPrompt(raw?: string): string {
   if (!raw) return ''
+  raw = stripAgyImageReferences(raw)
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
   if (match && match[1]) {
     return match[1].trim()
@@ -79,10 +81,12 @@ export async function loadTranscriptEvents(
       push('step/start', { turn: currentTurn, step: 1 }, time)
 
       const text = cleanUserPrompt(record.content)
+      const images = (await Promise.all(agyImageReferences(record.content ?? '').map(path => readAgyImage(conversationId, path))))
+        .filter((image): image is Record<string, unknown> => image !== undefined)
       push('user/message', {
         id: `user:${record.step_index}`,
         role: 'user',
-        content: [{ type: 'text', text }],
+        content: [...(text ? [{ type: 'text', text }] : []), ...images],
         source: { kind: 'user' },
       }, time, true)
     } else if (record.type === 'PLANNER_RESPONSE') {
@@ -210,7 +214,7 @@ export async function discoverAntigravityWorkspaces(
               if (process.platform === 'win32' && p.startsWith('/') && p.length > 2 && p[2] === ':') {
                 p = p.slice(1)
               }
-              paths.add(p)
+              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + '/')) paths.add(p)
             } catch {
               // ignore
             }
@@ -247,7 +251,7 @@ async function readTranscriptSummary(baseDir: string, conversationId: string): P
       if (!firstLine) return undefined
       const record = JSON.parse(firstLine) as StepLogRecord
       if (record.type !== 'USER_INPUT') return undefined
-      const title = cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40)
+      const title = cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40) || (agyImageReferences(record.content ?? '').length > 0 ? 'Image' : undefined)
       if (!title) return undefined
       return { conversationId, title, createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs, updatedAt: stat.mtimeMs }
     } finally {
