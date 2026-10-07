@@ -127,6 +127,10 @@ describe('RpcRouter', () => {
       name: 'CodeX',
       capability: 'codex.appserver.v1',
       available: true,
+      projectPath: '/private/workspace',
+      prompt: 'private prompt',
+      fileContent: 'private source',
+      toolOutput: 'private output',
     }]
     const router = createRouter({}, undefined, undefined, capabilities, undefined, workspaceTypes)
 
@@ -149,7 +153,7 @@ describe('RpcRouter', () => {
     const result = (response.payload as { result: Record<string, unknown> }).result
     // Guarantee no leaking of project path, prompt, file content, or tool output
     const serialized = JSON.stringify(result)
-    expect(serialized).not.toMatch(/(\/|\\)Users|(\/|\\)home|prompt|output|projectPath|cwd/i)
+    expect(serialized).not.toMatch(/(\/|\\)Users|(\/|\\)home|prompt|output|projectPath|fileContent|private|cwd/i)
     expect(Object.keys(result)).toEqual(['capabilities', 'workspaceTypes'])
     const types = result.workspaceTypes as Array<Record<string, unknown>>
     expect(types).toHaveLength(1)

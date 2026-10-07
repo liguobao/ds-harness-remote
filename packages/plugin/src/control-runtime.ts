@@ -13,6 +13,8 @@ import { ClientServerApi, HostServerApi } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
+import { codexBinaryCandidates } from './codex/domain.js'
+import { cursorBinaryCandidates } from './acp/gateway.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -351,7 +353,7 @@ export class PluginControlRuntime {
       writable: this.settings !== undefined,
       applies: 'restart',
       associations,
-      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, commandAvailable(item.command ?? '')])),
+      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, backendCommandAvailable(item.id, item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
     }
   }
@@ -390,6 +392,12 @@ export class PluginControlRuntime {
       ...(this.host === undefined ? {} : { host: this.host.hostStatus() }),
     }
   }
+}
+
+function backendCommandAvailable(backend: string, command: string): boolean {
+  const candidates = backend === 'codex' ? codexBinaryCandidates(command)
+    : backend === 'cursor' || backend === 'antigravity' ? cursorBinaryCandidates(command) : [command]
+  return candidates.some(commandAvailable)
 }
 
 function commandAvailable(command: string): boolean {

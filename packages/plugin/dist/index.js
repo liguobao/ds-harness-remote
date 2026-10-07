@@ -23447,6 +23447,4161 @@ var ControlStatusStream = class {
   }
 };
 
+// src/codex/domain.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
+import { readdir, realpath, stat as stat3 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join5, relative, resolve } from "node:path";
+
+// src/codex/app-server.ts
+import { spawn as spawn2 } from "node:child_process";
+import { Buffer as Buffer2 } from "node:buffer";
+var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
+var APP_SERVER_START_TIMEOUT_MS = 15e3;
+var MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024;
+var MAX_STDERR_CAPTURE_BYTES = 4 * 1024;
+var CodexAppServerError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "CodexAppServerError";
+  }
+};
+var CodexAppServerClient = class {
+  constructor(binary, logger, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true
+  })) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAppServer = spawnAppServer;
+  }
+  process;
+  nextId = 1;
+  pending = /* @__PURE__ */ new Map();
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  stdoutBuffer = Buffer2.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  failureNotified = false;
+  startPromise;
+  start() {
+    if (this.closed) return Promise.reject(new CodexAppServerError("CODEX_CLOSED", "The Codex domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  async call(method, params, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS) {
+    if (!this.ready) throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not ready.");
+    return this.request(method, params, timeoutMs);
+  }
+  async respond(id5, result) {
+    this.write({ id: id5, result });
+  }
+  async respondError(id5, code, message) {
+    this.write({ id: id5, error: { code, message } });
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.ready = false;
+    this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve5) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve5();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve5();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new CodexAppServerError("CODEX_STARTING", "Codex App Server is already starting.");
+    }
+    const child = this.spawnAppServer(this.binary);
+    this.process = child;
+    this.failureNotified = false;
+    this.stdoutBuffer = Buffer2.alloc(0);
+    this.stderrBytes = 0;
+    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer2.from(chunk)));
+    child.stderr.on("data", (chunk) => {
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer2.byteLength(chunk));
+    });
+    child.on("error", (error) => this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error));
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      this.failPending(new CodexAppServerError("CODEX_APP_SERVER_EXITED", "Codex App Server exited unexpectedly."));
+      if (!this.closed) {
+        this.logger?.warn("Codex App Server exited", {
+          code: code ?? "none",
+          signal: signal ?? "none",
+          stderrBytes: this.stderrBytes
+        });
+        this.notifyUnavailable("CODEX_APP_SERVER_EXITED");
+      }
+    });
+    try {
+      await this.request("initialize", {
+        clientInfo: {
+          name: "deepseek_harness_remote",
+          title: "DeepSeek Harness Remote",
+          version: PLUGIN_VERSION
+        },
+        capabilities: {
+          experimentalApi: true,
+          mcpServerOpenaiFormElicitation: false
+        }
+      }, APP_SERVER_START_TIMEOUT_MS);
+      this.write({ method: "initialized", params: {} });
+      this.ready = true;
+      this.logger?.info("Codex App Server ready");
+    } catch (error) {
+      child.kill("SIGTERM");
+      if (error instanceof CodexAppServerError) throw error;
+      throw new CodexAppServerError("CODEX_INITIALIZE_FAILED", "Codex App Server initialization failed.", { cause: error });
+    }
+  }
+  request(method, params, timeoutMs) {
+    const id5 = this.nextId++;
+    const result = new Promise((resolve5, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id5);
+        reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id5, { resolve: resolve5, reject, timer });
+    });
+    try {
+      this.write({ id: id5, method, params });
+    } catch (error) {
+      const pending = this.takePending(id5);
+      pending?.reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
+    }
+    return result;
+  }
+  write(message) {
+    const child = this.process;
+    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
+      throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not available.");
+    }
+    child.stdin.write(`${JSON.stringify(message)}
+`);
+  }
+  consumeStdout(chunk) {
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer2.concat([this.stdoutBuffer, chunk]);
+    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
+      this.handleProcessFailure(
+        "CODEX_RESPONSE_TOO_LARGE",
+        new Error("Codex App Server emitted an oversized JSONL message.")
+      );
+      return;
+    }
+    let newline = this.stdoutBuffer.indexOf(10);
+    while (newline >= 0) {
+      const line = this.stdoutBuffer.subarray(0, newline);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
+      if (line.length > 0) this.handleLine(line);
+      newline = this.stdoutBuffer.indexOf(10);
+    }
+  }
+  handleLine(line) {
+    let value;
+    try {
+      value = JSON.parse(line.toString("utf8"));
+    } catch {
+      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
+      return;
+    }
+    if (!isRecord11(value)) {
+      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
+      return;
+    }
+    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
+      const pending = this.takePending(value.id);
+      if (pending === void 0) return;
+      if ("error" in value && value.error !== void 0) {
+        pending.reject(new CodexAppServerError("CODEX_UPSTREAM_ERROR", safeUpstreamError(value.error)));
+      } else {
+        pending.resolve(value.result);
+      }
+      return;
+    }
+    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
+    const params = value.params ?? {};
+    const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
+    for (const handler of this.inboundHandlers) handler(inbound);
+  }
+  handleProcessFailure(code, cause) {
+    this.ready = false;
+    this.failPending(new CodexAppServerError(code, "Codex App Server communication failed.", { cause }));
+    const child = this.process;
+    this.process = void 0;
+    child?.kill("SIGTERM");
+    this.logger?.warn("Codex App Server communication failed", { code });
+    if (!this.closed) this.notifyUnavailable(code);
+  }
+  notifyUnavailable(code) {
+    if (this.failureNotified) return;
+    this.failureNotified = true;
+    for (const handler of this.unavailableHandlers) handler(code);
+  }
+  takePending(id5) {
+    const pending = this.pending.get(id5);
+    if (pending === void 0) return void 0;
+    this.pending.delete(id5);
+    clearTimeout(pending.timer);
+    return pending;
+  }
+  failPending(error) {
+    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
+  }
+};
+function safeUpstreamError(value) {
+  if (!isRecord11(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  const message = value.message.toLowerCase();
+  if (message.includes("active writer")) return "Codex thread already has an active writer.";
+  return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
+}
+function isRecord11(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/codex/method-policy.ts
+var id2 = external_exports.string().min(1).max(256);
+var cursor = external_exports.string().min(1).max(4096).nullable().optional();
+var textInput = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+  message: "Image data must use canonical base64."
+});
+var imageInput = external_exports.object({
+  type: external_exports.literal("image"),
+  mediaType: imageMediaType,
+  data: canonicalBase64
+}).strict();
+var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
+var projectRoot = external_exports.object({
+  path: external_exports.string().min(1).max(4096)
+}).strict();
+var schemas = {
+  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
+  "model/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    includeHidden: external_exports.boolean().optional()
+  }).strict(),
+  "project/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional()
+  }).strict(),
+  "project/create": external_exports.object({
+    name: external_exports.string().trim().min(1).max(256),
+    roots: external_exports.array(projectRoot).length(1),
+    idempotencyKey: external_exports.string().min(16).max(256)
+  }).strict(),
+  "thread/list": external_exports.object({
+    cursor,
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
+    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
+    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
+    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
+    archived: external_exports.boolean().optional(),
+    isPinned: external_exports.boolean().optional(),
+    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
+    useStateDbOnly: external_exports.boolean().optional(),
+    searchTerm: external_exports.string().max(1024).optional()
+  }).strict(),
+  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    threadId: id2,
+    beforeSeq: external_exports.number().int().nonnegative().optional(),
+    throughSeq: external_exports.number().int().min(-1).optional(),
+    maxMessages: external_exports.number().int().min(1).max(200).optional()
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "thread/start": external_exports.object({
+    cwd: external_exports.string().min(1).max(4096),
+    model: external_exports.string().min(1).max(128).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/resume": external_exports.object({
+    threadId: id2,
+    model: external_exports.string().min(1).max(128).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/fork": external_exports.object({
+    threadId: id2,
+    lastTurnId: id2.optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().trim().min(1).max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
+  "turn/start": external_exports.object({
+    threadId: id2,
+    input,
+    model: external_exports.string().min(1).max(128).optional(),
+    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
+    permissionPreset: permissionPreset.optional()
+  }).strict(),
+  "turn/steer": external_exports.object({ threadId: id2, input, expectedTurnId: id2 }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
+};
+var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
+function parseCodexCall(method, params) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
+  }
+  const schema = schemas[method];
+  const parsed = schema.safeParse(params);
+  if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
+  return { method, params: parsed.data };
+}
+function isThreadMutation(method) {
+  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
+}
+function threadIdFromParams(params) {
+  return typeof params.threadId === "string" ? params.threadId : void 0;
+}
+
+// src/codex/peer-bridge.ts
+import { Buffer as Buffer3 } from "node:buffer";
+var streamOpenSchema = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
+  threadId: external_exports.string().min(1).max(256)
+}).strict();
+var streamCloseSchema = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferOpenSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
+}).strict();
+var transferChunkSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
+}).strict();
+var transferIdSchema = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
+var MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION;
+var MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
+var INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024;
+var CodexPeerBridge = class {
+  constructor(domain, context, publish, logger) {
+    this.domain = domain;
+    this.context = context;
+    this.publish = publish;
+    this.logger = logger;
+  }
+  streams = /* @__PURE__ */ new Map();
+  incomingTransfers = /* @__PURE__ */ new Map();
+  outgoingTransfers = /* @__PURE__ */ new Map();
+  closed = false;
+  async call(input2) {
+    return this.callDomain(input2, true);
+  }
+  async callDomain(input2, logFailure) {
+    this.requireOpen();
+    try {
+      return await this.domain.call(this.context.connectionId, input2);
+    } catch (error) {
+      if (logFailure) {
+        this.logger?.warn("Codex call failed", {
+          method: safeMethod(input2),
+          code: safeErrorCode2(error)
+        });
+      }
+      throw error;
+    }
+  }
+  respond(input2) {
+    this.requireOpen();
+    return this.domain.respond(this.context.connectionId, input2);
+  }
+  async openStream(input2) {
+    this.requireOpen();
+    const params = streamOpenSchema.parse(input2);
+    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
+    if (this.streams.size >= MAX_ACTIVE_STREAMS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
+    }
+    await this.domain.call(this.context.connectionId, {
+      method: "thread/read",
+      params: { threadId: params.threadId, includeTurns: false }
+    });
+    this.streams.set(params.streamId, params.threadId);
+    return { opened: true, streamId: params.streamId, threadId: params.threadId };
+  }
+  closeStream(input2) {
+    const params = streamCloseSchema.parse(input2);
+    this.streams.delete(params.streamId);
+    return { closed: true, streamId: params.streamId };
+  }
+  openTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferOpenSchema.parse(input2);
+    if (params.totalChunks !== Math.ceil(params.totalBytes / CODEX_APP_TRANSFER_CHUNK_BYTES)) {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk count is invalid.");
+    }
+    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
+      throw new RpcError("REQUEST_CONFLICT", "The Codex transfer id is already active.");
+    }
+    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex transfers are active.", void 0, true);
+    }
+    this.incomingTransfers.set(params.transferId, {
+      totalBytes: params.totalBytes,
+      totalChunks: params.totalChunks,
+      chunks: [],
+      receivedBytes: 0,
+      touchedAt: Date.now()
+    });
+    return { opened: true, transferId: params.transferId };
+  }
+  appendTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferChunkSchema.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
+    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "Codex transfer chunks must arrive exactly once and in order.");
+    }
+    const chunk = decodeCanonicalBase64(params.data);
+    const expectedBytes = Math.min(
+      CODEX_APP_TRANSFER_CHUNK_BYTES,
+      transfer.totalBytes - params.index * CODEX_APP_TRANSFER_CHUNK_BYTES
+    );
+    if (chunk.byteLength !== expectedBytes) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk size is invalid.");
+    }
+    transfer.chunks.push(chunk);
+    transfer.receivedBytes += chunk.byteLength;
+    transfer.touchedAt = Date.now();
+    return { accepted: true, transferId: params.transferId, index: params.index };
+  }
+  async commitTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferIdSchema.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
+    this.incomingTransfers.delete(params.transferId);
+    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer is incomplete.");
+    }
+    let request;
+    try {
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks(transfer.chunks, transfer.totalBytes)));
+    } catch {
+      throw new RpcError("INVALID_MESSAGE", "The Codex transfer does not contain a valid request.");
+    }
+    let response;
+    try {
+      response = await this.callDomain(request, false);
+    } catch (error) {
+      this.logger?.warn("Codex transfer call failed", {
+        method: safeMethod(request),
+        code: safeErrorCode2(error)
+      });
+      throw error;
+    }
+    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: "inline", response };
+    if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "The Codex response exceeds the bounded transfer limit.");
+    }
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+      throw new RpcError("RATE_LIMITED", "Too many Codex response transfers are active.", void 0, true);
+    }
+    const totalChunks = Math.ceil(responseBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
+    this.outgoingTransfers.set(params.transferId, {
+      bytes: responseBytes,
+      totalChunks,
+      nextIndex: 0,
+      touchedAt: Date.now()
+    });
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+  }
+  readTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferReadSchema.parse(input2);
+    const transfer = this.outgoingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex response transfer is not active.");
+    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "Codex response chunks must be read exactly once and in order.");
+    }
+    const start = params.index * CODEX_APP_TRANSFER_CHUNK_BYTES;
+    const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
+    transfer.nextIndex += 1;
+    transfer.touchedAt = Date.now();
+    return {
+      transferId: params.transferId,
+      index: params.index,
+      data: Buffer3.from(transfer.bytes.subarray(start, end)).toString("base64")
+    };
+  }
+  closeTransfer(input2) {
+    const params = transferIdSchema.parse(input2);
+    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
+    return { closed, transferId: params.transferId };
+  }
+  hasThreadSubscription(threadId) {
+    return [...this.streams.values()].includes(threadId);
+  }
+  removeThreadSubscriptions(threadId) {
+    for (const [streamId, targetThreadId] of this.streams) {
+      if (targetThreadId === threadId) this.streams.delete(streamId);
+    }
+  }
+  async publishInbound(threadId, frame) {
+    if (this.closed) return;
+    const streamIds = [...this.streams.entries()].filter(([, targetThreadId]) => targetThreadId === threadId).map(([streamId]) => streamId);
+    for (const streamId of streamIds) {
+      const data2 = { streamId, frame };
+      if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+        this.streams.delete(streamId);
+        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
+        this.logger?.warn("Codex stream closed after oversized frame", { streamId });
+        continue;
+      }
+      await this.publish("codex.app.frame", data2);
+    }
+  }
+  async failStreams(reason = "failed") {
+    if (this.closed) return;
+    const streamIds = [...this.streams.keys()];
+    this.streams.clear();
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
+      streamId,
+      reason
+    }).catch(() => void 0)));
+  }
+  async closeAll() {
+    if (this.closed) return;
+    this.closed = true;
+    const streamIds = [...this.streams.keys()];
+    this.streams.clear();
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
+      streamId,
+      reason: "peer-disconnected"
+    }).catch(() => void 0)));
+    await this.domain.detachPeer(this.context.connectionId);
+  }
+  pruneTransfers() {
+    const staleBefore = Date.now() - TRANSFER_IDLE_MS;
+    for (const [id5, transfer] of this.incomingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id5);
+    }
+    for (const [id5, transfer] of this.outgoingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id5);
+    }
+  }
+  requireOpen() {
+    if (this.closed) throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
+  }
+};
+function decodeCanonicalBase64(value) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
+  }
+  const decoded = Buffer3.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
+  }
+  return decoded;
+}
+function isRecord12(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function safeErrorCode2(error) {
+  if (isRecord12(error) && typeof error.code === "string") return error.code;
+  return "UNKNOWN";
+}
+function safeMethod(input2) {
+  return isRecord12(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+}
+function concatChunks(chunks, totalBytes) {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+// src/codex/domain.ts
+var APPROVAL_TTL_MS = 5 * 6e4;
+var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
+var CODEX_PAGE_LIMIT2 = 100;
+var MAX_CODEX_PAGES2 = 32;
+var CODEX_HISTORY_PAGE_LIMIT = 25;
+var MAX_CODEX_HISTORY_PAGES = 64;
+var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
+var CodexRemoteDomain = class {
+  constructor(config, logger, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
+    this.config = config;
+    this.logger = logger;
+    this.createAppServer = createAppServer;
+    this.restartDelaysMs = restartDelaysMs;
+  }
+  appServer;
+  unsubscribeInbound;
+  unsubscribeUnavailable;
+  peers = /* @__PURE__ */ new Map();
+  peerDeviceIds = /* @__PURE__ */ new Map();
+  turnOwners = /* @__PURE__ */ new Map();
+  approvals = /* @__PURE__ */ new Map();
+  permissionPresets = /* @__PURE__ */ new Map();
+  approvalExpiryTimer;
+  restartTimer;
+  restartAttempt = 0;
+  available = false;
+  closed = false;
+  state = "disabled";
+  unavailableCode;
+  startPromise;
+  start() {
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  async startOnce() {
+    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
+    if (!this.config.enabled) return;
+    try {
+      this.state = "starting";
+      await this.launchAppServer();
+    } catch (error) {
+      this.available = false;
+      this.state = "unavailable";
+      this.unavailableCode = errorCode2(error);
+      await this.disposeAppServer(this.appServer);
+      this.logger.warn("Codex Remote domain unavailable", { code: this.unavailableCode });
+    }
+  }
+  isAvailable() {
+    return this.available && this.appServer?.isReady() === true;
+  }
+  status() {
+    return {
+      enabled: this.config.enabled,
+      available: this.isAvailable(),
+      state: this.state,
+      restartAttempt: this.restartAttempt,
+      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
+    };
+  }
+  /** Resolve a thread cwd for Host-owned workspace/terminal carriers. */
+  async resolveThreadWorkspace(connectionId, threadId) {
+    if (!this.peers.has(connectionId)) throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available on this connection.");
+    try {
+      const known = await this.readKnownThread(threadId);
+      return known.cwd;
+    } catch (error) {
+      if (error instanceof RpcError && error.code === "CODEX_THREAD_NOT_ALLOWED") {
+        throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
+      }
+      throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
+    }
+  }
+  createPeer(context, publish) {
+    const bridge = new CodexPeerBridge(this, context, publish, this.logger);
+    this.peers.set(context.connectionId, bridge);
+    this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
+    return bridge;
+  }
+  async call(connectionId, input2) {
+    const envelope = parseCallEnvelope(input2);
+    const call = parseCodexCall(envelope.method, envelope.params);
+    this.requireAppServer();
+    if (call.method === "account/read") {
+      return sanitizeAccount(await this.callUpstream(call.method, call.params));
+    }
+    if (call.method === "project/list") {
+      return sanitizeProjectList(await this.callUpstream(call.method, call.params));
+    }
+    if (call.method === "project/create") {
+      const roots = call.params.roots;
+      const path = await this.requireNewCodexProjectPath(roots[0].path);
+      return sanitizeProjectCreate(await this.callUpstream(call.method, {
+        name: call.params.name,
+        roots: [{ path }],
+        idempotencyKey: call.params.idempotencyKey
+      }));
+    }
+    if (call.method === "thread/list") {
+      const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
+      return filterThreadListByWorkspaceAuthority(
+        result,
+        await this.readWorkspaceAuthority(result.data)
+      );
+    }
+    if (call.method === "thread/start") {
+      const cwd2 = await this.requireCodexWorkspacePath(call.params.cwd);
+      const permission = codexPermission(call.params, "workspace-write");
+      const result = await this.callUpstream(call.method, {
+        ...permission.params,
+        cwd: cwd2,
+        ...codexThreadPermissionParams(permission),
+        serviceName: "deepseek_harness_remote"
+      });
+      if (extractThread(result)?.id === void 0) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
+      }
+      this.rememberPermission(extractThread(result).id, result);
+      return result;
+    }
+    const threadId = threadIdFromParams(call.params);
+    if (call.method === "dsh/sessionHistory") {
+      const thread = await this.readThreadForHistory(connectionId, threadId);
+      const page = paginateCodexNativeHistory(
+        projectCodexNativeHistory(thread, `codex:${threadId}`),
+        {
+          beforeSeq: optionalInteger3(call.params.beforeSeq),
+          throughSeq: optionalInteger3(call.params.throughSeq),
+          maxMessages: optionalInteger3(call.params.maxMessages)
+        }
+      );
+      const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
+      return {
+        ...page,
+        ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
+        permissionPreset: this.permissionPresets.get(threadId) ?? null
+      };
+    }
+    if (call.method === "dsh/directoryList") {
+      return this.listCodexDirectory(call.params.path);
+    }
+    const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
+    if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
+      const owner = this.turnOwners.get(threadId);
+      if (owner !== void 0 && owner.connectionId !== connectionId) {
+        throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
+      }
+      return this.changeThreadPermission(threadId, call.params, allowedThread);
+    }
+    if (call.method === "thread/read") {
+      return this.callUpstream(call.method, call.params);
+    }
+    if (call.method === "thread/unsubscribe") {
+      const bridge = this.peers.get(connectionId);
+      bridge?.removeThreadSubscriptions(threadId);
+      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
+      return this.callUpstream(call.method, call.params);
+    }
+    let claimed = false;
+    let previousOwner;
+    if (isThreadMutation(call.method) && threadId !== void 0) {
+      const claim = this.claimTurn(
+        threadId,
+        connectionId,
+        call.method,
+        typeof call.params.turnId === "string" ? call.params.turnId : void 0
+      );
+      claimed = claim.claimed;
+      previousOwner = claim.previous;
+    }
+    try {
+      const permission = codexPermission(call.params);
+      const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
+        ...permission.params,
+        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexThreadPermissionParams(permission),
+        excludeTurns: true
+      } : call.method === "thread/fork" && allowedThread !== void 0 ? {
+        ...permission.params,
+        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexThreadPermissionParams(permission)
+      } : call.method === "turn/start" ? {
+        ...permission.params,
+        ...allowedThread?.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
+        ...codexTurnPermissionParams(permission, allowedThread?.cwd)
+      } : permission.params;
+      let result;
+      try {
+        result = await this.callUpstream(call.method, upstreamParams);
+      } catch (error) {
+        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
+          return { thread: allowedThread.thread };
+        }
+        throw error;
+      }
+      if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
+        await this.assertResultThreadAllowed(result);
+      }
+      if (call.method === "thread/resume" || call.method === "thread/fork") {
+        const resultId = extractThread(result)?.id;
+        if (typeof resultId === "string") {
+          this.rememberPermission(resultId, result);
+          if (call.params.permissionPreset !== void 0) await this.publishPermission(resultId, result);
+        }
+      }
+      if (call.method === "turn/start" && threadId !== void 0) {
+        this.rememberTurnId(threadId, connectionId, extractTurnId(result));
+        if (call.params.permissionPreset !== void 0) {
+          await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
+        }
+      }
+      return result;
+    } catch (error) {
+      if (claimed && threadId !== void 0) {
+        if (previousOwner === void 0) this.turnOwners.delete(threadId);
+        else this.turnOwners.set(threadId, previousOwner);
+      }
+      throw mapAppServerError(error);
+    }
+  }
+  async respond(connectionId, input2) {
+    await this.expireApprovals();
+    const params = parseRespond(input2);
+    const approval = this.approvals.get(params.requestHandle);
+    if (approval === void 0 || approval.connectionId !== connectionId) {
+      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
+    }
+    this.approvals.delete(params.requestHandle);
+    this.scheduleApprovalExpiry();
+    await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
+    return { resolved: true };
+  }
+  async detachPeer(connectionId) {
+    const bridge = this.peers.get(connectionId);
+    if (bridge !== void 0) this.peers.delete(connectionId);
+    this.peerDeviceIds.delete(connectionId);
+    for (const [threadId, owner] of this.turnOwners) {
+      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId);
+    }
+    const appServer = this.appServer;
+    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
+    for (const [handle, approval] of pending) {
+      this.approvals.delete(handle);
+      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    this.scheduleApprovalExpiry();
+  }
+  async reconfigure(config) {
+    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
+    if (JSON.stringify(this.config) === JSON.stringify(config)) return;
+    this.config = config;
+    this.available = false;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    await this.startPromise?.catch(() => void 0);
+    this.available = false;
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    this.approvals.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    await this.disposeAppServer(this.appServer);
+    this.restartAttempt = 0;
+    this.unavailableCode = void 0;
+    this.state = "disabled";
+    await this.start();
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.available = false;
+    this.state = this.config.enabled ? "unavailable" : "disabled";
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    for (const bridge of [...this.peers.values()]) await bridge.closeAll();
+    this.peers.clear();
+    this.peerDeviceIds.clear();
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    this.approvals.clear();
+    this.unsubscribeInbound?.();
+    this.unsubscribeInbound = void 0;
+    this.unsubscribeUnavailable?.();
+    this.unsubscribeUnavailable = void 0;
+    await this.appServer?.close();
+    this.appServer = void 0;
+  }
+  async launchAppServer() {
+    let lastError;
+    for (const binary of codexBinaryCandidates(this.config.binary)) {
+      try {
+        await this.launchAppServerCandidate(binary);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!canTryNextBinary(error)) throw error;
+      }
+    }
+    throw lastError ?? new RpcError("CODEX_START_FAILED", "Codex App Server could not be started.");
+  }
+  async launchAppServerCandidate(binary) {
+    const appServer = this.createAppServer(binary, this.logger);
+    this.appServer = appServer;
+    this.unsubscribeInbound = appServer.onInbound((message) => {
+      void this.handleInbound(message).catch((error) => {
+        this.logger.warn("Codex inbound handling failed", { code: errorCode2(error) });
+      });
+    });
+    this.unsubscribeUnavailable = appServer.onUnavailable((code) => {
+      if (this.available && this.appServer === appServer) {
+        void this.handleAppServerUnavailable(appServer, code);
+      }
+    });
+    try {
+      await appServer.start();
+      const account = await appServer.call("account/read", { refreshToken: false }, 15e3);
+      if (!accountCanRun(account)) {
+        throw new RpcError("CODEX_AUTH_REQUIRED", "Codex is not signed in on this Host.");
+      }
+      if (this.closed || this.appServer !== appServer) {
+        await appServer.close().catch(() => void 0);
+        return;
+      }
+      this.available = true;
+      this.state = "ready";
+      this.restartAttempt = 0;
+      this.unavailableCode = void 0;
+      this.logger.info("Codex Remote domain ready");
+    } catch (error) {
+      await this.disposeAppServer(appServer);
+      throw error;
+    }
+  }
+  async handleAppServerUnavailable(appServer, code) {
+    if (this.closed || this.appServer !== appServer) return;
+    this.available = false;
+    this.state = "restarting";
+    this.unavailableCode = code;
+    this.turnOwners.clear();
+    this.permissionPresets.clear();
+    this.approvals.clear();
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    await this.disposeAppServer(appServer);
+    this.scheduleRestart();
+  }
+  scheduleRestart() {
+    if (this.closed || this.restartTimer !== void 0) return;
+    if (this.restartAttempt >= this.restartDelaysMs.length) {
+      this.state = "unavailable";
+      this.logger.warn("Codex App Server restart attempts exhausted", { attempts: this.restartAttempt });
+      return;
+    }
+    const delayMs = Math.max(0, this.restartDelaysMs[this.restartAttempt] ?? 0);
+    this.restartAttempt += 1;
+    this.state = "restarting";
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = void 0;
+      void this.restartAfterFailure();
+    }, delayMs);
+    this.restartTimer.unref?.();
+    this.logger.warn("Codex App Server restart scheduled", { attempt: this.restartAttempt, delayMs });
+  }
+  async restartAfterFailure() {
+    if (this.closed) return;
+    try {
+      await this.launchAppServer();
+    } catch (error) {
+      this.available = false;
+      this.state = "restarting";
+      this.unavailableCode = errorCode2(error);
+      this.logger.warn("Codex App Server restart failed", {
+        attempt: this.restartAttempt,
+        code: this.unavailableCode
+      });
+      this.scheduleRestart();
+    }
+  }
+  async disposeAppServer(appServer) {
+    if (appServer === void 0 || this.appServer !== appServer) return;
+    this.unsubscribeInbound?.();
+    this.unsubscribeInbound = void 0;
+    this.unsubscribeUnavailable?.();
+    this.unsubscribeUnavailable = void 0;
+    this.appServer = void 0;
+    await appServer.close().catch(() => void 0);
+  }
+  async handleInbound(message) {
+    if (!this.available) return;
+    if (message.kind === "request") {
+      await this.handleServerRequest(message);
+      return;
+    }
+    const threadId = extractThreadId(message.params);
+    if (message.method === "thread/settings/updated" && threadId !== void 0) {
+      this.rememberPermission(threadId, message.params);
+    }
+    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
+    if (message.method === "turn/completed" && threadId !== void 0) this.turnOwners.delete(threadId);
+    if (message.method === "turn/started" && threadId !== void 0) {
+      const owner = this.turnOwners.get(threadId);
+      const turnId = extractTurnId(message.params);
+      if (owner !== void 0) {
+        this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
+      }
+    }
+    if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
+    if (threadId === void 0) return;
+    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
+      method: message.method,
+      params: message.params
+    })));
+  }
+  rememberPermission(threadId, value) {
+    const preset = codexPermissionPresetFromResponse(value);
+    if (preset === void 0) this.permissionPresets.delete(threadId);
+    else this.permissionPresets.set(threadId, preset);
+  }
+  async changeThreadPermission(threadId, params, allowed) {
+    const permission = codexPermission(params);
+    const settings = {
+      ...codexTurnPermissionParams(permission, allowed.cwd),
+      ...params.model === void 0 ? {} : { model: params.model }
+    };
+    let result;
+    try {
+      await this.callUpstream("thread/settings/update", { threadId, ...settings });
+      result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
+    } catch {
+      result = await this.callUpstream("thread/resume", {
+        ...permission.params,
+        ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
+        ...codexThreadPermissionParams(permission),
+        excludeTurns: true
+      });
+      await this.assertResultThreadAllowed(result);
+      if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
+        await this.callUpstream("thread/settings/update", { threadId, ...settings });
+        result = { ...isRecord13(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+      }
+    }
+    await this.publishPermission(threadId, result);
+    return result;
+  }
+  async publishPermission(threadId, value) {
+    const source = isRecord13(value) ? value : {};
+    const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
+    await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
+  }
+  async handleServerRequest(message) {
+    const appServer = this.requireAppServer();
+    await this.expireApprovals();
+    if (message.method !== "item/commandExecution/requestApproval" && message.method !== "item/fileChange/requestApproval") {
+      await appServer.respondError(message.id, -32601, "This Remote client does not support the server request.");
+      return;
+    }
+    const threadId = extractThreadId(message.params);
+    const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
+    const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
+    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
+      await appServer.respond(message.id, { decision: "decline" });
+      return;
+    }
+    const requestHandle = randomUUID2();
+    this.approvals.set(requestHandle, {
+      upstreamId: message.id,
+      connectionId: owner.connectionId,
+      threadId,
+      method: message.method,
+      expiresAt: Date.now() + APPROVAL_TTL_MS
+    });
+    this.scheduleApprovalExpiry();
+    try {
+      await peer.publishInbound(threadId, {
+        method: message.method,
+        params: sanitizeApprovalParams(message.params, requestHandle)
+      });
+    } catch (error) {
+      this.approvals.delete(requestHandle);
+      this.scheduleApprovalExpiry();
+      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
+      throw error;
+    }
+  }
+  async readKnownThread(threadId) {
+    const authority = await this.readWorkspaceAuthority();
+    let result;
+    try {
+      result = await this.callUpstream("thread/read", { threadId, includeTurns: false });
+    } catch (error) {
+      if (!isHistoryReadRecoverable(error)) throw error;
+      const listed = await this.findKnownThreadInList(threadId, authority);
+      if (listed === void 0) {
+        throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+      }
+      return { thread: listed, ...typeof listed.cwd === "string" && listed.cwd.length > 0 ? { cwd: listed.cwd } : {} };
+    }
+    const thread = extractThread(result);
+    if (thread === void 0 || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
+      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+    }
+    return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
+  }
+  async readThreadForHistory(connectionId, threadId) {
+    const { thread: metadata } = await this.readKnownThread(threadId);
+    try {
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
+    } catch (fullError) {
+      if (!isHistoryReadRecoverable(fullError)) throw fullError;
+      this.logHistoryFallback(connectionId, "turns-full", fullError);
+    }
+    try {
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
+    } catch (summaryError) {
+      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
+      this.logHistoryFallback(connectionId, "turns-summary", summaryError);
+    }
+    try {
+      const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
+      const legacyThread = extractThread(legacyResult);
+      if (legacyThread === void 0 || legacyThread.id !== threadId) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
+      }
+      return legacyThread;
+    } catch (legacyError) {
+      if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
+      this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
+      return { ...metadata, turns: [] };
+    }
+  }
+  async readThreadTurns(connectionId, threadId, itemsView) {
+    const turns = [];
+    let cursor2;
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream("thread/turns/list", {
+        threadId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: "asc",
+        itemsView,
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      });
+      const pageResult = isRecord13(result) ? result : {};
+      for (const rawTurn of array3(pageResult.data)) {
+        if (!isRecord13(rawTurn)) continue;
+        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
+        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array3(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array3(rawTurn.items));
+        turns.push({ ...rawTurn, items });
+      }
+      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
+      if (cursor2 === void 0) break;
+    }
+    return turns;
+  }
+  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
+    const items = [];
+    let cursor2;
+    try {
+      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+        const result = await this.callUpstream("thread/items/list", {
+          threadId,
+          turnId,
+          limit: CODEX_HISTORY_PAGE_LIMIT,
+          sortDirection: "asc",
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        });
+        const pageResult = isRecord13(result) ? result : {};
+        for (const entry of array3(pageResult.data)) {
+          if (isRecord13(entry) && entry.item !== void 0) items.push(entry.item);
+        }
+        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    } catch (error) {
+      if (!isHistoryReadRecoverable(error)) throw error;
+      this.logHistoryFallback(connectionId, "items", error);
+      return fallbackItems;
+    }
+    return items;
+  }
+  logHistoryFallback(connectionId, stage, error) {
+    this.logger.warn("Codex history read fallback", {
+      connectionId: maskId(connectionId),
+      stage,
+      code: errorCode2(error)
+    });
+  }
+  async assertResultThreadAllowed(result) {
+    const thread = extractThread(result);
+    if (thread === void 0 || typeof thread.id !== "string") {
+      throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
+    }
+    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
+      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
+    }
+  }
+  claimTurn(threadId, connectionId, method, turnId) {
+    const owner = this.turnOwners.get(threadId);
+    const peerDeviceId = this.peerDeviceIds.get(connectionId) ?? connectionId;
+    const nextOwner = { connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } };
+    if (method === "turn/interrupt") {
+      if (owner === void 0) {
+        this.turnOwners.set(threadId, nextOwner);
+        return { claimed: true };
+      }
+      if (owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
+        throw new RpcError("CODEX_TURN_OWNED", "Only the connection that started this Codex turn can interrupt it.");
+      }
+      if (owner.connectionId !== connectionId) {
+        this.turnOwners.set(threadId, { ...owner, connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } });
+        return { claimed: true, previous: owner };
+      }
+      if (turnId !== void 0 && owner.turnId === void 0) this.turnOwners.set(threadId, { ...owner, turnId });
+      return { claimed: false };
+    }
+    if (owner !== void 0 && owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
+      throw new RpcError("CODEX_TURN_OWNED", "Another Remote connection owns the active Codex turn.");
+    }
+    if (owner?.connectionId === connectionId) return { claimed: false };
+    this.turnOwners.set(threadId, owner === void 0 ? nextOwner : { ...owner, connectionId, peerDeviceId });
+    return { claimed: true, previous: owner };
+  }
+  rememberTurnId(threadId, connectionId, turnId) {
+    if (turnId === void 0) return;
+    const owner = this.turnOwners.get(threadId);
+    if (owner === void 0 || owner.connectionId !== connectionId) return;
+    this.turnOwners.set(threadId, { ...owner, turnId });
+  }
+  hasSubscriber(threadId) {
+    return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
+  }
+  resolveUpstreamApproval(params) {
+    if (!isRecord13(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    for (const [handle, approval] of this.approvals) {
+      if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
+    }
+  }
+  async expireApprovals() {
+    const now = Date.now();
+    const appServer = this.appServer;
+    for (const [handle, approval] of this.approvals) {
+      if (approval.expiresAt > now) continue;
+      this.approvals.delete(handle);
+      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    this.scheduleApprovalExpiry();
+  }
+  scheduleApprovalExpiry() {
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    const nextExpiry = Math.min(...[...this.approvals.values()].map((approval) => approval.expiresAt));
+    if (!Number.isFinite(nextExpiry)) return;
+    this.approvalExpiryTimer = setTimeout(() => {
+      this.approvalExpiryTimer = void 0;
+      void this.expireApprovals().catch((error) => {
+        this.logger.warn("Codex approval expiry failed", { code: errorCode2(error) });
+      });
+    }, Math.max(0, nextExpiry - Date.now()));
+    this.approvalExpiryTimer.unref?.();
+  }
+  requireAppServer() {
+    if (!this.config.enabled || !this.isAvailable() || this.appServer === void 0) {
+      throw new RpcError("CODEX_UNAVAILABLE", "Codex Remote is disabled or unavailable on this Host.");
+    }
+    return this.appServer;
+  }
+  async callUpstream(method, params) {
+    try {
+      return await this.requireAppServer().call(method, params);
+    } catch (error) {
+      throw mapAppServerError(error);
+    }
+  }
+  async readWorkspaceAuthority(listedThreads) {
+    const projectIds = /* @__PURE__ */ new Set();
+    const roots = [];
+    let cursor2;
+    try {
+      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+        const result = sanitizeProjectList(await this.callUpstream("project/list", {
+          limit: CODEX_PAGE_LIMIT2,
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        }));
+        for (const project of result.data) {
+          const projectRoots = project.roots.map((root) => root.path).filter((path) => isAbsolute2(path));
+          if (projectRoots.length === 0) continue;
+          projectIds.add(project.id);
+          roots.push(...projectRoots);
+        }
+        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    } catch (error) {
+      if (!isProjectListFallbackError(error)) throw error;
+    }
+    if (roots.length > 0) return { projectIds, roots };
+    const threads = listedThreads === void 0 ? [] : [...listedThreads];
+    if (listedThreads === void 0) {
+      cursor2 = void 0;
+      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+        const result = sanitizeThreadList(await this.callUpstream("thread/list", {
+          limit: CODEX_PAGE_LIMIT2,
+          sortKey: "updated_at",
+          sortDirection: "desc",
+          archived: false,
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        }));
+        threads.push(...result.data);
+        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+        if (cursor2 === void 0) break;
+      }
+    }
+    for (const workspace of deriveCodexCwdWorkspaces(threads)) {
+      if (isAbsolute2(workspace.path)) roots.push(workspace.path);
+    }
+    return { projectIds, roots };
+  }
+  async findKnownThreadInList(threadId, authority) {
+    let cursor2;
+    for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
+      const result = sanitizeThreadList(await this.callUpstream("thread/list", {
+        limit: 100,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        archived: false,
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      }));
+      const thread = result.data.find((item) => item.id === threadId);
+      if (thread !== void 0) {
+        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : void 0;
+      }
+      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+      if (cursor2 === void 0) break;
+    }
+    return void 0;
+  }
+  async requireCodexWorkspacePath(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const paths = await this.listCodexWorkspacePaths();
+    const lexicalCandidate = resolve(path);
+    let candidate;
+    try {
+      candidate = await realpath(path);
+      if (!(await stat3(candidate)).isDirectory()) throw new Error("not a directory");
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    for (const root of paths.values()) {
+      try {
+        if (!containsCodexPath(resolve(root), lexicalCandidate)) continue;
+        const canonicalRoot = await realpath(root);
+        if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
+      } catch {
+      }
+    }
+    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+  }
+  async requireNewCodexProjectPath(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
+    }
+    try {
+      const canonical = await realpath(resolve(path));
+      if (!(await stat3(canonical)).isDirectory()) throw new Error("not a directory");
+      return canonical;
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
+    }
+  }
+  async listCodexDirectory(path) {
+    const target2 = await this.resolveCodexDirectory(path);
+    const rows = await readdir(target2.path, { withFileTypes: true }).catch(() => void 0);
+    if (rows === void 0) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const entries = [];
+    for (const row of rows) {
+      const child = resolve(target2.path, row.name);
+      let directory = row.isDirectory();
+      if (!directory && row.isSymbolicLink()) {
+        directory = await stat3(child).then((value) => value.isDirectory()).catch(() => false);
+      }
+      if (!directory) continue;
+      try {
+        const canonicalChild = await realpath(child);
+        if (!(await stat3(canonicalChild)).isDirectory()) continue;
+        if (!containsCodexPath(target2.canonicalRoot, canonicalChild)) continue;
+      } catch {
+        continue;
+      }
+      entries.push({
+        name: row.name,
+        path: child,
+        hidden: process.platform !== "win32" && row.name.startsWith(".")
+      });
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name, void 0, { sensitivity: "base" }));
+    return {
+      path: target2.path,
+      home: target2.root,
+      crumbs: codexDirectoryCrumbs(target2.root, target2.path),
+      entries: entries.slice(0, CODEX_DIRECTORY_ENTRY_LIMIT),
+      truncated: entries.length > CODEX_DIRECTORY_ENTRY_LIMIT
+    };
+  }
+  async resolveCodexDirectory(path) {
+    if (!isAbsolute2(path)) {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    const authority = await this.readWorkspaceAuthority();
+    const lexicalCandidate = resolve(path);
+    let canonicalCandidate;
+    try {
+      canonicalCandidate = await realpath(path);
+      if (!(await stat3(canonicalCandidate)).isDirectory()) throw new Error("not a directory");
+    } catch {
+      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+    }
+    for (const root of authority.roots) {
+      try {
+        const lexicalRoot = resolve(root);
+        if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
+        const canonicalRoot = await realpath(root);
+        if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
+          return { path: lexicalCandidate, root: lexicalRoot, canonicalRoot };
+        }
+      } catch {
+      }
+    }
+    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
+  }
+  async listCodexWorkspacePaths() {
+    const paths = /* @__PURE__ */ new Map();
+    const authority = await this.readWorkspaceAuthority();
+    for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root);
+    return paths;
+  }
+};
+function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2()) {
+  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  const bundledCandidates = [
+    "/Applications/ChatGPT.app",
+    join5(userHome, "Applications", "ChatGPT.app")
+  ].flatMap((chatGptApp) => {
+    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
+    try {
+      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
+      if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+        return [];
+      }
+      const candidate = join5(codexCli, manifest.entrypoint);
+      if (!existsSync2(candidate)) return [];
+      accessSync(candidate, constants.X_OK);
+      return [candidate];
+    } catch {
+      return [];
+    }
+  });
+  return [.../* @__PURE__ */ new Set([
+    ...bundledCandidates,
+    "/Applications/ChatGPT.app/Contents/Resources/codex",
+    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+    configured
+  ])];
+}
+function parseCallEnvelope(input2) {
+  if (!isRecord13(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
+  }
+  return { method: input2.method, params: input2.params };
+}
+function parseRespond(input2) {
+  if (!isRecord13(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
+    throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
+  }
+  return input2;
+}
+function accountCanRun(result) {
+  if (!isRecord13(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord13(result.account);
+}
+function sanitizeAccount(result) {
+  if (!isRecord13(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord13(result.account) ? result.account : void 0;
+  return {
+    authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
+    requiresOpenaiAuth: result.requiresOpenaiAuth === true,
+    ...account === void 0 ? {} : {
+      account: {
+        ...typeof account.type === "string" ? { type: account.type } : {},
+        ...typeof account.planType === "string" ? { planType: account.planType } : {}
+      }
+    }
+  };
+}
+function sanitizeThreadList(result) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
+  }
+  const data2 = result.data.flatMap((value) => {
+    if (!isRecord13(value) || typeof value.id !== "string") return [];
+    return [{
+      id: value.id,
+      ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
+      ...typeof value.projectId === "string" ? { projectId: value.projectId } : {},
+      ...typeof value.name === "string" ? { name: value.name } : {},
+      ...typeof value.preview === "string" ? { preview: value.preview } : {},
+      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
+      ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
+      ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
+      ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
+      ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
+      ...isRecord13(value.status) ? { status: value.status } : {}
+    }];
+  });
+  return {
+    data: data2,
+    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null },
+    ...typeof result.backwardsCursor === "string" && result.backwardsCursor.length > 0 ? { backwardsCursor: result.backwardsCursor } : {}
+  };
+}
+function filterThreadListByWorkspaceAuthority(result, authority) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
+  }
+  return {
+    ...result,
+    data: result.data.map((record8) => isRecord13(record8) ? record8 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+  };
+}
+function sanitizeProject(value) {
+  if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
+    const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    return path === void 0 || !isAbsolute2(path) ? [] : [{ path }];
+  }) : [];
+  if (roots.length === 0) return void 0;
+  return {
+    id: value.id,
+    name: value.name,
+    roots,
+    ...typeof value.position === "number" && Number.isFinite(value.position) ? { position: value.position } : {},
+    ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
+    ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {}
+  };
+}
+function sanitizeProjectList(result) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
+  }
+  const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
+  return {
+    data: data2,
+    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null }
+  };
+}
+function sanitizeProjectCreate(result) {
+  const project = isRecord13(result) ? sanitizeProject(result.project) : void 0;
+  if (project === void 0) {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
+  }
+  return { project };
+}
+function isThreadAllowedByWorkspaceAuthority(thread, authority) {
+  const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
+  if (projectId !== void 0 && authority.projectIds.has(projectId)) return true;
+  const cwd2 = typeof thread.cwd === "string" ? thread.cwd : void 0;
+  return cwd2 !== void 0 && authority.roots.some((root) => containsCodexPath(root, cwd2));
+}
+function containsCodexPath(root, candidate) {
+  const normalizedRoot = normalizeCodexPathForCompare(root);
+  const normalizedCandidate = normalizeCodexPathForCompare(candidate);
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
+}
+function normalizeCodexPathForCompare(path) {
+  return path.replace(/[\\/]+$/u, "") || path;
+}
+function codexDirectoryCrumbs(root, path) {
+  const crumbs2 = [{ name: basename2(root) || root, path: root, hidden: false }];
+  const remainder = relative(root, path);
+  if (remainder === "") return crumbs2;
+  let current = root;
+  for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
+    current = resolve(current, segment);
+    crumbs2.push({ name: segment, path: current, hidden: false });
+  }
+  return crumbs2;
+}
+function extractThread(result) {
+  return isRecord13(result) && isRecord13(result.thread) ? result.thread : void 0;
+}
+function extractTurnId(result) {
+  if (!isRecord13(result)) return void 0;
+  if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
+  if (isRecord13(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  return void 0;
+}
+function extractThreadId(params) {
+  if (!isRecord13(params)) return void 0;
+  if (typeof params.threadId === "string") return params.threadId;
+  if (isRecord13(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord13(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  return void 0;
+}
+function optionalInteger3(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
+}
+function codexPermission(params, fallbackPreset) {
+  const { permissionPreset: permissionPreset2, ...rest } = params;
+  const preset = permissionPreset2 === "workspace-write" || permissionPreset2 === "danger-full-access" ? permissionPreset2 : fallbackPreset;
+  if (preset === void 0) return { params: mapCodexImageInputs(rest) };
+  const fullAccess = preset === "danger-full-access";
+  return {
+    params: mapCodexImageInputs(rest),
+    approvalPolicy: fullAccess ? "never" : "on-request",
+    sandbox: fullAccess ? "danger-full-access" : "workspace-write"
+  };
+}
+function codexThreadPermissionParams(permission) {
+  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
+  return {
+    approvalPolicy: permission.approvalPolicy,
+    sandbox: permission.sandbox
+  };
+}
+function codexTurnPermissionParams(permission, cwd2) {
+  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
+  return {
+    approvalPolicy: permission.approvalPolicy,
+    sandboxPolicy: permission.sandbox === "danger-full-access" ? { type: "dangerFullAccess" } : {
+      type: "workspaceWrite",
+      writableRoots: cwd2 === void 0 ? [] : [cwd2],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false
+    }
+  };
+}
+function mapCodexImageInputs(params) {
+  if (!Array.isArray(params.input)) return params;
+  return {
+    ...params,
+    input: params.input.map((value) => {
+      if (!isRecord13(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
+    })
+  };
+}
+function sanitizeApprovalParams(params, requestHandle) {
+  if (!isRecord13(params)) return { requestHandle };
+  const safe = { ...params };
+  delete safe.proposedExecpolicyAmendment;
+  delete safe.additionalPermissions;
+  safe.availableDecisions = ["accept", "decline", "cancel"];
+  safe.requestHandle = requestHandle;
+  return safe;
+}
+function mapAppServerError(error) {
+  if (error instanceof RpcError) return error;
+  if (error instanceof CodexAppServerError) {
+    if (error.code === "CODEX_UPSTREAM_ERROR" && isActiveWriterMessage(error.message)) {
+      return new RpcError("CODEX_THREAD_BUSY", "The selected CodeX thread is already active in another CodeX client.");
+    }
+    return new RpcError(error.code, error.message, void 0, error.code === "CODEX_REQUEST_TIMEOUT");
+  }
+  return new RpcError("CODEX_UPSTREAM_ERROR", "Codex App Server could not complete the request.");
+}
+function errorCode2(error) {
+  if (error instanceof RpcError || error instanceof CodexAppServerError) return error.code;
+  return "CODEX_START_FAILED";
+}
+function isHistoryReadRecoverable(error) {
+  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR", "CODEX_REQUEST_TIMEOUT", "CODEX_THREAD_BUSY"].includes(error.code);
+}
+function isProjectListFallbackError(error) {
+  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
+}
+function canTryNextBinary(error) {
+  return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
+}
+function isRecord13(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function array3(value) {
+  return Array.isArray(value) ? value : [];
+}
+function maskId(value) {
+  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
+}
+function isActiveWriterMessage(message) {
+  return message.toLowerCase().includes("active writer");
+}
+
+// src/acp/gateway.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
+import { readdir as readdir2, realpath as realpath2, stat as stat4 } from "node:fs/promises";
+import { homedir as homedir5 } from "node:os";
+import { basename as basename4, isAbsolute as isAbsolute3, join as join9, relative as relative2, resolve as resolve2 } from "node:path";
+
+// src/acp/adapters/cursor-process.ts
+import { spawn as spawn3 } from "node:child_process";
+import { Buffer as Buffer4 } from "node:buffer";
+var ACP_REQUEST_TIMEOUT_MS = 6e4;
+var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
+var ACP_START_TIMEOUT_MS = 2e4;
+var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
+var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
+var CursorAcpError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "CursorAcpError";
+  }
+};
+var CursorAcpClient = class {
+  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
+    cwd: options.cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: process.env
+  }), options = {}) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAcp = spawnAcp;
+  }
+  process;
+  nextId = 1;
+  pending = /* @__PURE__ */ new Map();
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  stdoutBuffer = Buffer4.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  failureNotified = false;
+  startPromise;
+  start() {
+    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  async call(method, params, timeoutMs) {
+    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
+    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
+    return this.request(method, params, budget);
+  }
+  async respond(id5, result) {
+    this.write({ jsonrpc: "2.0", id: id5, result });
+  }
+  async respondError(id5, code, message) {
+    this.write({ jsonrpc: "2.0", id: id5, error: { code, message } });
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.ready = false;
+    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve5) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve5();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve5();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
+    }
+    const child = this.spawnAcp(this.binary);
+    this.process = child;
+    this.failureNotified = false;
+    this.stdoutBuffer = Buffer4.alloc(0);
+    this.stderrBytes = 0;
+    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer4.from(chunk)));
+    child.stderr.on("data", (chunk) => {
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
+    });
+    child.on("error", (error) => this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error));
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
+      if (!this.closed) {
+        this.logger?.warn("Cursor ACP exited", {
+          code: code ?? "none",
+          signal: signal ?? "none",
+          stderrBytes: this.stderrBytes
+        });
+        this.notifyUnavailable("CURSOR_ACP_EXITED");
+      }
+    });
+    try {
+      await this.request("initialize", {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false
+        },
+        clientInfo: {
+          name: "deepseek_harness_remote",
+          version: PLUGIN_VERSION
+        }
+      }, ACP_START_TIMEOUT_MS);
+      await this.request("authenticate", { methodId: "cursor_login" }, ACP_START_TIMEOUT_MS);
+      this.ready = true;
+      this.logger?.info("Cursor ACP ready");
+    } catch (error) {
+      child.kill("SIGTERM");
+      if (error instanceof CursorAcpError) throw error;
+      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error });
+    }
+  }
+  request(method, params, timeoutMs) {
+    const id5 = this.nextId++;
+    const result = new Promise((resolve5, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id5);
+        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id5, { resolve: resolve5, reject, timer });
+    });
+    try {
+      this.write({ jsonrpc: "2.0", id: id5, method, params });
+    } catch (error) {
+      const pending = this.takePending(id5);
+      pending?.reject(error instanceof Error ? error : new Error("Cursor ACP write failed."));
+    }
+    return result;
+  }
+  write(message) {
+    const child = this.process;
+    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
+      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+    }
+    child.stdin.write(`${JSON.stringify(message)}
+`);
+  }
+  consumeStdout(chunk) {
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
+    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
+      this.handleProcessFailure(
+        "CURSOR_RESPONSE_TOO_LARGE",
+        new Error("Cursor ACP emitted an oversized JSONL message.")
+      );
+      return;
+    }
+    let newline = this.stdoutBuffer.indexOf(10);
+    while (newline >= 0) {
+      const line = this.stdoutBuffer.subarray(0, newline);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
+      if (line.length > 0) this.handleLine(line);
+      newline = this.stdoutBuffer.indexOf(10);
+    }
+  }
+  handleLine(line) {
+    let value;
+    try {
+      value = JSON.parse(line.toString("utf8"));
+    } catch {
+      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
+      return;
+    }
+    if (!isRecord14(value)) {
+      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
+      return;
+    }
+    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
+      const pending = this.takePending(value.id);
+      if (pending === void 0) return;
+      if ("error" in value && value.error !== void 0) {
+        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
+      } else {
+        pending.resolve(value.result);
+      }
+      return;
+    }
+    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
+    const params = value.params ?? {};
+    const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
+    for (const handler of this.inboundHandlers) handler(inbound);
+  }
+  handleProcessFailure(code, cause) {
+    this.ready = false;
+    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
+    const child = this.process;
+    this.process = void 0;
+    child?.kill("SIGTERM");
+    this.logger?.warn("Cursor ACP communication failed", { code });
+    if (!this.closed) this.notifyUnavailable(code);
+  }
+  notifyUnavailable(code) {
+    if (this.failureNotified) return;
+    this.failureNotified = true;
+    for (const handler of this.unavailableHandlers) handler(code);
+  }
+  takePending(id5) {
+    const pending = this.pending.get(id5);
+    if (pending === void 0) return void 0;
+    this.pending.delete(id5);
+    clearTimeout(pending.timer);
+    return pending;
+  }
+  failPending(error) {
+    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
+  }
+};
+function safeUpstreamError2(value) {
+  if (!isRecord14(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  const message = value.message.toLowerCase();
+  if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
+    return "Cursor ACP authentication failed.";
+  }
+  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
+  return "Cursor ACP rejected the request.";
+}
+function isRecord14(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/adapters/antigravity/image-store.ts
+import { promises as fs, realpathSync as realpathSync2, constants as constants2 } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join6, basename as basename3 } from "node:path";
+import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
+var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
+var TTL = 24 * 60 * 60 * 1e3;
+var AGY_IMAGE_ROOT = join6(realpathSync2(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
+var stagingChain = Promise.resolve();
+var sessionFolder = (sessionId) => createHash2("sha256").update(sessionId).digest("hex");
+async function privateDirectory(path) {
+  await fs.mkdir(path, { recursive: true, mode: 448 });
+  const info = await fs.lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
+}
+async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
+  await privateDirectory(root);
+  return root;
+}
+function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
+  const result = stagingChain.then(() => stageImages(sessionId, images, root));
+  stagingChain = result.then(() => void 0, () => void 0);
+  return result;
+}
+async function stageImages(sessionId, images, root) {
+  await prepareAgyImageDirectory(root);
+  let total = 0;
+  for (const entry of await fs.readdir(root)) {
+    if (!/^[0-9a-f]{64}$/.test(entry)) continue;
+    const dir = join6(root, entry);
+    const info = await fs.lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) continue;
+    for (const name2 of await fs.readdir(dir)) {
+      if (!IMAGE_NAME.test(name2)) continue;
+      const path = join6(dir, name2);
+      const file = await fs.lstat(path);
+      if (!file.isFile() || file.isSymbolicLink()) continue;
+      if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
+      else total += file.size;
+    }
+  }
+  const parsed = images.map(parseAcpImage);
+  if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
+  const directory = join6(root, sessionFolder(sessionId));
+  await privateDirectory(directory);
+  const paths = [];
+  try {
+    for (const image of parsed) {
+      const path = join6(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
+      await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
+      paths.push(path);
+    }
+    return paths;
+  } catch (error) {
+    await Promise.all(paths.map((path) => fs.unlink(path).catch(() => void 0)));
+    throw error;
+  }
+}
+function agyImagePrompt(text, paths) {
+  return `${text}
+<AGY_REMOTE_IMAGES>
+User attached images. Use view_file to inspect these images before answering.
+${JSON.stringify(paths)}
+</AGY_REMOTE_IMAGES>`;
+}
+function stripAgyImageReferences(text) {
+  return text.replace(/\n?<AGY_REMOTE_IMAGES>[\s\S]*?<\/AGY_REMOTE_IMAGES>/g, "").trim();
+}
+function agyImageReferences(text) {
+  const block = /<AGY_REMOTE_IMAGES>\n[^\n]*\n([^\n]+)\n<\/AGY_REMOTE_IMAGES>/.exec(text);
+  if (!block) return [];
+  try {
+    const value = JSON.parse(block[1]);
+    return Array.isArray(value) && value.length <= 4 ? value.filter((path) => typeof path === "string") : [];
+  } catch {
+    return [];
+  }
+}
+async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
+  const name2 = basename3(path);
+  if (!IMAGE_NAME.test(name2) || path !== join6(root, sessionFolder(sessionId), name2)) return void 0;
+  try {
+    await privateDirectory(root);
+    await privateDirectory(join6(root, sessionFolder(sessionId)));
+    const info = await fs.lstat(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
+    const file = await fs.open(path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
+    try {
+      const current = await file.stat();
+      if (current.ino !== info.ino || current.dev !== info.dev || current.size !== info.size) return void 0;
+      const mediaType = Object.entries(EXTENSIONS).find(([, ext]) => name2.endsWith(`.${ext}`))?.[0];
+      const image = parseAcpImage({ type: "image", mimeType: mediaType, data: (await file.readFile()).toString("base64") });
+      return acpImageContent(image, `agy-image:${name2}`);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
+
+// src/acp/adapters/antigravity-process.ts
+import { spawn as spawn4 } from "node:child_process";
+import { Buffer as Buffer5 } from "node:buffer";
+import { existsSync as existsSync3 } from "node:fs";
+
+// src/acp/adapters/antigravity/transcript-watcher.ts
+import { promises as fs2 } from "node:fs";
+import { join as join7 } from "node:path";
+import { EventEmitter } from "node:events";
+import { homedir as homedir3 } from "node:os";
+var TranscriptWatcher = class extends EventEmitter {
+  constructor(conversationId, baseDir = join7(homedir3(), ".gemini/antigravity-cli/brain")) {
+    super();
+    this.conversationId = conversationId;
+    this.baseDir = baseDir;
+    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
+    this.transcriptPath = join7(brainDir, "transcript.jsonl");
+    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
+  }
+  offset = 0;
+  lineRemainder = "";
+  pollTimer;
+  closed = false;
+  transcriptPath;
+  transcriptFullPath;
+  on(event, listener) {
+    return super.on(event, listener);
+  }
+  emit(event, ...args) {
+    return super.emit(event, ...args);
+  }
+  /**
+   * 启动增量文件监听
+   */
+  start(intervalMs = 250) {
+    if (this.closed) return;
+    const poll = async () => {
+      try {
+        await this.readNewLines();
+      } catch {
+      }
+      if (!this.closed) {
+        this.pollTimer = setTimeout(poll, intervalMs);
+        this.pollTimer.unref?.();
+      }
+    };
+    void poll();
+  }
+  stop() {
+    this.closed = true;
+    if (this.pollTimer !== void 0) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = void 0;
+    }
+  }
+  /**
+   * 立即触发一次读取（同步/主动检查）
+   */
+  async flush() {
+    await this.readNewLines();
+  }
+  async readNewLines() {
+    let stat8;
+    try {
+      stat8 = await fs2.stat(this.transcriptPath);
+    } catch {
+      return;
+    }
+    if (stat8.size <= this.offset) return;
+    const handle = await fs2.open(this.transcriptPath, "r");
+    try {
+      const bytesToRead = stat8.size - this.offset;
+      const buffer = Buffer.alloc(bytesToRead);
+      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset);
+      this.offset += bytesRead;
+      const text = this.lineRemainder + buffer.subarray(0, bytesRead).toString("utf-8");
+      const lines = text.split("\n");
+      this.lineRemainder = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        await this.parseAndDispatch(trimmed);
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+  async parseAndDispatch(rawLine) {
+    let record8;
+    try {
+      record8 = JSON.parse(rawLine);
+    } catch {
+      return;
+    }
+    if (Array.isArray(record8.truncated_fields) && record8.truncated_fields.length > 0) {
+      record8 = await this.enrichFromFullTranscript(record8);
+    }
+    this.emit("step", record8);
+    if (record8.type === "PLANNER_RESPONSE") {
+      if (record8.thinking && record8.thinking.trim() !== "") {
+        this.emit("thinking", {
+          stepIndex: record8.step_index,
+          thinking: record8.thinking,
+          createdAt: record8.created_at
+        });
+      }
+      if (Array.isArray(record8.tool_calls) && record8.tool_calls.length > 0) {
+        this.emit("toolCall", {
+          stepIndex: record8.step_index,
+          toolCalls: record8.tool_calls,
+          createdAt: record8.created_at
+        });
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        this.emit("message", {
+          stepIndex: record8.step_index,
+          text: record8.content,
+          createdAt: record8.created_at
+        });
+      }
+    } else if (record8.type === "USER_INPUT" && record8.content) {
+      this.emit("message", {
+        stepIndex: record8.step_index,
+        text: record8.content,
+        createdAt: record8.created_at
+      });
+    }
+    if (record8.status === "DONE" && record8.type === "PLANNER_RESPONSE") {
+      this.emit("complete", this.conversationId);
+    }
+  }
+  async enrichFromFullTranscript(record8) {
+    try {
+      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
+      const lines = content.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const full = JSON.parse(trimmed);
+        if (full.step_index === record8.step_index) {
+          return full;
+        }
+      }
+    } catch {
+    }
+    return record8;
+  }
+};
+
+// src/acp/adapters/antigravity-process.ts
+var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
+var ACP_START_TIMEOUT_MS2 = 2e4;
+var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
+var AntigravityAcpError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "AntigravityAcpError";
+  }
+};
+function resolveAntigravityBinary(preferred) {
+  if (preferred && preferred.trim() !== "" && preferred !== "agent" && preferred !== "cursor") {
+    return preferred.trim();
+  }
+  const defaultLocal = "/var/lib/dsh/.local/bin/agy";
+  if (existsSync3(defaultLocal)) {
+    return defaultLocal;
+  }
+  return "agy";
+}
+var AntigravityAcpClient = class _AntigravityAcpClient {
+  constructor(binary = "agy", logger, spawnAcp = (bin, args, cwd2) => spawn4(bin, args, {
+    cwd: cwd2,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: process.env
+  }), options = {}) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAcp = spawnAcp;
+    this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
+    this.cwd = options.cwd ?? process.cwd();
+    this.sessionWorker = options.sessionWorker === true;
+    this.initialConversationClaimed = options.conversationId !== void 0;
+    this.skipPermissions = options.skipPermissions === true;
+    this.activeConversationId = options.conversationId;
+  }
+  process;
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  watcher;
+  stdoutBuffer = Buffer5.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  startPromise;
+  activeConversationId;
+  skipPermissions;
+  sessionWorker;
+  initialConversationClaimed = false;
+  sessions = /* @__PURE__ */ new Map();
+  spare;
+  spareCwd;
+  args;
+  cwd;
+  currentPromptPending;
+  start() {
+    if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  prepareSession(conversationId, cwd2 = this.cwd) {
+    const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
+      args: this.args,
+      skipPermissions: this.skipPermissions,
+      sessionWorker: true,
+      cwd: cwd2,
+      ...conversationId === void 0 ? {} : { conversationId }
+    });
+    worker.onInbound((frame) => {
+      for (const handler of this.inboundHandlers) handler(frame);
+    });
+    return worker.start().then(async () => {
+      if (this.closed) {
+        await worker.close();
+        throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
+      }
+      if (!worker.activeConversationId || conversationId !== void 0 && worker.activeConversationId !== conversationId) {
+        await worker.close();
+        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity initialized the wrong conversation.");
+      }
+      return worker;
+    }).catch(async (error) => {
+      await worker.close();
+      throw error;
+    });
+  }
+  warmNextSession(cwd2 = this.cwd) {
+    if (this.sessionWorker || this.closed || this.spare !== void 0) return;
+    const spare = this.prepareSession(void 0, cwd2);
+    this.spareCwd = cwd2;
+    this.spare = spare;
+    void spare.catch(() => {
+      if (this.spare === spare) this.spare = void 0;
+    });
+  }
+  prewarmSession(cwd2) {
+    if (this.sessionWorker || this.closed || this.spare !== void 0 && this.spareCwd === cwd2) return;
+    const previous = this.spare;
+    this.spare = void 0;
+    if (previous !== void 0) void previous.then((worker) => worker.close()).catch(() => void 0);
+    this.warmNextSession(cwd2);
+  }
+  async call(method, params, timeoutMs) {
+    if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
+    if (method === "initialize") {
+      return {
+        protocolVersion: 1,
+        capabilities: {
+          loadSession: true,
+          promptTypes: ["text", "image"]
+        },
+        agentInfo: {
+          name: "antigravity",
+          version: "1.2.16"
+        },
+        backend: "antigravity"
+      };
+    }
+    if (method === "session/new") {
+      if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A prompt is in progress.");
+      const cwd2 = typeof params?.cwd === "string" ? params.cwd : this.cwd;
+      if (!this.initialConversationClaimed && this.activeConversationId !== void 0 && cwd2 === this.cwd) {
+        this.initialConversationClaimed = true;
+        this.warmNextSession(cwd2);
+        return { sessionId: this.activeConversationId };
+      }
+      const cached = this.spare;
+      const pending = cached !== void 0 && this.spareCwd === cwd2 ? cached : this.prepareSession(void 0, cwd2);
+      if (cached !== void 0 && this.spareCwd !== cwd2) void cached.then((worker2) => worker2.close()).catch(() => void 0);
+      this.spare = void 0;
+      const worker = await pending;
+      const sessionId2 = worker.activeConversationId;
+      if (sessionId2 === this.activeConversationId || this.sessions.has(sessionId2)) {
+        await worker.close();
+        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity reused an existing conversation for session/new.");
+      }
+      this.sessions.set(sessionId2, worker);
+      this.warmNextSession(cwd2);
+      return { sessionId: sessionId2 };
+    }
+    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : void 0;
+    if (!this.sessionWorker && sessionId !== void 0 && sessionId !== this.activeConversationId) {
+      let worker = this.sessions.get(sessionId);
+      if (worker === void 0) {
+        worker = await this.prepareSession(sessionId);
+        this.sessions.set(sessionId, worker);
+      }
+      return worker.call(method, params, timeoutMs);
+    }
+    if (method === "session/load") {
+      if (sessionId !== this.activeConversationId) throw new AntigravityAcpError("SESSION_MISMATCH", "The process is bound to another conversation.");
+      return { sessionId };
+    }
+    if (method === "session/cancel") {
+      if (this.currentPromptPending) {
+        clearTimeout(this.currentPromptPending.timer);
+        const pending = this.currentPromptPending;
+        this.currentPromptPending = void 0;
+        pending.resolve({ stopReason: "cancelled" });
+      }
+      return { cancelled: true };
+    }
+    if (method === "session/prompt") {
+      const p = params;
+      let promptText = p.prompt.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n");
+      const images = p.prompt.filter((item) => item.type === "image").map(parseAcpImage);
+      if (images.length > 0) {
+        if (images.length > 4) throw new AntigravityAcpError("INVALID_MESSAGE", "Too many AGY image attachments.");
+        if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
+        const paths = await stageAgyImages(p.sessionId, images);
+        promptText = agyImagePrompt(promptText, paths);
+      }
+      return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS2);
+    }
+    throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", `Method ${method} is not supported by Antigravity ACP adapter.`);
+  }
+  async respond(_id, _result) {
+  }
+  async respondError(_id, _code, _message) {
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    const spare = this.spare;
+    this.spare = void 0;
+    void spare?.then((worker) => worker.close()).catch(() => void 0);
+    await Promise.all([...this.sessions.values()].map((worker) => worker.close()));
+    this.sessions.clear();
+    this.ready = false;
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = void 0;
+    }
+    if (this.currentPromptPending) {
+      clearTimeout(this.currentPromptPending.timer);
+      this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "Antigravity ACP was closed."));
+      this.currentPromptPending = void 0;
+    }
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve5) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve5();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve5();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new AntigravityAcpError("ANTIGRAVITY_STARTING", "Antigravity ACP is already starting.");
+    }
+    const bin = resolveAntigravityBinary(this.binary);
+    const imageDirectory = await prepareAgyImageDirectory();
+    if (this.closed) throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
+    const args = [...this.args, "--add-dir", imageDirectory];
+    if (this.activeConversationId) {
+      args.push("--conversation", this.activeConversationId);
+    }
+    if (this.skipPermissions) {
+      args.push("--dangerously-skip-permissions");
+    }
+    const child = this.spawnAcp(bin, args, this.cwd);
+    this.process = child;
+    this.stdoutBuffer = Buffer5.alloc(0);
+    this.stderrBytes = 0;
+    let initResolved = false;
+    let rejectInit;
+    const initPromise = new Promise((resolve5, reject) => {
+      rejectInit = reject;
+      const timer = setTimeout(() => {
+        if (!initResolved) {
+          reject(new AntigravityAcpError("ANTIGRAVITY_INIT_TIMEOUT", "Timed out waiting for Antigravity init event."));
+        }
+      }, ACP_START_TIMEOUT_MS2);
+      timer.unref?.();
+      const checkInit = (chunk) => {
+        this.consumeStdout(chunk, (event) => {
+          if (event.event === "init") {
+            initResolved = true;
+            clearTimeout(timer);
+            const conversationId = event.conversation_id;
+            if (typeof conversationId === "string") {
+              this.activeConversationId = conversationId;
+              this.watcher = new TranscriptWatcher(conversationId);
+              this.watcher.start();
+            }
+            resolve5();
+          }
+        });
+      };
+      child.stdout.on("data", (chunk) => {
+        if (!initResolved) {
+          checkInit(Buffer5.from(chunk));
+        } else {
+          this.consumeStdout(Buffer5.from(chunk));
+        }
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer5.byteLength(chunk));
+    });
+    child.on("error", (error) => {
+      this.ready = false;
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause: error }));
+      }
+      if (!this.closed) {
+        this.logger?.warn("Antigravity binary error", { message: error.message });
+        this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
+      }
+    });
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      if (!initResolved) {
+        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited before initialization."));
+      }
+      if (this.currentPromptPending) {
+        clearTimeout(this.currentPromptPending.timer);
+        this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited unexpectedly."));
+        this.currentPromptPending = void 0;
+      }
+      if (!this.closed) {
+        this.logger?.warn("Antigravity process exited", { code: code ?? "none", signal: signal ?? "none" });
+        this.notifyUnavailable("ANTIGRAVITY_EXITED");
+      }
+    });
+    try {
+      await initPromise;
+      this.ready = true;
+      this.warmNextSession();
+      this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
+    } catch (err) {
+      child.kill("SIGTERM");
+      throw err;
+    }
+  }
+  sendPrompt(sessionId, promptText, timeoutMs) {
+    if (this.currentPromptPending) {
+      throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
+    }
+    return new Promise((resolve5, reject) => {
+      const timer = setTimeout(() => {
+        if (this.currentPromptPending) {
+          this.currentPromptPending = void 0;
+          reject(new AntigravityAcpError("ANTIGRAVITY_REQUEST_TIMEOUT", "Antigravity turn timed out."));
+        }
+      }, timeoutMs);
+      timer.unref?.();
+      this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
+      const payload = {
+        event: "user",
+        message: { content: promptText }
+      };
+      const data2 = Buffer5.from(`${JSON.stringify(payload)}
+`, "utf8");
+      this.process?.stdin.write(data2);
+    });
+  }
+  consumeStdout(chunk, onRawEvent) {
+    this.stdoutBuffer = Buffer5.concat([this.stdoutBuffer, chunk]);
+    while (true) {
+      const newlineIndex = this.stdoutBuffer.indexOf(10);
+      if (newlineIndex === -1) break;
+      const line = this.stdoutBuffer.subarray(0, newlineIndex).toString("utf8").trim();
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newlineIndex + 1);
+      if (line === "") continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (onRawEvent) {
+          onRawEvent(parsed);
+        }
+        this.handleAgyEvent(parsed);
+      } catch (err) {
+        this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
+      }
+    }
+  }
+  handleAgyEvent(event) {
+    const eventName = event.event;
+    const current = this.currentPromptPending;
+    const sessionId = current?.sessionId ?? this.activeConversationId ?? "default";
+    if (eventName === "step_update" && typeof event.step_update === "object" && event.step_update !== null) {
+      const step = event.step_update;
+      const stepType = step.step_type;
+      if (stepType === "agent_response" && typeof step.text_delta === "string") {
+        this.emitNotification("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            text: step.text_delta
+          }
+        });
+      } else if (stepType === "thought" || stepType === "reasoning") {
+        const text = typeof step.text_delta === "string" ? step.text_delta : typeof step.thought === "string" ? step.thought : typeof step.reasoning === "string" ? step.reasoning : void 0;
+        if (text) {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              text
+            }
+          });
+        }
+      } else if (stepType === "tool") {
+        const toolInfo = step.tool_info ?? {};
+        const toolName = typeof step.tool_name === "string" ? step.tool_name : toolInfo.name ?? "tool";
+        const callId = String(step.step_index ?? Date.now());
+        if (step.state === "ACTIVE") {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "tool_call",
+              callId,
+              name: toolName,
+              parameters: toolInfo.parameters ?? {}
+            }
+          });
+        } else if (step.state === "DONE") {
+          this.emitNotification("session/update", {
+            sessionId,
+            update: {
+              sessionUpdate: "tool_call_update",
+              callId,
+              output: typeof toolInfo.output === "string" ? toolInfo.output : JSON.stringify(toolInfo.output ?? "")
+            }
+          });
+        }
+      }
+    } else if (eventName === "result" && typeof event.result === "object" && event.result !== null) {
+      const result = event.result;
+      if (current) {
+        clearTimeout(current.timer);
+        this.currentPromptPending = void 0;
+        if (result.status === "ERROR") {
+          current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
+        } else {
+          current.resolve({ stopReason: "end_turn", response: result.response });
+        }
+      }
+    }
+  }
+  emitNotification(method, params) {
+    const notification = { kind: "notification", method, params };
+    for (const handler of this.inboundHandlers) {
+      try {
+        handler(notification);
+      } catch (err) {
+        this.logger?.warn("Error in inbound ACP handler", { error: String(err) });
+      }
+    }
+  }
+  notifyUnavailable(code) {
+    for (const handler of this.unavailableHandlers) {
+      try {
+        handler(code);
+      } catch (err) {
+        this.logger?.warn("Error in unavailable ACP handler", { error: String(err) });
+      }
+    }
+  }
+};
+
+// src/acp/method-policy.ts
+var id3 = external_exports.string().min(1).max(256);
+var cwd = external_exports.string().min(1).max(4096);
+var mode = external_exports.enum(["agent", "plan", "ask"]);
+var textBlock = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageBlock = external_exports.object({ type: external_exports.literal("image"), mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
+  try {
+    parseAcpImage(value);
+    return true;
+  } catch {
+    return false;
+  }
+});
+var promptBlock = external_exports.union([textBlock, imageBlock]);
+var schemas2 = {
+  "initialize": external_exports.object({
+    protocolVersion: external_exports.number().int().positive().optional(),
+    backend: external_exports.string().min(1).max(64).optional(),
+    clientInfo: external_exports.object({
+      name: external_exports.string().min(1).max(128).optional(),
+      version: external_exports.string().min(1).max(128).optional()
+    }).strict().optional()
+  }).strict(),
+  "session/new": external_exports.object({
+    cwd,
+    backend: external_exports.string().min(1).max(64).optional(),
+    mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
+    mode: mode.optional()
+  }).strict(),
+  "session/load": external_exports.object({
+    sessionId: id3,
+    backend: external_exports.string().min(1).max(64).optional()
+  }).strict(),
+  "session/prompt": external_exports.object({
+    sessionId: id3,
+    backend: external_exports.enum(["cursor", "antigravity"]).optional(),
+    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
+  }).strict(),
+  "session/cancel": external_exports.object({
+    sessionId: id3
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "dsh/workspaceList": external_exports.object({
+    backend: external_exports.string().min(1).max(64).optional()
+  }).strict().optional(),
+  "dsh/sessionList": external_exports.object({
+    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
+    backend: external_exports.string().min(1).max(64).optional(),
+    limit: external_exports.number().int().positive().max(100).optional(),
+    prewarm: external_exports.boolean().optional()
+  }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    sessionId: id3,
+    backend: external_exports.string().min(1).max(64).optional()
+  }).strict()
+};
+var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
+function parseAcpCall(method, params) {
+  if (!(method in schemas2)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
+  }
+  const schema = schemas2[method];
+  const parsed = schema.safeParse(params ?? {});
+  if (!parsed.success) {
+    throw new RpcError("INVALID_MESSAGE", "The ACP parameters are invalid.");
+  }
+  return { method, params: parsed.data };
+}
+function sessionIdFromParams(method, params) {
+  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
+  if (typeof params.sessionId === "string") return params.sessionId;
+  return void 0;
+}
+function isSessionMutation(method) {
+  return method === "session/prompt" || method === "session/cancel";
+}
+
+// src/acp/adapters/antigravity/transcript-loader.ts
+import { promises as fs3 } from "node:fs";
+import { join as join8 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+function cleanUserPrompt(raw) {
+  if (!raw) return "";
+  raw = stripAgyImageReferences(raw);
+  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return raw.trim();
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain")) {
+  const filePath = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  let content = "";
+  try {
+    content = await fs3.readFile(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = content.split("\n");
+  const events = [];
+  let currentSeq = 0;
+  let currentTurn = 0;
+  let turnOpen = false;
+  const push = (type, data2, time, surface = false) => {
+    events.push({
+      type: "event",
+      event: {
+        type,
+        seq: currentSeq++,
+        time,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    });
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let record8;
+    try {
+      record8 = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
+    if (record8.type === "USER_INPUT") {
+      if (turnOpen) {
+        push("step/end", { turn: currentTurn, step: 1 }, time);
+        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
+        turnOpen = false;
+      }
+      currentTurn += 1;
+      turnOpen = true;
+      push("turn/start", { turn: currentTurn }, time);
+      push("step/start", { turn: currentTurn, step: 1 }, time);
+      const text = cleanUserPrompt(record8.content);
+      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
+      push("user/message", {
+        id: `user:${record8.step_index}`,
+        role: "user",
+        content: [...text ? [{ type: "text", text }] : [], ...images],
+        source: { kind: "user" }
+      }, time, true);
+    } else if (record8.type === "PLANNER_RESPONSE") {
+      if (!turnOpen) {
+        currentTurn += 1;
+        turnOpen = true;
+        push("turn/start", { turn: currentTurn }, time);
+        push("step/start", { turn: currentTurn, step: 1 }, time);
+      }
+      if (Array.isArray(record8.tool_calls)) {
+        for (const call of record8.tool_calls) {
+          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
+          const callId = `${record8.step_index}:${toolName}`;
+          push("tool/call", {
+            turn: currentTurn,
+            step: 1,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
+            toolCallId: callId,
+            toolName,
+            status: call.status === "ERROR" ? "failed" : "finished"
+          }, time, false);
+        }
+      }
+      if (record8.content && record8.content.trim() !== "") {
+        const contentBlocks2 = [];
+        if (record8.thinking && record8.thinking.trim() !== "") {
+          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
+        }
+        contentBlocks2.push({ type: "text", text: record8.content.trim() });
+        push("assistant/message", {
+          turn: currentTurn,
+          step: 1,
+          message: {
+            id: `${sessionId}:${record8.step_index}`,
+            role: "assistant",
+            content: contentBlocks2,
+            source: { kind: "model", provider: "google", model: "gemini" }
+          },
+          // Harness trajectory timing expects every assistant message to carry
+          // an iterable stream, including messages restored from transcript.
+          stream: []
+        }, time, true);
+      }
+    }
+  }
+  if (turnOpen) {
+    const settledAt = events.at(-1)?.event.time ?? Date.now();
+    push("step/end", { turn: currentTurn, step: 1 }, settledAt);
+    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
+  }
+  return events;
+}
+async function querySqliteJson(dbPath, sql, params = []) {
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const stmt = db.prepare(sql);
+      const rows = stmt.all(...params);
+      return rows;
+    } finally {
+      db.close();
+    }
+  } catch {
+  }
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    let formattedSql = sql;
+    for (const p of params) {
+      const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
+      formattedSql = formattedSql.replace("?", val);
+    }
+    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
+    return JSON.parse(stdout || "[]");
+  } catch {
+    return [];
+  }
+}
+async function discoverAntigravityWorkspaces(dbPath = join8(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain")) {
+  try {
+    await fs3.stat(dbPath);
+  } catch {
+    return [];
+  }
+  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
+  const rows = await querySqliteJson(dbPath, sql);
+  const paths = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    if (!row?.workspace_uris) continue;
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
+    try {
+      const uris = JSON.parse(row.workspace_uris);
+      if (Array.isArray(uris)) {
+        for (const u of uris) {
+          if (typeof u === "string" && u.startsWith("file://")) {
+            try {
+              const parsed = new URL(u);
+              let p = decodeURIComponent(parsed.pathname);
+              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
+                p = p.slice(1);
+              }
+              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
+            } catch {
+            }
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  const verified = [];
+  for (const p of paths) {
+    try {
+      const s2 = await fs3.stat(p);
+      if (s2.isDirectory()) verified.push(p);
+    } catch {
+    }
+  }
+  return verified;
+}
+async function readTranscriptSummary(baseDir, conversationId) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
+  const path = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
+  try {
+    const stat8 = await fs3.stat(path);
+    const handle = await fs3.open(path, "r");
+    try {
+      const buffer = Buffer.alloc(4096);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+      if (!firstLine) return void 0;
+      const record8 = JSON.parse(firstLine);
+      if (record8.type !== "USER_INPUT") return void 0;
+      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
+      if (!title) return void 0;
+      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return void 0;
+  }
+}
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join8(homedir4(), ".gemini/antigravity-cli/brain"), dbPath = join8(homedir4(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+  try {
+    await fs3.stat(dbPath);
+    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
+    const params = [];
+    if (workspacePath && workspacePath.trim() !== "") {
+      sql += " AND workspace_uris LIKE ?";
+      params.push(`%${workspacePath.trim()}%`);
+    }
+    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
+    params.push(limit);
+    const rows = await querySqliteJson(dbPath, sql, params);
+    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
+    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
+    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
+    if (rows.length > 0 || emptyRows.length > 0) {
+      const summaries = await Promise.all(rows.map(async (r) => {
+        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
+        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
+        return {
+          conversationId: r.conversation_id,
+          title: r.title?.trim() || transcript?.title || "Untitled Session",
+          createdAt: time,
+          updatedAt: time
+        };
+      }));
+      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+    }
+  } catch {
+  }
+  let dirEntries;
+  try {
+    dirEntries = await fs3.readdir(baseDir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of dirEntries) {
+    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
+    const transcriptPath = join8(baseDir, entry, ".system_generated/logs/transcript.jsonl");
+    try {
+      const s2 = await fs3.stat(transcriptPath);
+      const handle = await fs3.open(transcriptPath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine);
+          const rawPrompt = cleanUserPrompt(parsed.content);
+          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
+          if (title) {
+            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
+            results.push({
+              conversationId: entry,
+              title,
+              createdAt,
+              updatedAt: s2.mtimeMs
+            });
+          }
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+    }
+  }
+  results.sort((a, b) => b.updatedAt - a.updatedAt);
+  return results.slice(0, limit);
+}
+
+// src/acp/peer-bridge.ts
+import { Buffer as Buffer6 } from "node:buffer";
+var streamOpenSchema2 = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
+  sessionId: external_exports.string().min(1).max(256)
+}).strict();
+var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferOpenSchema2 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
+}).strict();
+var transferChunkSchema2 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
+}).strict();
+var transferIdSchema2 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema2 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
+var MAX_ACTIVE_STREAMS2 = 16;
+var MAX_ACTIVE_TRANSFERS2 = 2;
+var TRANSFER_IDLE_MS2 = 2 * 6e4;
+var INLINE_TRANSFER_RESPONSE_BYTES2 = 2 * 1024 * 1024;
+var AcpPeerBridge = class {
+  constructor(domain, context, publish, logger) {
+    this.domain = domain;
+    this.context = context;
+    this.publish = publish;
+    this.logger = logger;
+  }
+  streams = /* @__PURE__ */ new Map();
+  incomingTransfers = /* @__PURE__ */ new Map();
+  outgoingTransfers = /* @__PURE__ */ new Map();
+  closed = false;
+  async call(input2) {
+    return this.callDomain(input2, true);
+  }
+  async callDomain(input2, logFailure) {
+    this.requireOpen();
+    try {
+      return await this.domain.call(this.context.connectionId, input2);
+    } catch (error) {
+      if (logFailure) {
+        this.logger?.warn("Cursor call failed", {
+          method: safeMethod2(input2),
+          code: safeErrorCode3(error)
+        });
+      }
+      throw error;
+    }
+  }
+  respond(input2) {
+    this.requireOpen();
+    return this.domain.respond(this.context.connectionId, input2);
+  }
+  async openStream(input2) {
+    this.requireOpen();
+    const params = streamOpenSchema2.parse(input2);
+    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The ACP stream id is already active.");
+    if (this.streams.size >= MAX_ACTIVE_STREAMS2) {
+      throw new RpcError("RATE_LIMITED", "Too many ACP streams are active for this connection.", void 0, true);
+    }
+    this.domain.assertStreamable(this.context.connectionId, params.sessionId);
+    this.streams.set(params.streamId, params.sessionId);
+    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+    return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
+  }
+  /** Whether this peer has at least one live stream observing the session. */
+  hasStreamFor(sessionId) {
+    for (const target2 of this.streams.values()) {
+      if (target2 === sessionId) return true;
+    }
+    return false;
+  }
+  closeStream(input2) {
+    const params = streamCloseSchema2.parse(input2);
+    this.streams.delete(params.streamId);
+    return { closed: true, streamId: params.streamId };
+  }
+  openTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferOpenSchema2.parse(input2);
+    if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk count is invalid.");
+    }
+    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
+      throw new RpcError("REQUEST_CONFLICT", "The ACP transfer id is already active.");
+    }
+    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
+      throw new RpcError("RATE_LIMITED", "Too many ACP transfers are active.", void 0, true);
+    }
+    this.incomingTransfers.set(params.transferId, {
+      totalBytes: params.totalBytes,
+      totalChunks: params.totalChunks,
+      chunks: [],
+      receivedBytes: 0,
+      touchedAt: Date.now()
+    });
+    return { opened: true, transferId: params.transferId };
+  }
+  appendTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferChunkSchema2.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
+    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "ACP transfer chunks must arrive exactly once and in order.");
+    }
+    const chunk = decodeCanonicalBase642(params.data);
+    const expectedBytes = Math.min(
+      AGENT_ACP_TRANSFER_CHUNK_BYTES,
+      transfer.totalBytes - params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES
+    );
+    if (chunk.byteLength !== expectedBytes) {
+      this.incomingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk size is invalid.");
+    }
+    transfer.chunks.push(chunk);
+    transfer.receivedBytes += chunk.byteLength;
+    transfer.touchedAt = Date.now();
+    return { accepted: true, transferId: params.transferId, index: params.index };
+  }
+  async commitTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferIdSchema2.parse(input2);
+    const transfer = this.incomingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
+    this.incomingTransfers.delete(params.transferId);
+    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer is incomplete.");
+    }
+    let request;
+    try {
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks2(transfer.chunks, transfer.totalBytes)));
+    } catch {
+      throw new RpcError("INVALID_MESSAGE", "The ACP transfer does not contain a valid request.");
+    }
+    let response;
+    try {
+      response = await this.callDomain(request, false);
+    } catch (error) {
+      this.logger?.warn("ACP transfer call failed", {
+        method: safeMethod2(request),
+        code: safeErrorCode3(error)
+      });
+      throw error;
+    }
+    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) return { kind: "inline", response };
+    if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "The Cursor response exceeds the bounded transfer limit.");
+    }
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
+      throw new RpcError("RATE_LIMITED", "Too many Cursor response transfers are active.", void 0, true);
+    }
+    const totalChunks = Math.ceil(responseBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES);
+    this.outgoingTransfers.set(params.transferId, {
+      bytes: responseBytes,
+      totalChunks,
+      nextIndex: 0,
+      touchedAt: Date.now()
+    });
+    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
+  }
+  readTransfer(input2) {
+    this.requireOpen();
+    this.pruneTransfers();
+    const params = transferReadSchema2.parse(input2);
+    const transfer = this.outgoingTransfers.get(params.transferId);
+    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Cursor response transfer is not active.");
+    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId);
+      throw new RpcError("INVALID_MESSAGE", "Cursor response chunks must be read exactly once and in order.");
+    }
+    const start = params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
+    const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
+    transfer.nextIndex += 1;
+    transfer.touchedAt = Date.now();
+    return {
+      transferId: params.transferId,
+      index: params.index,
+      data: Buffer6.from(transfer.bytes.subarray(start, end)).toString("base64")
+    };
+  }
+  closeTransfer(input2) {
+    const params = transferIdSchema2.parse(input2);
+    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
+    return { closed, transferId: params.transferId };
+  }
+  async publishInbound(sessionId, frame) {
+    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
+    const streamIds = [...this.streams.entries()].filter(([, targetSessionId]) => targetSessionId === sessionId).map(([streamId]) => streamId);
+    if (streamIds.length === 0) {
+      this.logger?.warn("Publishing ACP frame without an open stream; using session-scoped delivery", {
+        method: frame.method
+      });
+    }
+    const data2 = { streamId: `session:${sessionId}`, frame };
+    if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+      for (const streamId of streamIds) {
+        this.streams.delete(streamId);
+        await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
+      }
+      this.logger?.warn("ACP stream closed after oversized frame", { method: frame.method });
+      throw new RpcError("RESPONSE_TOO_LARGE", "The ACP frame exceeds the secure channel limit.");
+    }
+    try {
+      await this.publish("agent.acp.frame", data2);
+    } catch (error) {
+      this.logger?.warn("ACP frame publish failed", {
+        method: frame.method,
+        code: safeErrorCode3(error)
+      });
+      throw error;
+    }
+  }
+  async failStreams(reason = "failed", sessions) {
+    if (this.closed) return;
+    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id5]) => id5);
+    for (const id5 of streamIds) this.streams.delete(id5);
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
+      streamId,
+      reason
+    }).catch(() => void 0)));
+  }
+  async closeAll() {
+    if (this.closed) return;
+    this.closed = true;
+    const streamIds = [...this.streams.keys()];
+    this.streams.clear();
+    this.incomingTransfers.clear();
+    this.outgoingTransfers.clear();
+    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
+      streamId,
+      reason: "peer-disconnected"
+    }).catch(() => void 0)));
+    this.domain.dropPeer(this.context.connectionId);
+  }
+  pruneTransfers() {
+    const staleBefore = Date.now() - TRANSFER_IDLE_MS2;
+    for (const [id5, transfer] of this.incomingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id5);
+    }
+    for (const [id5, transfer] of this.outgoingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id5);
+    }
+  }
+  requireOpen() {
+    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
+  }
+};
+function decodeCanonicalBase642(value) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
+  }
+  const decoded = Buffer6.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
+  }
+  return decoded;
+}
+function isRecord15(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function safeErrorCode3(error) {
+  if (isRecord15(error) && typeof error.code === "string") return error.code;
+  return "UNKNOWN";
+}
+function safeMethod2(input2) {
+  return isRecord15(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+}
+function concatChunks2(chunks, totalBytes) {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+// src/acp/gateway.ts
+var APPROVAL_TTL_MS2 = 5 * 6e4;
+var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
+var ACP_DIRECTORY_ENTRY_LIMIT = 500;
+var MAX_BUFFERED_ACP_FRAMES = 200;
+var ACP_FRAME_BUFFER_TTL_MS = 5 * 6e4;
+var MAX_TURN_CATCH_UP_FRAMES = 120;
+var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
+  "agent_thought_chunk",
+  "agent_thought",
+  "agent_message_chunk",
+  "agent_message",
+  "user_message_chunk",
+  "tool_call",
+  "tool_call_update"
+]);
+var AcpRemoteGateway = class {
+  constructor(config, logger, createAcp = (binary, targetLogger, backend) => {
+    if (backend.id === "antigravity") {
+      return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+    }
+    return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
+    this.config = config;
+    this.logger = logger;
+    this.createAcp = createAcp;
+    this.restartDelaysMs = restartDelaysMs;
+  }
+  backendInstances = /* @__PURE__ */ new Map();
+  peers = /* @__PURE__ */ new Map();
+  sessionOwners = /* @__PURE__ */ new Map();
+  sessionBackends = /* @__PURE__ */ new Map();
+  approvals = /* @__PURE__ */ new Map();
+  approvalExpiryTimer;
+  restartTimer;
+  restartAttempt = 0;
+  available = false;
+  closed = false;
+  state = "disabled";
+  unavailableCode;
+  /** Keep ACP → Client fanout ordered; concurrent publish races Noise sends. */
+  inboundChain = Promise.resolve();
+  /** Catch-up buffer for turns that finish while the Client is reconnecting. */
+  recentFrames = /* @__PURE__ */ new Map();
+  /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
+  turnCatchUp = /* @__PURE__ */ new Map();
+  startPromise;
+  startingClients = /* @__PURE__ */ new Set();
+  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
+  enabledBackends() {
+    if (!this.config.enabled) return [];
+    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor"].includes(item.id)).map((item) => item.id);
+  }
+  start() {
+    if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
+    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  async startOnce() {
+    try {
+      this.state = "starting";
+      await this.launchAcp();
+    } catch (error) {
+      if (this.closed) return;
+      this.available = false;
+      this.state = "unavailable";
+      this.unavailableCode = errorCode3(error);
+      await this.disposeAllInstances();
+      this.logger.warn("ACP Remote domain unavailable", { code: this.unavailableCode });
+    }
+  }
+  isAvailable() {
+    return this.config.enabled && this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
+  }
+  availableBackends() {
+    const list = [];
+    for (const [id5, inst] of this.backendInstances) {
+      if (this.enabledBackends().includes(id5) && inst.client.isReady()) list.push(id5);
+    }
+    return list;
+  }
+  defaultBackend() {
+    const ready = this.availableBackends();
+    return this.enabledBackends().find((id5) => ready.includes(id5)) ?? this.enabledBackends()[0] ?? "antigravity";
+  }
+  status() {
+    return {
+      enabled: this.config.enabled,
+      available: this.isAvailable(),
+      state: this.state,
+      restartAttempt: this.restartAttempt,
+      availableBackends: this.availableBackends(),
+      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
+    };
+  }
+  createPeer(context, publish) {
+    const bridge = new AcpPeerBridge(this, context, publish, this.logger);
+    this.peers.set(context.connectionId, bridge);
+    return bridge;
+  }
+  async call(connectionId, input2) {
+    const envelope = parseCallEnvelope2(input2);
+    const call = parseAcpCall(envelope.method, envelope.params);
+    this.logger.info("ACP call received", {
+      method: call.method,
+      sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
+    });
+    if (typeof call.params.backend === "string") {
+      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor):/, "") : sessionIdFromParams(call.method, call.params);
+      const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
+      if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      this.requireAcp(call.params.backend);
+    }
+    if (call.method === "initialize") {
+      const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
+      this.requireAcp(requestedBackend);
+      return this.initializeResult(call.params, requestedBackend);
+    }
+    if (call.method === "dsh/directoryList") {
+      return this.listDirectory(String(call.params.path));
+    }
+    if (call.method === "dsh/workspaceList") {
+      const candidates = /* @__PURE__ */ new Set();
+      const cwd2 = process.cwd();
+      if (cwd2) candidates.add(cwd2);
+      for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
+        try {
+          const s2 = await stat4(candidate);
+          if (s2.isDirectory()) candidates.add(candidate);
+        } catch {
+        }
+      }
+      const backend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
+      if (backend === "antigravity") {
+        try {
+          const agyDirs = await discoverAntigravityWorkspaces();
+          for (const d of agyDirs) {
+            candidates.add(d);
+          }
+        } catch {
+        }
+      }
+      const results = await Promise.all([...candidates].map(async (p) => {
+        let sessionCount = 0;
+        if (backend === "antigravity") {
+          try {
+            const sessions = await discoverAntigravitySessions(p, 100);
+            sessionCount = sessions.length;
+          } catch {
+          }
+        }
+        return {
+          path: p,
+          title: basename4(p) || "workspace",
+          ...sessionCount > 0 ? { sessionCount } : {}
+        };
+      }));
+      return results;
+    }
+    if (call.method === "dsh/sessionList") {
+      const limit = typeof call.params.limit === "number" ? call.params.limit : 30;
+      const path = String(call.params.path || "");
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
+      if (backend === "antigravity") {
+        if (path.trim() !== "" && call.params.prewarm !== false) {
+          const cwd2 = await this.requireExistingDirectory(path);
+          this.requireAcp("antigravity").prewarmSession?.(cwd2);
+        }
+        const items = await discoverAntigravitySessions(path, limit);
+        this.logger.info("ACP session list fetched", { count: items.length });
+        return { items };
+      }
+      return { items: [] };
+    }
+    if (call.method === "dsh/sessionHistory") {
+      const rawSessionId = String(call.params.sessionId);
+      const conversationId = rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
+      const boundBackend = this.sessionBackends.get(conversationId);
+      const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
+      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      this.requireAcp(backend);
+      if (backend !== "antigravity") return { events: [] };
+      const events = await loadTranscriptEvents(conversationId, rawSessionId);
+      this.logger.info("ACP session history fetched", {
+        sessionId: shortSessionId(rawSessionId),
+        eventCount: events.length
+      });
+      return { events };
+    }
+    if (call.method === "session/new") {
+      const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
+      const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
+      const acp = this.requireAcp(requestedBackend);
+      const result = await acp.call("session/new", {
+        cwd: cwd2,
+        mcpServers: [],
+        ...typeof call.params.mode === "string" ? { mode: call.params.mode } : {}
+      });
+      const sessionId2 = readSessionId(result);
+      if (sessionId2 !== void 0) {
+        this.sessionOwners.set(sessionId2, connectionId);
+        this.sessionBackends.set(sessionId2, requestedBackend);
+      }
+      return sanitizeSessionResult(result);
+    }
+    const sessionId = sessionIdFromParams(call.method, call.params);
+    if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
+    if (call.method === "session/prompt") {
+      const selected = this.sessionBackends.get(sessionId);
+      const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
+      if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      this.requireAcp(requested);
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord16(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      this.sessionBackends.set(sessionId, requested);
+    }
+    if (call.method === "session/load") {
+      const boundBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+      const targetBackend = typeof call.params.backend === "string" ? call.params.backend : boundBackend;
+      if (boundBackend !== void 0 && targetBackend !== boundBackend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      const acp = this.requireAcp(targetBackend);
+      const result = await acp.call(call.method, call.params);
+      const loadedId = readSessionId(result) ?? sessionId;
+      if (loadedId !== void 0) {
+        this.sessionOwners.set(loadedId, connectionId);
+        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
+      }
+      return sanitizeSessionResult(result);
+    }
+    if (isSessionMutation(call.method) && sessionId !== void 0) {
+      this.requireSessionOwner(connectionId, sessionId);
+    }
+    if (call.method === "session/prompt" && sessionId !== void 0) {
+      const ownerPeer = this.peers.get(connectionId);
+      if (ownerPeer !== void 0 && !ownerPeer.hasStreamFor(sessionId)) {
+        this.logger?.warn("Cursor prompt started without an open ACP stream", {
+          sessionId: shortSessionId(sessionId)
+        });
+      }
+      this.turnCatchUp.set(sessionId, []);
+      void this.runPromptInBackground(sessionId, call.params);
+      return { accepted: true, stopReason: "in_progress" };
+    }
+    const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
+    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params));
+  }
+  async runPromptInBackground(sessionId, params) {
+    try {
+      const sessionBackend = this.sessionBackends.get(sessionId);
+      const acp = this.requireAcp(sessionBackend);
+      const result = await acp.call("session/prompt", params);
+      await this.inboundChain;
+      const stopReason = isRecord16(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
+      this.logger.info("ACP prompt finished", {
+        sessionId: shortSessionId(sessionId),
+        stopReason,
+        catchUp: catchUp.length
+      });
+      await this.publishToSession(sessionId, {
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "prompt_completed",
+            stopReason,
+            ...catchUp.length > 0 ? { catchUp } : {}
+          }
+        }
+      });
+    } catch (error) {
+      this.logger?.warn("ACP session/prompt failed", { code: errorCode3(error) });
+      await this.inboundChain.catch(() => void 0);
+      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
+      await this.publishToSession(sessionId, {
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "prompt_failed",
+            code: errorCode3(error),
+            ...catchUp.length > 0 ? { catchUp } : {}
+          }
+        }
+      }).catch(() => void 0);
+    }
+  }
+  async respond(connectionId, input2) {
+    const params = parseRespondEnvelope(input2);
+    const pending = this.approvals.get(params.requestHandle);
+    if (pending === void 0 || pending.expiresAt <= Date.now()) {
+      this.approvals.delete(params.requestHandle);
+      throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
+    }
+    if (pending.connectionId !== connectionId) {
+      throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
+    }
+    this.approvals.delete(params.requestHandle);
+    const acp = this.requireAcp(pending.backend);
+    if (params.decision === "cancel") {
+      await acp.respondError(pending.upstreamId, -32800, "Cancelled by Remote client.");
+      return { resolved: true };
+    }
+    const result = params.result ?? mapPermissionDecision(params.decision, pending.method);
+    await acp.respond(pending.upstreamId, result);
+    return { resolved: true };
+  }
+  dropPeer(connectionId) {
+    this.peers.delete(connectionId);
+    for (const [sessionId, owner] of this.sessionOwners) {
+      if (owner === connectionId) this.sessionOwners.delete(sessionId);
+    }
+    for (const [handle, approval] of this.approvals) {
+      if (approval.connectionId === connectionId) {
+        this.approvals.delete(handle);
+        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
+      }
+    }
+  }
+  /** Used by peer stream open to prove this connection may observe the session. */
+  assertStreamable(connectionId, sessionId) {
+    this.claimSession(connectionId, sessionId);
+  }
+  /**
+   * After a Client reconnect, session ownership may have been cleared with the
+   * old peer. Reclaim the in-memory ACP session for the new connection so
+   * stream open / prompt can resume and buffered frames can replay.
+   */
+  claimSession(connectionId, sessionId) {
+    const owner = this.sessionOwners.get(sessionId);
+    if (owner === void 0) {
+      this.sessionOwners.set(sessionId, connectionId);
+      return;
+    }
+    if (owner !== connectionId) {
+      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
+    }
+  }
+  /** Replay frames buffered while no healthy peer could receive them. */
+  async replayBufferedFrames(connectionId, sessionId) {
+    const peer = this.peers.get(connectionId);
+    if (peer === void 0) return;
+    this.pruneFrameBuffer(sessionId);
+    const buffered = this.recentFrames.get(sessionId) ?? [];
+    if (buffered.length === 0) return;
+    this.recentFrames.delete(sessionId);
+    this.logger.info("Replaying buffered ACP frames", {
+      sessionId: shortSessionId(sessionId),
+      count: buffered.length
+    });
+    for (const frame of buffered) {
+      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
+    }
+  }
+  async reconfigure(config) {
+    if (this.closed) throw new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed.");
+    const previous = this.config;
+    const implemented = (value) => ({
+      enabled: value.enabled,
+      backends: value.backends.filter((item) => ["cursor", "antigravity"].includes(item.id))
+    });
+    this.config = config;
+    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = void 0;
+    await this.startPromise?.catch(() => void 0);
+    const changed = new Set(previous.backends.filter((item) => {
+      const next = config.backends.find((candidate) => candidate.id === item.id);
+      return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next);
+    }).map((item) => item.id));
+    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
+    if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
+    for (const id5 of sessions) {
+      this.sessionOwners.delete(id5);
+      this.sessionBackends.delete(id5);
+      this.recentFrames.delete(id5);
+      this.turnCatchUp.delete(id5);
+    }
+    for (const [id5, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id5);
+    for (const id5 of changed) {
+      const instance = this.backendInstances.get(id5);
+      if (instance === void 0) continue;
+      this.backendInstances.delete(id5);
+      await this.disposeInstance(instance);
+    }
+    this.available = this.availableBackends().length > 0;
+    this.state = this.available ? "ready" : "disabled";
+    this.restartAttempt = 0;
+    this.unavailableCode = void 0;
+    await this.start();
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    for (const peer of this.peers.values()) await peer.closeAll();
+    this.peers.clear();
+    this.sessionOwners.clear();
+    this.sessionBackends.clear();
+    this.recentFrames.clear();
+    this.turnCatchUp.clear();
+    this.approvals.clear();
+    await Promise.all([...this.startingClients].map((client) => client.close()));
+    await this.disposeAllInstances();
+    this.available = false;
+    this.state = "disabled";
+  }
+  async launchAcp() {
+    const candidates = this.config.backends.filter((item) => this.enabledBackends().includes(item.id));
+    const results = await Promise.allSettled(candidates.map(async (candidate) => {
+      if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
+      let lastError;
+      for (const binary of cursorBinaryCandidates(candidate.command)) {
+        if (this.closed) return;
+        try {
+          await this.launchBackendCandidate(candidate, binary);
+          return;
+        } catch (error) {
+          lastError = error;
+          this.logger.debug?.("ACP candidate failed", { id: candidate.id, code: errorCode3(error) });
+        }
+      }
+      throw lastError;
+    }));
+    if (this.closed) return;
+    if (this.isAvailable()) {
+      this.state = "ready";
+      this.unavailableCode = void 0;
+      this.restartAttempt = 0;
+      return;
+    }
+    const failure3 = results.find((result) => result.status === "rejected");
+    throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
+  }
+  async launchBackendCandidate(backend, binary) {
+    const id5 = backend.id;
+    const acp = this.createAcp(binary, this.logger, backend);
+    this.startingClients.add(acp);
+    try {
+      await acp.start();
+      if (this.closed) {
+        await acp.close();
+        return;
+      }
+    } catch (error) {
+      await acp.close();
+      throw error;
+    } finally {
+      this.startingClients.delete(acp);
+    }
+    const unsubscribeInbound = acp.onInbound((message) => {
+      this.inboundChain = this.inboundChain.then(() => this.handleInbound(id5, message)).catch((error) => {
+        this.logger.warn("ACP inbound fanout failed", { id: id5, code: errorCode3(error) });
+      });
+    });
+    const unsubscribeUnavailable = acp.onUnavailable((code) => {
+      void this.handleUnavailable(code);
+    });
+    const prev = this.backendInstances.get(id5);
+    if (prev !== void 0) {
+      await this.disposeInstance(prev);
+    }
+    if (this.closed) {
+      unsubscribeInbound();
+      unsubscribeUnavailable();
+      await acp.close();
+      return;
+    }
+    this.available = true;
+    this.backendInstances.set(id5, {
+      id: id5,
+      client: acp,
+      unsubscribeInbound,
+      unsubscribeUnavailable
+    });
+  }
+  async handleInbound(backend, message) {
+    if (message.kind === "notification" || message.method === "session/update") {
+      const sessionId2 = readSessionId(message.params) ?? readNestedSessionId(message.params);
+      if (sessionId2 === void 0) return;
+      if (!this.sessionBackends.has(sessionId2)) {
+        this.sessionBackends.set(sessionId2, backend);
+      }
+      await this.publishToSession(sessionId2, { method: message.method, params: message.params });
+      return;
+    }
+    const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? "unknown";
+    if (sessionId !== "unknown" && !this.sessionBackends.has(sessionId)) {
+      this.sessionBackends.set(sessionId, backend);
+    }
+    const requestHandle = randomUUID4();
+    this.approvals.set(requestHandle, {
+      upstreamId: message.id,
+      connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? "unknown",
+      sessionId,
+      method: message.method,
+      expiresAt: Date.now() + APPROVAL_TTL_MS2,
+      backend
+    });
+    this.scheduleApprovalExpiry();
+    const owner = this.sessionOwners.get(sessionId);
+    const frame = {
+      method: message.method,
+      params: {
+        requestHandle,
+        sessionId,
+        upstreamMethod: message.method,
+        ...isRecord16(message.params) ? message.params : {}
+      }
+    };
+    if (owner !== void 0) {
+      const peer = this.peers.get(owner);
+      if (peer !== void 0) {
+        await peer.publishInbound(sessionId, frame);
+        return;
+      }
+    }
+    await this.publishToSession(sessionId, frame);
+  }
+  async publishToSession(sessionId, frame) {
+    this.recordTurnCatchUp(sessionId, frame);
+    const ownerId = this.sessionOwners.get(sessionId);
+    const entries = [...this.peers.entries()];
+    if (entries.length === 0) {
+      this.bufferFrame(sessionId, frame);
+      return;
+    }
+    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
+      try {
+        await peer.publishInbound(sessionId, frame);
+        return { connectionId, ok: true };
+      } catch {
+        return { connectionId, ok: false };
+      }
+    }));
+    const ownerDelivered = ownerId !== void 0 && deliveries.some((item) => item.connectionId === ownerId && item.ok);
+    if (ownerId !== void 0 ? !ownerDelivered : deliveries.every((item) => !item.ok)) {
+      this.bufferFrame(sessionId, frame);
+    }
+  }
+  recordTurnCatchUp(sessionId, frame) {
+    const list = this.turnCatchUp.get(sessionId);
+    if (list === void 0 || frame.method !== "session/update") return;
+    const params = isRecord16(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord16(params.update) ? params.update : params;
+    const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
+    if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
+    list.push({ method: frame.method, params: frame.params });
+    while (list.length > MAX_TURN_CATCH_UP_FRAMES) list.shift();
+  }
+  bufferFrame(sessionId, frame) {
+    this.pruneFrameBuffer(sessionId);
+    const list = this.recentFrames.get(sessionId) ?? [];
+    list.push({ method: frame.method, params: frame.params, at: Date.now() });
+    while (list.length > MAX_BUFFERED_ACP_FRAMES) list.shift();
+    this.recentFrames.set(sessionId, list);
+    this.logger.warn("Buffered ACP frame for later replay", {
+      sessionId: shortSessionId(sessionId),
+      method: frame.method,
+      buffered: list.length
+    });
+  }
+  pruneFrameBuffer(sessionId) {
+    const list = this.recentFrames.get(sessionId);
+    if (list === void 0) return;
+    const validAfter = Date.now() - ACP_FRAME_BUFFER_TTL_MS;
+    const next = list.filter((frame) => frame.at >= validAfter);
+    if (next.length === 0) this.recentFrames.delete(sessionId);
+    else this.recentFrames.set(sessionId, next);
+  }
+  async handleUnavailable(code) {
+    if (this.closed) return;
+    this.available = false;
+    this.state = "restarting";
+    this.unavailableCode = code;
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    this.scheduleRestart();
+  }
+  scheduleRestart() {
+    if (this.closed || !this.config.enabled) return;
+    if (this.restartAttempt >= this.restartDelaysMs.length) {
+      this.state = "unavailable";
+      return;
+    }
+    const delay = this.restartDelaysMs[this.restartAttempt];
+    this.restartAttempt += 1;
+    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      void this.start().catch(() => void 0);
+    }, delay);
+    this.restartTimer.unref?.();
+  }
+  scheduleApprovalExpiry() {
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    const next = [...this.approvals.values()].reduce((min, item) => {
+      if (min === void 0 || item.expiresAt < min) return item.expiresAt;
+      return min;
+    }, void 0);
+    if (next === void 0) return;
+    this.approvalExpiryTimer = setTimeout(() => {
+      const now = Date.now();
+      for (const [handle, approval] of this.approvals) {
+        if (approval.expiresAt <= now) {
+          this.approvals.delete(handle);
+          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
+        }
+      }
+      this.scheduleApprovalExpiry();
+    }, Math.max(0, next - Date.now()));
+    this.approvalExpiryTimer.unref?.();
+  }
+  requireAcp(backend) {
+    if (!this.config.enabled || backend !== void 0 && !this.enabledBackends().includes(backend) || !this.isAvailable()) {
+      throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
+    }
+    if (backend !== void 0) {
+      const instance = this.backendInstances.get(backend);
+      if (instance !== void 0 && instance.client.isReady()) return instance.client;
+      throw new RpcError("CURSOR_UNAVAILABLE", "The requested ACP backend is disabled or unavailable on this Host.");
+    }
+    const selected = this.backendInstances.get(this.defaultBackend());
+    if (selected !== void 0 && selected.client.isReady()) return selected.client;
+    throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
+  }
+  initializeResult(params, backend) {
+    const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
+    const actualBackend = backend ?? this.defaultBackend();
+    return {
+      protocolVersion: requested,
+      agentInfo: {
+        name: actualBackend === "antigravity" ? "antigravity" : "dsh-remote-acp",
+        version: PLUGIN_VERSION
+      },
+      backend: actualBackend,
+      availableBackends: this.availableBackends(),
+      authMethods: [],
+      capabilities: {
+        loadSession: true,
+        promptTypes: actualBackend === "antigravity" ? ["text", "image"] : ["text"],
+        methods: [...ACP_METHOD_ALLOWLIST]
+      }
+    };
+  }
+  callUpstream(method, params) {
+    return this.requireAcp().call(method, params);
+  }
+  requireSessionAccess(connectionId, sessionId, method) {
+    if (method === "session/load") return;
+    const owner = this.sessionOwners.get(sessionId);
+    if (owner === void 0) {
+      this.sessionOwners.set(sessionId, connectionId);
+      return;
+    }
+    if (owner !== connectionId && isSessionMutation(method)) {
+      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
+    }
+  }
+  requireSessionOwner(connectionId, sessionId) {
+    this.claimSession(connectionId, sessionId);
+  }
+  async requireExistingDirectory(path) {
+    if (!isAbsolute3(path)) {
+      throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
+    }
+    try {
+      const canonical = await realpath2(path);
+      const info = await stat4(canonical);
+      if (!info.isDirectory()) {
+        throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
+      }
+      return canonical;
+    } catch (error) {
+      if (error instanceof RpcError) throw error;
+      throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
+    }
+  }
+  async listDirectory(path) {
+    const home = homedir5();
+    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join9(home, path.slice(2)) : path;
+    const canonical = await this.requireExistingDirectory(isAbsolute3(target2) ? target2 : resolve2(target2));
+    const names = await readdir2(canonical);
+    const entries = [];
+    let truncated = false;
+    for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
+      if (entries.length >= ACP_DIRECTORY_ENTRY_LIMIT) {
+        truncated = true;
+        break;
+      }
+      const child = join9(canonical, name2);
+      try {
+        const info = await stat4(child);
+        if (!info.isDirectory()) continue;
+        entries.push({ name: name2, path: child, hidden: name2.startsWith(".") });
+      } catch {
+      }
+    }
+    return {
+      path: canonical,
+      home,
+      crumbs: buildCrumbs(canonical, home),
+      entries,
+      truncated
+    };
+  }
+  async disposeInstance(inst) {
+    inst.unsubscribeInbound();
+    inst.unsubscribeUnavailable();
+    await inst.client.close();
+  }
+  async disposeAllInstances() {
+    for (const inst of this.backendInstances.values()) {
+      await this.disposeInstance(inst);
+    }
+    this.backendInstances.clear();
+  }
+};
+function parseCallEnvelope2(input2) {
+  if (!isRecord16(input2) || typeof input2.method !== "string") {
+    throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
+  }
+  return { method: input2.method, params: input2.params ?? {} };
+}
+function parseRespondEnvelope(input2) {
+  if (!isRecord16(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
+    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
+  }
+  const decision = input2.decision;
+  if (decision !== "allow-once" && decision !== "allow-always" && decision !== "reject-once" && decision !== "cancel") {
+    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
+  }
+  return {
+    requestHandle: input2.requestHandle,
+    decision,
+    ...input2.result === void 0 ? {} : { result: input2.result }
+  };
+}
+function mapPermissionDecision(decision, method) {
+  if (method === "session/request_permission") {
+    return { outcome: { outcome: "selected", optionId: decision === "cancel" ? "reject-once" : decision } };
+  }
+  if (method === "cursor/create_plan") {
+    if (decision === "allow-once" || decision === "allow-always") return { outcome: { outcome: "accepted" } };
+    return { outcome: { outcome: decision === "cancel" ? "cancelled" : "rejected" } };
+  }
+  if (method === "cursor/ask_question") {
+    return { outcome: { outcome: "cancelled" } };
+  }
+  return { outcome: { outcome: "selected", optionId: decision } };
+}
+function readSessionId(value) {
+  if (!isRecord16(value)) return void 0;
+  return typeof value.sessionId === "string" ? value.sessionId : void 0;
+}
+function readNestedSessionId(value) {
+  if (!isRecord16(value)) return void 0;
+  if (isRecord16(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  return void 0;
+}
+function sanitizeSessionResult(value) {
+  if (!isRecord16(value)) return value;
+  const next = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
+  }
+  return Object.keys(next).length > 0 ? next : value;
+}
+function buildCrumbs(path, home) {
+  const crumbs2 = [];
+  let current = path;
+  while (true) {
+    crumbs2.unshift({
+      name: current === home ? "~" : basename4(current) || current,
+      path: current,
+      hidden: false
+    });
+    const parent = resolve2(current, "..");
+    if (parent === current) break;
+    if (home !== "" && relative2(home, current) === "" && current !== home) break;
+    current = parent;
+    if (crumbs2.length >= 32) break;
+  }
+  return crumbs2;
+}
+function cursorBinaryCandidates(configured) {
+  const userHome = homedir5();
+  if (configured === "agy" || configured === "antigravity") {
+    return [
+      join9(userHome, ".local", "bin", "agy"),
+      "agy"
+    ];
+  }
+  if (configured === "agent" || configured === "cursor") {
+    return [
+      join9(userHome, ".local", "bin", "agent"),
+      "agent"
+    ];
+  }
+  return [configured];
+}
+function errorCode3(error) {
+  if (error instanceof CursorAcpError || error instanceof RpcError) return error.code;
+  return "CURSOR_UNAVAILABLE";
+}
+function shortSessionId(sessionId) {
+  return sessionId.length <= 16 ? sessionId : `${sessionId.slice(0, 8)}\u2026${sessionId.slice(-4)}`;
+}
+function takeTurnCatchUp(turnCatchUp, sessionId) {
+  const list = turnCatchUp.get(sessionId) ?? [];
+  turnCatchUp.delete(sessionId);
+  return list;
+}
+function isRecord16(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/control-runtime.ts
 var PluginControlRuntime = class {
   constructor(config, identityDirectory, settings, client, host) {
@@ -23726,7 +27881,7 @@ var PluginControlRuntime = class {
       writable: this.settings !== void 0,
       applies: "restart",
       associations,
-      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map((item) => [item.id, commandAvailable(item.command ?? "")])),
+      acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map((item) => [item.id, backendCommandAvailable(item.id, item.command ?? "")])),
       ...association === void 0 ? {} : { association }
     };
   }
@@ -23763,6 +27918,10 @@ var PluginControlRuntime = class {
     };
   }
 };
+function backendCommandAvailable(backend, command) {
+  const candidates = backend === "codex" ? codexBinaryCandidates(command) : backend === "cursor" || backend === "antigravity" ? cursorBinaryCandidates(command) : [command];
+  return candidates.some(commandAvailable);
+}
 function commandAvailable(command) {
   try {
     execFileSync(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
@@ -23797,11 +27956,11 @@ function editableConfig(config) {
     ...config.acp === void 0 ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }
   };
 }
-function isRecord11(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record6(value) {
-  if (!isRecord11(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord17(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -23872,7 +28031,7 @@ var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/close"
 ]);
 var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
-var id2 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var id4 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
 var TerminalPolicy = class {
   constructor(enabled, deviceId, owners) {
     this.enabled = enabled;
@@ -23887,12 +28046,12 @@ var TerminalPolicy = class {
     );
     const args = external_exports.object({ args: external_exports.record(external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
-    const sessionId = id2.parse(rawSessionId);
+    const sessionId = id4.parse(rawSessionId);
     const codexSession = parseCodexSessionId(sessionId);
     void codexSession;
     if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request = endpoint === "terminal/create" ? external_exports.object({ id: id2 }).passthrough().parse(args.request) : void 0;
-    const terminalId = id2.parse(request?.id ?? args.id);
+    const request = endpoint === "terminal/create" ? external_exports.object({ id: id4 }).passthrough().parse(args.request) : void 0;
+    const terminalId = id4.parse(request?.id ?? args.id);
     const key = `${sessionId}/${terminalId}`;
     if (endpoint === "terminal/create") {
       if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
@@ -23902,9 +28061,9 @@ var TerminalPolicy = class {
       return { key, created };
     }
     if (this.owners.get(key) !== this.deviceId) this.deny();
-    if (endpoint === "terminal/follow") this.attachments.set(key, id2.parse(args.attachmentId));
+    if (endpoint === "terminal/follow") this.attachments.set(key, id4.parse(args.attachmentId));
     if (endpoint === "terminal/write" || endpoint === "terminal/resize") {
-      if (this.attachments.get(key) !== id2.parse(args.attachmentId)) this.deny();
+      if (this.attachments.get(key) !== id4.parse(args.attachmentId)) this.deny();
     }
     return { key };
   }
@@ -24581,7 +28740,7 @@ var HostServerConnection = class {
         await this.connectOnce();
         delayMs = this.config.reconnect.initialDelayMs;
       } catch (error) {
-        const code = errorCode2(error);
+        const code = errorCode4(error);
         if (code === "CREDENTIALS_REFRESHED") continue;
         this.terminalError = code;
         this.logger.warn("server control connection failed", {
@@ -24596,7 +28755,7 @@ var HostServerConnection = class {
           try {
             await this.api.clearAuthorization();
           } catch (clearError) {
-            this.logger.error("failed to clear revoked Host authorization", { code: errorCode2(clearError) });
+            this.logger.error("failed to clear revoked Host authorization", { code: errorCode4(clearError) });
           }
         }
         if (TERMINAL_AUTH_ERRORS.has(code) || !this.config.reconnect.enabled) return;
@@ -24676,7 +28835,7 @@ var HostServerConnection = class {
           if (!acknowledged) throw new ControlConnectionError("INVALID_MESSAGE", "Server sent a frame before hello.ack.");
           await this.handleFrame(frame);
         }).catch((error) => {
-          const code = errorCode2(error);
+          const code = errorCode4(error);
           this.terminalError = code;
           this.logger.error("server control frame failed", {
             code,
@@ -24788,7 +28947,7 @@ var HostServerConnection = class {
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by account authorization", {
         clientDeviceId: shortId3(payload.clientDeviceId),
-        code: errorCode2(error)
+        code: errorCode4(error)
       });
       return;
     }
@@ -24937,7 +29096,7 @@ var HostServerConnection = class {
     } catch (error) {
       this.logger.warn("TURN credentials unavailable; trying direct candidates", {
         connectionId: shortId3(tunnel.connectionId),
-        code: errorCode2(error)
+        code: errorCode4(error)
       });
     }
     if (!tunnel.preferredTransports.includes("turn")) iceServers = stunOnlyIceServers(iceServers);
@@ -25381,11 +29540,11 @@ function rtcDiagnostics(rtc) {
     return void 0;
   }
 }
-function errorCode2(error) {
+function errorCode4(error) {
   return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : "CONNECTION_FAILED";
 }
 function isRetryable(error) {
-  return !TERMINAL_AUTH_ERRORS.has(errorCode2(error)) && (!(error instanceof ServerApiError) || error.retryable);
+  return !TERMINAL_AUTH_ERRORS.has(errorCode4(error)) && (!(error instanceof ServerApiError) || error.retryable);
 }
 function closeCode(code) {
   if (code === 4002) return "AUTH_INVALID";
@@ -25397,22 +29556,22 @@ function closeCode(code) {
 }
 
 // src/remote-directory-browser.ts
-import { readdir, stat as stat3 } from "node:fs/promises";
-import { homedir as homedir2, platform as platform2 } from "node:os";
-import { basename as basename2, dirname as dirname5, isAbsolute as isAbsolute2, parse, resolve } from "node:path";
+import { readdir as readdir3, stat as stat5 } from "node:fs/promises";
+import { homedir as homedir6, platform as platform2 } from "node:os";
+import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute4, parse, resolve as resolve3 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve(homedir2());
-  const target2 = path === void 0 || path.trim() === "" ? home : resolve(path);
-  if (!isAbsolute2(target2)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir(target2, { withFileTypes: true });
+  const home = resolve3(homedir6());
+  const target2 = path === void 0 || path.trim() === "" ? home : resolve3(path);
+  if (!isAbsolute4(target2)) throw new Error("The remote directory path must be absolute.");
+  const rows = await readdir3(target2, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve(target2, row.name);
+    const child = resolve3(target2, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat3(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat5(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -25431,11 +29590,11 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root) {
-    segments.unshift(basename2(current));
+    segments.unshift(basename5(current));
     current = dirname5(current);
   }
   for (const segment of segments) {
-    current = resolve(current, segment);
+    current = resolve3(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -25506,7 +29665,7 @@ var respondSchema = external_exports.object({
     result: external_exports.unknown()
   }).strict()
 }).strict();
-var streamOpenSchema = external_exports.object({
+var streamOpenSchema3 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   stream: external_exports.enum(["mux", "host"]),
   rpcId: external_exports.string().min(1).max(128),
@@ -25518,21 +29677,21 @@ var streamOpenSchema = external_exports.object({
     sessionId: external_exports.string().min(1).max(128).optional()
   }).strict()
 }).strict();
-var streamCloseSchema = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferIdSchema = external_exports.string().min(1).max(128);
-var transferOpenSchema = external_exports.object({
-  transferId: transferIdSchema,
+var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferIdSchema3 = external_exports.string().min(1).max(128);
+var transferOpenSchema3 = external_exports.object({
+  transferId: transferIdSchema3,
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive().max(Math.ceil(MAX_HARNESS_API_TRANSFER_BYTES / HARNESS_API_TRANSFER_CHUNK_BYTES))
 }).strict();
-var transferChunkSchema = external_exports.object({
-  transferId: transferIdSchema,
+var transferChunkSchema3 = external_exports.object({
+  transferId: transferIdSchema3,
   index: external_exports.number().int().nonnegative(),
   data: external_exports.string().max(Math.ceil(HARNESS_API_TRANSFER_CHUNK_BYTES / 3) * 4)
 }).strict();
-var transferCommitSchema = external_exports.object({ transferId: transferIdSchema }).strict();
-var transferReadSchema = external_exports.object({ transferId: transferIdSchema, index: external_exports.number().int().nonnegative() }).strict();
-var transferCloseSchema = external_exports.object({ transferId: transferIdSchema }).strict();
+var transferCommitSchema = external_exports.object({ transferId: transferIdSchema3 }).strict();
+var transferReadSchema3 = external_exports.object({ transferId: transferIdSchema3, index: external_exports.number().int().nonnegative() }).strict();
+var transferCloseSchema = external_exports.object({ transferId: transferIdSchema3 }).strict();
 var commandExecuteSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
@@ -25663,7 +29822,7 @@ var HARNESS_API_ALLOWLIST = [
 var NATIVE_CALL_TIMEOUT_MS = 3e4;
 var MAX_ACTIVE_API_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var API_TRANSFER_IDLE_MS = TRANSFER_IDLE_MS;
-var INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024;
+var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var HarnessApiBridge = class {
   constructor(api, publish, maxStreams = 8, logger, typertGateway, harnessVersion) {
     this.api = api;
@@ -25755,7 +29914,7 @@ var HarnessApiBridge = class {
   }
   openTransfer(input2) {
     this.pruneTransfers();
-    const params = transferOpenSchema.parse(input2);
+    const params = transferOpenSchema3.parse(input2);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk count is invalid.");
     }
@@ -25776,7 +29935,7 @@ var HarnessApiBridge = class {
   }
   appendTransfer(input2) {
     this.pruneTransfers();
-    const params = transferChunkSchema.parse(input2);
+    const params = transferChunkSchema3.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -25785,7 +29944,7 @@ var HarnessApiBridge = class {
     }
     let chunk;
     try {
-      chunk = decodeCanonicalBase64(params.data);
+      chunk = decodeCanonicalBase643(params.data);
     } catch (error) {
       this.incomingTransfers.delete(params.transferId);
       throw error;
@@ -25814,7 +29973,7 @@ var HarnessApiBridge = class {
     }
     let request;
     try {
-      const bytes = concatChunks(transfer.chunks, transfer.totalBytes);
+      const bytes = concatChunks3(transfer.chunks, transfer.totalBytes);
       request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer does not contain a valid request.");
@@ -25822,7 +29981,7 @@ var HarnessApiBridge = class {
     const nativeRequest = callSchema2.parse(request);
     const response = await this.call(nativeRequest);
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) {
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) {
       return { kind: "inline", response };
     }
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -25843,7 +30002,7 @@ var HarnessApiBridge = class {
   }
   readTransfer(input2) {
     this.pruneTransfers();
-    const params = transferReadSchema.parse(input2);
+    const params = transferReadSchema3.parse(input2);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -25877,7 +30036,7 @@ var HarnessApiBridge = class {
     return receipt;
   }
   openStream(input2) {
-    const params = streamOpenSchema.parse(input2);
+    const params = streamOpenSchema3.parse(input2);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness event stream is already open.");
     if (this.streams.size >= this.maxStreams) throw new RpcError("RATE_LIMITED", "Too many Harness event streams are open.", void 0, true);
     const controller = new AbortController();
@@ -25894,7 +30053,7 @@ var HarnessApiBridge = class {
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input2) {
-    const params = streamCloseSchema.parse(input2);
+    const params = streamCloseSchema3.parse(input2);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -26242,14 +30401,14 @@ function withTimeout(promise, ms, message) {
 function shortId4(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
-function decodeCanonicalBase64(value) {
+function decodeCanonicalBase643(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk is not canonical base64.");
   }
   return bytes;
 }
-function concatChunks(chunks, totalBytes) {
+function concatChunks3(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -26262,12 +30421,12 @@ function concatChunks(chunks, totalBytes) {
 // src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
-var streamOpenSchema2 = external_exports.object({
+var streamOpenSchema4 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
   payload: external_exports.unknown()
 }).strict();
-var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var streamCloseSchema4 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var commandExecuteArgsSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
@@ -26286,27 +30445,27 @@ var commandExecuteArgsSchema = external_exports.object({
   }
 });
 var commandExecutePayloadSchema = external_exports.object({ args: commandExecuteArgsSchema }).strict();
-var transferOpenSchema2 = external_exports.object({
+var transferOpenSchema4 = external_exports.object({
   transferId: external_exports.string().uuid(),
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema2 = external_exports.object({
+var transferChunkSchema4 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative(),
   data: external_exports.string().min(1)
 }).strict();
-var transferIdSchema2 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema2 = external_exports.object({
+var transferIdSchema4 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema4 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative()
 }).strict();
 var directoryListSchema2 = external_exports.object({
   path: external_exports.string().min(1).max(4096).optional()
 }).strict();
-var MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION;
-var MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var INLINE_TRANSFER_RESPONSE_BYTES2 = 2 * 1024 * 1024;
+var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
+var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
+var INLINE_TRANSFER_RESPONSE_BYTES4 = 2 * 1024 * 1024;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -26458,14 +30617,14 @@ var HarnessRemoteBridge = class {
   }
   openTransfer(input2) {
     this.pruneTransfers();
-    const params = transferOpenSchema2.parse(input2);
+    const params = transferOpenSchema4.parse(input2);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk count is invalid.");
     }
     if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
       throw new RpcError("REQUEST_CONFLICT", "The Harness Remote transfer id is already active.");
     }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote transfers are active.", void 0, true);
     }
     this.incomingTransfers.set(params.transferId, {
@@ -26479,14 +30638,14 @@ var HarnessRemoteBridge = class {
   }
   appendTransfer(input2) {
     this.pruneTransfers();
-    const params = transferChunkSchema2.parse(input2);
+    const params = transferChunkSchema4.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
       this.incomingTransfers.delete(params.transferId);
       throw new RpcError("INVALID_MESSAGE", "Harness Remote transfer chunks must arrive exactly once and in order.");
     }
-    const chunk = decodeCanonicalBase642(params.data);
+    const chunk = decodeCanonicalBase644(params.data);
     const expectedBytes = Math.min(
       HARNESS_API_TRANSFER_CHUNK_BYTES,
       transfer.totalBytes - params.index * HARNESS_API_TRANSFER_CHUNK_BYTES
@@ -26502,7 +30661,7 @@ var HarnessRemoteBridge = class {
   }
   async commitTransfer(input2) {
     this.pruneTransfers();
-    const params = transferIdSchema2.parse(input2);
+    const params = transferIdSchema4.parse(input2);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -26511,17 +30670,17 @@ var HarnessRemoteBridge = class {
     }
     let request;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks2(transfer.chunks, transfer.totalBytes)));
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks4(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
     const response = await this.call(callSchema3.parse(request));
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) return { kind: "inline", response };
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES4) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Harness Remote response exceeds the bounded transfer limit.");
     }
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote response transfers are active.", void 0, true);
     }
     const totalChunks = Math.ceil(responseBytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
@@ -26535,7 +30694,7 @@ var HarnessRemoteBridge = class {
   }
   readTransfer(input2) {
     this.pruneTransfers();
-    const params = transferReadSchema2.parse(input2);
+    const params = transferReadSchema4.parse(input2);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -26553,18 +30712,18 @@ var HarnessRemoteBridge = class {
     };
   }
   closeTransfer(input2) {
-    const params = transferIdSchema2.parse(input2);
+    const params = transferIdSchema4.parse(input2);
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
   async openStream(input2) {
-    const params = streamOpenSchema2.parse(input2);
+    const params = streamOpenSchema4.parse(input2);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness Remote stream is already open.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS) {
+    if (this.streams.size >= MAX_ACTIVE_STREAMS3) {
       throw new RpcError("RATE_LIMITED", "Too many Harness Remote streams are open.", void 0, true);
     }
     const controller = new AbortController();
@@ -26582,7 +30741,7 @@ var HarnessRemoteBridge = class {
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input2) {
-    const params = streamCloseSchema2.parse(input2);
+    const params = streamCloseSchema4.parse(input2);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -26639,11 +30798,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord12(payload) || !isRecord12(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord18(payload) || !isRecord18(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord12(payload) || !isRecord12(payload.args)) return payload;
+  if (!isRecord18(payload) || !isRecord18(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -26689,12 +30848,12 @@ async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) 
     signal
   );
 }
-function decodeCanonicalBase642(value) {
+function decodeCanonicalBase644(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
 }
-function concatChunks2(chunks, totalBytes) {
+function concatChunks4(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -26711,4173 +30870,18 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record7(payload);
-  const args = isRecord12(root.args) ? root.args : root;
+  const args = isRecord18(root.args) ? root.args : root;
   return record7(args.request ?? args._request ?? args);
 }
 function record7(value) {
-  return isRecord12(value) ? value : {};
-}
-function isRecord12(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/codex/domain.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
-import { readdir as readdir2, realpath, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join5, relative, resolve as resolve2 } from "node:path";
-
-// src/codex/app-server.ts
-import { spawn as spawn2 } from "node:child_process";
-import { Buffer as Buffer2 } from "node:buffer";
-var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
-var APP_SERVER_START_TIMEOUT_MS = 15e3;
-var MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024;
-var MAX_STDERR_CAPTURE_BYTES = 4 * 1024;
-var CodexAppServerError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "CodexAppServerError";
-  }
-};
-var CodexAppServerClient = class {
-  constructor(binary, logger, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true
-  })) {
-    this.binary = binary;
-    this.logger = logger;
-    this.spawnAppServer = spawnAppServer;
-  }
-  process;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  inboundHandlers = /* @__PURE__ */ new Set();
-  unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer2.alloc(0);
-  stderrBytes = 0;
-  ready = false;
-  closed = false;
-  failureNotified = false;
-  startPromise;
-  start() {
-    if (this.closed) return Promise.reject(new CodexAppServerError("CODEX_CLOSED", "The Codex domain is closed."));
-    if (this.ready) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  isReady() {
-    return this.ready;
-  }
-  async call(method, params, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS) {
-    if (!this.ready) throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not ready.");
-    return this.request(method, params, timeoutMs);
-  }
-  async respond(id5, result) {
-    this.write({ id: id5, result });
-  }
-  async respondError(id5, code, message) {
-    this.write({ id: id5, error: { code, message } });
-  }
-  onInbound(handler) {
-    this.inboundHandlers.add(handler);
-    return () => this.inboundHandlers.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailableHandlers.add(handler);
-    return () => this.unavailableHandlers.delete(handler);
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
-    this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve5();
-      }, 2e3);
-      timer.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve5();
-      });
-      child.kill("SIGTERM");
-    });
-  }
-  async startOnce() {
-    if (this.process !== void 0) {
-      throw new CodexAppServerError("CODEX_STARTING", "Codex App Server is already starting.");
-    }
-    const child = this.spawnAppServer(this.binary);
-    this.process = child;
-    this.failureNotified = false;
-    this.stdoutBuffer = Buffer2.alloc(0);
-    this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer2.from(chunk)));
-    child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer2.byteLength(chunk));
-    });
-    child.on("error", (error) => this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error));
-    child.on("exit", (code, signal) => {
-      if (this.process !== child) return;
-      this.process = void 0;
-      this.ready = false;
-      this.failPending(new CodexAppServerError("CODEX_APP_SERVER_EXITED", "Codex App Server exited unexpectedly."));
-      if (!this.closed) {
-        this.logger?.warn("Codex App Server exited", {
-          code: code ?? "none",
-          signal: signal ?? "none",
-          stderrBytes: this.stderrBytes
-        });
-        this.notifyUnavailable("CODEX_APP_SERVER_EXITED");
-      }
-    });
-    try {
-      await this.request("initialize", {
-        clientInfo: {
-          name: "deepseek_harness_remote",
-          title: "DeepSeek Harness Remote",
-          version: PLUGIN_VERSION
-        },
-        capabilities: {
-          experimentalApi: true,
-          mcpServerOpenaiFormElicitation: false
-        }
-      }, APP_SERVER_START_TIMEOUT_MS);
-      this.write({ method: "initialized", params: {} });
-      this.ready = true;
-      this.logger?.info("Codex App Server ready");
-    } catch (error) {
-      child.kill("SIGTERM");
-      if (error instanceof CodexAppServerError) throw error;
-      throw new CodexAppServerError("CODEX_INITIALIZE_FAILED", "Codex App Server initialization failed.", { cause: error });
-    }
-  }
-  request(method, params, timeoutMs) {
-    const id5 = this.nextId++;
-    const result = new Promise((resolve5, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id5);
-        reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
-      }, timeoutMs);
-      timer.unref?.();
-      this.pending.set(id5, { resolve: resolve5, reject, timer });
-    });
-    try {
-      this.write({ id: id5, method, params });
-    } catch (error) {
-      const pending = this.takePending(id5);
-      pending?.reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
-    }
-    return result;
-  }
-  write(message) {
-    const child = this.process;
-    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not available.");
-    }
-    child.stdin.write(`${JSON.stringify(message)}
-`);
-  }
-  consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer2.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
-      this.handleProcessFailure(
-        "CODEX_RESPONSE_TOO_LARGE",
-        new Error("Codex App Server emitted an oversized JSONL message.")
-      );
-      return;
-    }
-    let newline = this.stdoutBuffer.indexOf(10);
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline);
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
-      if (line.length > 0) this.handleLine(line);
-      newline = this.stdoutBuffer.indexOf(10);
-    }
-  }
-  handleLine(line) {
-    let value;
-    try {
-      value = JSON.parse(line.toString("utf8"));
-    } catch {
-      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
-      return;
-    }
-    if (!isRecord13(value)) {
-      this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
-      return;
-    }
-    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
-      const pending = this.takePending(value.id);
-      if (pending === void 0) return;
-      if ("error" in value && value.error !== void 0) {
-        pending.reject(new CodexAppServerError("CODEX_UPSTREAM_ERROR", safeUpstreamError(value.error)));
-      } else {
-        pending.resolve(value.result);
-      }
-      return;
-    }
-    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
-    const params = value.params ?? {};
-    const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    for (const handler of this.inboundHandlers) handler(inbound);
-  }
-  handleProcessFailure(code, cause) {
-    this.ready = false;
-    this.failPending(new CodexAppServerError(code, "Codex App Server communication failed.", { cause }));
-    const child = this.process;
-    this.process = void 0;
-    child?.kill("SIGTERM");
-    this.logger?.warn("Codex App Server communication failed", { code });
-    if (!this.closed) this.notifyUnavailable(code);
-  }
-  notifyUnavailable(code) {
-    if (this.failureNotified) return;
-    this.failureNotified = true;
-    for (const handler of this.unavailableHandlers) handler(code);
-  }
-  takePending(id5) {
-    const pending = this.pending.get(id5);
-    if (pending === void 0) return void 0;
-    this.pending.delete(id5);
-    clearTimeout(pending.timer);
-    return pending;
-  }
-  failPending(error) {
-    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
-  }
-};
-function safeUpstreamError(value) {
-  if (!isRecord13(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
-  const message = value.message.toLowerCase();
-  if (message.includes("active writer")) return "Codex thread already has an active writer.";
-  return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
-}
-function isRecord13(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/codex/method-policy.ts
-var id3 = external_exports.string().min(1).max(256);
-var cursor = external_exports.string().min(1).max(4096).nullable().optional();
-var textInput = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
-  message: "Image data must use canonical base64."
-});
-var imageInput = external_exports.object({
-  type: external_exports.literal("image"),
-  mediaType: imageMediaType,
-  data: canonicalBase64
-}).strict();
-var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
-var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
-var projectRoot = external_exports.object({
-  path: external_exports.string().min(1).max(4096)
-}).strict();
-var schemas = {
-  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
-  "model/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    includeHidden: external_exports.boolean().optional()
-  }).strict(),
-  "project/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional()
-  }).strict(),
-  "project/create": external_exports.object({
-    name: external_exports.string().trim().min(1).max(256),
-    roots: external_exports.array(projectRoot).length(1),
-    idempotencyKey: external_exports.string().min(16).max(256)
-  }).strict(),
-  "thread/list": external_exports.object({
-    cursor,
-    limit: external_exports.number().int().min(1).max(100).optional(),
-    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
-    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
-    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
-    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
-    archived: external_exports.boolean().optional(),
-    isPinned: external_exports.boolean().optional(),
-    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
-    useStateDbOnly: external_exports.boolean().optional(),
-    searchTerm: external_exports.string().max(1024).optional()
-  }).strict(),
-  "thread/read": external_exports.object({ threadId: id3, includeTurns: external_exports.boolean().optional() }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    threadId: id3,
-    beforeSeq: external_exports.number().int().nonnegative().optional(),
-    throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(200).optional()
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "thread/start": external_exports.object({
-    cwd: external_exports.string().min(1).max(4096),
-    model: external_exports.string().min(1).max(128).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/resume": external_exports.object({
-    threadId: id3,
-    model: external_exports.string().min(1).max(128).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/fork": external_exports.object({
-    threadId: id3,
-    lastTurnId: id3.optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "thread/name/set": external_exports.object({ threadId: id3, name: external_exports.string().trim().min(1).max(256) }).strict(),
-  "thread/archive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unarchive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unsubscribe": external_exports.object({ threadId: id3 }).strict(),
-  "turn/start": external_exports.object({
-    threadId: id3,
-    input,
-    model: external_exports.string().min(1).max(128).optional(),
-    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
-    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
-    personality: external_exports.string().min(1).max(64).optional(),
-    permissionPreset: permissionPreset.optional()
-  }).strict(),
-  "turn/steer": external_exports.object({ threadId: id3, input, expectedTurnId: id3 }).strict(),
-  "turn/interrupt": external_exports.object({ threadId: id3, turnId: id3 }).strict()
-};
-var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
-function parseCodexCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
-  }
-  const schema = schemas[method];
-  const parsed = schema.safeParse(params);
-  if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
-  return { method, params: parsed.data };
-}
-function isThreadMutation(method) {
-  return method === "turn/start" || method === "turn/steer" || method === "turn/interrupt";
-}
-function threadIdFromParams(params) {
-  return typeof params.threadId === "string" ? params.threadId : void 0;
-}
-
-// src/codex/peer-bridge.ts
-import { Buffer as Buffer3 } from "node:buffer";
-var streamOpenSchema3 = external_exports.object({
-  streamId: external_exports.string().min(1).max(128),
-  threadId: external_exports.string().min(1).max(256)
-}).strict();
-var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferOpenSchema3 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  totalBytes: external_exports.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
-  totalChunks: external_exports.number().int().positive()
-}).strict();
-var transferChunkSchema3 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  index: external_exports.number().int().nonnegative(),
-  data: external_exports.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
-}).strict();
-var transferIdSchema3 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema3 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
-var MAX_ACTIVE_STREAMS2 = MAX_ALPHA_STREAMS_PER_CONNECTION;
-var MAX_ACTIVE_TRANSFERS2 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
-var CodexPeerBridge = class {
-  constructor(domain, context, publish, logger) {
-    this.domain = domain;
-    this.context = context;
-    this.publish = publish;
-    this.logger = logger;
-  }
-  streams = /* @__PURE__ */ new Map();
-  incomingTransfers = /* @__PURE__ */ new Map();
-  outgoingTransfers = /* @__PURE__ */ new Map();
-  closed = false;
-  async call(input2) {
-    return this.callDomain(input2, true);
-  }
-  async callDomain(input2, logFailure) {
-    this.requireOpen();
-    try {
-      return await this.domain.call(this.context.connectionId, input2);
-    } catch (error) {
-      if (logFailure) {
-        this.logger?.warn("Codex call failed", {
-          method: safeMethod(input2),
-          code: safeErrorCode2(error)
-        });
-      }
-      throw error;
-    }
-  }
-  respond(input2) {
-    this.requireOpen();
-    return this.domain.respond(this.context.connectionId, input2);
-  }
-  async openStream(input2) {
-    this.requireOpen();
-    const params = streamOpenSchema3.parse(input2);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
-    }
-    await this.domain.call(this.context.connectionId, {
-      method: "thread/read",
-      params: { threadId: params.threadId, includeTurns: false }
-    });
-    this.streams.set(params.streamId, params.threadId);
-    return { opened: true, streamId: params.streamId, threadId: params.threadId };
-  }
-  closeStream(input2) {
-    const params = streamCloseSchema3.parse(input2);
-    this.streams.delete(params.streamId);
-    return { closed: true, streamId: params.streamId };
-  }
-  openTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferOpenSchema3.parse(input2);
-    if (params.totalChunks !== Math.ceil(params.totalBytes / CODEX_APP_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk count is invalid.");
-    }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError("REQUEST_CONFLICT", "The Codex transfer id is already active.");
-    }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex transfers are active.", void 0, true);
-    }
-    this.incomingTransfers.set(params.transferId, {
-      totalBytes: params.totalBytes,
-      totalChunks: params.totalChunks,
-      chunks: [],
-      receivedBytes: 0,
-      touchedAt: Date.now()
-    });
-    return { opened: true, transferId: params.transferId };
-  }
-  appendTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferChunkSchema3.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
-    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Codex transfer chunks must arrive exactly once and in order.");
-    }
-    const chunk = decodeCanonicalBase643(params.data);
-    const expectedBytes = Math.min(
-      CODEX_APP_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * CODEX_APP_TRANSFER_CHUNK_BYTES
-    );
-    if (chunk.byteLength !== expectedBytes) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk size is invalid.");
-    }
-    transfer.chunks.push(chunk);
-    transfer.receivedBytes += chunk.byteLength;
-    transfer.touchedAt = Date.now();
-    return { accepted: true, transferId: params.transferId, index: params.index };
-  }
-  async commitTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferIdSchema3.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
-    this.incomingTransfers.delete(params.transferId);
-    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer is incomplete.");
-    }
-    let request;
-    try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
-    } catch {
-      throw new RpcError("INVALID_MESSAGE", "The Codex transfer does not contain a valid request.");
-    }
-    let response;
-    try {
-      response = await this.callDomain(request, false);
-    } catch (error) {
-      this.logger?.warn("Codex transfer call failed", {
-        method: safeMethod(request),
-        code: safeErrorCode2(error)
-      });
-      throw error;
-    }
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
-      throw new RpcError("RESPONSE_TOO_LARGE", "The Codex response exceeds the bounded transfer limit.");
-    }
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
-      throw new RpcError("RATE_LIMITED", "Too many Codex response transfers are active.", void 0, true);
-    }
-    const totalChunks = Math.ceil(responseBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES);
-    this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
-      totalChunks,
-      nextIndex: 0,
-      touchedAt: Date.now()
-    });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
-  }
-  readTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferReadSchema3.parse(input2);
-    const transfer = this.outgoingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex response transfer is not active.");
-    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
-      this.outgoingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Codex response chunks must be read exactly once and in order.");
-    }
-    const start = params.index * CODEX_APP_TRANSFER_CHUNK_BYTES;
-    const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
-    transfer.nextIndex += 1;
-    transfer.touchedAt = Date.now();
-    return {
-      transferId: params.transferId,
-      index: params.index,
-      data: Buffer3.from(transfer.bytes.subarray(start, end)).toString("base64")
-    };
-  }
-  closeTransfer(input2) {
-    const params = transferIdSchema3.parse(input2);
-    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
-    return { closed, transferId: params.transferId };
-  }
-  hasThreadSubscription(threadId) {
-    return [...this.streams.values()].includes(threadId);
-  }
-  removeThreadSubscriptions(threadId) {
-    for (const [streamId, targetThreadId] of this.streams) {
-      if (targetThreadId === threadId) this.streams.delete(streamId);
-    }
-  }
-  async publishInbound(threadId, frame) {
-    if (this.closed) return;
-    const streamIds = [...this.streams.entries()].filter(([, targetThreadId]) => targetThreadId === threadId).map(([streamId]) => streamId);
-    for (const streamId of streamIds) {
-      const data2 = { streamId, frame };
-      if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
-        this.streams.delete(streamId);
-        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
-        this.logger?.warn("Codex stream closed after oversized frame", { streamId });
-        continue;
-      }
-      await this.publish("codex.app.frame", data2);
-    }
-  }
-  async failStreams(reason = "failed") {
-    if (this.closed) return;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
-      streamId,
-      reason
-    }).catch(() => void 0)));
-  }
-  async closeAll() {
-    if (this.closed) return;
-    this.closed = true;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
-      streamId,
-      reason: "peer-disconnected"
-    }).catch(() => void 0)));
-    await this.domain.detachPeer(this.context.connectionId);
-  }
-  pruneTransfers() {
-    const staleBefore = Date.now() - TRANSFER_IDLE_MS;
-    for (const [id5, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id5);
-    }
-    for (const [id5, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id5);
-    }
-  }
-  requireOpen() {
-    if (this.closed) throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
-  }
-};
-function decodeCanonicalBase643(value) {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
-  }
-  const decoded = Buffer3.from(value, "base64");
-  if (decoded.toString("base64") !== value) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk is not canonical base64.");
-  }
-  return decoded;
-}
-function isRecord14(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function safeErrorCode2(error) {
-  if (isRecord14(error) && typeof error.code === "string") return error.code;
-  return "UNKNOWN";
-}
-function safeMethod(input2) {
-  return isRecord14(input2) && typeof input2.method === "string" ? input2.method : "invalid";
-}
-function concatChunks3(chunks, totalBytes) {
-  const output = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output;
-}
-
-// src/codex/domain.ts
-var APPROVAL_TTL_MS = 5 * 6e4;
-var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
-var CODEX_PAGE_LIMIT2 = 100;
-var MAX_CODEX_PAGES2 = 32;
-var CODEX_HISTORY_PAGE_LIMIT = 25;
-var MAX_CODEX_HISTORY_PAGES = 64;
-var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
-var CodexRemoteDomain = class {
-  constructor(config, logger, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
-    this.config = config;
-    this.logger = logger;
-    this.createAppServer = createAppServer;
-    this.restartDelaysMs = restartDelaysMs;
-  }
-  appServer;
-  unsubscribeInbound;
-  unsubscribeUnavailable;
-  peers = /* @__PURE__ */ new Map();
-  peerDeviceIds = /* @__PURE__ */ new Map();
-  turnOwners = /* @__PURE__ */ new Map();
-  approvals = /* @__PURE__ */ new Map();
-  permissionPresets = /* @__PURE__ */ new Map();
-  approvalExpiryTimer;
-  restartTimer;
-  restartAttempt = 0;
-  available = false;
-  closed = false;
-  state = "disabled";
-  unavailableCode;
-  startPromise;
-  start() {
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  async startOnce() {
-    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
-    if (!this.config.enabled) return;
-    try {
-      this.state = "starting";
-      await this.launchAppServer();
-    } catch (error) {
-      this.available = false;
-      this.state = "unavailable";
-      this.unavailableCode = errorCode3(error);
-      await this.disposeAppServer(this.appServer);
-      this.logger.warn("Codex Remote domain unavailable", { code: this.unavailableCode });
-    }
-  }
-  isAvailable() {
-    return this.available && this.appServer?.isReady() === true;
-  }
-  status() {
-    return {
-      enabled: this.config.enabled,
-      available: this.isAvailable(),
-      state: this.state,
-      restartAttempt: this.restartAttempt,
-      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
-    };
-  }
-  /** Resolve a thread cwd for Host-owned workspace/terminal carriers. */
-  async resolveThreadWorkspace(connectionId, threadId) {
-    if (!this.peers.has(connectionId)) throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available on this connection.");
-    try {
-      const known = await this.readKnownThread(threadId);
-      return known.cwd;
-    } catch (error) {
-      if (error instanceof RpcError && error.code === "CODEX_THREAD_NOT_ALLOWED") {
-        throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
-      }
-      throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
-    }
-  }
-  createPeer(context, publish) {
-    const bridge = new CodexPeerBridge(this, context, publish, this.logger);
-    this.peers.set(context.connectionId, bridge);
-    this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
-    return bridge;
-  }
-  async call(connectionId, input2) {
-    const envelope = parseCallEnvelope(input2);
-    const call = parseCodexCall(envelope.method, envelope.params);
-    this.requireAppServer();
-    if (call.method === "account/read") {
-      return sanitizeAccount(await this.callUpstream(call.method, call.params));
-    }
-    if (call.method === "project/list") {
-      return sanitizeProjectList(await this.callUpstream(call.method, call.params));
-    }
-    if (call.method === "project/create") {
-      const roots = call.params.roots;
-      const path = await this.requireNewCodexProjectPath(roots[0].path);
-      return sanitizeProjectCreate(await this.callUpstream(call.method, {
-        name: call.params.name,
-        roots: [{ path }],
-        idempotencyKey: call.params.idempotencyKey
-      }));
-    }
-    if (call.method === "thread/list") {
-      const result = sanitizeThreadList(await this.callUpstream(call.method, call.params));
-      return filterThreadListByWorkspaceAuthority(
-        result,
-        await this.readWorkspaceAuthority(result.data)
-      );
-    }
-    if (call.method === "thread/start") {
-      const cwd2 = await this.requireCodexWorkspacePath(call.params.cwd);
-      const permission = codexPermission(call.params, "workspace-write");
-      const result = await this.callUpstream(call.method, {
-        ...permission.params,
-        cwd: cwd2,
-        ...codexThreadPermissionParams(permission),
-        serviceName: "deepseek_harness_remote"
-      });
-      if (extractThread(result)?.id === void 0) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
-      }
-      this.rememberPermission(extractThread(result).id, result);
-      return result;
-    }
-    const threadId = threadIdFromParams(call.params);
-    if (call.method === "dsh/sessionHistory") {
-      const thread = await this.readThreadForHistory(connectionId, threadId);
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger3(call.params.beforeSeq),
-          throughSeq: optionalInteger3(call.params.throughSeq),
-          maxMessages: optionalInteger3(call.params.maxMessages)
-        }
-      );
-      const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
-      return {
-        ...page,
-        ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
-        permissionPreset: this.permissionPresets.get(threadId) ?? null
-      };
-    }
-    if (call.method === "dsh/directoryList") {
-      return this.listCodexDirectory(call.params.path);
-    }
-    const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
-    if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
-      const owner = this.turnOwners.get(threadId);
-      if (owner !== void 0 && owner.connectionId !== connectionId) {
-        throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
-      }
-      return this.changeThreadPermission(threadId, call.params, allowedThread);
-    }
-    if (call.method === "thread/read") {
-      return this.callUpstream(call.method, call.params);
-    }
-    if (call.method === "thread/unsubscribe") {
-      const bridge = this.peers.get(connectionId);
-      bridge?.removeThreadSubscriptions(threadId);
-      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
-      return this.callUpstream(call.method, call.params);
-    }
-    let claimed = false;
-    let previousOwner;
-    if (isThreadMutation(call.method) && threadId !== void 0) {
-      const claim = this.claimTurn(
-        threadId,
-        connectionId,
-        call.method,
-        typeof call.params.turnId === "string" ? call.params.turnId : void 0
-      );
-      claimed = claim.claimed;
-      previousOwner = claim.previous;
-    }
-    try {
-      const permission = codexPermission(call.params);
-      const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
-        ...permission.params,
-        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true
-      } : call.method === "thread/fork" && allowedThread !== void 0 ? {
-        ...permission.params,
-        ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexThreadPermissionParams(permission)
-      } : call.method === "turn/start" ? {
-        ...permission.params,
-        ...allowedThread?.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexTurnPermissionParams(permission, allowedThread?.cwd)
-      } : permission.params;
-      let result;
-      try {
-        result = await this.callUpstream(call.method, upstreamParams);
-      } catch (error) {
-        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
-          return { thread: allowedThread.thread };
-        }
-        throw error;
-      }
-      if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
-        await this.assertResultThreadAllowed(result);
-      }
-      if (call.method === "thread/resume" || call.method === "thread/fork") {
-        const resultId = extractThread(result)?.id;
-        if (typeof resultId === "string") {
-          this.rememberPermission(resultId, result);
-          if (call.params.permissionPreset !== void 0) await this.publishPermission(resultId, result);
-        }
-      }
-      if (call.method === "turn/start" && threadId !== void 0) {
-        this.rememberTurnId(threadId, connectionId, extractTurnId(result));
-        if (call.params.permissionPreset !== void 0) {
-          await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
-        }
-      }
-      return result;
-    } catch (error) {
-      if (claimed && threadId !== void 0) {
-        if (previousOwner === void 0) this.turnOwners.delete(threadId);
-        else this.turnOwners.set(threadId, previousOwner);
-      }
-      throw mapAppServerError(error);
-    }
-  }
-  async respond(connectionId, input2) {
-    await this.expireApprovals();
-    const params = parseRespond(input2);
-    const approval = this.approvals.get(params.requestHandle);
-    if (approval === void 0 || approval.connectionId !== connectionId) {
-      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
-    }
-    this.approvals.delete(params.requestHandle);
-    this.scheduleApprovalExpiry();
-    await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
-    return { resolved: true };
-  }
-  async detachPeer(connectionId) {
-    const bridge = this.peers.get(connectionId);
-    if (bridge !== void 0) this.peers.delete(connectionId);
-    this.peerDeviceIds.delete(connectionId);
-    for (const [threadId, owner] of this.turnOwners) {
-      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId);
-    }
-    const appServer = this.appServer;
-    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
-    for (const [handle, approval] of pending) {
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-    }
-    this.scheduleApprovalExpiry();
-  }
-  async reconfigure(config) {
-    if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
-    if (JSON.stringify(this.config) === JSON.stringify(config)) return;
-    this.config = config;
-    this.available = false;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = void 0;
-    await this.startPromise?.catch(() => void 0);
-    this.available = false;
-    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
-    this.turnOwners.clear();
-    this.permissionPresets.clear();
-    this.approvals.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    await this.disposeAppServer(this.appServer);
-    this.restartAttempt = 0;
-    this.unavailableCode = void 0;
-    this.state = "disabled";
-    await this.start();
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.available = false;
-    this.state = this.config.enabled ? "unavailable" : "disabled";
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = void 0;
-    for (const bridge of [...this.peers.values()]) await bridge.closeAll();
-    this.peers.clear();
-    this.peerDeviceIds.clear();
-    this.turnOwners.clear();
-    this.permissionPresets.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    this.approvals.clear();
-    this.unsubscribeInbound?.();
-    this.unsubscribeInbound = void 0;
-    this.unsubscribeUnavailable?.();
-    this.unsubscribeUnavailable = void 0;
-    await this.appServer?.close();
-    this.appServer = void 0;
-  }
-  async launchAppServer() {
-    let lastError;
-    for (const binary of codexBinaryCandidates(this.config.binary)) {
-      try {
-        await this.launchAppServerCandidate(binary);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (!canTryNextBinary(error)) throw error;
-      }
-    }
-    throw lastError ?? new RpcError("CODEX_START_FAILED", "Codex App Server could not be started.");
-  }
-  async launchAppServerCandidate(binary) {
-    const appServer = this.createAppServer(binary, this.logger);
-    this.appServer = appServer;
-    this.unsubscribeInbound = appServer.onInbound((message) => {
-      void this.handleInbound(message).catch((error) => {
-        this.logger.warn("Codex inbound handling failed", { code: errorCode3(error) });
-      });
-    });
-    this.unsubscribeUnavailable = appServer.onUnavailable((code) => {
-      if (this.available && this.appServer === appServer) {
-        void this.handleAppServerUnavailable(appServer, code);
-      }
-    });
-    try {
-      await appServer.start();
-      const account = await appServer.call("account/read", { refreshToken: false }, 15e3);
-      if (!accountCanRun(account)) {
-        throw new RpcError("CODEX_AUTH_REQUIRED", "Codex is not signed in on this Host.");
-      }
-      if (this.closed || this.appServer !== appServer) {
-        await appServer.close().catch(() => void 0);
-        return;
-      }
-      this.available = true;
-      this.state = "ready";
-      this.restartAttempt = 0;
-      this.unavailableCode = void 0;
-      this.logger.info("Codex Remote domain ready");
-    } catch (error) {
-      await this.disposeAppServer(appServer);
-      throw error;
-    }
-  }
-  async handleAppServerUnavailable(appServer, code) {
-    if (this.closed || this.appServer !== appServer) return;
-    this.available = false;
-    this.state = "restarting";
-    this.unavailableCode = code;
-    this.turnOwners.clear();
-    this.permissionPresets.clear();
-    this.approvals.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
-    await this.disposeAppServer(appServer);
-    this.scheduleRestart();
-  }
-  scheduleRestart() {
-    if (this.closed || this.restartTimer !== void 0) return;
-    if (this.restartAttempt >= this.restartDelaysMs.length) {
-      this.state = "unavailable";
-      this.logger.warn("Codex App Server restart attempts exhausted", { attempts: this.restartAttempt });
-      return;
-    }
-    const delayMs = Math.max(0, this.restartDelaysMs[this.restartAttempt] ?? 0);
-    this.restartAttempt += 1;
-    this.state = "restarting";
-    this.restartTimer = setTimeout(() => {
-      this.restartTimer = void 0;
-      void this.restartAfterFailure();
-    }, delayMs);
-    this.restartTimer.unref?.();
-    this.logger.warn("Codex App Server restart scheduled", { attempt: this.restartAttempt, delayMs });
-  }
-  async restartAfterFailure() {
-    if (this.closed) return;
-    try {
-      await this.launchAppServer();
-    } catch (error) {
-      this.available = false;
-      this.state = "restarting";
-      this.unavailableCode = errorCode3(error);
-      this.logger.warn("Codex App Server restart failed", {
-        attempt: this.restartAttempt,
-        code: this.unavailableCode
-      });
-      this.scheduleRestart();
-    }
-  }
-  async disposeAppServer(appServer) {
-    if (appServer === void 0 || this.appServer !== appServer) return;
-    this.unsubscribeInbound?.();
-    this.unsubscribeInbound = void 0;
-    this.unsubscribeUnavailable?.();
-    this.unsubscribeUnavailable = void 0;
-    this.appServer = void 0;
-    await appServer.close().catch(() => void 0);
-  }
-  async handleInbound(message) {
-    if (!this.available) return;
-    if (message.kind === "request") {
-      await this.handleServerRequest(message);
-      return;
-    }
-    const threadId = extractThreadId(message.params);
-    if (message.method === "thread/settings/updated" && threadId !== void 0) {
-      this.rememberPermission(threadId, message.params);
-    }
-    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
-    if (message.method === "turn/completed" && threadId !== void 0) this.turnOwners.delete(threadId);
-    if (message.method === "turn/started" && threadId !== void 0) {
-      const owner = this.turnOwners.get(threadId);
-      const turnId = extractTurnId(message.params);
-      if (owner !== void 0) {
-        this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
-      }
-    }
-    if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
-    if (threadId === void 0) return;
-    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
-      method: message.method,
-      params: message.params
-    })));
-  }
-  rememberPermission(threadId, value) {
-    const preset = codexPermissionPresetFromResponse(value);
-    if (preset === void 0) this.permissionPresets.delete(threadId);
-    else this.permissionPresets.set(threadId, preset);
-  }
-  async changeThreadPermission(threadId, params, allowed) {
-    const permission = codexPermission(params);
-    const settings = {
-      ...codexTurnPermissionParams(permission, allowed.cwd),
-      ...params.model === void 0 ? {} : { model: params.model }
-    };
-    let result;
-    try {
-      await this.callUpstream("thread/settings/update", { threadId, ...settings });
-      result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
-    } catch {
-      result = await this.callUpstream("thread/resume", {
-        ...permission.params,
-        ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true
-      });
-      await this.assertResultThreadAllowed(result);
-      if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
-        await this.callUpstream("thread/settings/update", { threadId, ...settings });
-        result = { ...isRecord15(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
-      }
-    }
-    await this.publishPermission(threadId, result);
-    return result;
-  }
-  async publishPermission(threadId, value) {
-    const source = isRecord15(value) ? value : {};
-    const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
-    await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
-  }
-  async handleServerRequest(message) {
-    const appServer = this.requireAppServer();
-    await this.expireApprovals();
-    if (message.method !== "item/commandExecution/requestApproval" && message.method !== "item/fileChange/requestApproval") {
-      await appServer.respondError(message.id, -32601, "This Remote client does not support the server request.");
-      return;
-    }
-    const threadId = extractThreadId(message.params);
-    const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
-    const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
-    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
-      await appServer.respond(message.id, { decision: "decline" });
-      return;
-    }
-    const requestHandle = randomUUID2();
-    this.approvals.set(requestHandle, {
-      upstreamId: message.id,
-      connectionId: owner.connectionId,
-      threadId,
-      method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS
-    });
-    this.scheduleApprovalExpiry();
-    try {
-      await peer.publishInbound(threadId, {
-        method: message.method,
-        params: sanitizeApprovalParams(message.params, requestHandle)
-      });
-    } catch (error) {
-      this.approvals.delete(requestHandle);
-      this.scheduleApprovalExpiry();
-      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
-      throw error;
-    }
-  }
-  async readKnownThread(threadId) {
-    const authority = await this.readWorkspaceAuthority();
-    let result;
-    try {
-      result = await this.callUpstream("thread/read", { threadId, includeTurns: false });
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      const listed = await this.findKnownThreadInList(threadId, authority);
-      if (listed === void 0) {
-        throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-      }
-      return { thread: listed, ...typeof listed.cwd === "string" && listed.cwd.length > 0 ? { cwd: listed.cwd } : {} };
-    }
-    const thread = extractThread(result);
-    if (thread === void 0 || thread.id !== threadId || !isThreadAllowedByWorkspaceAuthority(thread, authority)) {
-      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-    }
-    return { thread, ...typeof thread.cwd === "string" && thread.cwd.length > 0 ? { cwd: thread.cwd } : {} };
-  }
-  async readThreadForHistory(connectionId, threadId) {
-    const { thread: metadata } = await this.readKnownThread(threadId);
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
-    } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError;
-      this.logHistoryFallback(connectionId, "turns-full", fullError);
-    }
-    try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
-    } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
-      this.logHistoryFallback(connectionId, "turns-summary", summaryError);
-    }
-    try {
-      const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
-      const legacyThread = extractThread(legacyResult);
-      if (legacyThread === void 0 || legacyThread.id !== threadId) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
-      }
-      return legacyThread;
-    } catch (legacyError) {
-      if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
-      this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
-      return { ...metadata, turns: [] };
-    }
-  }
-  async readThreadTurns(connectionId, threadId, itemsView) {
-    const turns = [];
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream("thread/turns/list", {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: "asc",
-        itemsView,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      });
-      const pageResult = isRecord15(result) ? result : {};
-      for (const rawTurn of array3(pageResult.data)) {
-        if (!isRecord15(rawTurn)) continue;
-        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
-        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array3(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array3(rawTurn.items));
-        turns.push({ ...rawTurn, items });
-      }
-      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-    return turns;
-  }
-  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
-    const items = [];
-    let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream("thread/items/list", {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: "asc",
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        });
-        const pageResult = isRecord15(result) ? result : {};
-        for (const entry of array3(pageResult.data)) {
-          if (isRecord15(entry) && entry.item !== void 0) items.push(entry.item);
-        }
-        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      this.logHistoryFallback(connectionId, "items", error);
-      return fallbackItems;
-    }
-    return items;
-  }
-  logHistoryFallback(connectionId, stage, error) {
-    this.logger.warn("Codex history read fallback", {
-      connectionId: maskId(connectionId),
-      stage,
-      code: errorCode3(error)
-    });
-  }
-  async assertResultThreadAllowed(result) {
-    const thread = extractThread(result);
-    if (thread === void 0 || typeof thread.id !== "string") {
-      throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
-    }
-    if (!isThreadAllowedByWorkspaceAuthority(thread, await this.readWorkspaceAuthority())) {
-      throw new RpcError("CODEX_THREAD_NOT_ALLOWED", "The Codex thread is not available through this Remote Host.");
-    }
-  }
-  claimTurn(threadId, connectionId, method, turnId) {
-    const owner = this.turnOwners.get(threadId);
-    const peerDeviceId = this.peerDeviceIds.get(connectionId) ?? connectionId;
-    const nextOwner = { connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } };
-    if (method === "turn/interrupt") {
-      if (owner === void 0) {
-        this.turnOwners.set(threadId, nextOwner);
-        return { claimed: true };
-      }
-      if (owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
-        throw new RpcError("CODEX_TURN_OWNED", "Only the connection that started this Codex turn can interrupt it.");
-      }
-      if (owner.connectionId !== connectionId) {
-        this.turnOwners.set(threadId, { ...owner, connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } });
-        return { claimed: true, previous: owner };
-      }
-      if (turnId !== void 0 && owner.turnId === void 0) this.turnOwners.set(threadId, { ...owner, turnId });
-      return { claimed: false };
-    }
-    if (owner !== void 0 && owner.connectionId !== connectionId && owner.peerDeviceId !== peerDeviceId) {
-      throw new RpcError("CODEX_TURN_OWNED", "Another Remote connection owns the active Codex turn.");
-    }
-    if (owner?.connectionId === connectionId) return { claimed: false };
-    this.turnOwners.set(threadId, owner === void 0 ? nextOwner : { ...owner, connectionId, peerDeviceId });
-    return { claimed: true, previous: owner };
-  }
-  rememberTurnId(threadId, connectionId, turnId) {
-    if (turnId === void 0) return;
-    const owner = this.turnOwners.get(threadId);
-    if (owner === void 0 || owner.connectionId !== connectionId) return;
-    this.turnOwners.set(threadId, { ...owner, turnId });
-  }
-  hasSubscriber(threadId) {
-    return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
-  }
-  resolveUpstreamApproval(params) {
-    if (!isRecord15(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
-    for (const [handle, approval] of this.approvals) {
-      if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
-    }
-  }
-  async expireApprovals() {
-    const now = Date.now();
-    const appServer = this.appServer;
-    for (const [handle, approval] of this.approvals) {
-      if (approval.expiresAt > now) continue;
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-    }
-    this.scheduleApprovalExpiry();
-  }
-  scheduleApprovalExpiry() {
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    const nextExpiry = Math.min(...[...this.approvals.values()].map((approval) => approval.expiresAt));
-    if (!Number.isFinite(nextExpiry)) return;
-    this.approvalExpiryTimer = setTimeout(() => {
-      this.approvalExpiryTimer = void 0;
-      void this.expireApprovals().catch((error) => {
-        this.logger.warn("Codex approval expiry failed", { code: errorCode3(error) });
-      });
-    }, Math.max(0, nextExpiry - Date.now()));
-    this.approvalExpiryTimer.unref?.();
-  }
-  requireAppServer() {
-    if (!this.config.enabled || !this.isAvailable() || this.appServer === void 0) {
-      throw new RpcError("CODEX_UNAVAILABLE", "Codex Remote is disabled or unavailable on this Host.");
-    }
-    return this.appServer;
-  }
-  async callUpstream(method, params) {
-    try {
-      return await this.requireAppServer().call(method, params);
-    } catch (error) {
-      throw mapAppServerError(error);
-    }
-  }
-  async readWorkspaceAuthority(listedThreads) {
-    const projectIds = /* @__PURE__ */ new Set();
-    const roots = [];
-    let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-        const result = sanitizeProjectList(await this.callUpstream("project/list", {
-          limit: CODEX_PAGE_LIMIT2,
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        }));
-        for (const project of result.data) {
-          const projectRoots = project.roots.map((root) => root.path).filter((path) => isAbsolute3(path));
-          if (projectRoots.length === 0) continue;
-          projectIds.add(project.id);
-          roots.push(...projectRoots);
-        }
-        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    } catch (error) {
-      if (!isProjectListFallbackError(error)) throw error;
-    }
-    if (roots.length > 0) return { projectIds, roots };
-    const threads = listedThreads === void 0 ? [] : [...listedThreads];
-    if (listedThreads === void 0) {
-      cursor2 = void 0;
-      for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-        const result = sanitizeThreadList(await this.callUpstream("thread/list", {
-          limit: CODEX_PAGE_LIMIT2,
-          sortKey: "updated_at",
-          sortDirection: "desc",
-          archived: false,
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        }));
-        threads.push(...result.data);
-        cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-        if (cursor2 === void 0) break;
-      }
-    }
-    for (const workspace of deriveCodexCwdWorkspaces(threads)) {
-      if (isAbsolute3(workspace.path)) roots.push(workspace.path);
-    }
-    return { projectIds, roots };
-  }
-  async findKnownThreadInList(threadId, authority) {
-    let cursor2;
-    for (let page = 0; page < MAX_CODEX_PAGES2; page += 1) {
-      const result = sanitizeThreadList(await this.callUpstream("thread/list", {
-        limit: 100,
-        sortKey: "updated_at",
-        sortDirection: "desc",
-        archived: false,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      }));
-      const thread = result.data.find((item) => item.id === threadId);
-      if (thread !== void 0) {
-        return isThreadAllowedByWorkspaceAuthority(thread, authority) ? thread : void 0;
-      }
-      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-    return void 0;
-  }
-  async requireCodexWorkspacePath(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const paths = await this.listCodexWorkspacePaths();
-    const lexicalCandidate = resolve2(path);
-    let candidate;
-    try {
-      candidate = await realpath(path);
-      if (!(await stat4(candidate)).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    for (const root of paths.values()) {
-      try {
-        if (!containsCodexPath(resolve2(root), lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
-        if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
-      } catch {
-      }
-    }
-    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-  }
-  async requireNewCodexProjectPath(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
-    }
-    try {
-      const canonical = await realpath(resolve2(path));
-      if (!(await stat4(canonical)).isDirectory()) throw new Error("not a directory");
-      return canonical;
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
-    }
-  }
-  async listCodexDirectory(path) {
-    const target2 = await this.resolveCodexDirectory(path);
-    const rows = await readdir2(target2.path, { withFileTypes: true }).catch(() => void 0);
-    if (rows === void 0) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const entries = [];
-    for (const row of rows) {
-      const child = resolve2(target2.path, row.name);
-      let directory = row.isDirectory();
-      if (!directory && row.isSymbolicLink()) {
-        directory = await stat4(child).then((value) => value.isDirectory()).catch(() => false);
-      }
-      if (!directory) continue;
-      try {
-        const canonicalChild = await realpath(child);
-        if (!(await stat4(canonicalChild)).isDirectory()) continue;
-        if (!containsCodexPath(target2.canonicalRoot, canonicalChild)) continue;
-      } catch {
-        continue;
-      }
-      entries.push({
-        name: row.name,
-        path: child,
-        hidden: process.platform !== "win32" && row.name.startsWith(".")
-      });
-    }
-    entries.sort((left, right) => left.name.localeCompare(right.name, void 0, { sensitivity: "base" }));
-    return {
-      path: target2.path,
-      home: target2.root,
-      crumbs: codexDirectoryCrumbs(target2.root, target2.path),
-      entries: entries.slice(0, CODEX_DIRECTORY_ENTRY_LIMIT),
-      truncated: entries.length > CODEX_DIRECTORY_ENTRY_LIMIT
-    };
-  }
-  async resolveCodexDirectory(path) {
-    if (!isAbsolute3(path)) {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    const authority = await this.readWorkspaceAuthority();
-    const lexicalCandidate = resolve2(path);
-    let canonicalCandidate;
-    try {
-      canonicalCandidate = await realpath(path);
-      if (!(await stat4(canonicalCandidate)).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-    }
-    for (const root of authority.roots) {
-      try {
-        const lexicalRoot = resolve2(root);
-        if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
-        if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
-          return { path: lexicalCandidate, root: lexicalRoot, canonicalRoot };
-        }
-      } catch {
-      }
-    }
-    throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
-  }
-  async listCodexWorkspacePaths() {
-    const paths = /* @__PURE__ */ new Map();
-    const authority = await this.readWorkspaceAuthority();
-    for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root);
-    return paths;
-  }
-};
-function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
-  const bundledCandidates = [
-    "/Applications/ChatGPT.app",
-    join5(userHome, "Applications", "ChatGPT.app")
-  ].flatMap((chatGptApp) => {
-    const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
-    try {
-      const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
-      if (!isRecord15(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
-        return [];
-      }
-      const candidate = join5(codexCli, manifest.entrypoint);
-      if (!existsSync2(candidate)) return [];
-      accessSync(candidate, constants.X_OK);
-      return [candidate];
-    } catch {
-      return [];
-    }
-  });
-  return [.../* @__PURE__ */ new Set([
-    ...bundledCandidates,
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    join5(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
-  ])];
-}
-function parseCallEnvelope(input2) {
-  if (!isRecord15(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
-  }
-  return { method: input2.method, params: input2.params };
-}
-function parseRespond(input2) {
-  if (!isRecord15(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
-    throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
-  }
-  return input2;
-}
-function accountCanRun(result) {
-  if (!isRecord15(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord15(result.account);
-}
-function sanitizeAccount(result) {
-  if (!isRecord15(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord15(result.account) ? result.account : void 0;
-  return {
-    authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
-    requiresOpenaiAuth: result.requiresOpenaiAuth === true,
-    ...account === void 0 ? {} : {
-      account: {
-        ...typeof account.type === "string" ? { type: account.type } : {},
-        ...typeof account.planType === "string" ? { planType: account.planType } : {}
-      }
-    }
-  };
-}
-function sanitizeThreadList(result) {
-  if (!isRecord15(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
-  }
-  const data2 = result.data.flatMap((value) => {
-    if (!isRecord15(value) || typeof value.id !== "string") return [];
-    return [{
-      id: value.id,
-      ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
-      ...typeof value.projectId === "string" ? { projectId: value.projectId } : {},
-      ...typeof value.name === "string" ? { name: value.name } : {},
-      ...typeof value.preview === "string" ? { preview: value.preview } : {},
-      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
-      ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
-      ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
-      ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
-      ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord15(value.status) ? { status: value.status } : {}
-    }];
-  });
-  return {
-    data: data2,
-    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null },
-    ...typeof result.backwardsCursor === "string" && result.backwardsCursor.length > 0 ? { backwardsCursor: result.backwardsCursor } : {}
-  };
-}
-function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord15(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
-  }
-  return {
-    ...result,
-    data: result.data.map((record8) => isRecord15(record8) ? record8 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
-  };
-}
-function sanitizeProject(value) {
-  if (!isRecord15(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
-  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord15(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
-    return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
-  }) : [];
-  if (roots.length === 0) return void 0;
-  return {
-    id: value.id,
-    name: value.name,
-    roots,
-    ...typeof value.position === "number" && Number.isFinite(value.position) ? { position: value.position } : {},
-    ...typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {},
-    ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {}
-  };
-}
-function sanitizeProjectList(result) {
-  if (!isRecord15(result) || !Array.isArray(result.data)) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
-  }
-  const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
-  return {
-    data: data2,
-    ...typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? { nextCursor: result.nextCursor } : { nextCursor: null }
-  };
-}
-function sanitizeProjectCreate(result) {
-  const project = isRecord15(result) ? sanitizeProject(result.project) : void 0;
-  if (project === void 0) {
-    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
-  }
-  return { project };
-}
-function isThreadAllowedByWorkspaceAuthority(thread, authority) {
-  const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
-  if (projectId !== void 0 && authority.projectIds.has(projectId)) return true;
-  const cwd2 = typeof thread.cwd === "string" ? thread.cwd : void 0;
-  return cwd2 !== void 0 && authority.roots.some((root) => containsCodexPath(root, cwd2));
-}
-function containsCodexPath(root, candidate) {
-  const normalizedRoot = normalizeCodexPathForCompare(root);
-  const normalizedCandidate = normalizeCodexPathForCompare(candidate);
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
-}
-function normalizeCodexPathForCompare(path) {
-  return path.replace(/[\\/]+$/u, "") || path;
-}
-function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
-  const remainder = relative(root, path);
-  if (remainder === "") return crumbs2;
-  let current = root;
-  for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
-    current = resolve2(current, segment);
-    crumbs2.push({ name: segment, path: current, hidden: false });
-  }
-  return crumbs2;
-}
-function extractThread(result) {
-  return isRecord15(result) && isRecord15(result.thread) ? result.thread : void 0;
-}
-function extractTurnId(result) {
-  if (!isRecord15(result)) return void 0;
-  if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord15(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
-  return void 0;
-}
-function extractThreadId(params) {
-  if (!isRecord15(params)) return void 0;
-  if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord15(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord15(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
-  return void 0;
-}
-function optionalInteger3(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
-}
-function codexPermission(params, fallbackPreset) {
-  const { permissionPreset: permissionPreset2, ...rest } = params;
-  const preset = permissionPreset2 === "workspace-write" || permissionPreset2 === "danger-full-access" ? permissionPreset2 : fallbackPreset;
-  if (preset === void 0) return { params: mapCodexImageInputs(rest) };
-  const fullAccess = preset === "danger-full-access";
-  return {
-    params: mapCodexImageInputs(rest),
-    approvalPolicy: fullAccess ? "never" : "on-request",
-    sandbox: fullAccess ? "danger-full-access" : "workspace-write"
-  };
-}
-function codexThreadPermissionParams(permission) {
-  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
-  return {
-    approvalPolicy: permission.approvalPolicy,
-    sandbox: permission.sandbox
-  };
-}
-function codexTurnPermissionParams(permission, cwd2) {
-  if (permission.approvalPolicy === void 0 || permission.sandbox === void 0) return {};
-  return {
-    approvalPolicy: permission.approvalPolicy,
-    sandboxPolicy: permission.sandbox === "danger-full-access" ? { type: "dangerFullAccess" } : {
-      type: "workspaceWrite",
-      writableRoots: cwd2 === void 0 ? [] : [cwd2],
-      networkAccess: false,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false
-    }
-  };
-}
-function mapCodexImageInputs(params) {
-  if (!Array.isArray(params.input)) return params;
-  return {
-    ...params,
-    input: params.input.map((value) => {
-      if (!isRecord15(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
-      return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
-    })
-  };
-}
-function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord15(params)) return { requestHandle };
-  const safe = { ...params };
-  delete safe.proposedExecpolicyAmendment;
-  delete safe.additionalPermissions;
-  safe.availableDecisions = ["accept", "decline", "cancel"];
-  safe.requestHandle = requestHandle;
-  return safe;
-}
-function mapAppServerError(error) {
-  if (error instanceof RpcError) return error;
-  if (error instanceof CodexAppServerError) {
-    if (error.code === "CODEX_UPSTREAM_ERROR" && isActiveWriterMessage(error.message)) {
-      return new RpcError("CODEX_THREAD_BUSY", "The selected CodeX thread is already active in another CodeX client.");
-    }
-    return new RpcError(error.code, error.message, void 0, error.code === "CODEX_REQUEST_TIMEOUT");
-  }
-  return new RpcError("CODEX_UPSTREAM_ERROR", "Codex App Server could not complete the request.");
-}
-function errorCode3(error) {
-  if (error instanceof RpcError || error instanceof CodexAppServerError) return error.code;
-  return "CODEX_START_FAILED";
-}
-function isHistoryReadRecoverable(error) {
-  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR", "CODEX_REQUEST_TIMEOUT", "CODEX_THREAD_BUSY"].includes(error.code);
-}
-function isProjectListFallbackError(error) {
-  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
-}
-function canTryNextBinary(error) {
-  return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
-}
-function isRecord15(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array3(value) {
-  return Array.isArray(value) ? value : [];
-}
-function maskId(value) {
-  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
-}
-function isActiveWriterMessage(message) {
-  return message.toLowerCase().includes("active writer");
-}
-
-// src/service.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-
-// src/acp/gateway.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
-import { readdir as readdir3, realpath as realpath2, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir6 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute4, join as join9, relative as relative2, resolve as resolve3 } from "node:path";
-
-// src/acp/adapters/cursor-process.ts
-import { spawn as spawn3 } from "node:child_process";
-import { Buffer as Buffer4 } from "node:buffer";
-var ACP_REQUEST_TIMEOUT_MS = 6e4;
-var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
-var ACP_START_TIMEOUT_MS = 2e4;
-var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
-var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
-var CursorAcpError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "CursorAcpError";
-  }
-};
-var CursorAcpClient = class {
-  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
-    cwd: options.cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    env: process.env
-  }), options = {}) {
-    this.binary = binary;
-    this.logger = logger;
-    this.spawnAcp = spawnAcp;
-  }
-  process;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  inboundHandlers = /* @__PURE__ */ new Set();
-  unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer4.alloc(0);
-  stderrBytes = 0;
-  ready = false;
-  closed = false;
-  failureNotified = false;
-  startPromise;
-  start() {
-    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
-    if (this.ready) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  isReady() {
-    return this.ready;
-  }
-  async call(method, params, timeoutMs) {
-    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
-    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
-    return this.request(method, params, budget);
-  }
-  async respond(id5, result) {
-    this.write({ jsonrpc: "2.0", id: id5, result });
-  }
-  async respondError(id5, code, message) {
-    this.write({ jsonrpc: "2.0", id: id5, error: { code, message } });
-  }
-  onInbound(handler) {
-    this.inboundHandlers.add(handler);
-    return () => this.inboundHandlers.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailableHandlers.add(handler);
-    return () => this.unavailableHandlers.delete(handler);
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
-    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve5();
-      }, 2e3);
-      timer.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve5();
-      });
-      child.kill("SIGTERM");
-    });
-  }
-  async startOnce() {
-    if (this.process !== void 0) {
-      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
-    }
-    const child = this.spawnAcp(this.binary);
-    this.process = child;
-    this.failureNotified = false;
-    this.stdoutBuffer = Buffer4.alloc(0);
-    this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer4.from(chunk)));
-    child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
-    });
-    child.on("error", (error) => this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error));
-    child.on("exit", (code, signal) => {
-      if (this.process !== child) return;
-      this.process = void 0;
-      this.ready = false;
-      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
-      if (!this.closed) {
-        this.logger?.warn("Cursor ACP exited", {
-          code: code ?? "none",
-          signal: signal ?? "none",
-          stderrBytes: this.stderrBytes
-        });
-        this.notifyUnavailable("CURSOR_ACP_EXITED");
-      }
-    });
-    try {
-      await this.request("initialize", {
-        protocolVersion: 1,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          terminal: false
-        },
-        clientInfo: {
-          name: "deepseek_harness_remote",
-          version: PLUGIN_VERSION
-        }
-      }, ACP_START_TIMEOUT_MS);
-      await this.request("authenticate", { methodId: "cursor_login" }, ACP_START_TIMEOUT_MS);
-      this.ready = true;
-      this.logger?.info("Cursor ACP ready");
-    } catch (error) {
-      child.kill("SIGTERM");
-      if (error instanceof CursorAcpError) throw error;
-      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error });
-    }
-  }
-  request(method, params, timeoutMs) {
-    const id5 = this.nextId++;
-    const result = new Promise((resolve5, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id5);
-        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
-      }, timeoutMs);
-      timer.unref?.();
-      this.pending.set(id5, { resolve: resolve5, reject, timer });
-    });
-    try {
-      this.write({ jsonrpc: "2.0", id: id5, method, params });
-    } catch (error) {
-      const pending = this.takePending(id5);
-      pending?.reject(error instanceof Error ? error : new Error("Cursor ACP write failed."));
-    }
-    return result;
-  }
-  write(message) {
-    const child = this.process;
-    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
-    }
-    child.stdin.write(`${JSON.stringify(message)}
-`);
-  }
-  consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
-      this.handleProcessFailure(
-        "CURSOR_RESPONSE_TOO_LARGE",
-        new Error("Cursor ACP emitted an oversized JSONL message.")
-      );
-      return;
-    }
-    let newline = this.stdoutBuffer.indexOf(10);
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline);
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
-      if (line.length > 0) this.handleLine(line);
-      newline = this.stdoutBuffer.indexOf(10);
-    }
-  }
-  handleLine(line) {
-    let value;
-    try {
-      value = JSON.parse(line.toString("utf8"));
-    } catch {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
-      return;
-    }
-    if (!isRecord16(value)) {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
-      return;
-    }
-    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
-      const pending = this.takePending(value.id);
-      if (pending === void 0) return;
-      if ("error" in value && value.error !== void 0) {
-        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
-      } else {
-        pending.resolve(value.result);
-      }
-      return;
-    }
-    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
-    const params = value.params ?? {};
-    const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    for (const handler of this.inboundHandlers) handler(inbound);
-  }
-  handleProcessFailure(code, cause) {
-    this.ready = false;
-    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
-    const child = this.process;
-    this.process = void 0;
-    child?.kill("SIGTERM");
-    this.logger?.warn("Cursor ACP communication failed", { code });
-    if (!this.closed) this.notifyUnavailable(code);
-  }
-  notifyUnavailable(code) {
-    if (this.failureNotified) return;
-    this.failureNotified = true;
-    for (const handler of this.unavailableHandlers) handler(code);
-  }
-  takePending(id5) {
-    const pending = this.pending.get(id5);
-    if (pending === void 0) return void 0;
-    this.pending.delete(id5);
-    clearTimeout(pending.timer);
-    return pending;
-  }
-  failPending(error) {
-    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
-  }
-};
-function safeUpstreamError2(value) {
-  if (!isRecord16(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
-  const message = value.message.toLowerCase();
-  if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
-    return "Cursor ACP authentication failed.";
-  }
-  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
-  return "Cursor ACP rejected the request.";
-}
-function isRecord16(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/acp/adapters/antigravity/image-store.ts
-import { promises as fs, realpathSync as realpathSync2, constants as constants2 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join6, basename as basename4 } from "node:path";
-import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
-var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
-var TTL = 24 * 60 * 60 * 1e3;
-var AGY_IMAGE_ROOT = join6(realpathSync2(tmpdir()), `dsh-remote-agy-images-${process.getuid?.() ?? "user"}`);
-var stagingChain = Promise.resolve();
-var sessionFolder = (sessionId) => createHash2("sha256").update(sessionId).digest("hex");
-async function privateDirectory(path) {
-  await fs.mkdir(path, { recursive: true, mode: 448 });
-  const info = await fs.lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
-}
-async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
-  await privateDirectory(root);
-  return root;
-}
-function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
-  const result = stagingChain.then(() => stageImages(sessionId, images, root));
-  stagingChain = result.then(() => void 0, () => void 0);
-  return result;
-}
-async function stageImages(sessionId, images, root) {
-  await prepareAgyImageDirectory(root);
-  let total = 0;
-  for (const entry of await fs.readdir(root)) {
-    if (!/^[0-9a-f]{64}$/.test(entry)) continue;
-    const dir = join6(root, entry);
-    const info = await fs.lstat(dir);
-    if (!info.isDirectory() || info.isSymbolicLink()) continue;
-    for (const name2 of await fs.readdir(dir)) {
-      if (!IMAGE_NAME.test(name2)) continue;
-      const path = join6(dir, name2);
-      const file = await fs.lstat(path);
-      if (!file.isFile() || file.isSymbolicLink()) continue;
-      if (Date.now() - file.mtimeMs > TTL) await fs.unlink(path);
-      else total += file.size;
-    }
-  }
-  const parsed = images.map(parseAcpImage);
-  if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
-  const directory = join6(root, sessionFolder(sessionId));
-  await privateDirectory(directory);
-  const paths = [];
-  try {
-    for (const image of parsed) {
-      const path = join6(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
-      await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
-      paths.push(path);
-    }
-    return paths;
-  } catch (error) {
-    await Promise.all(paths.map((path) => fs.unlink(path).catch(() => void 0)));
-    throw error;
-  }
-}
-function agyImagePrompt(text, paths) {
-  return `${text}
-<AGY_REMOTE_IMAGES>
-User attached images. Use view_file to inspect these images before answering.
-${JSON.stringify(paths)}
-</AGY_REMOTE_IMAGES>`;
-}
-function stripAgyImageReferences(text) {
-  return text.replace(/\n?<AGY_REMOTE_IMAGES>[\s\S]*?<\/AGY_REMOTE_IMAGES>/g, "").trim();
-}
-function agyImageReferences(text) {
-  const block = /<AGY_REMOTE_IMAGES>\n[^\n]*\n([^\n]+)\n<\/AGY_REMOTE_IMAGES>/.exec(text);
-  if (!block) return [];
-  try {
-    const value = JSON.parse(block[1]);
-    return Array.isArray(value) && value.length <= 4 ? value.filter((path) => typeof path === "string") : [];
-  } catch {
-    return [];
-  }
-}
-async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
-  const name2 = basename4(path);
-  if (!IMAGE_NAME.test(name2) || path !== join6(root, sessionFolder(sessionId), name2)) return void 0;
-  try {
-    await privateDirectory(root);
-    await privateDirectory(join6(root, sessionFolder(sessionId)));
-    const info = await fs.lstat(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
-    const file = await fs.open(path, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
-    try {
-      const current = await file.stat();
-      if (current.ino !== info.ino || current.dev !== info.dev || current.size !== info.size) return void 0;
-      const mediaType = Object.entries(EXTENSIONS).find(([, ext]) => name2.endsWith(`.${ext}`))?.[0];
-      const image = parseAcpImage({ type: "image", mimeType: mediaType, data: (await file.readFile()).toString("base64") });
-      return acpImageContent(image, `agy-image:${name2}`);
-    } finally {
-      await file.close();
-    }
-  } catch {
-    return void 0;
-  }
-}
-
-// src/acp/adapters/antigravity-process.ts
-import { spawn as spawn4 } from "node:child_process";
-import { Buffer as Buffer5 } from "node:buffer";
-import { existsSync as existsSync3 } from "node:fs";
-
-// src/acp/adapters/antigravity/transcript-watcher.ts
-import { promises as fs2 } from "node:fs";
-import { join as join7 } from "node:path";
-import { EventEmitter } from "node:events";
-import { homedir as homedir4 } from "node:os";
-var TranscriptWatcher = class extends EventEmitter {
-  constructor(conversationId, baseDir = join7(homedir4(), ".gemini/antigravity-cli/brain")) {
-    super();
-    this.conversationId = conversationId;
-    this.baseDir = baseDir;
-    const brainDir = join7(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join7(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join7(brainDir, "transcript_full.jsonl");
-  }
-  offset = 0;
-  lineRemainder = "";
-  pollTimer;
-  closed = false;
-  transcriptPath;
-  transcriptFullPath;
-  on(event, listener) {
-    return super.on(event, listener);
-  }
-  emit(event, ...args) {
-    return super.emit(event, ...args);
-  }
-  /**
-   * 启动增量文件监听
-   */
-  start(intervalMs = 250) {
-    if (this.closed) return;
-    const poll = async () => {
-      try {
-        await this.readNewLines();
-      } catch {
-      }
-      if (!this.closed) {
-        this.pollTimer = setTimeout(poll, intervalMs);
-        this.pollTimer.unref?.();
-      }
-    };
-    void poll();
-  }
-  stop() {
-    this.closed = true;
-    if (this.pollTimer !== void 0) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = void 0;
-    }
-  }
-  /**
-   * 立即触发一次读取（同步/主动检查）
-   */
-  async flush() {
-    await this.readNewLines();
-  }
-  async readNewLines() {
-    let stat8;
-    try {
-      stat8 = await fs2.stat(this.transcriptPath);
-    } catch {
-      return;
-    }
-    if (stat8.size <= this.offset) return;
-    const handle = await fs2.open(this.transcriptPath, "r");
-    try {
-      const bytesToRead = stat8.size - this.offset;
-      const buffer = Buffer.alloc(bytesToRead);
-      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset);
-      this.offset += bytesRead;
-      const text = this.lineRemainder + buffer.subarray(0, bytesRead).toString("utf-8");
-      const lines = text.split("\n");
-      this.lineRemainder = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        await this.parseAndDispatch(trimmed);
-      }
-    } finally {
-      await handle.close();
-    }
-  }
-  async parseAndDispatch(rawLine) {
-    let record8;
-    try {
-      record8 = JSON.parse(rawLine);
-    } catch {
-      return;
-    }
-    if (Array.isArray(record8.truncated_fields) && record8.truncated_fields.length > 0) {
-      record8 = await this.enrichFromFullTranscript(record8);
-    }
-    this.emit("step", record8);
-    if (record8.type === "PLANNER_RESPONSE") {
-      if (record8.thinking && record8.thinking.trim() !== "") {
-        this.emit("thinking", {
-          stepIndex: record8.step_index,
-          thinking: record8.thinking,
-          createdAt: record8.created_at
-        });
-      }
-      if (Array.isArray(record8.tool_calls) && record8.tool_calls.length > 0) {
-        this.emit("toolCall", {
-          stepIndex: record8.step_index,
-          toolCalls: record8.tool_calls,
-          createdAt: record8.created_at
-        });
-      }
-      if (record8.content && record8.content.trim() !== "") {
-        this.emit("message", {
-          stepIndex: record8.step_index,
-          text: record8.content,
-          createdAt: record8.created_at
-        });
-      }
-    } else if (record8.type === "USER_INPUT" && record8.content) {
-      this.emit("message", {
-        stepIndex: record8.step_index,
-        text: record8.content,
-        createdAt: record8.created_at
-      });
-    }
-    if (record8.status === "DONE" && record8.type === "PLANNER_RESPONSE") {
-      this.emit("complete", this.conversationId);
-    }
-  }
-  async enrichFromFullTranscript(record8) {
-    try {
-      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
-      const lines = content.split("\n");
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const full = JSON.parse(trimmed);
-        if (full.step_index === record8.step_index) {
-          return full;
-        }
-      }
-    } catch {
-    }
-    return record8;
-  }
-};
-
-// src/acp/adapters/antigravity-process.ts
-var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
-var ACP_START_TIMEOUT_MS2 = 2e4;
-var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
-var AntigravityAcpError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "AntigravityAcpError";
-  }
-};
-function resolveAntigravityBinary(preferred) {
-  if (preferred && preferred.trim() !== "" && preferred !== "agent" && preferred !== "cursor") {
-    return preferred.trim();
-  }
-  const defaultLocal = "/var/lib/dsh/.local/bin/agy";
-  if (existsSync3(defaultLocal)) {
-    return defaultLocal;
-  }
-  return "agy";
-}
-var AntigravityAcpClient = class _AntigravityAcpClient {
-  constructor(binary = "agy", logger, spawnAcp = (bin, args, cwd2) => spawn4(bin, args, {
-    cwd: cwd2,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    env: process.env
-  }), options = {}) {
-    this.binary = binary;
-    this.logger = logger;
-    this.spawnAcp = spawnAcp;
-    this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
-    this.cwd = options.cwd ?? process.cwd();
-    this.sessionWorker = options.sessionWorker === true;
-    this.initialConversationClaimed = options.conversationId !== void 0;
-    this.skipPermissions = options.skipPermissions === true;
-    this.activeConversationId = options.conversationId;
-  }
-  process;
-  inboundHandlers = /* @__PURE__ */ new Set();
-  unavailableHandlers = /* @__PURE__ */ new Set();
-  watcher;
-  stdoutBuffer = Buffer5.alloc(0);
-  stderrBytes = 0;
-  ready = false;
-  closed = false;
-  startPromise;
-  activeConversationId;
-  skipPermissions;
-  sessionWorker;
-  initialConversationClaimed = false;
-  sessions = /* @__PURE__ */ new Map();
-  spare;
-  spareCwd;
-  args;
-  cwd;
-  currentPromptPending;
-  start() {
-    if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
-    if (this.ready) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  isReady() {
-    return this.ready;
-  }
-  prepareSession(conversationId, cwd2 = this.cwd) {
-    const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
-      args: this.args,
-      skipPermissions: this.skipPermissions,
-      sessionWorker: true,
-      cwd: cwd2,
-      ...conversationId === void 0 ? {} : { conversationId }
-    });
-    worker.onInbound((frame) => {
-      for (const handler of this.inboundHandlers) handler(frame);
-    });
-    return worker.start().then(async () => {
-      if (this.closed) {
-        await worker.close();
-        throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
-      }
-      if (!worker.activeConversationId || conversationId !== void 0 && worker.activeConversationId !== conversationId) {
-        await worker.close();
-        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity initialized the wrong conversation.");
-      }
-      return worker;
-    }).catch(async (error) => {
-      await worker.close();
-      throw error;
-    });
-  }
-  warmNextSession(cwd2 = this.cwd) {
-    if (this.sessionWorker || this.closed || this.spare !== void 0) return;
-    const spare = this.prepareSession(void 0, cwd2);
-    this.spareCwd = cwd2;
-    this.spare = spare;
-    void spare.catch(() => {
-      if (this.spare === spare) this.spare = void 0;
-    });
-  }
-  prewarmSession(cwd2) {
-    if (this.sessionWorker || this.closed || this.spare !== void 0 && this.spareCwd === cwd2) return;
-    const previous = this.spare;
-    this.spare = void 0;
-    if (previous !== void 0) void previous.then((worker) => worker.close()).catch(() => void 0);
-    this.warmNextSession(cwd2);
-  }
-  async call(method, params, timeoutMs) {
-    if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
-    if (method === "initialize") {
-      return {
-        protocolVersion: 1,
-        capabilities: {
-          loadSession: true,
-          promptTypes: ["text", "image"]
-        },
-        agentInfo: {
-          name: "antigravity",
-          version: "1.2.16"
-        },
-        backend: "antigravity"
-      };
-    }
-    if (method === "session/new") {
-      if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A prompt is in progress.");
-      const cwd2 = typeof params?.cwd === "string" ? params.cwd : this.cwd;
-      if (!this.initialConversationClaimed && this.activeConversationId !== void 0 && cwd2 === this.cwd) {
-        this.initialConversationClaimed = true;
-        this.warmNextSession(cwd2);
-        return { sessionId: this.activeConversationId };
-      }
-      const cached = this.spare;
-      const pending = cached !== void 0 && this.spareCwd === cwd2 ? cached : this.prepareSession(void 0, cwd2);
-      if (cached !== void 0 && this.spareCwd !== cwd2) void cached.then((worker2) => worker2.close()).catch(() => void 0);
-      this.spare = void 0;
-      const worker = await pending;
-      const sessionId2 = worker.activeConversationId;
-      if (sessionId2 === this.activeConversationId || this.sessions.has(sessionId2)) {
-        await worker.close();
-        throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity reused an existing conversation for session/new.");
-      }
-      this.sessions.set(sessionId2, worker);
-      this.warmNextSession(cwd2);
-      return { sessionId: sessionId2 };
-    }
-    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : void 0;
-    if (!this.sessionWorker && sessionId !== void 0 && sessionId !== this.activeConversationId) {
-      let worker = this.sessions.get(sessionId);
-      if (worker === void 0) {
-        worker = await this.prepareSession(sessionId);
-        this.sessions.set(sessionId, worker);
-      }
-      return worker.call(method, params, timeoutMs);
-    }
-    if (method === "session/load") {
-      if (sessionId !== this.activeConversationId) throw new AntigravityAcpError("SESSION_MISMATCH", "The process is bound to another conversation.");
-      return { sessionId };
-    }
-    if (method === "session/cancel") {
-      if (this.currentPromptPending) {
-        clearTimeout(this.currentPromptPending.timer);
-        const pending = this.currentPromptPending;
-        this.currentPromptPending = void 0;
-        pending.resolve({ stopReason: "cancelled" });
-      }
-      return { cancelled: true };
-    }
-    if (method === "session/prompt") {
-      const p = params;
-      let promptText = p.prompt.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n");
-      const images = p.prompt.filter((item) => item.type === "image").map(parseAcpImage);
-      if (images.length > 0) {
-        if (images.length > 4) throw new AntigravityAcpError("INVALID_MESSAGE", "Too many AGY image attachments.");
-        if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
-        const paths = await stageAgyImages(p.sessionId, images);
-        promptText = agyImagePrompt(promptText, paths);
-      }
-      return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS2);
-    }
-    throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", `Method ${method} is not supported by Antigravity ACP adapter.`);
-  }
-  async respond(_id, _result) {
-  }
-  async respondError(_id, _code, _message) {
-  }
-  onInbound(handler) {
-    this.inboundHandlers.add(handler);
-    return () => this.inboundHandlers.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailableHandlers.add(handler);
-    return () => this.unavailableHandlers.delete(handler);
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    const spare = this.spare;
-    this.spare = void 0;
-    void spare?.then((worker) => worker.close()).catch(() => void 0);
-    await Promise.all([...this.sessions.values()].map((worker) => worker.close()));
-    this.sessions.clear();
-    this.ready = false;
-    if (this.watcher) {
-      this.watcher.stop();
-      this.watcher = void 0;
-    }
-    if (this.currentPromptPending) {
-      clearTimeout(this.currentPromptPending.timer);
-      this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "Antigravity ACP was closed."));
-      this.currentPromptPending = void 0;
-    }
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve5) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve5();
-      }, 2e3);
-      timer.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve5();
-      });
-      child.kill("SIGTERM");
-    });
-  }
-  async startOnce() {
-    if (this.process !== void 0) {
-      throw new AntigravityAcpError("ANTIGRAVITY_STARTING", "Antigravity ACP is already starting.");
-    }
-    const bin = resolveAntigravityBinary(this.binary);
-    const imageDirectory = await prepareAgyImageDirectory();
-    if (this.closed) throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
-    const args = [...this.args, "--add-dir", imageDirectory];
-    if (this.activeConversationId) {
-      args.push("--conversation", this.activeConversationId);
-    }
-    if (this.skipPermissions) {
-      args.push("--dangerously-skip-permissions");
-    }
-    const child = this.spawnAcp(bin, args, this.cwd);
-    this.process = child;
-    this.stdoutBuffer = Buffer5.alloc(0);
-    this.stderrBytes = 0;
-    let initResolved = false;
-    let rejectInit;
-    const initPromise = new Promise((resolve5, reject) => {
-      rejectInit = reject;
-      const timer = setTimeout(() => {
-        if (!initResolved) {
-          reject(new AntigravityAcpError("ANTIGRAVITY_INIT_TIMEOUT", "Timed out waiting for Antigravity init event."));
-        }
-      }, ACP_START_TIMEOUT_MS2);
-      timer.unref?.();
-      const checkInit = (chunk) => {
-        this.consumeStdout(chunk, (event) => {
-          if (event.event === "init") {
-            initResolved = true;
-            clearTimeout(timer);
-            const conversationId = event.conversation_id;
-            if (typeof conversationId === "string") {
-              this.activeConversationId = conversationId;
-              this.watcher = new TranscriptWatcher(conversationId);
-              this.watcher.start();
-            }
-            resolve5();
-          }
-        });
-      };
-      child.stdout.on("data", (chunk) => {
-        if (!initResolved) {
-          checkInit(Buffer5.from(chunk));
-        } else {
-          this.consumeStdout(Buffer5.from(chunk));
-        }
-      });
-    });
-    child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer5.byteLength(chunk));
-    });
-    child.on("error", (error) => {
-      this.ready = false;
-      if (!initResolved) {
-        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause: error }));
-      }
-      if (!this.closed) {
-        this.logger?.warn("Antigravity binary error", { message: error.message });
-        this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
-      }
-    });
-    child.on("exit", (code, signal) => {
-      if (this.process !== child) return;
-      this.process = void 0;
-      this.ready = false;
-      if (!initResolved) {
-        rejectInit?.(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited before initialization."));
-      }
-      if (this.currentPromptPending) {
-        clearTimeout(this.currentPromptPending.timer);
-        this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity exited unexpectedly."));
-        this.currentPromptPending = void 0;
-      }
-      if (!this.closed) {
-        this.logger?.warn("Antigravity process exited", { code: code ?? "none", signal: signal ?? "none" });
-        this.notifyUnavailable("ANTIGRAVITY_EXITED");
-      }
-    });
-    try {
-      await initPromise;
-      this.ready = true;
-      this.warmNextSession();
-      this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
-    } catch (err) {
-      child.kill("SIGTERM");
-      throw err;
-    }
-  }
-  sendPrompt(sessionId, promptText, timeoutMs) {
-    if (this.currentPromptPending) {
-      throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
-    }
-    return new Promise((resolve5, reject) => {
-      const timer = setTimeout(() => {
-        if (this.currentPromptPending) {
-          this.currentPromptPending = void 0;
-          reject(new AntigravityAcpError("ANTIGRAVITY_REQUEST_TIMEOUT", "Antigravity turn timed out."));
-        }
-      }, timeoutMs);
-      timer.unref?.();
-      this.currentPromptPending = { sessionId, resolve: resolve5, reject, timer };
-      const payload = {
-        event: "user",
-        message: { content: promptText }
-      };
-      const data2 = Buffer5.from(`${JSON.stringify(payload)}
-`, "utf8");
-      this.process?.stdin.write(data2);
-    });
-  }
-  consumeStdout(chunk, onRawEvent) {
-    this.stdoutBuffer = Buffer5.concat([this.stdoutBuffer, chunk]);
-    while (true) {
-      const newlineIndex = this.stdoutBuffer.indexOf(10);
-      if (newlineIndex === -1) break;
-      const line = this.stdoutBuffer.subarray(0, newlineIndex).toString("utf8").trim();
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newlineIndex + 1);
-      if (line === "") continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (onRawEvent) {
-          onRawEvent(parsed);
-        }
-        this.handleAgyEvent(parsed);
-      } catch (err) {
-        this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
-      }
-    }
-  }
-  handleAgyEvent(event) {
-    const eventName = event.event;
-    const current = this.currentPromptPending;
-    const sessionId = current?.sessionId ?? this.activeConversationId ?? "default";
-    if (eventName === "step_update" && typeof event.step_update === "object" && event.step_update !== null) {
-      const step = event.step_update;
-      const stepType = step.step_type;
-      if (stepType === "agent_response" && typeof step.text_delta === "string") {
-        this.emitNotification("session/update", {
-          sessionId,
-          update: {
-            sessionUpdate: "agent_message_chunk",
-            text: step.text_delta
-          }
-        });
-      } else if (stepType === "thought" || stepType === "reasoning") {
-        const text = typeof step.text_delta === "string" ? step.text_delta : typeof step.thought === "string" ? step.thought : typeof step.reasoning === "string" ? step.reasoning : void 0;
-        if (text) {
-          this.emitNotification("session/update", {
-            sessionId,
-            update: {
-              sessionUpdate: "agent_thought_chunk",
-              text
-            }
-          });
-        }
-      } else if (stepType === "tool") {
-        const toolInfo = step.tool_info ?? {};
-        const toolName = typeof step.tool_name === "string" ? step.tool_name : toolInfo.name ?? "tool";
-        const callId = String(step.step_index ?? Date.now());
-        if (step.state === "ACTIVE") {
-          this.emitNotification("session/update", {
-            sessionId,
-            update: {
-              sessionUpdate: "tool_call",
-              callId,
-              name: toolName,
-              parameters: toolInfo.parameters ?? {}
-            }
-          });
-        } else if (step.state === "DONE") {
-          this.emitNotification("session/update", {
-            sessionId,
-            update: {
-              sessionUpdate: "tool_call_update",
-              callId,
-              output: typeof toolInfo.output === "string" ? toolInfo.output : JSON.stringify(toolInfo.output ?? "")
-            }
-          });
-        }
-      }
-    } else if (eventName === "result" && typeof event.result === "object" && event.result !== null) {
-      const result = event.result;
-      if (current) {
-        clearTimeout(current.timer);
-        this.currentPromptPending = void 0;
-        if (result.status === "ERROR") {
-          current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
-        } else {
-          current.resolve({ stopReason: "end_turn", response: result.response });
-        }
-      }
-    }
-  }
-  emitNotification(method, params) {
-    const notification = { kind: "notification", method, params };
-    for (const handler of this.inboundHandlers) {
-      try {
-        handler(notification);
-      } catch (err) {
-        this.logger?.warn("Error in inbound ACP handler", { error: String(err) });
-      }
-    }
-  }
-  notifyUnavailable(code) {
-    for (const handler of this.unavailableHandlers) {
-      try {
-        handler(code);
-      } catch (err) {
-        this.logger?.warn("Error in unavailable ACP handler", { error: String(err) });
-      }
-    }
-  }
-};
-
-// src/acp/method-policy.ts
-var id4 = external_exports.string().min(1).max(256);
-var cwd = external_exports.string().min(1).max(4096);
-var mode = external_exports.enum(["agent", "plan", "ask"]);
-var textBlock = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageBlock = external_exports.object({ type: external_exports.literal("image"), mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
-  try {
-    parseAcpImage(value);
-    return true;
-  } catch {
-    return false;
-  }
-});
-var promptBlock = external_exports.union([textBlock, imageBlock]);
-var schemas2 = {
-  "initialize": external_exports.object({
-    protocolVersion: external_exports.number().int().positive().optional(),
-    backend: external_exports.string().min(1).max(64).optional(),
-    clientInfo: external_exports.object({
-      name: external_exports.string().min(1).max(128).optional(),
-      version: external_exports.string().min(1).max(128).optional()
-    }).strict().optional()
-  }).strict(),
-  "session/new": external_exports.object({
-    cwd,
-    backend: external_exports.string().min(1).max(64).optional(),
-    mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
-    mode: mode.optional()
-  }).strict(),
-  "session/load": external_exports.object({
-    sessionId: id4,
-    backend: external_exports.string().min(1).max(64).optional()
-  }).strict(),
-  "session/prompt": external_exports.object({
-    sessionId: id4,
-    backend: external_exports.enum(["cursor", "antigravity"]).optional(),
-    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
-  }).strict(),
-  "session/cancel": external_exports.object({
-    sessionId: id4
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "dsh/workspaceList": external_exports.object({
-    backend: external_exports.string().min(1).max(64).optional()
-  }).strict().optional(),
-  "dsh/sessionList": external_exports.object({
-    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
-    backend: external_exports.string().min(1).max(64).optional(),
-    limit: external_exports.number().int().positive().max(100).optional(),
-    prewarm: external_exports.boolean().optional()
-  }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    sessionId: id4,
-    backend: external_exports.string().min(1).max(64).optional()
-  }).strict()
-};
-var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
-function parseAcpCall(method, params) {
-  if (!(method in schemas2)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
-  }
-  const schema = schemas2[method];
-  const parsed = schema.safeParse(params ?? {});
-  if (!parsed.success) {
-    throw new RpcError("INVALID_MESSAGE", "The ACP parameters are invalid.");
-  }
-  return { method, params: parsed.data };
-}
-function sessionIdFromParams(method, params) {
-  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
-  if (typeof params.sessionId === "string") return params.sessionId;
-  return void 0;
-}
-function isSessionMutation(method) {
-  return method === "session/prompt" || method === "session/cancel";
-}
-
-// src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs3 } from "node:fs";
-import { join as join8 } from "node:path";
-import { homedir as homedir5 } from "node:os";
-function cleanUserPrompt(raw) {
-  if (!raw) return "";
-  raw = stripAgyImageReferences(raw);
-  const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return raw.trim();
-}
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
-  const filePath = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  let content = "";
-  try {
-    content = await fs3.readFile(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines = content.split("\n");
-  const events = [];
-  let currentSeq = 0;
-  let currentTurn = 0;
-  let turnOpen = false;
-  const push = (type, data2, time, surface = false) => {
-    events.push({
-      type: "event",
-      event: {
-        type,
-        seq: currentSeq++,
-        time,
-        data: data2,
-        ...surface ? { surfaceOp: "append" } : {}
-      }
-    });
-  };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record8;
-    try {
-      record8 = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
-    if (record8.type === "USER_INPUT") {
-      if (turnOpen) {
-        push("step/end", { turn: currentTurn, step: 1 }, time);
-        push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
-        turnOpen = false;
-      }
-      currentTurn += 1;
-      turnOpen = true;
-      push("turn/start", { turn: currentTurn }, time);
-      push("step/start", { turn: currentTurn, step: 1 }, time);
-      const text = cleanUserPrompt(record8.content);
-      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
-      push("user/message", {
-        id: `user:${record8.step_index}`,
-        role: "user",
-        content: [...text ? [{ type: "text", text }] : [], ...images],
-        source: { kind: "user" }
-      }, time, true);
-    } else if (record8.type === "PLANNER_RESPONSE") {
-      if (!turnOpen) {
-        currentTurn += 1;
-        turnOpen = true;
-        push("turn/start", { turn: currentTurn }, time);
-        push("step/start", { turn: currentTurn, step: 1 }, time);
-      }
-      if (Array.isArray(record8.tool_calls)) {
-        for (const call of record8.tool_calls) {
-          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record8.step_index}:${toolName}`;
-          push("tool/call", {
-            turn: currentTurn,
-            step: 1,
-            callId,
-            name: toolName,
-            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
-            toolCallId: callId,
-            toolName,
-            status: call.status === "ERROR" ? "failed" : "finished"
-          }, time, false);
-        }
-      }
-      if (record8.content && record8.content.trim() !== "") {
-        const contentBlocks2 = [];
-        if (record8.thinking && record8.thinking.trim() !== "") {
-          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
-        }
-        contentBlocks2.push({ type: "text", text: record8.content.trim() });
-        push("assistant/message", {
-          turn: currentTurn,
-          step: 1,
-          message: {
-            id: `${sessionId}:${record8.step_index}`,
-            role: "assistant",
-            content: contentBlocks2,
-            source: { kind: "model", provider: "google", model: "gemini" }
-          },
-          // Harness trajectory timing expects every assistant message to carry
-          // an iterable stream, including messages restored from transcript.
-          stream: []
-        }, time, true);
-      }
-    }
-  }
-  if (turnOpen) {
-    const settledAt = events.at(-1)?.event.time ?? Date.now();
-    push("step/end", { turn: currentTurn, step: 1 }, settledAt);
-    push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
-  }
-  return events;
-}
-async function querySqliteJson(dbPath, sql, params = []) {
-  try {
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    try {
-      const stmt = db.prepare(sql);
-      const rows = stmt.all(...params);
-      return rows;
-    } finally {
-      db.close();
-    }
-  } catch {
-  }
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
-    let formattedSql = sql;
-    for (const p of params) {
-      const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
-      formattedSql = formattedSql.replace("?", val);
-    }
-    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
-    return JSON.parse(stdout || "[]");
-  } catch {
-    return [];
-  }
-}
-async function discoverAntigravityWorkspaces(dbPath = join8(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain")) {
-  try {
-    await fs3.stat(dbPath);
-  } catch {
-    return [];
-  }
-  const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
-  const rows = await querySqliteJson(dbPath, sql);
-  const paths = /* @__PURE__ */ new Set();
-  for (const row of rows) {
-    if (!row?.workspace_uris) continue;
-    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
-    try {
-      const uris = JSON.parse(row.workspace_uris);
-      if (Array.isArray(uris)) {
-        for (const u of uris) {
-          if (typeof u === "string" && u.startsWith("file://")) {
-            try {
-              const parsed = new URL(u);
-              let p = decodeURIComponent(parsed.pathname);
-              if (process.platform === "win32" && p.startsWith("/") && p.length > 2 && p[2] === ":") {
-                p = p.slice(1);
-              }
-              if (p !== AGY_IMAGE_ROOT && !p.startsWith(AGY_IMAGE_ROOT + "/")) paths.add(p);
-            } catch {
-            }
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  const verified = [];
-  for (const p of paths) {
-    try {
-      const s2 = await fs3.stat(p);
-      if (s2.isDirectory()) verified.push(p);
-    } catch {
-    }
-  }
-  return verified;
-}
-async function readTranscriptSummary(baseDir, conversationId) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(conversationId)) return void 0;
-  const path = join8(baseDir, conversationId, ".system_generated/logs/transcript.jsonl");
-  try {
-    const stat8 = await fs3.stat(path);
-    const handle = await fs3.open(path, "r");
-    try {
-      const buffer = Buffer.alloc(4096);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-      if (!firstLine) return void 0;
-      const record8 = JSON.parse(firstLine);
-      if (record8.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
-      if (!title) return void 0;
-      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return void 0;
-  }
-}
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join8(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join8(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
-  try {
-    await fs3.stat(dbPath);
-    let sql = "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries WHERE (step_count > 0 OR title != '')";
-    const params = [];
-    if (workspacePath && workspacePath.trim() !== "") {
-      sql += " AND workspace_uris LIKE ?";
-      params.push(`%${workspacePath.trim()}%`);
-    }
-    sql += " ORDER BY last_modified_time DESC LIMIT ?;";
-    params.push(limit);
-    const rows = await querySqliteJson(dbPath, sql, params);
-    const emptySql = sql.replace("(step_count > 0 OR title != '')", "(step_count = 0 AND title = '')");
-    const emptyRows = await querySqliteJson(dbPath, emptySql, params);
-    const recovered = (await Promise.all(emptyRows.map((row) => readTranscriptSummary(baseDir, row.conversation_id)))).filter((item) => item !== void 0);
-    if (rows.length > 0 || emptyRows.length > 0) {
-      const summaries = await Promise.all(rows.map(async (r) => {
-        const time = r.last_modified_time ? new Date(r.last_modified_time).getTime() : Date.now();
-        const transcript = r.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, r.conversation_id);
-        return {
-          conversationId: r.conversation_id,
-          title: r.title?.trim() || transcript?.title || "Untitled Session",
-          createdAt: time,
-          updatedAt: time
-        };
-      }));
-      return [...summaries, ...recovered].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-    }
-  } catch {
-  }
-  let dirEntries;
-  try {
-    dirEntries = await fs3.readdir(baseDir);
-  } catch {
-    return [];
-  }
-  const results = [];
-  for (const entry of dirEntries) {
-    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const transcriptPath = join8(baseDir, entry, ".system_generated/logs/transcript.jsonl");
-    try {
-      const s2 = await fs3.stat(transcriptPath);
-      const handle = await fs3.open(transcriptPath, "r");
-      try {
-        const buf = Buffer.alloc(4096);
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine);
-          const rawPrompt = cleanUserPrompt(parsed.content);
-          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s2.mtimeMs;
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s2.mtimeMs
-            });
-          }
-        }
-      } finally {
-        await handle.close();
-      }
-    } catch {
-    }
-  }
-  results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
-}
-
-// src/acp/peer-bridge.ts
-import { Buffer as Buffer6 } from "node:buffer";
-var streamOpenSchema4 = external_exports.object({
-  streamId: external_exports.string().min(1).max(128),
-  sessionId: external_exports.string().min(1).max(256)
-}).strict();
-var streamCloseSchema4 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferOpenSchema4 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  totalBytes: external_exports.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
-  totalChunks: external_exports.number().int().positive()
-}).strict();
-var transferChunkSchema4 = external_exports.object({
-  transferId: external_exports.string().uuid(),
-  index: external_exports.number().int().nonnegative(),
-  data: external_exports.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
-}).strict();
-var transferIdSchema4 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema4 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
-var MAX_ACTIVE_STREAMS3 = 16;
-var MAX_ACTIVE_TRANSFERS3 = 2;
-var TRANSFER_IDLE_MS2 = 2 * 6e4;
-var INLINE_TRANSFER_RESPONSE_BYTES4 = 2 * 1024 * 1024;
-var AcpPeerBridge = class {
-  constructor(domain, context, publish, logger) {
-    this.domain = domain;
-    this.context = context;
-    this.publish = publish;
-    this.logger = logger;
-  }
-  streams = /* @__PURE__ */ new Map();
-  incomingTransfers = /* @__PURE__ */ new Map();
-  outgoingTransfers = /* @__PURE__ */ new Map();
-  closed = false;
-  async call(input2) {
-    return this.callDomain(input2, true);
-  }
-  async callDomain(input2, logFailure) {
-    this.requireOpen();
-    try {
-      return await this.domain.call(this.context.connectionId, input2);
-    } catch (error) {
-      if (logFailure) {
-        this.logger?.warn("Cursor call failed", {
-          method: safeMethod2(input2),
-          code: safeErrorCode3(error)
-        });
-      }
-      throw error;
-    }
-  }
-  respond(input2) {
-    this.requireOpen();
-    return this.domain.respond(this.context.connectionId, input2);
-  }
-  async openStream(input2) {
-    this.requireOpen();
-    const params = streamOpenSchema4.parse(input2);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The ACP stream id is already active.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS3) {
-      throw new RpcError("RATE_LIMITED", "Too many ACP streams are active for this connection.", void 0, true);
-    }
-    this.domain.assertStreamable(this.context.connectionId, params.sessionId);
-    this.streams.set(params.streamId, params.sessionId);
-    await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
-    return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
-  }
-  /** Whether this peer has at least one live stream observing the session. */
-  hasStreamFor(sessionId) {
-    for (const target2 of this.streams.values()) {
-      if (target2 === sessionId) return true;
-    }
-    return false;
-  }
-  closeStream(input2) {
-    const params = streamCloseSchema4.parse(input2);
-    this.streams.delete(params.streamId);
-    return { closed: true, streamId: params.streamId };
-  }
-  openTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferOpenSchema4.parse(input2);
-    if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk count is invalid.");
-    }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError("REQUEST_CONFLICT", "The ACP transfer id is already active.");
-    }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
-      throw new RpcError("RATE_LIMITED", "Too many ACP transfers are active.", void 0, true);
-    }
-    this.incomingTransfers.set(params.transferId, {
-      totalBytes: params.totalBytes,
-      totalChunks: params.totalChunks,
-      chunks: [],
-      receivedBytes: 0,
-      touchedAt: Date.now()
-    });
-    return { opened: true, transferId: params.transferId };
-  }
-  appendTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferChunkSchema4.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
-    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "ACP transfer chunks must arrive exactly once and in order.");
-    }
-    const chunk = decodeCanonicalBase644(params.data);
-    const expectedBytes = Math.min(
-      AGENT_ACP_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES
-    );
-    if (chunk.byteLength !== expectedBytes) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk size is invalid.");
-    }
-    transfer.chunks.push(chunk);
-    transfer.receivedBytes += chunk.byteLength;
-    transfer.touchedAt = Date.now();
-    return { accepted: true, transferId: params.transferId, index: params.index };
-  }
-  async commitTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferIdSchema4.parse(input2);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
-    this.incomingTransfers.delete(params.transferId);
-    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError("INVALID_MESSAGE", "The ACP transfer is incomplete.");
-    }
-    let request;
-    try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks4(transfer.chunks, transfer.totalBytes)));
-    } catch {
-      throw new RpcError("INVALID_MESSAGE", "The ACP transfer does not contain a valid request.");
-    }
-    let response;
-    try {
-      response = await this.callDomain(request, false);
-    } catch (error) {
-      this.logger?.warn("ACP transfer call failed", {
-        method: safeMethod2(request),
-        code: safeErrorCode3(error)
-      });
-      throw error;
-    }
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES4) return { kind: "inline", response };
-    if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
-      throw new RpcError("RESPONSE_TOO_LARGE", "The Cursor response exceeds the bounded transfer limit.");
-    }
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) {
-      throw new RpcError("RATE_LIMITED", "Too many Cursor response transfers are active.", void 0, true);
-    }
-    const totalChunks = Math.ceil(responseBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES);
-    this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
-      totalChunks,
-      nextIndex: 0,
-      touchedAt: Date.now()
-    });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
-  }
-  readTransfer(input2) {
-    this.requireOpen();
-    this.pruneTransfers();
-    const params = transferReadSchema4.parse(input2);
-    const transfer = this.outgoingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Cursor response transfer is not active.");
-    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
-      this.outgoingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Cursor response chunks must be read exactly once and in order.");
-    }
-    const start = params.index * AGENT_ACP_TRANSFER_CHUNK_BYTES;
-    const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
-    transfer.nextIndex += 1;
-    transfer.touchedAt = Date.now();
-    return {
-      transferId: params.transferId,
-      index: params.index,
-      data: Buffer6.from(transfer.bytes.subarray(start, end)).toString("base64")
-    };
-  }
-  closeTransfer(input2) {
-    const params = transferIdSchema4.parse(input2);
-    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
-    return { closed, transferId: params.transferId };
-  }
-  async publishInbound(sessionId, frame) {
-    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
-    const streamIds = [...this.streams.entries()].filter(([, targetSessionId]) => targetSessionId === sessionId).map(([streamId]) => streamId);
-    if (streamIds.length === 0) {
-      this.logger?.warn("Publishing ACP frame without an open stream; using session-scoped delivery", {
-        method: frame.method
-      });
-    }
-    const data2 = { streamId: `session:${sessionId}`, frame };
-    if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
-      for (const streamId of streamIds) {
-        this.streams.delete(streamId);
-        await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
-      }
-      this.logger?.warn("ACP stream closed after oversized frame", { method: frame.method });
-      throw new RpcError("RESPONSE_TOO_LARGE", "The ACP frame exceeds the secure channel limit.");
-    }
-    try {
-      await this.publish("agent.acp.frame", data2);
-    } catch (error) {
-      this.logger?.warn("ACP frame publish failed", {
-        method: frame.method,
-        code: safeErrorCode3(error)
-      });
-      throw error;
-    }
-  }
-  async failStreams(reason = "failed", sessions) {
-    if (this.closed) return;
-    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id5]) => id5);
-    for (const id5 of streamIds) this.streams.delete(id5);
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
-      streamId,
-      reason
-    }).catch(() => void 0)));
-  }
-  async closeAll() {
-    if (this.closed) return;
-    this.closed = true;
-    const streamIds = [...this.streams.keys()];
-    this.streams.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
-      streamId,
-      reason: "peer-disconnected"
-    }).catch(() => void 0)));
-    this.domain.dropPeer(this.context.connectionId);
-  }
-  pruneTransfers() {
-    const staleBefore = Date.now() - TRANSFER_IDLE_MS2;
-    for (const [id5, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id5);
-    }
-    for (const [id5, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id5);
-    }
-  }
-  requireOpen() {
-    if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
-  }
-};
-function decodeCanonicalBase644(value) {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
-  }
-  const decoded = Buffer6.from(value, "base64");
-  if (decoded.toString("base64") !== value) {
-    throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
-  }
-  return decoded;
-}
-function isRecord17(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function safeErrorCode3(error) {
-  if (isRecord17(error) && typeof error.code === "string") return error.code;
-  return "UNKNOWN";
-}
-function safeMethod2(input2) {
-  return isRecord17(input2) && typeof input2.method === "string" ? input2.method : "invalid";
-}
-function concatChunks4(chunks, totalBytes) {
-  const output = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output;
-}
-
-// src/acp/gateway.ts
-var APPROVAL_TTL_MS2 = 5 * 6e4;
-var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
-var ACP_DIRECTORY_ENTRY_LIMIT = 500;
-var MAX_BUFFERED_ACP_FRAMES = 200;
-var ACP_FRAME_BUFFER_TTL_MS = 5 * 6e4;
-var MAX_TURN_CATCH_UP_FRAMES = 120;
-var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
-  "agent_thought_chunk",
-  "agent_thought",
-  "agent_message_chunk",
-  "agent_message",
-  "user_message_chunk",
-  "tool_call",
-  "tool_call_update"
-]);
-var AcpRemoteGateway = class {
-  constructor(config, logger, createAcp = (binary, targetLogger, backend) => {
-    if (backend.id === "antigravity") {
-      return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-    }
-    return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2) {
-    this.config = config;
-    this.logger = logger;
-    this.createAcp = createAcp;
-    this.restartDelaysMs = restartDelaysMs;
-  }
-  backendInstances = /* @__PURE__ */ new Map();
-  peers = /* @__PURE__ */ new Map();
-  sessionOwners = /* @__PURE__ */ new Map();
-  sessionBackends = /* @__PURE__ */ new Map();
-  approvals = /* @__PURE__ */ new Map();
-  approvalExpiryTimer;
-  restartTimer;
-  restartAttempt = 0;
-  available = false;
-  closed = false;
-  state = "disabled";
-  unavailableCode;
-  /** Keep ACP → Client fanout ordered; concurrent publish races Noise sends. */
-  inboundChain = Promise.resolve();
-  /** Catch-up buffer for turns that finish while the Client is reconnecting. */
-  recentFrames = /* @__PURE__ */ new Map();
-  /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
-  turnCatchUp = /* @__PURE__ */ new Map();
-  startPromise;
-  startingClients = /* @__PURE__ */ new Set();
-  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
-  enabledBackends() {
-    if (!this.config.enabled) return [];
-    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor"].includes(item.id)).map((item) => item.id);
-  }
-  start() {
-    if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
-    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  async startOnce() {
-    try {
-      this.state = "starting";
-      await this.launchAcp();
-    } catch (error) {
-      if (this.closed) return;
-      this.available = false;
-      this.state = "unavailable";
-      this.unavailableCode = errorCode4(error);
-      await this.disposeAllInstances();
-      this.logger.warn("ACP Remote domain unavailable", { code: this.unavailableCode });
-    }
-  }
-  isAvailable() {
-    return this.config.enabled && this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
-  }
-  availableBackends() {
-    const list = [];
-    for (const [id5, inst] of this.backendInstances) {
-      if (this.enabledBackends().includes(id5) && inst.client.isReady()) list.push(id5);
-    }
-    return list;
-  }
-  defaultBackend() {
-    const ready = this.availableBackends();
-    return this.enabledBackends().find((id5) => ready.includes(id5)) ?? this.enabledBackends()[0] ?? "antigravity";
-  }
-  status() {
-    return {
-      enabled: this.config.enabled,
-      available: this.isAvailable(),
-      state: this.state,
-      restartAttempt: this.restartAttempt,
-      availableBackends: this.availableBackends(),
-      ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
-    };
-  }
-  createPeer(context, publish) {
-    const bridge = new AcpPeerBridge(this, context, publish, this.logger);
-    this.peers.set(context.connectionId, bridge);
-    return bridge;
-  }
-  async call(connectionId, input2) {
-    const envelope = parseCallEnvelope2(input2);
-    const call = parseAcpCall(envelope.method, envelope.params);
-    this.logger.info("ACP call received", {
-      method: call.method,
-      sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
-    });
-    if (typeof call.params.backend === "string") {
-      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor):/, "") : sessionIdFromParams(call.method, call.params);
-      const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
-      if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
-        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      }
-      this.requireAcp(call.params.backend);
-    }
-    if (call.method === "initialize") {
-      const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
-      this.requireAcp(requestedBackend);
-      return this.initializeResult(call.params, requestedBackend);
-    }
-    if (call.method === "dsh/directoryList") {
-      return this.listDirectory(String(call.params.path));
-    }
-    if (call.method === "dsh/workspaceList") {
-      const candidates = /* @__PURE__ */ new Set();
-      const cwd2 = process.cwd();
-      if (cwd2) candidates.add(cwd2);
-      for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
-        try {
-          const s2 = await stat5(candidate);
-          if (s2.isDirectory()) candidates.add(candidate);
-        } catch {
-        }
-      }
-      const backend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
-      if (backend === "antigravity") {
-        try {
-          const agyDirs = await discoverAntigravityWorkspaces();
-          for (const d of agyDirs) {
-            candidates.add(d);
-          }
-        } catch {
-        }
-      }
-      const results = await Promise.all([...candidates].map(async (p) => {
-        let sessionCount = 0;
-        if (backend === "antigravity") {
-          try {
-            const sessions = await discoverAntigravitySessions(p, 100);
-            sessionCount = sessions.length;
-          } catch {
-          }
-        }
-        return {
-          path: p,
-          title: basename5(p) || "workspace",
-          ...sessionCount > 0 ? { sessionCount } : {}
-        };
-      }));
-      return results;
-    }
-    if (call.method === "dsh/sessionList") {
-      const limit = typeof call.params.limit === "number" ? call.params.limit : 30;
-      const path = String(call.params.path || "");
-      const backend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
-      if (backend === "antigravity") {
-        if (path.trim() !== "" && call.params.prewarm !== false) {
-          const cwd2 = await this.requireExistingDirectory(path);
-          this.requireAcp("antigravity").prewarmSession?.(cwd2);
-        }
-        const items = await discoverAntigravitySessions(path, limit);
-        this.logger.info("ACP session list fetched", { count: items.length });
-        return { items };
-      }
-      return { items: [] };
-    }
-    if (call.method === "dsh/sessionHistory") {
-      const rawSessionId = String(call.params.sessionId);
-      const conversationId = rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
-      const boundBackend = this.sessionBackends.get(conversationId);
-      const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
-      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
-        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      }
-      this.requireAcp(backend);
-      if (backend !== "antigravity") return { events: [] };
-      const events = await loadTranscriptEvents(conversationId, rawSessionId);
-      this.logger.info("ACP session history fetched", {
-        sessionId: shortSessionId(rawSessionId),
-        eventCount: events.length
-      });
-      return { events };
-    }
-    if (call.method === "session/new") {
-      const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
-      const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
-      const acp = this.requireAcp(requestedBackend);
-      const result = await acp.call("session/new", {
-        cwd: cwd2,
-        mcpServers: [],
-        ...typeof call.params.mode === "string" ? { mode: call.params.mode } : {}
-      });
-      const sessionId2 = readSessionId(result);
-      if (sessionId2 !== void 0) {
-        this.sessionOwners.set(sessionId2, connectionId);
-        this.sessionBackends.set(sessionId2, requestedBackend);
-      }
-      return sanitizeSessionResult(result);
-    }
-    const sessionId = sessionIdFromParams(call.method, call.params);
-    if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
-    if (call.method === "session/prompt") {
-      const selected = this.sessionBackends.get(sessionId);
-      const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
-      if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
-      this.sessionBackends.set(sessionId, requested);
-    }
-    if (call.method === "session/load") {
-      const boundBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
-      const targetBackend = typeof call.params.backend === "string" ? call.params.backend : boundBackend;
-      if (boundBackend !== void 0 && targetBackend !== boundBackend) {
-        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      }
-      const acp = this.requireAcp(targetBackend);
-      const result = await acp.call(call.method, call.params);
-      const loadedId = readSessionId(result) ?? sessionId;
-      if (loadedId !== void 0) {
-        this.sessionOwners.set(loadedId, connectionId);
-        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
-      }
-      return sanitizeSessionResult(result);
-    }
-    if (isSessionMutation(call.method) && sessionId !== void 0) {
-      this.requireSessionOwner(connectionId, sessionId);
-    }
-    if (call.method === "session/prompt" && sessionId !== void 0) {
-      const ownerPeer = this.peers.get(connectionId);
-      if (ownerPeer !== void 0 && !ownerPeer.hasStreamFor(sessionId)) {
-        this.logger?.warn("Cursor prompt started without an open ACP stream", {
-          sessionId: shortSessionId(sessionId)
-        });
-      }
-      this.turnCatchUp.set(sessionId, []);
-      void this.runPromptInBackground(sessionId, call.params);
-      return { accepted: true, stopReason: "in_progress" };
-    }
-    const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
-    return sanitizeSessionResult(await this.requireAcp(sessionBackend).call(call.method, call.params));
-  }
-  async runPromptInBackground(sessionId, params) {
-    try {
-      const sessionBackend = this.sessionBackends.get(sessionId);
-      const acp = this.requireAcp(sessionBackend);
-      const result = await acp.call("session/prompt", params);
-      await this.inboundChain;
-      const stopReason = isRecord18(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
-      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
-      this.logger.info("ACP prompt finished", {
-        sessionId: shortSessionId(sessionId),
-        stopReason,
-        catchUp: catchUp.length
-      });
-      await this.publishToSession(sessionId, {
-        method: "session/update",
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: "prompt_completed",
-            stopReason,
-            ...catchUp.length > 0 ? { catchUp } : {}
-          }
-        }
-      });
-    } catch (error) {
-      this.logger?.warn("ACP session/prompt failed", { code: errorCode4(error) });
-      await this.inboundChain.catch(() => void 0);
-      const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
-      await this.publishToSession(sessionId, {
-        method: "session/update",
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: "prompt_failed",
-            code: errorCode4(error),
-            ...catchUp.length > 0 ? { catchUp } : {}
-          }
-        }
-      }).catch(() => void 0);
-    }
-  }
-  async respond(connectionId, input2) {
-    const params = parseRespondEnvelope(input2);
-    const pending = this.approvals.get(params.requestHandle);
-    if (pending === void 0 || pending.expiresAt <= Date.now()) {
-      this.approvals.delete(params.requestHandle);
-      throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
-    }
-    if (pending.connectionId !== connectionId) {
-      throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
-    }
-    this.approvals.delete(params.requestHandle);
-    const acp = this.requireAcp(pending.backend);
-    if (params.decision === "cancel") {
-      await acp.respondError(pending.upstreamId, -32800, "Cancelled by Remote client.");
-      return { resolved: true };
-    }
-    const result = params.result ?? mapPermissionDecision(params.decision, pending.method);
-    await acp.respond(pending.upstreamId, result);
-    return { resolved: true };
-  }
-  dropPeer(connectionId) {
-    this.peers.delete(connectionId);
-    for (const [sessionId, owner] of this.sessionOwners) {
-      if (owner === connectionId) this.sessionOwners.delete(sessionId);
-    }
-    for (const [handle, approval] of this.approvals) {
-      if (approval.connectionId === connectionId) {
-        this.approvals.delete(handle);
-        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
-      }
-    }
-  }
-  /** Used by peer stream open to prove this connection may observe the session. */
-  assertStreamable(connectionId, sessionId) {
-    this.claimSession(connectionId, sessionId);
-  }
-  /**
-   * After a Client reconnect, session ownership may have been cleared with the
-   * old peer. Reclaim the in-memory ACP session for the new connection so
-   * stream open / prompt can resume and buffered frames can replay.
-   */
-  claimSession(connectionId, sessionId) {
-    const owner = this.sessionOwners.get(sessionId);
-    if (owner === void 0) {
-      this.sessionOwners.set(sessionId, connectionId);
-      return;
-    }
-    if (owner !== connectionId) {
-      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
-    }
-  }
-  /** Replay frames buffered while no healthy peer could receive them. */
-  async replayBufferedFrames(connectionId, sessionId) {
-    const peer = this.peers.get(connectionId);
-    if (peer === void 0) return;
-    this.pruneFrameBuffer(sessionId);
-    const buffered = this.recentFrames.get(sessionId) ?? [];
-    if (buffered.length === 0) return;
-    this.recentFrames.delete(sessionId);
-    this.logger.info("Replaying buffered ACP frames", {
-      sessionId: shortSessionId(sessionId),
-      count: buffered.length
-    });
-    for (const frame of buffered) {
-      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
-    }
-  }
-  async reconfigure(config) {
-    if (this.closed) throw new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed.");
-    const previous = this.config;
-    const implemented = (value) => ({
-      enabled: value.enabled,
-      backends: value.backends.filter((item) => ["cursor", "antigravity"].includes(item.id))
-    });
-    this.config = config;
-    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = void 0;
-    await this.startPromise?.catch(() => void 0);
-    const changed = new Set(previous.backends.filter((item) => {
-      const next = config.backends.find((candidate) => candidate.id === item.id);
-      return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next);
-    }).map((item) => item.id));
-    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
-    if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
-    for (const id5 of sessions) {
-      this.sessionOwners.delete(id5);
-      this.sessionBackends.delete(id5);
-      this.recentFrames.delete(id5);
-      this.turnCatchUp.delete(id5);
-    }
-    for (const [id5, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id5);
-    for (const id5 of changed) {
-      const instance = this.backendInstances.get(id5);
-      if (instance === void 0) continue;
-      this.backendInstances.delete(id5);
-      await this.disposeInstance(instance);
-    }
-    this.available = this.availableBackends().length > 0;
-    this.state = this.available ? "ready" : "disabled";
-    this.restartAttempt = 0;
-    this.unavailableCode = void 0;
-    await this.start();
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    for (const peer of this.peers.values()) await peer.closeAll();
-    this.peers.clear();
-    this.sessionOwners.clear();
-    this.sessionBackends.clear();
-    this.recentFrames.clear();
-    this.turnCatchUp.clear();
-    this.approvals.clear();
-    await Promise.all([...this.startingClients].map((client) => client.close()));
-    await this.disposeAllInstances();
-    this.available = false;
-    this.state = "disabled";
-  }
-  async launchAcp() {
-    const candidates = this.config.backends.filter((item) => this.enabledBackends().includes(item.id));
-    const results = await Promise.allSettled(candidates.map(async (candidate) => {
-      if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
-      let lastError;
-      for (const binary of cursorBinaryCandidates(candidate.command)) {
-        if (this.closed) return;
-        try {
-          await this.launchBackendCandidate(candidate, binary);
-          return;
-        } catch (error) {
-          lastError = error;
-          this.logger.debug?.("ACP candidate failed", { id: candidate.id, code: errorCode4(error) });
-        }
-      }
-      throw lastError;
-    }));
-    if (this.closed) return;
-    if (this.isAvailable()) {
-      this.state = "ready";
-      this.unavailableCode = void 0;
-      this.restartAttempt = 0;
-      return;
-    }
-    const failure3 = results.find((result) => result.status === "rejected");
-    throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
-  }
-  async launchBackendCandidate(backend, binary) {
-    const id5 = backend.id;
-    const acp = this.createAcp(binary, this.logger, backend);
-    this.startingClients.add(acp);
-    try {
-      await acp.start();
-      if (this.closed) {
-        await acp.close();
-        return;
-      }
-    } catch (error) {
-      await acp.close();
-      throw error;
-    } finally {
-      this.startingClients.delete(acp);
-    }
-    const unsubscribeInbound = acp.onInbound((message) => {
-      this.inboundChain = this.inboundChain.then(() => this.handleInbound(id5, message)).catch((error) => {
-        this.logger.warn("ACP inbound fanout failed", { id: id5, code: errorCode4(error) });
-      });
-    });
-    const unsubscribeUnavailable = acp.onUnavailable((code) => {
-      void this.handleUnavailable(code);
-    });
-    const prev = this.backendInstances.get(id5);
-    if (prev !== void 0) {
-      await this.disposeInstance(prev);
-    }
-    if (this.closed) {
-      unsubscribeInbound();
-      unsubscribeUnavailable();
-      await acp.close();
-      return;
-    }
-    this.available = true;
-    this.backendInstances.set(id5, {
-      id: id5,
-      client: acp,
-      unsubscribeInbound,
-      unsubscribeUnavailable
-    });
-  }
-  async handleInbound(backend, message) {
-    if (message.kind === "notification" || message.method === "session/update") {
-      const sessionId2 = readSessionId(message.params) ?? readNestedSessionId(message.params);
-      if (sessionId2 === void 0) return;
-      if (!this.sessionBackends.has(sessionId2)) {
-        this.sessionBackends.set(sessionId2, backend);
-      }
-      await this.publishToSession(sessionId2, { method: message.method, params: message.params });
-      return;
-    }
-    const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? "unknown";
-    if (sessionId !== "unknown" && !this.sessionBackends.has(sessionId)) {
-      this.sessionBackends.set(sessionId, backend);
-    }
-    const requestHandle = randomUUID4();
-    this.approvals.set(requestHandle, {
-      upstreamId: message.id,
-      connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? "unknown",
-      sessionId,
-      method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS2,
-      backend
-    });
-    this.scheduleApprovalExpiry();
-    const owner = this.sessionOwners.get(sessionId);
-    const frame = {
-      method: message.method,
-      params: {
-        requestHandle,
-        sessionId,
-        upstreamMethod: message.method,
-        ...isRecord18(message.params) ? message.params : {}
-      }
-    };
-    if (owner !== void 0) {
-      const peer = this.peers.get(owner);
-      if (peer !== void 0) {
-        await peer.publishInbound(sessionId, frame);
-        return;
-      }
-    }
-    await this.publishToSession(sessionId, frame);
-  }
-  async publishToSession(sessionId, frame) {
-    this.recordTurnCatchUp(sessionId, frame);
-    const ownerId = this.sessionOwners.get(sessionId);
-    const entries = [...this.peers.entries()];
-    if (entries.length === 0) {
-      this.bufferFrame(sessionId, frame);
-      return;
-    }
-    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
-      try {
-        await peer.publishInbound(sessionId, frame);
-        return { connectionId, ok: true };
-      } catch {
-        return { connectionId, ok: false };
-      }
-    }));
-    const ownerDelivered = ownerId !== void 0 && deliveries.some((item) => item.connectionId === ownerId && item.ok);
-    if (ownerId !== void 0 ? !ownerDelivered : deliveries.every((item) => !item.ok)) {
-      this.bufferFrame(sessionId, frame);
-    }
-  }
-  recordTurnCatchUp(sessionId, frame) {
-    const list = this.turnCatchUp.get(sessionId);
-    if (list === void 0 || frame.method !== "session/update") return;
-    const params = isRecord18(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord18(params.update) ? params.update : params;
-    const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
-    if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
-    list.push({ method: frame.method, params: frame.params });
-    while (list.length > MAX_TURN_CATCH_UP_FRAMES) list.shift();
-  }
-  bufferFrame(sessionId, frame) {
-    this.pruneFrameBuffer(sessionId);
-    const list = this.recentFrames.get(sessionId) ?? [];
-    list.push({ method: frame.method, params: frame.params, at: Date.now() });
-    while (list.length > MAX_BUFFERED_ACP_FRAMES) list.shift();
-    this.recentFrames.set(sessionId, list);
-    this.logger.warn("Buffered ACP frame for later replay", {
-      sessionId: shortSessionId(sessionId),
-      method: frame.method,
-      buffered: list.length
-    });
-  }
-  pruneFrameBuffer(sessionId) {
-    const list = this.recentFrames.get(sessionId);
-    if (list === void 0) return;
-    const validAfter = Date.now() - ACP_FRAME_BUFFER_TTL_MS;
-    const next = list.filter((frame) => frame.at >= validAfter);
-    if (next.length === 0) this.recentFrames.delete(sessionId);
-    else this.recentFrames.set(sessionId, next);
-  }
-  async handleUnavailable(code) {
-    if (this.closed) return;
-    this.available = false;
-    this.state = "restarting";
-    this.unavailableCode = code;
-    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
-    this.scheduleRestart();
-  }
-  scheduleRestart() {
-    if (this.closed || !this.config.enabled) return;
-    if (this.restartAttempt >= this.restartDelaysMs.length) {
-      this.state = "unavailable";
-      return;
-    }
-    const delay = this.restartDelaysMs[this.restartAttempt];
-    this.restartAttempt += 1;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = setTimeout(() => {
-      void this.start().catch(() => void 0);
-    }, delay);
-    this.restartTimer.unref?.();
-  }
-  scheduleApprovalExpiry() {
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    const next = [...this.approvals.values()].reduce((min, item) => {
-      if (min === void 0 || item.expiresAt < min) return item.expiresAt;
-      return min;
-    }, void 0);
-    if (next === void 0) return;
-    this.approvalExpiryTimer = setTimeout(() => {
-      const now = Date.now();
-      for (const [handle, approval] of this.approvals) {
-        if (approval.expiresAt <= now) {
-          this.approvals.delete(handle);
-          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
-        }
-      }
-      this.scheduleApprovalExpiry();
-    }, Math.max(0, next - Date.now()));
-    this.approvalExpiryTimer.unref?.();
-  }
-  requireAcp(backend) {
-    if (!this.config.enabled || backend !== void 0 && !this.enabledBackends().includes(backend) || !this.isAvailable()) {
-      throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
-    }
-    if (backend !== void 0) {
-      const instance = this.backendInstances.get(backend);
-      if (instance !== void 0 && instance.client.isReady()) return instance.client;
-      throw new RpcError("CURSOR_UNAVAILABLE", "The requested ACP backend is disabled or unavailable on this Host.");
-    }
-    const selected = this.backendInstances.get(this.defaultBackend());
-    if (selected !== void 0 && selected.client.isReady()) return selected.client;
-    throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
-  }
-  initializeResult(params, backend) {
-    const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
-    const actualBackend = backend ?? this.defaultBackend();
-    return {
-      protocolVersion: requested,
-      agentInfo: {
-        name: actualBackend === "antigravity" ? "antigravity" : "dsh-remote-acp",
-        version: PLUGIN_VERSION
-      },
-      backend: actualBackend,
-      availableBackends: this.availableBackends(),
-      authMethods: [],
-      capabilities: {
-        loadSession: true,
-        promptTypes: actualBackend === "antigravity" ? ["text", "image"] : ["text"],
-        methods: [...ACP_METHOD_ALLOWLIST]
-      }
-    };
-  }
-  callUpstream(method, params) {
-    return this.requireAcp().call(method, params);
-  }
-  requireSessionAccess(connectionId, sessionId, method) {
-    if (method === "session/load") return;
-    const owner = this.sessionOwners.get(sessionId);
-    if (owner === void 0) {
-      this.sessionOwners.set(sessionId, connectionId);
-      return;
-    }
-    if (owner !== connectionId && isSessionMutation(method)) {
-      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
-    }
-  }
-  requireSessionOwner(connectionId, sessionId) {
-    this.claimSession(connectionId, sessionId);
-  }
-  async requireExistingDirectory(path) {
-    if (!isAbsolute4(path)) {
-      throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
-    }
-    try {
-      const canonical = await realpath2(path);
-      const info = await stat5(canonical);
-      if (!info.isDirectory()) {
-        throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
-      }
-      return canonical;
-    } catch (error) {
-      if (error instanceof RpcError) throw error;
-      throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
-    }
-  }
-  async listDirectory(path) {
-    const home = homedir6();
-    const target2 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join9(home, path.slice(2)) : path;
-    const canonical = await this.requireExistingDirectory(isAbsolute4(target2) ? target2 : resolve3(target2));
-    const names = await readdir3(canonical);
-    const entries = [];
-    let truncated = false;
-    for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
-      if (entries.length >= ACP_DIRECTORY_ENTRY_LIMIT) {
-        truncated = true;
-        break;
-      }
-      const child = join9(canonical, name2);
-      try {
-        const info = await stat5(child);
-        if (!info.isDirectory()) continue;
-        entries.push({ name: name2, path: child, hidden: name2.startsWith(".") });
-      } catch {
-      }
-    }
-    return {
-      path: canonical,
-      home,
-      crumbs: buildCrumbs(canonical, home),
-      entries,
-      truncated
-    };
-  }
-  async disposeInstance(inst) {
-    inst.unsubscribeInbound();
-    inst.unsubscribeUnavailable();
-    await inst.client.close();
-  }
-  async disposeAllInstances() {
-    for (const inst of this.backendInstances.values()) {
-      await this.disposeInstance(inst);
-    }
-    this.backendInstances.clear();
-  }
-};
-function parseCallEnvelope2(input2) {
-  if (!isRecord18(input2) || typeof input2.method !== "string") {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
-  }
-  return { method: input2.method, params: input2.params ?? {} };
-}
-function parseRespondEnvelope(input2) {
-  if (!isRecord18(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
-  }
-  const decision = input2.decision;
-  if (decision !== "allow-once" && decision !== "allow-always" && decision !== "reject-once" && decision !== "cancel") {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
-  }
-  return {
-    requestHandle: input2.requestHandle,
-    decision,
-    ...input2.result === void 0 ? {} : { result: input2.result }
-  };
-}
-function mapPermissionDecision(decision, method) {
-  if (method === "session/request_permission") {
-    return { outcome: { outcome: "selected", optionId: decision === "cancel" ? "reject-once" : decision } };
-  }
-  if (method === "cursor/create_plan") {
-    if (decision === "allow-once" || decision === "allow-always") return { outcome: { outcome: "accepted" } };
-    return { outcome: { outcome: decision === "cancel" ? "cancelled" : "rejected" } };
-  }
-  if (method === "cursor/ask_question") {
-    return { outcome: { outcome: "cancelled" } };
-  }
-  return { outcome: { outcome: "selected", optionId: decision } };
-}
-function readSessionId(value) {
-  if (!isRecord18(value)) return void 0;
-  return typeof value.sessionId === "string" ? value.sessionId : void 0;
-}
-function readNestedSessionId(value) {
-  if (!isRecord18(value)) return void 0;
-  if (isRecord18(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
-  return void 0;
-}
-function sanitizeSessionResult(value) {
-  if (!isRecord18(value)) return value;
-  const next = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
-  }
-  return Object.keys(next).length > 0 ? next : value;
-}
-function buildCrumbs(path, home) {
-  const crumbs2 = [];
-  let current = path;
-  while (true) {
-    crumbs2.unshift({
-      name: current === home ? "~" : basename5(current) || current,
-      path: current,
-      hidden: false
-    });
-    const parent = resolve3(current, "..");
-    if (parent === current) break;
-    if (home !== "" && relative2(home, current) === "" && current !== home) break;
-    current = parent;
-    if (crumbs2.length >= 32) break;
-  }
-  return crumbs2;
-}
-function cursorBinaryCandidates(configured) {
-  const userHome = homedir6();
-  if (configured === "agy" || configured === "antigravity") {
-    return [
-      join9(userHome, ".local", "bin", "agy"),
-      "agy"
-    ];
-  }
-  if (configured === "agent" || configured === "cursor") {
-    return [
-      join9(userHome, ".local", "bin", "agent"),
-      "agent"
-    ];
-  }
-  return [configured];
-}
-function errorCode4(error) {
-  if (error instanceof CursorAcpError || error instanceof RpcError) return error.code;
-  return "CURSOR_UNAVAILABLE";
-}
-function shortSessionId(sessionId) {
-  return sessionId.length <= 16 ? sessionId : `${sessionId.slice(0, 8)}\u2026${sessionId.slice(-4)}`;
-}
-function takeTurnCatchUp(turnCatchUp, sessionId) {
-  const list = turnCatchUp.get(sessionId) ?? [];
-  turnCatchUp.delete(sessionId);
-  return list;
+  return isRecord18(value) ? value : {};
 }
 function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+// src/service.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/codex-workspace-bridge.ts
 import { spawn as spawn5 } from "node:child_process";

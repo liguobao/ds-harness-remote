@@ -827,6 +827,13 @@ Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 
      2. `workspaceTypes` 中的声明条目（稳定小写 `id` 与展示名称 `name`）；
      3. 对应的数据面 RPC / Stream / Event allowlist 策略及通道隔离实现。
 
+Web 接入时，`workspaceTypes` 是现有 `harness.transport.describe` 响应的可选加法字段，
+无需修改 Server 中继或握手协议。既有 Harness / CodeX 数据面应直接复用；新客户端优先读取
+有效的类型条目及 `available`，旧 Host 未提供该字段时才沿用 `capabilities` 判断。类型列表
+不是 Harness 入口的完整替代：当前 Host 单独声明 CodeX 和已启用的 ACP 后端，Harness
+入口仍由原有 `harness.api.v1` / `harness.remote.v1|v3` 能力决定。未知类型可以展示其 `name`，
+但只有已有对应 RPC / 数据面处理器时才允许进入，不得据类型声明代理任意方法。
+
 ApiProxy 与 Typert Remote contract 仍随 Desktop Plugin 发布物升级，但新增的可选业务能力
 必须保持加法兼容。当前实现不翻译 rc.2 与 alpha 的完整 Harness 业务模型：本地与远端
 carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、创建 Workspace 或其它 mutation 前

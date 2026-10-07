@@ -1124,6 +1124,7 @@ window.__ModuleLoader__.load({
       const [terminalEnabled, setTerminalEnabled] = React.useState(false)
       const [terminalBusy, setTerminalBusy] = React.useState(false)
       const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
+      const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
       const [acpChecking, setAcpChecking] = React.useState<Record<string, boolean>>({})
       const [acpCheckResults, setAcpCheckResults] = React.useState<Record<string, boolean | undefined>>({})
       const [addingAcp, setAddingAcp] = React.useState(false)
@@ -1148,6 +1149,7 @@ window.__ModuleLoader__.load({
         setTerminalEnabled(view.config.terminal?.enabled ?? true)
         setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
         setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
+        setAcpAvailability(view.acpAvailability ?? {})
         setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
         setWritable(view.writable)
         setLoaded(true)
@@ -1280,6 +1282,7 @@ window.__ModuleLoader__.load({
       }
 
       const checkAcp = async (backend: string): Promise<void> => {
+        if (acpChecking[backend]) return
         setAcpChecking(current => ({ ...current, [backend]: true }))
         setAcpCheckResults(current => ({ ...current, [backend]: undefined }))
         setError(undefined)
@@ -1287,6 +1290,9 @@ window.__ModuleLoader__.load({
           const view = await props.control<PluginSettingsView>('settings.get')
           applyView(view)
           const available = view.acpAvailability?.[backend] === true
+          if (!available && view.writable && view.config.acp?.backends?.some(item => item.id === backend && item.enabled !== false)) {
+            applyView(await props.control<PluginSettingsView>('settings.acp.set', { backend, enabled: false }))
+          }
           setAcpCheckResults(current => ({ ...current, [backend]: available }))
           setNotice({ key: available ? 'acpAvailable' : 'acpUnavailable' })
           window.setTimeout(() => setAcpCheckResults(current => ({ ...current, [backend]: undefined })), 5_000)
@@ -1368,7 +1374,7 @@ window.__ModuleLoader__.load({
             React.createElement('a', { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? ' isChecking' : acpCheckResults[item.id] === undefined ? '' : acpCheckResults[item.id] ? ' isPassed' : ' isFailed'}`, onClick: (event: Event) => { event.preventDefault(); void checkAcp(item.id) } },
               acpChecking[item.id] ? t('checkingAcp') : acpCheckResults[item.id] === undefined ? t('checkAcp') : t(acpCheckResults[item.id] ? 'acpCheckPassed' : 'acpCheckFailed'))),
           ['codex', 'cursor', 'antigravity'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
-          React.createElement('input', { type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled, 'aria-label': item.id, disabled: busy || !writable,
+          React.createElement('input', { type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled && acpAvailability[item.id] === true, 'aria-label': item.id, disabled: busy || !writable || acpChecking[item.id] === true || acpAvailability[item.id] !== true,
             onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason)))
           }))),
           addingAcp ? React.createElement('div', { className: 'dshRemoteAcpAddForm' },
