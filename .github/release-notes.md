@@ -22,7 +22,8 @@ CI and release builds passed. AGY encrypted cross-device E2E, Windows / native-d
 
 ### 致谢 / Thanks
 
-[@zzalancelot](https://github.com/zzalancelot) · [择梦舟 / @dreamfarer-space](https://github.com/dreamfarer-space)
+- [@zzalancelot](https://github.com/zzalancelot)：Cursor ACP Host 接入、Desktop / Android 会话支持与流式回复。Cursor ACP integration, Desktop / Android sessions, and streaming replies.
+- [择梦舟 / @dreamfarer-space](https://github.com/dreamfarer-space)：Android 引用与消息操作、新对话与轨迹入口、快捷提示词管理及输入栏直达（[#89](https://github.com/liguobao/ds-harness-remote/pull/89)、[#91](https://github.com/liguobao/ds-harness-remote/pull/91)、[#94](https://github.com/liguobao/ds-harness-remote/pull/94)）。Android references and message actions, new-conversation and trajectory controls, and saved prompts accessible from the composer.
 
 ---
 
