@@ -115,18 +115,13 @@ pnpm --filter @dsh-remote/server build
 
 本地启动、环境变量与 Docker 部署见 `apps/server/README.md` 和 `apps/server/README.zh.md`。Server 设备凭据数据和 `.env` 不得提交。
 
-macOS/Linux 自动安装脚本复用已有 Node.js（缺少时安装到用户目录），将 pnpm/DSH/Remote
-安装到 `${DSH_INSTALL_DIR:-$HOME/.local/share/dsh-remote}/runtime` 的独立 npm prefix；仅 Remote
-CLI 启动器加入用户 PATH，不覆盖全局 DSH 或修改 npm prefix 配置。服务与 CLI 保留显式
-`DSH_HOME`。卸载只清理带安装标记的独立 runtime，保留 Node.js、profile、凭据和旧全局包；
-旧版未隔离安装不自动移除 profile 插件。Linux 仅注册/卸载 systemd 服务时使用 sudo，macOS
-使用用户 LaunchAgent。安装和卸载需使用相同 `DSH_INSTALL_DIR`。真实服务部署仍需另行验证。
-
-Windows 自动安装脚本将独立 Node.js/pnpm/DSH 放在 `%LOCALAPPDATA%\dsh-remote`（可用
-`DSH_INSTALL_DIR` 覆盖），用 WinSW `3.0.0-alpha.11` 交互式账户提示注册当前用户的服务；
-安装和卸载需在安装所属账户的管理员 PowerShell 中执行，脚本只检查权限、不自动提权；
-首次安装需 Windows 账户密码，禁止把密码写入 XML。服务与 CLI 共用固定 `DSH_HOME`，
-卸载保留 profile 和凭证，不清理旧全局 npm 环境。Windows 实机回归尚待完成。
+macOS/Linux 和 Windows 安装/卸载脚本只调用已有 `dsh plugin` 添加/移除 Remote，禁止安装、
+升级或卸载 DSH、Node.js、pnpm，禁止修改 PATH、npm 配置或注册/清理后台服务。普通用户运行。
+脚本支持 `DSH_COMMAND`、`DSH_PROFILE` 和安装版本 `REMOTE_VERSION`，保留已有 `DSH_HOME`。
+Desktop 应通过官方插件管理安装 GitHub 地址，或复用 Desktop 官方 `dsh` launcher 管理保留的
+`desktop` profile；普通独立 CLI 默认 `web`。macOS 支持标准 app 目录启动器回退，Windows
+支持官方 HKCU 命令目录回退。找不到已有命令时给出 Desktop 操作说明并失败，不能宣称已安装。
+旧 service/runtime 不自动迁移或删除；token 安装包装脚本已停用。Windows 真机安装回归仍待完成。
 
 ## Validation Baseline
 

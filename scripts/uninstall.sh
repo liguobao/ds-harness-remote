@@ -1,61 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DSH_PROFILE="${DSH_PROFILE:-web}"
-SERVICE_NAME="${DSH_SERVICE_NAME:-dsh-remote}"
-INSTALL_DIR="${DSH_INSTALL_DIR:-${HOME}/.local/share/dsh-remote}"
-RUNTIME_DIR="$INSTALL_DIR/runtime"
-[[ "$INSTALL_DIR" = /* && "$INSTALL_DIR" != / && "$INSTALL_DIR" != "$HOME" ]] || { printf '[dsh-install] Invalid DSH_INSTALL_DIR.\n' >&2; exit 1; }
+# Remove only Remote from an existing Harness profile.
+DSH_COMMAND="${DSH_COMMAND:-}"
+DSH_PROFILE="${DSH_PROFILE:-}"
+PLUGIN_URL='https://github.com/liguobao/ds-harness-remote'
 
-case "$(uname -s)" in
-  Linux)
-    if [[ "${EUID}" -eq 0 ]]; then sudo_prefix=""; else sudo_prefix="sudo"; fi
-    ${sudo_prefix} systemctl disable --now "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
-    ${sudo_prefix} rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
-    ${sudo_prefix} systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl --user disable --now "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
-    rm -f "${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
-    systemctl --user daemon-reload >/dev/null 2>&1 || true
-    ;;
-  Darwin)
-    launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/${SERVICE_NAME}.plist" >/dev/null 2>&1 || true
-    rm -f "${HOME}/Library/LaunchAgents/${SERVICE_NAME}.plist"
-    ;;
-esac
+say() { printf '[dsh-plugin] %s\n' "$*"; }
+desktop_help() {
+  say 'DeepSeek Harness Desktop: open Extensions / Plugin management.'
+  say "Plugin address: $PLUGIN_URL"
+  say 'Install or remove Remote there, then restart Desktop.'
+  say "To use this script, enable Desktop's official dsh command or set DSH_COMMAND to its launcher."
+}
 
-# The service entry point install.sh generated; it embeds this machine's paths.
-rm -f "$INSTALL_DIR/start-host.sh"
-
-# Drop the PATH block install.sh added; the marker pair is the only thing this
-# script is allowed to remove from a user's shell files.
-for rc in "${HOME}/.profile" "${HOME}/.bashrc" "${HOME}/.zshrc"; do
-  [[ -f "$rc" ]] || continue
-  grep -qF '# >>> dsh-remote installer >>>' "$rc" || continue
-  tmp="$(mktemp)"
-  sed '/^# >>> dsh-remote installer >>>$/,/^# <<< dsh-remote installer <<<$/d' "$rc" >"$tmp"
-  cat "$tmp" >"$rc"
-  rm -f "$tmp"
-  printf '[dsh-install] Removed the PATH entry from %s\n' "$rc"
-done
-
-# Never uninstall packages from the user's global npm environment, including
-# legacy installations. Only this installer's marked private runtime is owned.
-if [[ -f "$RUNTIME_DIR/.dsh-remote-installer" ]] && [[ "$(cat "$RUNTIME_DIR/.dsh-remote-installer")" = dsh-remote-private-runtime-v1 ]]; then
-  if [[ -f "$INSTALL_DIR/node-bin" ]]; then
-    NODE_BIN_DIR="$(cat "$INSTALL_DIR/node-bin")"
-    export PATH="$RUNTIME_DIR/bin:$NODE_BIN_DIR:$PATH"
-  fi
-  if [[ -f "$INSTALL_DIR/dsh-home" ]]; then
-    export DSH_HOME="$(cat "$INSTALL_DIR/dsh-home")"
-  fi
-  if [[ -x "$RUNTIME_DIR/bin/dsh" ]]; then
-    "$RUNTIME_DIR/bin/dsh" plugin --profile "$DSH_PROFILE" remove ds-harness-remote >/dev/null 2>&1 || true
-  fi
-  rm -rf "$RUNTIME_DIR"
-  rm -f "$INSTALL_DIR/bin/ds-harness-remote" "$INSTALL_DIR/node-bin" "$INSTALL_DIR/dsh-home"
-  rmdir "$INSTALL_DIR/bin" >/dev/null 2>&1 || true
-else
-  printf '[dsh-install] No managed private runtime found; existing global packages and profile plugins were kept.\n'
+# Use the installed CLI, including Desktop's official immutable-runtime launcher.
+# Do not create command links or change the invoking shell's PATH.
+desktop_command=''
+if [[ "$(uname -s)" = Darwin ]]; then
+  for candidate in "$HOME/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"; do
+    if [[ -x "$candidate" ]]; then desktop_command="$candidate"; break; fi
+  done
 fi
-rmdir "$INSTALL_DIR" >/dev/null 2>&1 || true
-printf '[dsh-install] Removed service and managed private runtime. Node.js, profiles, credentials and existing global packages were kept.\n'
+if [[ -n "$DSH_COMMAND" ]]; then
+  DSH_COMMAND="$(command -v "$DSH_COMMAND")" || { say 'DSH_COMMAND was not found.' >&2; exit 1; }
+elif [[ -n "$desktop_command" ]]; then
+  DSH_COMMAND="$desktop_command"
+elif command -v dsh >/dev/null 2>&1; then
+  DSH_COMMAND="$(command -v dsh)"
+else
+  desktop_help
+  say 'No existing dsh command found. No plugin was changed.' >&2
+  exit 1
+fi
+if [[ -z "$DSH_PROFILE" ]]; then
+  case "$DSH_COMMAND" in
+    */runtime/cli/bin/dsh) DSH_PROFILE=desktop ;;
+    *)
+      # Desktop may publish its launcher as a hard link in /usr/local/bin.
+      if [[ -n "$desktop_command" ]] && cmp -s "$DSH_COMMAND" "$desktop_command"; then
+        DSH_PROFILE=desktop
+      else
+        DSH_PROFILE=web
+      fi ;;
+  esac
+fi
+[[ "$DSH_PROFILE" =~ ^[A-Za-z0-9_-]+$ ]] || { say 'Invalid DSH_PROFILE.' >&2; exit 1; }
+if [[ "$DSH_PROFILE" = desktop ]]; then
+  say 'Using the Desktop profile. Its official Desktop CLI must manage this reserved profile.'
+fi
+
+say "Removing ds-harness-remote from profile ${DSH_PROFILE} using ${DSH_COMMAND}"
+"$DSH_COMMAND" plugin --profile "$DSH_PROFILE" remove -w ds-harness-remote
+say 'Remote plugin removed. Restart the selected Harness instance.'

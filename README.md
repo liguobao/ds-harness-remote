@@ -51,10 +51,13 @@ plugin version through DSH's plugin manager:
 
 ### DeepSeek Harness Desktop support
 
-Remote supports the DeepSeek Harness desktop edition. Use this pinned plugin version through the
-command-line installation below:
+Open **Extensions / Plugin management** in DeepSeek Harness Desktop and install:
 
-`ds-harness-remote@0.5.0`
+`https://github.com/liguobao/ds-harness-remote`
+
+Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`.
+Use Desktop's launcher for its reserved `desktop` profile.
 
 ### dsh-TUI Host
 
@@ -85,15 +88,12 @@ Sign in to the Android client with your existing account, select an available co
 
 Tap **Prompts** beside the composer's `+` button to open the saved prompt list, then tap a prompt to send it. Edit prompts in the same panel. Files, Terminal, and Trajectory remain under `+` → **Tool access**.
 
-### Automated installation (background service)
+### Plugin installation scripts
 
-The macOS/Linux `install.sh` script (including its `install-token.sh` variant) installs and starts
-a Remote Host background service, keeping the Host running without an open desktop window.
-DSH, pnpm and Remote are installed in a private user directory; existing global npm packages
-and the `dsh` command are preserved. To add Remote to an existing Harness desktop installation,
-use the plugin command above.
-For service management, login, directory settings, and uninstallation, see the
-[installation guide](docs/installation.md).
+The scripts use your existing Harness command to install or update only Remote.
+Run as your normal user. They preserve your DSH installation and do not create a service.
+Desktop users can use Plugin management above or its official CLI launcher.
+See the [installation guide](docs/installation.md) for profile selection and removal.
 
 macOS / Linux:
 
@@ -101,10 +101,11 @@ macOS / Linux:
 curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ```
 
-Windows PowerShell (run as administrator):
+Windows PowerShell:
 
 ```powershell
-$installer = "$env:TEMP\install.ps1"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$installer = Join-Path $env:TEMP 'dsh-remote-install.ps1'
 Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
 & $installer
 ```

@@ -39,7 +39,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P0：Plugin 可用链路
 
-- [ ] Windows 用户目录 WinSW 安装实机回归：管理员权限预检/账户密码、独立 Node、旧登录任务迁移、重启后 Host/CodeX、失败重试与卸载保留凭证（含 ARM64 .NET wrapper）
+- [ ] Windows 插件安装/卸载实机回归：复用已有 CLI 与 Desktop 官方 launcher、desktop/web profile 选择、失败提示和保留已有 DSH/运行环境；旧服务安装器已停用
 
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
 - [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval

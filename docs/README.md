@@ -23,7 +23,7 @@
 
 ## 主题说明
 
-- [自动安装指南](installation.zh.md)（[English](installation.md)）：安装命令、Windows 独立运行环境、服务账户、目录配置与卸载。
+- [插件安装指南](installation.zh.md)（[English](installation.md)）：已有 Harness 插件安装、Desktop 插件管理、profile 选择与插件卸载。
 - [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、ApiProxy/Typert carrier 兼容与排障。
 - [Codex Remote 技术说明](codex-remote.md)：说明 Codex 工作区展示、数据边界、配置、安全限制和当前验证状态。
 - [ACP Remote / Agent adapters](acp-remote.md)：说明 #65 Agent ACP gateway、Cursor adapter、allowlist 与配置。

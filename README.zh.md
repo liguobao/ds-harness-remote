@@ -50,9 +50,13 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 ### 支持 DeepSeek Harness 桌面版
 
-Remote 已支持 DeepSeek Harness 桌面版。通过下面的命令行安装方式使用这个固定版本：
+在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中安装：
 
-`ds-harness-remote@0.5.0`
+`https://github.com/liguobao/ds-harness-remote`
+
+安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
+`dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`。
+Desktop 专用的 `desktop` profile 需要由 Desktop 官方启动器管理。
 
 ### dsh-TUI Host
 
@@ -82,12 +86,11 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.0
 
 点击输入栏 `+` 旁的「快捷提示词」打开已保存的提示词列表，点击条目即可发送，并可在同一面板编辑提示词。文件、终端和轨迹仍位于 `+` →「工具访问」。
 
-### 自动安装（后台服务）
+### 插件安装脚本
 
-macOS/Linux 的 `install.sh` 脚本（含 `install-token.sh` 版本）用于**安装并启动 Remote Host 后台服务**，无需保持桌面窗口打开，主机即可持续运行。
-DSH、pnpm 和 Remote 安装到用户目录下的独立环境，保留已有全局 npm 包和 `dsh` 命令。
-为已有 Harness 桌面版添加 Remote，请使用上方的插件安装命令。
-服务管理、登录、目录配置和卸载方式见[安装指南](docs/installation.zh.md)。
+脚本使用已有 Harness 命令，只安装或更新 Remote。使用普通用户运行，保留用户的 DSH
+安装，不创建后台服务。Desktop 用户可使用上方插件管理入口或其官方 CLI 启动器。
+profile 选择和卸载方式见[安装指南](docs/installation.zh.md)。
 
 macOS / Linux：
 
@@ -95,10 +98,11 @@ macOS / Linux：
 curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ```
 
-Windows PowerShell（以管理员身份运行）：
+Windows PowerShell：
 
 ```powershell
-$installer = "$env:TEMP\install.ps1"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$installer = Join-Path $env:TEMP 'dsh-remote-install.ps1'
 Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
 & $installer
 ```
