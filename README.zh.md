@@ -84,7 +84,9 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.0
 
 ### 自动安装（后台服务）
 
-将 Remote Host 安装为后台服务。服务管理、登录、目录配置和卸载方式见[安装指南](docs/installation.zh.md)。
+macOS/Linux 的 `install.sh` 脚本（含 `install-token.sh` 版本）用于**安装并启动 Remote Host 后台服务**，无需保持桌面窗口打开，主机即可持续运行。
+为已有 Harness 桌面版添加 Remote，请使用上方的插件安装命令。
+服务管理、登录、目录配置和卸载方式见[安装指南](docs/installation.zh.md)。
 
 macOS / Linux：
 
