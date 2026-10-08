@@ -1,5 +1,7 @@
 <p align="center">
 
+The development version is `0.5.1` (unreleased); npm installation examples below still use the published `0.5.0`.
+
 Harness baseline: `0.2.1-alpha.1`, retaining `0.2.0-rc.2` and admitting future `0.2.2` RC versions. Legacy ApiProxy is no longer a compatibility maintenance target. See [compatibility](docs/compatibility.md) for validation boundaries.
   <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
 </p>

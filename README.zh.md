@@ -1,5 +1,7 @@
 <p align="center">
 
+开发版本为 `0.5.1`（尚未发布）；下方 npm 安装示例仍使用已发布的 `0.5.0`。
+
 当前 Harness 适配基线：`0.2.1-alpha.1`，保留 `0.2.0-rc.2`，版本范围接纳后续 `0.2.2` RC；legacy ApiProxy 不再作为兼容维护目标。详细范围与验证边界见[兼容说明](docs/compatibility.zh.md)。
   <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
 </p>

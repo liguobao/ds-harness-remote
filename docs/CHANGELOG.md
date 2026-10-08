@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 - Unreleased
+
+- Bumps Plugin and Android to `0.5.1` (Android `versionCode 40`); publication remains pending.
 
 - Updates the Harness development baseline to `0.2.1-alpha.1`, retaining `0.2.0-rc.2` and admitting `0.2.2` prereleases; legacy ApiProxy is no longer a compatibility maintenance target.
 - Adds fixed official timed-question and Claude Code Mods endpoints; Android claims timed questions, displays remaining time, and restores continued questions from Host projections without replaying replies.
