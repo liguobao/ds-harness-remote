@@ -118,7 +118,7 @@ pnpm --filter @dsh-remote/server build
 macOS/Linux 和 Windows 安装/卸载脚本只调用已有 `dsh plugin` 添加/移除 Remote，禁止安装、
 升级或卸载 DSH、Node.js、pnpm，禁止修改 PATH、npm 配置或注册/清理后台服务。普通用户运行。
 脚本支持 `DSH_COMMAND`、`DSH_PROFILE` 和安装版本 `REMOTE_VERSION`，保留已有 `DSH_HOME`。
-Desktop 应通过官方插件管理安装 GitHub 地址，或复用 Desktop 官方 `dsh` launcher 管理保留的
+Desktop 应通过官方插件管理安装 npm 包 `ds-harness-remote@0.5.0`，或复用 Desktop 官方 `dsh` launcher 管理保留的
 `desktop` profile；普通独立 CLI 默认 `web`。macOS 支持标准 app 目录启动器回退，Windows
 支持官方 HKCU 命令目录回退。找不到已有命令时给出 Desktop 操作说明并失败，不能宣称已安装。
 旧 service/runtime 不自动迁移或删除；token 安装包装脚本已停用。Windows 真机安装回归仍待完成。

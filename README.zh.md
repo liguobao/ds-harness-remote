@@ -50,9 +50,9 @@ Remote 已支持 DeepSeek Harness 桌面版。手动安装时，通过 DSH 插�
 
 ### 支持 DeepSeek Harness 桌面版
 
-在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中安装：
+在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`https://github.com/liguobao/ds-harness-remote`
+`ds-harness-remote@0.5.0`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
 `dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`。
@@ -76,7 +76,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.0
 
 安装后请重启 Harness。
 
-不要直接用 npm 安装这个包。只有 `dsh plugin` 会更新指定 profile，并加入插件的 bundle 配置层。
+命令行安装请使用 `dsh plugin`，它会将 npm 包安装到指定 profile，并加入插件的 bundle 配置层。
 
 ### Android 客户端
 

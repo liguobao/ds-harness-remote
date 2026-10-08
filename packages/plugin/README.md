@@ -6,13 +6,26 @@ Continue DeepSeek Harness sessions and experimental Codex workspaces from anothe
 
 `ds-harness-remote` is the Remote Host and workspace plugin for DeepSeek Harness. Harness keeps running on your work computer with its existing workspaces, tools, and permission controls; Remote gives authorized devices another window into that environment.
 
-> Install this package with `dsh plugin`, not `npm install`. The DSH command updates the selected profile and adds the required bundle configuration.
+> Install the npm package through Desktop Plugin management or `dsh plugin`. Both manage the selected Harness profile and its bundle configuration.
 
 ## Install
 
 ### DSH Desktop
 
-[DSH Desktop](https://github.com/liguobao/dsh-desktop) includes Remote and enables it by default. No separate plugin installation is required.
+In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose installation
+from **npm**, and enter:
+
+```text
+ds-harness-remote@0.5.0
+```
+
+Restart Desktop after installation. Its official `dsh` launcher can also install the package:
+
+```sh
+dsh plugin --profile desktop add -w ds-harness-remote@0.5.0
+```
+
+Use Desktop's official launcher to manage its reserved `desktop` profile.
 
 ### Existing DSH installation
 

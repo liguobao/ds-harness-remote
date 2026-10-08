@@ -4,10 +4,10 @@
 
 ## DeepSeek Harness Desktop
 
-打开 **扩展 / 插件管理**，选择从 GitHub 安装插件，粘贴：
+打开 **扩展 / 插件管理**，选择从 **npm** 安装，输入包名和版本：
 
 ```text
-https://github.com/liguobao/ds-harness-remote
+ds-harness-remote@0.5.0
 ```
 
 安装后重启 Desktop。更新和卸载也使用同一插件管理入口。
@@ -41,7 +41,7 @@ Windows 检查 Desktop 在 `HKCU\Software\DeepSeekHarness\Command` 记录的命�
 选择 Desktop 启动器时默认
 使用 `desktop` profile，否则默认使用 `web`。
 找不到已有命令时，脚本会给出 Desktop 插件管理操作说明并停止，不会报告安装成功。
-未提供官方 CLI 的旧版 Desktop 仍可通过插件管理安装上述 GitHub 地址。
+未提供官方 CLI 的旧版 Desktop 仍可通过插件管理安装上述 npm 包。
 
 可用 `DSH_COMMAND` 指定已有启动器路径（包括自定义 Desktop 安装位置），`DSH_PROFILE`
 指定 `dsh-tui` 等 profile，`REMOTE_VERSION` 固定插件版本。默认安装 npm 的 `latest`，

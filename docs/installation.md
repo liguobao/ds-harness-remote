@@ -4,11 +4,11 @@
 
 ## DeepSeek Harness Desktop
 
-Open **Extensions / Plugin management**, choose the GitHub plugin installation entry,
-and paste this address:
+Open **Extensions / Plugin management**, choose installation from **npm**,
+and enter this package and version:
 
 ```text
-https://github.com/liguobao/ds-harness-remote
+ds-harness-remote@0.5.0
 ```
 
 Restart Desktop after installation. Use the same plugin manager to update or remove Remote.
@@ -45,7 +45,7 @@ When the selected launcher is
 Desktop's, the default profile is `desktop`; otherwise it is `web`.
 If no command is available, the script stops with Desktop plugin-manager instructions;
 it does not report a successful installation. Older Desktop versions without an official
-CLI can still install the GitHub address through Plugin management.
+CLI can still install the npm package through Plugin management.
 
 Use `DSH_COMMAND` to select an existing launcher (including a custom Desktop location),
 `DSH_PROFILE` to select a profile such as `dsh-tui`, and `REMOTE_VERSION` to pin a release.

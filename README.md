@@ -51,9 +51,10 @@ plugin version through DSH's plugin manager:
 
 ### DeepSeek Harness Desktop support
 
-Open **Extensions / Plugin management** in DeepSeek Harness Desktop and install:
+Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
+from npm, and enter this package:
 
-`https://github.com/liguobao/ds-harness-remote`
+`ds-harness-remote@0.5.0`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
 with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`.
@@ -77,8 +78,8 @@ otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
 
 Restart Harness after installation.
 
-Do not install this package directly with npm. Only `dsh plugin` updates the selected profile and
-adds the bundle's configuration layer.
+For CLI installation, use `dsh plugin` to install the npm package into the selected profile
+and add its bundle configuration layer.
 
 ### Android client
 
