@@ -28,24 +28,24 @@
 
 Continue using your DeepSeek Harness instance from a phone, computer, or browser.
 
-Return to the same Harness session from whichever device is with you. Harness keeps running on your work computer, with the same workspaces, tools, and project setup. Remote is simply another window into that environment.
+Return to the same Harness session from whichever device is with you. Harness keeps running on your work computer, with the same workspaces, tools, and project setup.
 
-The DeepSeek Harness desktop edition is supported. When installing manually, use this pinned
-plugin version through DSH's plugin manager:
+Remote is simply another window into that environment.
+
+The DeepSeek Harness desktop edition is supported. Install the latest release:
 
 `ds-harness-remote@0.5.0`
 
 ## Features
 
-- Continue active sessions and review their latest progress from another device
-- Send new instructions, change direction, and use image prompts with supported Harness versions from `dsh-v0.1.1-rc.2` through `dsh-v0.2.0-rc.2`
-- Answer questions and permission requests from clients with live conversation controls
-- Support the DeepSeek Harness desktop edition with pinned Remote plugin releases
-- Open workspaces from another authorized computer on the same account
-- Reuse the native Harness interface instead of maintaining a separate desktop conversation UI
-- Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host and authorize it with a GitHub or Zhihu QR code
-- The Harness Host does not need a public listening port. Connect securely from anywhere with internet access over a bidirectional end-to-end encrypted channel
-- Native workspace files, read-only previews, terminal access, and authorized local development-service previews are available through the Harness sidebar.
+- Access your local Harness instance remotely from the web, a PC, or a mobile device: DSH first, with Codex and Cursor support too.
+- Use the native DeepSeek Harness interface without a separate desktop conversation UI.
+- Create workspaces, configure models, and switch conversation models with the same smooth workflow as local use.
+- Support DeepSeek Harness Desktop, ready to use after installation.
+- Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host.
+- No public listening port or public IP is required on the Harness Host. Connect from anywhere with internet access over a bidirectional end-to-end encrypted channel.
+- Prefer P2P connections, use TURN relay nodes worldwide, and fall back to Server Relay when needed.
+- Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
 
 ## Install
 
@@ -58,7 +58,6 @@ from npm, and enter this package:
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
 with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`.
-Use Desktop's launcher for its reserved `desktop` profile.
 
 ### dsh-TUI Host
 
@@ -73,28 +72,15 @@ Add the exact package version through DSH's plugin manager for the `web` profile
 dsh plugin --profile web add -w ds-harness-remote@0.5.0
 ```
 
-`-w` targets the profile's own workspace root. It is required on pnpm below 11, which
-otherwise refuses the add with `ERR_PNPM_ADDING_TO_ROOT`.
-
-Restart Harness after installation.
+Restart DeepSeek Harness after installation.
 
 For CLI installation, use `dsh plugin` to install the npm package into the selected profile
 and add its bundle configuration layer.
-
-### Android client
-
-Download the latest Android APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest).
-
-Sign in to the Android client with your existing account, select an available computer, and open a workspace. Continue the conversation with text or image prompts; the conversation toolbar also lets you switch the active model and choose any reasoning effort declared by it.
-
-Tap **Prompts** beside the composer's `+` button to open the saved prompt list, then tap a prompt to send it. Edit prompts in the same panel. Files, Terminal, and Trajectory remain under `+` → **Tool access**.
 
 ### Plugin installation scripts
 
 The scripts use your existing Harness command to install or update only Remote.
 Run as your normal user. They preserve your DSH installation and do not create a service.
-Desktop users can use Plugin management above or its official CLI launcher.
-See the [installation guide](docs/installation.md) for profile selection and removal.
 
 macOS / Linux:
 
@@ -102,36 +88,31 @@ macOS / Linux:
 curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ```
 
-Windows PowerShell:
+### Android client
 
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$installer = Join-Path $env:TEMP 'dsh-remote-install.ps1'
-Invoke-WebRequest -UseBasicParsing https://dsh.r2049.cn/app/install.ps1 -OutFile $installer
-& $installer
-```
+Download the latest APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest), sign in to the same account, and select a Host and workspace to continue your conversation.
+
+### iOS client
+
+- [Join the beta](https://github.com/liguobao/ds-harness-remote/issues/20)
 
 ## Quick start
 
 1. Open **Remote** from the Harness sidebar.
-2. Sign in with a GitHub or Zhihu QR code, or use your account and password. New password accounts can register through [Remote Web](https://dsh.r2049.cn/app/register); the site shows the current invitation requirements.
+2. Sign in with a GitHub or Zhihu QR code, or use your account and password.
 3. The Host starts with control of the current computer enabled. Remote terminal access is also enabled by default; you can turn it off in the detailed Remote settings.
 4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
 5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
 
-The public service uses the hosted Remote relay. For a minimal single-account deployment,
-see the [self-hosted Server](apps/server/README.md); its Web page shows device status only.
+By default, Remote uses this project's hosted Server at [https://dsh.r2049.cn](https://dsh.r2049.cn).
 
-## Minimal self-hosted Server
-
-Run the optional single-account Relay Server in [`apps/server`](apps/server/README.md). Set `DSH_SERVER_ACCOUNT` and `DSH_SERVER_PASSWORD`; its small Web page offers login and device status. Point both Host and Client at your Server URL and sign in with the same account. Device credentials survive restarts.
+For self-hosting, use the repository's [minimal Server](apps/server/README.md); its Web page shows device status only.
 
 ## Screenshots
 
 ### Desktop
 
-The current computer starts with **Allow control of this device** enabled and is available
-as a Host.
+The current computer starts with **Allow control of this device** enabled and is available as a Host. Remote terminal access is also enabled by default and can be turned off in the Host's detailed Remote settings.
 
 On another computer, select an online Host and open one of its workspaces.
 
@@ -148,15 +129,7 @@ connection status shown in the header.
 
 ### Android
 
-Sign in to the Android client with your existing account, select an available computer,
-open a workspace, and continue the conversation with text or image prompts. The conversation
-toolbar also lets you switch the active model and choose any reasoning effort declared by it.
-
-Harness conversations open **Files** (workspace folders and paged read-only UTF-8 previews) and **Terminal** from the conversation title bar. These require the native APIs in DSH `0.1.6-alpha.2` or later (including `0.1.7-rc.1` and `0.2.0-rc.2`) and an updated Remote Host plugin. Remote terminal access is enabled by default and can be turned off in the Host's detailed Remote settings. The Terminal panel lists the terminals owned by this device and creates a new one only when you tap ＋ in its title bar; opening the panel never creates a terminal. Android restores terminals from the Host snapshot; it never replays input after disconnect. In Files, Back returns from a file to its directory and closes the tool only at the workspace root; refresh also sits in the title bar. These tools are not exposed for CodeX conversations.
-
-The permission selector supports both older inline options and the separate `permissionPresets/catalog` used by newer DSH 0.1.6 builds. Update the Host Remote plugin too; unsupported Hosts show an actionable error instead of fabricated permission options.
-
-Android Files also previews PNG/JPEG/GIF/WebP images and PDF documents, plus DOC/DOCX/XLS/XLSX/PPT/PPTX when the Host provides `officeToPdf`. Binary previews are limited to 8 MiB (Office sources: 50 MiB). PDF rendering is bundled locally, with no CDN, external viewer, or file export. Unknown binary types are not treated as text. All access remains read-only and authorized by the official Session filesystem; native-device and cross-device preview validation is still pending.
+Use text or image prompts, switch models, and access supported workspace files and terminals. See the [Android guide](apps/android/README.md) for details.
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
@@ -174,57 +147,29 @@ Remote Plugin on the Host
 Harness sessions/workspaces or Codex projects
 ```
 
-The Harness Host does not need a public listening port. You can connect from
-anywhere with internet access, and Remote communicates over a bidirectional end-to-end encrypted channel.
-It switches the client to the selected Host's native Harness API, so the original workspace,
-tools, and permission flow remain on that computer. Every settings namespace currently
-registered by the Host can also be configured remotely through the official Harness settings
-API. Credential values remain write-only, and Host-local document/open actions are never exposed.
+The Harness Host does not need a public listening port. You can connect from anywhere with internet access.
 
-## Experimental Codex workspaces
+Remote communicates over a bidirectional end-to-end encrypted channel and switches the client to the selected Host's native Harness API.
 
-Remote can also show Codex projects from an authorized Host. Pick one from the normal workspace
-chooser and continue in the existing Harness or Android interface; there is no separate Codex screen
-to learn. The Desktop chooser and Android workspace page can also add a Host directory to the Codex
-project catalog without importing it into Harness storage.
+The original workspace, tools, and permission flow remain on that computer.
 
-Codex Remote is meant as a convenience layer for your own devices. It supports text prompts, image
-prompts where available, model and permission controls, interrupt, and approvals. It is still
-published as experimental while long-running recovery and compatibility work continue.
+Every settings namespace currently registered by the Host can also be configured remotely through the official Harness settings API.
 
-Web and Desktop approval controls show the Host-confirmed mode for the selected Codex session.
-If it has not been reported, they indicate that Host settings are inherited. Changing the mode
-requires Host confirmation; sending a prompt preserves the session's current policy.
+Credential values remain write-only, and Host-local document/open actions are never exposed.
 
-Codex is enabled by default and can be turned off in the DeepSeek Remote settings card. Advanced
-configuration and implementation notes live in [Codex Remote technical notes](docs/codex-remote.md).
+## Experimental ACP workspaces
 
-## Experimental Agent ACP / Cursor workspaces
+The Host runs local AI backends and forwards prompts, streamed replies and approvals through the encrypted Remote channel.
 
-Remote can also open Host-local Cursor Agent sessions through a backend-neutral Agent ACP gateway
-(`agent.acp.*`). Desktop reuses the native Workspace / Session / Composer shell; Android uses an
-in-memory Cursor workspace projection. Text prompts, streaming thought/message updates, cancel, and
-one-shot approvals are supported. Cursor image prompts are not supported. AGY workspaces accept
-PNG/JPEG/WebP/GIF images (8 MiB each, up to four per prompt) through a private Host temporary cache.
-AGY reads these files with its image tool; cached images can be restored with conversation history
-for up to 24 hours, unless the system clears temporary files earlier.
+Desktop and Android project their workspaces and sessions into the existing interface in memory, without writing them to Harness storage.
 
-AGY keeps the Web client compatible through the independent `agent.acp.*` API and events.
-Workspace discovery and history come from the Host over ACP; the client never reads local AGY files.
-The native UI projection stays in memory, with separate Cursor/AGY workspace IDs.
-Older AGY IDs using the Cursor prefix are rejected. Harness and Codex APIs remain unchanged. Independent Remote Web integration
-and cross-device AGY regression still need verification.
+Supported backends:
 
-ACP backends initialize in the background, so AGY/Cursor startup does not delay Harness Remote
-registration or Client initialization. `acp.enabled` gates the domain; each supported entry in
-`acp.backends` uses its own `enabled`, `command`, `args`, and optional `cwd`. Currently the gateway
-implements `cursor` and `antigravity`; other registry entries do not launch or advertise an adapter.
-An explicitly selected disabled or unavailable backend fails without routing to another backend.
-Configuration changes require a DSH restart.
+- **Cursor** — connected through the CLI's ACP interface.
+- **Antigravity (AGY)** — its stream-json CLI is adapted to the ACP gateway.
+- **Codex** — connected through its independent App Server interface, with the same workspace entry.
 
-The Cursor adapter is **off by default**. Enable `cursor.enabled` in DeepSeek Remote settings, finish
-`agent login` (or set `CURSOR_API_KEY`) on the Host, and restart DSH. Details:
-[ACP Remote / Agent adapter notes](docs/acp-remote.md).
+Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
 
 ## End-to-end encryption
 
@@ -251,8 +196,7 @@ validation status.
 - Interactive terminals use the Host-local `terminal.enabled` switch (on by default). They run as the Host user, independently of Agent approvals. General tool RPC and remote desktop remain unavailable.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
-- Codex Remote is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
-- Agent ACP / Cursor is optional and off by default; it follows the same encrypted Host permission boundary and a fixed method allowlist.
+- Codex Remote / Agent ACP is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
 - Removing a device revokes its credentials, membership, and active Remote connections.
 
 ## Documentation
@@ -294,11 +238,3 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-Android also supports AGY workspaces through the independently enabled Antigravity ACP backend:
-Host catalog discovery, new conversations, durable history, live replies, title refresh, reconnect,
-and text/image prompts. PNG/JPEG/WebP/GIF images are limited to 8 MiB each and four per message;
-images use the Host's private temporary cache. See [Android notes](apps/android/README.md#agy-workspaces)
-for validation limits.
-
-Agent backend settings have one switch per backend: CodeX uses the existing App Server Remote domain, while Cursor and AGY use ACP adapters. CodeX is controlled by `acp.backends[id=codex].enabled` and `.command`; old `codex` settings are read only when no backend value exists. Kimi is not implemented and is omitted. Workspace entries appear only when the Host reports the backend ready. Backend switches apply immediately without restarting DSH.
