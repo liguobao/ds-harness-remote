@@ -1,13 +1,18 @@
 # Changelog
 
-## 0.5.0 - 2026-10-07
+## 0.5.0 - 2026-10-08
 
 - Adds independent Cursor and Antigravity workspace types over the authenticated `agent.acp.*` data plane, including Desktop/Web memory projections and Android AGY conversation history and image prompts.
+- Adds shared read-only workspace files and Host-controlled terminals to Cursor and AGY sessions, with session directory containment and device ownership enforcement.
+- Loads AGY model and reasoning choices from the installed CLI, applies confirmed changes to the same conversation, caches the catalog per running backend, and avoids redundant CLI startup during model changes.
+- Adds Android slash commands, inline references, message actions, new-conversation and trajectory controls, and a direct saved-prompts entry with persistent edits and deletions.
+- Improves Android turn completion, interruption, error handling, and reconnect recovery; serves `/health` and `/ready` aliases in the self-hosted Server.
 - Advertises structured `workspaceTypes` while preserving Harness and CodeX capability discovery for existing clients and Hosts.
 - Applies backend switches live, disables undiscoverable workspace switches, and cancels backend initialization when disabled.
 - Uses consistent capability and readiness checks on Desktop and Android; prevents late ACP history and subscriptions from replacing another conversation.
 - Matches AGY project URIs exactly, handles encoded directory names and native file paths, and confines restored transcripts to the AGY brain directory.
 - Replaces local-data-dependent AGY tests with isolated fixtures and preserves the main branch's Android session recovery improvements.
+- Makes committed Plugin bundles reproducible across pnpm dependency layouts.
 - Advances the Plugin and Android app to `0.5.0` (Android `versionCode 39`).
 
 ## 0.4.27 - 2026-09-30
