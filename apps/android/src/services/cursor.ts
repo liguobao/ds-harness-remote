@@ -119,6 +119,21 @@ export function createAntigravitySession(input: {
 /** In-flight assistant bubble; must be renamed on prompt_completed so turns do not merge. */
 const CURSOR_ASSISTANT_LIVE_ID = 'cursor-assistant-live'
 let cursorAssistantSeq = 0
+let acpTurnSeq = 0
+
+/** ACP has no native turn number; scope activity to one prompt in this session's projection. */
+function activeAcpTurn(messages: ChatItem[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const item = messages[index]!
+    if ((item.kind === 'message' && item.role === 'user') || item.turnEnd !== undefined) return undefined
+    if (item.turn?.startsWith('acp-live:')) return item.turn
+  }
+  return undefined
+}
+
+function acpTurn(messages: ChatItem[]): string {
+  return activeAcpTurn(messages) ?? `acp-live:${++acpTurnSeq}`
+}
 
 export async function createCursorWorkspaceSession(
   client: AgentAcpClient,
@@ -195,11 +210,13 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
   if (kind === 'agent_message_chunk' || kind === 'agent_message') {
     const text = extractText(update)
     if (text === undefined || text.length === 0) return messages
+    messages = retireAssistantBeforeActivity(messages)
     return appendAssistantDelta(messages, sessionId, text, CURSOR_ASSISTANT_LIVE_ID)
   }
   if (kind === 'agent_thought_chunk' || kind === 'agent_thought') {
     const text = extractText(update)
     if (text === undefined || text.length === 0) return messages
+    messages = retireAssistantBeforeActivity(messages)
     return appendAssistantReasoningDelta(messages, sessionId, text, CURSOR_ASSISTANT_LIVE_ID)
   }
   if (kind === 'prompt_completed' || kind === 'prompt_failed') {
@@ -219,7 +236,15 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     }
     // Retire the live id so the next turn opens a new left-side bubble instead
     // of appending into the previous assistant message.
-    return finalizeAssistantLive(next)
+    const reason = kind === 'prompt_failed' ? 'failed'
+      : update.stopReason === 'cancelled' || update.stopReason === 'aborted' || update.stopReason === 'interrupted'
+        ? 'stopped' : 'completed'
+    const turn = activeAcpTurn(next)
+    const time = Date.now()
+    return finalizeAssistantLive(next).map(item => turn !== undefined && item.turn === turn
+      ? { ...item, turnEnd: { reason, time },
+          ...(item.kind === 'tool' && item.state === 'running' ? { state: reason === 'completed' ? 'finished' as const : 'failed' as const } : {}) }
+      : item)
   }
   if (kind === 'user_message_chunk') {
     const text = extractText(update)
@@ -227,8 +252,14 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     return appendUserDelta(messages, sessionId, text, 'cursor-user-live')
   }
   if (kind === 'tool_call' || kind === 'tool_call_update') {
+    // A spoken reply closes the preceding activity range, as it does in DSH.
+    // Retain its position when another tool starts instead of appending later text into it.
+    const live = messages.find(item => item.id === CURSOR_ASSISTANT_LIVE_ID)
+    if (kind === 'tool_call' && live?.kind === 'message' && live.text.trim() !== '') {
+      messages = finalizeAssistantLive(messages)
+    }
     const callId = stringValue(update.toolCallId) ?? stringValue(update.callId) ?? stringValue(update.name) ?? 'tool'
-    const turn = [...messages].reverse().find(item => item.kind === 'message' && item.role === 'user')?.id ?? String(cursorAssistantSeq)
+    const turn = acpTurn(messages)
     const id = `cursor-tool:${turn}:${callId}`
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
     const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
@@ -239,7 +270,8 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const output = boundedDetail(update.rawOutput ?? update.output ?? update.content)
     const next: ToolActivity = {
       ...previous,
-      kind: 'tool', id, sessionId, toolName, state,
+      kind: 'tool', id, sessionId, turn, toolName, state,
+      ...(stringValue(update.toolName) ?? stringValue(update.name) ? { toolKey: stringValue(update.toolName) ?? stringValue(update.name) } : {}),
       createdAt: previous?.createdAt ?? Date.now(),
       ...(argumentsText === undefined ? {} : { arguments: argumentsText, callDetail: { text: argumentsText, format: 'code' } }),
       ...(output === undefined ? {} : { resultDetail: { text: output, format: 'code' } }),
@@ -277,6 +309,7 @@ function upsertApproval(
     kind: 'approval',
     id,
     sessionId,
+    turn: acpTurn(messages),
     approvalId: requestHandle,
     toolName,
     ...(reason === undefined ? {} : { reason }),
@@ -312,6 +345,7 @@ function appendAssistantDelta(messages: ChatItem[], sessionId: string, text: str
     id,
     sessionId,
     role: 'assistant',
+    turn: acpTurn(messages),
     text,
     createdAt: Date.now(),
     streaming: true,
@@ -343,6 +377,7 @@ function appendAssistantReasoningDelta(
     id,
     sessionId,
     role: 'assistant',
+    turn: acpTurn(messages),
     text: '',
     reasoning: text,
     createdAt: Date.now(),
@@ -351,14 +386,19 @@ function appendAssistantReasoningDelta(
   }]
 }
 
+function retireAssistantBeforeActivity(messages: ChatItem[]): ChatItem[] {
+  const index = messages.findIndex(item => item.id === CURSOR_ASSISTANT_LIVE_ID)
+  return index >= 0 && index < messages.length - 1 ? finalizeAssistantLive(messages) : messages
+}
+
 function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
   let changed = false
   const next = messages.map(item => {
-    if (item.kind !== 'message' || item.id !== CURSOR_ASSISTANT_LIVE_ID) return item
+    if (item.kind !== 'message' || (item.id !== CURSOR_ASSISTANT_LIVE_ID && item.id !== 'cursor-user-live')) return item
     changed = true
     return {
       ...item,
-      id: `cursor-assistant:${++cursorAssistantSeq}`,
+      id: `${item.role === 'user' ? 'cursor-user' : 'cursor-assistant'}:${++cursorAssistantSeq}`,
       streaming: false,
       streamingPhase: undefined,
     }

@@ -992,6 +992,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
               accessibilityState={{ disabled: !connected || permissionSelecting, expanded: promptsPickerOpen }}
               disabled={!connected || permissionSelecting}
               onPress={openPromptsPicker}
+              hitSlop={{ top: 8, bottom: 8 }}
               style={({ pressed }) => [styles.quickPromptsButton, pressed && styles.plusPressed, (!connected || permissionSelecting) && styles.plusDisabled]}
             >
               <Text style={styles.quickPromptsText} numberOfLines={1}>{zhCN.chat.quickPrompts}</Text>
@@ -2412,7 +2413,7 @@ function createStyles(colors: ThemeColors) {
   // Keep the actual target at the Android 48dp minimum. hitSlop is not
   // reliable when a control sits inside a clipped/native text-input surface.
   plusButton: { width: 48, height: 48, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
-  quickPromptsButton: { minWidth: 48, minHeight: 48, flexShrink: 0, paddingHorizontal: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
+  quickPromptsButton: { minWidth: 48, flexShrink: 0, paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
   quickPromptsText: { ...type.smallStrong, color: colors.primary },
   plusPressed: { opacity: 0.7 },
   plusDisabled: { opacity: 0.52 },

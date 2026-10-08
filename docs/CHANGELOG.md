@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fixes Android ACP live activity grouping for Antigravity and Cursor by retaining prompt boundaries, completion/interruption/failure evidence, and reply/tool ordering; AGY command and file tools use the existing collapsed process summaries.
+- Aligns the Android saved-prompts button height and padding with the model selector.
+
 ## 0.5.0 - 2026-10-08
 
 - Adds independent Cursor and Antigravity workspace types over the authenticated `agent.acp.*` data plane, including Desktop/Web memory projections and Android AGY conversation history and image prompts.

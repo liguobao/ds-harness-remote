@@ -36,12 +36,12 @@ export type ProcessActivity = 'thinking' | 'read' | 'readImage' | 'write' | 'sea
 /** Official ui-chat/process-activity.ts categories, retaining display-title fallbacks for old Hosts. */
 export function toolActivity(tool: ToolActivity): ProcessActivity {
   const name = tool.toolKey ?? tool.toolName
-  if (name === 'read') return 'read'
+  if (name === 'read' || name === 'view_file') return 'read'
   if (name === 'read_image') return 'readImage'
   if (name === 'grep' || name === 'glob' || name.endsWith('_inspect')) return 'search'
   if (name === 'write') return 'write'
   if (name === 'edit' || name === 'apply_patch') return 'edit'
-  if (['bash', 'pwsh', 'exec_command', 'write_stdin'].includes(name) || name.startsWith('terminal_')) return 'commands'
+  if (['bash', 'pwsh', 'exec_command', 'write_stdin', 'run_command'].includes(name) || name.startsWith('terminal_')) return 'commands'
   if (name === 'run_code') return 'code'
   if (name === 'web_search') return 'webSearch'
   if (name === 'web_fetch') return 'webFetch'
