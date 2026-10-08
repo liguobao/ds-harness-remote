@@ -1,7 +1,7 @@
 # Codex Remote 技术说明
 
 本文记录 Codex Remote 的实现边界、配置方式和当前验证状态。用户入口请看根
-[README](../README.zh.md)；线协议和安全约束以 [Remote Protocol v1](protocol.md) 为准。
+[README](../README.md)；线协议和安全约束以 [Remote Protocol v1](protocol.md) 为准。
 
 ## 定位
 

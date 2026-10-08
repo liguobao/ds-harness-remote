@@ -1,8 +1,8 @@
 # DeepSeek Harness Remote
 
-Continue DeepSeek Harness sessions and experimental Codex workspaces from another device over an end-to-end encrypted connection.
+Continue DeepSeek Harness sessions and experimental Codex, Cursor, and Antigravity workspaces from another device over an end-to-end encrypted connection.
 
-[GitHub](https://github.com/liguobao/ds-harness-remote) · [Full guide](https://github.com/liguobao/ds-harness-remote#readme) · [中文说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/liguobao/ds-harness-remote/releases/latest)
+[GitHub](https://github.com/liguobao/ds-harness-remote) · [Full guide](https://github.com/liguobao/ds-harness-remote/blob/main/README.en.md) · [中文说明](https://github.com/liguobao/ds-harness-remote#readme) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/liguobao/ds-harness-remote/releases/latest)
 
 `ds-harness-remote` is the Remote Host and workspace plugin for DeepSeek Harness. Harness keeps running on your work computer with its existing workspaces, tools, and permission controls; Remote gives authorized devices another window into that environment.
 
@@ -53,6 +53,7 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 - Use the official workspace file tree and bounded read-only previews on supported Harness versions.
 - Use an optional Host-local terminal and authorized loopback development-service previews.
 - Open Host Codex projects in the existing Remote UI through the optional experimental Codex domain.
+- Access Cursor and Antigravity workspaces through the optional experimental ACP gateway, with client-side projections kept in memory.
 - Reach the Host without opening a public listening port or configuring router port forwarding.
 
 ## Compatibility
@@ -82,6 +83,7 @@ This repository includes a minimal, single-account self-hosted Relay Server in [
 - [Complete guide](https://github.com/liguobao/ds-harness-remote#readme)
 - [dsh-TUI Remote guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/dsh-tui.md)
 - [Codex Remote technical notes](https://github.com/liguobao/ds-harness-remote/blob/main/docs/codex-remote.md)
+- [Agent workspace integration guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-integration.md)
 - [End-to-end encryption](https://github.com/liguobao/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)
 - [Network and transport](https://github.com/liguobao/ds-harness-remote/blob/main/docs/network.md)
 - [Protocol reference](https://github.com/liguobao/ds-harness-remote/blob/main/docs/protocol.md)

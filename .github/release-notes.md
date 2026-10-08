@@ -27,4 +27,4 @@ CI and release builds passed. AGY encrypted cross-device E2E, Windows / native-d
 
 ---
 
-[安装说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/main/README.md#install) · [完整改动 / Changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.4.27...v0.5.0)
+[安装说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/main/README.en.md#install) · [完整改动 / Changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.4.27...v0.5.0)

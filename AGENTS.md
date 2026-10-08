@@ -197,8 +197,9 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 
 ## Documentation Rules
 
-- `README.md`：面向用户的默认英文入口；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
-- `README.zh.md`：与根 README 对应的中文版本；功能和版本信息必须同步。
+- `README.md`：面向用户的默认中文入口；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
+- `README.en.md`：与根 README 对应的英文版本；功能和版本信息必须同步。
+- `README.zh.md`：保留的中文入口，与默认 `README.md` 保持功能和版本信息一致。
 - `AGENTS.md`：面向编码 Agent，写仓库结构、进度、命令和实现约束。
 - `docs/TODO.md`：未完成任务与优先级。
 - `docs/CHANGELOG.md`：版本更新记录。

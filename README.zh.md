@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a>
+  <a href="README.en.md">English</a>
   &nbsp;·&nbsp;
   <strong>中文</strong>
   &nbsp;·&nbsp;
@@ -28,9 +28,11 @@
 
 从手机、电脑、浏览器继续使用你的 DeepSeek Harness 实例。
 
-无论使用哪台设备，都可以回到同一个 Harness 会话。Harness 始终运行在工作电脑上，原有的工作区、工具和项目配置保持不变。
+无论使用哪台设备，都可以回到同一个 Harness 会话。
 
-Remote 只是通往这个工作环境的另一个窗口。
+Harness 始终运行在工作电脑上，原有的工作区、工具和项目配置保持不变。
+
+DS Harness Remote 只是通往这个工作环境的另一个窗口。
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
@@ -38,7 +40,7 @@ Remote 只是通往这个工作环境的另一个窗口。
 
 ## 主要特性
 
-- 从另一台设备（Web、PC、移动端）远程到本地Harness实例：DSH first，CodeX、Cursor 一样可用。
+- 从另一台设备（Web、PC、移动端）远程到本地Harness实例：DSH 优先，CodeX、Cursor、Antigravity 一样可用。
 - DeepSeek Harness 原生界面，不另外维护一套桌面会话 UI。
 - 支持新建工作区、模型配置、对话模型切换，远端如本地一样丝滑。
 - 已支持 DeepSeek Harness 桌面版，安装即可使用。
@@ -88,7 +90,9 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 
 ### Android 客户端
 
-从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载最新 APK，登录同一账号，选择 Host 和工作区即可继续会话。
+从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest)
+
+下载最新 APK，登录同一账号，选择 Host 和工作区即可继续会话。
 
 ### iOS 客户端
 
@@ -178,16 +182,22 @@ identity key 校验。服务端可以协调连接并看到必要的网络元数�
 
 ## 网络与传输
 
-Host 只建立出站连接，不监听公网端口，也不要求路由器端口转发。Remote 按
-`LAN -> P2P -> TURN -> Relay` 协商路径；WebRTC 不可用或连接失败时，会降级到加密的
-WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
+Host 只建立出站连接，不监听公网端口，也不要求路由器端口转发。
+
+Remote 按 `LAN -> P2P -> TURN -> Relay` 协商路径；
+
+WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
+
+所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
+
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
 
 ## 安全边界
 
 - 会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
 - Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
-- 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；不开放通用工具 RPC 或远程桌面。
+- 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
+- 不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
 - Codex Remote / Agent ACP是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。

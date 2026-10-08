@@ -49,5 +49,5 @@ TalkBack、IME、大字体和原生设备效果仍需实际验证，不能将设
 
 ## 当前状态依据
 
-功能和使用见[README](../../README.zh.md)，安全边界见[协议](../protocol.md)，验收缺口见[TODO](../TODO.md)。
+功能和使用见[README](../../README.md)，安全边界见[协议](../protocol.md)，验收缺口见[TODO](../TODO.md)。
 实验性后端和已实现的工具入口仍需各自的跨设备与长期稳定性验收。
