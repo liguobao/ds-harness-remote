@@ -3,6 +3,9 @@ set -euo pipefail
 
 DSH_PROFILE="${DSH_PROFILE:-web}"
 SERVICE_NAME="${DSH_SERVICE_NAME:-dsh-remote}"
+INSTALL_DIR="${DSH_INSTALL_DIR:-${HOME}/.local/share/dsh-remote}"
+RUNTIME_DIR="$INSTALL_DIR/runtime"
+[[ "$INSTALL_DIR" = /* && "$INSTALL_DIR" != / && "$INSTALL_DIR" != "$HOME" ]] || { printf '[dsh-install] Invalid DSH_INSTALL_DIR.\n' >&2; exit 1; }
 
 case "$(uname -s)" in
   Linux)
@@ -21,8 +24,7 @@ case "$(uname -s)" in
 esac
 
 # The service entry point install.sh generated; it embeds this machine's paths.
-rm -f "${HOME}/.local/share/dsh-remote/start-host.sh"
-rmdir "${HOME}/.local/share/dsh-remote" >/dev/null 2>&1 || true
+rm -f "$INSTALL_DIR/start-host.sh"
 
 # Drop the PATH block install.sh added; the marker pair is the only thing this
 # script is allowed to remove from a user's shell files.
@@ -36,11 +38,24 @@ for rc in "${HOME}/.profile" "${HOME}/.bashrc" "${HOME}/.zshrc"; do
   printf '[dsh-install] Removed the PATH entry from %s\n' "$rc"
 done
 
-if command -v dsh >/dev/null 2>&1; then
-  dsh plugin --profile "$DSH_PROFILE" remove ds-harness-remote >/dev/null 2>&1 || true
-  dsh plugin --profile "$DSH_PROFILE" remove dsh-file-viewer >/dev/null 2>&1 || true
+# Never uninstall packages from the user's global npm environment, including
+# legacy installations. Only this installer's marked private runtime is owned.
+if [[ -f "$RUNTIME_DIR/.dsh-remote-installer" ]] && [[ "$(cat "$RUNTIME_DIR/.dsh-remote-installer")" = dsh-remote-private-runtime-v1 ]]; then
+  if [[ -f "$INSTALL_DIR/node-bin" ]]; then
+    NODE_BIN_DIR="$(cat "$INSTALL_DIR/node-bin")"
+    export PATH="$RUNTIME_DIR/bin:$NODE_BIN_DIR:$PATH"
+  fi
+  if [[ -f "$INSTALL_DIR/dsh-home" ]]; then
+    export DSH_HOME="$(cat "$INSTALL_DIR/dsh-home")"
+  fi
+  if [[ -x "$RUNTIME_DIR/bin/dsh" ]]; then
+    "$RUNTIME_DIR/bin/dsh" plugin --profile "$DSH_PROFILE" remove ds-harness-remote >/dev/null 2>&1 || true
+  fi
+  rm -rf "$RUNTIME_DIR"
+  rm -f "$INSTALL_DIR/bin/ds-harness-remote" "$INSTALL_DIR/node-bin" "$INSTALL_DIR/dsh-home"
+  rmdir "$INSTALL_DIR/bin" >/dev/null 2>&1 || true
+else
+  printf '[dsh-install] No managed private runtime found; existing global packages and profile plugins were kept.\n'
 fi
-if command -v npm >/dev/null 2>&1; then
-  npm uninstall --global ds-harness-remote @deepseek-ai/dsh >/dev/null 2>&1 || true
-fi
-printf '[dsh-install] Removed service, CLI, and plugins from the %s profile. Node.js and credentials were kept.\n' "$DSH_PROFILE"
+rmdir "$INSTALL_DIR" >/dev/null 2>&1 || true
+printf '[dsh-install] Removed service and managed private runtime. Node.js, profiles, credentials and existing global packages were kept.\n'

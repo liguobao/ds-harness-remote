@@ -89,7 +89,9 @@ Tap **Prompts** beside the composer's `+` button to open the saved prompt list, 
 
 The macOS/Linux `install.sh` script (including its `install-token.sh` variant) installs and starts
 a Remote Host background service, keeping the Host running without an open desktop window.
-To add Remote to an existing Harness desktop installation, use the plugin command above.
+DSH, pnpm and Remote are installed in a private user directory; existing global npm packages
+and the `dsh` command are preserved. To add Remote to an existing Harness desktop installation,
+use the plugin command above.
 For service management, login, directory settings, and uninstallation, see the
 [installation guide](docs/installation.md).
 

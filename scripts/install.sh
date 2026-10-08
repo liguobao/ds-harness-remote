@@ -8,6 +8,9 @@ DSH_VERSION="${DSH_VERSION:-latest}"
 REMOTE_VERSION="${REMOTE_VERSION:-latest}"
 DSH_PROFILE="${DSH_PROFILE:-web}"
 NODE_HOME="${DSH_NODE_HOME:-${HOME}/.local/share/dsh-node/node-v${NODE_VERSION}}"
+INSTALL_DIR="${DSH_INSTALL_DIR:-${HOME}/.local/share/dsh-remote}"
+RUNTIME_DIR="$INSTALL_DIR/runtime"
+CLI_BIN_DIR="$INSTALL_DIR/bin"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 SERVICE_NAME="${DSH_SERVICE_NAME:-dsh-remote}"
 SERVICE_COMMAND="${DSH_SERVICE_COMMAND:-}"
@@ -15,7 +18,6 @@ SERVICE_COMMAND="${DSH_SERVICE_COMMAND:-}"
 # opt-out available, but enable it for automated installations by default.
 DSH_REMOTE_TERMINAL_ENABLED="${DSH_REMOTE_TERMINAL_ENABLED:-true}"
 export DSH_REMOTE_TERMINAL_ENABLED
-INITIAL_PATH="$PATH"
 PATH_BLOCK_BEGIN='# >>> dsh-remote installer >>>'
 PATH_BLOCK_END='# <<< dsh-remote installer <<<'
 
@@ -52,10 +54,8 @@ install_node() {
   say "Node.js installed at $NODE_HOME"
 }
 
-# The global bin directory is often outside the user's default PATH (nvm, or
-# the Node.js this script just downloaded), and the export below only affects
-# this process. Persist it so `dsh` and `ds-harness-remote` survive the install
-# for later shells too.
+# Expose only the Remote launcher to later shells. The private DSH and pnpm
+# must not shadow the user's existing commands.
 persist_path() {
   local bin_dir="$1" rc
   local rcs=("${HOME}/.profile")
@@ -66,12 +66,15 @@ persist_path() {
   for rc in "${rcs[@]}"; do
     touch "$rc"
     if grep -qF "$PATH_BLOCK_BEGIN" "$rc"; then
-      say "PATH entry already present in $rc"
-      continue
+      local tmp
+      tmp="$(mktemp)"
+      sed '/^# >>> dsh-remote installer >>>$/,/^# <<< dsh-remote installer <<<$/d' "$rc" >"$tmp"
+      cat "$tmp" >"$rc"
+      rm -f "$tmp"
     fi
     {
       printf '\n%s\n' "$PATH_BLOCK_BEGIN"
-      printf 'export PATH="%s:$PATH"\n' "$bin_dir"
+      printf 'export PATH=%q:"$PATH"\n' "$bin_dir"
       printf '%s\n' "$PATH_BLOCK_END"
     } >>"$rc"
     say "Added ${bin_dir} to PATH in $rc"
@@ -81,50 +84,63 @@ persist_path() {
 if ! command -v node >/dev/null 2>&1; then install_node; fi
 command -v npm >/dev/null 2>&1 || die 'npm was not found next to Node.js.'
 
-export PATH="$(npm prefix --global)/bin:$PATH"
-if ! command -v pnpm >/dev/null 2>&1; then
-  say 'Installing pnpm (required by the DSH plugin manager)'
-  # pnpm >= 11 is what DSH profiles are written for: their pnpm-workspace.yaml
-  # carries pnpm 11 settings and their packageManager pins pnpm@11. Installing
-  # pnpm 9 here would also shadow that pin with an older lockfile format.
-  npm --registry "$NPM_REGISTRY" install --global pnpm@11.21.0
+[[ "$INSTALL_DIR" = /* && "$INSTALL_DIR" != / && "$INSTALL_DIR" != "$HOME" ]] || die 'DSH_INSTALL_DIR must be an absolute program directory, not / or HOME.'
+NODE_BIN_DIR="$(dirname "$(command -v node)")"
+mkdir -p "$RUNTIME_DIR" "$CLI_BIN_DIR"
+# This marker also permits cleanup after a partially completed installation.
+printf 'dsh-remote-private-runtime-v1\n' >"$RUNTIME_DIR/.dsh-remote-installer"
+printf '%s\n' "$NODE_BIN_DIR" >"$INSTALL_DIR/node-bin"
+if [[ -n "${DSH_HOME:-}" ]]; then
+  printf '%s\n' "$DSH_HOME" >"$INSTALL_DIR/dsh-home"
+else
+  rm -f "$INSTALL_DIR/dsh-home"
 fi
+export PATH="$RUNTIME_DIR/bin:$NODE_BIN_DIR:$PATH"
+say 'Installing private pnpm (required by the DSH plugin manager)'
+# pnpm >= 11 matches the DSH profile settings and packageManager pin.
+npm --registry "$NPM_REGISTRY" --prefix "$RUNTIME_DIR" install --global pnpm@11.21.0
 pnpm --version
 export npm_config_registry="$NPM_REGISTRY"
 
 say "Installing @deepseek-ai/dsh (${DSH_VERSION})"
-npm --registry "$NPM_REGISTRY" install --global "@deepseek-ai/dsh@${DSH_VERSION}"
+npm --registry "$NPM_REGISTRY" --prefix "$RUNTIME_DIR" install --global "@deepseek-ai/dsh@${DSH_VERSION}"
 say "Installing ds-harness-remote CLI (${REMOTE_VERSION})"
-npm --registry "$NPM_REGISTRY" install --global "ds-harness-remote@${REMOTE_VERSION}"
-REMOTE_PACKAGE_DIR="$(npm root --global)/ds-harness-remote"
-[[ -f "$REMOTE_PACKAGE_DIR/package.json" ]] || die "Global ds-harness-remote package was not found at $REMOTE_PACKAGE_DIR"
+npm --registry "$NPM_REGISTRY" --prefix "$RUNTIME_DIR" install --global "ds-harness-remote@${REMOTE_VERSION}"
+REMOTE_PACKAGE_DIR="$RUNTIME_DIR/lib/node_modules/ds-harness-remote"
+[[ -f "$REMOTE_PACKAGE_DIR/package.json" ]] || die "Private ds-harness-remote package was not found at $REMOTE_PACKAGE_DIR"
 
-NPM_GLOBAL_BIN="$(npm prefix --global)/bin"
-if [[ ":$INITIAL_PATH:" != *":${NPM_GLOBAL_BIN}:"* ]]; then
-  persist_path "$NPM_GLOBAL_BIN"
-fi
+# The launcher records the Node location even when Node was downloaded here.
+{
+  printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+  printf 'export PATH=%q:"$PATH"\n' "$RUNTIME_DIR/bin:$NODE_BIN_DIR"
+  if [[ -n "${DSH_HOME:-}" ]]; then printf 'export DSH_HOME=%q\n' "$DSH_HOME"; fi
+  printf 'exec %q "$@"\n' "$RUNTIME_DIR/bin/ds-harness-remote"
+} >"$CLI_BIN_DIR/ds-harness-remote"
+chmod 700 "$CLI_BIN_DIR/ds-harness-remote"
+persist_path "$CLI_BIN_DIR"
 
 # -w is required: a DSH profile is itself a pnpm workspace, and pnpm < 11
 # refuses to add a dependency to a workspace root without it
 # (ERR_PNPM_ADDING_TO_ROOT), which aborts the install before the service step.
 say "Adding ds-harness-remote@${REMOTE_VERSION} to the ${DSH_PROFILE} profile"
-dsh plugin --profile "$DSH_PROFILE" add -w "$REMOTE_PACKAGE_DIR"
+"$RUNTIME_DIR/bin/dsh" plugin --profile "$DSH_PROFILE" add -w "$REMOTE_PACKAGE_DIR"
 
 say 'Plugins installed. Configuring the Host service.'
 
 executable="${SERVICE_COMMAND:-}"
   if [[ -z "$executable" ]]; then
-    executable="$(command -v dsh || true)"
+    executable="$RUNTIME_DIR/bin/dsh"
   fi
   [[ -n "$executable" ]] || die 'Cannot find dsh. Set DSH_SERVICE_COMMAND to its executable.'
   # A service has no interactive terminal and must use the installed profile.
-  runner_dir="$HOME/.local/share/dsh-remote"
+  runner_dir="$INSTALL_DIR"
   mkdir -p "$runner_dir"
   runner="$runner_dir/start-host.sh"
   {
     printf '#!/usr/bin/env bash\nset -euo pipefail\n'
     printf 'export PATH=%q\n' "$PATH"
     printf 'export DSH_REMOTE_TERMINAL_ENABLED=%q\n' "$DSH_REMOTE_TERMINAL_ENABLED"
+    if [[ -n "${DSH_HOME:-}" ]]; then printf 'export DSH_HOME=%q\n' "$DSH_HOME"; fi
     printf 'cd %q\n' "$HOME"
     printf 'exec %q --profile %q\n' "$executable" "$DSH_PROFILE"
   } > "$runner"

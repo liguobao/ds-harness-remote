@@ -10,5 +10,5 @@ case "$token" in *[![:alnum:]-]*) printf 'The server token contains unsupported 
 export DSH_REMOTE_TERMINAL_ENABLED=true
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 "$script_dir/install.sh"
-ds-harness-remote register "$token"
+"${DSH_INSTALL_DIR:-${HOME}/.local/share/dsh-remote}/bin/ds-harness-remote" register "$token"
 printf '[dsh-install] Host registered and remote terminal enabled.\n'

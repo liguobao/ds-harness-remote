@@ -20,8 +20,25 @@ if ((Get-Item "$env:TEMP\install.ps1").Length -lt 1KB) { throw 'Downloaded insta
 & "$env:TEMP\install.ps1"
 ```
 
-On macOS/Linux, the script installs Node.js if missing and registers a Host background
-service (Linux uses a system-level systemd unit and requires sudo).
+On macOS/Linux, run the script as your normal user. It reuses Node.js when available
+and installs it in your user directory if missing. pnpm, DSH and the Remote CLI are
+installed into a private npm prefix at `~/.local/share/dsh-remote/runtime`; your existing
+global DSH/npm packages and npm prefix configuration are left in place. Only the Remote
+CLI launcher is added to your shell `PATH`, so your existing `dsh` command is preserved.
+Open a new terminal after installation to use the launcher.
+
+The script registers a Host background service (Linux uses a system-level systemd unit
+and asks for sudo for service registration only; macOS uses a user LaunchAgent).
+Use `DSH_INSTALL_DIR` to override the macOS/Linux program directory with an absolute
+path, and pass the same value when uninstalling. An explicitly set `DSH_HOME` is
+preserved for both the service and login CLI.
+The updated uninstaller removes only its marked private runtime and the Remote plugin
+from the selected profile, retaining Node.js, profiles, credentials and existing global
+packages. For older global installations it removes the service/PATH entry but keeps
+global packages and profile plugins; inspect them before removing anything manually.
+
+If you only want to add Remote to an existing Harness installation, use the
+[plugin installation command](../README.md#installation) instead of this service installer.
 
 On Windows, it installs a private Node.js, pnpm, DSH and Remote runtime under
 `%LOCALAPPDATA%\dsh-remote`, and adds only the Remote CLI launcher to your user `PATH`.
@@ -32,7 +49,8 @@ themselves. Enter the account's password (not a Windows Hello PIN) on first inst
 configuration. The wrapper is pinned to WinSW `3.0.0-alpha.11` for its interactive
 service-account prompt. Windows ARM64 uses its .NET Framework wrapper.
 
-Both platforms install Remote and File Viewer into the `web` profile. Windows preserves
+macOS/Linux installs Remote into the `web` profile by default (`DSH_PROFILE` can override
+it). Windows installs Remote and File Viewer into the `web` profile. Windows preserves
 `DSH_HOME` (default `%USERPROFILE%\.dsh`) for both the service and login CLI.
 Use `DSH_INSTALL_DIR` to override the Windows program directory, and use the same value
 when uninstalling. An existing same-user logon task is removed during migration;
