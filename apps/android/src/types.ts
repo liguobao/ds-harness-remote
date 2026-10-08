@@ -314,9 +314,12 @@ export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unava
 
 export interface QuestionActivity extends ChatItemBase {
   kind: 'question'
+  callId?: string
+  questionState?: 'open' | 'continued'
+  deadline?: number
   frameRpcId?: string
   questions: AskUserQuestionItem[]
-  outcome?: 'answered' | 'cancelled'
+  outcome?: 'answered' | 'cancelled' | 'queued'
 }
 
 export type ChatItem = ChatMessage | ToolActivity | ApprovalActivity | QuestionActivity
@@ -370,6 +373,8 @@ export interface MuxFrame {
   reason?: string
   outcome?: string
   questions?: AskUserQuestionItem[]
+  questionState?: 'open' | 'continued'
+  deadline?: number
   questionRpcId?: string
   error?: unknown
 }

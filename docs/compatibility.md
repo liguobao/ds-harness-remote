@@ -1,5 +1,17 @@
 ## Compatibility
 
+## Current compatibility targets (2026-10-09)
+
+The development baseline is `dsh-v0.2.1-alpha.1`, retaining the previous `dsh-v0.2.0-rc.2` (and rc.1) official Typert / Session V3 carrier. Peer ranges explicitly admit `0.2.1` and `0.2.2` prereleases and stable releases. A future `0.2.2` RC with the same official carrier contract requires no version-only package edit; that future runtime has not been validated.
+
+Legacy rc.2 ApiProxy is no longer a compatibility maintenance target. Existing implementations and historical types remain, but this change does not upgrade or extend their APIs. Older Typert/settings branches are outside this validation scope.
+
+Timed questions claim `userQuestions/attachWait`, return foreground answers or `ASK_TIMED_OUT` through `$events/result`, and recover late replies only from the official `userQuestions` projection. Late replies use `userQuestions/answer`; disconnect never replays answers. The previous RC's indefinite question flow retains its existing event path.
+
+Optional Claude Code Mods expose only `claudeCodeMods/watchBand` / `pressBand`. Remote status SSE uses document-relative URLs like the official RPC carrier, preserving a reverse proxy path prefix. The proxy must still strip that prefix and configure trusted authority as documented by Harness.
+
+## Historical implementation (not current maintenance targets)
+
 **Breaking change notice:** Plugin `0.4.1` removes the earlier experimental
 Remote business RPC surface (`sessions.*`, `session.*`, `permissions.respond`,
 `sync.from`). Harness session traffic now only uses the official rc.2

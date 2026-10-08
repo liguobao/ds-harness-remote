@@ -2133,12 +2133,20 @@ function QuestionCard({ item, busy, onRespond }: {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [selected, setSelected] = useState<Record<string, string[]>>({})
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (item.deadline === undefined || item.outcome !== undefined) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(timer)
+  }, [item.deadline, item.outcome])
+  const remaining = item.deadline === undefined ? undefined : Math.max(0, Math.ceil((item.deadline - now) / 1000))
 
   if (item.outcome !== undefined) {
     return (
       <View style={styles.permissionResolved}>
         <Check size={18} color={colors.success} />
-        <Text style={styles.permissionResolvedText}>{item.outcome === 'answered' ? zhCN.chat.answered : zhCN.chat.questionCancelled}</Text>
+        <Text style={styles.permissionResolvedText}>{item.outcome === 'answered' ? zhCN.chat.answered : item.outcome === 'queued' ? zhCN.chat.questionQueued : zhCN.chat.questionCancelled}</Text>
       </View>
     )
   }
@@ -2161,7 +2169,7 @@ function QuestionCard({ item, busy, onRespond }: {
         <View style={styles.permissionIcon}><ShieldAlert size={20} color={colors.accent} /></View>
         <View style={styles.permissionHeaderCopy}>
           <Text style={styles.permissionTitle}>{zhCN.chat.questionTitle}</Text>
-          <Text style={styles.permissionKind}>{zhCN.chat.answerToContinue}</Text>
+          <Text style={styles.permissionKind}>{item.questionState === 'continued' ? zhCN.chat.questionContinued : remaining === undefined ? zhCN.chat.answerToContinue : zhCN.chat.questionRemaining(remaining)}</Text>
         </View>
       </View>
       {item.questions.map(question => (
@@ -2185,7 +2193,7 @@ function QuestionCard({ item, busy, onRespond }: {
           })}
         </View>
       ))}
-      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected)} loading={busy} disabled={!allAnswered} />
+      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected)} loading={busy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
     </View>
   )
 }

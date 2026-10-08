@@ -4205,7 +4205,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           if (!result.ok) throw new Error(result.error?.message ?? t("remoteRequestFailed"));
           return result.value;
         }, statusFeed = createStatusFeed({
-          url: STATUS_STREAM_PATH,
+          url: STATUS_STREAM_PATH.slice(1),
           readStatus: () => control("status"),
           onFallback: (reason) => {
             console.warn("ds-harness-remote: status event stream unavailable, polling status instead:", reason);

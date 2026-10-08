@@ -3143,7 +3143,7 @@ window.__ModuleLoader__.load({
       // Hosts without the event stream keep answering the unary status control
       // call, which the feed itself polls at the interval this replaced.
       const statusFeed = createStatusFeed<RemoteStatus>({
-        url: STATUS_STREAM_PATH,
+        url: STATUS_STREAM_PATH.slice(1),
         readStatus: () => control<RemoteStatus>('status'),
         onFallback: reason => {
           console.warn('ds-harness-remote: status event stream unavailable, polling status instead:', reason)

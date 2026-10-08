@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Updates the Harness development baseline to `0.2.1-alpha.1`, retaining `0.2.0-rc.2` and admitting `0.2.2` prereleases; legacy ApiProxy is no longer a compatibility maintenance target.
+- Adds fixed official timed-question and Claude Code Mods endpoints; Android claims timed questions, displays remaining time, and restores continued questions from Host projections without replaying replies.
+- Preserves Web reverse proxy prefixes in the Remote status SSE URL.
+
 - Fixes Android ACP live activity grouping for Antigravity and Cursor by retaining prompt boundaries, completion/interruption/failure evidence, and reply/tool ordering; AGY command and file tools use the existing collapsed process summaries.
 - Aligns the Android saved-prompts button height and padding with the model selector.
 

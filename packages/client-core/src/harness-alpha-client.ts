@@ -1,3 +1,4 @@
+import { HarnessQuestions } from './harness-questions.js'
 import { RemoteGatewayError, RemoteTypertGateway, createRemoteId, type RemoteGatewayResult, type RemoteGatewayStream } from './remote-gateway.js'
 import type { RemoteClientCore } from './index.js'
 
@@ -173,6 +174,7 @@ const LEGACY_AGENT_PRESET_TARGET = 'ptc'
 export class HarnessAlphaClient {
   readonly mode = 'remote' as const
 
+  private readonly questions: HarnessQuestions
   private readonly gateway: RemoteTypertGateway
   private readonly sessionsCache = new Map<string, HarnessRemoteSession>()
   private readonly selectedModels = new Map<string, HarnessModelSelection>()
@@ -191,6 +193,7 @@ export class HarnessAlphaClient {
     private readonly onFrame?: (frame: HarnessClientFrame) => void,
   ) {
     this.gateway = new RemoteTypertGateway(core)
+    this.questions = new HarnessQuestions(this.gateway, (id, outcome) => this.respondEvent(id, outcome), frame => this.emitFrame(frame))
   }
 
   start(): void {
@@ -208,6 +211,7 @@ export class HarnessAlphaClient {
 
   async close(notifyRemote = true): Promise<void> {
     ++this.followGeneration
+    this.questions.close(notifyRemote)
     await Promise.all([
       this.closeHandle(this.sessionFollow, notifyRemote),
       this.closeHandle(this.events, notifyRemote),
@@ -515,6 +519,7 @@ export class HarnessAlphaClient {
   }
 
   async respondQuestion(frameRpcId: string, sessionId: string, answer: HarnessQuestionAnswer): Promise<void> {
+    if (await this.questions.answer(frameRpcId, sessionId, answer)) return
     await this.respondEvent(frameRpcId, { kind: 'result', value: answer })
     this.pendingEvents.delete(frameRpcId)
     this.emitFrame({
@@ -659,6 +664,7 @@ export class HarnessAlphaClient {
       return
     }
     if (event === 'user-questions/request') {
+      if (this.questions.request(sessionId, eventId, request)) return
       this.pendingEvents.set(eventId, { event, eventId, sessionId })
       this.emitFrame({
         rpcId: eventId,
@@ -672,6 +678,7 @@ export class HarnessAlphaClient {
   }
 
   private cancelRemoteEvent(eventId: string): void {
+    if (this.questions.cancel(eventId)) return
     const pending = this.pendingEvents.get(eventId)
     if (pending === undefined) return
     this.pendingEvents.delete(eventId)
@@ -725,6 +732,7 @@ export class HarnessAlphaClient {
         },
       })
     }
+    if (key === 'userQuestions') this.questions.projection(sessionId, projectedValue, seq)
     if (key === 'modelSelection') {
       const selection = modelSelectionFromValue(projectedValue)
       if (selection !== undefined) this.selectedModels.set(sessionId, selection)

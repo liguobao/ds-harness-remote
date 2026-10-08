@@ -945,7 +945,7 @@ Open Params：
 
 `stream` 仅允许 `mux | host`，每条 peer connection 最多同时打开三个原生流：常驻的 host/mux 各一条，加一条 mux 切换缓冲。mux 流的 `payload` 可携带可选 `sessionId`（focus）：提供后 Host 只转发该 session 的 mux 帧（`session/event`、approval、question 等），其余 session 的流量不进入 tunnel；省略时转发全部。Remote Web 每次只关注一个 session，用 focus 避免把其他活跃 session 的大事件流（可能达数 MB）推过 WebRTC/relay 数据面。切换 session 时 Client 先打开新 mux，成功后立即关闭旧 mux；新流失败时保留旧流。Close Params：`{ "streamId": "client-stream-id" }`。`streamId` namespace、三条流上限和生命周期都属于发起它的 `connectionId`；不同 Client 可使用相同 `streamId`，不得互相关闭或接收对方的 tunnel event。连接替换、撤销或断开时 Host 只取消该 connection 的全部流。
 
-### Harness v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 Typert Remote bridge
+### Harness Typert Remote bridge（当前基线 0.2.1，兼容 0.2.0 RC）
 
 `harness.remote.v1` 只承载 `dsh-v0.1.2-alpha.1`–`rc.1` 官方 `TypertGateway` 已编码的 carrier
 envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 的相同官方 carrier 与 Session V3
@@ -986,6 +986,12 @@ picker 时，可以退回 Plugin Host 本地只读目录枚举；`session/canOpe
 受限枚举返回 `true`，且仍只允许单层目录元数据。Client 的 Gateway target switch 必须让
 `dynamicCordisRunner/*` 固定调用本地 Gateway，不得因选中远端 Host 而把本机 UI/runtime
 装载请求转发到 Host。
+
+Harness `0.2.1` 增加固定官方端点 `userQuestions/answer`（call）、`userQuestions/attachWait`（stream）与可选 `claudeCodeMods/pressBand`（call）、`claudeCodeMods/watchBand`（stream）。它们复用现有加密 carrier，不增加 Remote namespace。问答使用 Gateway 验证的 `agentId`、`callId`；Mods 使用 `agentId`、`generation` 和 `actionId`，所有业务校验由官方 Gateway/service 执行。禁止按 namespace 放开其他方法。
+
+限时问答事件保留官方 `wait.callId` 与 `wait.timed`；Client 先打开 `attachWait`，根据 Host 返回的 `remainingMs` 计时，窗口内回答沿用 `$events/result`，到期回传具备 `name: UserQuestionError`、`code: ASK_TIMED_OUT` 的拒绝结果。断线释放 claim 并取消本地计时，禁止重放回复。只有 Host 的 `userQuestions.active` projection 标记 `continued` 后，才可调用 `answer` 补答；`answer` 接受回复仅表示已排队，Client 不将其提前标记为已回答；`settled` 确认问题已结束。投影序号落后时不得恢复旧问题。上一版 RC 没有 `wait.timed` 的问答保持旧事件流程。
+
+当前兼容维护目标为 Typert Session V3 `0.2.x`；前述 ApiProxy 章节保留历史线协议，不表示继续适配其 API。
 
 #### `harness.remote.stream.open` / `harness.remote.stream.close`
 

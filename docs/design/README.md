@@ -34,12 +34,11 @@
 
 | 领域 | Host 接入 | Client 展示 | 边界 |
 | --- | --- | --- | --- |
-| Harness | legacy ApiProxy 或官方 Typert Remote Gateway | Desktop 原生 UI、Android / VS Code Client | 原生会话契约，固定 endpoint allowlist |
+| Harness | 官方 Typert Remote Gateway（legacy ApiProxy 仅保留历史实现） | Desktop 原生 UI、Android / VS Code Client | 原生会话契约，固定 endpoint allowlist |
 | CodeX | stdio App Server，`codex.app.*` | Desktop 内存载体、Android 内存投影 | 不写 DSH 存储；Project / Thread authority |
 | Cursor / AGY | ACP gateway，`agent.acp.*` | 浏览器可用的 Desktop 内存载体、Android 投影 | 独立后端 capability、工作区 ID 与会话归属 |
 
-当前兼容范围见[兼容说明](../compatibility.zh.md)，包括 rc.2 ApiProxy、v0.1.2 Typert 与后续 Session V3；
-当前兼容说明覆盖 Harness 0.2.0-rc.2，开发依赖声明仍从 `^0.2.0-rc.1` 起。Client 按加密 capability 与 `workspaceTypes.available` 判断协议支持及实际就绪，不能仅依据版本号或后端开关。
+当前兼容范围见[兼容说明](../compatibility.zh.md)：开发基线 `0.2.1-alpha.1`，保留 `0.2.0-rc.2` / rc.1，并接纳后续 `0.2.2` RC 版本。legacy ApiProxy 不再作为兼容维护目标。Client 按加密 capability 与 `workspaceTypes.available` 判断协议支持及实际就绪；未来版本范围接纳不代表 runtime 已验收。
 
 ## 主路径
 

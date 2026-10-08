@@ -34,11 +34,27 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenCalledWith('permissionPresets/catalog', { args: {} }, expect.any(AbortSignal))
     await expect(bridge.call({ endpoint: 'permissionPresets/select', payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     expect(dispatch).toHaveBeenCalledTimes(2)
-    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession']) {
+    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession', 'userQuestions/answer', 'claudeCodeMods/pressBand']) {
       const payload = { args: { request: { sessionId: 'session-1' } } }
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
     }
+  })
+
+  it('forwards only fixed v0.2.1 question and Mods streams', async () => {
+    await runScenarios(['userQuestions/attachWait', 'claudeCodeMods/watchBand'].map(endpoint => ({
+      name: endpoint,
+      run: async () => {
+        const open = vi.fn(async () => (async function* () { yield { remainingMs: 1000 } })())
+        const publish = vi.fn(async () => undefined)
+        const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+        const payload = { args: { agentId: 's1', callId: 'c1' } }
+        await bridge.openStream({ streamId: 'claim1', endpoint, payload })
+        expect(open).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', { streamId: 'claim1', reason: 'completed' }))
+        await expect(bridge.call({ endpoint: endpoint.split('/')[0] + '/arbitrary', payload })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      },
+    })))
   })
 
   it('falls back to Host directory metadata for the v0.1.2-rc.1 native-only picker failure', async () => {
@@ -76,7 +92,7 @@ describe('HarnessRemoteBridge', () => {
   })
 
   it('selects command attachment fields for modern Host versions', async () => {
-    const rows = ['0.1.5-rc.1', '0.2.0-rc.1'] as const
+    const rows = ['0.1.5-rc.1', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.2-rc.1'] as const
     await runScenarios(
       rows.map((row, index) => {
         const version = row

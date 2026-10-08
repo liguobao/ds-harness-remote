@@ -165,7 +165,7 @@ export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?:
     // Without a result we cannot claim a tool succeeded.
     if (item.kind === 'tool' && item.state === 'running') return { ...item, state: 'failed' }
     if (item.kind === 'approval' && item.outcome === undefined) return { ...item, outcome: 'unavailable' }
-    if (item.kind === 'question' && item.outcome === undefined) return { ...item, outcome: 'cancelled' }
+    if (item.kind === 'question' && item.callId === undefined && item.outcome === undefined) return { ...item, outcome: 'cancelled' }
     return item
   })
 }
@@ -540,8 +540,11 @@ function addQuestion(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
   const id = `question:${frameRpcId || questions[0]?.id || localId('question')}`
   const existing = current.find(item => item.id === id)
   const turn = requestTurn(current, payload)
-  const activity = {
-    kind: 'question' as const,
+  const activity: import('../types').QuestionActivity = {
+    kind: 'question',
+    ...(typeof payload.callId === 'string' ? { callId: payload.callId } : {}),
+    ...(payload.questionState === 'open' || payload.questionState === 'continued' ? { questionState: payload.questionState } : {}),
+    ...(typeof payload.deadline === 'number' ? { deadline: payload.deadline } : {}),
     id,
     sessionId,
     ...(turn === undefined ? {} : { turn }),
@@ -549,7 +552,7 @@ function addQuestion(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
     questions,
     createdAt: Date.now(),
   }
-  return existing !== undefined ? current : [...current, activity]
+  return existing !== undefined ? current.map(item => item.id === id ? { ...activity, createdAt: item.createdAt, outcome: item.kind === 'question' ? item.outcome : undefined } : item) : [...current, activity]
 }
 
 /** Approval/question frames may omit their turn; use the active transcript owner. */
@@ -569,7 +572,7 @@ function resolveQuestion(current: ChatItem[], payload: UnknownRecord): ChatItem[
   const outcome = stringValue(payload.outcome)
   if (questionRpcId === undefined || outcome === undefined) return current
   return current.map(item => item.kind === 'question' && item.frameRpcId === questionRpcId
-    ? { ...item, outcome: outcome === 'answered' ? 'answered' as const : 'cancelled' as const }
+    ? { ...item, outcome: outcome === 'answered' ? 'answered' as const : outcome === 'queued' ? 'queued' as const : 'cancelled' as const }
     : item)
 }
 

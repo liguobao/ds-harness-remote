@@ -19,6 +19,22 @@ function frame(rpcId: string, payload: { type: string } & Record<string, unknown
 }
 
 describe('remote mux frame reducer', () => {
+  it('keeps continued timed questions answerable across turn end and updates the same card', () => {
+    const id = 'timed-question:s1:c1'
+    let items = applyMuxFrame([], frame(id, { type: 'question/requested', sessionId: 's1', callId: 'c1',
+      questionState: 'open', deadline: 123, questions: [{ id: 'q1', question: 'Continue?' }] }))
+    items = applyMuxFrame(items, frame(id, { type: 'question/requested', sessionId: 's1', callId: 'c1',
+      questionState: 'continued', questions: [{ id: 'q1', question: 'Continue?' }] }))
+    items = applyMuxFrame(items, frame('', { type: 'session/event', sessionId: 's1',
+      event: sessionEvent({ type: 'turn/end', data: {} }) }))
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'question', callId: 'c1', questionState: 'continued' })
+    expect(items[0]).not.toHaveProperty('deadline')
+    expect((items[0] as { outcome?: string }).outcome).toBeUndefined()
+    items = applyMuxFrame(items, frame('', { type: 'question/resolved', sessionId: 's1', questionRpcId: id, outcome: 'answered' }))
+    expect(items[0]).toMatchObject({ outcome: 'answered' })
+  })
+
   it('projects Harness turn lifecycle into the session running state', () => {
     const start = frame('', {
       type: 'session/event',

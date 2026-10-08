@@ -323,3 +323,11 @@ Plugin 类型检查、42 个测试文件 / 372 个测试和 `git diff --check` �
 `docs/design/` 按当前源码更新，不再使用早期 MVP 草案作为当前边界。CodeX 会话只读文件与终端由 `codex-workspace-bridge.ts` 基于 Host 验证的 Thread cwd 提供；ACP 只读文件与终端使用独立 `dsh/toolCall` / tool stream 和 session/backend scope。两者都遵循固定 allowlist、路径/realpath 校验和终端归属/输入权，不扩大 App Server 或 Harness 通用 RPC。上述源码能力不代表已完成 Windows、APK、真机或加密跨设备验收。旧日期的“不对 CodeX 投影开放”记录仅描述当时范围；当前线协议以 `docs/protocol.md` 为准。
 
 界面设计 `docs/design/DESIGN.md` 引用 Android 当前 theme 和 App 导航；Files/Terminal 从输入栏「＋」的工具访问进入，快捷提示词独立展示，轨迹另有标题栏入口。原始需求归档到 `docs/archive/vibe-coding.md`，不作为当前实现任务。
+
+## Harness 0.2.1 compatibility (2026-10-09)
+
+按用户要求，开发依赖使用 `0.2.1-alpha.1`，保留上一版 `0.2.0-rc.2` / rc.1 的 Typert Session V3；peer range 明确接受 `0.2.1` 与 `0.2.2` 预发布版。未来 `0.2.2` RC 未发布，不能把范围接纳描述为已完成 runtime 验证。legacy ApiProxy 不再作为兼容维护目标，已有代码/历史类型暂保留；后续新增能力仅使用官方 Typert。
+
+限时问答只使用固定 `userQuestions/answer` / `attachWait` 与既有 `$events/result`，根据官方投影恢复 `continued` 问题；断线释放 claim，不重放回答。可选 Mods 只开放官方 `watchBand` / `pressBand`。Web SSE 使用文档相对地址以保留代理前缀。真实跨设备、Android 原生 UI 与真实代理验收仍需另行验证。
+
+本轮验证：全仓 check/test 与生产 build 通过，最终问答状态改动后 client-core 38、Android 88 个测试再次通过；Plugin 250 个测试与 DSH bundle 校验通过。官方 `0.2.0-rc.2` / `0.2.1-alpha.1` Gateway 包的事件流、取消、目标切换和断线 fail-closed 烟测通过。该烟测不等于完整 Desktop / Android 跨设备 E2E。Metro noble/hashes exports fallback 警告仍存在。

@@ -1704,7 +1704,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       await proxy.respondQuestion(item.frameRpcId, item.sessionId, { answers })
       set(state => ({
-        messages: mapQuestionAnswered(state.messages, itemId),
+        messages: item.callId === undefined ? mapQuestionAnswered(state.messages, itemId) : state.messages,
         busyAction: undefined,
       }))
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
