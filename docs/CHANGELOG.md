@@ -118,7 +118,7 @@
 - Verifies the Web → Host main path against a standalone
   `dsh-v0.1.6-alpha.1` instance running the local Plugin build. Cross-machine,
   CodeX, Android, VS Code, and WebRTC coverage on `0.1.6` is outside this
-  verification set and stays tracked in `TODO.md`.
+  verification set and stays tracked in `docs/TODO.md`.
 - Selects the command attachment field by Host version, so `dsh-commands` 0.1.2
   (`images`) and the newer attachment field both round-trip image prompts.
 - Publishes the `harnessCapabilities` constant from protocol §17, documents the

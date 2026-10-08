@@ -72,6 +72,6 @@ This repository includes a minimal, single-account self-hosted Relay Server in [
 - [End-to-end encryption](https://github.com/liguobao/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)
 - [Network and transport](https://github.com/liguobao/ds-harness-remote/blob/main/docs/network.md)
 - [Protocol reference](https://github.com/liguobao/ds-harness-remote/blob/main/docs/protocol.md)
-- [Changelog](https://github.com/liguobao/ds-harness-remote/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/liguobao/ds-harness-remote/blob/main/docs/CHANGELOG.md)
 
 This is an independent community project and is not an official DeepSeek product. Licensed under the [MIT License](./LICENSE).

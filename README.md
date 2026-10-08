@@ -264,7 +264,9 @@ validation status.
 - [End-to-end encryption](docs/end-to-end-encryption.md)
 - [Network and transport](docs/network.md)
 - [Remote Protocol](docs/protocol.md)
-- [Development status and roadmap](TODO.md)
+- [Development status and roadmap](docs/TODO.md)
+- [Changelog](docs/CHANGELOG.md)
+- [Privacy policy](docs/PRIVACY.md)
 - Remote compatibility details are maintained in [the compatibility guide](docs/compatibility.md).
 
 ## Links

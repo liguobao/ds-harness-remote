@@ -90,4 +90,4 @@ ds-harness-remote:
 
 Codex Remote 已完成 Desktop 跨机、Android 真机、Web → Host、多客户端观察、大 History、Prompt、
 approval、interrupt 和图片分块的真实设备验证，但仍以实验功能发布。后续恢复策略、跨平台矩阵和
-长期稳定性以 [TODO](../TODO.md) 为准；不应把 TODO 中的目标能力描述为已完成。
+长期稳定性以 [TODO](TODO.md) 为准；不应把 TODO 中的目标能力描述为已完成。

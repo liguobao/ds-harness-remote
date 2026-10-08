@@ -244,7 +244,9 @@ WebSocket Relay。所有路径都承载同一份 Noise 密文，并保持相同�
 - [端到端加密](docs/end-to-end-encryption.md)
 - [网络与传输](docs/network.md)
 - [远程协议](docs/protocol.md)
-- [开发进度与路线图](TODO.md)
+- [开发进度与路线图](docs/TODO.md)
+- [更新记录](docs/CHANGELOG.md)
+- [隐私说明](docs/PRIVACY.md)
 - 版本兼容详情见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接

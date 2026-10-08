@@ -60,7 +60,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 ## Agent ACP / Cursor adapter（进行中，实验）
 
 通用 `agent.acp.*` gateway + Cursor `agent acp` adapter。技术说明见
-[docs/acp-remote.md](docs/acp-remote.md)。**暂不**推进 Codex→ACP adapter。
+[docs/acp-remote.md](acp-remote.md)。**暂不**推进 Codex→ACP adapter。
 
 - [x] Host gateway、capability、allowlist、Cursor stdio adapter
 - [x] ACP Web 兼容边界：独立 API/事件、浏览器安全内存投影、远端历史分块与后端工作区 ID 隔离

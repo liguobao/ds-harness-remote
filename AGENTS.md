@@ -76,7 +76,7 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 | 开源自部署 Server | `apps/server` 已实现单账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN | Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
 | 完整 Server/Remote Web/Admin | 独立 Server 仓库已有实现，REST、Control WebSocket、Relay、Signaling 与 conformance fixture 跨仓库联调已完成 | 完整站点 runtime 变更在独立 Server 仓库完成，并同步跨仓库契约 |
 
-完整任务和优先级以 `TODO.md` 为准。不得把 TODO 中的目标能力描述成已经完成。
+完整任务和优先级以 `docs/TODO.md` 为准。不得把 TODO 中的目标能力描述成已经完成。
 
 ## Development
 
@@ -137,7 +137,7 @@ Desktop 应通过官方插件管理安装 GitHub 地址，或复用 Desktop 官�
 - 独立 `dsh-v0.1.6-alpha.1` 实例验证通过：Plugin 树加载、Host identity、Codex 域与 client bundle 下发正常，Web → Host 主链路可用；peer range 与构建/测试基线已升级到 `@deepseek-ai/dsh-*@0.1.6-alpha.1`
 - `git diff --check` 通过
 
-已知构建警告：Metro 对 `@noble/hashes/crypto.js` 使用 package exports fallback。该问题记录在 `TODO.md`，不得静默删除说明。
+已知构建警告：Metro 对 `@noble/hashes/crypto.js` 使用 package exports fallback。该问题记录在 `docs/TODO.md`，不得静默删除说明。
 
 2026-09-20 开源自部署 Server 补充验证：check、11 个核心测试与生产 build 通过；构建产物本地启动后，健康检查、页面及静态资源、账号登录、Cookie 鉴权与未授权拒绝通过。Docker daemon 未运行，未验证镜像构建和容器启动；真实跨机与反向代理长期连接仍待验证。独立 Server 的既有联调结果不等于本版本已完成部署验收。
 
@@ -200,14 +200,19 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 - `README.md`：面向用户的默认英文入口；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
 - `README.zh.md`：与根 README 对应的中文版本；功能和版本信息必须同步。
 - `AGENTS.md`：面向编码 Agent，写仓库结构、进度、命令和实现约束。
-- `TODO.md`：未完成任务与优先级。
+- `docs/TODO.md`：未完成任务与优先级。
+- `docs/CHANGELOG.md`：版本更新记录。
+- `docs/PRIVACY.md`：隐私说明。
+- `docs/design/PRODUCT.md`、`docs/design/DESIGN.md`：产品定位与界面设计系统。
 - `apps/server/README.md`、`apps/server/README.zh.md`：开源自部署 Server 的实际能力、配置、运行方式和验证边界。
 - `docs/server.md`：完整 Server 项目的产品/功能设计，并说明本仓库自部署版本的范围。
 - `docs/plugin-integration.md`：Host Plugin 对接 Server 的账号认证、设备认证与凭证状态机，以及最小自部署版本支持的子集。
 - `docs/protocol.md`：跨仓库协议规范。
-- `vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
+- `docs/archive/vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
+
+根目录保留中英文 README、AGENTS 和构建、发布所需配置与入口；其他说明文档集中在 `docs/`，产品设计集中在 `docs/design/`，原始需求归档到 `docs/archive/`。移动文档时同步更新相对链接和仓库路径引用。
 
 ## Authorization recovery (Issue #70)
 
@@ -311,3 +316,9 @@ Android check、286 测试、Hermes export 通过；真实 AGY CLI 的 in-proces
 依赖已替换为隔离临时 fixtures，移除硬编码 Linux 项目路径及数据为空时跳过断言的行为。
 Plugin 类型检查、42 个测试文件 / 372 个测试和 `git diff --check` 通过；此前记录的该
 环境依赖测试失败已修复。此验证不代表 Windows 或真实 AGY 跨设备验收。
+
+## Design documentation sync (2026-10-08)
+
+`docs/design/` 按当前源码更新，不再使用早期 MVP 草案作为当前边界。CodeX 会话只读文件与终端由 `codex-workspace-bridge.ts` 基于 Host 验证的 Thread cwd 提供；ACP 只读文件与终端使用独立 `dsh/toolCall` / tool stream 和 session/backend scope。两者都遵循固定 allowlist、路径/realpath 校验和终端归属/输入权，不扩大 App Server 或 Harness 通用 RPC。上述源码能力不代表已完成 Windows、APK、真机或加密跨设备验收。旧日期的“不对 CodeX 投影开放”记录仅描述当时范围；当前线协议以 `docs/protocol.md` 为准。
+
+界面设计 `docs/design/DESIGN.md` 引用 Android 当前 theme 和 App 导航；Files/Terminal 从输入栏「＋」的工具访问进入，快捷提示词独立展示，轨迹另有标题栏入口。原始需求归档到 `docs/archive/vibe-coding.md`，不作为当前实现任务。

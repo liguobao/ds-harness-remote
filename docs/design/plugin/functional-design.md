@@ -1,228 +1,119 @@
-# Harness Remote Plugin 功能设计
+# Remote Plugin 功能设计
 
-状态：Draft v0.2
-目标项目：`packages/plugin`
+更新时间：2026-10-08；目标项目：`packages/plugin`。
 
-## 1. 受控业务接入面
+## 1. 数据面
 
-Harness rc.2 会话业务只使用官方 `@deepseek-ai/dsh-host-apiproxy/api`；v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 Session V3 会话业务只
-使用官方 `TypertGateway` Remote carrier；可选文件预览只使用
-`dsh-file-viewer` 暴露的 `fileViewerHost` 只读服务。Plugin 不读取或解释
-`SessionStore`、`AgentRegistry`、Workspace 或 Approval 内部对象，也不把 Harness
-事件重新投影成另一套 Remote Session/Message/Tool/Permission 模型。
+| 领域 | Remote 接口 | Host authority |
+| --- | --- | --- |
+| Harness legacy | `harness.api.*` | 官方 ApiProxy、原生流和权限响应 |
+| Harness Typert | `harness.remote.*` | 官方 Gateway endpoint 与事件关联 |
+| CodeX | `codex.app.*` | stdio App Server、Project / Thread 根目录 |
+| Cursor / AGY | `agent.acp.*` | backend adapter、Host 会话/catalog |
+| File Viewer | `fileviewer.call` | provider 已授权的 root / locator |
+| 开发预览 | `loopback.call` | Host 本地端口白名单 |
 
-```text
-本地 Harness UI
-  -> ApiProxySwitch (rc.2) / TypertGatewaySwitch (alpha)
-  -> RemoteHarnessApiProxy / RemoteTypertGateway
-  -> authenticated Remote channel
-  -> HarnessApiBridge / HarnessRemoteBridge allowlist
-  -> Host ApiProxy / TypertGateway
-  -> 远端 Harness
-```
+业务都复用认证后的 Noise channel，但独立 capability、allowlist、RPC/event 和状态。
+不得将 ACP 方法塞入 Harness 或 CodeX API，也不得引入平行的 Harness session/agent/workspace/permission 协议。
+兼容版本和 carrier 选择见[兼容说明](../../compatibility.zh.md)；schema 与具体限额见[协议](../../protocol.md)。
 
-rc.2 远端调用仍使用 Harness 原生 `RpcRequest`、`RpcResponse`、`MuxFrame`、`HostFrame`
-和 `ClientResponse`；alpha 保持 Gateway 的 `{ endpoint, payload }`、RPC result、stream item
-与 `$events` 语义。Plugin 只负责传输、关联、流生命周期与安全检查。
+## 2. 生命周期与模块
 
-## 2. 模块结构
+| 模块 | 职责 |
+| --- | --- |
+| `index.ts` / `config.ts` | Cordis 装配、配置解析、settings 兼容和热更新 |
+| `service.ts` / `server-connection.ts` | Host、Control/Relay、每连接业务桥 |
+| `identity-store.ts` / `server-credentials.ts` | 按 Server origin/角色隔离身份、信任和凭据 |
+| `harness-api-bridge.ts` / `harness-remote-bridge.ts` | 官方 Harness 固定 allowlist、原生流与有界 transfer |
+| `api-proxy-switch.ts` / `typert-gateway-switch.ts` | Local / Remote carrier 切换 |
+| `client-runtime.ts` / `client.ts` | 加密 capability、工作区类型、选择与内存 carrier |
+| `workspace-bridge.ts` / `codex-workspace-bridge.ts` | 有界只读文件和按会话隔离的 CodeX 工具 scope |
+| `terminal-policy.ts` | Host 开关、设备归属、连接输入权 |
+| `loopback-host.ts` / `loopback-preview.ts` | Host 白名单请求与 Client 本机独立预览 origin |
+| `codex/` | App Server、authority、allowlist、虚拟 carrier、审批 |
+| `acp/` | 后端注册表、gateway、独立工具、transfer、虚拟 carrier |
+| `control-runtime.ts` / `control-route.ts` / `control-stream.ts` | 本机设置、账号授权与 Host status SSE |
 
-```text
-packages/plugin/src/
-  index.ts                    Cordis 生命周期与服务装配
-  config.ts                   配置解析
-  service.ts                  Host runtime
-  identity-store.ts           设备身份和本地 trusted peer
-  server-credentials.ts       device credential
-  server-api.ts               Server REST client
-  server-connection.ts        Host control/relay/Noise 连接
-  connection-controller.ts    单一认证 peer 与业务通道
-  rpc-router.ts               仅接受 capability 对应的 Harness tunnel RPC
-  harness-api-bridge.ts       Host ApiProxy allowlist 与原生流
-  harness-remote-bridge.ts    Host v0.1.2 Typert Remote allowlist 与 stream
-  file-viewer-bridge.ts       File Viewer 只读方法白名单与传输限制
-  remote-file-content-provider.ts Client 侧远端内容 provider
-  remote-directory-browser.ts native picker 场景的只读目录元数据兜底
-  remote-api-proxy.ts         Client 侧 ApiProxy 实现
-  remote-typert-gateway.ts    Client 侧 alpha Gateway carrier
-  api-proxy-switch.ts         Local/Remote 目标切换
-  typert-gateway-switch.ts    alpha Gateway unary/stream/event 目标切换
-  client-runtime.ts           Desktop Client runtime
-  control-runtime.ts          loopback-only 设置与账号授权控制面
-  control-route.ts            loopback control 的 HTTP/RPC 路由与信任校验
-  control-stream.ts           loopback status 事件流（SSE）与变更采样
-  status-stream.ts            Web 侧 status 推送订阅与 unary 轮询降级
-  client-secure-transport.ts  Client Noise IK
-  client.ts                   Desktop Web client face
-  logging.ts                  脱敏日志
-```
+顶层 Plugin 激活不等待可选 Agent 后端。Host 捕获未经过 Remote switch 的本地 dispatcher，避免请求递归。
+每条认证连接独立创建 bridge 和 pending/stream/transfer 状态，连接替换只清理其自己的旧状态。
+ACP 后台初始化；关闭中清理启动进程，迟到的结果不得重新注册。
 
-不再存在 session/agent/workspace/permission adapters、Remote event sequencer、
-replay buffer 或自定义 pending approval 状态机。
+settings 通过 `typeof settings.register === 'function'` 分流旧注册表与新 Volatile entry 路径。
+终端开关、loopback 保存和 Agent 后端配置热生效；只重载发生变化的后端，其待审批句柄和流失效，其他后端保留。
 
-## 3. 插件生命周期
+## 3. Harness bridge 与 Client carrier
 
-```ts
-export const name = 'ds-harness-remote'
+rc.2 使用官方请求、响应、mux/host frame 与 `respond()`；Typert 使用官方 invoke、stream、`$events` / `$events/result`。
+Plugin 仅负责认证、方法过滤、RPC 关联、流生命周期和传输，不读取 Harness 内部 SessionStore 或重建业务模型。
 
-export function apply(ctx, config) {
-  ctx.inject(['settings', 'connection', 'typertGateway'], runtimeCtx => {
-    if (runtimeCtx.typertGateway supports alpha carrier) activate(runtimeCtx, config)
-    else runtimeCtx.inject(['apiProxy'], legacyCtx => activate(legacyCtx, config))
-  })
-}
-```
+- Unary、respond、stream open/close 进入对应固定 allowlist。
+- 图片 Prompt 和大 History / attachment 走已协商的有界 transfer，保持原生业务 envelope。
+- 官方命令仅使用 Host 注册的目录与 handler；不允许反射任意 service。
+- 官方 settings 写入限实时注册的命名空间，排除插件自身访问设置；credential 只写入有界引用，不返回秘密值。
+- 禁止 native open/picker、目录写入、动态 Cordis runtime/source、通用 attachment upload/download 和未知 endpoint。
 
-`apply(ctx, config)`：
+Client 先调用 `harness.transport.describe`。老 Host 缺少方法时保留 legacy 降级；新 Host 按 capability、
+版本 profile 和现有事件/history 归一化选择 carrier。不支持的组合在 mutation 或 UI target 切换前拒绝，不进行任意 wire format 翻译。
+Remote 退出/断线结束旧流并回落本地；恢复时重新认证和读取 baseline，不重放 mutation。
 
-1. 顶层 Bundle entry 立即完成激活，不把远端插件依赖变成 Harness 主服务的启动条件。
-2. 在隔离的依赖 scope 中等待 `settings`、`connection` 和 `typertGateway`；alpha carrier
-   可用时直接激活，否则继续等待 rc.2 `apiProxy`，避免依赖 bundle 行顺序。
-3. 校验配置并按规范化 Server origin 选择隔离的身份目录。
-4. 捕获不会经过 Local/Remote switch 的 Host `ApiProxy` 或 Typert Gateway dispatcher，为每条认证 Client connection 创建隔离的 allowlist bridge。
-5. 创建常驻 Host runtime；Server、对应 Harness carrier 和 Web connection 可用时同时创建后台 Remote runtime。
-6. 在 `ctx.effect()` 中启动出站 Server 连接，退出时关闭原生流、secure channel 和控制连接。
+## 4. 原生文件与终端
 
-Plugin 不订阅 `session/created`、`session/event`、`agent/status` 或
-`approval/request`。这些语义由 rc.2 ApiProxy mux/host + `respond()` 或 alpha 官方 `$events`
-与 `$events/result` 原样承担。
+Harness 复用官方 `workspaceFiles` / `officeToPdf` 固定 allowlist，并保留 dsh-file-viewer 的 stat/readRange/list 桥。
+CodeX `codex:<threadId>` 由 Host 解析成独立 Thread cwd scope，不当作 Harness agent ID。
+共享工作区桥对路径、realpath、符号链接、读取大小与终端操作执行有界校验。
 
-## 4. Host Harness bridges
+CodeX 工具使用原生 `workspaceFiles/*` / `terminal/*` 语义；不是放开 App Server 的 `command/*` 或 `process/*`。
+ACP 工具使用独立 `dsh/toolCall` 与有 tool 参数的 stream，限编译期固定 endpoints；scope 必须与 backend/session 匹配。
+客户端不能提交任意 cwd 来扩展工具 authority。
 
-Remote 业务 RPC 只有：
+终端默认开启，Host 本地可立即关闭。固定设备归属与当前连接输入权；follow/retain、输出序号和关闭遵循原生语义。
+断线保留可恢复的终端状态但不重放输入；领域关闭结束其进程。Host subprocess 服务可用时使用 PTY，否则回退 pipe；
+共享桥输出是有界原始日志，由 Client 终端模拟器重放。
 
-- `harness.api.call`
-- `harness.api.transfer.open/chunk/commit/read/close`（仅在 `harness.api.transfer.v1` capability 下）
-- `harness.api.respond`
-- `harness.api.stream.open`
-- `harness.api.stream.close`
-- `harness.remote.call`
-- `harness.remote.transfer.open/chunk/commit/read/close`（仅在 `harness.remote.transfer.v1` capability 下）
-- `harness.remote.stream.open`
-- `harness.remote.stream.close`
-- `harness.transport.describe`
-- `fileviewer.call`（仅在 `fileviewer.read.v1` capability 下）
+Android 图片/PDF 最大 8 MiB、Office 源文件最大 50 MiB；本地打包 PDF.js/xterm 渲染器，生成源文件不提交。
+PDF 只读，不提供脚本、外链、导出或明文文件缓存；真机与跨设备效果另行验收。
 
-`harness.api.call` 的 `method` 必须命中代码内固定 allowlist。当前允许会话、子 Agent、
-Workspace、Skill、Agent Preset、Goal、Host 描述和只读 LLM 目录等原生 UI 所需操作。
-`commands.list` 与 `commands.execute` 经官方 Typert gateway 分发，以覆盖原生 UI 的
-"+" 命令菜单。Remote 使用 Host 对当前 Agent 解析出的有效命令目录和 handler，因而与
-本地 Harness UI 保持一致；它只能执行 Host 已注册的命令，不构成任意方法调用入口。
+## 5. Loopback 预览
 
-alpha `harness.remote.call` 与 stream 只转发官方 Gateway carrier envelope，endpoint 必须
-命中代码内固定 allowlist。`$events` / `$events/result` 保持官方双向事件关联；
-`directoryPicker/pick/createDirectory`、native open、动态 Cordis runtime/source 与未知
-endpoint 均拒绝。alpha stream 上限为每连接 16 条，并用显式 `hasValue` 保留
-`undefined` stream item。
+`loopback.http-ws.v1` / `loopback.call` 只访问 `127.0.0.1` 的 Host 白名单端口；默认未授权。
+Host 只出站连接，禁止 CONNECT、任意主机和通用 TCP 转发。
+Desktop Client 随机本机监听端口承载独立 preview origin；Header 提供「预览服务」。
+本机预览 URL 不能当作 Remote Web、Android 或 VS Code 的可用地址，复杂 HMR、Cookie/CSP 与网络条件仍需回归。
 
-`host.listDirectory` 是 Workspace picker 的唯一文件系统相关能力。优先转发 Harness browse
-capability；若桌面 Harness 只提供 native picker，则 bridge 以只读实现返回同形状的单层目录
-元数据。结果有数量上限，不包含文件内容，也不允许目录写入。
+## 6. CodeX 与 ACP
 
-Harness `dsh-v0.1.1-rc.2` 图片仍使用官方 ApiProxy：Client 将图片内容放入
-`session.prompt`，Host 持久化 attachment 并由 DeepSeek adapter 负责预处理、Files API 上传和
-file id 复用；Client 通过只读 `session.attachment` 回读已被该 session 日志引用的图片以显示。
-超过单条 secure message 限制的原生 request/response 走 `harness.api.transfer.v1`，每块 512 KiB，
-严格有序、按连接隔离并设置总量/并发/空闲期限，不扩大 4 MiB secure message 上限。
-alpha 保持同一官方 `session/prompt` 与 `session/attachment` 业务语义，并通过
-`harness.remote.transfer.v1` 分块承载超限 Gateway envelope。
+CodeX 默认开启，通过 stdio App Server 访问固定方法。
+Workspace authority 优先 `project/list`，缺少有效根目录才回退到 `thread/list` 已返回的绝对 cwd。
+`project/create` 仅注册 Host 真实目录，realpath + 目录验证后由 App Server 返回 Project 扩展 authority。
+新 Thread 子目录需词法路径与 realpath 双重校验；已有 Thread 操作也重新校验归属。
+详见[CodeX 投影](../codex-session-history-projection-prompt.md)。
 
-安装 `dsh-file-viewer` 后，`fileviewer.call` 复用它的 `fileViewerHost` 服务，只允许
-`stat | readRange | list`。单次传输读取最多 512 KiB，目录最多 1000 项；Host 返回值再次做
-schema 与大小校验。路径根与 locator 权限由 File Viewer provider 执行，Remote 不绕过该边界。
+ACP 当前实现 Cursor 和 Antigravity adapter，不按命令名称选择后端，不对明确选中的不可用后端降级。
+启用 capability 与实际 `workspaceTypes.available` 分离；Cursor/AGY 工作区 ID 分别生成，AGY 使用 `antigravity:cwd:`。
+浏览器内存 carrier 只从 Host ACP 读取工作区、历史和图片，不依赖 Node、AGY 数据库或本机 transcript。
+Host 的 AGY catalog/transcript 则执行项目归属、realpath、符号链接与迟到结果隔离。
 
-明确禁止：
+AGY 图片仅 PNG/JPEG/WebP/GIF，每张 8 MiB、每次 4 张；专用 tmp 私有缓存总量 512 MiB、保留 24 小时，后续上传触发清理。
+AGY 1.3.0 stream-json 接收 text，图片通过固定 add-dir 和 view_file 使用；历史只读当前会话引用且仍有效的缓存图片。
+Cursor 保持文字 Prompt。AGY 模型目录来自安装 CLI，模型/effort 切换待 Host 确认，不推测默认或历史模型。
+具体 capability 与选择时序见协议。
 
-- `settings.openDocument` 以及对 Host 实时注册目录之外命名空间的 settings 写入；credentials 只允许官方全局引用语义下的有界 describe/set/unset，值只写且不得进入日志或响应；
-- native path open/picker；
-- 绕过 File Viewer provider 的文件访问、目录创建/修改/删除或通用文件系统 RPC；
-- File Viewer `openExternal`、文件写入、上传与执行；
-- attachment upload、download；`session.attachment` 只读回读除外；
-- 任意 Cordis service、Harness tool 或反射调用。
+## 7. 身份、恢复与审批
 
-Host 可同时服务来自不同 `clientDeviceId` 的连接；RPC pending、stream namespace 和 stream
-上限均按 `connectionId` 隔离。每条连接最多打开三个原生流（host、当前 mux、mux 切换缓冲）。同一 Client 设备重连只替换
-它自己的旧连接；连接替换、撤销或断开时，只 abort 该连接的 mux/host iterator。Plugin
-卸载时才关闭全部连接和流。
+Server membership、Host 本地信任、pinned identity、Noise transcript 与计数器校验全部通过后才开放业务桥。
+凭据刷新使用跨进程目录锁，锁内重新读取凭据；握手拒绝最多刷新恢复一次。
+`4003` 作为 `CONNECTION_REPLACED` 停止自动抢占；并行 Host 分别使用独立 DSH_HOME。
 
-## 5. Client Harness transport
+Harness 保持官方审批关联；CodeX / ACP 保持独立、按连接隔离的审批句柄。Remote 决策只允许单次允许或拒绝。
+断线、后端关闭、撤销或替换使相关 stream、transfer、待审批状态失效，不自动重放 Prompt 或终端输入。
+Android 对支持的后端重开 stream 并读取 history baseline；通用 pending call 恢复和长期稳定性仍按 TODO 跟踪。
 
-`RemoteHarnessApiProxy` 实现与本机相同形状的 `ApiProxy`：
+Host status 通过本机 SSE 首帧完整快照、变化推送和空闲保活更新；旧 Host 不支持 SSE 时保留 unary status 降级。
+连接建立进度与二维码登录属于独立交互流程，不等于常态 status 轮询。
 
-- unary method 转成 `harness.api.call`；
-- 大图片 prompt 和 attachment response 使用 transfer wrapper 分块搬运同一原生 envelope；
-- `respond()` 转成 `harness.api.respond`；
-- `events.mux()` / `events.host()` 转成远端 stream open/close；
-- 原生 `rpcId` 保持不变，Remote envelope id 只负责隧道层关联。
+## 8. 验证要求
 
-`ApiProxySwitch` 向官方 Web UI 暴露稳定对象。选择 Remote 后所有新调用解析到远端
-proxy；连接意外关闭时立即回落 Local 并结束旧流。
-
-alpha 的 `RemoteTypertGateway` 对等承载 unary、stream 与 `$events/result`；
-`TypertGatewaySwitch` 同时切换 Gateway 的公开 invoke/stream 和 Connection/WebSocket mux
-实际调用的 carrier methods。Host bridge 始终使用安装 switch 前捕获的本地 dispatcher，
-避免 Remote 目标递归调用自身。
-
-Noise channel 建立后 Client 调用 `harness.transport.describe`。旧 Host 返回
-`METHOD_NOT_FOUND` 时按 rc.2 `clientVersion` 降级；新 Host 明确返回 ApiProxy/Remote Gateway
-能力。两端 carrier 代际不同则在 Workspace create 或 UI target switch 前返回
-`HARNESS_VERSION_INCOMPATIBLE`，当前不翻译 rc.2 与 alpha 的完整业务模型。
-
-Desktop UI 不提供 Client 模式切换。侧边栏始终只有一个 Remote 工作区入口：
-
-- 设备列表过滤本机 Host deviceId；
-- 展示规范化系统名称、Harness 版本、Plugin 版本与在线状态；
-- 选择已有 Workspace，或浏览远端目录后调用 `workspace.create`；
-- Remote 激活后显示独立顶部 Header、连接链路、端到端加密说明和退出链接。
-
-### Loopback status 推送
-
-Harness Web UI 内的 Host 状态不轮询 unary `status`：
-
-- Host 在 `/ds-harness-remote/status.events` 暴露 `text/event-stream`；连接建立后先推送一次完整
-  status，之后仅在采样值变化时推送新帧，空闲时只发 SSE comment 保活，重连后首帧仍是完整 status；
-- 采样只存在于 Host 进程内且仅在有订阅者时运行，浏览器侧不存在固定间隔的 status 调用；
-- 事件流与 unary `status` 共用同一个读取实现，推送值与轮询结果不会分叉；
-- 老 Host 只提供 POST RPC 通道或无 Web server prefix 路由时返回非 2xx，浏览器按 SSE 永久失败
-  处理并退回原来的 1.5s unary `status` 读取；老 Client 行为不变，因此无需版本协商。
-
-Remote 连接进度（单次 `mode.set` 动作内）与账号二维码登录（用户交互流程）仍按各自节奏读取
-`status`。
-
-## 6. 安全连接
-
-业务桥只在以下条件全部成立后可见：
-
-- Server active membership 与目标连接一致；
-- 双方账号授权的 peer descriptor 与本地 pinned key 完全一致；
-- Noise IK transcript 成功绑定 connectionId、Host 和 Client；
-- relay counter 连续且密文认证成功。
-
-Server 只看到控制元数据和 ciphertext。Host 不监听公网端口。
-
-## 7. 权限语义
-
-Approval 和 Question 在 rc.2 使用 ApiProxy 原生 mux `ServerRequest` / `ClientResponse`，
-在 alpha 使用官方 `$events` waterfall / `$events/result`。Plugin 不创造第二套 permission id、
-decision enum 或超时状态机。
-
-Host Harness 仍是唯一权限裁决者。rc.2 Plugin 只允许回答当前原生流实际发出的 rpcId；
-alpha 的 eventId/clientId 关联由官方 Gateway 验证。状态按 `connectionId` 隔离，晚到、重复
-或格式错误的回答由 Host 官方 carrier 拒绝。连接断开会关闭原生流，
-不能继续提交旧回答。
-
-## 8. 核心测试
-
-- ApiProxy allowlist 允许预期方法并拒绝敏感方法。
-- Typert Remote endpoint allowlist 拒绝 native open、目录写入、动态 Cordis 与未知 endpoint。
-- unary response 保留内层 rpcId。
-- mux/host 与 alpha stream frame 转发、显式 `undefined` item 和 close reason 正确。
-- 未认证、错误 identity/membership、篡改和重放 fail closed。
-- peer 替换或断开时关闭全部原生流。
-- Local/Remote switch 可逆，远端断开回落 Local。
-- File Viewer 只允许 stat/list/受限 range read，超限和未安装依赖 fail closed。
-- Host/Client account token 与 device token 隔离，主机匹配码单次消费，refresh single-flight。
-- loopback status 事件流首帧即完整 status、仅在变化时推送、空闲保活、客户端断开后停止采样，
-  并且事件流不可用时降级到 unary `status`、不会在可用时读取 unary `status`。
-
-Android 和 VS Code Client 使用相同 rc.2 ApiProxy / v0.1.2 Typert Remote capability 探测；其 UI 和生命周期独立，不构成 Desktop Plugin 的组件兼容要求。
+测试预算用于 schema/版本、身份加密、授权、RPC、allowlist、权限隔离、事件顺序、恢复和 transport 状态机。
+共享契约不在各 Client 重复测试；跨端 conformance 必须在真实目标 runtime 运行。
+展示、布局、文案和静态说明以类型检查及必要人工烟测验证。
+既有主链路结果与最新工具、AGY 模型选择、Windows、APK / 真机、复杂预览验收分开记录，见[TODO](../../TODO.md)。

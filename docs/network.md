@@ -206,4 +206,4 @@ Client 可以把当前模式显示为 `LAN`、`P2P`、`TURN`、`Relay` 或 `Disc
 - Host signaling 与连接管理：`packages/plugin/src/server-connection.ts`
 - Client 连接编排：`packages/plugin/src/client-runtime.ts`
 - 规范性协议：[Remote Protocol v1 §10–14](protocol.md#10-control-channel)
-- 尚未完成的验证：[TODO](../TODO.md)
+- 尚未完成的验证：[TODO](TODO.md)

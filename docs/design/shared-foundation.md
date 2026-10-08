@@ -1,105 +1,76 @@
 # 共享基础功能设计
 
-状态：Draft v0.2
+更新时间：2026-10-08。
 
-## 1. 目的
+## 包与应用边界
 
-统一 Desktop 双角色 Plugin 与外部 Server 的身份、加密、连接和传输边界。Harness 业务层以
-rc.2 官方 `ApiProxy`、v0.1.2 alpha.1–rc.1 或 v0.1.5 rc.1 Session V3 官方 Typert Remote Gateway 为唯一事实来源；可选文件预览以 `dsh-file-viewer` provider 为唯一授权来源，
-不再维护平行的 Remote Session/Event 或文件系统协议。
-Android 与 VS Code Client 复用同一 capability 探测，在 rc.2 ApiProxy 和 v0.1.2 Typert Remote carrier 之间选择数据面。
+| 包/应用 | 职责 |
+| --- | --- |
+| `protocol` | Control / Relay、业务 tunnel 和领域 capability 的类型与运行时 schema |
+| `crypto` | X25519、HKDF、ChaCha20-Poly1305、Noise IK 与确定性 vector |
+| `webrtc` | Relay / LAN / P2P / TURN 和自适应传输状态 |
+| `client-core` | RPC 关联、流/事件分发、Harness / CodeX / ACP Client |
+| `plugin` | Host/本地 Remote、账号设备接入、信任、各领域 allowlist 与内存 UI carrier |
+| Android / VS Code | 各自 Client 生命周期、凭据与平台 UI |
+| Browser | 独立凭据授权与在线 Host Launcher，不建立 Remote transport |
+| 最小 Server | 单账号、设备凭据文件持久化、Control/握手转发和 opaque Relay |
 
-## 2. 包边界
+[协议](../protocol.md)定义 wire contract；完整 Server 与 Remote Web 由独立仓库实现。
+各领域共用身份和加密传输，但不共享业务 authority、RPC 命名空间或会话持久化。
 
-| 包 | 职责 | 不负责 |
-| --- | --- | --- |
-| `@dsh-remote/protocol` | Control/Relay envelope 与 ApiProxy/Typert Remote 隧道 envelope | Harness 业务模型、UI |
-| `@dsh-remote/crypto` | 设备密钥、Noise IK、AEAD counter | 设备授权、传输选择 |
-| `@dsh-remote/webrtc` | Relay、LAN、WebRTC/TURN transport 抽象 | ApiProxy、会话状态 |
-| `@dsh-remote/client-core` | 隧道 RPC 关联和事件分发 | Harness 业务 reducer、UI |
-| `@dsh-remote/plugin` | 账号设备接入、peer pinning、secure channel、ApiProxy/Typert Remote allowlist、File Viewer 只读桥和 Local/Remote switch | Server runtime、Harness 业务重建、通用文件系统访问 |
+## 身份与授权
 
-## 3. 端到端边界
+Host / Client 使用独立 deviceId 与 X25519 identity。Plugin 身份、credential 和 trusted peer 按规范化 Server origin 与角色隔离，私钥保留设备本地。
+Client 凭据与 Host 凭据、浏览器扩展凭据分别隔离。
 
-```text
-Harness Web UI
-  -> ApiProxySwitch (rc.2) / TypertGatewaySwitch (alpha)
-  -> RemoteHarnessApiProxy / RemoteTypertGateway
-  -> Noise secure channel
-  -> opaque Server relay
-  -> Host Plugin HarnessApiBridge / HarnessRemoteBridge
-  -> official Host ApiProxy / TypertGateway
-```
+账号密码、GitHub/知乎授权及主机匹配码由 Server 支持范围决定。匹配码用于 Host 加入账号，不是 Client/Host 配对码。
+业务建立前 Client 固定受 membership 保护的 Host descriptor key；Host 同时验证 Server account authorization 和本地 pinned trust。
+既有 deviceId 的 key 改变必须拒绝；不能由 presence、名称或 UI 选中状态授予信任。
 
-Server 可以读取路由和连接元数据，但不能解密 Harness business payload。
+Plugin 刷新凭据使用跨进程目录锁和锁内重读，不按时间强行抢锁；握手拒绝后最多恢复一次。
+连接被替换时停止自动抢占。异常锁恢复见根 README，并行 Host 使用不同 DSH_HOME。
 
-## 4. 身份与账号授权
+## 加密与传输
 
-每个 Host/Client 具有独立 deviceId、显示名、平台和 X25519 identity key。私钥只保存
-在设备本地。身份、device credential 和 trusted peer 按规范化 Server origin 与角色隔离。
+Noise IK 绑定双方 identity、Host/Client、connectionId；业务只进入认证后的加密 channel。
+AEAD counter、target、连接状态和消息限额共同执行 fail-closed 校验。
+Server 可见路由与设备/连接元数据，不读取 Relay 业务明文。最小 Server Relay-only，不提供 WebRTC/TURN。
 
-Host 和 Client 都必须归属站点账号；Server 为同账号异角色设备自动建立 membership。
-Host 可使用账号密码，或使用网页生成的 8 位、10 分钟 TTL、单次消费主机匹配码接入。
-该码只授权 Host 加入账号，不是 Host/Client pairing。建立业务通道前，Client 从受
-membership 保护的详情固定 Host key；Host 对 `connect.incoming.authorization=account`
-再次查询 Client descriptor 后写入本地 pinned trust。Server membership 与本地 trust
-必须同时成立，既有 deviceId 的 key 变化必须 fail closed。
+完整 transport 选路使用 LAN / P2P / TURN / Relay；STUN/TURN、ICE、signaling 和 werift/Android 原生互操作已有验证。
+网络切换、代理、休眠唤醒、rekey 与长期稳定性仍有独立待办，不能由基础互操作推断全部环境可用。
 
-## 5. 受控业务协议
+## 独立业务域
 
-Secure channel 中只接受：
+- Harness：`harness.api.*` / `harness.remote.*`，保持官方 ApiProxy / Typert 的请求、事件与权限语义。
+- CodeX：`codex.app.*`，App Server 固定 allowlist 和 Project / Thread authority。
+- ACP：`agent.acp.*`，Cursor / AGY 独立 capability；Host 会话/backend 归属，浏览器只消费 Host 接口。
+- File Viewer：`fileviewer.call`，provider 内受限 stat/readRange/list。
+- Loopback：`loopback.call`，Host 本地白名单端口和 HTTP/WebSocket 限制。
 
-- `harness.api.call`
-- `harness.api.respond`
-- `harness.api.stream.open`
-- `harness.api.stream.close`
-- `harness.remote.call`
-- `harness.remote.stream.open`
-- `harness.remote.stream.close`
-- `harness.transport.describe`
-- `fileviewer.call`（Host 宣告 `fileviewer.read.v1` 时，仅 stat/readRange/list）
-- 对应 response/error 与 `harness.api.*`、`harness.remote.*` stream events
+工具通过既有领域的固定 endpoint 接入。CodeX / ACP 使用 Host 验证的独立会话 scope，不能由 Client 自报 cwd 或通用 RPC 绕过 authority。
+终端归属/输入权独立于 Agent 审批；Remote 不得改插件自身访问设置。
+图片和超限业务 envelope 使用有界 transfer，限制类型、总量、并发、顺序、空闲期限与连接归属；不扩展为任意文件上传。
 
-Session、Message、Tool、Approval、Question、Workspace 和 Goal 的结构全部沿用对应版本
-的官方 ApiProxy 或 Typert Remote contract。Plugin 不复制其 schema，也不提供旧 `sessions.*`、
-`session.send`、`permissions.respond` 或 `sync.from`。
+## Capability 与兼容
 
-`fileviewer.call` 不承载 Harness 业务对象，只把 File Viewer provider 已授权的只读内容以
-不超过 512 KiB 的分块传输；禁止 openExternal、文件修改与任意 endpoint。
+`harness.transport.describe` 在加密通道中探测 carrier、领域与工具支持，老 Host 保留 legacy 降级。
+当前 Host 可提供 `workspaceTypes`，Client 同时检查已协商 capability 与 `available`，启用开关不等于实际就绪。
+后端初始化不阻塞 Harness，配置热更新只影响对应后端；不可用后端不能替换成另一个后端。
+兼容 profile 以[版本说明](../compatibility.zh.md)及源码为准，不复制或翻译任意 Harness wire format。
 
-Client 与 Host Plugin 推荐安装同一发布物。对已经发布的 Host，新增业务 endpoint 必须
-保留加法兼容：Client 先在 Noise channel 内调用 `harness.transport.describe`；旧 Host 返回
-`METHOD_NOT_FOUND` 时才使用 `clientVersion` 作为 rc.2 降级。rc.2 与 alpha carrier 不一致
-时在 mutation 前明确拒绝。官方 carrier 本身的破坏性 schema 变化仍需要提升协议版本，
-不能只依赖 Plugin 版本字符串。
+## 断线与恢复
 
-## 6. 传输与恢复
+断线关闭连接所属 pending RPC、stream、transfer 和审批句柄；Desktop Harness 回落 Local。
+CodeX / ACP 虚拟载体只存在 Client 内存，不进入 DSH SessionStore、Workspace 数据库或 Harness 日志。
+恢复重新认证、打开流、获取历史 baseline，丢弃迟到结果，不自动重放 mutation 或终端输入。
+Android 已有后端专属恢复行为；共享 pending call/stream 的完整恢复与长期稳定性仍按 TODO 跟踪。
 
-当前已实现 WebRTC offer/answer/ICE、STUN/TURN 与 Relay fallback 基础链路，选路优先级为
-`LAN -> P2P -> TURN -> Relay`。上层只依赖 `RemoteTransport`。真实跨网互操作、网络切换恢复
-与长期稳定性仍需验证，不能据此描述为已经稳定交付。
+## 安全与测试
 
-断线时：
+Plugin 不监听公网，预览 Client 只监听本机；日志不得包含 token、私钥、匹配码、Prompt、源码与工具输出。
+AGY 私有图片 tmp 是有界、按会话隔离的例外，不允许项目写入、任意路径或符号链接逃逸。
+未知 method、错误 connection/target、越权会话、identity mismatch、篡改、重放和无效权限回答均拒绝。
 
-1. pending tunnel RPC 失败；
-2. 原生 mux/host stream 结束；
-3. Desktop `ApiProxySwitch` 或 `TypertGatewaySwitch` 立即回落 Local；
-4. 再次选择 Remote 时重新建 Noise channel，并由官方 UI 重新打开 stream、读取 history baseline。
-
-Plugin 不维护第二套 seq replay buffer 或 full-resync 机制。
-
-## 7. 安全边界
-
-- Plugin 只建立出站连接，不监听公网端口。
-- 业务 payload 只能进入完成 Noise IK 和 membership/trust 校验的 channel。
-- Host 以固定 allowlist 代理 ApiProxy 或 Typert Remote endpoint；已认证 Remote peer 可通过官方 seam 管理 Host 实时注册的 settings 命名空间和全局 credential 引用，credential 值只写且 payload 有界。File Viewer 使用独立的 stat/readRange/list allowlist。禁止 `settings.openDocument`、任意目录访问、native open、attachment upload、下载和文件写入。
-- 未知 method、错误 target、重放、counter gap、identity mismatch 全部 fail closed。
-- token、私钥、主机匹配码、prompt、源码、工具输出和 ciphertext 不写日志。
-
-## 8. 核心测试
-
-- Control/Relay 编解码、版本和 frame limits。
-- Noise transcript、identity binding、篡改和重放拒绝。
-- 主机匹配码单次消费、同账号 membership 与 local pinned trust 双重授权。
-- ApiProxy/Typert Remote allowlist、RPC 关联、stream open/close、断线清理。
-- transport fallback/reconnect 状态机。
+核心测试保护 protocol schema、身份加密、账号授权、allowlist、RPC/stream、隔离、恢复与 transport 状态机。
+共享 fixture 由所属包验证，跨端验证在真实 runtime 执行；不以 Node 重跑共享代码冒充 Android 原生验收。
+待验证项见[TODO](../TODO.md)，协议对齐过程见[Schema 对齐](protocol-schema-alignment.md)。

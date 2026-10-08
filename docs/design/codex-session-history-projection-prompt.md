@@ -1,220 +1,97 @@
-# CodeX 虚拟 Workspace / Session 接入——完整需求提示词
+# CodeX Workspace / Session 内存展示投影设计
 
-> 将本文整体作为编码 Agent 的任务提示词使用。实现前必须阅读仓库根目录的
-> `AGENTS.md`、`README.md`、`README.zh.md`、`TODO.md`、`docs/protocol.md` 与实际代码。
+更新时间：2026-10-08。文件名保留既有引用；本文描述当前设计，不再作为从零实现的任务提示词。
 
-## 任务
+## 1. 定位与入口
 
-在 `deepseek-harness-remote` 的现有 Remote Plugin 中接入官方 CodeX App Server，并把 CodeX
-工作目录、Thread 与 History 暂时伪装成 DSH 原生 Workspace、Session 与 Session Event。
+CodeX 保留在 Remote Plugin 的 `packages/plugin/src/codex/` 独立领域，Host 使用 stdio App Server，Remote 使用 `codex.app.*`。
+Desktop 通过临时 ApiProxy / Typert carrier 复用原生 Workspace / Session / Conversation / Composer；Android 直接消费同一领域并在内存中投影。
+VS Code 当前不增加 CodeX 会话入口。完整 Remote Web runtime 仍在独立 Server 仓库；本仓库最小 Server 只转发加密数据。
 
-目标不是新增一套 CodeX 页面，而是让 DSH 已有的 Workspace/Session 列表、Conversation Renderer、
-Composer、Tool、file change 与 approval UI 直接消费 CodeX 数据。
+用户从 Remote Host 的工作区选择器进入 CodeX Project / Workspace，可选择既有目录或注册 Host 现存目录。
+CodeX 默认开启，可在 Host 后端设置中关闭；capability 与 `workspaceTypes.available` 同时成立才进入工作区。
+命令可发现不代表 App Server 已登录或就绪。
 
-CodeX 必须继续位于同一个 Remote Plugin 中，并作为 `packages/plugin/src/codex/` 下的独立领域。
-不得拆成第二个 Plugin，不修改 DSH 主仓库，也不得在本仓库增加 Remote Web、Server 或 Admin runtime。
-Android 可直接消费同一 `codex.app.*`；VS Code 暂不增加本功能。
+## 2. 数据所有权与 authority
 
-## 产品入口
+App Server 保存 Project、Thread、Turn、Item、History、运行与审批状态；Client 仅维护临时映射和 stream。
+不得写 DSH SessionStore、Workspace 数据库、Harness 日志或自建展示数据库，不读取 `~/.codex` 私有 JSONL/SQLite。
 
-本功能只有一个入口：用户从 DSH Desktop 的 Remote 工作区操作进入远端 Host 后，在原有工作区
-选择器中选择 CodeX 虚拟工作区。
+Workspace 优先由 `project/list` 得到；缺少可用根目录才使用 App Server `thread/list` 已返回的绝对 cwd 精确回退。
+不推测共同父目录，不接受 Client 自报路径作为 authority。
+`project/create` 仅接受 Host 已存在的单个绝对目录，Host 执行 realpath 和目录校验，App Server 返回新 Project 后才扩展 authority。
+新 Thread 可使用 authority 根内经词法路径和 realpath 双重验证的真实子目录；带 threadId 的调用也校验 Thread 归属。
 
-```text
-连接 Remote Host
-  -> 选择工作区
-     -> Harness Workspace
-     -> CodeX virtual Workspace
-        -> 进入 DSH 原生 Workspace/Session/Conversation 流程
-```
+Workspace ID 使用 `codex-workspace:project:` 前缀，Session ID 使用 `codex:<threadId>`。
+ID 只是映射，不能单独授权访问路径、Thread 或文件。
 
-禁止增加本地模式下的 CodeX 切换按钮、独立 CodeX 页面/时间线/Composer、第二套 Thread
-导航，以及 VS Code CodeX 入口。Desktop Remote 工作区选择器与 Android 工作区页可以提供添加 CodeX
-Project 的目录选择入口。Host 未启用 CodeX、App Server 不可用或 capability
-未协商时，Remote 工作区选择器不显示可操作的 CodeX 工作区。
-
-## 数据所有权
-
-这是展示载体，不是数据迁移：
-
-- CodeX App Server 始终保存并管理 Thread、Turn、Item、History、运行状态与审批状态；
-- Plugin 只在 Client 进程内维护临时 Workspace/Session 映射与 stream 状态；
-- 不得把虚拟 Workspace、Session 或 Event 写入 DSH SessionStore、Workspace 数据库、Harness 日志
-  或自建数据库；
-- 用户操作必须路由回 CodeX App Server 的白名单方法；
-- 退出 CodeX 模式、切换 Host 或断开连接时必须销毁虚拟 carrier、订阅和审批状态；
-- 重新进入或重连时重新读取 `thread/list` 与 `thread/read(includeTurns: true)` baseline。
-
-## 架构
+## 3. 数据流
 
 ```text
-DSH 原生 Workspace / Session / Conversation / Composer
-                         |
-                         | rc.2 ApiProxy 或 v0.1.2 Typert target
-                         v
-             CodeX Virtual Harness（仅内存）
-                         |
-                         | CodexRemoteClient
-                         v
-              已认证、端到端加密 Remote channel
-                         |
-                         v
-                 Remote Host Plugin
-                         |
-                         | 固定 allowlist
-                         v
-               Codex App Server (stdio)
+Desktop 原生 UI / Android Workspace、Session、Chat
+  -> Client 内存展示投影
+  -> CodexRemoteClient
+  -> membership + pinned identity + Noise channel
+  -> 每连接 Codex bridge 与固定 allowlist
+  -> Host stdio Codex App Server
 ```
 
-已有 Remote Host 认证、账号 membership、pinned identity、Noise IK、LAN/P2P/TURN/Relay、连接隔离与
-固定 App Server allowlist 必须继续复用。Server 只中继密文，不理解 CodeX 内容。
+Desktop 虚拟 carrier 只实现 UI 需要的固定 endpoint；未知方法拒绝，不能回落到 Host 本地 Harness Session。
+各版本 carrier 和 Session V3 兼容以[兼容说明](../compatibility.zh.md)和源码为准。
 
-## 虚拟标识
+## 4. 方法与原生操作
 
-```text
-Workspace ID = codex-workspace:project:<projectId-or-cwd-derived-id>
-Session ID   = codex:<threadId>
-```
-
-Workspace 优先来自 CodeX App Server 的 `project/list`。Desktop 与 Android 还可通过受限的
-`project/create` 将 Host 上已存在的真实目录注册为 CodeX Project；一个 CodeX project 对应一个虚拟 Workspace；
-该 project id 或 project root 能归属的 Thread 对应 Session。当 `project/list` 不可用或没有可用根目录时，
-Client 可按 `thread/list` 已返回的绝对 `cwd` 精确合成只读后备 Workspace；新 Thread 可使用这些
-authority 根内通过词法路径与 `realpath` 双重校验的真实子目录。不得合并到推测的父目录，也
-不得接受 Client 自报路径。映射只代表当前 CodeX catalog，不创建 DSH 本地记录。
-
-## 官方 CodeX 契约
-
-Host 只通过 stdio 启动 `codex app-server`。实现以当前官方 schema 和运行时生成的 schema 为准，
-不得读取或解析 `~/.codex` 的私有 JSONL、SQLite 或其它内部存储。
-
-允许的方法包括 `account/read`、`model/list`、`project/list`、`project/create`、`thread/list`、`thread/read`、`thread/start`、
-`thread/resume`、`thread/fork`、`thread/name/set`、`thread/archive`、`thread/unarchive`、
-`thread/unsubscribe`、`turn/start`、`turn/steer` 与 `turn/interrupt`。
-
-禁止 raw App Server 代理、Shell、PTY、`command/*`、`process/*`、任意 `config/*`、任意文件读取、
-`thread/delete`、`thread/shellCommand`、`thread/inject_items` 与远程 API Key 登录。
-
-`project/list` 是 CodeX Workspace 的首选来源。`project/create` 仅接受一个 Host 现存绝对目录；Host
-必须将其解析为 canonical `realpath` 并确认是目录，再交给 App Server 注册。只有 App Server 返回的
-Project 才能扩展 Workspace authority，映射仍只保留在 Client 内存中。`project/list` 不可用或没有可用根目录时，Host 可使用
-`thread/list` 已返回的绝对 `cwd` 作为精确 Workspace authority；新增 Thread 可使用 authority 根内经过
-词法路径与 `realpath` 双重校验的真实子目录；其它带 `threadId` 的调用必须再次验证
-该 Thread 属于当前 authority，不能只信任 Client 发来的 ID。
-
-## DSH 原生数据面
-
-DSH 0.1.x 存在两个兼容面，Plugin 必须复用现有 switch：
-
-1. rc.2：向 `ApiProxySwitch` 提供虚拟 `ApiProxy`；
-2. v0.1.2 alpha.1–rc.1：向 `TypertGatewaySwitch` 提供虚拟 carrier target。
-
-禁止修改 DSH 主仓库注册 Session Provider，也不要新增另一套线协议。虚拟 target 只实现原生 UI
-实际需要的白名单 endpoint；未知 endpoint 必须返回稳定的 `method-not-found`，不允许回落到 Host
-本地 Harness Session。
-
-alpha 基线至少支持 `workspace/list`、`workspace/follow`、`workspace/create`、`session/list`、
-`session/create`、`session/fork`、`session/rename`、`workspace/archiveSession`、
-`session/modelCatalog`、`session/control`、`session/follow` 与 `$events`。rc.2 至少支持等价的
-`workspace.*`、`sessions.*`、events mux/host 与 `respond`。
-
-## History 到原生事件的映射
-
-每次打开 Session 时，调用 `thread/read({ threadId, includeTurns: true })`，按 Turn 和 Item 原顺序生成
-单调递增 `seq` 的 DSH 原生事件：
-
-| CodeX 数据 | DSH 原生事件 |
+| UI 动作 | App Server 操作 |
 | --- | --- |
-| Turn 开始/结束 | `turn/start`、`turn/end` |
-| Turn 内步骤 | `step/start`、`step/end` |
-| `userMessage` | `user/message` |
-| `agentMessage` | `assistant/message` |
-| assistant delta | `assistant/chunk` |
-| `reasoning` / `plan` 及其 delta | assistant message / 原生 reasoning chunk；Turn plan 同步为 `todo/write` |
-| command/MCP/dynamic tool/file change | `tool/call` + `tool/result` |
-| command/file output delta、MCP progress | 原位替换同一 `tool/result` 的有界累计内容 |
-| file patch update | 只含 path/kind 的文件变更工具卡片；不透传原始 diff |
-| Thread status / model reroute | 原生 session status / `request/context` 与 model-selection projection |
-| Web Search/Subagent/Image/Compaction/Review Mode | 具有安全摘要的原生 `tool/call` + `tool/result` |
-| CodeX error | 可由原生 renderer 安全展示的 assistant/error 事件 |
+| Project 列表 / 注册 | `project/list` / `project/create` |
+| 新会话 / 打开历史 | `thread/start` / `thread/read` |
+| Fork / Rename / Archive | `thread/fork` / `thread/name/set` / `thread/archive` |
+| 发送 Prompt | `thread/resume` 后 `turn/start` |
+| 运行中调整 | `turn/steer`，校验 expectedTurnId |
+| 停止 | `turn/interrupt` |
+| 审批 | Host `codex.app.respond`，单次允许或拒绝 |
 
-snapshot 必须包含原生 header、cursor、records、`hasMore` 与安全 projection。未知 Item 不得泄漏原始
-对象。实时订阅处理 `turn/started`、`item/started`、`item/completed`、assistant/reasoning/plan
-delta、command/file/MCP progress、file patch update、`thread/status/changed`、`model/rerouted`、
-`turn/completed` 和 command/file-change approval request。后续 CodeX 新增且尚未识别的 Item 继续安全忽略，
-不得把原始对象作为通用 JSON 卡片透传。
+打开历史不自动 resume；发送前恢复相应 Thread。账户、模型、unsubscribe/unarchive 等操作仍受编译期 allowlist 限制，
+完整 schema 与限额见[协议](../protocol.md)及 `codex/method-policy.ts`。
+禁止 raw App Server 代理、`command/*`、`process/*`、任意 config、Thread 删除/注入和远程 API Key 登录。
 
-断线后以新的 persisted baseline 替换临时 live 状态，不维护第二套永久 replay buffer，不自动重放
-任何 mutation。
+图片以受限 base64 input 经 CodeX transfer 传递，在 Host 转为 App Server data URL；不接收通用附件、外部 URL 或任意 Host path。
+权限控件显示 Host 确认的会话策略，未知时标明沿用 Host 设置；切换确认后生效。
 
-## 原生操作路由
+## 5. History 与实时事件
 
-| DSH 原生动作 | CodeX App Server |
+打开 Session 从 `thread/read(includeTurns: true)` 取得 baseline，按 Turn/Item 顺序生成原生展示事件。
+
+| CodeX 数据 | 原生展示 |
 | --- | --- |
-| 添加 CodeX Workspace | `project/create` |
-| 新建 Session | `thread/start` |
-| Fork Session | `thread/fork` |
-| Rename Session | `thread/name/set` |
-| Archive Session | `thread/archive` |
-| 打开既有 Session | `thread/read`; 不得自动 resume |
-| Composer 发送 | `thread/resume` 后 `turn/start` |
-| 运行中 steer | `turn/steer` + `expectedTurnId` |
-| Stop | `turn/interrupt` |
-| Approval | Host 的 `codex.app.respond` |
+| Turn 开始/结束 | turn start/end |
+| User / Agent message | user/assistant message |
+| Assistant / reasoning delta | 原生 chunk 和 reasoning |
+| Plan | todo/write 与计划展示 |
+| Command / MCP / tool / file change | tool call/result 与受限摘要 |
+| Output delta / progress | 同一 tool result 的有界累计更新 |
+| Thread / model 状态 | session status 与模型选择投影 |
+| 未识别 Item | 安全忽略，不透传任意原始对象 |
 
-Composer 接受文本和剪贴板粘贴的 PNG、JPEG、WebP、GIF 图片；图片只以受限 base64 input 通过
-CodeX transfer 传输，并在 Host 边界转换成 App Server data URL。通用附件、外部 URL、Host path
-与 DSH inbox queue 必须明确返回受限错误。远程审批只允许单次 `allow_once` 或 `deny`，不得提供
-session-scoped 或永久授权。
+snapshot 保持 header/cursor/records/hasMore 和事件顺序；实时流处理开始、delta、完成、状态与审批。
+大 History 走有界 transfer，断线后新的持久化 baseline 替换临时 live 状态，不重放 mutation 或建立永久 replay buffer。
 
-## 生命周期与安全
+## 6. CodeX Files / Terminal
 
-- 虚拟 target 必须按当前选中的 Remote Host 创建，不能调用本机 CodeX；
-- 切换回 Harness、切换 Host、退出 Remote、授权清除或连接断开时立即 close；
-- 所有 stream、pending waiter、abort listener 和 approval handle 必须释放；
-- 多 Client 的 stream 与 approval 必须按加密 connection 隔离；
-- Token、私钥、prompt、history、源码、工具输出和完整路径不得写日志；
-- 未知 connection、错误 target、重放、identity mismatch 与越权 root 必须 fail closed。
+当前 CodeX 会话已接入受限工作区工具。`codex-workspace-bridge.ts` 由 Host 将 `codex:<threadId>` 解析为 Thread cwd，
+独立创建文件 scope 和终端上下文；不把 CodeX ID 当作 Harness agent，也不扩大 App Server allowlist。
+路径规范化、realpath、符号链接、尺寸与会话有效性校验和 Harness 工具一致，不能越过该 Thread cwd。
 
-## 实现位置
+只读文件使用固定 `workspaceFiles/*` 语义。终端使用官方 `terminal/*` shape、快照、controllerId、follow/retain 与单调输出序号，
+遵循 Host 开关、设备归属与连接输入权。Host subprocess 可用时提供 PTY，否则 pipe；Client 模拟器重放有界原始输出。
+这是受控会话工具入口，不能成为 raw App Server shell/command 或通用 filesystem RPC。
 
-```text
-packages/plugin/src/codex/virtual-harness.ts  # 虚拟原生载体与事件投影
-packages/plugin/src/client-runtime.ts         # 创建、切换、销毁 target
-packages/plugin/src/client.ts                 # 仅 Remote 工作区选择入口
-```
+## 7. 生命周期与验证
 
-旧的独立 CodeX sidebar、conversation override、timeline 与 composer 代码必须删除，不得只用 CSS 隐藏。
+切换领域/Host、退出 Remote、撤销、断线或关闭 CodeX 时清理对应内存载体、stream、pending waiter 和审批句柄。
+Host 配置热更新只重启变化后端；其他后端保留。工具和审批按认证连接隔离，未知连接、identity mismatch、越权 root 和迟到回复拒绝。
+日志不包含 token、私钥、Prompt、历史、源码或工具输出。
 
-## 测试与验证
-
-核心测试至少覆盖 Workspace 分组与稳定 ID、History 事件顺序与 seq、live delta/completion、Composer
-到 `thread/resume + turn/start/steer`、interrupt/rename/fork/archive/approval、未知 endpoint fail closed、
-close/abort/断线，以及 ApiProxy/Typert 原生 schema 兼容。
-
-完成前运行：
-
-```bash
-pnpm --filter './packages/**' -r build
-pnpm -r check
-node scripts/verify-dsh-plugin.mjs
-pnpm -r test
-NODE_ENV=production pnpm -r build
-git diff --check
-```
-
-还必须启动两个 DeviceId 不同的 DSH Desktop 实例加载本插件，验证 Remote Host 选择 -> CodeX 工作区
--> 原生 Session 列表 -> 原生 Conversation History -> 原生 Composer 发送 -> 实时回复/审批 -> 退出 Remote。
-
-## 验收标准
-
-1. CodeX 入口只出现在 Remote 工作区选择阶段；
-2. 选择后显示 DSH 原生 Workspace、Session、Conversation 和 Composer，不出现独立 CodeX 页面；
-3. History 和 live frame 能由原生 renderer 正确消费；
-4. 原生操作正确路由回 CodeX App Server；
-5. 虚拟记录不进入 DSH SessionStore、Workspace 数据库或 Harness 日志；
-6. Host allowlist、CodeX Workspace authority、membership、identity 固定、Noise 与连接隔离仍然生效；
-7. 退出或断线后无残留虚拟 target、stream 或 approval；
-8. Android 仅直接消费同一 `codex.app.*`；不修改 VS Code、Server runtime 或 DSH 主仓库；
-9. 核心测试、check、bundle 校验、build、test 与 `git diff --check` 通过；
-10. README、中文 README、AGENTS、TODO、协议和本文与真实实现一致。
+核心验证保护 authority、allowlist、History/live 顺序、RPC、审批、恢复和文件/终端隔离；纯展示不新增测试。
+已有 CodeX Desktop/Android 主链路验收不等于 Project 新建、最新工具、Windows 与长连接全部通过。
+剩余验收见[TODO](../TODO.md)，使用与边界见[CodeX 技术说明](../codex-remote.md)，实现约束见 [AGENTS](../../AGENTS.md)。
