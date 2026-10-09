@@ -1718,6 +1718,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (config === undefined || identity === undefined) return false
     set({ busyAction: `forget:${deviceId}`, error: undefined })
     try {
+      const { api } = await serverSession.authenticate(config.baseUrl, identity)
+      await api.removeAccountDevice(deviceId)
       if (get().selectedDevice?.deviceId === deviceId) await get().disconnect()
       await forgetHost(deviceId)
       await clearCodexPermissionPresets(deviceId)

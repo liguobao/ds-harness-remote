@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, ShieldCheck, X } from 'lucide-react-native'
+import { ActivityIndicator, Alert, Animated, BackHandler, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, ShieldCheck, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -37,6 +37,7 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   const connectedWorkspaces = useAppStore(state => state.workspaces)
   const refreshing = useAppStore(state => state.refreshing)
   const refresh = useAppStore(state => state.refreshDevices)
+  const forgetDevice = useAppStore(state => state.forgetDevice)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const isHome = onBack === undefined
@@ -129,15 +130,18 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                 body={zhCN.devices.emptyBody}
               />
             : <View>{devices.map(device => (
-                <ListRow
+                <SwipeableDeviceRow
                   key={device.deviceId}
-                  title={device.name}
-                  subtitle={deviceSubtitle(device)}
-                  meta={lastSeenText(device.lastSeenAt)}
-                  metaInline
-                  icon={Laptop}
-                  status={<StatusBadge status={device.online ? 'online' : 'offline'} />}
+                  device={device}
                   onPress={() => onDevice(device)}
+                  onRemove={() => Alert.alert(
+                    zhCN.devices.forgetTitle(device.name),
+                    zhCN.devices.forgetBody,
+                    [
+                      { text: zhCN.common.cancel, style: 'cancel' },
+                      { text: zhCN.devices.forget, style: 'destructive', onPress: () => void forgetDevice(device.deviceId) },
+                    ],
+                  )}
                 />
               ))}</View>}
       </Screen>
@@ -146,6 +150,73 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
           <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
         </View>
       )}
+    </View>
+  )
+}
+
+function SwipeableDeviceRow({ device, onPress, onRemove }: {
+  device: RemoteDevice
+  onPress: () => void
+  onRemove: () => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const offset = useRef(new Animated.Value(0)).current
+  const swiped = useRef(false)
+  const busy = useAppStore(state => state.busyAction === `forget:${device.deviceId}`)
+
+  const settle = (value: number) => {
+    Animated.spring(offset, { toValue: value, useNativeDriver: true, bounciness: 0, speed: 24 }).start()
+  }
+  const responder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    onPanResponderMove: (_, gesture) => {
+      const next = Math.max(0, Math.min(104, (swiped.current ? 104 : 0) + gesture.dx))
+      offset.setValue(next)
+    },
+    onPanResponderRelease: (_, gesture) => {
+      const next = Math.max(0, Math.min(104, (swiped.current ? 104 : 0) + gesture.dx))
+      swiped.current = next >= 52
+      settle(swiped.current ? 104 : 0)
+    },
+    onPanResponderTerminate: () => { swiped.current = false; settle(0) },
+  })).current
+
+  const press = () => {
+    if (swiped.current) { swiped.current = false; settle(0); return }
+    onPress()
+  }
+  return (
+    <View style={styles.swipeRow}>
+      <View style={styles.swipeDeleteAction}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.devices.forget}
+          disabled={busy}
+          onPress={() => { swiped.current = false; settle(0); onRemove() }}
+          style={styles.swipeDeleteButton}
+        >
+          <Trash2 size={20} color={colors.white} />
+          <Text style={styles.swipeDeleteText}>{zhCN.devices.forget}</Text>
+        </Pressable>
+      </View>
+      <Animated.View style={[styles.swipeContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
+        <Pressable accessibilityRole="button" onPress={press} style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}>
+          <View style={styles.rowIcon}><Laptop size={21} color={colors.primary} /></View>
+          <View style={styles.rowCopy}>
+            <View style={styles.rowTitleLine}>
+              <Text style={styles.rowTitle} numberOfLines={1}>{device.name}</Text>
+              <StatusBadge status={device.online ? 'online' : 'offline'} />
+            </View>
+            <View style={styles.rowDetailLine}>
+              <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{deviceSubtitle(device)}</Text>
+              <Text style={styles.rowMeta} numberOfLines={1}>{lastSeenText(device.lastSeenAt)}</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={colors.subtle} />
+        </Pressable>
+      </Animated.View>
     </View>
   )
 }
@@ -649,6 +720,21 @@ function createStyles(colors: ThemeColors) {
   favoriteLinkPressed: { opacity: 0.6 },
   favoriteLinkText: { ...type.bodyStrong, color: colors.primary, textDecorationLine: 'underline', flexGrow: 2, flexShrink: 1, flexBasis: 0 },
   favoriteLinkMeta: { ...type.caption, color: colors.muted, flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+  swipeRow: { position: 'relative', overflow: 'hidden' },
+  swipeDeleteAction: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 104, backgroundColor: colors.danger, borderRadius: radius.md, overflow: 'hidden' },
+  swipeDeleteButton: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  swipeDeleteText: { ...type.caption, color: colors.white },
+  swipeContent: { backgroundColor: colors.background },
+  listRow: { minHeight: 82, paddingVertical: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
+  listRowPressed: { backgroundColor: colors.surface },
+  rowIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  rowCopy: { flex: 1, gap: 3 },
+  rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
+  rowTitle: { ...type.bodyStrong, color: colors.ink, flex: 1 },
+  rowDetailLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  rowSubtitle: { ...type.small, color: colors.muted },
+  rowInlineSubtitle: { flex: 1 },
+  rowMeta: { ...type.caption, color: colors.subtle },
   connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
   connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
   connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },

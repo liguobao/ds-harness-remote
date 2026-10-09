@@ -90,6 +90,11 @@ export class RemoteServerApi {
     await this.request('/api/v1/devices/self', { method: 'DELETE' })
   }
 
+  /** Remove an account-owned Host, matching the Web device removal operation. */
+  async removeAccountDevice(deviceId: string): Promise<void> {
+    await this.request(`/api/v1/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' })
+  }
+
   /** Account password login; the returned token only authorizes device registration. */
   async loginAccount(email: string, password: string): Promise<AccountLoginResult> {
     const body = await this.request<unknown>('/api/v1/auth/login', {
