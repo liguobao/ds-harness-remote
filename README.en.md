@@ -9,7 +9,7 @@ Harness baseline: `0.2.1-alpha.1`, retaining `0.2.0-rc.2` and admitting future `
 <p align="center">
   <strong>English</strong>
   &nbsp;·&nbsp;
-  <a href="README.md">中文</a>
+  <a href="README.zh.md">中文</a>
   &nbsp;·&nbsp;
   <a href="docs/README.md">Documentation</a>
   &nbsp;·&nbsp;

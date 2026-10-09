@@ -40,7 +40,7 @@
 
 ## 阅读路径
 
-- **项目介绍与快速开始**：默认入口为[中文 README](../README.md)，英文版见[English README](../README.en.md)。
+- **项目介绍与快速开始**：默认入口为[English README](../README.md)，中文版见[中文 README](../README.zh.md)。
 - **在 dsh-TUI 中使用 Remote**：先读[dsh-TUI Remote 使用指南](dsh-tui.md)，再按需查看[插件包说明](../packages/plugin/README.md)。
 - **安装或使用其他 Plugin 入口**：先读[根 README](../README.md)，再读[插件包说明](../packages/plugin/README.md)。
 - **了解 Codex Remote 的实现边界**：先读[Codex Remote 技术说明](codex-remote.md)，需要实现级字段时再查[协议](protocol.md)。
