@@ -76,6 +76,23 @@ describe('AcpVirtualHarness', () => {
     } finally { await target.close() }
   })
 
+  it('delegates unprojected global surfaces to the Host gateway', async () => {
+    const hostCarrier = {
+      invoke: vi.fn(async () => undefined),
+      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
+      open: vi.fn(async () => (async function* () { yield { type: 'ready' } })()),
+    }
+    const target = new AcpVirtualHarness(fakeAcp(), { deviceId: 'host-1', name: 'Host' }, 'antigravity', hostCarrier)
+    const signal = new AbortController().signal
+    await expect(target.dispatch('settings/describe', { args: {} }, signal))
+      .resolves.toEqual({ ok: true, value: { endpoint: 'settings/describe' } })
+    expect(hostCarrier.dispatch).toHaveBeenCalledWith('settings/describe', { args: {} }, signal)
+    const stream = await target.open('account/watch', { args: {} }, signal)
+    await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
+    expect(hostCarrier.open).toHaveBeenCalledWith('account/watch', { args: {} }, signal)
+    await target.close()
+  })
+
   it('provides the required native carrier stream baselines', async () => {
     await runScenarios([
       {
@@ -113,6 +130,25 @@ describe('AcpVirtualHarness', () => {
           const stream = await target.open('$events', {}, new AbortController().signal)
           const first = await stream[Symbol.asyncIterator]().next()
           expect(first.value).toMatchObject({ type: 'ready', host: { home: '/workspace/repo' } })
+          await target.close()
+        },
+      },
+      {
+        name: 'answers the background-job roster without a terminal stream failure',
+        run: async () => {
+          const client = fakeAcp()
+          const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
+          const rosterController = new AbortController()
+          const roster = await target.open('job/list', { args: { request: { sessionId: 'acp:job' } } }, rosterController.signal)
+          const rosterIterator = roster[Symbol.asyncIterator]()
+          await expect(rosterIterator.next()).resolves.toEqual({ done: false, value: { type: 'rows', jobs: [] } })
+          rosterController.abort()
+          await expect(rosterIterator.next()).resolves.toMatchObject({ done: true })
+
+          const followController = new AbortController()
+          const follow = await target.open('job/follow', { args: { request: { jobId: 'job-1' } } }, followController.signal)
+          followController.abort()
+          await expect(follow[Symbol.asyncIterator]().next()).resolves.toMatchObject({ done: true })
           await target.close()
         },
       },

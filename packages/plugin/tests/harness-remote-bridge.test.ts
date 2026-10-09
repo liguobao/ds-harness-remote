@@ -41,6 +41,22 @@ describe('HarnessRemoteBridge', () => {
     }
   })
 
+  it('forwards the background-job roster and observation streams', async () => {
+    await runScenarios(['job/list', 'job/follow'].map(endpoint => ({
+      name: endpoint,
+      run: async () => {
+        const open = vi.fn(async () => (async function* () { yield { type: 'rows', jobs: [] } })())
+        const publish = vi.fn(async () => undefined)
+        const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+        const payload = { args: { request: { sessionId: 'session-1' } } }
+        await bridge.openStream({ streamId: 'jobs1', endpoint, payload })
+        expect(open).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', { streamId: 'jobs1', reason: 'completed' }))
+        await expect(bridge.call({ endpoint: endpoint.split('/')[0] + '/arbitrary', payload })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      },
+    })))
+  })
+
   it('forwards only fixed v0.2.1 question and Mods streams', async () => {
     await runScenarios(['userQuestions/attachWait', 'claudeCodeMods/watchBand'].map(endpoint => ({
       name: endpoint,

@@ -27,6 +27,17 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  it('answers the background-job roster without a terminal stream failure', async () => {
+    const target = new CodexVirtualHarness(fakeCodex(), { deviceId: 'host-1', name: 'Host' })
+    const rosterController = new AbortController()
+    const roster = await target.open('job/list', { args: { request: { sessionId: 'codex:thr_1' } } }, rosterController.signal)
+    const rosterIterator = roster[Symbol.asyncIterator]()
+    await expect(rosterIterator.next()).resolves.toEqual({ done: false, value: { type: 'rows', jobs: [] } })
+    rosterController.abort()
+    await expect(rosterIterator.next()).resolves.toMatchObject({ done: true })
+    await target.close()
+  })
+
   it('switches the native Session permission projection between workspace and Full access', async () => {
     const client = fakeCodex()
     const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })

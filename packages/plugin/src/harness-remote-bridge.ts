@@ -118,6 +118,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'goals/edit',
   'goals/pause',
   'goals/resume',
+  'job/list',
+  'job/follow',
   'llm/discoverModels',
   'llm/listConfigurableProviders',
   'llm/listProviders',

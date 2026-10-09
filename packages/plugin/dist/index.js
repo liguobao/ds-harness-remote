@@ -16344,7 +16344,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         case "commands/execute":
           return ok(await this.executeCommand(args, signal));
         default:
-          return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
+          return this.hostCarrier === void 0 ? fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
       }
     } catch (error) {
       return failFrom(error);
@@ -16366,6 +16366,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg(args), signal);
     if (endpoint === "$events") return this.remoteEvents(signal);
+    if (endpoint === "job/list" || endpoint === "job/follow") return this.emptyJobStream(endpoint, signal);
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",
@@ -16591,6 +16593,17 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.controlStreams.add(queue);
     queue.push({ type: "baseline", value: { queues: {}, jobs: {}, projections: {} } });
     return queue.iterate(() => this.controlStreams.delete(queue));
+  }
+  /**
+   * Background jobs belong to the Host Harness session, not to a CodeX virtual
+   * Workspace. The native session header mounts a job roster stream as soon as a
+   * Session opens, so answer it with an authoritative empty roster instead of a
+   * terminal `method-not-found` failure that tears the page down.
+   */
+  emptyJobStream(endpoint, signal) {
+    const queue = new AsyncValueQueue2(signal);
+    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
+    return queue.iterate(() => queue.close());
   }
   async remoteEvents(signal) {
     const queue = new AsyncValueQueue2(signal);
@@ -18585,10 +18598,11 @@ async function discoverAcpVirtualWorkspaces(client, backend, signal) {
   return [];
 }
 var AcpVirtualHarness = class _AcpVirtualHarness {
-  constructor(client, host, backend = "cursor") {
+  constructor(client, host, backend = "cursor", hostCarrier) {
     this.client = client;
     this.host = host;
     this.backend = backend;
+    this.hostCarrier = hostCarrier;
     this.api = this.createApiProxy();
   }
   api;
@@ -18606,8 +18620,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   lastProjectionSeq = 0;
   imageAttachments = /* @__PURE__ */ new Map();
   closed = false;
-  static remote(core, host, backend = "cursor", capabilities = []) {
-    return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend);
+  static remote(core, host, backend = "cursor", capabilities = [], hostCarrier) {
+    return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier);
   }
   async workspaces() {
     return [...this.workspaceById.values()];
@@ -18762,7 +18776,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "commands/execute":
           return business2(void 0);
         default:
-          return fail2("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`);
+          return this.hostCarrier === void 0 ? fail2("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
       }
     } catch (error) {
       return failFrom2(error);
@@ -18784,6 +18798,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (endpoint === "session/control") return this.sessionControl(signal);
     if (endpoint === "session/follow") return this.sessionFollow(requestArg2(args), signal);
     if (endpoint === "$events") return this.remoteEvents(signal);
+    if (endpoint === "job/list" || endpoint === "job/follow") return this.emptyJobStream(endpoint, signal);
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
     throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",
@@ -19105,6 +19121,17 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.controlStreams.add(queue);
     queue.push({ type: "baseline", value: { projections: {} } });
     return queue.iterate(() => this.controlStreams.delete(queue));
+  }
+  /**
+   * Background jobs belong to the Host Harness session, not to a backend-scoped
+   * virtual Workspace. The native session header mounts a job roster stream as
+   * soon as a Session opens, so answer it with an authoritative empty roster
+   * instead of a terminal `method-not-found` failure that tears the page down.
+   */
+  emptyJobStream(endpoint, signal) {
+    const queue = new AsyncValueQueue3(signal);
+    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
+    return queue.iterate(() => queue.close());
   }
   async remoteEvents(signal) {
     const id5 = `cursor-events:${Date.now()}:${Math.random()}`;
@@ -22290,7 +22317,7 @@ var ClientModeRuntime = class {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : []);
+    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [], new RemoteTypertGateway2(remote.client));
     let workspace;
     try {
       workspace = await virtual.selectWorkspace(workspaceId);
@@ -22325,7 +22352,7 @@ var ClientModeRuntime = class {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name
-    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : []);
+    }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [], new RemoteTypertGateway2(remote.client));
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
@@ -29325,8 +29352,10 @@ var RpcRouter = class {
       return createRpcResponse(request.id, result);
     } catch (error) {
       const response = errorResponse2(request.id, error);
+      const failedEndpoint = typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
+        ...failedEndpoint ? { endpoint: failedEndpoint } : {},
         durationMs: Math.round(performance.now() - startedAt),
         code: response.payload.code,
         retryable: response.payload.retryable
@@ -31433,6 +31462,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "goals/edit",
   "goals/pause",
   "goals/resume",
+  "job/list",
+  "job/follow",
   "llm/discoverModels",
   "llm/listConfigurableProviders",
   "llm/listProviders",

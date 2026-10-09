@@ -622,7 +622,7 @@ export class ClientModeRuntime {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [])
+    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [], new RemoteTypertGateway(remote.client))
     let workspace: AcpVirtualWorkspaceView
     try {
       workspace = await virtual.selectWorkspace(workspaceId)
@@ -663,7 +663,7 @@ export class ClientModeRuntime {
     const virtual = AcpVirtualHarness.remote(remote.client, {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
-    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [])
+    }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [], new RemoteTypertGateway(remote.client))
     const workspace = await virtual.selectOrCreateWorkspace(trimmedPath)
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()

@@ -396,7 +396,9 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'skills/list': return business(success({ items: [] }))
         case 'commands/list': return ok(this.commandList(args))
         case 'commands/execute': return ok(await this.executeCommand(args, signal))
-        default: return fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)
+        default: return this.hostCarrier === undefined
+          ? fail('method-not-found', `CodeX virtual Harness does not implement ${endpoint}.`)
+          : await this.hostCarrier.dispatch(endpoint, payload, signal)
       }
     } catch (error) {
       return failFrom(error)
@@ -419,6 +421,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     if (endpoint === 'session/control') return this.sessionControl(signal)
     if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
     if (endpoint === '$events') return this.remoteEvents(signal)
+    if (endpoint === 'job/list' || endpoint === 'job/follow') return this.emptyJobStream(endpoint, signal)
+    if (this.hostCarrier !== undefined) return this.hostCarrier.open(endpoint, payload, signal)
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true as const,
       code: 'method-not-found',
@@ -671,6 +675,18 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.controlStreams.add(queue)
     queue.push({ type: 'baseline', value: { queues: {}, jobs: {}, projections: {} } })
     return queue.iterate(() => this.controlStreams.delete(queue))
+  }
+
+  /**
+   * Background jobs belong to the Host Harness session, not to a CodeX virtual
+   * Workspace. The native session header mounts a job roster stream as soon as a
+   * Session opens, so answer it with an authoritative empty roster instead of a
+   * terminal `method-not-found` failure that tears the page down.
+   */
+  private emptyJobStream(endpoint: 'job/list' | 'job/follow', signal: AbortSignal): AsyncIterable<unknown> {
+    const queue = new AsyncValueQueue(signal)
+    if (endpoint === 'job/list') queue.push({ type: 'rows', jobs: [] })
+    return queue.iterate(() => queue.close())
   }
 
   private async remoteEvents(signal: AbortSignal): Promise<AsyncIterable<unknown>> {

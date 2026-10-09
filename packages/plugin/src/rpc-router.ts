@@ -128,8 +128,12 @@ export class RpcRouter {
       return createRpcResponse(request.id, result)
     } catch (error: unknown) {
       const response = errorResponse(request.id, error)
+      const failedEndpoint = typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
+        ? String((request.payload.params as Record<string, unknown>).endpoint)
+        : undefined
       this.logger?.warn('host rpc failed', {
         method: request.payload.method,
+        ...(failedEndpoint ? { endpoint: failedEndpoint } : {}),
         durationMs: Math.round(performance.now() - startedAt),
         code: response.payload.code,
         retryable: response.payload.retryable,
