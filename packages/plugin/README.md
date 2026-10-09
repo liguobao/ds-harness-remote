@@ -1,7 +1,5 @@
 # DeepSeek Harness Remote
 
-当前 Harness 适配基线：`0.2.1-alpha.1`，保留 `0.2.0-rc.2`，版本范围接纳后续 `0.2.2` RC；legacy ApiProxy 不再作为兼容维护目标。详细范围与验证边界见[兼容说明](../../docs/compatibility.zh.md)。
-
 Continue DeepSeek Harness sessions and experimental Codex, Cursor, and Antigravity workspaces from another device over an end-to-end encrypted connection.
 
 [GitHub](https://github.com/liguobao/ds-harness-remote) · [Full guide](https://github.com/liguobao/ds-harness-remote/blob/main/README.md) · [中文说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.zh.md) · [Remote Web](https://dsh.r2049.cn/app) · [Android](https://github.com/liguobao/ds-harness-remote/releases/latest)
