@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-10-10
+
+- Adds account-owned Host removal from the Android device list, with swipe-to-remove confirmation and local credential cleanup.
+- Improves Antigravity ACP cancellation, restart recovery, thinking-stream capture, and tool completion status reporting.
+- Serves unprojected Harness surfaces through the Host gateway so ACP clients can keep their existing workspace view.
+
 ## 0.5.1 - 2026-10-09
 
 - Advances the Plugin and Android app to `0.5.1` (Android `versionCode 40`).

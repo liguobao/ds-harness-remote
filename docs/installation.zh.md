@@ -7,7 +7,7 @@
 打开 **扩展 / 插件管理**，选择从 **npm** 安装，输入包名和版本：
 
 ```text
-ds-harness-remote@0.5.1
+ds-harness-remote@0.5.2
 ```
 
 安装后重启 Desktop。更新和卸载也使用同一插件管理入口。

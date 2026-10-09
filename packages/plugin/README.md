@@ -16,13 +16,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.5.1
+ds-harness-remote@0.5.2
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.5.1
+dsh plugin --profile desktop add -w ds-harness-remote@0.5.2
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -32,7 +32,7 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.5.1
+dsh plugin --profile web add -w ds-harness-remote@0.5.2
 ```
 
 ### dsh-TUI Host
@@ -40,7 +40,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.1
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.1
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.2
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
@@ -58,7 +58,7 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 
 ## Compatibility
 
-Plugin `0.5.1` targets DeepSeek Harness `dsh-v0.2.0-rc.2` and retains `dsh-v0.1.7-rc.1` compatibility; it also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
+Plugin `0.5.2` targets DeepSeek Harness `dsh-v0.2.0-rc.2` and retains `dsh-v0.1.7-rc.1` compatibility; it also supports `dsh-v0.1.6-alpha.2` and earlier settings hosts. It supports:
 
 - `dsh-v0.1.1-rc.2` through the official legacy `ApiProxy`;
 - `dsh-v0.1.2-alpha.1` through `dsh-v0.1.2-rc.1` through the official Typert Remote Gateway;
