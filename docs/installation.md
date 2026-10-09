@@ -8,7 +8,7 @@ Open **Extensions / Plugin management**, choose installation from **npm**,
 and enter this package and version:
 
 ```text
-ds-harness-remote@0.5.0
+ds-harness-remote@0.5.1
 ```
 
 Restart Desktop after installation. Use the same plugin manager to update or remove Remote.

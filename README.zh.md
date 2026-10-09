@@ -1,6 +1,6 @@
 <p align="center">
 
-开发版本为 `0.5.1`（尚未发布）；下方 npm 安装示例仍使用已发布的 `0.5.0`。
+当前版本为 `0.5.1`；Android 使用 `versionCode 40`。
 
 当前 Harness 适配基线：`0.2.1-alpha.1`，保留 `0.2.0-rc.2`，版本范围接纳后续 `0.2.2` RC；legacy ApiProxy 不再作为兼容维护目标。详细范围与验证边界见[兼容说明](docs/compatibility.zh.md)。
   <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
@@ -40,7 +40,7 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.5.0`
+`ds-harness-remote@0.5.1`
 
 ## 主要特性
 
@@ -59,10 +59,10 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.5.0`
+`ds-harness-remote@0.5.1`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.5.1`。
 
 ### dsh-TUI Host
 
@@ -74,7 +74,7 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 通过 DSH 插件管理命令，将确切版本加入 `web` profile：
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.5.0
+dsh plugin --profile web add -w ds-harness-remote@0.5.1
 ```
 
 安装后请重启 DeepSeek Harness。

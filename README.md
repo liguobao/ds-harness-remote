@@ -1,6 +1,6 @@
 <p align="center">
 
-The development version is `0.5.1` (unreleased); npm installation examples below still use the published `0.5.0`.
+The current release is `0.5.1`; Android uses `versionCode 40`.
 
 Harness baseline: `0.2.1-alpha.1`, retaining `0.2.0-rc.2` and admitting future `0.2.2` RC versions. Legacy ApiProxy is no longer a compatibility maintenance target. See [compatibility](docs/compatibility.md) for validation boundaries.
   <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
@@ -38,7 +38,7 @@ DS Harness Remote is simply another window into that environment.
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.5.0`
+`ds-harness-remote@0.5.1`
 
 ## Features
 
@@ -58,10 +58,10 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.5.0`
+`ds-harness-remote@0.5.1`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.0`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.1`.
 
 ### dsh-TUI Host
 
@@ -73,7 +73,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.5.0
+dsh plugin --profile web add -w ds-harness-remote@0.5.1
 ```
 
 Restart DeepSeek Harness after installation.

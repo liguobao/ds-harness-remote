@@ -1,6 +1,6 @@
 # DSH Remote 设计文档
 
-更新时间：2026-10-09；对应 Plugin 0.5.1（未发布）当前源码。
+更新时间：2026-10-09；对应 Plugin 0.5.1 发布内容的当前源码。
 
 本目录描述当前产品和实现边界。运行方式见[根 README](../../README.md)，线协议以
 [protocol.md](../protocol.md)为准，实现约束见 [AGENTS](../../AGENTS.md)，未完成工作见
