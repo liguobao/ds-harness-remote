@@ -162,6 +162,7 @@ describe('AntigravityAcpClient', () => {
         update: {
           sessionUpdate: 'tool_call_update',
           callId: '2',
+          status: 'completed',
           output: 'ok',
         },
       },
@@ -303,6 +304,85 @@ describe('AntigravityAcpClient', () => {
     expect(passedArgs).toContain('--conversation')
     expect(passedArgs).toContain('conv-opt-1')
     await client.close()
+  })
+
+  it('captures thinking from transcript.jsonl via watcher even if stream-json omits thought', async () => {
+    const os = await import('node:os')
+    const path = await import('node:path')
+    const fs = await import('node:fs/promises')
+    const testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-watcher-client-'))
+    const brainDir = path.join(testDir, 'conv_watcher_1', '.system_generated/logs')
+    await fs.mkdir(brainDir, { recursive: true })
+    const fake = fakeProcess()
+
+    const client = new AntigravityAcpClient('agy-custom', logger(), (_bin, _args) => {
+      setTimeout(() => {
+        fake.stdout.write(`${JSON.stringify({
+          event: 'init',
+          conversation_id: 'conv_watcher_1',
+          init: { cwd: '/test' },
+        })}\n`)
+      }, 10)
+      return fake.child
+    }, { cwd: '/test', brainDir: testDir, sessionWorker: true })
+
+    const inbound = vi.fn()
+    client.onInbound(inbound)
+
+    await client.start()
+
+    fake.child.stdin.on('data', async () => {
+      const plannerStep = {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-10-09T10:00:00Z',
+        thinking: 'I need to check the files first.',
+        tool_calls: [{ name: 'run_command', args: { CommandLine: 'ls' } }],
+      }
+      await fs.appendFile(path.join(brainDir, 'transcript.jsonl'), `${JSON.stringify(plannerStep)}\n`)
+
+      fake.stdout.write(`${JSON.stringify({
+        event: 'step_update',
+        step_update: {
+          conversation_id: 'conv_watcher_1',
+          step_index: 2,
+          state: 'ACTIVE',
+          step_type: 'tool',
+          tool_name: 'run_command',
+          tool_info: { name: 'run_command', parameters: { CommandLine: 'ls' } },
+        },
+      })}\n`)
+
+      fake.stdout.write(`${JSON.stringify({
+        event: 'result',
+        result: {
+          conversation_id: 'conv_watcher_1',
+          status: 'SUCCESS',
+          response: 'done',
+        },
+      })}\n`)
+    })
+
+    await client.call('session/prompt', {
+      sessionId: 'conv_watcher_1',
+      prompt: [{ type: 'text', text: 'check files' }],
+    })
+
+    expect(inbound).toHaveBeenCalledWith({
+      kind: 'notification',
+      method: 'session/update',
+      params: {
+        sessionId: 'conv_watcher_1',
+        update: {
+          sessionUpdate: 'agent_thought_chunk',
+          text: 'I need to check the files first.\n\n',
+        },
+      },
+    })
+
+    await client.close()
+    await fs.rm(testDir, { recursive: true, force: true }).catch(() => undefined)
   })
 })
 

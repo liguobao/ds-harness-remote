@@ -18944,6 +18944,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (session === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.client.cancel(session.acpSessionId, signal);
     session.running = false;
+    for (const follow of this.follows) {
+      if (follow.sessionId === sessionId) {
+        this.closeFollowAfterRemoteStreamClosed(follow);
+      }
+    }
     this.emitRemoteEvent("api-session/status", [sessionId, false]);
     return success2({ accepted: true });
   }
@@ -26418,6 +26423,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels);
     this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
     this.cwd = options.cwd ?? process.cwd();
+    this.brainDir = options.brainDir;
     this.sessionWorker = options.sessionWorker === true;
     this.initialConversationClaimed = options.conversationId !== void 0;
     this.skipPermissions = options.skipPermissions === true;
@@ -26442,6 +26448,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   args;
   cwd;
   readModels;
+  brainDir;
+  dispatchedThinkingSteps = /* @__PURE__ */ new Set();
   selections = /* @__PURE__ */ new Map();
   selecting = /* @__PURE__ */ new Set();
   currentPromptPending;
@@ -26464,6 +26472,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd: cwd2,
+      brainDir: this.brainDir,
       ...conversationId === void 0 ? {} : { conversationId }
     });
     worker.onInbound((frame) => {
@@ -26501,6 +26510,13 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.warmNextSession(cwd2);
   }
   async call(method, params, timeoutMs) {
+    if (!this.ready) {
+      if (this.startPromise) {
+        await this.startPromise;
+      } else if (!this.closed) {
+        await this.start();
+      }
+    }
     if (!this.ready) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
     if (method === "initialize") {
       return {
@@ -26597,12 +26613,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       return { sessionId };
     }
     if (method === "session/cancel") {
-      if (this.currentPromptPending) {
-        clearTimeout(this.currentPromptPending.timer);
-        const pending = this.currentPromptPending;
-        this.currentPromptPending = void 0;
-        pending.resolve({ stopReason: "cancelled" });
-      }
+      await this.cancelTurn();
       return { cancelled: true };
     }
     if (method === "session/prompt") {
@@ -26630,6 +26641,36 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   onUnavailable(handler) {
     this.unavailableHandlers.add(handler);
     return () => this.unavailableHandlers.delete(handler);
+  }
+  async cancelTurn() {
+    if (this.currentPromptPending) {
+      clearTimeout(this.currentPromptPending.timer);
+      const pending = this.currentPromptPending;
+      this.currentPromptPending = void 0;
+      pending.resolve({ stopReason: "cancelled" });
+    }
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = void 0;
+    }
+    const child = this.process;
+    this.process = void 0;
+    this.ready = false;
+    this.stdoutBuffer = Buffer5.alloc(0);
+    if (child !== void 0 && child.exitCode === null && !child.killed) {
+      child.stdout.removeAllListeners("data");
+      child.stderr.removeAllListeners("data");
+      child.kill("SIGINT");
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+      }, 1e3);
+      timer.unref?.();
+    }
+    if (this.activeConversationId && !this.closed) {
+      void this.start().catch((err) => {
+        this.logger?.warn("Failed to restart Antigravity process after cancellation", { error: String(err) });
+      });
+    }
   }
   async close() {
     if (this.closed) return;
@@ -26701,8 +26742,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
             const conversationId = event.conversation_id;
             if (typeof conversationId === "string") {
               this.activeConversationId = conversationId;
-              this.watcher = new TranscriptWatcher(conversationId);
-              this.watcher.start();
+              this.attachWatcher(conversationId);
             }
             resolve6();
           }
@@ -26781,6 +26821,32 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       this.process?.stdin.write(data2);
     });
   }
+  attachWatcher(conversationId) {
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = void 0;
+    }
+    const watcher = new TranscriptWatcher(conversationId, this.brainDir);
+    this.watcher = watcher;
+    this.dispatchedThinkingSteps.clear();
+    watcher.on("thinking", ({ stepIndex, thinking }) => {
+      if (this.dispatchedThinkingSteps.has(stepIndex)) return;
+      this.dispatchedThinkingSteps.add(stepIndex);
+      const trimmed = thinking?.trim();
+      if (!trimmed) return;
+      const sessionId = this.currentPromptPending?.sessionId ?? this.activeConversationId ?? "default";
+      this.emitNotification("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          text: `${trimmed}
+
+`
+        }
+      });
+    });
+    watcher.start();
+  }
   consumeStdout(chunk, onRawEvent) {
     this.stdoutBuffer = Buffer5.concat([this.stdoutBuffer, chunk]);
     while (true) {
@@ -26795,6 +26861,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           onRawEvent(parsed);
         }
         this.handleAgyEvent(parsed);
+        void this.watcher?.flush();
       } catch (err) {
         this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
       }
@@ -26818,6 +26885,9 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       } else if (stepType === "thought" || stepType === "reasoning") {
         const text = typeof step.text_delta === "string" ? step.text_delta : typeof step.thought === "string" ? step.thought : typeof step.reasoning === "string" ? step.reasoning : void 0;
         if (text) {
+          if (typeof step.step_index === "number") {
+            this.dispatchedThinkingSteps.add(step.step_index);
+          }
           this.emitNotification("session/update", {
             sessionId,
             update: {
@@ -26841,11 +26911,13 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
             }
           });
         } else if (step.state === "DONE") {
+          const status2 = step.status === "ERROR" ? "failed" : "completed";
           this.emitNotification("session/update", {
             sessionId,
             update: {
               sessionUpdate: "tool_call_update",
               callId,
+              status: status2,
               output: typeof toolInfo.output === "string" ? toolInfo.output : JSON.stringify(toolInfo.output ?? "")
             }
           });
@@ -26856,11 +26928,18 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       if (current) {
         clearTimeout(current.timer);
         this.currentPromptPending = void 0;
-        if (result.status === "ERROR") {
-          current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
-        } else {
-          current.resolve({ stopReason: "end_turn", response: result.response });
-        }
+        const finish = async () => {
+          try {
+            await this.watcher?.flush();
+          } catch {
+          }
+          if (result.status === "ERROR") {
+            current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
+          } else {
+            current.resolve({ stopReason: "end_turn", response: result.response });
+          }
+        };
+        void finish();
       }
     }
   }

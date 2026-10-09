@@ -521,6 +521,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.client.cancel(session.acpSessionId, signal)
     session.running = false
+    for (const follow of this.follows) {
+      if (follow.sessionId === sessionId) {
+        this.closeFollowAfterRemoteStreamClosed(follow)
+      }
+    }
     this.emitRemoteEvent('api-session/status', [sessionId, false])
     return success({ accepted: true })
   }

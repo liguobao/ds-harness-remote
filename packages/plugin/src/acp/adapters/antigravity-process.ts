@@ -47,6 +47,7 @@ export interface AntigravityAcpClientOptions {
   cwd?: string
   args?: string[]
   readModels?: () => Promise<AgyCatalog>
+  brainDir?: string
 }
 
 /**
@@ -73,6 +74,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private readonly args: string[]
   private readonly cwd: string
   private readonly readModels: () => Promise<AgyCatalog>
+  private readonly brainDir?: string
+  private readonly dispatchedThinkingSteps = new Set<number>()
   private readonly selections = new Map<string, AgySelection>()
   private readonly selecting = new Set<string>()
   private currentPromptPending?: {
@@ -97,6 +100,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels)
     this.args = options.args ?? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     this.cwd = options.cwd ?? process.cwd()
+    this.brainDir = options.brainDir
     this.sessionWorker = options.sessionWorker === true
     this.initialConversationClaimed = options.conversationId !== undefined
     this.skipPermissions = options.skipPermissions === true
@@ -120,6 +124,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
       cwd,
+      brainDir: this.brainDir,
       ...(conversationId === undefined ? {} : { conversationId }),
     })
     worker.onInbound(frame => { for (const handler of this.inboundHandlers) handler(frame) })
@@ -154,6 +159,13 @@ export class AntigravityAcpClient implements CursorAcpLike {
   }
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+    if (!this.ready) {
+      if (this.startPromise) {
+        await this.startPromise
+      } else if (!this.closed) {
+        await this.start()
+      }
+    }
     if (!this.ready) throw new AntigravityAcpError('ANTIGRAVITY_UNAVAILABLE', 'Antigravity ACP is not ready.')
 
     if (method === 'initialize') {
@@ -249,12 +261,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/cancel') {
-      if (this.currentPromptPending) {
-        clearTimeout(this.currentPromptPending.timer)
-        const pending = this.currentPromptPending
-        this.currentPromptPending = undefined
-        pending.resolve({ stopReason: 'cancelled' })
-      }
+      await this.cancelTurn()
       return { cancelled: true }
     }
 
@@ -290,6 +297,41 @@ export class AntigravityAcpClient implements CursorAcpLike {
   onUnavailable(handler: CursorAcpUnavailableHandler): () => void {
     this.unavailableHandlers.add(handler)
     return () => this.unavailableHandlers.delete(handler)
+  }
+
+  async cancelTurn(): Promise<void> {
+    if (this.currentPromptPending) {
+      clearTimeout(this.currentPromptPending.timer)
+      const pending = this.currentPromptPending
+      this.currentPromptPending = undefined
+      pending.resolve({ stopReason: 'cancelled' })
+    }
+
+    if (this.watcher) {
+      this.watcher.stop()
+      this.watcher = undefined
+    }
+
+    const child = this.process
+    this.process = undefined
+    this.ready = false
+    this.stdoutBuffer = Buffer.alloc(0)
+
+    if (child !== undefined && child.exitCode === null && !child.killed) {
+      child.stdout.removeAllListeners('data')
+      child.stderr.removeAllListeners('data')
+      child.kill('SIGINT')
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && !child.killed) child.kill('SIGKILL')
+      }, 1_000)
+      timer.unref?.()
+    }
+
+    if (this.activeConversationId && !this.closed) {
+      void this.start().catch(err => {
+        this.logger?.warn('Failed to restart Antigravity process after cancellation', { error: String(err) })
+      })
+    }
   }
 
   async close(): Promise<void> {
@@ -365,8 +407,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
             const conversationId = (event as Record<string, unknown>).conversation_id
             if (typeof conversationId === 'string') {
               this.activeConversationId = conversationId
-              this.watcher = new TranscriptWatcher(conversationId)
-              this.watcher.start()
+              this.attachWatcher(conversationId)
             }
             resolve()
           }
@@ -453,6 +494,33 @@ export class AntigravityAcpClient implements CursorAcpLike {
     })
   }
 
+  private attachWatcher(conversationId: string): void {
+    if (this.watcher) {
+      this.watcher.stop()
+      this.watcher = undefined
+    }
+    const watcher = new TranscriptWatcher(conversationId, this.brainDir)
+    this.watcher = watcher
+    this.dispatchedThinkingSteps.clear()
+
+    watcher.on('thinking', ({ stepIndex, thinking }) => {
+      if (this.dispatchedThinkingSteps.has(stepIndex)) return
+      this.dispatchedThinkingSteps.add(stepIndex)
+      const trimmed = thinking?.trim()
+      if (!trimmed) return
+      const sessionId = this.currentPromptPending?.sessionId ?? this.activeConversationId ?? 'default'
+      this.emitNotification('session/update', {
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_thought_chunk',
+          text: `${trimmed}\n\n`,
+        },
+      })
+    })
+
+    watcher.start()
+  }
+
   private consumeStdout(chunk: Buffer, onRawEvent?: (event: Record<string, unknown>) => void): void {
     this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk])
     while (true) {
@@ -469,6 +537,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
           onRawEvent(parsed)
         }
         this.handleAgyEvent(parsed)
+        void this.watcher?.flush()
       } catch (err) {
         this.logger?.debug('Failed to parse agy stdout line', { code: 'INVALID_AGY_STREAM_EVENT' })
       }
@@ -501,6 +570,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
               ? step.reasoning
               : undefined
         if (text) {
+          if (typeof step.step_index === 'number') {
+            this.dispatchedThinkingSteps.add(step.step_index)
+          }
           this.emitNotification('session/update', {
             sessionId,
             update: {
@@ -525,11 +597,13 @@ export class AntigravityAcpClient implements CursorAcpLike {
             },
           })
         } else if (step.state === 'DONE') {
+          const status = step.status === 'ERROR' ? 'failed' : 'completed'
           this.emitNotification('session/update', {
             sessionId,
             update: {
               sessionUpdate: 'tool_call_update',
               callId,
+              status,
               output: typeof toolInfo.output === 'string' ? toolInfo.output : JSON.stringify(toolInfo.output ?? ''),
             },
           })
@@ -540,11 +614,19 @@ export class AntigravityAcpClient implements CursorAcpLike {
       if (current) {
         clearTimeout(current.timer)
         this.currentPromptPending = undefined
-        if (result.status === 'ERROR') {
-          current.reject(new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', String(result.error ?? 'Execution error')))
-        } else {
-          current.resolve({ stopReason: 'end_turn', response: result.response })
+        const finish = async () => {
+          try {
+            await this.watcher?.flush()
+          } catch {
+            // ignore flush errors
+          }
+          if (result.status === 'ERROR') {
+            current.reject(new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', String(result.error ?? 'Execution error')))
+          } else {
+            current.resolve({ stopReason: 'end_turn', response: result.response })
+          }
         }
+        void finish()
       }
     }
   }
