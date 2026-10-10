@@ -7210,7 +7210,7 @@ function sleep(ms) {
 }
 
 // ../webrtc/dist/adaptive-transport.js
-var DEFAULT_CAPABILITIES = ["transport.lan", "transport.p2p", "transport.turn", "transport.relay"];
+var DEFAULT_CAPABILITIES = ["transport.lan", "transport.p2p", "transport.turn", "transport.relay", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
   url;
