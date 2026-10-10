@@ -14,6 +14,11 @@ CodeX App Server domain advertised by the Host.
   `expo-secure-store`.
 - List same-account Harness hosts, fetch each host's authorized peer descriptor, verify its
   identity key, and pin it locally; a changed key fails closed and is never silently replaced.
+- Rename an online or offline Host with the pencil button in the device list or **Rename**
+  in device details, without connecting first. The name is saved
+  through the hosted Server's account-device API, matching Web management, and updates the
+  device list, connected device and saved workspace shortcuts. Servers without this endpoint
+  show an error and keep the original name.
 - Establish a Noise IK channel over an adaptive transport (WebRTC P2P/TURN with Relay fallback) and
   reject tampered, replayed, or wrong-identity frames.
 - Drive the Host through the rc.2 ApiProxy bridge or the v0.1.2 Typert Remote Gateway after

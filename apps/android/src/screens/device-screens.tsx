@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, ShieldCheck, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -23,6 +23,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveSessionDisplayTitle } from './session-title'
+import { DeviceRenameModal } from './device-rename-modal'
 
 export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   onDevice: (device: RemoteDevice) => void
@@ -39,11 +40,13 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   const refreshing = useAppStore(state => state.refreshing)
   const refresh = useAppStore(state => state.refreshDevices)
   const forgetDevice = useAppStore(state => state.forgetDevice)
-  const removalPending = useAppStore(state => state.busyAction?.startsWith('forget:') === true)
+  const mutationPending = useAppStore(state => state.busyAction?.startsWith('forget:') === true
+    || state.busyAction?.startsWith('rename-device:') === true)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const isHome = onBack === undefined
   const [openRowId, setOpenRowId] = useState<string>()
+  const [renameTarget, setRenameTarget] = useState<RemoteDevice>()
   // Removed rows stay mounted until their exit animation ends; the store drops them at once.
   const [leaving, setLeaving] = useState<ReadonlyMap<string, LeavingDevice>>(() => new Map())
   const initialDeviceIds = useRef(new Set(devices.map(device => device.deviceId)))
@@ -158,7 +161,7 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                   open={openRowId === device.deviceId}
                   exiting={exiting}
                   animateIn={!initialDeviceIds.current.has(device.deviceId)}
-                  locked={removalPending}
+                  locked={mutationPending}
                   onOpenChange={open => setOpenRowId(current => open
                     ? device.deviceId
                     : current === device.deviceId ? undefined : current)}
@@ -168,6 +171,7 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                     onDevice(device)
                   }}
                   onRemove={() => removeDevice(device)}
+                  onRename={() => { setOpenRowId(undefined); setRenameTarget(device) }}
                   onExited={() => forgetLeaving(device.deviceId)}
                 />
               ))}</View>}
@@ -177,6 +181,7 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
           <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
         </View>
       )}
+      {renameTarget !== undefined && <DeviceRenameModal device={renameTarget} onClose={() => setRenameTarget(undefined)} />}
     </View>
   )
 }
@@ -231,7 +236,7 @@ const SWIPE_SPRING = { damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: 
 const nudge = (value: Animated.Value, toValue: number, duration: number) =>
   Animated.timing(value, { toValue, duration, easing: Easing.inOut(Easing.quad), useNativeDriver: true })
 
-function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onExited }: {
+function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onRename, onExited }: {
   device: RemoteDevice
   open: boolean
   exiting: boolean
@@ -240,6 +245,7 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
   onOpenChange: (open: boolean) => void
   onPress: () => void
   onRemove: () => Promise<boolean>
+  onRename: () => void
   onExited: () => void
 }) {
   const { colors } = useTheme()
@@ -409,16 +415,16 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
           </Pressable>
         </View>
         <Animated.View style={[styles.swipeContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={device.name}
-            accessibilityActions={[{ name: 'delete', label: zhCN.devices.forget }]}
-            onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'delete') void requestRemove() }}
-            disabled={busy || exiting}
-            onPress={onPress}
-            style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
-          >
-            <View style={[styles.swipeContentInner, busy && styles.swipeContentBusy]}>
+          <View style={styles.listRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={device.name}
+              accessibilityActions={[{ name: 'delete', label: zhCN.devices.forget }]}
+              onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'delete') void requestRemove() }}
+              disabled={busy || exiting}
+              onPress={onPress}
+              style={({ pressed }) => [styles.swipeContentInner, pressed && styles.listRowPressed, busy && styles.swipeContentBusy]}
+            >
               <View style={styles.rowIcon}><Laptop size={21} color={colors.primary} /></View>
               <View style={styles.rowCopy}>
                 <View style={styles.rowTitleLine}>
@@ -431,8 +437,9 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
                 </View>
               </View>
               <ChevronRight size={20} color={colors.subtle} />
-            </View>
-          </Pressable>
+            </Pressable>
+            <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={onRename} disabled={disabled} />
+          </View>
         </Animated.View>
       </Animated.View>
     </Animated.View>
@@ -632,6 +639,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
   const [showNetworkDetails, setShowNetworkDetails] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
 
@@ -659,6 +667,8 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
             status={connectionBadgeStatus(isSelected, connection.phase, connection.stats.mode, device.online)}
           />
         </View>
+
+        <Button label={zhCN.devices.rename} icon={Pencil} variant="quiet" onPress={() => setRenaming(true)} />
 
         {connection.error !== undefined && isSelected && (
           <View style={styles.connectionError}>
@@ -728,6 +738,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
               </>}
       </Screen>
+      {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
     </View>
   )
 }
