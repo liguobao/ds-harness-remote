@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { ANDROID_CLIENT_VERSION, RemoteServerApi } from '../src/services/api'
 import type { DeviceIdentity } from '../src/types'
 
@@ -11,6 +12,38 @@ const identity: DeviceIdentity = {
 }
 
 describe('Remote Server API compatibility', () => {
+  it('renames an account-owned device with authenticated PATCH and the canonical server name', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () => jsonResponse({ name: '书房电脑' }))
+    const api = new RemoteServerApi('https://remote.example.com/prefix', 'client-device-token', fetchImplementation)
+    expect(await api.renameAccountDevice('host /中文', '  书房电脑  ')).toEqual({ name: '书房电脑' })
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe('https://remote.example.com/prefix/api/v1/account/devices/host%20%2F%E4%B8%AD%E6%96%87')
+    expect(fetchImplementation.mock.calls[0]?.[1]).toMatchObject({
+      method: 'PATCH', body: JSON.stringify({ name: '书房电脑' }),
+      headers: { Authorization: 'Bearer client-device-token' },
+    })
+  })
+
+  it('rejects invalid rename input, missing authorization, denied membership and invalid responses', async () => {
+    const scenarios = [
+      { label: 'empty name', name: ' \n ', token: 'token', body: { name: 'OK' }, status: 200, code: 'INVALID_MESSAGE', called: false },
+      { label: 'oversized name', name: 'x'.repeat(129), token: 'token', body: { name: 'OK' }, status: 200, code: 'INVALID_MESSAGE', called: false },
+      { label: 'missing credential', name: 'OK', token: undefined, body: { name: 'OK' }, status: 200, code: 'AUTH_REQUIRED', called: false },
+      { label: 'expired credential', name: 'OK', token: 'token', body: {}, status: 401, code: 'AUTH_INVALID', called: true },
+      { label: 'foreign device', name: 'OK', token: 'token', body: { error: { code: 'MEMBERSHIP_REQUIRED' } }, status: 403, code: 'MEMBERSHIP_REQUIRED', called: true },
+      { label: 'missing device', name: 'OK', token: 'token', body: {}, status: 404, code: 'DEVICE_NOT_FOUND', called: true },
+      { label: 'invalid success response', name: 'OK', token: 'token', body: { name: ' ' }, status: 200, code: 'INVALID_MESSAGE', called: true },
+    ]
+    await runScenarios(scenarios.map(scenario => ({
+      name: scenario.label,
+      run: async () => {
+        const fetchImplementation = vi.fn<typeof fetch>(async () => jsonResponse(scenario.body, scenario.status))
+        const api = new RemoteServerApi('https://remote.example.com', scenario.token, fetchImplementation)
+        await expect(api.renameAccountDevice('host-1', scenario.name)).rejects.toMatchObject({ code: scenario.code })
+        expect(fetchImplementation).toHaveBeenCalledTimes(scenario.called ? 1 : 0)
+      },
+    })))
+  })
+
   it('registers the Android descriptor with the account token and validates the token pair', async () => {
     const calls: Array<{ url: string; body?: unknown; headers?: unknown }> = []
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {

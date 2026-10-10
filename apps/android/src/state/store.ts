@@ -191,6 +191,7 @@ interface AppState {
   refreshConnectionNetworkDetails(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
+  renameDevice(deviceId: string, name: string): Promise<boolean>
   connectDevice(device: RemoteDevice, options?: { forceRelay?: boolean }): Promise<boolean>
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
@@ -423,7 +424,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         await forgetHost(deviceId)
         await clearCodexPermissionPresets(deviceId)
       }))
-      set({ devices: result.devices, refreshing: false })
+      set(state => ({
+        devices: result.devices,
+        selectedDevice: state.selectedDevice === undefined ? undefined : {
+          ...state.selectedDevice,
+          name: result.devices.find(device => device.deviceId === state.selectedDevice?.deviceId)?.name ?? state.selectedDevice.name,
+        },
+        refreshing: false,
+      }))
     } catch (error) {
       if (isSessionAuthError(error)) {
         await get().requireReauth(friendlyError(error))
@@ -1710,6 +1718,42 @@ export const useAppStore = create<AppState>((set, get) => ({
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     } catch (error) {
       set({ busyAction: undefined, error: friendlyError(error) })
+    }
+  },
+
+  async renameDevice(deviceId, name) {
+    const { config, identity, busyAction } = get()
+    const trimmed = name.trim()
+    if (config === undefined || identity === undefined || busyAction !== undefined || trimmed.length === 0) return false
+    set({ busyAction: `rename-device:${deviceId}`, error: undefined })
+    try {
+      const { api } = await serverSession.authenticate(config.baseUrl, identity)
+      const renamed = await api.renameAccountDevice(deviceId, trimmed)
+      // Ignore an old account's response after sign-out or server switching.
+      if (get().config !== config || get().identity !== identity) return false
+      const updateShortcut = (item: WorkspaceShortcut) => item.deviceId === deviceId
+        ? { ...item, deviceName: renamed.name }
+        : item
+      const favoriteWorkspaces = get().favoriteWorkspaces.map(updateShortcut)
+      const recentWorkspaces = get().recentWorkspaces.map(updateShortcut)
+      set(state => ({
+        devices: state.devices.map(device => device.deviceId === deviceId ? { ...device, name: renamed.name } : device),
+        selectedDevice: state.selectedDevice?.deviceId === deviceId
+          ? { ...state.selectedDevice, name: renamed.name }
+          : state.selectedDevice,
+        favoriteWorkspaces,
+        recentWorkspaces,
+      }))
+      await saveFavoriteWorkspaces(favoriteWorkspaces)
+      await saveRecentWorkspaces(recentWorkspaces)
+      if (get().config !== config || get().identity !== identity) return false
+      set({ busyAction: undefined })
+      return true
+    } catch (error) {
+      if (get().config !== config || get().identity !== identity) return false
+      set({ busyAction: undefined, error: friendlyError(error) })
+      if (isSessionAuthError(error)) await get().requireReauth(friendlyError(error))
+      return false
     }
   },
 

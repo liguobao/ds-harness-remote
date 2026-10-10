@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adds Android Host renaming from device details, synced through the account-device API to device lists and saved workspace shortcuts.
+
 ## 0.5.2 - 2026-10-10
 
 - Adds account-owned Host removal from the Android device list, with swipe-to-remove confirmation and local credential cleanup.

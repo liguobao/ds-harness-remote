@@ -1,5 +1,5 @@
 import appConfig from '../../app.json'
-import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
+import { MAX_DEVICE_NAME_LENGTH, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import { RemoteApiError } from '../lib/errors'
 import { normalizeServerUrl } from '../lib/server-url'
 import type {
@@ -93,6 +93,21 @@ export class RemoteServerApi {
   /** Remove an account-owned Host, matching the Web device removal operation. */
   async removeAccountDevice(deviceId: string): Promise<void> {
     await this.request(`/api/v1/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' })
+  }
+
+  /** Rename an account-owned Host using the same endpoint as Web management. */
+  async renameAccountDevice(deviceId: string, name: string): Promise<{ name: string }> {
+    const trimmed = name.trim()
+    if (trimmed.length === 0 || trimmed.length > MAX_DEVICE_NAME_LENGTH) {
+      throw new RemoteApiError('INVALID_MESSAGE', 'Enter a device name between 1 and 128 characters.')
+    }
+    const body = await this.request<unknown>(`/api/v1/account/devices/${encodeURIComponent(deviceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name: trimmed }),
+    })
+    if (!isRecord(body) || typeof body.name !== 'string' || body.name.trim().length === 0
+      || body.name.length > MAX_DEVICE_NAME_LENGTH) invalidResponse('renamed device')
+    return { name: body.name }
   }
 
   /** Account password login; the returned token only authorizes device registration. */

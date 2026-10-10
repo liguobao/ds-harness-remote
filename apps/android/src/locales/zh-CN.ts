@@ -77,6 +77,7 @@ const zhCN = {
     signOut: '退出登录', resetLocal: '清除本地数据', resetTitle: '清除此手机上的数据？', resetBody: '将删除服务设置、登录信息和已信任的设备。之后需要重新登录，此操作无法撤销。', reset: '清除数据', signOutTitle: '退出当前账号？', signOutBody: '退出后，需要重新登录才能访问设备。',
   },
   devices: {
+    rename: '重命名', renameTitle: '修改设备名称', namePlaceholder: '输入设备名称', saveName: '保存', renameHint: '新名称会同步到账号下的设备列表。',
     title: '设备', myDevices: '我的设备', lead: '选择一台设备，继续你的工作', footer: '随时继续你的工作。', favorites: '收藏夹', recent: '最近访问', openFavorite: (title: string, device: string) => `打开收藏夹中 ${device} 上的“${title}”`, openRecent: (title: string, device: string) => `打开最近访问的“${title}”（${device}）`, removeFavorite: (title: string) => `从收藏夹移除“${title}”`, emptyTitle: '还没有可用设备', emptyBody: '在电脑上安装 DSH Remote 插件并登录同一账号，设备就会出现在这里。', options: '管理设备', encrypted: '安全连接',
     connectionInterrupted: '连接已断开', trustExplanation: '确认后，此手机会记住这台设备的安全身份。如果身份发生变化，将停止连接以保护你的数据。', trust: '信任并继续', connectReady: '连接后即可查看并继续电脑上的对话。', offlineHelp: '这台设备已离线。请确认电脑上的 DSH Remote 插件正在运行。', secureConnect: '连接设备',
     connectingTitle: '连接设备', connecting: '正在连接', connectionReady: '已就绪', retryConnection: '重新连接', cancelConnection: '取消连接', openInfo: '查看设备和连接信息',

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, ShieldCheck, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -23,6 +23,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveSessionDisplayTitle } from './session-title'
+import { DeviceRenameModal } from './device-rename-modal'
 
 export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   onDevice: (device: RemoteDevice) => void
@@ -632,6 +633,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
   const [showNetworkDetails, setShowNetworkDetails] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
 
@@ -659,6 +661,8 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
             status={connectionBadgeStatus(isSelected, connection.phase, connection.stats.mode, device.online)}
           />
         </View>
+
+        <Button label={zhCN.devices.rename} icon={Pencil} variant="quiet" onPress={() => setRenaming(true)} />
 
         {connection.error !== undefined && isSelected && (
           <View style={styles.connectionError}>
@@ -728,6 +732,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
               </>}
       </Screen>
+      {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
     </View>
   )
 }
