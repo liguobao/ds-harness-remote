@@ -221,7 +221,7 @@ export class HostPluginRuntime {
       ...(error === undefined ? {} : { error }),
       ...(authorization?.account === undefined ? {} : { account: authorization.account }),
       authorized: authorization !== undefined,
-      accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED',
+      accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED' || error === 'DEVICE_REVOKED',
       connectedClients: this.listConnectedClients(),
     }
   }
@@ -319,7 +319,14 @@ export class HostPluginRuntime {
     if (this.serverApi === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before signing in.', false)
     }
-    const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password)
+    const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password, async () => {
+      await this.serverConnection?.stop()
+      this.identity = await this.identities.reset(this.config.deviceName)
+      this.serverApi!.bindIdentity(this.identity)
+      this.serverConnection = this.createServerConnection(this.identity)
+      this.logger.info('Rotated revoked Host identity before account authorization')
+      return this.identity
+    })
     this.serverConnection?.resume()
     this.logger.info('Host account authorized')
     return result

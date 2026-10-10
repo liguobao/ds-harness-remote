@@ -7210,7 +7210,7 @@ function sleep(ms) {
 }
 
 // ../webrtc/dist/adaptive-transport.js
-var DEFAULT_CAPABILITIES = ["transport.lan", "transport.p2p", "transport.turn", "transport.relay", "harness.api.v1"];
+var DEFAULT_CAPABILITIES = ["transport.lan", "transport.p2p", "transport.turn", "transport.relay"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
   url;
@@ -20289,7 +20289,7 @@ var HostServerApi = class {
       await this.clearAuthorization();
     }
   }
-  async authorizeWithAccount(identity, email, password) {
+  async authorizeWithAccount(identity, email, password, recoverIdentity) {
     this.bindIdentity(identity);
     const account = email.trim();
     if (account.length === 0 || password.length === 0) {
@@ -20299,11 +20299,19 @@ var HostServerApi = class {
       method: "POST",
       body: JSON.stringify({ email: account, password })
     }));
-    await this.register(identity, {
+    const authorization = {
       accountToken: login2.token,
       account: login2.account,
       authorizationMethod: "account"
-    });
+    };
+    try {
+      await this.register(identity, authorization);
+    } catch (error) {
+      if (!(error instanceof ServerApiError) || error.code !== "DEVICE_REVOKED" || recoverIdentity === void 0) throw error;
+      const nextIdentity = await recoverIdentity();
+      this.bindIdentity(nextIdentity);
+      await this.register(nextIdentity, authorization);
+    }
     return {
       method: "account",
       account: login2.account,
@@ -28746,7 +28754,7 @@ var PluginControlRuntime = class {
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role)
     });
-    const identity = await identities.loadOrCreate(hostname2());
+    let identity = await identities.loadOrCreate(hostname2());
     const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
     let authorization;
     if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
@@ -28755,7 +28763,10 @@ var PluginControlRuntime = class {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
       }
-      authorization = await api.authorizeWithAccount(identity, value.email, value.password);
+      authorization = await api.authorizeWithAccount(identity, value.email, value.password, async () => {
+        identity = await identities.reset(hostname2());
+        return identity;
+      });
     }
     if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
       await this.client?.authorizeHostByDefault();
@@ -32028,7 +32039,7 @@ var HostPluginRuntime = class {
       ...error === void 0 ? {} : { error },
       ...authorization?.account === void 0 ? {} : { account: authorization.account },
       authorized: authorization !== void 0,
-      accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED",
+      accountRequired: error === "ACCOUNT_AUTH_REQUIRED" || error === "AUTH_INVALID" || error === "TOKEN_EXPIRED" || error === "DEVICE_REVOKED",
       connectedClients: this.listConnectedClients()
     };
   }
@@ -32117,7 +32128,14 @@ var HostPluginRuntime = class {
     if (this.serverApi === void 0) {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before signing in.", false);
     }
-    const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password);
+    const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password, async () => {
+      await this.serverConnection?.stop();
+      this.identity = await this.identities.reset(this.config.deviceName);
+      this.serverApi.bindIdentity(this.identity);
+      this.serverConnection = this.createServerConnection(this.identity);
+      this.logger.info("Rotated revoked Host identity before account authorization");
+      return this.identity;
+    });
     this.serverConnection?.resume();
     this.logger.info("Host account authorized");
     return result;

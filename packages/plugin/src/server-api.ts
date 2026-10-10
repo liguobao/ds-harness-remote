@@ -112,7 +112,12 @@ export class HostServerApi {
     }
   }
 
-  async authorizeWithAccount(identity: HostIdentity, email: string, password: string): Promise<DeviceAuthorization> {
+  async authorizeWithAccount(
+    identity: HostIdentity,
+    email: string,
+    password: string,
+    recoverIdentity?: () => Promise<HostIdentity>,
+  ): Promise<DeviceAuthorization> {
     this.bindIdentity(identity)
     const account = email.trim()
     if (account.length === 0 || password.length === 0) {
@@ -122,11 +127,23 @@ export class HostServerApi {
       method: 'POST',
       body: JSON.stringify({ email: account, password }),
     }))
-    await this.register(identity, {
+    const authorization = {
       accountToken: login.token,
       account: login.account,
-      authorizationMethod: 'account',
-    })
+      authorizationMethod: 'account' as const,
+    }
+    try {
+      await this.register(identity, authorization)
+    } catch (error) {
+      // A Server-side device removal revokes the old identity permanently.
+      // Account login is the explicit re-authorization boundary, so callers
+      // may rotate the local identity and retry without requiring a separate
+      // settings logout first.
+      if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED' || recoverIdentity === undefined) throw error
+      const nextIdentity = await recoverIdentity()
+      this.bindIdentity(nextIdentity)
+      await this.register(nextIdentity, authorization)
+    }
     return {
       method: 'account',
       account: login.account,

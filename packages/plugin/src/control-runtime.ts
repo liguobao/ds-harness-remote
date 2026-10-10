@@ -150,7 +150,7 @@ export class PluginControlRuntime {
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, next.serverUrl!, value.role),
     })
-    const identity = await identities.loadOrCreate(hostname())
+    let identity = await identities.loadOrCreate(hostname())
     const api = value.role === 'host'
       ? new HostServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
       : new ClientServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
@@ -161,7 +161,10 @@ export class PluginControlRuntime {
       if (typeof value.email !== 'string' || typeof value.password !== 'string') {
         throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required for account authorization.')
       }
-      authorization = await api.authorizeWithAccount(identity, value.email, value.password)
+      authorization = await api.authorizeWithAccount(identity, value.email, value.password, async () => {
+        identity = await identities.reset(hostname())
+        return identity
+      })
     }
     if (value.role === 'client' && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
       await this.client?.authorizeHostByDefault()

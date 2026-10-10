@@ -118,6 +118,50 @@ describe('HostServerApi', () => {
     })
   })
 
+  it('retries account login with a recovered Host identity after device removal', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-account-revoked-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const recoveredIdentity: HostIdentity = {
+      ...identity,
+      deviceId: '0198a2d0-0000-7000-8000-000000000003',
+      fingerprint: '2222 2222 2222',
+      ...generateKeyPair(new Uint8Array(32).fill(7)),
+    }
+    let registerCalls = 0
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/auth/login')) return json({
+        token: 'web-account-token-value',
+        expiresAt: Date.now() + 600_000,
+        account: 'host@example.com',
+        profile: {},
+        isAdmin: false,
+      })
+      if (url.endsWith('/devices/register')) {
+        registerCalls += 1
+        return registerCalls === 1
+          ? errorJson('DEVICE_REVOKED', 'device was revoked', 403)
+          : json(tokens({ accessToken: 'recovered-access-token-value' }))
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+    const recoverIdentity = vi.fn(async () => recoveredIdentity)
+
+    await expect(api.authorizeWithAccount(identity, 'host@example.com', 'correct horse battery staple', recoverIdentity))
+      .resolves.toMatchObject({ method: 'account', account: 'host@example.com' })
+    expect(recoverIdentity).toHaveBeenCalledOnce()
+    expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[1]?.[1]?.body))).toMatchObject({
+      device: { deviceId: identity.deviceId },
+    })
+    expect(JSON.parse(String(vi.mocked(fetchMock).mock.calls[2]?.[1]?.body))).toMatchObject({
+      device: { deviceId: recoveredIdentity.deviceId },
+    })
+    await expect(new ServerCredentialStore(directory).load('https://dsh.r2049.cn', recoveredIdentity.deviceId))
+      .resolves.toMatchObject({ accessToken: 'recovered-access-token-value' })
+  })
+
   it('authorizes Host enrollment through account, code or owned-role credentials', async () => {
     await runScenarios(
       [

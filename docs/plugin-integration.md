@@ -300,6 +300,10 @@ Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁
 
 建议在 access token 到期前 60 秒刷新。收到 `TOKEN_EXPIRED` 可刷新后重试一次；收到 `AUTH_INVALID` 或 `DEVICE_REVOKED` 应停止自动重试，清理设备凭证并提示用户重新登录/接入。
 
+用户随后在 Remote 登录界面使用账号密码重新授权时，Plugin 会把这次显式登录视为新的授权边界：若原
+`deviceId` 已被 Server 移除，则先轮换本机 identity、重建 Host 控制连接，再用刚取得的账号 token
+注册新设备。这样不需要先进入设置页执行一次完整退出；后台连接仍保持 fail-closed，不会自行抢占或恢复被移除的设备。
+
 ## 7. 建立 WebSocket
 
 连接：
