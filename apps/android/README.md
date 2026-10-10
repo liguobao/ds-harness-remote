@@ -14,7 +14,8 @@ CodeX App Server domain advertised by the Host.
   `expo-secure-store`.
 - List same-account Harness hosts, fetch each host's authorized peer descriptor, verify its
   identity key, and pin it locally; a changed key fails closed and is never silently replaced.
-- Rename an online or offline Host from its device details (**Rename**). The name is saved
+- Rename an online or offline Host with the pencil button in the device list or **Rename**
+  in device details, without connecting first. The name is saved
   through the hosted Server's account-device API, matching Web management, and updates the
   device list, connected device and saved workspace shortcuts. Servers without this endpoint
   show an error and keep the original name.
