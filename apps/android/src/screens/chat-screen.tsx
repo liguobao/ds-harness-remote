@@ -110,6 +110,13 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
 
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
+/**
+ * Shared empty values for the memoized chat rows. A settled dep array or an
+ * empty artifact list must keep one identity across streaming deltas: a fresh
+ * `new Map()` / `?? []` per render hands the rows new props and re-renders them.
+ */
+const EMPTY_UI_BY_SECTION = new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
+const EMPTY_UI_SECTION_CARDS: UiArtifact[] = []
 
 /** Soft hint threshold; the composer accepts longer input instead of silently truncating. */
 const LONG_DRAFT_HINT = 12_000
@@ -288,10 +295,18 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       // Output-less failure turns keep an empty assistant row carrying only the
       // turnEnd reason — it must stay visible so the failure is explainable.
       || item.turnEnd !== undefined))), [messages, session?.backend])
-  const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
+  // Reuse the sections the last render produced: `chatSections` keeps the
+  // identity of every group whose items did not change, so a streaming delta
+  // re-renders only the row that changed instead of every mounted row.
+  const visibleSectionsRef = useRef<ChatSection[]>([])
+  const visibleSections = useMemo(() => {
+    const next = chatSections(visibleMessages, visibleSectionsRef.current)
+    visibleSectionsRef.current = next
+    return next
+  }, [visibleMessages])
   const uiBySection = useMemo(() => {
     if (hostId === undefined || session === undefined
-      || (session.backend !== undefined && session.backend !== 'harness')) return new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
+      || (session.backend !== undefined && session.backend !== 'harness')) return EMPTY_UI_BY_SECTION
     return placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
   }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
   const visibleUiIds = useMemo(() => new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
@@ -441,12 +456,24 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     pinToBottomRef.current = atBottom
   }, [])
 
-  // Stable renderItem keeps FlatList rows from re-rendering on every streaming
-  // delta; ChatItemView is memoized so only the changing row re-renders.
-  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? []} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? []} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
-    : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
+  // `uiBySection` and `visibleUiIds` are rebuilt from `messages` on every
+  // streaming delta. Reading them straight from this callback rebuilt it once
+  // per delta and re-rendered every mounted row - the exact cost the stable
+  // callback exists to avoid, and the reason the section reuse above was not
+  // enough on its own. Read the current value through refs instead so the
+  // callback keeps one identity while the data stays current.
+  const uiBySectionRef = useRef(uiBySection)
+  uiBySectionRef.current = uiBySection
+  const visibleUiIdsRef = useRef(visibleUiIds)
+  visibleUiIdsRef.current = visibleUiIds
+  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => {
+    const section = uiBySectionRef.current.get(item.key)
+    // Shared empties: a section without artifacts must keep one prop identity
+    // across deltas, otherwise `?? []` hands ChatProcessGroup a new array.
+    return item.kind === 'process'
+      ? <ChatProcessGroup items={item.items} artifacts={section?.cards ?? EMPTY_UI_SECTION_CARDS} updatedArtifacts={section?.pointers ?? EMPTY_UI_SECTION_CARDS} availableUiIds={visibleUiIdsRef.current} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+      : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />
+  }, [busy, respondApproval, respondQuestion])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
