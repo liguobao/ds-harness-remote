@@ -156,23 +156,64 @@ export type ChatSection =
   | { kind: 'item'; key: string; item: ChatItem }
   | { kind: 'process'; key: string; turn: string; items: ChatItem[] }
 
-/** Group adjacent activity from one native turn, leaving user rows in place. */
-export function chatSections(items: ChatItem[]): ChatSection[] {
+/**
+ * Group adjacent activity from one native turn, leaving user rows in place.
+ *
+ * `previous` is the list produced for the same session on a prior render. It
+ * exists so a streaming delta only disturbs the section it lands in: rebuilding
+ * every section (and every `items` array) on each delta handed untouched groups
+ * a fresh array, which re-rendered them through `ChatProcessGroup`'s memo and
+ * defeated the stable `renderItem` above. A section that has the same key, the
+ * same ordered item identities and the same nested objects is reused as-is, so
+ * `items`, `item` and `key` keep their references while rows fold and unfold.
+ */
+export function chatSections(items: ChatItem[], previous?: readonly ChatSection[]): ChatSection[] {
+  const reusable = new Map<string, ChatSection>()
+  for (const section of previous ?? []) reusable.set(section.key, section)
   const sections: ChatSection[] = []
+  // Items pending for the section being appended to; flushed on the next section.
+  let pending: ChatItem[] = []
+  let pendingTurn: string | undefined
+  let pendingKey = ''
+  const flush = () => {
+    if (pendingTurn === undefined) return
+    sections.push(withPreviousItems({ kind: 'process', key: pendingKey, turn: pendingTurn, items: pending }, reusable))
+    pending = []
+    pendingTurn = undefined
+  }
   for (const item of items) {
     const turn = item.kind === 'message' && item.role === 'user'
       ? undefined
       : item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
-    const previous = sections.at(-1)
-    if (turn !== undefined && previous?.kind === 'process' && previous.turn === turn) {
-      previous.items.push(item)
-    } else if (turn !== undefined) {
-      sections.push({ kind: 'process', key: `process:${turn}:${item.id}`, turn, items: [item] })
+    if (turn === undefined) {
+      flush()
+      sections.push(withPreviousItem({ kind: 'item', key: item.id, item }, reusable))
     } else {
-      sections.push({ kind: 'item', key: item.id, item })
+      if (pendingTurn !== undefined && pendingTurn !== turn) flush()
+      if (pendingTurn === undefined) {
+        pendingTurn = turn
+        pendingKey = `process:${turn}:${item.id}`
+      }
+      pending.push(item)
     }
   }
+  flush()
   return sections
+}
+
+function withPreviousItem(section: Extract<ChatSection, { kind: 'item' }>, reusable: Map<string, ChatSection>): ChatSection {
+  const previous = reusable.get(section.key)
+  if (previous?.kind !== 'item') return section
+  return previous.item === section.item ? previous : section
+}
+
+function withPreviousItems(section: Extract<ChatSection, { kind: 'process' }>, reusable: Map<string, ChatSection>): ChatSection {
+  const previous = reusable.get(section.key)
+  if (previous?.kind !== 'process' || previous.items.length !== section.items.length) return section
+  for (let index = 0; index < section.items.length; index += 1) {
+    if (previous.items[index] !== section.items[index]) return section
+  }
+  return previous
 }
 
 /**
