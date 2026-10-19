@@ -1,7 +1,7 @@
 ## Unreleased
 
-- Fix sidebar footer layout corruption on Harness 0.2.x: Remote styles only its own official footer-slot entry, without overriding host CSS Modules classes or legacy better-sidebar account/connection rows. Expanded entries can shrink beside other actions; collapsed entries keep a 36 px icon seat.
-- 修复 Harness 0.2.x 侧栏 footer 布局错乱：Remote 仅设置官方 footer slot 内自身入口的样式，移除对宿主 CSS Modules 类名及旧 better-sidebar 账号/连接条的覆盖；展开入口可与其他按钮并排收缩，折叠入口保持 36 px 图标区域。
+- Fix sidebar footer layout corruption on Harness 0.2.x: Remote styles only its own official footer-slot entry, without overriding host CSS Modules classes or legacy better-sidebar account/connection rows. Expanded entries can shrink beside other actions; collapsed entries keep a 36 px icon seat. The active entry keeps Exit in normal flow so long host names can shrink without overlapping it.
+- 修复 Harness 0.2.x 侧栏 footer 布局错乱：Remote 仅设置官方 footer slot 内自身入口的样式，移除对宿主 CSS Modules 类名及旧 better-sidebar 账号/连接条的覆盖；展开入口可与其他按钮并排收缩，折叠入口保持 36 px 图标区域；远程状态下退出按钮参与正常布局，长主机名收缩时不会与其重叠。
 
 ## 0.5.14 - 2026-10-19
 
