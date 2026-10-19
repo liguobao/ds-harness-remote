@@ -28,6 +28,7 @@ import { listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
+import { filterArchivedResult, filterChatFrame, filterChatResult, withDefaultTurnWindow } from './remote-payload-trim.js'
 
 type PublishRemoteFrame = (
   event: 'harness.remote.frame' | 'harness.remote.stream.closed',
@@ -198,6 +199,8 @@ export class HarnessRemoteBridge {
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
 
+  private archivedCache: ArchivedCache = { at: 0, ids: new Set() }
+
   constructor(
     private readonly gateway: LocalTypertGateway,
     private readonly publish: PublishRemoteFrame,
@@ -239,7 +242,11 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      const nativePayload = normalizeWorkspaceRequestPayload(
+        params.endpoint,
+        withDefaultTurnWindow(params.endpoint, params.payload),
+        this.harnessVersion,
+      )
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
@@ -258,7 +265,8 @@ export class HarnessRemoteBridge {
       // to canonical base64. (Codex/ACP workspace bridges already return the
       // wire shape and are left unchanged.)
       const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result)
-      return reservation === undefined ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation)
+      const trimmed = await this.trimResult(params.endpoint, wireResult)
+      return reservation === undefined ? trimmed : this.terminal.result(params.endpoint, params.payload, trimmed, reservation)
     } catch (error) {
       if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
       if (params.endpoint === 'directoryPicker/list') {
@@ -405,10 +413,15 @@ export class HarnessRemoteBridge {
     this.streams.set(params.streamId, { controller })
     let source: AsyncIterable<unknown>
     try {
+      const streamPayload = withDefaultTurnWindow(params.endpoint, params.payload)
       source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
         ?? await (params.endpoint === 'terminal/follow' && this.terminalCarrier !== undefined
           ? this.terminalCarrier.open(params.payload, controller.signal)
-          : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal))
+          : this.gateway.open(
+              params.endpoint,
+              normalizeWorkspaceChangesPayload(params.endpoint, streamPayload, this.harnessVersion),
+              controller.signal,
+            ))
       controller.signal.throwIfAborted()
     } catch (error) {
       this.streams.delete(params.streamId)
@@ -453,10 +466,13 @@ export class HarnessRemoteBridge {
     try {
       for await (const value of source) {
         if (signal.aborted) break
+        // Trim the opening snapshot on its way out: the remote surface keeps
+        // chat only, so tool events never need to cross the encrypted channel.
+        const trimmed = filterChatFrame(value)
         const frame: HarnessRemoteFrameData = {
           streamId,
           hasValue: true,
-          ...(value === undefined ? {} : { value }),
+          ...(trimmed === undefined ? {} : { value: trimmed }),
         }
         if (encodeMessage(createEvent('harness.remote.frame', frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
           throw new Error('Oversized Harness Remote frame')
@@ -477,11 +493,47 @@ export class HarnessRemoteBridge {
     }
   }
 
+  /**
+   * Shrink the payloads a remote client receives.
+   *
+   * The desktop Web client talks to the Gateway in-process and never crosses
+   * this bridge, so everything here only affects remote clients.
+   */
+  private async trimResult(endpoint: string, result: TypertRpcResult): Promise<TypertRpcResult> {
+    const chatOnly = filterChatResult(endpoint, result)
+    if (endpoint !== 'session/list') return chatOnly
+    return filterArchivedResult(endpoint, chatOnly, await this.archivedSessionIds())
+  }
+
+  /** Cached archive projection used to hide archived Sessions from `session/list`. */
+  private async archivedSessionIds(): Promise<ReadonlySet<string>> {
+    const now = Date.now()
+    if (now - this.archivedCache.at < ARCHIVE_CACHE_TTL_MS) return this.archivedCache.ids
+    try {
+      const result = await this.gateway.dispatch('workspace/list', {}, AbortSignal.timeout(5_000))
+      const value = result.ok === true && isRecord(result.value) ? result.value : undefined
+      const list = value?.archivedSessionIds
+      const ids = new Set(Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [])
+      this.archivedCache = { at: now, ids }
+      return ids
+    } catch {
+      return this.archivedCache.ids
+    }
+  }
+
   private pruneTransfers(): void {
     const cutoff = Date.now() - TRANSFER_IDLE_MS
     for (const [id, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id)
     for (const [id, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id)
   }
+}
+
+/** How long the archive projection is reused before asking the Host again. */
+const ARCHIVE_CACHE_TTL_MS = 3_000
+
+interface ArchivedCache {
+  readonly at: number
+  readonly ids: ReadonlySet<string>
 }
 
 /**
