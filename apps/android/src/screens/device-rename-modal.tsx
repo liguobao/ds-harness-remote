@@ -25,7 +25,12 @@ export function DeviceRenameModal({ device, onClose }: { device: RemoteDevice; o
   // (input, hint and both actions) so nothing is pushed off screen.
   const { sheetMaxHeight } = useResponsiveLayout()
   const trimmed = name.trim()
-  const valid = trimmed.length > 0 && trimmed.length <= MAX_DEVICE_NAME_LENGTH
+  // The protocol validates the name in UTF-8 bytes (packages/protocol's
+  // boundedUtf8Schema), while String#length counts UTF-16 code units. One CJK
+  // character is 1 code unit but 3 bytes, so a 43-character Chinese name passed
+  // here and was rejected by the Host. Measure the same unit the wire uses.
+  const byteLength = new TextEncoder().encode(trimmed).byteLength
+  const valid = trimmed.length > 0 && byteLength <= MAX_DEVICE_NAME_LENGTH
   const close = () => { if (!pending.current) onClose() }
   const save = async () => {
     if (!valid || pending.current || busyAction !== undefined) return

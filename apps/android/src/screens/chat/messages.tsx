@@ -91,6 +91,28 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
+}, (prev, next) => {
+  // Every field below is a reference that streaming rebuilds, so compare their
+  // contents: a group whose text did not change keeps its rendered subtree.
+  if (prev.busyAction !== next.busyAction) return false
+  if (prev.onApproval !== next.onApproval || prev.onQuestion !== next.onQuestion) return false
+  if (prev.items !== next.items) {
+    if (prev.items.length !== next.items.length) return false
+    for (let index = 0; index < prev.items.length; index += 1) {
+      if (prev.items[index] !== next.items[index]) return false
+    }
+  }
+  if (prev.artifacts !== next.artifacts) return false
+  if (prev.updatedArtifacts !== next.updatedArtifacts) return false
+  const before = prev.availableUiIds
+  const after = next.availableUiIds
+  if (before !== after) {
+    if (before.size !== after.size) return false
+    for (const id of before) {
+      if (!after.has(id)) return false
+    }
+  }
+  return true
 })
 
 const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, busyAction, onApproval, onQuestion }: {

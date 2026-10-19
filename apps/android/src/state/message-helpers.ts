@@ -157,22 +157,49 @@ export type ChatSection =
   | { kind: 'process'; key: string; turn: string; items: ChatItem[] }
 
 /** Group adjacent activity from one native turn, leaving user rows in place. */
-export function chatSections(items: ChatItem[]): ChatSection[] {
-  const sections: ChatSection[] = []
+export function chatSections(items: ChatItem[], previous?: readonly ChatSection[]): ChatSection[] {
+  // Two phases on purpose: build fresh buffers first, then hand back the old
+  // object per key when nothing about it moved. Pushing into `sections.at(-1)`
+  // while reusing a previous section would mutate the array the previous
+  // render still holds, which is exactly the corruption this cache must avoid.
+  const drafts: ChatSection[] = []
   for (const item of items) {
     const turn = item.kind === 'message' && item.role === 'user'
       ? undefined
       : item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
-    const previous = sections.at(-1)
-    if (turn !== undefined && previous?.kind === 'process' && previous.turn === turn) {
-      previous.items.push(item)
+    const last = drafts.at(-1)
+    if (turn !== undefined && last?.kind === 'process' && last.turn === turn) {
+      last.items.push(item)
     } else if (turn !== undefined) {
-      sections.push({ kind: 'process', key: `process:${turn}:${item.id}`, turn, items: [item] })
+      drafts.push({ kind: 'process', key: `process:${turn}:${item.id}`, turn, items: [item] })
     } else {
-      sections.push({ kind: 'item', key: item.id, item })
+      drafts.push({ kind: 'item', key: item.id, item })
+    }
+  }
+  if (previous === undefined || previous.length === 0) return drafts
+  const reusable = new Map<string, ChatSection>()
+  for (const section of previous) reusable.set(section.key, section)
+  const sections: ChatSection[] = []
+  for (const draft of drafts) {
+    const old = reusable.get(draft.key)
+    if (old === undefined || old.kind !== draft.kind) {
+      sections.push(draft)
+    } else if (draft.kind === 'item') {
+      sections.push(old.kind === 'item' && old.item === draft.item ? old : draft)
+    } else {
+      sections.push(old.kind === 'process' && sameItems(old.items, draft.items) ? old : draft)
     }
   }
   return sections
+}
+
+/** True when both lists carry the same objects in the same order. */
+function sameItems(a: readonly ChatItem[], b: readonly ChatItem[]): boolean {
+  if (a.length !== b.length) return false
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false
+  }
+  return true
 }
 
 /**
@@ -283,4 +310,46 @@ export function oldestSeq(events: HistoryEntry[]): number | undefined {
     if (Number.isSafeInteger(seq)) oldest = oldest === undefined ? seq : Math.min(oldest, seq)
   }
   return oldest
+}
+/**
+ * Keep only the newest visible turn.
+ *
+ * The Remote Host can be configured to replay just a fraction of the
+ * transcript, but that limit only applies to the history it sends on open.
+ * Once a session is live, the client keeps appending every delta it receives
+ * and never drops what it already holds — so a long-running session slowly
+ * regrows the whole transcript the Host was trying to trim.
+ *
+ * This keeps the view honest about that setting: only the most recent turn
+ * stays visible.
+ *
+ * Turn boundaries come from the user rows, which is what a reader calls a
+ * turn: everything after the newest user message belongs to it. Items that
+ * carry an explicit `turn` are matched against that id as well, so a trailing
+ * assistant row whose user row already scrolled out of the incoming page is
+ * still attributed to the newest turn rather than dropped. Rows with no turn
+ * evidence at all are kept, so a session that has never carried a user message
+ * (or a backend that omits turn ids) cannot be rendered blank.
+ */
+export function limitToLatestTurn(items: ChatItem[]): ChatItem[] {
+  if (items.length === 0) return items
+  let newestTurn: string | undefined
+  let start = 0
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const row = items[index]
+    if (row === undefined) continue
+    if (row.kind === 'message' && row.role === 'user') {
+      start = index
+      newestTurn = row.turn
+      break
+    }
+    if (newestTurn === undefined && row.turn !== undefined) newestTurn = row.turn
+  }
+  const within = (row: ChatItem): boolean =>
+    newestTurn === undefined || row.turn === undefined || row.turn === newestTurn
+  const tail = items.slice(start)
+  const kept = tail.filter(within)
+  if (kept.length > 0) return kept
+  // A page can start inside a turn whose user row is gone; keep that turn's rows.
+  return tail
 }
