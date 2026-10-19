@@ -35,7 +35,8 @@
   "exports": {
     ".": {
       "types": "./public.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": "./dist/client.js",
