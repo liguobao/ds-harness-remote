@@ -77,6 +77,44 @@ describe('HarnessRemoteBridge', () => {
     })))
   })
 
+  it('creates missing Host folders before forwarding workspace/create', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-remote-workspace-create-'))
+    const folder = join(root, 'MarcoAgent', 'admin')
+    const dispatch = vi.fn(async (endpoint: string, payload: { args: Record<string, unknown> }) => {
+      expect(endpoint).toBe('workspace/create')
+      expect(payload.args).toEqual({ request: { path: folder } })
+      const resolved = await realpath(folder)
+      expect(resolved).toBe(await realpath(folder))
+      return {
+        ok: true as const,
+        value: {
+          workspace: {
+            workspaceId: 'ws-admin',
+            path: folder,
+            title: 'admin',
+            sessionIds: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          created: true,
+        },
+      }
+    })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+    try {
+      await expect(bridge.call({
+        endpoint: 'workspace/create',
+        payload: { args: { request: { path: folder } } },
+      })).resolves.toMatchObject({
+        ok: true,
+        value: { workspace: { workspaceId: 'ws-admin' }, created: true },
+      })
+      expect(dispatch).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('falls back to Host directory metadata for the v0.1.2-rc.1 native-only picker failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-remote-alpha-directory-'))
     await mkdir(join(root, 'project'))
