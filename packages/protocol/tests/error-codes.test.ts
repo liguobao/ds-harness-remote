@@ -251,6 +251,7 @@ describe('capability constants', () => {
 
   it('harnessCapabilityValues matches §17 universe of known values', () => {
     expect(harnessCapabilityValues).toEqual([
+      'workspace.upload.v1',
       'harness.api.v1',
       'harness.api.transfer.v1',
       'harness.remote.v1',

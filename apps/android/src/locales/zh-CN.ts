@@ -64,6 +64,7 @@ const zhCN = {
   setup: {
     title: '登录', signIn: '登录账号', signInAgain: '重新登录', lead: '授权此手机后，即可查看同一账号下的设备并继续对话。',
     oauth: '知乎', githubOAuth: 'GitHub', passwordMethod: '邮箱', zhihu: '使用知乎账号登录', github: '使用 GitHub 账号登录', oauthHint: '会打开浏览器完成授权，然后自动返回这里。',
+    qr: '扫码登录', qrEntryHint: '点击显示二维码，用手机扫码授权', qrScanTitle: '使用手机扫码登录', qrScanHint: '用手机扫描二维码并在授权页确认，完成后会自动登录此设备。', qrWaiting: '等待手机扫码…', qrExpired: '二维码已过期，请刷新后重试。', qrRefresh: '刷新二维码', qrUnsupported: '当前服务器未开启扫码登录，请使用其他方式登录。', qrFailed: '扫码登录未完成，请重试。',
     email: '邮箱', emailPlaceholder: '输入邮箱', password: '密码', passwordPlaceholder: '输入密码', passwordHint: '密码只用于本次登录，不会保存在手机上。',
     server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: '对话内容会加密传输。只有登录同一账号的可信设备才能访问。',
   },

@@ -2,7 +2,7 @@
   "name": "@dsh-remote/browser",
   "displayName": "DeepSeek Harness Remote",
   "description": "Browser launcher for DeepSeek Harness Remote: authorize from Web, see online Hosts and open the selected machine.",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "private": true,
   "license": "MIT",
   "repository": {

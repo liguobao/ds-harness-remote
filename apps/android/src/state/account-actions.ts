@@ -3,6 +3,7 @@ import { resolveAutoConnectDevice } from '../lib/auto-connect'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { applyLanguagePreference, strings as zhCN } from '../locales/i18n'
 import { reconcileTrustedDevices } from '../services/device-directory'
+import { RemoteServerApi } from '../services/api'
 import type { LoginOutcome } from '../services/login'
 import {
   githubOAuthLoginChannel,
@@ -37,11 +38,11 @@ import {
   trustHost,
 } from '../services/storage'
 import type { ServerConfig, WorkspaceShortcut } from '../types'
-import type { AppState, StoreAccess } from './store-state'
+import type { AppState, QrLoginStart, QrProviderList, StoreAccess } from './store-state'
 import { initialData } from './store-state'
 
 type AccountActions = Pick<AppState,
-  'bootstrap' | 'requireReauth' | 'consumePendingAutoConnect' | 'configureServer' | 'startOAuth' | 'startGithubOAuth' | 'completeOAuth' | 'refreshDevices' | 'trustDevice' | 'renameDevice' | 'forgetDevice' | 'resetLocalData' | 'signOut'>
+  'bootstrap' | 'requireReauth' | 'consumePendingAutoConnect' | 'configureServer' | 'startOAuth' | 'startGithubOAuth' | 'completeOAuth' | 'listQrProviders' | 'startQrLogin' | 'pollQrLogin' | 'completeQrLogin' | 'refreshDevices' | 'trustDevice' | 'renameDevice' | 'forgetDevice' | 'resetLocalData' | 'signOut'>
 
 export function createAccountActions({ set, get }: StoreAccess): AccountActions {
   let accountGeneration = 0
@@ -209,6 +210,64 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
         const context = await loginFlow.createContext(baseUrl, identity)
         const outcome = await loginFlow.completeRedirect(channel, context, token)
+        return await finalizeLogin(set, context.baseUrl, outcome)
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async listQrProviders(input) {
+      set({ error: undefined })
+      try {
+        const identity = get().identity
+        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+        const context = await loginFlow.createContext(input, identity)
+        const providers = (await context.publicApi.oauthProviders())
+          .filter(provider => provider.qrStartUrl !== undefined)
+        return { baseUrl: context.baseUrl, providers } satisfies QrProviderList
+      } catch (error) {
+        set({ error: friendlyError(error) })
+        return undefined
+      }
+    },
+
+    async startQrLogin(input, providerId) {
+      set({ busyAction: 'oauth', error: undefined })
+      try {
+        const identity = get().identity
+        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+        const context = await loginFlow.createContext(input, identity)
+        const provider = (await context.publicApi.oauthProviders())
+          .find(item => item.id === providerId && item.qrStartUrl !== undefined)
+        if (provider === undefined) throw new Error(zhCN.setup.qrUnsupported)
+        const session = await context.publicApi.startOAuthQrLogin(provider)
+        set({ busyAction: undefined })
+        return { baseUrl: context.baseUrl, provider, session } satisfies QrLoginStart
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return undefined
+      }
+    },
+
+    async pollQrLogin(baseUrl, qrId) {
+      // Poll failures stay local to the sign-in panel: a transient network
+      // error must not replace the whole app error banner while scanning.
+      try {
+        return await new RemoteServerApi(baseUrl).pollOAuthQrLogin(qrId)
+      } catch {
+        return undefined
+      }
+    },
+
+    async completeQrLogin(baseUrl, token, method) {
+      set({ busyAction: 'server', error: undefined })
+      try {
+        const identity = get().identity
+        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+        if (token.length < 16) throw new Error(zhCN.setup.qrFailed)
+        const context = await loginFlow.createContext(baseUrl, identity)
+        const outcome = await loginFlow.completeRedirect(redirectLoginChannelFor(method), context, token)
         return await finalizeLogin(set, context.baseUrl, outcome)
       } catch (error) {
         set({ busyAction: undefined, error: friendlyError(error) })
@@ -418,6 +477,18 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
     configureServer: (...args) => login(() => actions.configureServer(...args)),
     completeOAuth: token => login(() => actions.completeOAuth(token)),
+    listQrProviders: async input => {
+      const generation = accountGeneration + 1
+      const result = await change(() => actions.listQrProviders(input))
+      return generation === accountGeneration ? result : undefined
+    },
+    startQrLogin: async (input, providerId) => {
+      const generation = accountGeneration + 1
+      const result = await change(() => actions.startQrLogin(input, providerId))
+      return generation === accountGeneration ? result : undefined
+    },
+    pollQrLogin: (baseUrl, qrId) => actions.pollQrLogin(baseUrl, qrId),
+    completeQrLogin: (baseUrl, token, method) => login(() => actions.completeQrLogin(baseUrl, token, method)),
     startOAuth: input => redirect(() => actions.startOAuth(input)),
     startGithubOAuth: input => redirect(() => actions.startGithubOAuth(input)),
     requireReauth: message => change(() => actions.requireReauth(message)),

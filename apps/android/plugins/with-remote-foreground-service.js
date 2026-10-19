@@ -18,6 +18,8 @@ function withRemoteForegroundService(config) {
     for (const name of [
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING',
+      'android.permission.POST_NOTIFICATIONS',
+      'android.permission.WAKE_LOCK',
     ]) {
       if (!permissions.has(name)) manifest['uses-permission'].push({ $: { 'android:name': name } })
     }

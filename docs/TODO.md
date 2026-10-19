@@ -1,6 +1,6 @@
 # TODO
 
-更新日期：2026-10-18。本次发布版本统一为 `0.5.12`，Android `versionCode 50`；发布状态以 GitHub Release 工作流为准。
+更新日期：2026-10-19。本次发布版本统一为 `0.5.13`（Tag `v0.5.13`），Android `versionCode 57`（从 51 跳过 52–56），Expo iOS `buildNumber 57`；发布状态以 GitHub Release 工作流为准。
 
 Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
 peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
@@ -13,6 +13,7 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 
 ## 2026-10-18 版本审查后续
 
+- [ ] Android 保活修复真机验收：安装重建 APK，确认通知权限与常驻通知、后台/息屏 1/5/15 分钟的 Relay/WebRTC 心跳与消息更新、回前台半开连接恢复、断开后通知与唤醒锁释放；覆盖默认/不受限制省电、Doze 与 Wi-Fi/蜂窝切换。本机类型/契约测试与原生编译不等于这些场景已通过。
 - [x] 修复 ACP/CodeX 异步结果隔离、归属回滚、旧 Prompt、OpenCode history reader、Pi 模型确认及文件预览内存限额；全仓 check、689 个测试及生产 build 通过。修复尚未发布。
 - [ ] 消除剩余 5 项依赖公告（4 high / 1 moderate）：Expo/xcode 的 uuid、Metro 的 image-size（2 项）及 braces、Expo CLI 的 node-forge。image-size/uuid 需要兼容升级；node-forge/braces 本轮 audit 尚无修复版本。不得直接覆盖不兼容大版本或将构建链依赖视为无风险。
 - [ ] 在 Windows、Android APK/真机、独立 Remote Web 与加密跨设备环境回归本轮断线/后端替换修复；本机 check/test/Hermes 构建不替代目标平台验收。
@@ -124,6 +125,9 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 ## P1：Agent ACP / Cursor / Antigravity（实验）
 
 - [x] [OpenCode 原生归档](design/acp-session-archive.md)：直接调用同一 ACP 进程的认证 loopback HTTP API，持久状态由 OpenCode 管理；固定 capability/扩展、可信 cwd、并发隔离、跨连接事件与 Desktop/Android 确认后更新。
+- [x] OpenCode ACP 启动按 CLI 参数能力检测，兼容带网络参数与纯 stdio 构建；无原生 HTTP API 时归档明确不可用，列表/历史继续工作。修复尚未发布。
+- [x] OpenCode 共享浏览器内存投影接收标准标题事件，回复后限时恢复异步标题，占位标题用首条提问临时替代并从历史恢复；保护手动改名和迟到目录读取。独立 Remote Web 需同步投影并部署，真实模型命名与跨设备验收仍待完成；本机隔离 `2.0.32` Prompt 尝试遇到上游模型错误。
+- [x] 核实官方 OpenCode v2 已改用 `@opencode/cli`；真实 `2.0.32` 隔离验证初始化、新建、列表、42 个模型目录与模型切换、独立历史及重启恢复。v1 `1.19.3` 原生归档回归通过；v2 无该私有 HTTP API，归档明确不可用。未发送 Prompt，跨设备验收仍待完成。
 - [ ] OpenCode 归档的 Windows、APK/真机及加密跨设备 E2E；独立 Remote Web 在 Server 仓库同步。恢复/已归档列表与其他 ACP 后端原生归档仍未实现；不得将 `session/delete` 当作归档。
 - [x] OpenCode 模型目录与切换使用真实 ACP 上游响应，按会话隔离；Pi / AGY / OpenCode 投影只提交确认状态，Android 接入 AGY 模型/思考强度。
 - [x] Cursor / Claude Remote 真实模型目录与上游确认的切换，Cursor 按会话隔离进程；Claude Desktop/Android 工作区、历史与文字会话入口。

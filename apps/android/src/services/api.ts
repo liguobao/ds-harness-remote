@@ -45,6 +45,24 @@ export interface RtcIceServer {
   credential?: string
 }
 
+/** Server-owned OAuth provider; IDs are opaque and controlled by the Server. */
+export interface OAuthProviderInfo {
+  id: string
+  displayName: string
+  startUrl: string
+  qrStartUrl?: string
+}
+
+export interface OAuthQrSession {
+  qrId: string
+  scanUrl: string
+  expiresIn: number
+}
+
+export type OAuthQrPollResult =
+  | { status: 'pending' | 'expired' }
+  | { status: 'complete'; token: string }
+
 type FetchImplementation = typeof fetch
 
 export class RemoteServerApi {
@@ -78,6 +96,87 @@ export class RemoteServerApi {
     const body = await this.request<unknown>('/api/v1/auth/oauth/github/status', {}, false)
     if (!isRecord(body) || typeof body.configured !== 'boolean') invalidResponse('GitHub oauth status')
     return { configured: body.configured }
+  }
+
+  /**
+   * Server-defined OAuth providers. A provider without `qrStartUrl` cannot be
+   * used for QR sign-in. Older Servers only expose the per-provider status
+   * endpoints, so fall back to those only when the discovery endpoint is 404.
+   */
+  async oauthProviders(): Promise<OAuthProviderInfo[]> {
+    let body: unknown
+    try {
+      body = await this.request<unknown>('/api/v1/auth/oauth/providers', {}, false)
+    } catch (error) {
+      if (!(error instanceof RemoteApiError) || error.status !== 404) throw error
+      const legacy: OAuthProviderInfo[] = []
+      for (const [id, displayName, statusPath, startPath] of [
+        ['zhihu', '知乎', '/api/v1/auth/oauth/status', '/api/v1/auth/oauth/start'],
+        ['github', 'GitHub', '/api/v1/auth/oauth/github/status', '/api/v1/auth/oauth/github/start'],
+      ] as const) {
+        try {
+          const status = await this.request<unknown>(statusPath, {}, false)
+          if (isRecord(status) && status.configured === true) {
+            legacy.push({
+              id,
+              displayName,
+              startUrl: startPath,
+              qrStartUrl: `/api/v1/auth/oauth/qr/start?provider=${id}`,
+            })
+          }
+        } catch (reason) {
+          if (reason instanceof RemoteApiError && reason.status === 404) continue
+          throw reason
+        }
+      }
+      return legacy
+    }
+    if (!isRecord(body) || !Array.isArray(body.items)) invalidResponse('OAuth providers')
+    const ids = new Set<string>()
+    return body.items.map(item => {
+      if (!isRecord(item)
+        || typeof item.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(item.id) || ids.has(item.id)
+        || typeof item.displayName !== 'string' || item.displayName.trim().length === 0 || item.displayName.length > 128
+        || !isAuthEntryPath(item.startUrl)
+        || (item.qrStartUrl !== undefined && item.qrStartUrl !== null && !isAuthEntryPath(item.qrStartUrl))) {
+        invalidResponse('OAuth providers')
+      }
+      ids.add(item.id)
+      return {
+        id: item.id,
+        displayName: item.displayName,
+        startUrl: item.startUrl,
+        ...(typeof item.qrStartUrl === 'string' ? { qrStartUrl: item.qrStartUrl } : {}),
+      } satisfies OAuthProviderInfo
+    })
+  }
+
+  /** Create a short-lived QR sign-in session for one Server-owned provider. */
+  async startOAuthQrLogin(provider: OAuthProviderInfo): Promise<OAuthQrSession> {
+    if (provider.qrStartUrl === undefined) {
+      throw new RemoteApiError('INVALID_MESSAGE', 'This provider does not support QR sign-in.')
+    }
+    const body = await this.request<unknown>(provider.qrStartUrl, { method: 'POST', body: '{}' }, false)
+    if (!isRecord(body)
+      || typeof body.qrId !== 'string' || body.qrId.length < 20
+      || !Number.isSafeInteger(body.expiresIn) || (body.expiresIn as number) <= 0
+      || (body.provider !== undefined && body.provider !== provider.id)) {
+      invalidResponse('QR sign-in session')
+    }
+    const scanUrl = sameOriginScanUrl(body.scanUrl, this.baseUrl)
+    if (scanUrl === undefined) invalidResponse('QR sign-in session')
+    return { qrId: body.qrId, scanUrl, expiresIn: body.expiresIn as number }
+  }
+
+  /** Poll a QR sign-in session; the account token is returned exactly once on completion. */
+  async pollOAuthQrLogin(qrId: string): Promise<OAuthQrPollResult> {
+    const body = await this.request<unknown>(`/api/v1/auth/oauth/qr/${encodeURIComponent(qrId)}`, {}, false)
+    if (!isRecord(body)) invalidResponse('QR sign-in status')
+    if (body.status === 'pending' || body.status === 'expired') return { status: body.status }
+    if (body.status !== 'complete' || typeof body.token !== 'string' || body.token.length < 16) {
+      invalidResponse('QR sign-in status')
+    }
+    return { status: 'complete', token: body.token }
   }
 
   async accountMe(accountToken: string): Promise<{ account: string }> {
@@ -322,6 +421,28 @@ function parseIceServer(input: unknown): RtcIceServer[] {
 
 function invalidResponse(name: string): never {
   throw new RemoteApiError('INVALID_MESSAGE', `The server returned invalid ${name} data.`)
+}
+
+/**
+ * Only same-origin auth entry paths are accepted. This prevents a compromised
+ * discovery response from turning the Client into an open request forwarder.
+ */
+function isAuthEntryPath(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith('/api/v1/auth/') || /[\u0000-\u001f\u007f\s\\#]/u.test(value)) {
+    return false
+  }
+  return !(value.split('?')[0] ?? '').split('/').some(segment => segment === '.' || segment === '..' || segment.includes('%'))
+}
+
+/** The QR payload must stay on the configured Server origin and path prefix. */
+function sameOriginScanUrl(value: unknown, baseUrl: string): string | undefined {
+  if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/u.test(value)) return undefined
+  try {
+    const normalized = new URL(value).href
+    return normalized.startsWith(`${baseUrl}/`) ? normalized : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

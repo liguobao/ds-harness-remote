@@ -1,9 +1,32 @@
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { realpath } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify, stripVTControlCharacters } from 'node:util'
 import { RpcError } from '../../safe-error.js'
 
 const MAX_RESPONSE_BYTES = 64 * 1024
+const execFileAsync = promisify(execFile)
+
+/** Probe the installed CLI, since ACP builds do not all expose a native HTTP listener. */
+export async function opencodeHasNativeApi(binary: string, args: readonly string[], cwd: string | undefined, signal: AbortSignal): Promise<boolean> {
+  try {
+    const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), '--help'], {
+      cwd, signal, timeout: 20_000, maxBuffer: MAX_RESPONSE_BYTES, windowsHide: true, killSignal: 'SIGKILL',
+    })
+    const help = stripVTControlCharacters(`${stdout}\n${stderr}`)
+    const hasFlag = (name: string) => new RegExp(`^\\s*(?:-[A-Za-z],?\\s+)?--${name}(?=[\\s=,\\[]|$)`, 'm').test(help)
+    const network = ['hostname', 'port', 'mdns'].map(hasFlag)
+    // An incomplete/failed probe must never remove the private bind from an older CLI.
+    if (!/\bacp\b/i.test(help) || !hasFlag('help') || (network.some(Boolean) && !network.every(Boolean))) throw new Error('Invalid ACP help')
+    return network.every(Boolean)
+  } catch (error) {
+    // Do not expose captured CLI output or inherited configuration in errors/logs.
+    if (signal.aborted) throw new RpcError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') throw new RpcError('OPENCODE_BINARY_UNAVAILABLE', 'The Host OpenCode executable is unavailable.')
+    throw new RpcError('OPENCODE_CLI_PROBE_FAILED', 'Could not inspect OpenCode ACP options. Check opencode acp --help on the Host.')
+  }
+}
 
 /** The native HTTP listener belongs to the same Host-local `opencode acp` process. */
 export class OpencodeNativeApi {
@@ -69,17 +92,17 @@ export async function opencodeLoopbackPort(): Promise<number> {
   return address.port
 }
 
-/** Explicit flags override user network defaults, including mDNS's public bind. */
-export function opencodePrivateArgs(args: readonly string[], port: number): string[] {
+/** Strip stale network flags; only add a private listener when the CLI advertises it. */
+export function opencodePrivateArgs(args: readonly string[], port?: number): string[] {
   if (args.includes('--')) throw unavailable()
   const kept: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (/^--(?:port|hostname|mdns|no-mdns)(?:=|$)/.test(arg)) {
-      if ((arg === '--port' || arg === '--hostname') || (arg === '--mdns' && /^(true|false)$/.test(args[i + 1] ?? ''))) i++
+      if ((arg === '--port' || arg === '--hostname') || ((arg === '--mdns' || arg === '--no-mdns') && /^(true|false)$/.test(args[i + 1] ?? ''))) i++
     } else kept.push(arg)
   }
-  return [...kept, `--hostname=127.0.0.1`, `--port=${port}`, '--mdns=false']
+  return port === undefined ? kept : [...kept, `--hostname=127.0.0.1`, `--port=${port}`, '--mdns=false']
 }
 
 function unavailable(): RpcError {

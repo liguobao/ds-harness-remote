@@ -16,6 +16,7 @@ import type { SafeLogger } from './logging.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode } from './safe-error.js'
+import type { WorkspaceUploadHost } from './workspace-upload.js'
 import type { PluginRouteBridge } from './plugin-route-bridge.js'
 
 export { RpcError } from './safe-error.js'
@@ -62,6 +63,10 @@ const apiMethods = new Set([
   'agent.acp.transfer.read',
   'agent.acp.transfer.close',
   'plugin.route.call',
+  'workspace.upload.open',
+  'workspace.upload.chunk',
+  'workspace.upload.commit',
+  'workspace.upload.abort',
 ])
 
 export const HOST_CAPABILITIES = [
@@ -70,6 +75,7 @@ export const HOST_CAPABILITIES = [
   'harness.remote.v1',
   'harness.remote.transfer.v1',
   'fileviewer.read.v1',
+  'workspace.upload.v1',
   'codex.appserver.v1',
   'codex.appserver.transfer.v1',
   'agent.acp.v1',
@@ -91,6 +97,7 @@ export class RpcRouter {
     private readonly loopback?: LoopbackHost,
     private readonly workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
     private readonly pluginRoute?: PluginRouteBridge,
+    private readonly workspaceUpload?: WorkspaceUploadHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -100,6 +107,7 @@ export class RpcRouter {
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
       this.acp?.closeAll(),
+      this.workspaceUpload?.closeAll(),
     ])
   }
 
@@ -131,7 +139,8 @@ export class RpcRouter {
       return createRpcResponse(request.id, result)
     } catch (error: unknown) {
       const response = errorResponse(request.id, error)
-      const failedEndpoint = typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
+      const failedEndpoint = !request.payload.method.startsWith('workspace.upload.')
+        && typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
         ? String((request.payload.params as Record<string, unknown>).endpoint)
         : undefined
       this.logger?.warn('host rpc failed', {
@@ -210,6 +219,13 @@ export class RpcRouter {
       case 'agent.acp.transfer.commit': return this.requireAcp().commitTransfer(params)
       case 'agent.acp.transfer.read': return this.requireAcp().readTransfer(params)
       case 'agent.acp.transfer.close': return this.requireAcp().closeTransfer(params)
+      case 'workspace.upload.open':
+      case 'workspace.upload.chunk':
+      case 'workspace.upload.commit':
+      case 'workspace.upload.abort': {
+        if (!this.workspaceUpload) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace upload is unavailable on this Host.')
+        return this.workspaceUpload.call(method, params)
+      }
       case 'plugin.route.call': return this.requirePluginRoute().call(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }

@@ -274,6 +274,22 @@ export class AndroidRemoteConnection {
     return this.core?.getStats()
   }
 
+  /** A locally open socket can be half-open after Android suspends networking. */
+  async checkHealth(): Promise<boolean> {
+    const core = this.core
+    if (core === undefined || !core.getStats().connected) return false
+    try {
+      // Existing authenticated, encrypted capability RPC; no new wire heartbeat.
+      await core.rpc('harness.transport.describe', {}, undefined, { timeoutMs: 5_000 })
+      return this.core === core
+    } catch (error) {
+      // Old ApiProxy Hosts can omit capability discovery. An authenticated
+      // METHOD_NOT_FOUND response still proves this same carrier is alive.
+      return this.core === core && error instanceof Error
+        && (error as Error & { code?: unknown }).code === 'METHOD_NOT_FOUND'
+    }
+  }
+
   async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
     return await this.transport?.connectionDetails()
   }

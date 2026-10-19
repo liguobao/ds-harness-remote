@@ -15,10 +15,12 @@ import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup } from '../se
 
 const SESSION_PAGE_SIZE = 3
 
-export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
+export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false }: {
   onBack: () => void
   onClose: () => void
   onSelect: (session: RemoteSession) => Promise<void>
+  /** Render as a persistent tablet sidebar instead of a modal drawer. */
+  inline?: boolean
 }) {
   // The store's catalog is scoped to selectedDevice and reset when changing hosts.
   const device = useAppStore(state => state.selectedDevice)
@@ -99,12 +101,9 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
     try { await refreshWorkspaces() } finally { setRefreshing(false) }
   }
 
-  return <Modal transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-    <View style={styles.overlay}>
-      <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} />
-      <View accessibilityViewIsModal style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+  const pane = <>
         <View style={styles.header}>
-          <IconButton label={strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />
+          {inline ? <View style={styles.headerSpacer} /> : <IconButton label={strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />}
           <Text style={styles.title} numberOfLines={1}>{device?.name}</Text>
           <IconButton label={strings.common.refresh} icon={RefreshCw} onPress={() => void refresh()} disabled={refreshing || busy !== undefined || !connected} />
         </View>
@@ -185,7 +184,14 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
             </Pressable>
           }}
         />
-      </View>
+  </>
+  if (inline) {
+    return <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{pane}</View>
+  }
+  return <Modal transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <View style={styles.overlay}>
+      <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} />
+      <View accessibilityViewIsModal style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{pane}</View>
     </View>
   </Modal>
 }
@@ -193,6 +199,8 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: colors.scrim },
   drawer: { flex: 1, width: '88%', maxWidth: 420, backgroundColor: colors.surface },
+  inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
+  headerSpacer: { width: 40 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
   list: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },

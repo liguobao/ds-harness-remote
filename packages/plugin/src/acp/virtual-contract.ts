@@ -42,6 +42,7 @@ export interface AcpSessionState {
   cwd: string
   title?: string
   titleOverridden?: boolean
+  titleFromPrompt?: boolean
   blank: boolean
   running: boolean
   createdAt: number

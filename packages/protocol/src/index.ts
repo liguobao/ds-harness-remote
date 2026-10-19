@@ -111,6 +111,10 @@ export const controlFrameTypes = [
 ] as const
 
 export const rpcMethods = [
+  'workspace.upload.open',
+  'workspace.upload.chunk',
+  'workspace.upload.commit',
+  'workspace.upload.abort',
   'harness.transport.describe',
   'harness.api.call',
   'harness.api.transfer.open',
@@ -427,6 +431,7 @@ export const transportCapabilities = [
  * harness.remote.v3); advertising both is a protocol violation.
  */
 export const harnessCapabilityValues = [
+  'workspace.upload.v1',
   'harness.api.v1',
   'harness.api.transfer.v1',
   'harness.remote.v1',

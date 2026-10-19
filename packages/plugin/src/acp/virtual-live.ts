@@ -40,6 +40,7 @@ export interface AcpLiveProjectionContext {
   readonly publishProjection: (sessionId: string, key: string, value: unknown, seq?: number) => void
   readonly nextProjectionSeq: () => number
   readonly refreshSessionTitle: (session: AcpSessionState) => Promise<void>
+  readonly applySessionTitle: (session: AcpSessionState, title: string) => void
   readonly publishWorkspaceBaseline: () => void
   readonly pendingApprovals: Map<string, PendingApproval>
   readonly emitApproval: (input: { eventId: string; agentId: string; request: JsonRecord; }) => void
@@ -167,6 +168,12 @@ export class AcpLiveProjection {
     const update = isRecord(params.update) ? params.update : params
     const kind = string(update.sessionUpdate) ?? string(update.type)
     const session = this.context.sessions.get(follow.sessionId)
+    if (kind === 'session_info_update') {
+      if (session && params.sessionId === follow.acpSessionId && typeof update.title === 'string') {
+        this.context.applySessionTitle(session, update.title)
+      }
+      return
+    }
     if (kind === 'model_selection' && isRecord(update.selected)
       && update.selected.provider === this.context.backend && typeof update.selected.model === 'string') {
       this.context.selectedModels.set(follow.sessionId, update.selected as unknown as AcpModelSelection)

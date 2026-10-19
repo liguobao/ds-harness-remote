@@ -1,45 +1,31 @@
 ## 中文
 
-**0.5.12** 汇总自 `v0.5.11` 以来的更新，重点加入 Android 横竖屏适配、修复 CodeX 新会话历史投影，并补充依赖安全与 Agent 可靠性更新。本仓库各自有包与客户端版本统一为 **0.5.12**；Android `versionCode` 与 Expo iOS `buildNumber` 均为 **50**。
+**0.5.13** 新增 Android 扫码登录与平板双栏，修复 OpenCode v1/v2 接入和异步标题恢复，并提供 Host 加密工作区文件上传能力。所有自有包与客户端版本均为 **0.5.13**，发布 Tag 为 **v0.5.13**。Android `versionCode` 从 **51** 升至 **57**，跳过 **52–56**；Expo iOS `buildNumber` 同步为 **57**。
 
-- **Android 横竖屏适配**：解除竖屏锁定，跟随系统自动旋转；聊天消息、输入栏和轨迹页在宽窗口使用可读列，底部弹层按窗口高度收缩并可滚动，工作区对话框、设备重命名、Home 菜单、连接页与启动页适配横屏和短窗口；旋转后重新同步 IME inset。已在 Android 15 真机完成横竖屏往返烟测。
-- **CodeX 新会话可打开**：当前 App Server 版本会在首条用户消息之后才 materialize Thread。尚未 materialize 的 Thread 不再被当作历史读取失败，而是投影为空历史基线；旧 Host 的 legacy `thread/read` 回退仍保留。
-- **依赖安全更新**：同步兼容的安全补丁，生产依赖 audit 发现由 32 项降至 5 项；剩余 Expo/Metro 构建链公告与验收边界记录在 [TODO](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/docs/TODO.md)。
-- **Agent 可靠性**：修复 Pi 现代模型/Thinking 状态确认，并在读取超大文件前执行文件预览内存限额。ACP/CodeX 请求与归属回滚在断线、后端替换时 fail closed，退役 Prompt 结果不再污染新任务；OpenCode 历史子进程在关闭或超限时停止。
+- **Android 扫码登录**：点击「扫码登录」后才请求 Server provider 并本地渲染同源二维码，大屏显示更大的二维码；保留知乎/GitHub 浏览器 OAuth 与邮箱密码登录。领取一次性 token 后立即停止轮询，避免成功登录被后续“二维码过期”状态覆盖；离开扫码页或更换 Server 时作废旧会话。
+- **平板双栏**：聊天页在宽度 ≥760 dp 且高度 ≥520 dp，或宽度 ≥1000 dp 时，左侧常驻分组会话列表，右侧展示消息与输入栏；切换会话只更新右侧内容。窄屏与较短的手机横屏窗口保持单栏。
+- **OpenCode v1/v2 兼容**：启动前检测 CLI 支持的网络参数；支持时保留认证私有监听器，否则使用纯 stdio ACP。v1 保留原生归档；v2 归档明确提示不可用，会话发现、历史与模型选择保持可用。参数检测失败或不完整时拒绝启动。
+- **OpenCode 标题恢复**：接收 ACP 标题更新，回复完成后最多二十秒重读列表；原生标题尚未生成时临时使用首条提问。历史恢复该临时标题，旧读取和占位标题不能覆盖新标题或手动改名。
+- **Host 工作区上传**：新增独立加密 `workspace.upload.v1`，单文件最大 20 MiB，只能写入当前会话经 Host 验证的工作区根目录。同名文件自动改名、不覆盖已有文件；分块、连接/会话隔离、取消与断线清理均受限。不接受客户端目标路径；独立 Remote Web 的上传界面与部署需单独同步。
 
 ### 验证与待验收范围
 
-全仓类型检查、**692 个测试**、生产构建（含 Android Hermes 导出）、DSH GitHub bundle 与 npm 打包入口检查通过；Android 旋转已在真机完成横竖屏往返烟测。本次未完成 Windows、原生 APK/TalkBack、平板/折叠屏/分屏及加密跨设备全量验收；iOS 方向锁定也随本版解除，iOS 旋转布局尚未验证。新增能力不代表独立 Remote Web runtime 已完成接入。
-
-本机缺少 Intelligent UI renderer 时使用安全降级；Release APK 工作流会另行打包固定审核版本。本次本机构建不能替代该 APK 的验收。Metro 的 `@noble/hashes/crypto.js` exports fallback 警告仍存在。
-
-升级时请指定 **`ds-harness-remote@0.5.12`** 并同步更新 Host 插件和 Android 客户端；若 Desktop 仍显示旧插件，可按官方插件管理流程移除后指定版本重装。
-
-### 感谢贡献者
-
-感谢参与代码、审查、测试、文档和问题反馈的所有人。本版未引入新的外部代码贡献，发布整合由 [@liguobao](https://github.com/liguobao) 完成。
+本地全仓类型检查、**713 个测试**、生产构建（含 Android Hermes export）、DSH bundle 校验与版本一致性核对通过。发布工作流再次执行检查与构建，并生成 Android Release APK。已有本机验证覆盖 Android QR 合约、模拟 800×1280 dp 真机窗口的双栏切换，以及官方 OpenCode `1.19.3`（`opencode-ai`）和 `2.0.32`（`@opencode/cli`）的会话发现/恢复与 v2 模型切换；两版 CLI 未发送 Prompt。真实平板/折叠屏、扫码端到端、文件上传跨设备与独立 Remote Web 部署仍待验收。Metro 的 `@noble/hashes/crypto.js` package exports fallback 已知警告仍存在。
 
 ## English
 
-**0.5.12** brings together changes since `v0.5.11`, adding Android screen rotation, fixing CodeX new-conversation history projection, and including dependency-security and Agent reliability updates. All first-party package and client versions are **0.5.12**; Android `versionCode` and Expo iOS `buildNumber` are **50**.
+**0.5.13** adds Android QR sign-in and tablet split view, fixes OpenCode v1/v2 startup and asynchronous titles, and adds encrypted workspace file uploads on the Host. All first-party package and client versions are **0.5.13**, matching tag **v0.5.13**. Android `versionCode` advances from **51** to **57**, skipping **52–56**; Expo iOS `buildNumber` is also **57**.
 
-- **Android screen rotation:** removes the portrait lock and follows the system rotation setting. Chat content, the composer and the trajectory view use a readable column on wide windows; bottom sheets shrink to the live window height and scroll; workspace dialogs, device rename, the home menu, connection and boot screens adapt to landscape and short windows; IME insets are re-synced after rotation. Verified with portrait/landscape round trips on an Android 15 device.
-- **CodeX new conversations open:** current App Server versions materialize a Thread only after its first user message. Threads that are not materialized yet are projected as an empty history baseline instead of a failed read; the legacy `thread/read` fallback for older Hosts remains.
-- **Dependency security:** compatible security patches are applied; production-dependency audit findings drop from 32 to 5, with the remaining Expo/Metro build-chain advisories and acceptance limits tracked in [TODO](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/docs/TODO.md).
-- **Agent reliability:** fixes Pi modern model/Thinking state confirmation and bounds file-preview allocation before reading oversized files. ACP/CodeX requests and ownership rollback fail closed on disconnect or backend replacement, retired Prompt results cannot pollute new tasks, and OpenCode history subprocesses stop on shutdown or overflow.
+- **Android QR sign-in:** tapping **Sign in with QR code** requests Server providers and locally renders a same-origin QR code, enlarged on large screens. Zhihu/GitHub browser OAuth and email/password remain available. Polling stops when the one-time token is claimed so a later expired state cannot overwrite successful sign-in; leaving the view or changing Servers invalidates the old session.
+- **Tablet split view:** at ≥760 dp wide and ≥520 dp high, or ≥1000 dp wide, the grouped session list stays on the left while messages and the composer occupy the right. Selecting a conversation updates the right pane. Narrow screens and shorter phone landscape windows keep one pane.
+- **OpenCode v1/v2 compatibility:** startup probes supported CLI network options, keeping the authenticated private listener where supported and using stdio-only ACP otherwise. Native archive remains available on v1 and fails explicitly on v2; session discovery, history and model selection remain available. Failed or partial probes fail closed.
+- **OpenCode title recovery:** ACP title updates and bounded catalog retries for up to twenty seconds after completion recover asynchronous native titles. The first user message supplies a temporary title, including after history restoration; stale reads and placeholders cannot overwrite newer or manually renamed titles.
+- **Host workspace uploads:** independent encrypted `workspace.upload.v1` accepts files up to 20 MiB only within the current session's Host-verified workspace root. Publication renames conflicts without overwriting; chunks, connection/session ownership, cancellation and disconnect cleanup are bounded. Clients cannot choose destination paths. The independent Remote Web upload UI and deployment require a separate update.
 
 ### Validation and acceptance limits
 
-Workspace type checks, **692 tests**, production builds including Android Hermes export, DSH GitHub bundle validation and npm package-entry checks pass. Android rotation was smoke-tested on a real device. This release has not completed Windows, native APK/TalkBack, tablet/foldable/split-screen or full encrypted cross-device acceptance. iOS orientation locking is also removed by this release, but iOS rotation layouts have not been verified. New capabilities do not imply integration into the independent Remote Web runtime.
-
-Local builds use a safe fallback when the Intelligent UI renderer is absent; the Release APK workflow separately bundles its pinned, audited renderer. Local builds do not replace acceptance of that APK. The existing Metro `@noble/hashes/crypto.js` exports fallback warning remains.
-
-Pin **`ds-harness-remote@0.5.12`** when upgrading and update both the Host plugin and Android client. If Desktop still shows an older plugin, remove it through official plugin management and reinstall the pinned version.
-
-### Contributors
-
-Thank you to everyone who contributed code, reviews, tests, documentation and feedback. This release introduces no new external code contributions; release integration is by [@liguobao](https://github.com/liguobao).
+Local workspace type checks, **713 tests**, production builds (including Android Hermes export), DSH bundle validation and version consistency checks pass. The release workflow repeats checks and builds, then generates the Android Release APK. Existing local validation covers Android QR contracts, split-view switching on a real device at a simulated 800×1280 dp window, and session discovery/recovery plus v2 model selection with official OpenCode `1.19.3` (`opencode-ai`) and `2.0.32` (`@opencode/cli`); neither CLI validation sent a Prompt. Real tablets/foldables, end-to-end QR scanning, cross-device uploads and the independent Remote Web deployment still require acceptance. The known Metro `@noble/hashes/crypto.js` package exports fallback warning remains.
 
 ---
 
-[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.11...v0.5.12)
+[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.12...v0.5.13)

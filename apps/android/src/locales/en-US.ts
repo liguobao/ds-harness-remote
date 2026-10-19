@@ -66,6 +66,7 @@ const enUS = {
   setup: {
     title: 'Sign in', signIn: 'Sign in to your account', signInAgain: 'Sign in again', lead: 'Authorize this phone to see devices on the same account and continue your conversations.',
     oauth: 'Zhihu', githubOAuth: 'GitHub', passwordMethod: 'Email', zhihu: 'Continue with Zhihu', github: 'Continue with GitHub', oauthHint: 'A browser will open to finish authorization, then return here automatically.',
+    qr: 'Sign in with QR code', qrEntryHint: 'Tap to show the code, then scan it with your phone', qrScanTitle: 'Sign in with your phone', qrScanHint: 'Scan this code with your phone and confirm on the authorization page. This device signs in automatically afterward.', qrWaiting: 'Waiting for your phone…', qrExpired: 'This QR code expired. Refresh and try again.', qrRefresh: 'Refresh code', qrUnsupported: 'This server does not offer QR sign-in. Use another sign-in method.', qrFailed: 'QR sign-in did not complete. Try again.',
     email: 'Email', emailPlaceholder: 'Enter your email', password: 'Password', passwordPlaceholder: 'Enter your password', passwordHint: 'Your password is used only for this sign-in and is not stored on your phone.',
     server: 'Server address', serverHint: 'Use an HTTPS address.', trustTitle: 'Protect your devices and conversations', trustBody: 'Conversation data is encrypted in transit. Only trusted devices signed in to the same account can access it.',
   },

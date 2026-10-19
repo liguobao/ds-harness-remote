@@ -126,7 +126,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.12`。
+凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.13`。
 
 ## Validation Baseline
 
@@ -153,7 +153,7 @@ Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理�
 3. Remote business message 只能进入已认证的加密 channel；明文、未知 connection、错误 target、重放和 identity mismatch 必须 fail closed。
 4. Server membership 与 Host 本地 trusted peer 必须同时成立。
 5. v1 permission decision 只允许 `allow_once | deny`，禁止恢复 `allow_session`。
-6. 按用户 2026-09-20 授权，支持官方原生文件树/只读预览、默认开启且可在详细 Remote 设置中关闭的 `terminal.enabled` 交互终端，以及 `loopback.ports` 明确授权的 HTTP/WebSocket 预览。文件通过官方 `workspaceFiles`/`officeToPdf` 或已有 dsh-file-viewer provider 读取，禁止新增直接 filesystem 写入、远程桌面或通用 Harness tool RPC。终端以 Host 用户权限运行，独立于 Agent 审批；按设备固定终端归属与连接输入权，断线不重放输入。loopback Host 只出站连接 `127.0.0.1` 白名单端口；Desktop Client 可监听随机本机端口承载独立预览 origin，禁止监听公网、任意目标、CONNECT 和通用 TCP 转发。
+6. 按用户 2026-09-20 授权，支持官方原生文件树/只读预览、默认开启且可在详细 Remote 设置中关闭的 `terminal.enabled` 交互终端，以及 `loopback.ports` 明确授权的 HTTP/WebSocket 预览。文件通过官方 `workspaceFiles`/`officeToPdf` 或已有 dsh-file-viewer provider 读取，除下述 2026-10-18 workspace upload 授权外，禁止新增直接 filesystem 写入、远程桌面或通用 Harness tool RPC。终端以 Host 用户权限运行，独立于 Agent 审批；按设备固定终端归属与连接输入权，断线不重放输入。loopback Host 只出站连接 `127.0.0.1` 白名单端口；Desktop Client 可监听随机本机端口承载独立预览 origin，禁止监听公网、任意目标、CONNECT 和通用 TCP 转发。
 7. Token、私钥、主机匹配码、prompt、源码和工具输出不得写日志。
 8. Harness v0.1.1 rc.2 业务层只使用官方 `ApiProxy`，v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 业务层只使用官方 `TypertGateway` Remote carrier；原生侧栏使用官方 `workspaceFiles` / `officeToPdf` / `terminal` 固定 allowlist；保留 dsh-file-viewer provider 通道。除规则 10 规定的 CodeX 内存展示载体外，禁止增加 session/agent/workspace/permission adapter、另一套 Harness wire format 或通用文件系统协议。
 9. 不修改用户已有变更，不提交 `node_modules`、Expo cache、Android build 产物或个人 Agent 配置；唯一允许提交的 `dist` 是根 DSH GitHub Bundle 所需的 `packages/plugin/dist/index.js` 与 `client.github.js`，另需保留根 Host 入口 `index.js`。
@@ -491,3 +491,76 @@ IME inset 在窗口尺寸变化后重新读取 `Keyboard.metrics()`，避免沿�
 面板在竖屏与横屏往返切换后均可用；横屏 Gboard 走系统全屏输入编辑界面，未验证普通内联 IME
 布局。未验证平板、折叠屏/分屏、大字体、TalkBack、Terminal/PDF 原生交互及 iOS 旋转布局
 （该改动同时解除 iOS 方向锁定，需另行验收）。
+
+## Android QR sign-in (2026-10-18)
+
+Android 登录页新增「扫码登录」点击入口：`RemoteServerApi.oauthProviders()` 使用 Server 返回的
+`/api/v1/auth/oauth/providers`（404 时回退旧的 per-provider status 接口），只接受同源
+`/api/v1/auth/` 入口；只有用户点击入口后才请求 provider 并展示二维码，不在登录页加载时
+自动创建会话。`startOAuthQrLogin` 校验 `qrId`、`expiresIn` 与同源 `scanUrl`，
+`pollOAuthQrLogin` 只接受 pending/expired/complete+token。手机与大屏都保留知乎/GitHub
+浏览器 OAuth 与邮箱密码登录；大屏使用更大的二维码。二维码由 `qrcode-generator` 本地生成并通过
+`react-native-svg` 渲染；离开扫码页停止轮询，切换服务地址会使旧会话失效；完成后用一次性 token
+注册本机设备并复用现有 LoginFlow。领取到 `complete` 后立即停止轮询；注册与页面跳转不依赖会随
+store/父组件渲染变化的 effect 依赖，避免已消费的一次性 token 被再次轮询判为过期后覆盖成功状态。
+token 与二维码内容不写日志。
+
+验证：Android check、24 文件 / 136 测试（含 QR provider/start/poll 同源与状态矩阵）、
+`tsc --noEmit` 通过；真实 Server `dsh.r2049.cn` 的 providers、QR start 与 poll 合约已用 curl
+核对。本轮未完成大屏真机 UI 扫码端到端验收。
+
+## Android tablet split view (2026-10-18)
+
+聊天页在宽度 ≥760 dp 且（高度 ≥520 dp 或宽度 ≥1000 dp）时启用双栏：左侧复用
+`HostSessionsDrawer` 的 `inline` 模式常驻会话列表（当前工作/工作区/其他对话分组、刷新与
+分页），右侧保留聊天头部、消息列表与输入栏。左栏切换会话只更新右侧内容，不离开聊天；
+返回按钮回到工作区。窄屏和横屏手机仍为单栏，`HostSessionsDrawer` 的 Modal 模式不变。
+模拟 800×1280 dp 窗口的真机烟测通过：进入会话、左栏切换“新对话”、恢复窄屏后回到单栏；
+真实平板/折叠屏、分屏、大字体与 TalkBack 尚未验收。
+
+## OpenCode ACP CLI option compatibility (2026-10-18)
+
+OpenCode 启动先读取同一配置命令的 `--help`，按参数能力分流，不按主版本号猜测。
+同时支持 hostname/port/mdns 时保留强制 127.0.0.1、临时端口、关闭 mDNS 和随机认证；
+三者均不支持时移除旧网络参数，以纯 stdio ACP 提供目录、历史和对话，原生归档明确返回
+`OPENCODE_ARCHIVE_UNAVAILABLE`，不访问未启动的 HTTP listener。部分支持、检测失败或
+输出超限时拒绝启动；检测有超时且后端关闭时立即取消，不记录 CLI 输出。
+
+验证：Plugin check、53 文件 / 373 测试（串行）、共享包及 Plugin build、DSH bundle 校验、
+`git diff --check` 通过。隔离进程契约覆盖两种 CLI、私有监听/认证、失败/超限与关闭清理；
+真实官方 OpenCode 1.19.3 的初始化、新建、目录、原生归档、归档目录与独立历史读取通过，
+未发送 Prompt。随后依据官方 `https://opencode.ai/v2/docs` 确认 v2 使用 `@opencode/cli`，
+不是 v1 的 `opencode-ai`；补齐 v2 `--help, -h` 格式解析后，Plugin check/build、相关 9 个
+核心测试和 bundle 校验再次通过。真实官方 `@opencode/cli-darwin-arm64@2.0.32` 已校验
+npm integrity 并在临时目录通过初始化、新建、目录、42 个模型与模型切换、独立历史及重启
+列表/加载；归档明确不可用。v2 ACP 内部私有服务不开放网络端口，不接入共享后台服务。
+两版均未发送 Prompt，不代表 Windows、APK/真机或加密跨设备验收。修复尚未发布。
+
+
+## Web workspace upload (2026-10-18)
+
+按用户本轮明确授权，新增独立 `workspace.upload.v1`：只允许将文件上传到当前会话的
+Host 验证工作区根目录。四个固定 RPC 为 open/chunk/commit/abort；不接受 Client cwd/path，
+不扩展通用文件系统、只读预览或后端业务 allowlist。Harness 通过官方 Session V3 Peer
+解析 cwd，CodeX/ACP 使用各自可信 session authority；ACP 要求 peer/backend/owner 匹配。
+分块与每连接限额、空闲过期、取消/断线清理、排他临时文件和原子无覆盖发布属于该领域。
+聊天仍用普通文本路径引用，不新增消息 attachments。协议见 docs/protocol.md 对应章节。
+该例外覆盖本文件此前的通用文件写入禁止；不代表发布、部署或跨设备验收完成。
+
+## Android foreground connection service audit (2026-10-19)
+
+Android 在异步鉴权前启动连接服务；Expo config plugin 显式声明前台服务、通知与 WAKE_LOCK
+权限，Android 13+ 在前台连接时请求通知权限（拒绝不禁止服务，但通知栏隐藏通知）。原生服务
+绑定现有 ReactHost 的 Headless JS task，并仅在连接生命周期内持有 PARTIAL_WAKE_LOCK；
+断开、启动失败、原生销毁和 React instance invalidate 时释放。原生启动通过 Promise 确认，
+服务操作串行且按连接代次隔离，旧失败/关闭回调不能停止替换后的服务。任务等待按原生服务
+lifetime 隔离；不重启已被杀死的进程或创建无连接的常驻服务。
+
+回前台使用既有加密 `harness.transport.describe` 做最多五秒的健康检查；旧 Host 的
+METHOD_NOT_FOUND 回包同样证明链路可用。半开或检查中关闭的链路走既有重连/会话恢复，
+明确断开后的迟到检查不能恢复设备。需安装重新构建的 APK；该实现不绕过深度 Doze 或厂商
+省电限制。验证结果与真机待验收项见 apps/android/README.md 和 docs/TODO.md。
+
+本次 Android check、25 个测试文件 / 140 个测试、arm64 Release APK（含 Kotlin/Hermes）构建
+与 `git diff --check` 通过；Metro noble/hashes exports fallback 警告仍存在。本机无已连接设备，
+尚未验证通知授权 UI、后台/息屏心跳、Doze/厂商省电与真实跨设备恢复；未发布新版本。

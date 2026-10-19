@@ -103,12 +103,13 @@ describe('HostPluginRuntime multi-Client routing', () => {
               expect(result.capabilities).toEqual(
                 scenario === 'ready'
                   ? [
+                      'workspace.upload.v1',
                       'harness.api.v1',
                       'harness.api.transfer.v1',
                       'codex.appserver.v1',
                       'codex.appserver.transfer.v1',
                     ]
-                  : ['harness.api.v1', 'harness.api.transfer.v1'],
+                  : ['workspace.upload.v1', 'harness.api.v1', 'harness.api.transfer.v1'],
               )
               expect(result.workspaceTypes).toEqual(
                 scenario === 'ready'

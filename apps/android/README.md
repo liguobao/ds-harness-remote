@@ -43,6 +43,11 @@ CodeX App Server domain advertised by the Host.
   reuse the same route/connection state; chat content and the composer stay in a readable centred
   column on wide windows, bottom sheets and workspace dialogs are capped by the live window height
   and scroll their bodies on short landscape windows, and the IME inset is re-synced after rotation.
+- Sign in by scanning a Server QR code on phones, tablets and other large screens. A **Scan**
+  entry on the sign-in screen requests the Server-owned provider list and shows the QR code only
+  after it is tapped; the app renders the same-origin `scanUrl` locally, polls the one-time QR
+  session and then registers this Android device with the returned account token. Large screens
+  use a larger code; browser OAuth and email/password sign-in remain available.
 - Show the interface in English or Simplified Chinese, follow Android's current locale by default,
   and persist an explicit in-app language choice across launches.
 - Show the installed app/build version and the complete open-source repository and latest-release
@@ -106,10 +111,22 @@ src/
 An active remote connection is owned by `services/remote-runtime.ts`, rather than by a
 screen. On Android, the runtime starts a low-importance Foreground Service through the
 Expo config plugin in `plugins/with-remote-foreground-service.js`; the service keeps the
-React Native process eligible while the app is backgrounded or the screen is briefly off.
-Returning to the app observes the existing connection and only reconnects when it is offline.
-The service is stopped when the user disconnects or the connection setup fails. This does not
+React Native process eligible while the app is backgrounded. It starts before credential
+requests, while the Activity can still start an Android foreground service. The native service
+holds a partial CPU wake lock and an RN Headless JS task so Activity pause does not suspend
+RPC timeouts, stream processing or transport fallback timers. Neither mechanism keeps the screen on.
+Android 13+ requests notification permission on a foreground connection attempt; granting it
+shows the ongoing connection notification, which opens the app when tapped. Denying it does
+not disable the service, but Android hides its notification from the drawer.
+Returning to the app verifies the existing encrypted channel with a bounded, five-second
+capability request and reconnects/restores the selected session if that check fails or the
+connection is already offline. Healthy carriers are retained.
+The service is stopped when the user disconnects, the carrier closes, or connection setup fails. This does not
 make a force-stopped process reconnect by itself; that remains an explicit recovery path.
+These native changes require rebuilding and reinstalling the APK. Device/OEM battery restrictions
+and deep Doze can still suspend networking; a foreground service and wake lock do not exempt
+the app from those policies. If necessary, allow notifications and unrestricted battery use in
+Android app settings. Long screen-off/background behavior still requires device validation.
 
 Harness conversations expose **Files** and **Terminal** from `+` → **Tool access** through the Host's fixed official Typert allowlist, requiring the native APIs in DSH 0.1.6-alpha.2 or later. Files lists workspace directories and previews UTF-8 text in 200-line pages without mutations; its title-bar Back returns from a file to its directory and closes the panel only at the workspace root, and refresh stays in the title bar. PNG/JPEG/GIF/WebP images and PDFs use bounded `workspaceFiles/stat` / `readBytes` reads, with size, offset, version, and content validation. DOC/DOCX/XLS/XLSX/PPT/PPTX use the Host's existing `officeToPdf` service, when available, and the same PDF viewer. The app allows up to 8 MiB per binary preview and 50 MiB per Office source. Unsupported binary formats are not opened as text; HTML and SVG are never executed.
 

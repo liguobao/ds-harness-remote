@@ -2,7 +2,7 @@ import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-r
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { Credentials, DeviceIdentity, RemoteHost } from './types.js'
 
-const CLIENT_VERSION = '0.5.12'
+const CLIENT_VERSION = '0.5.13'
 
 export interface QrLoginSession { qrId: string; scanUrl: string; expiresIn: number }
 export type QrLoginPoll = { status: 'pending' | 'expired' } | { status: 'complete'; token: string; account: string }

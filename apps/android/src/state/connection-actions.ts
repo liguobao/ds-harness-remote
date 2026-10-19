@@ -21,7 +21,7 @@ import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'connectDevice' | 'reconnect' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
+  'connectDevice' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
   return {
     async connectDevice(device, options = {}) {
       const { config, identity } = get()
@@ -60,6 +60,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         error: undefined,
       }))
       try {
+        await runtime.connection.prepareConnection()
+        if (generation !== runtime.connectionGeneration) return false
         await runtime.closeActiveCodexStream(false)
         await runtime.closeActiveCursorStream(false)
         const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
@@ -250,6 +252,29 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       runtime.reconnectFlight = task
       void task.finally(() => { if (runtime.reconnectFlight === task) runtime.reconnectFlight = undefined })
       return task
+    },
+
+    async resumeConnection() {
+      const { selectedDevice, connection } = get()
+      if (selectedDevice === undefined) return
+      if (connection.phase === 'offline') {
+        await get().reconnect()
+        return
+      }
+      if (connection.phase !== 'connected') return
+      const generation = runtime.connectionGeneration
+      const healthy = await runtime.connection.checkHealth()
+      const current = get()
+      if (current.selectedDevice?.deviceId !== selectedDevice.deviceId) return
+      // onClose may have invalidated the generation while the probe was in
+      // flight. Resume must still recover that newly confirmed offline state.
+      if (current.connection.phase === 'offline') {
+        await get().reconnect()
+        return
+      }
+      if (generation !== runtime.connectionGeneration || current.connection.phase !== 'connected') return
+      if (!healthy) await get().reconnect()
+      else await get().refreshConnectionNetworkDetails()
     },
 
     async refreshConnectionNetworkDetails() {

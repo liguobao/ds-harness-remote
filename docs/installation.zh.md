@@ -71,7 +71,7 @@ Desktop 默认 `desktop` profile，独立 CLI 默认 `web`，可用 `DSH_COMMAND
 Desktop 也可打开 **扩展 / 插件管理**，从 npm 安装：
 
 ```text
-ds-harness-remote@0.5.12
+ds-harness-remote@0.5.13
 ```
 
 普通独立 CLI 不能管理保留的 `desktop` profile，必须使用 Desktop 官方 launcher。

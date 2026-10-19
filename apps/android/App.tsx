@@ -253,17 +253,9 @@ function AppNavigator() {
       }
       if (state !== 'active' || !backgrounded.current) return
       backgrounded.current = false
-      const current = useAppStore.getState()
-      if (current.selectedDevice === undefined
-        || current.connection.phase === 'connecting'
-        || current.connection.phase === 'reconnecting') return
-      if (current.connection.phase === 'offline') {
-        void reconnect()
-        return
-      }
-      // The foreground service keeps a healthy carrier alive while the
-      // Activity is backgrounded. Inspect it on return instead of replacing it.
-      void current.refreshConnectionNetworkDetails()
+      // Keep healthy carriers, but verify an encrypted round trip before
+      // trusting a socket that merely remained locally "open" while asleep.
+      void useAppStore.getState().resumeConnection()
     })
     return () => subscription.remove()
   }, [reconnect])

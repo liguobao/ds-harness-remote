@@ -1,3 +1,31 @@
+## Unreleased
+
+- Repairs Android background connection service ownership: request Android 13+ notification permission, start before authentication awaits, keep RN timers eligible through a service-owned Headless JS task, and hold/release a partial CPU wake lock with the active carrier. Native startup failures reach the connection UI; retired connection callbacks cannot stop a replacement service.
+- 修复 Android 后台连接保活：补齐 Android 13+ 通知权限，在异步鉴权前启动服务，通过服务归属的 Headless JS task 保持 RN 定时器运行，并按连接生命周期持有/释放 CPU 部分唤醒锁。原生启动失败传回连接界面；旧连接的迟到回调不能停止新连接的服务。
+- On resume, verify a bounded encrypted capability round trip before retaining a locally open socket; restore the selected session through existing reconnect when unhealthy. Requires a rebuilt APK; screen-off/Doze/OEM device acceptance remains pending.
+- 返回应用时通过有界加密 capability 请求确认链路，半开连接走既有重连并恢复会话。需重建 APK；息屏、Doze 与厂商省电策略的真机验收待完成。
+
+## 0.5.13 - 2026-10-19
+
+- Unifies all first-party package/client versions at `0.5.13`, matching tag `v0.5.13`; Android `versionCode` advances from `51` to `57`, skipping `52`–`56`, and Expo iOS `buildNumber` is `57`.
+- 本仓库各自有包与客户端版本统一为 `0.5.13`，与 Tag `v0.5.13` 一致；Android `versionCode` 从 `51` 升至 `57`，跳过 `52`–`56`，Expo iOS `buildNumber` 同步为 `57`。
+- Adds Host support for encrypted `workspace.upload.v1`: files up to 20 MiB can be saved only in the current session's Host-verified workspace root, with bounded chunks, per-connection/session isolation, no-overwrite publication and partial-file cleanup. Client-selected paths and generic filesystem RPC remain unavailable; the independent Remote Web upload UI/deployment is outside this release.
+- Host 新增加密 `workspace.upload.v1`：单文件最大 20 MiB，只能保存到当前会话经 Host 验证的工作区根目录；分块有界、按连接/会话隔离、提交不覆盖已有文件，并清理未完成临时文件。不接受客户端目标路径或通用文件系统 RPC；独立 Remote Web 上传界面与部署不属于本次发布。
+- Recover OpenCode titles in the shared browser projection: consume ACP title updates, retry catalog reads for up to twenty seconds after completion, and use the first user message temporarily when the native title is missing. History restores that fallback; stale reads and native placeholders cannot replace newer or manually renamed titles. No native database writes; independent Remote Web deployment remains pending.
+- 修复 OpenCode 共享浏览器投影的标题恢复：接收 ACP 标题事件，回复结束后最多二十秒限时重读列表，原生标题缺失时临时显示首条提问；历史可恢复该临时标题，旧读取与原生占位标题不能覆盖新标题或手动改名。不写原生数据库；独立 Remote Web 部署仍待同步。
+- Detect OpenCode ACP network options before startup, retaining the authenticated private listener on compatible CLIs and using stdio-only ACP when those options are absent. Unsupported native archiving fails explicitly without blocking session discovery or history; failed/partial probes fail closed and are cancelled on shutdown.
+- 启动前检测 OpenCode ACP 网络参数能力：兼容 CLI 保留认证私有监听器，缺少这些参数时使用纯 stdio ACP。原生归档不可用会明确失败，不阻塞会话发现或历史；检测失败或参数不完整时拒绝启动，关闭后端取消检测。
+- Verified with official OpenCode `1.19.3` (`opencode-ai`) and `2.0.32` (`@opencode/cli`), including both help formats, session discovery/recovery and v2 model selection; v1 native archive remains available. No Prompt or encrypted cross-device acceptance was performed.
+- 已用官方 OpenCode `1.19.3`（`opencode-ai`）与 `2.0.32`（`@opencode/cli`）验证两种帮助格式、会话发现/恢复和 v2 模型切换；保留 v1 原生归档。未执行 Prompt 或加密跨设备验收。
+- Adds QR sign-in to the Android client through an explicit “Sign in with QR code” entry. The login screen requests the Server provider list and displays the locally rendered same-origin `scanUrl` only after the entry is tapped; large screens use a bigger code, while browser OAuth and email/password sign-in remain available.
+- Android 客户端新增「扫码登录」点击入口：只有点击后才会请求 Server provider 并展示本地渲染的同源二维码；大屏使用更大的二维码，浏览器 OAuth 与邮箱密码登录保留。
+- Validates provider/QR responses against same-origin and malformed payloads, falls back to the legacy per-provider OAuth status endpoints on older Servers, and stops polling off-view or when the Server changes.
+- 校验 provider/二维码响应的同源与格式；旧 Server 回退到 per-provider OAuth status 接口；离开扫码视图或修改服务地址时停止轮询/作废旧会话。
+- Completes QR sign-in after the one-time token is claimed: the client stops polling immediately and drives device registration/navigation without render-dependent effect restarts, so a successful scan no longer ends with “QR code expired” or a skipped login.
+- 修复扫码登录完成阶段：领取一次性 token 后立即停止轮询，设备注册与跳转不再依赖会随渲染变化的 effect 依赖，扫码成功后不会再次轮询已消费会话而显示二维码过期或跳过登录。
+- Adds a tablet split view to the Android chat: at ≥760 dp wide the session list stays on the left and the conversation, header and composer render on the right; selecting another conversation updates only the right pane. Narrow and short windows keep the single-pane phone layout.
+- Android 聊天页新增平板双栏：宽度 ≥760 dp 时左侧常驻会话列表，右侧显示会话头部、消息与输入栏；在左栏切换会话只更新右侧内容。窄屏和短窗口保持手机单栏布局。
+
 ## 0.5.12 - 2026-10-18
 
 - Unifies all first-party package/client versions at `0.5.12`; Android `versionCode` and Expo iOS `buildNumber` are both `50`.

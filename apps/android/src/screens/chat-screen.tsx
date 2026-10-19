@@ -348,10 +348,17 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const styles = useThemedStyles(createStyles)
   // Landscape phones are short: keep the composer compact when the IME is up
   // and let the list use a readable centred column on wide windows.
-  const { landscape, compactHeight, height, contentMaxWidth } = useResponsiveLayout()
+  const { landscape, compactHeight, height, width, contentMaxWidth } = useResponsiveLayout()
   const plusMenuListMaxHeight = usePickerListMaxHeight()
   const compactComposer = landscape || compactHeight
   const composerInputMaxHeight = compactComposer ? Math.max(48, Math.min(96, Math.round(height * 0.22))) : 126
+  // Tablets keep the session list visible beside the conversation. Short
+  // landscape phone windows stay single-pane; a wide tablet keeps the split
+  // even while the IME reduces the window height.
+  const tabletSplit = width >= 760 && (height >= 520 || width >= 1000)
+  useEffect(() => {
+    if (tabletSplit) setSessionsOpen(false)
+  }, [tabletSplit])
   const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
 
   const scrollToBottom = useCallback((animated: boolean) => {
@@ -1013,9 +1020,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         title={sessionTitle(session)}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        onBack={trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
-        backIcon={trajectory ? ArrowLeft : Menu}
-        backLabel={trajectory ? zhCN.common.back : zhCN.chat.openHostSessions}
+        onBack={trajectory ? handleBack : tabletSplit ? backFromChat : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
+        backIcon={trajectory || tabletSplit ? ArrowLeft : Menu}
+        backLabel={trajectory || tabletSplit ? zhCN.common.back : zhCN.chat.openHostSessions}
         action={<>
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
@@ -1044,6 +1051,23 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     </>
   return (
     <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+      <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
+        {tabletSplit && (
+          <View style={styles.splitSidebar}>
+            <HostSessionsDrawer
+              inline
+              onBack={() => Keyboard.dismiss()}
+              onClose={() => Keyboard.dismiss()}
+              onSelect={async next => {
+                if (await openSession(next)) {
+                  applyDraft('')
+                  setImages([])
+                }
+              }}
+            />
+          </View>
+        )}
+        <View style={styles.splitMain}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
@@ -1258,6 +1282,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         </View>
       </View>
+        </View>
+      </View>
 
       <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu} statusBarTranslucent>
         <ModalSurface onClose={closePlusMenu}>
@@ -1393,7 +1419,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           else onBack()
         }}
       />}
-      {sessionsOpen && <HostSessionsDrawer
+      {sessionsOpen && !tabletSplit && <HostSessionsDrawer
         onBack={() => {
           Keyboard.dismiss()
           setSessionsOpen(false)

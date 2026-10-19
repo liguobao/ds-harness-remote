@@ -5,6 +5,10 @@ import type { ThemeColors } from '../../ui/theme-context'
 export function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
+    splitRoot: { flex: 1 },
+    splitRootWide: { flexDirection: 'row' },
+    splitSidebar: { width: 300, maxWidth: '38%', backgroundColor: colors.surface },
+    splitMain: { flex: 1, minWidth: 0 },
     modelChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, height: 36, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
     permissionChip: { minWidth: 0, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, height: 36, borderRadius: radius.pill, backgroundColor: colors.primarySoft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
     permissionChipDisabled: { opacity: 0.52 },

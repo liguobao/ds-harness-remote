@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
+import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, QrCode as QrCodeIcon, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
+import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
+import type { OAuthProviderInfo } from '../services/api'
 import { BlurHeaderFrame, Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, LoginMethod } from '../types'
+import { QrCode } from '../ui/qr-code'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -24,7 +27,7 @@ const updateUrl = 'https://github.com/liguobao/ds-harness-remote/releases/latest
 const releaseApiUrl = 'https://api.github.com/repos/liguobao/ds-harness-remote/releases/latest'
 const developerUrl = 'https://www.zhihu.com/people/codelover'
 
-type SetupLoginMethod = Extract<LoginMethod, 'oauth' | 'github-oauth' | 'password'>
+type SetupLoginMethod = Extract<LoginMethod, 'oauth' | 'github-oauth' | 'password'> | 'qr'
 
 function loginMethodLabel(method?: LoginMethod): string {
   if (method === 'oauth') return zhCN.setup.oauth
@@ -40,10 +43,35 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
   const configure = useAppStore(state => state.configureServer)
   const startOAuth = useAppStore(state => state.startOAuth)
   const startGithubOAuth = useAppStore(state => state.startGithubOAuth)
+  const listQrProviders = useAppStore(state => state.listQrProviders)
+  const startQrLogin = useAppStore(state => state.startQrLogin)
+  const pollQrLogin = useAppStore(state => state.pollQrLogin)
+  const completeQrLogin = useAppStore(state => state.completeQrLogin)
   const [serverUrl, setServerUrl] = useState(config?.baseUrl ?? process.env.EXPO_PUBLIC_DSH_REMOTE_SERVER ?? defaultServerUrl)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginMethod, setLoginMethod] = useState<SetupLoginMethod>('oauth')
+  const [qrProviders, setQrProviders] = useState<OAuthProviderInfo[]>([])
+  const [qrProviderId, setQrProviderId] = useState<string>()
+  const [qrLogin, setQrLogin] = useState<QrLoginStart>()
+  const [qrPhase, setQrPhase] = useState<'idle' | 'loading' | 'waiting' | 'expired' | 'unsupported' | 'failed'>('idle')
+  const qrRun = useRef(0)
+  const lastServerUrl = useRef(serverUrl)
+  // Keep navigation out of the polling effect dependencies: completing QR
+  // sign-in updates the store (and re-renders the app), which must not cancel
+  // the in-flight registration and re-poll an already-consumed one-time token.
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
+  const qrCompleted = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const { width, height } = useResponsiveLayout()
+  // Tablets and other large screens sign in from their own display while the
+  // user scans with a phone; phones keep the browser OAuth tabs by default.
+  const largeScreen = Math.min(width, height) >= 600
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
@@ -63,6 +91,184 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
 
   const canSubmit = email.trim().length > 0 && password.length > 0
 
+  const startQrFor = async (provider: OAuthProviderInfo, run: number) => {
+    qrCompleted.current = false
+    setQrPhase('loading')
+    setQrLogin(undefined)
+    const started = await startQrLogin(serverUrl, provider.id)
+    if (run !== qrRun.current) return
+    if (started === undefined) {
+      setQrPhase('failed')
+      return
+    }
+    setQrLogin(started)
+    setQrProviderId(started.provider.id)
+    setQrPhase('waiting')
+  }
+
+  const refreshQr = async () => {
+    const run = ++qrRun.current
+    qrCompleted.current = false
+    setQrPhase('loading')
+    setQrLogin(undefined)
+    const result = await listQrProviders(serverUrl)
+    if (run !== qrRun.current) return
+    if (result === undefined) {
+      setQrPhase('failed')
+      return
+    }
+    setQrProviders(result.providers)
+    if (result.providers.length === 0) {
+      setQrPhase('unsupported')
+      return
+    }
+    const preferred = result.providers.find(provider => provider.id === qrProviderId)
+      ?? result.providers.find(provider => provider.id === 'zhihu')
+      ?? result.providers[0]!
+    setQrProviderId(preferred.id)
+    await startQrFor(preferred, run)
+  }
+
+  // Changing the Server invalidates every provider and QR session on screen.
+  useEffect(() => {
+    if (lastServerUrl.current === serverUrl) return
+    lastServerUrl.current = serverUrl
+    qrRun.current += 1
+    qrCompleted.current = false
+    setQrProviders([])
+    setQrProviderId(undefined)
+    setQrLogin(undefined)
+    setQrPhase('idle')
+  }, [serverUrl])
+
+  // Poll only while the QR tab is visible. Leaving the tab keeps the session
+  // but stops timers; returning resumes polling the same session.
+  useEffect(() => {
+    if (loginMethod !== 'qr' || qrLogin === undefined || qrCompleted.current) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let failures = 0
+    const poll = async () => {
+      if (cancelled || qrCompleted.current) return
+      const result = await pollQrLogin(qrLogin.baseUrl, qrLogin.session.qrId)
+      if (cancelled || qrCompleted.current) return
+      if (result === undefined) {
+        failures += 1
+        if (failures >= 5) {
+          setQrPhase('failed')
+          return
+        }
+        timer = setTimeout(() => void poll(), 3000)
+        return
+      }
+      failures = 0
+      if (result.status === 'expired') {
+        setQrPhase('expired')
+        return
+      }
+      if (result.status === 'complete') {
+        // The one-time token can only be claimed once. From here on the app
+        // must not poll again while device registration is in flight; the
+        // registration also re-renders the app, so navigation is read from a
+        // ref instead of being an effect dependency.
+        qrCompleted.current = true
+        const method = qrLogin.provider.id === 'github' ? 'github-oauth' : 'oauth'
+        const ok = await completeQrLogin(qrLogin.baseUrl, result.token, method)
+        if (ok) {
+          // Finish navigation even if this render's tab was switched while the
+          // registration was in flight; the account is already signed in.
+          if (mounted.current) onCompleteRef.current()
+        } else {
+          qrCompleted.current = false
+          if (mounted.current && !cancelled) setQrPhase('failed')
+        }
+        return
+      }
+      timer = setTimeout(() => void poll(), 2000)
+    }
+    timer = setTimeout(() => void poll(), 1200)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [completeQrLogin, loginMethod, pollQrLogin, qrLogin])
+
+  const openQrTab = () => {
+    setLoginMethod('qr')
+    if (qrLogin === undefined && qrPhase !== 'loading') void refreshQr()
+  }
+
+  const chooseQrProvider = (provider: OAuthProviderInfo) => {
+    if (provider.id === qrProviderId && qrLogin !== undefined && (qrPhase === 'waiting' || qrPhase === 'loading')) return
+    const run = ++qrRun.current
+    setQrProviderId(provider.id)
+    void startQrFor(provider, run)
+  }
+
+  const qrContent = loginMethod !== 'qr' ? null : (
+    <View style={styles.qrPanel}>
+      <Text style={styles.qrTitle}>{zhCN.setup.qrScanTitle}</Text>
+      {qrProviders.length > 1 && (
+        <View style={styles.qrProviders}>
+          {qrProviders.map(provider => {
+            const selected = provider.id === qrProviderId
+            return (
+              <Pressable
+                key={provider.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected, disabled: qrPhase === 'loading' }}
+                disabled={qrPhase === 'loading'}
+                onPress={() => chooseQrProvider(provider)}
+                style={[styles.qrProvider, selected && styles.qrProviderSelected]}
+              >
+                <Text style={[styles.qrProviderText, selected && styles.qrProviderTextSelected]}>{provider.displayName}</Text>
+              </Pressable>
+            )
+          })}
+        </View>
+      )}
+      {qrPhase === 'loading'
+        ? <View style={styles.qrPlaceholder}><ActivityIndicator color={colors.primary} accessibilityLabel={zhCN.setup.qrWaiting} /></View>
+        : qrPhase === 'unsupported'
+          ? <Text style={styles.qrMessage}>{zhCN.setup.qrUnsupported}</Text>
+          : qrPhase === 'failed'
+            ? <Text style={styles.qrMessage}>{zhCN.setup.qrFailed}</Text>
+            : qrPhase === 'expired'
+              ? <Text style={styles.qrMessage}>{zhCN.setup.qrExpired}</Text>
+              : qrLogin !== undefined
+                ? <QrCode
+                    value={qrLogin.session.scanUrl}
+                    size={largeScreen ? 260 : 200}
+                    label={`${zhCN.setup.qrScanTitle}. ${zhCN.setup.qrScanHint}`}
+                  />
+                : null}
+      {qrPhase === 'waiting' && <Text style={styles.qrHint}>{zhCN.setup.qrScanHint}</Text>}
+      {qrPhase === 'expired' && <Text style={styles.qrHint}>{zhCN.setup.qrScanHint}</Text>}
+      <Button
+        label={zhCN.setup.qrRefresh}
+        variant="secondary"
+        onPress={() => void refreshQr()}
+        loading={qrPhase === 'loading'}
+      />
+    </View>
+  )
+
+  const credentialContent = loginMethod === 'oauth'
+    ? <>
+        <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} />
+        <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
+      </>
+    : loginMethod === 'github-oauth'
+      ? <>
+          <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} />
+          <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
+        </>
+      : <>
+          <Field label={zhCN.setup.email} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder={zhCN.setup.emailPlaceholder} />
+          <Field label={zhCN.setup.password} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" returnKeyType="go" onSubmitEditing={() => { if (canSubmit) void submit() }} placeholder={zhCN.setup.passwordPlaceholder} hint={zhCN.setup.passwordHint} />
+          <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit} />
+        </>
+
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.setup.title} onBack={onBack} />}>
@@ -71,41 +277,44 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
           <Text style={styles.title}>{config === undefined ? zhCN.setup.signIn : zhCN.setup.signInAgain}</Text>
           <Text style={styles.lead}>{zhCN.setup.lead}</Text>
 
-          <View style={styles.form}>
+          <View style={[styles.form, largeScreen && styles.formLarge]}>
             <View style={styles.methodTabs}>
               <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'oauth' }} onPress={() => setLoginMethod('oauth')} style={[styles.methodTab, loginMethod === 'oauth' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'oauth' && styles.methodTabTextActive]}>{zhCN.setup.oauth}</Text>
+                <Text style={[styles.methodTabText, loginMethod === 'oauth' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.oauth}</Text>
               </Pressable>
               <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'github-oauth' }} onPress={() => setLoginMethod('github-oauth')} style={[styles.methodTab, loginMethod === 'github-oauth' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'github-oauth' && styles.methodTabTextActive]}>{zhCN.setup.githubOAuth}</Text>
+                <Text style={[styles.methodTabText, loginMethod === 'github-oauth' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.githubOAuth}</Text>
               </Pressable>
               <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'password' }} onPress={() => setLoginMethod('password')} style={[styles.methodTab, loginMethod === 'password' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'password' && styles.methodTabTextActive]}>{zhCN.setup.passwordMethod}</Text>
+                <Text style={[styles.methodTabText, loginMethod === 'password' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.passwordMethod}</Text>
               </Pressable>
             </View>
 
-            {loginMethod === 'oauth'
-              ? <>
-                  <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} />
-                  <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
-                </>
-              : loginMethod === 'github-oauth'
-                ? <>
-                    <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} />
-                    <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
-                  </>
-                : <>
-                  <Field label={zhCN.setup.email} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder={zhCN.setup.emailPlaceholder} />
-                  <Field label={zhCN.setup.password} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" returnKeyType="go" onSubmitEditing={() => { if (canSubmit) void submit() }} placeholder={zhCN.setup.passwordPlaceholder} hint={zhCN.setup.passwordHint} />
-                  <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit} />
-                </>}
+            {loginMethod !== 'qr' && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.setup.qr}
+                accessibilityState={{ expanded: qrContent !== null }}
+                onPress={openQrTab}
+                style={({ pressed }) => [styles.qrEntry, pressed && styles.qrEntryPressed]}
+              >
+                <QrCodeIcon size={22} color={colors.primary} />
+                <View style={styles.qrEntryCopy}>
+                  <Text style={styles.qrEntryText}>{zhCN.setup.qr}</Text>
+                  <Text style={styles.qrEntryHint}>{zhCN.setup.qrEntryHint}</Text>
+                </View>
+                <ChevronRight size={16} color={colors.muted} />
+              </Pressable>
+            )}
+
+            {qrContent ?? credentialContent}
 
             <View style={styles.serverSection}>
               <Field label={zhCN.setup.server} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.serverHint} placeholder="https://remote.example.com" />
             </View>
           </View>
 
-          <View style={styles.securityNote}>
+          <View style={[styles.securityNote, largeScreen && styles.securityNoteLarge]}>
             <LockKeyhole size={20} color={colors.primary} />
             <View style={styles.securityCopy}>
               <Text style={styles.securityTitle}>{zhCN.setup.trustTitle}</Text>
@@ -599,6 +808,23 @@ function createStyles(colors: ThemeColors) {
   serverSection: { gap: spacing.sm, marginTop: spacing.sm, paddingTop: spacing.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   serverLabel: { ...type.smallStrong, color: colors.muted },
   oauthHint: { ...type.caption, color: colors.muted, textAlign: 'center' },
+  formLarge: { width: '100%', maxWidth: 560, alignSelf: 'center' },
+  qrEntry: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  qrEntryPressed: { backgroundColor: colors.surfaceStrong },
+  qrEntryCopy: { flex: 1, gap: 2 },
+  qrEntryText: { ...type.smallStrong, color: colors.ink },
+  qrEntryHint: { ...type.caption, color: colors.muted },
+  qrPanel: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  qrTitle: { ...type.heading, color: colors.ink, textAlign: 'center' },
+  qrProviders: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.xs },
+  qrProvider: { minHeight: 40, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  qrProviderSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  qrProviderText: { ...type.smallStrong, color: colors.muted },
+  qrProviderTextSelected: { color: colors.primary },
+  qrPlaceholder: { minHeight: 200, alignItems: 'center', justifyContent: 'center' },
+  qrHint: { ...type.caption, color: colors.muted, textAlign: 'center', maxWidth: 420 },
+  qrMessage: { ...type.small, color: colors.muted, textAlign: 'center', maxWidth: 420 },
+  securityNoteLarge: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   securityNote: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.surface, marginTop: spacing.xxxl },
   securityCopy: { flex: 1 },
   securityTitle: { ...type.smallStrong, color: colors.ink },

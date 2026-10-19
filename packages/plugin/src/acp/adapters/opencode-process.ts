@@ -6,7 +6,7 @@ import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
 import { AcpSessionModelState } from './session-models.js'
-import { OpencodeNativeApi, opencodeLoopbackPort, opencodePrivateArgs } from './opencode-native-api.js'
+import { OpencodeNativeApi, opencodeHasNativeApi, opencodeLoopbackPort, opencodePrivateArgs } from './opencode-native-api.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -68,6 +68,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
   private startPromise?: Promise<void>
   private historyBusy = false
   private historyStop?: () => Promise<void>
+  private readonly startupAbort = new AbortController()
   private nativeApi?: OpencodeNativeApi
   private readonly archivedSessions = new Set<string>()
   private readonly archivingSessions = new Set<string>()
@@ -265,6 +266,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.startupAbort.abort()
     this.ready = false
     this.models.clear()
     this.nativeApi?.close()
@@ -294,12 +296,14 @@ export class OpencodeAcpClient implements CursorAcpLike {
     let child: ChildProcessWithoutNullStreams
     if (this.spawnAcp) child = this.spawnAcp(this.binary)
     else {
-      const port = await opencodeLoopbackPort()
+      const args = this.options.args ?? ['acp']
+      const nativeApiSupported = await opencodeHasNativeApi(this.binary, args, this.options.cwd, this.startupAbort.signal)
+      const port = nativeApiSupported ? await opencodeLoopbackPort() : undefined
       if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
-      this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`)
-      child = spawn(this.binary, opencodePrivateArgs(this.options.args ?? ['acp'], port), {
+      if (port !== undefined) this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`)
+      child = spawn(this.binary, opencodePrivateArgs(args, port), {
         cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-        env: { ...process.env, OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password },
+        env: { ...process.env, ...(this.nativeApi ? { OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {}) },
       })
     }
     this.process = child

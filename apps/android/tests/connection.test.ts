@@ -101,6 +101,57 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
   }
 beforeEach(prepareScenario1)
 
+  it('checks an encrypted round trip after resume and rejects stale or failed health replies', async () => {
+    await runScenarios([
+      {
+        name: 'healthy carrier uses the existing bounded capability RPC',
+        run: async () => {
+          const connection = new AndroidRemoteConnection()
+          expect(await connection.checkHealth()).toBe(false)
+          await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { forceRelay: true })
+          const rpc = vi.spyOn(testState.cores[0]!, 'rpc')
+          expect(await connection.checkHealth()).toBe(true)
+          expect(rpc).toHaveBeenLastCalledWith('harness.transport.describe', {}, undefined, { timeoutMs: 5_000 })
+          await connection.close()
+        },
+      },
+      {
+        name: 'a failed round trip cannot claim that a locally open socket is healthy',
+        run: async () => {
+          const connection = new AndroidRemoteConnection()
+          await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { forceRelay: true })
+          vi.spyOn(testState.cores[0]!, 'rpc').mockRejectedValueOnce(new Error('RPC_TIMEOUT'))
+          expect(await connection.checkHealth()).toBe(false)
+          await connection.close()
+        },
+      },
+      {
+        name: 'a legacy capability rejection still proves the encrypted round trip',
+        run: async () => {
+          const connection = new AndroidRemoteConnection()
+          await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { forceRelay: true })
+          vi.spyOn(testState.cores[0]!, 'rpc').mockRejectedValueOnce(Object.assign(new Error('unsupported'), { code: 'METHOD_NOT_FOUND' }))
+          expect(await connection.checkHealth()).toBe(true)
+          await connection.close()
+        },
+      },
+      {
+        name: 'a late successful reply cannot validate a replacement carrier',
+        run: async () => {
+          const connection = new AndroidRemoteConnection()
+          await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { forceRelay: true })
+          let finish!: (value: unknown) => void
+          vi.spyOn(testState.cores[0]!, 'rpc').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+          const checking = connection.checkHealth()
+          await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { forceRelay: true })
+          finish({})
+          expect(await checking).toBe(false)
+          await connection.close()
+        },
+      },
+    ], prepareScenario1)
+  })
+
   it('does not let a late connection attempt overwrite or close its replacement', async () => {
     const connection = new AndroidRemoteConnection()
     let release!: () => void

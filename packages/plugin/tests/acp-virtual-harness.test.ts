@@ -29,6 +29,96 @@ function fakeAcp() {
 }
 
 describe('AcpVirtualHarness', () => {
+  it('recovers delayed ACP titles without stale catalog reads replacing newer metadata', async () => {
+    await runScenarios(['delayed catalog', 'live rename', 'workspace refresh', 'manual rename', 'closed projection', 'retry exhausted', 'read timeout'].map(name => ({ name, run: async () => {
+      vi.useFakeTimers()
+      const catalog = (title: string) => [{ conversationId: 'remote-history', title, createdAt: 1, updatedAt: 2 }]
+      const placeholder = 'New session - 2026-10-18T14:29:07.000Z'
+      let onFrame!: (frame: AgentAcpFrameData) => void
+      let resolveRead!: (items: ReturnType<typeof catalog>) => void
+      let readSignal: AbortSignal | undefined
+      const listSessions = vi.fn(async (_path: string, _backend?: string, _limit?: number, _signal?: AbortSignal) => catalog('Native title'))
+        .mockResolvedValueOnce(catalog(placeholder))
+        .mockImplementationOnce((_path, _backend, _limit, signal) => {
+          readSignal = signal
+          return new Promise(resolve => { resolveRead = resolve })
+        })
+      const client = { ...fakeAcp(), listSessions,
+        openStream: vi.fn(async (_id: string, handler: typeof onFrame) => { onFrame = handler; return { close: async () => undefined } }),
+      }
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+      const signal = new AbortController().signal
+      const request = { sessionId: 'opencode:remote-history' }
+      const emit = (update: Record<string, unknown>) => onFrame({ frame: { method: 'session/update', params: { sessionId: 'remote-history', update } } } as AgentAcpFrameData)
+      const projection = () => target.dispatch('session/projections', { args: { request } }, signal)
+      try {
+        await target.selectOrCreateWorkspace('/test')
+        await target.dispatch('session/prompt', { args: { request: { ...request, content: [{ type: 'text', text: 'First request' }] } } }, signal)
+        const rediscovery = name === 'workspace refresh' ? target.dispatch('session/list', { args: {} }, signal) : undefined
+        if (!rediscovery) emit({ sessionUpdate: 'prompt_completed' })
+        expect(await projection()).toMatchObject({ ok: true, value: { values: { title: 'First request' } } })
+        expect(listSessions).toHaveBeenCalledTimes(2)
+        if (name === 'live rename' || name === 'workspace refresh') emit({ sessionUpdate: 'session_info_update', title: 'Live title' })
+        if (name === 'manual rename') await target.dispatch('session/rename', { args: { request: { ...request, title: 'Manual title' } } }, signal)
+        if (name === 'closed projection') {
+          await target.close()
+          expect(readSignal?.aborted).toBe(true)
+        }
+        if (name === 'retry exhausted') listSessions.mockResolvedValue(catalog(placeholder))
+        if (name !== 'read timeout') resolveRead(catalog(name === 'delayed catalog' || name === 'retry exhausted' ? placeholder : 'Stale title'))
+        await rediscovery
+        await vi.advanceTimersByTimeAsync(20_000)
+        if (name === 'read timeout') {
+          expect(readSignal?.aborted).toBe(true)
+          resolveRead(catalog('Late title'))
+          await vi.advanceTimersByTimeAsync(0)
+        }
+        if (name !== 'closed projection') {
+          const title = name === 'live rename' || name === 'workspace refresh' ? 'Live title' : name === 'manual rename' ? 'Manual title'
+            : name === 'retry exhausted' || name === 'read timeout' ? 'First request' : 'Native title'
+          expect(await projection()).toMatchObject({ ok: true, value: { values: { title } } })
+        }
+        expect(listSessions).toHaveBeenCalledTimes(name === 'delayed catalog' ? 3 : name === 'retry exhausted' ? 6 : 2)
+        expect(vi.getTimerCount()).toBe(0)
+      } finally { await target.close(); vi.useRealTimers() }
+    } })))
+  })
+
+  it('restores OpenCode title metadata from history and accepts only its own live updates', async () => {
+    await runScenarios(['New session - 2026-10-18T14:29:07.000Z', 'Native title'].map(title => ({ name: title, run: async () => {
+      const client = { ...fakeAcp(),
+        listSessions: vi.fn(async () => [{ conversationId: 'remote-history', title, createdAt: 1, updatedAt: 2 }]),
+        loadSessionHistory: vi.fn(async () => ['Original request', 'Later request'].map((text, seq) => ({ type: 'event', event: {
+          type: 'user/message', seq, time: 0, data: { content: [{ type: 'text', text }] },
+        } }))),
+        openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
+      }
+      let onFrame!: (frame: AgentAcpFrameData) => void
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+      const controller = new AbortController()
+      const request = { sessionId: 'opencode:remote-history' }
+      const projection = () => target.dispatch('session/projections', { args: { request } }, controller.signal)
+      let iterator: AsyncIterator<unknown> | undefined
+      try {
+        await target.selectOrCreateWorkspace('/test')
+        const stream = await target.open('session/follow', { args: { request } }, controller.signal)
+        iterator = stream[Symbol.asyncIterator]()
+        const expected = title === 'Native title' ? title : 'Original request'
+        expect((await iterator.next()).value).toMatchObject({ type: 'snapshot', projections: { values: { title: expected } } })
+        // A stale placeholder catalog cannot overwrite the recovered title.
+        await target.dispatch('session/list', { args: {} }, controller.signal)
+        expect(await projection()).toMatchObject({ ok: true, value: { values: { title: expected } } })
+        for (const [sessionId, update] of [
+          ['other', { sessionUpdate: 'session_info_update', title: 'Other session' }],
+          ['remote-history', { sessionUpdate: 'session_info_update', _meta: { retry: true } }],
+        ] as const) onFrame({ frame: { method: 'session/update', params: { sessionId, update } } } as AgentAcpFrameData)
+        expect(await projection()).toMatchObject({ ok: true, value: { values: { title: expected } } })
+        onFrame({ frame: { method: 'session/update', params: { sessionId: 'remote-history', update: { sessionUpdate: 'session_info_update', title: 'Confirmed title' } } } } as AgentAcpFrameData)
+        expect(await projection()).toMatchObject({ ok: true, value: { values: { title: 'Confirmed title' } } })
+      } finally { controller.abort(); await iterator?.return?.(); await target.close() }
+    } })))
+  })
+
   it('requires exact registered session identities for model reads and changes', async () => {
     await runScenarios([
       { id: 'opencode:remote-history', nativeId: 'remote-history' },

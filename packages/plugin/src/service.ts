@@ -1,3 +1,5 @@
+import { WorkspaceUploadHost } from './workspace-upload.js'
+import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
 import { randomUUID } from 'node:crypto'
@@ -154,6 +156,12 @@ export class HostPluginRuntime {
         this.createLoopbackHost(),
         () => this.hostWorkspaceTypes(),
         pluginRoute,
+        new WorkspaceUploadHost(workspaceUploadRootResolver(
+          peerGateway,
+          () => harnessSessionGeneration(this.harnessVersion) === 'v3',
+          threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+          sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
+        )),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -496,7 +504,7 @@ export class HostPluginRuntime {
   }
 
   private hostCapabilities(): string[] {
-    const capabilities: string[] = []
+    const capabilities: string[] = ['workspace.upload.v1']
     if (this.loopbackPorts.length > 0) capabilities.push('loopback.http-ws.v1')
     if (this.localGateway?.supportsCarrier === true) {
       capabilities.push(

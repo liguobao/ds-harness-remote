@@ -9,7 +9,7 @@ import { workspaceStableKey } from '../src/lib/workspace-key'
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
@@ -21,6 +21,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   requireProxy() { return proxy }
   connect = transport.connect
   close = transport.close
+  checkHealth = transport.checkHealth
   refreshBackends = transport.refreshBackends
   hasCodex() { return false }
   requireCodex() { return codex }
@@ -54,6 +55,7 @@ const page = (events: HistoryEntry[], throughSeq = 10) => ({ events, throughSeq,
 
 const prepareScenario1 = () => {
   vi.resetAllMocks()
+  transport.checkHealth.mockResolvedValue(true)
   transport.hasCursor.mockReturnValue(false)
   transport.hasAntigravity.mockReturnValue(false)
   transport.hasPi.mockReturnValue(false)
@@ -446,6 +448,52 @@ describe('session restore state machine', () => {
     expect(transport.connect).toHaveBeenCalledTimes(1)
     expect(proxy.sessionHistory).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
+  })
+  it('retains healthy carriers on resume and restores half-open connections without reviving a disconnected Host', async () => {
+    await runScenarios([
+      ...[true, false].map(healthy => ({
+        name: healthy ? 'keeps a healthy carrier' : 'reconnects a half-open carrier and restores the session',
+        run: async () => {
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          transport.checkHealth.mockResolvedValue(healthy)
+          await useAppStore.getState().resumeConnection()
+          expect(transport.connect).toHaveBeenCalledTimes(healthy ? 0 : 1)
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(healthy ? 0 : 1)
+        },
+      })),
+      {
+        name: 'recovers when the carrier closes while the resume probe is in flight',
+        run: async () => {
+          const device = { deviceId: 'host' } as never
+          useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          await useAppStore.getState().connectDevice(device)
+          let finish!: (healthy: boolean) => void
+          transport.checkHealth.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+          const checking = useAppStore.getState().resumeConnection()
+          const options = transport.connect.mock.calls[0]![5] as { onClose?: () => void }
+          options.onClose?.()
+          expect(useAppStore.getState().connection.phase).toBe('offline')
+          finish(false)
+          await checking
+          expect(transport.connect).toHaveBeenCalledTimes(2)
+          expect(useAppStore.getState().connection.phase).toBe('connected')
+        },
+      },
+      {
+        name: 'ignores an old failed health check after explicit disconnect',
+        run: async () => {
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never })
+          let finish!: (healthy: boolean) => void
+          transport.checkHealth.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+          const checking = useAppStore.getState().resumeConnection()
+          await useAppStore.getState().disconnect()
+          finish(false)
+          await checking
+          expect(transport.connect).not.toHaveBeenCalled()
+          expect(useAppStore.getState().selectedDevice).toBeUndefined()
+        },
+      },
+    ], prepareScenario1)
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
     const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const

@@ -17,7 +17,13 @@ Remote 直接调用 Host 上 OpenCode 原生 HTTP API 设置归档时间。归�
   核对原生归档状态，保留分页 cursor，遍历后再应用 Remote limit。已归档条目的可信
   cwd 仍用于只读历史授权，但不进入默认会话和工作区发现结果。
 
-监听强制使用 `127.0.0.1`、临时端口及 `--mdns=false`，覆盖配置中的网络 flags；
+Host 先读取配置命令的 `--help`，仅当同时声明 `--hostname`、`--port`、`--mdns` 时
+启动原生 HTTP listener。三者均不支持时移除旧网络参数，以纯 stdio ACP 启动，不建立
+原生归档 API；列表、历史和对话仍可用，归档明确返回 `OPENCODE_ARCHIVE_UNAVAILABLE`。
+部分参数支持、检测失败或超限则拒绝启动，避免对旧 CLI 丢失私有监听约束。
+检测有时间/输出限额，关闭后端立即取消；不记录 CLI 输出，也不按版本号猜测接口。
+
+启用时监听强制使用 `127.0.0.1`、临时端口及 `--mdns=false`，覆盖配置中的网络 flags；
 每个进程使用随机 Basic auth 密码。HTTP URL、认证和 payload 不由 Client 提供，
 禁止重定向，响应上限 64 KiB、单次请求超时 20 秒，进程关闭时中止请求。
 不额外启动 `opencode serve`，不向 Remote 暴露 HTTP listener。
@@ -67,3 +73,14 @@ Host 经 catalog、backend binding 和 realpath 校验解析 authority，并核�
 后端替换、客户端确认及过期连接结果隔离。真实 OpenCode v1.19.3 在独立临时数据目录
 完成新建、跨连接归档、原生时间确认、幂等重试、重启后隐藏及历史读取验证，无 Prompt。
 本机验证不等于 Windows、APK/真机、跨设备加密 E2E 或独立 Remote Web 已验收。
+
+CLI 参数检测修复后，1.19.3 的初始化、新建、目录、原生归档、归档目录核对及独立历史读取
+已在隔离目录重新验证。官方 v2 npm 包已改为 `@opencode/cli`，真实
+`@opencode/cli-darwin-arm64@2.0.32` 校验 integrity 后在临时目录通过初始化、新建、目录、
+42 个模型目录与模型切换、独立历史、重启列表与加载；归档明确不可用。两版均未发送 Prompt。
+部分支持/失败/超限与启动中关闭由进程 fixture 覆盖；帮助格式分别覆盖 v1 的 `-h, --help`
+与 v2 的 `--help, -h`，不将这些验证描述成 Windows 或加密跨设备验收。
+
+v2 参考：[安装与包名](https://opencode.ai/v2/docs/)、
+[ACP 协议与进程](https://opencode.ai/v2/docs/cli/acp/)。v2 ACP 启动内部私有服务，不连接
+共享后台服务，也不开放网络端口；其 `session/delete` 是删除，不能代替归档。

@@ -674,7 +674,7 @@ Control-only 类型（hello, signaling, relay）禁止出现在 secure channel �
 
 ## 16. RPC
 
-Plugin Host 的业务路由只接受 capability 对应的官方 Harness tunnel。rc.2 使用：`harness.api.call`、
+Plugin Host 的 Harness 业务路由只接受 capability 对应的官方 Harness tunnel。rc.2 使用：`harness.api.call`、
 `harness.api.transfer.open`、`harness.api.transfer.chunk`、`harness.api.transfer.commit`、
 `harness.api.transfer.read`、`harness.api.transfer.close`、`harness.api.respond`、
 `harness.api.stream.open`、`harness.api.stream.close`。alpha 使用：
@@ -682,12 +682,13 @@ Plugin Host 的业务路由只接受 capability 对应的官方 Harness tunnel�
 `harness.remote.transfer.commit`、`harness.remote.transfer.read`、`harness.remote.transfer.close`、
 `harness.remote.stream.open`、`harness.remote.stream.close`。所有新旧 Host 都可接受只读的
 `harness.transport.describe` capability 探测；旧 Host 对此返回 `METHOD_NOT_FOUND`。
-此外只允许在
-`fileviewer.read.v1` capability 下的 `fileviewer.call`。可选 Codex 领域仍属于同一个 Remote Plugin，
+文件预览使用 `fileviewer.read.v1` capability 下的 `fileviewer.call`。可选 Codex 领域仍属于同一个 Remote Plugin，
 但在线上仍使用独立的 `codex.appserver.v1` / `codex.appserver.transfer.v1` capability、
 `codex.app.*` RPC 和 event namespace；只有认证 Client Plugin 内的临时展示 target 可以把它包装成
 原生 Harness Session carrier，Android Client 则只能在本机内存中投影到已有移动端状态。Host、Server
 与 Android 都不得伪造或持久化第二份 Harness/CodeX Session。
+工作区根目录写入只通过独立 `workspace.upload.v1` 的四个固定 RPC，
+不得将其加入 Harness / CodeX / ACP 的任意方法透传。参见 [Workspace upload](#workspace-upload)。
 旧 `system.info`、`workspace.get`、`sessions.*`、`session.*`、
 `permissions.respond`、`connection.ping` 与 `sync.from` 已退出 Plugin 协议，Host 必须返回
 `METHOD_NOT_FOUND`。Android 旧原型不是兼容目标。
@@ -819,6 +820,7 @@ Host handshake 的 capability 例子：
   "harness.remote.v1",
   "harness.remote.transfer.v1",
   "fileviewer.read.v1",
+  "workspace.upload.v1",
   "codex.appserver.v1",
   "codex.appserver.transfer.v1",
   "agent.acp.v1",
@@ -838,6 +840,12 @@ Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 
 上线；初始化中或启动失败时，`workspaceTypes` 对应项的 `available` 必须为 `false`，数据面调用
 返回不可用。关闭的后端不声明能力；明确选择的后端不可用时禁止转发到其他后端。后端就绪后，
 再次调用 `harness.transport.describe` 可取得最新可用性，无需重新建立加密连接。
+
+`workspace.upload.v1` 声明独立的当前会话工作区根目录上传能力，固定方法为
+`workspace.upload.open|chunk|commit|abort`。Client 必须以加密通道内的
+`harness.transport.describe` 结果确认该能力；它不表示任意目录可写，也不扩展原生
+附件、图片 transfer 或只读预览 allowlist。协议详见 [Workspace upload](#workspace-upload)。
+未声明该能力时不调用上传 RPC；旧 Host 的入口保持禁用。
 
 ### 17.1 工作区类型能力声明（workspaceTypes）
 
@@ -1232,6 +1240,9 @@ adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.bina
 
 OpenCode 原生归档要求 `agent.acp.opencode.archive.v1`。`dsh/sessionArchive` 的严格参数
 为 `{ backend: "opencode", sessionId: nativeId }`，不接受 Client cwd、URL 或附加 payload。
+Host 按 CLI 帮助中的参数能力决定是否启动私有 HTTP listener；不支持网络参数的 ACP
+构建仍可通过 stdio 提供会话列表、历史和对话。此时归档返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，
+目录使用原生 ACP 列表，不请求不存在的 HTTP listener，也不伪造归档状态。
 Host 以可信 catalog / realpath 和原生返回的 ID/目录确认会话归属，只调用同一 ACP 进程的
 认证 loopback 原生 HTTP GET / PATCH，将 `time.archived` 设为当前时间。原生确认后返回
 `{ backend: "opencode", sessionId: nativeId, archived: true }`，并向当前认证 ACP peers 发布
@@ -1263,7 +1274,7 @@ AGY 1.3.0 的 stream-json 不接受 image block，Host 将缓存目录加入 AGY
 用 text 内的受限引用让其 `view_file` 读取图片。缓存目录不作为 Workspace 暴露。
 Remote 将图片投影到原生 user/message 与 session/attachment，仅返回所属 Session 引用的图片；
 历史从该 AGY transcript 的引用恢复仍有效的附件，用户文案移除内部缓存引用。
-不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传，仅允许 `allow-once` / `reject-once` / `cancel`；禁止 `allow-always` 或其他持久授权。Host 按上游 `options[].kind` 的 `allow_once` / `reject_once` 映射本次请求真实 `optionId`（不可假设拒绝 ID 为 `reject-once`），仅接受唯一、有效的单次选项；`cancel` 取消待审批请求而不授权。权限回复不得附带任意 `result` 绕过映射。审批句柄绑定 Host 后端实例、会话与所有者连接，跨连接、重放、断线或重配后的旧句柄必须拒绝；无主或未知上游请求 fail closed，不向其他设备广播。Cursor 专属 plan/question 只保留明确的受限响应形状，不扩展通用 RPC。有序 `session/update` 与 `session/request_permission` 经 `agent.acp.frame` 下发；Host 生成的 requestHandle/sessionId/upstreamMethod 不得被上游字段覆盖。
+ACP transfer 不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，也不写入项目目录。独立的工作区根目录上传仅通过 `workspace.upload.v1`，见 [Workspace upload](#workspace-upload)。权限类上游请求经 `agent.acp.respond` 回传，仅允许 `allow-once` / `reject-once` / `cancel`；禁止 `allow-always` 或其他持久授权。Host 按上游 `options[].kind` 的 `allow_once` / `reject_once` 映射本次请求真实 `optionId`（不可假设拒绝 ID 为 `reject-once`），仅接受唯一、有效的单次选项；`cancel` 取消待审批请求而不授权。权限回复不得附带任意 `result` 绕过映射。审批句柄绑定 Host 后端实例、会话与所有者连接，跨连接、重放、断线或重配后的旧句柄必须拒绝；无主或未知上游请求 fail closed，不向其他设备广播。Cursor 专属 plan/question 只保留明确的受限响应形状，不扩展通用 RPC。有序 `session/update` 与 `session/request_permission` 经 `agent.acp.frame` 下发；Host 生成的 requestHandle/sessionId/upstreamMethod 不得被上游字段覆盖。
 
 Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生 Harness UI，
 该投影不改变 Harness Host API，也不写入 DSH SessionStore、Workspace 数据库或日志。
@@ -1409,6 +1420,131 @@ Thread；仅当它仍属于该工作区的 Host catalog 时恢复，否则选择
 只是 Host 侧的事件过滤器，不得因纯查看自动调用 `thread/resume`。用户明确继续发送前才
 resume；如果 App Server 因 Thread 已在本进程加载而拒绝重复 resume，Host 可在已经完成
 `thread/read` 归属校验后把该操作视为幂等成功。不确定结果的 turn、rename 或 archive 不自动重放。
+
+### Workspace upload
+
+`workspace.upload.v1` 是将文件保存到**当前会话工作区根目录**的可选能力。四个 RPC
+只在已认证的端到端加密业务通道内调用，Server 仅转发密文，不接收、暂存或解析文件。
+该能力独立于 Harness / CodeX / ACP 的业务 carrier、图片 transfer 和只读文件预览。
+消息继续使用原有 text/image 结构；本扩展不新增消息 `attachments` 字段或文件内容 part。
+
+#### 能力协商与会话范围
+
+建立 Noise 通道后，Client 必须通过 `harness.transport.describe` 确认
+`capabilities` 包含 `workspace.upload.v1`，才能发起以下 RPC。该声明表示 Host 实现了
+上传协议，不保证任意会话都有可写工作区。Host 按公开 `sessionId` 解析可信目录：
+
+| 会话来源 | 公开 sessionId | Host 目录 authority |
+| --- | --- | --- |
+| Harness Session V3 | 原生 Session ID | 当前已认证官方 Peer 的 `session/list` 中，精确匹配可见会话的绝对 `cwd` |
+| CodeX | `codex:<threadId>` | CodeX 领域验证过的 Thread workspace |
+| Antigravity | `acp:<nativeSessionId>` | ACP 领域已记录的同一 backend/session 的可信 `cwd` |
+| Cursor / Pi / OpenCode / Claude | `cursor:` / `pi:` / `opencode:` / `claude:` 加原生会话 ID | ACP 领域已记录的同一 backend/session 的可信 `cwd` |
+
+ACP 同时要求调用连接的 peer 仍有效、backend 可用、session owner 匹配；拥有者断开后，
+按已有 ACP 规则重新取得会话归属。Harness 旧 carrier、未知或不可见会话、缺失绝对目录、
+后端不可用时必须拒绝，不能回退到 Client 自报目录。Web 对旧 Host 或当前不支持的会话禁用入口。
+
+#### RPC 参数与结果
+
+所有 Params 都是严格对象，拒绝额外字段。`sessionId` 为 1–512 字符的公开会话 ID；
+`uploadId` 是 Client 在发送 open **之前**生成的 UUID。上传句柄只在创建它的连接及
+`sessionId` 内有效，不允许跨连接、跨会话复用，不支持跨连接续传。
+
+| RPC | Params | Result |
+| --- | --- | --- |
+| `workspace.upload.open` | `{sessionId, uploadId, name, totalBytes}` | `{uploadId, chunkBytes}` |
+| `workspace.upload.chunk` | `{sessionId, uploadId, offset, data}` | `{uploadId, receivedBytes}` |
+| `workspace.upload.commit` | `{sessionId, uploadId}` | `{name, path, bytes}` |
+| `workspace.upload.abort` | `{sessionId, uploadId}` | `{aborted:true}` |
+
+- `open`：`totalBytes` 是 0–20 MiB 的整数。`name` 是单个文件名，UTF-8 编码最多
+  220 bytes；禁止 `/`、`\`、ASCII 控制字符、DEL、`<>:"|?*`、`.`、`..`、尾部点/空格、
+  Windows 保留名，以及 Host 临时文件前缀 `.dsh-upload-`。不能传 `cwd`、目标目录或目标路径。
+  Host 当前返回 `chunkBytes: 65536`，表示后续每块**解码后**最多 64 KiB。
+- `chunk`：`offset` 是从 0 开始的非负整数字节偏移，必须等于上一块确认后的
+  `receivedBytes`。`data` 使用标准、规范的 Base64（含所需 padding），不使用 Base64URL；
+  解码结果不得为空、不得超过 `chunkBytes`，累计不得超过 `totalBytes`。Host 顺序写入，
+  返回累计接收字节数；Client 必须核对 `uploadId` 和 `receivedBytes`，不能跳块或重复追加。
+  Client 应按文件切片编码，不能把完整文件一次展开为 Base64。
+- `commit`：只有累计字节数等于 `totalBytes` 才能提交；零字节文件可直接 open → commit。
+  Host flush 后原子发布，已有文件、目录或符号链接均不能覆盖。同名时依次尝试
+  `name (1).ext` 等名称，最多 10,000 个候选；结果中的 `name` 是最终名称，
+  `path` 必须严格等于 `./` 加最终 `name`，`bytes` 必须等于 `totalBytes`。
+- `abort`：移除同一会话下尚未提交的上传；不存在或已提交时幂等返回 `{aborted:true}`，
+  不删除已经发布的文件。活动句柄属于其他会话时返回 `UPLOAD_NOT_FOUND`，不影响原上传。
+
+例如上传原名 `report.txt` 的三个字节 `abc`，且目录中已有同名文件：
+
+```text
+workspace.upload.open
+  Params: {"sessionId":"session-1","uploadId":"550e8400-e29b-41d4-a716-446655440000","name":"report.txt","totalBytes":3}
+  Result: {"uploadId":"550e8400-e29b-41d4-a716-446655440000","chunkBytes":65536}
+workspace.upload.chunk
+  Params: {"sessionId":"session-1","uploadId":"550e8400-e29b-41d4-a716-446655440000","offset":0,"data":"YWJj"}
+  Result: {"uploadId":"550e8400-e29b-41d4-a716-446655440000","receivedBytes":3}
+workspace.upload.commit
+  Params: {"sessionId":"session-1","uploadId":"550e8400-e29b-41d4-a716-446655440000"}
+  Result: {"name":"report (1).txt","path":"./report (1).txt","bytes":3}
+```
+
+以上 Params/Result 仍使用 §16 的 `rpc.request` / `rpc.response` / `rpc.error` envelope，
+每次调用各有独立 request ID；上传顺序由 `uploadId`、`offset` 和 Host 状态共同约束。
+
+#### 生命周期、重试与落盘边界
+
+每连接最多 2 个活动上传。Host 在工作区根目录排他创建随机 `.dsh-upload-*.part`
+临时文件，权限为 `0600`；根目录必须经过 realpath 与目录身份验证，并在分块写入、
+发布前重验会话 authority 和根目录身份。目录改变或失去 authority 时拒绝继续。
+Host 本地进程仍保有原有文件系统权限，本协议不隔离恶意本地进程的并发目录修改。
+
+未提交上传在空闲达到 2 min 后进入清理范围；Host 定时或处理下一次调用时回收。
+取消、失败和连接断开也清理未提交临时文件；不得跟随被替换的根目录或删除被替换的
+临时条目。进程崩溃后的残留不支持恢复上传。每次目录 authority 解析最多等待 15 s。
+
+原子发布成功是提交点。提交点后的 abort、断线或 Client 取消不能撤销文件。
+Host 为每连接最多缓存 64 个提交结果，保留至提交后 2 min 或被淘汰；缓存存在时，
+同一会话、同一 `uploadId` 的 commit 重试返回原结果，不重复发布。重复 open 不是
+幂等恢复；chunk 也不支持同偏移重放。chunk 结果未知或提交缓存已失效时，不得盲目重放。
+
+commit 超时/丢包意味着结果未知，工作区中可能已有文件；重新上传必须使用新 `uploadId`，
+并可能产生一个自动改名的副本。Client 在 open/传输失败时可用已知 `uploadId` 尝试 abort，
+但不能把 abort 成功解释为“此前的 commit 未发生”。Client 本地取消应立即停止等待，
+不能等待原 RPC 或 abort 回执后才释放上传队列；迟到回复不能继续分块或加入草稿。
+
+Web 在选择、拖拽或粘贴文件后开始上传，每个输入栏最多保留 5 个文件；这是 Web 的
+交互限制，不是 Host 全局配额。所有保留的上传成功前禁止发送；失败需重试或移除。
+成功后将 Host 返回路径以普通文本（例如 `已上传文件：./report (1).txt`）插入草稿。
+移除已完成条目只移除草稿引用，工作区文件保留。切换 Host/会话取消未完成上传并清除旧引用；
+图片 Prompt 的既有行为保持不变。异步编码图片和发送确认回调必须重验当前会话、连接与
+文件批次，不能漏过新加入的文件或清理其他会话的草稿/上传条目。同 Host/会话的连接对象
+替换也要取消原连接的未完成上传，并使条目可重试。文件内容、文件名、绝对路径不得写入 Remote 日志。
+
+#### 上传错误
+
+错误仍使用 §16.3 的 envelope，不回显路径、文件内容、原始异常或 stack。
+以下 `UPLOAD_*` 属于子系统扩展码，不要求加入 v1 标准错误码枚举：
+
+| code | 含义 |
+| --- | --- |
+| `INVALID_MESSAGE` | 参数类型、额外字段、文件声明大小或 Base64 字符串长度等 schema 校验失败 |
+| `FEATURE_NOT_SUPPORTED` | Host 没有安装该上传处理器 |
+| `UPLOAD_INVALID_NAME` | 文件名不满足上述限制 |
+| `UPLOAD_ID_IN_USE` | 当前连接中该 UUID 已用于活动上传或仍有提交缓存 |
+| `UPLOAD_LIMIT` | 当前连接活动上传已达上限 |
+| `UPLOAD_WORKSPACE_UNAVAILABLE` | 会话无法解析为可信绝对工作区 |
+| `UPLOAD_WORKSPACE_CHANGED` | 会话目录或根目录/临时文件身份改变 |
+| `UPLOAD_NOT_FOUND` | 活动句柄不存在、已过期或 session 不匹配；无缓存的 commit 也返回此码 |
+| `UPLOAD_INVALID_CHUNK` | 非规范 Base64、错误偏移、空块或解码后超限 |
+| `UPLOAD_INCOMPLETE` | 收到的字节数不足声明大小 |
+| `UPLOAD_NAME_CONFLICT` | 所有候选文件名均已占用 |
+| `UPLOAD_TIMEOUT` | 目录 authority 解析超时 |
+| `UPLOAD_CLOSED` | 上传连接已关闭 |
+| `UPLOAD_FAILED` | 文件系统或其他内部操作失败，不公开原始异常 |
+
+后端的 `ACP_*`、`CURSOR_*`、`CODEX_*` 等 authority 错误也可能直接返回，不表示可回退
+到另一后端。Client 不应只按这张表推断全部错误。失败可能使该活动上传被清理；除仍在缓存
+内的 commit 重试外，用户重新上传应创建新的 UUID，不自动重放有副作用的调用。
 
 ## 20. Events
 
@@ -1576,7 +1712,8 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 错误 message 面向用户但不包含内部路径、stack、secret 或原始异常。`retryable` 只表示同一操作稍后重试可能成功，不代表 Client 应自动重放非幂等请求。`error.payload.connectionId` 为可选字段；存在时错误作用域仅限该逻辑连接。
 
 错误码字段可以使用非空扩展字符串。子系统扩展应使用稳定前缀。
-当前前缀包括 `CODEX_*` 和 `FILE_VIEWER_*`。扩展码不属于上面的 v1 标准错误码集合。
+当前前缀包括 `CODEX_*`、`FILE_VIEWER_*` 和 `UPLOAD_*`。扩展码不属于上面的 v1 标准错误码集合。
+上传错误及重试语义见 [Workspace upload](#workspace-upload)。
 
 ## 24. 默认限制
 
@@ -1593,6 +1730,12 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | File Viewer range / RPC | 512 KiB |
 | File Viewer directory entries / RPC | 1,000 |
 | RPC text input | 64 KiB |
+| Workspace upload file | 20 MiB；允许零字节 |
+| Workspace upload chunk（解码后） | 64 KiB；以 open 返回的 chunkBytes 为准 |
+| Workspace active uploads / connection | 2；2 min idle 后回收 |
+| Workspace upload authority lookup | 每次最多 15 s |
+| Workspace upload commit cache / connection | 最多 64 项；提交后最多 2 min |
+| Web composer files | 5；仅 Web 交互限制 |
 | 同连接 pending RPC | 128 |
 | 同 session pending permission | 16 |
 | ICE candidates / connection | 256 |
@@ -1600,7 +1743,8 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | Heartbeat disconnect | 75 s |
 | Event replay window | 至少 10,000 events 或 15 min，取先达到者 |
 
-Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。超限必须返回稳定错误或关闭违规连接，不能无限缓存。
+工作区上传采用上述固定限额，`chunkBytes` 由 open 返回，不新增 hello/system.info 字段。
+其他限制如由 Server/Host 协商缩小，必须在 hello/system.info 中公布。超限必须返回稳定错误或关闭违规连接，不能无限缓存。
 
 ## 25. 安全不变量
 
@@ -1610,7 +1754,7 @@ Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。�
 2. Membership、双方账号一致性、Host/Client 本机 pinned peer 和 connection identity key 绑定必须同时成立。
 3. Remote RPC/Event 不以明文经过或落盘到 Server。
 4. TLS/WSS 不能替代 Noise secure channel。
-5. Client 不能请求通用 shell/filesystem RPC 绕过 Harness；显式开启的原生 terminal 与 loopback 例外遵循下述独立边界。
+5. Client 不能请求通用 shell/filesystem RPC 绕过 Harness；原生 terminal、loopback 与经 capability 协商的 `workspace.upload.v1` 各自遵循固定边界。上传只写入 Host 为当前会话验证的根目录，不接受 Client 目标路径。
 6. Permission 只能映射 Harness 当前 request，默认 fail closed。
 7. `harness.api.call.method`、`harness.remote.call.endpoint` 与 `codex.app.call.method` 必须命中各自编译期固定 allowlist；禁止通过对象反射、Typert/Cordis registry、service 名或任意 endpoint 扩权。
 8. 当前 Harness v1 只允许 Remote `allow_once`/`deny`，不得伪造 session grant。
@@ -1630,6 +1774,10 @@ Server/Host 可协商更小限制，但必须在 hello/system.info 中公布。�
 
 - JSON/envelope/schema/version vectors
 - RPC correlation、timeout、late response 和 idempotency
+- Workspace upload 分块顺序/规范 Base64/声明大小校验、零字节与同名字节完整性
+- Workspace upload 连接/会话/后端 authority 隔离、路径穿越与根目录/临时条目替换拒绝
+- Workspace upload 取消/空闲/断线清理、迟到目录解析取消与提交点后文件保留
+- Workspace upload 提交缓存幂等、缓存失效后的结果未知与旧 Host capability 降级
 - event seq、duplicate、gap、replay 和 full resync
 - Host/Client account authorization、owner mismatch 与跨账号访问拒绝
 - Host registration code expire/single-use

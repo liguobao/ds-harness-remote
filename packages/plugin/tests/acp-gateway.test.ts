@@ -29,6 +29,29 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('resolves upload roots only for a live peer, matching backend and session owner', async () => {
+    const cwd = await realpath(process.cwd())
+    const adapter = readyAcp()
+    adapter.call = vi.fn(async () => ({ sessionId: 'upload-session' }))
+    const config = { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'fixture', args: [] }] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), () => adapter)
+    await gateway.start()
+    const owner = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'a' } as never, async () => undefined)!
+    gateway.createPeer({ connectionId: 'other', peerDeviceId: 'b' } as never, async () => undefined)
+    try {
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd } })
+      expect(gateway.resolveUploadWorkspace('owner', 'cursor:upload-session')).toBe(cwd)
+      expect(() => gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toThrow()
+      expect(() => gateway.resolveUploadWorkspace('owner', 'claude:upload-session')).toThrow()
+      expect(() => gateway.resolveUploadWorkspace('owner', 'cursor:unknown')).toThrow()
+      await owner.closeAll()
+      expect(() => gateway.resolveUploadWorkspace('owner', 'cursor:upload-session')).toThrow()
+      expect(gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toBe(cwd)
+      await gateway.reconfigure({ enabled: false, backends: [] })
+      expect(() => gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toThrow()
+    } finally { await gateway.close() }
+  })
+
   it('does not restore session ownership from new/load results after disconnect, replacement or shutdown', async () => {
     const cwd = await realpath(process.cwd())
     await runScenarios((['cursor', 'pi', 'opencode'] as const).flatMap(backend =>

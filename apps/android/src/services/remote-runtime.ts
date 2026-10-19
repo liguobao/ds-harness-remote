@@ -7,6 +7,15 @@ import { foregroundService } from './foreground-service'
 export class AndroidRemoteRuntime {
   private readonly client = new AndroidRemoteConnection()
   private foreground = false
+  private generation = 0
+  private foregroundTail: Promise<void> = Promise.resolve()
+
+  /** Start while the Activity is visible, before credential/network awaits. */
+  async prepareConnection(): Promise<void> {
+    const generation = ++this.generation
+    await this.updateForeground(generation, true)
+    if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
+  }
 
   async connect(
     baseUrl: string,
@@ -16,17 +25,20 @@ export class AndroidRemoteRuntime {
     onFrame: MuxFrameHandler,
     options: AndroidConnectionOptions = {},
   ): Promise<void> {
-    await this.startForeground()
+    const generation = ++this.generation
     try {
+      await this.updateForeground(generation, true)
+      if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
       await this.client.connect(baseUrl, identity, host, accessToken, onFrame, {
         ...options,
         onClose: () => {
-          void this.stopForeground()
+          if (generation !== this.generation) return
+          void this.updateForeground(generation, false).catch(() => undefined)
           options.onClose?.()
         },
       })
     } catch (error) {
-      await this.stopForeground()
+      await this.updateForeground(generation, false).catch(() => undefined)
       throw error
     }
   }
@@ -48,22 +60,28 @@ export class AndroidRemoteRuntime {
   hasClaude() { return this.client.hasClaude() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
+  checkHealth() { return this.client.checkHealth() }
 
   async close(): Promise<void> {
-    await this.client.close()
-    await this.stopForeground()
+    const generation = ++this.generation
+    try {
+      await this.client.close()
+    } finally {
+      await this.updateForeground(generation, false)
+    }
   }
 
-  private async startForeground(): Promise<void> {
-    if (this.foreground) return
-    await foregroundService.start()
-    this.foreground = true
-  }
-
-  private async stopForeground(): Promise<void> {
-    if (!this.foreground) return
-    this.foreground = false
-    await foregroundService.stop()
+  private updateForeground(generation: number, active: boolean): Promise<void> {
+    // A native start/permission prompt is asynchronous. Serialize it with stop
+    // and fence retired connection callbacks before touching the shared service.
+    const task = this.foregroundTail.then(async () => {
+      if (generation !== this.generation || active === this.foreground) return
+      if (active) await foregroundService.start()
+      else await foregroundService.stop()
+      this.foreground = active
+    })
+    this.foregroundTail = task.catch(() => undefined)
+    return task
   }
 }
 

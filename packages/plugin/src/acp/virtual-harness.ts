@@ -38,6 +38,7 @@ import {
 } from './virtual-contract.js'
 import { AcpEventCarrier } from './virtual-event-carrier.js'
 import { AcpLiveProjection } from './virtual-live.js'
+import { AcpSessionTitles } from './virtual-titles.js'
 
 /**
  * Browser-safe, in-memory Harness projection for the independent Agent ACP domain. Projects
@@ -47,6 +48,7 @@ import { AcpLiveProjection } from './virtual-live.js'
 export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly live: AcpLiveProjection
   private readonly events: AcpEventCarrier
+  private readonly titles: AcpSessionTitles
 
   readonly api: ApiProxy
 
@@ -94,7 +96,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       get selectedModels() { return owner.selectedModels },
       publishProjection: (...args) => owner.events.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
-      refreshSessionTitle: (...args) => owner.refreshSessionTitle(...args),
+      refreshSessionTitle: (...args) => owner.titles.refresh(...args),
+      applySessionTitle: (...args) => owner.titles.applyNative(...args),
       publishWorkspaceBaseline: () => owner.publishWorkspaceBaseline(),
       get pendingApprovals() { return owner.pendingApprovals },
       emitApproval: (...args) => owner.events.emitApproval(...args),
@@ -119,6 +122,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
     })
 
+    this.titles = new AcpSessionTitles(backend, client, this.sessions,
+      (sessionId, title) => this.events.publishProjection(sessionId, 'title', title))
     this.api = this.events.createApiProxy()
     this.unsubscribeArchived = client.onSessionArchived?.(data => {
       if (this.closed || data.backend !== this.backend) return
@@ -306,6 +311,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.titles.close()
     this.unsubscribeArchived?.()
     for (const stream of this.workspaceStreams) stream.close()
     for (const stream of this.controlStreams) stream.close()
@@ -472,6 +478,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         source: requestId ? { kind: 'user', rpcId: requestId } : { kind: 'user' },
       })
     }
+    this.titles.applyPrompt(session, text)
     session.blank = false
     session.running = true
     session.updatedAt = Date.now()
@@ -553,6 +560,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     if (events.length > 0) {
       session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
+      const firstUser = session.events.find(entry => entry.event.type === 'user/message')
+      this.titles.applyPrompt(session, extractPromptText(array(record(firstUser?.event.data).content)))
       session.blank = false
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
     }
@@ -664,11 +673,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     updatedAt: number = Date.now(),
     blank: boolean = true,
   ): AcpSessionState {
+    const nativeTitle = this.titles.nativeTitle(title)
     const session: AcpSessionState = {
       sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd,
-      ...(title === undefined ? {} : { title }),
+      ...(nativeTitle === undefined ? {} : { title: nativeTitle }),
       blank,
       running: false,
       createdAt,
@@ -679,26 +689,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return session
   }
 
-  private applyDiscoveredTitle(session: AcpSessionState, title: string): void {
-    const next = title.trim()
-    if (this.closed || session.titleOverridden || !next || next === 'Untitled Session' || next === session.title) return
-    session.title = next
-    this.events.publishProjection(session.sessionId, 'title', next)
-  }
-
-  private async refreshSessionTitle(session: AcpSessionState): Promise<void> {
-    if (this.backend === 'cursor' || this.closed || session.titleOverridden || this.client.listSessions === undefined) return
-    try {
-      const items = await this.client.listSessions(session.cwd, this.backend, 30)
-      const current = items.find(item => item.conversationId === session.acpSessionId)
-      if (current !== undefined && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title)
-    } catch {
-      // Title discovery must not delay or fail an already completed turn.
-    }
-  }
-
   private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
     if (this.backend === 'cursor') return
+    const previousTitles = new Map([...this.sessions].map(([id, session]) => [id, session.title]))
     try {
       let discovered: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
       if (this.client.listSessions !== undefined) {
@@ -718,7 +711,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         if (existing !== undefined) {
           // Refresh activity from the Host without moving a live turn backwards.
           if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt)
-          this.applyDiscoveredTitle(existing, item.title)
+          if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
+            this.titles.applyNative(existing, item.title)
+          }
         }
         if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId)

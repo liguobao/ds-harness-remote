@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events'
-import { realpath } from 'node:fs/promises'
+import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { OpencodeNativeApi } from '../src/acp/adapters/opencode-native-api.js'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -9,6 +12,55 @@ import type { SafeLogger } from '../src/logging.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
 describe('OpencodeAcpClient', () => {
+  it('negotiates native-listener and stdio-only CLIs without breaking ACP or weakening the private listener', async () => {
+    await runScenarios(['legacy', 'stdio'].map(mode => ({ name: mode, run: async () => {
+      const cwd = await realpath(await mkdtemp(join(tmpdir(), 'opencode CLI ')))
+      const client = new OpencodeAcpClient(process.execPath, logger(), undefined, {
+        cwd, args: [fileURLToPath(new URL('./fixtures/opencode-cli.mjs', import.meta.url)), 'acp', mode,
+          '--hostname', '0.0.0.0', '--port=4096', '--mdns', 'true', '--no-mdns=false', '--cwd', cwd],
+      })
+      try {
+        await Promise.all([client.start(), client.start()])
+        expect(client.isReady()).toBe(true)
+        await expect(client.call('session/list', {})).resolves.toMatchObject({ sessions: [{ sessionId: 'saved', cwd }] })
+        if (mode === 'legacy') {
+          await client.archiveSession('saved', cwd)
+          await expect(client.call('session/list', {})).resolves.toMatchObject({ sessions: [{ sessionId: 'saved', archived: true }] })
+          await expect(client.call('session/prompt', { sessionId: 'saved', prompt: [] })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+        } else {
+          await expect(client.archiveSession('saved', cwd)).rejects.toMatchObject({ code: 'OPENCODE_ARCHIVE_UNAVAILABLE' })
+          await expect(client.call('session/load', { sessionId: 'saved', cwd, mcpServers: [] })).resolves.toMatchObject({ sessionId: 'saved' })
+          await expect(client.call('session/prompt', { sessionId: 'saved', prompt: [] })).resolves.toMatchObject({ stopReason: 'end_turn' })
+          await expect(client.history('saved', cwd)).resolves.toEqual([])
+        }
+      } finally { await client.close(); await rm(cwd, { recursive: true, force: true }) }
+    } })))
+  })
+
+  it('fails closed on uncertain CLI options and cancels probes without a late ACP launch', async () => {
+    await runScenarios(['probe-failure', 'probe-partial', 'probe-invalid', 'probe-overflow', 'probe-close', 'missing binary'].map(mode => ({ name: mode, run: async () => {
+      const cwd = await realpath(await mkdtemp(join(tmpdir(), 'opencode probe ')))
+      const client = new OpencodeAcpClient(mode === 'missing binary' ? join(cwd, 'missing') : process.execPath, logger(), undefined, {
+        cwd, args: [fileURLToPath(new URL('./fixtures/opencode-cli.mjs', import.meta.url)), 'acp', mode],
+      })
+      // Attach the rejection handler before closing a probe or spawning a missing binary.
+      const starting = client.start().then(() => undefined, error => error)
+      try {
+        if (mode === 'probe-close') {
+          await vi.waitFor(async () => { await access(join(cwd, 'probe-pid')) })
+          await client.close()
+          const pid = Number(await readFile(join(cwd, 'probe-pid'), 'utf8'))
+          await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow())
+        }
+        const error = await starting
+        expect(error).toMatchObject({ code: mode === 'probe-close' ? 'OPENCODE_CLOSED' : mode === 'missing binary' ? 'OPENCODE_BINARY_UNAVAILABLE' : 'OPENCODE_CLI_PROBE_FAILED' })
+        expect(String(error)).not.toContain('private CLI configuration')
+        expect(client.isReady()).toBe(false)
+        await expect(access(join(cwd, 'acp-started'))).rejects.toThrow()
+      } finally { await client.close(); await rm(cwd, { recursive: true, force: true }) }
+    } })))
+  })
+
   it('bounds isolated history readers and stops them with the parent during startup or load', async () => {
     await runScenarios(['history', 'close during initialize', 'close during load', 'overflow'].map(scenario => ({ name: scenario, run: async () => {
       const fake = fakeProcess()

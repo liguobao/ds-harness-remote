@@ -35,7 +35,7 @@ DS Harness Remote is simply another window into that environment.
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.5.12`
+`ds-harness-remote@0.5.13`
 
 ## Features
 
@@ -56,10 +56,10 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.5.12`
+`ds-harness-remote@0.5.13`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.12`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.5.13`.
 
 ### dsh-TUI Host
 
@@ -71,7 +71,7 @@ For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), 
 Add the exact package version through DSH's plugin manager for the `web` profile:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.5.12
+dsh plugin --profile web add -w ds-harness-remote@0.5.13
 ```
 
 Restart DeepSeek Harness after installation.
@@ -170,7 +170,7 @@ Supported backends:
 - **Antigravity (AGY)** — its stream-json CLI is adapted to the ACP gateway.
 - **Pi Agent (experimental)** — install `@earendil-works/pi-coding-agent` and `pi-acp` on the Host, configure Pi's provider locally; Remote automatically detects and initializes Pi unless explicitly disabled in Remote settings. The workspace is available only after ACP initialization succeeds. Uses the separate ACP data plane. Tools run with Host-user permissions; per-tool confirmation requires a Pi extension and is not enabled by default.
 
-- **OpenCode** — connected through `opencode acp`, with workspace discovery, history recovery, and native session archiving on Desktop/Android. Archive state is saved by OpenCode; history is retained. Unarchive is not yet exposed.
+- **OpenCode** — connected through `opencode acp`, with workspace discovery and history recovery. Host startup checks the CLI's supported options, accepting both native-listener and stdio-only ACP builds. Native session archiving on Desktop/Android requires the authenticated loopback API; builds without it report archiving unavailable. Archive state is saved by OpenCode; history is retained. Unarchive is not yet exposed.
 - **Claude** — uses a locally authorized `claude-agent-acp` on the Host; enable it in Remote settings. Desktop/Android support workspaces, history, text prompts and approvals. Image input and direct Files/Terminal access are not available.
 
 Model selection is available for Cursor, Claude, Pi, OpenCode, and AGY on Desktop/Android using the Host's actual model catalog and confirmed changes. Effort choices appear when advertised by the backend. Cursor uses a separate process per session so model changes cannot affect other conversations.
