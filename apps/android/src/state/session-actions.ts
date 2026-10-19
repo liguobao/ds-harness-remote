@@ -27,6 +27,7 @@ import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
 import { readClaudeHistory, selectClaudeModel } from '../services/claude'
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
+import { browseKey, browseScope } from '../services/browse-memory'
 import type { RemoteSession } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
@@ -94,14 +95,42 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async openSession(session) {
       runtime.flushPendingMuxFrames()
       runtime.flushPendingCodexFrames()
-      let loadGeneration = ++runtime.sessionLoadGeneration
+      const hostId = get().selectedDevice?.deviceId ?? ''
+      const pageScope = browseScope(get())
+      const pageKey = (id: string) => browseKey(pageScope, id)
+      const previous = get().selectedSession
+      if (previous !== undefined && !get().busyAction?.startsWith('session:') && !get().historyLoadingOlder) {
+        runtime.browsePages.set(pageKey(previous.sessionId), {
+          oldestLoadedSeq: get().oldestLoadedSeq, historyHasMore: get().historyHasMore,
+        })
+        if (runtime.browsePages.size > 32) runtime.browsePages.delete(runtime.browsePages.keys().next().value!)
+      }
+      const cachedPage = runtime.browsePages.get(pageKey(session.sessionId))
+      const cachedIds = new Set((get().messages[session.sessionId] ?? []).map(item => item.id))
+      let contiguousCache = false
+      const browseLive = (items: import('../types').ChatItem[], existing: import('../types').ChatItem[]) => {
+        contiguousCache = items.some(item => cachedIds.has(item.id))
+        // When the tail no longer overlaps, pagination starts from the new tail.
+        // Retain live/optimistic rows, not a misleading gap in cached history.
+        return contiguousCache ? existing : existing.filter(item => !cachedIds.has(item.id) || item.id.startsWith('local:'))
+      }
+      runtime.sessionReadAbort?.abort()
+      const readAbort = new AbortController()
+      runtime.sessionReadAbort = readAbort
+      const loadGeneration = ++runtime.sessionLoadGeneration
+      const connectionGeneration = runtime.connectionGeneration
       const current = () => loadGeneration === runtime.sessionLoadGeneration
+        && connectionGeneration === runtime.connectionGeneration && !readAbort.signal.aborted
+      const pageState = (hasMore: boolean, oldest: number | undefined) => {
+        // Already loaded older pages remain contiguous with a refreshed tail.
+        const retained = cachedPage?.oldestLoadedSeq
+        return contiguousCache && retained !== undefined && oldest !== undefined && retained <= oldest
+          ? cachedPage! : { historyHasMore: hasMore, oldestLoadedSeq: oldest }
+      }
       const finishOpen = async () => {
-        await runtime.rememberRecentWorkspace(session)
+        void runtime.rememberRecentWorkspace(session).catch(() => undefined)
         if (!current() || get().selectedSession?.sessionId !== session.sessionId) return false
-        set(state => state.currentWorkSessionIds.includes(session.sessionId)
-          ? {}
-          : { currentWorkSessionIds: [...state.currentWorkSessionIds, session.sessionId] })
+        set(state => ({ currentWorkSessionIds: [...state.currentWorkSessionIds.filter(id => id !== session.sessionId), session.sessionId].slice(-32) }))
         return true
       }
       // Reset per-session view state up front: `historyLoadingOlder` and the
@@ -110,6 +139,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       // session's model).
       set(state => ({
         busyAction: `session:${session.sessionId}`,
+        ...((session.backend === 'codex' || session.backend === undefined || session.backend === 'harness') ? {
+          selectedSession: session,
+          historyHasMore: cachedPage?.historyHasMore ?? false,
+          oldestLoadedSeq: cachedPage?.oldestLoadedSeq,
+        } : {}),
         error: undefined,
         historyLoadingOlder: false,
         sessionModels: undefined,
@@ -123,43 +157,22 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       }))
       const load = async () => {
         if (session.backend === 'codex') {
-          await runtime.closeActiveCodexStream()
-          await runtime.closeActiveCursorStream()
+          void runtime.closeActiveCodexStream()
+          void runtime.closeActiveCursorStream()
           const client = runtime.connection.requireCodex()
           const threadId = codexThreadId(session)
           const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
+          if (!current()) return
           const sessionWithPermission = withBestCodexPermission(session, undefined, savedPermissions)
           const permission = codexPermissionPreset(sessionWithPermission)
           const [read, history] = await Promise.all([
-            readCodexSession(client, threadId, permission),
-            readCodexHistoryPage(client, threadId),
+            readCodexSession(client, threadId, permission, readAbort.signal),
+            readCodexHistoryPage(client, threadId, undefined, 16, readAbort.signal),
           ])
           if (!current()) return
           const timeline = createCodexTimelineState({ ...read.thread, turns: [] })
           if (timeline === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
           runtime.activeCodexTimeline = withActiveCodexTurn(timeline, history.activeTurnId)
-          const streamGeneration = loadGeneration
-          const stream = await client.subscribe(
-            threadId,
-            frame => runtime.enqueueCodexFrame(streamGeneration, frame),
-            undefined,
-            reason => {
-              if (streamGeneration !== runtime.sessionLoadGeneration) return
-              if (runtime.activeCodexTimeline?.session.nativeId !== threadId) return
-              runtime.flushPendingCodexFrames()
-              runtime.activeCodexStream = undefined
-              runtime.activeCodexTimeline = undefined
-              set(state => ({
-                sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
-                selectedSession: state.selectedSession?.sessionId === session.sessionId
-                  ? { ...state.selectedSession, running: false }
-                  : state.selectedSession,
-                ...(reason === 'failed' ? { error: zhCN.runtime.codexUnavailable } : {}),
-              }))
-            },
-          )
-          if (!current()) { await stream.close().catch(() => undefined); return }
-          runtime.activeCodexStream = stream
           const items = foldHistory(history.events, session.sessionId, true)
           const nextSession = {
             ...sessionWithPermission,
@@ -171,12 +184,31 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
             messages: {
               ...state.messages,
-              [session.sessionId]: mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
+              [session.sessionId]: mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? [])),
             },
-            historyHasMore: history.hasMore,
-            oldestLoadedSeq: oldestSeq(history.events),
-            busyAction: undefined,
+            ...pageState(history.hasMore, oldestSeq(history.events)),
           }))
+          const stream = await client.subscribe(
+            threadId,
+            frame => { if (current()) runtime.enqueueCodexFrame(loadGeneration, frame) },
+            readAbort.signal,
+            reason => {
+              if (!current()) return
+              if (runtime.activeCodexTimeline?.session.nativeId !== threadId) return
+              runtime.activeCodexStream = undefined
+              runtime.activeCodexTimeline = undefined
+              set(state => ({
+                sessions: state.sessions.map(item => item.sessionId === session.sessionId ? {...item, running: false} : item),
+                selectedSession: state.selectedSession?.sessionId === session.sessionId
+                  ? state.selectedSession
+                  : state.selectedSession,
+                ...(reason === 'failed' ? { error: zhCN.runtime.codexUnavailable } : {}),
+              }))
+            },
+          )
+          if (!current()) { await stream.close().catch(() => undefined); return }
+          runtime.activeCodexStream = stream
+          set({ busyAction: undefined })
           void runtime.refreshCodexModels(session.sessionId)
           return
         }
@@ -233,10 +265,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (session.backend === 'cursor') void runtime.refreshCursorModels(session, current)
           return
         }
-        await runtime.closeActiveCodexStream()
-        await runtime.closeActiveCursorStream()
+        void runtime.closeActiveCodexStream()
+        void runtime.closeActiveCursorStream()
         const [history, feedback] = await Promise.all([
-          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 60, session.parentSessionId),
+          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 16, session.parentSessionId),
           // Older carriers may not expose feedback; history must remain usable.
           runtime.connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
         ])
@@ -261,7 +293,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // reconciliation marks, never deletes: a late `user/message` echo still
           // replaces the row by requestRpcId, so a misjudgment self-heals.
           const inboxSnapshot = latest.projections?.values?.inbox
-          const merged = applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? [], history.throughSeq), ratings)
+          const merged = applyFeedback(mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []), history.throughSeq), ratings)
           const reconciled = inboxSnapshot === undefined ? merged : reconcileDeliveryStates(
             merged,
             inboxRpcIds(inboxSnapshot),
@@ -277,8 +309,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             historyLoadingOlder: false,
             feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
             messages: { ...state.messages, [session.sessionId]: restored },
-            historyHasMore: history.hasMore,
-            oldestLoadedSeq: oldestSeq(history.events),
+            ...pageState(history.hasMore, oldestSeq(history.events)),
             busyAction: undefined,
           }
         })
@@ -295,6 +326,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // forceRelay once (the pre-bounding recovery path).
         const transportRetry = (isRpcTimeoutError(error) || isRecoverableTransportError(error))
           && !(isStreamTimeoutError(error) && session.parentSessionId !== undefined)
+          && !runtime.sessionReadRetry
         if (transportRetry) {
           if (runtime.reconnectFlight !== undefined) {
             set({ busyAction: undefined, error: friendlyError(error) })
@@ -305,17 +337,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // Mutating ApiProxy calls deliberately do not use this path because a
           // timeout leaves their result unknown.
           const recovered = await get().reconnect({ forceRelay: true, restoreSession: false })
+          if (runtime.sessionReadAbort !== readAbort || get().selectedDevice?.deviceId !== hostId) return false
           if (recovered) {
-            loadGeneration = ++runtime.sessionLoadGeneration
-            try {
-              await load()
-              if (!current()) return false
-              return await finishOpen()
-            } catch (retryError) {
-              if (!current()) return false
-              set({ busyAction: undefined, error: friendlyError(retryError) })
-              return false
-            }
+            // The replaced connection owns a new abort/generation scope.
+            // Mark this bounded retry so another failed read cannot reconnect in a loop.
+            runtime.sessionReadRetry = true
+            try { return await get().openSession(session) }
+            finally { runtime.sessionReadRetry = false }
           }
           set({ busyAction: undefined })
           return false
@@ -740,7 +768,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       runtime.flushPendingMuxFrames()
       const session = get().selectedSession
       const beforeSeq = get().oldestLoadedSeq
-      if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
+      if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore || get().busyAction?.startsWith('session:')) return
+      const generation = runtime.sessionLoadGeneration
+      const connectionGeneration = runtime.connectionGeneration
+      const current = () => generation === runtime.sessionLoadGeneration && connectionGeneration === runtime.connectionGeneration
       if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
         set({ historyHasMore: false, historyLoadingOlder: false })
         return
@@ -750,6 +781,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const page = session.backend === 'codex'
           ? await readCodexHistoryPage(runtime.connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
           : await runtime.connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, session.parentSessionId)
+        if (!current()) return
         const items = foldHistory(page.events, session.sessionId, true)
         const older = oldestSeq(page.events)
         set(state => ({
@@ -764,6 +796,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           } : {}),
         }))
       } catch (error) {
+        if (!current()) return
         set(state => state.selectedSession?.sessionId === session.sessionId
           ? { historyLoadingOlder: false, error: friendlyError(error) } : {})
       }

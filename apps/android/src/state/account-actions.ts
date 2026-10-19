@@ -39,6 +39,7 @@ import {
 } from '../services/storage'
 import type { ServerConfig, WorkspaceShortcut } from '../types'
 import type { AppState, QrLoginStart, QrProviderList, StoreAccess } from './store-state'
+import { clearBrowseMemory } from '../services/browse-memory'
 import { initialData } from './store-state'
 
 type AccountActions = Pick<AppState,
@@ -422,6 +423,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
 
     async resetLocalData() {
       await get().disconnect()
+      await clearBrowseMemory(true)
       await clearLocalData()
       const identity = await loadOrCreateIdentity()
       const language = applyLanguagePreference('system')
@@ -442,6 +444,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async signOut() {
       const { config, identity, languagePreference, themePreference, defaultPermissionPreset } = get()
       await get().disconnect()
+      await clearBrowseMemory(true)
       if (config !== undefined && identity !== undefined) {
         try {
           const { api } = await serverSession.authenticate(config.baseUrl, identity)

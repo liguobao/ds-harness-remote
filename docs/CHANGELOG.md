@@ -1,5 +1,17 @@
 ## Unreleased
 
+- Improve Android conversation browsing with backend-separated search, local favorites,
+  per-conversation drafts, reading anchors and a jump-to-latest action. Keep bounded encrypted
+  text previews scoped to server/account/Host identity, optional startup restoration and live
+  task notifications. Show cached content immediately while fresh history and subscriptions
+  are verified; ignore cancelled reads and deduplicate native Codex catalog snapshots.
+- Android 对话侧栏增加后端分类、搜索和本机收藏；按对话保留草稿、阅读位置和受限加密文字预览，
+  支持可选启动恢复与连接期间的任务通知。切换先显示缓存再核对最新历史，取消过期读取，并按原生
+  Codex 对话 ID 归并重复目录记录。
+- Add an opt-in read-only Codex history preview with authenticated-peer-scoped, expiring tool
+  detail handles. Android requests large tool bodies on expansion; existing clients and older
+  Hosts keep their original history flow.
+
 ## 0.5.14 - 2026-10-19
 
 - Unifies first-party package/client versions at `0.5.14` (tag `v0.5.14`); Android `versionCode` and Expo iOS `buildNumber` advance to `58`.

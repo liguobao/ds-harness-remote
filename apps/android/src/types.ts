@@ -349,6 +349,7 @@ export interface ImageAttachmentLimits {
 }
 
 export interface ToolActivity extends ChatItemBase {
+  remoteDetail?: {threadId: string; detailId: string}
   kind: 'tool'
   toolName: string
   /** Original official tool name, separate from its localized display title. */

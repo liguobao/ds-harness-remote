@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useBrowseMemory, browsePreference, clearBrowseMemory } from '../services/browse-memory'
 import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
@@ -331,6 +332,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
+  const comfort = useBrowseMemory()
   const preference = useAppStore(state => state.transportPreference)
   const setPreference = useAppStore(state => state.setTransportPreference)
   const languagePreference = useAppStore(state => state.languagePreference)
@@ -396,6 +398,15 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
             </View>
 
+            <Text style={styles.groupLabel}>{zhCN.comfort.continueWork}</Text>
+            <View style={styles.preferenceList}>
+              <Button label={comfort.resume ? zhCN.comfort.resumeOn : zhCN.comfort.resumeOff} variant="secondary" onPress={() => browsePreference({resume: !comfort.resume})} />
+              <Button label={comfort.notifications ? zhCN.comfort.notificationsOn : zhCN.comfort.notificationsOff} variant="secondary" onPress={() => browsePreference({notifications: !comfort.notifications})} />
+              <Button label={zhCN.comfort.systemNotifications} variant="secondary" onPress={() => void Linking.openSettings()} />
+              <Text style={styles.preferenceNote}>{zhCN.comfort.cacheNote}</Text>
+              <Button label={zhCN.comfort.clearCache} variant="secondary" onPress={() => void clearBrowseMemory()} />
+              {comfort.error !== undefined && <Text accessibilityRole="alert">{comfort.error}</Text>}
+            </View>
             <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
             <View style={styles.preferenceList}>
               {languageOptions().map(option => {

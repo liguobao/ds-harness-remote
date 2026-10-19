@@ -48,6 +48,8 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - Prefer P2P connections, use TURN relay nodes worldwide, and fall back to Server Relay when needed.
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
 - CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
+- Android keeps per-conversation drafts and reading positions, offers backend-separated search
+  and local favorites, and loads retained previews before refreshing conversation history.
 
 ## Install
 

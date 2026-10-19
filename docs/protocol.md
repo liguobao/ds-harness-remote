@@ -1939,3 +1939,8 @@ successful local selections. Cursor uses one process per session because its ups
 model manager is process-wide (maximum 30 active sessions plus the catalog process);
 Claude keeps per-session model state in its existing adapter. Neither adds generic
 configuration RPC or fabricated choices. The display name is `Claude`, backend ID `claude`.
+
+
+### Optional read-only history preview
+
+`codex.app.call` accepts `{method: "dsh/sessionHistory", params, previewHistory: true}` on supporting Hosts. Ordinary history is returned directly up to 2 MiB. Tool-result bodies over 4 KiB are represented by an opaque `remoteDetail: {threadId, detailId}` handle; the original remains in a per-authenticated-peer memory cache (64 entries, 16 MiB, ten minutes). `dsh/historyDetail` accepts exactly that pair, verifies the peer/thread/expiry and revalidates `thread/read` before returning the original through the existing bounded transfer. Handles never authorize mutations. Clients fall back to the existing read-only transfer only on `INVALID_MESSAGE` (older Host) or `RESPONSE_TOO_LARGE`; timeouts and authority failures are not replayed.

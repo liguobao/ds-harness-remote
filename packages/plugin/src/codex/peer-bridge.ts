@@ -1,3 +1,4 @@
+import { previewCall } from './history-preview.js'
 import { Buffer } from 'node:buffer'
 import type {
   CodexAppFrameData,
@@ -85,7 +86,7 @@ export class CodexPeerBridge {
   private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {
     this.requireOpen()
     try {
-      return await this.domain.call(this.context.connectionId, input)
+      return await previewCall(this, input, value => this.domain.call(this.context.connectionId, value))
     } catch (error) {
       if (logFailure) {
         this.logger?.warn('Codex call failed', {

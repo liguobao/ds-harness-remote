@@ -21,6 +21,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
   'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'respondApproval' | 'respondQuestion'> {
   return {
     async sendMessage(input, images = [], reuseRpcId) {
+      if (get().busyAction?.startsWith('session:')) return 'rejected'
       runtime.flushPendingMuxFrames()
       set({ commandResult: undefined })
       const session = get().selectedSession
