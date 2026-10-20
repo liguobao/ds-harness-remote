@@ -40846,6 +40846,105 @@ function concatChunks3(chunks, totalBytes) {
   return result;
 }
 
+// src/remote-archive.ts
+var ARCHIVE_CACHE_TTL_MS = 3e3;
+var ARCHIVE_READ_TIMEOUT_MS = 1e3;
+var ARCHIVE_CLOSE_TIMEOUT_MS = 250;
+function emptyArchivedCache() {
+  return { value: { at: 0, ids: /* @__PURE__ */ new Set() } };
+}
+function archivedIdsFromBaseline(frame) {
+  if (!isRecord21(frame) || frame.type !== "baseline" || !isRecord21(frame.value)) return void 0;
+  const list = frame.value.archivedSessionIds;
+  if (!Array.isArray(list)) return void 0;
+  return new Set(list.filter((id5) => typeof id5 === "string"));
+}
+async function readArchivedSessionIds(gateway, cache, now = Date.now()) {
+  if (now - cache.value.at < ARCHIVE_CACHE_TTL_MS) return cache.value.ids;
+  const lifetime = new AbortController();
+  const timer = setTimeout(() => lifetime.abort("archive-baseline-timeout"), ARCHIVE_READ_TIMEOUT_MS);
+  let iterator;
+  try {
+    const source = await boundedRead(
+      gateway.open("workspace/follow", { args: {} }, lifetime.signal),
+      lifetime.signal
+    );
+    iterator = source[Symbol.asyncIterator]();
+    const first = await boundedRead(iterator.next(), lifetime.signal);
+    const ids = first.done ? void 0 : archivedIdsFromBaseline(first.value);
+    if (ids === void 0) return cache.value.ids;
+    cache.value = { at: now, ids };
+    return ids;
+  } catch {
+    return cache.value.ids;
+  } finally {
+    clearTimeout(timer);
+    await closeStream(iterator, lifetime);
+  }
+}
+async function boundedRead(pending, signal) {
+  return await new Promise((resolve6, reject) => {
+    if (signal.aborted) {
+      reject(new Error("cancelled"));
+      return;
+    }
+    const onAbort = () => reject(new Error("cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve6(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+async function closeStream(iterator, lifetime) {
+  lifetime.abort("archive-baseline-read");
+  if (iterator?.return === void 0) return;
+  let cancel;
+  try {
+    await Promise.race([
+      iterator.return().catch(() => void 0),
+      new Promise((resolve6) => {
+        const handle = setTimeout(resolve6, ARCHIVE_CLOSE_TIMEOUT_MS);
+        cancel = () => {
+          clearTimeout(handle);
+        };
+      })
+    ]);
+  } catch {
+  } finally {
+    cancel?.();
+  }
+}
+function filterArchivedResult(endpoint, result, archived) {
+  if (endpoint !== "session/list" || archived.size === 0) return result;
+  try {
+    const value = result.ok === true && isRecord21(result.value) ? result.value : void 0;
+    const items = value?.items;
+    if (value === void 0 || !Array.isArray(items)) return result;
+    const kept = items.filter((item) => {
+      const sessionId = isRecord21(item) ? item.sessionId : void 0;
+      if (typeof sessionId !== "string") return true;
+      if (archived.has(sessionId)) return false;
+      if (archived.has(`session-${sessionId}`)) return false;
+      if (sessionId.startsWith("session-") && archived.has(sessionId.slice("session-".length))) return false;
+      return true;
+    });
+    if (kept.length === items.length) return result;
+    return { ...result, value: { ...value, items: kept } };
+  } catch {
+    return result;
+  }
+}
+function isRecord21(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema4 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
@@ -40993,6 +41092,8 @@ var HarnessRemoteBridge = class {
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   terminalCarrier;
+  /** Short-lived cache of the Workspace archive projection. */
+  archivedCache = emptyArchivedCache();
   async call(input3) {
     const params = callSchema4.parse(input3);
     this.assertAllowed(params.endpoint);
@@ -41030,7 +41131,8 @@ var HarnessRemoteBridge = class {
         durationMs: Math.round(performance.now() - startedAt)
       });
       const wireResult = normalizeWorkspaceBinaryResult2(params.endpoint, result);
-      return reservation === void 0 ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation);
+      const visibleResult = params.endpoint === "session/list" ? filterArchivedResult(params.endpoint, wireResult, await readArchivedSessionIds(this.gateway, this.archivedCache)) : wireResult;
+      return reservation === void 0 ? visibleResult : this.terminal.result(params.endpoint, params.payload, visibleResult, reservation);
     } catch (error) {
       if (reservation !== void 0) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: "FAILED", message: "", details: {} } }, reservation);
       if (params.endpoint === "directoryPicker/list") {
@@ -41242,11 +41344,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord21(payload) || !isRecord21(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord22(payload) || !isRecord22(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord21(payload) || !isRecord21(payload.args)) return payload;
+  if (!isRecord22(payload) || !isRecord22(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -41344,13 +41446,13 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record8(payload);
-  const args = isRecord21(root.args) ? root.args : root;
+  const args = isRecord22(root.args) ? root.args : root;
   return record8(args.request ?? args._request ?? args);
 }
 function record8(value) {
-  return isRecord21(value) ? value : {};
+  return isRecord22(value) ? value : {};
 }
-function isRecord21(value) {
+function isRecord22(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
