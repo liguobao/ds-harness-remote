@@ -11,6 +11,27 @@ import {
 const okList = (items: unknown[]): TypertRpcResult => ({ ok: true, value: { items } }) as TypertRpcResult
 
 /**
+ * Wall-clock ceilings for the stall tests, written as literals on purpose.
+ *
+ * Deriving them from the production constants would defeat the assertion: when
+ * `ARCHIVE_READ_TIMEOUT_MS` grows, the ceiling would grow with it and the test
+ * would keep passing. The ceilings state an independent contract instead —
+ * "a stalled read must settle inside this budget" — so raising the timeout
+ * budget without re-deriving the numbers makes the test fail.
+ *
+ * Measured worst cases on the dev box: 1 280 ms for the stalled read (1 000 ms
+ * read budget plus the 250 ms teardown), 265 ms for the stalled close. The
+ * budgets below leave headroom for CI jitter while staying far enough from the
+ * measured values to catch a real regression.
+ *
+ * Note: a read that never settles at all cannot be caught by either assertion —
+ * `await` never returns, so only the runner's own test timeout stops it. These
+ * ceilings catch the case where the budgets themselves grow.
+ */
+const BOUNDED_LIMIT_MS = 2_000
+const CLOSE_LIMIT_MS = 750
+
+/**
  * The bridge only calls `open()`, so the rest of `LocalTypertGateway` is stubbed
  * out here; the assertion keeps that contract visible instead of casting away
  * the whole interface.
@@ -208,7 +229,7 @@ describe('readArchivedSessionIds', () => {
     const startedAt = Date.now()
     const ids = await readArchivedSessionIds(gatewayThatNeverOpens(), cache)
     expect(ids.size).toBe(0)
-    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(Date.now() - startedAt).toBeLessThan(BOUNDED_LIMIT_MS)
   })
 
   it('stays bounded when the stream never settles and ignores the signal', async () => {
@@ -216,7 +237,7 @@ describe('readArchivedSessionIds', () => {
     const startedAt = Date.now()
     const ids = await readArchivedSessionIds(gatewayThatIgnoresAbort(), cache)
     expect(ids.size).toBe(0)
-    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(Date.now() - startedAt).toBeLessThan(BOUNDED_LIMIT_MS)
   })
 })
 
@@ -246,7 +267,7 @@ describe('closeStream', () => {
   it('stays bounded when return() never settles', async () => {
     const startedAt = Date.now()
     await closeStream({ next: async () => ({ done: true as const, value: undefined }), return: () => new Promise<never>(() => {}) }, new AbortController())
-    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(Date.now() - startedAt).toBeLessThan(CLOSE_LIMIT_MS)
   })
 
   it('swallows a rejecting return()', async () => {
