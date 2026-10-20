@@ -1,8 +1,74 @@
 import { describe, expect, it } from 'vitest'
-import type { TypertRpcResult } from '../src/typert-gateway-contract.js'
-import { archivedIdsFromBaseline, emptyArchivedCache, filterArchivedResult } from '../src/remote-archive.js'
+import type { LocalTypertGateway, TypertRpcResult } from '../src/typert-gateway-contract.js'
+import {
+  archivedIdsFromBaseline,
+  closeStream,
+  emptyArchivedCache,
+  filterArchivedResult,
+  readArchivedSessionIds,
+} from '../src/remote-archive.js'
 
 const okList = (items: unknown[]): TypertRpcResult => ({ ok: true, value: { items } }) as TypertRpcResult
+
+/**
+ * The bridge only calls `open()`, so the rest of `LocalTypertGateway` is stubbed
+ * out here; the assertion keeps that contract visible instead of casting away
+ * the whole interface.
+ */
+function asGateway(shape: { open: LocalTypertGateway['open'] }): LocalTypertGateway {
+  return {
+    open: shape.open,
+    dispatch: async () => ({ ok: false, error: { code: 'UNUSED', message: '', details: {} } }),
+    invoke: async () => undefined,
+    failure: () => ({ code: 'UNUSED', message: '', details: {} }),
+    supportsCarrier: true,
+  }
+}
+
+/** A `LocalTypertGateway` whose stream yields exactly one baseline frame. */
+function gatewayYielding(frame: unknown, options: { onReturn?: () => void } = {}): LocalTypertGateway {
+  return asGateway({
+    async open() {
+      let served = false
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              if (served) return { done: true as const, value: undefined }
+              served = true
+              return { done: false as const, value: frame }
+            },
+            async return() {
+              options.onReturn?.()
+              return { done: true as const, value: undefined }
+            },
+          }
+        },
+      }
+    },
+  })
+}
+
+/** A gateway whose stream never settles and ignores the abort signal. */
+function gatewayThatIgnoresAbort(): LocalTypertGateway {
+  return asGateway({
+    async open() {
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => new Promise<never>(() => {}),
+            return: () => new Promise<never>(() => {}),
+          }
+        },
+      }
+    },
+  })
+}
+
+/** A gateway whose `open()` itself never settles. */
+function gatewayThatNeverOpens(): LocalTypertGateway {
+  return asGateway({ open: () => new Promise<never>(() => {}) })
+}
 
 describe('archivedIdsFromBaseline', () => {
   it('reads the archive set from a baseline frame', () => {
@@ -59,7 +125,8 @@ describe('filterArchivedResult', () => {
 
   it('keeps rows without a usable sessionId', () => {
     const result = filterArchivedResult('session/list', okList([{ foo: 1 }, { sessionId: 'session-a' }]), archived)
-    expect((result as { value: { items: unknown[] } }).value.items).toHaveLength(1)
+    // Both length and content: the surviving row must be the one without an id.
+    expect((result as { value: { items: unknown[] } }).value.items).toEqual([{ foo: 1 }])
   })
 
   it('returns the same reference when nothing is archived', () => {
@@ -78,7 +145,7 @@ describe('filterArchivedResult', () => {
   })
 
   it('leaves a failed result alone', () => {
-    const result: TypertRpcResult = { ok: false, error: { code: 'FAILED', message: '' } }
+    const result: TypertRpcResult = { ok: false, error: { code: 'FAILED', message: '', details: {} } }
     expect(filterArchivedResult('session/list', result, archived)).toBe(result)
   })
 
@@ -91,7 +158,102 @@ describe('filterArchivedResult', () => {
 describe('emptyArchivedCache', () => {
   it('starts empty and never filters', () => {
     const cache = emptyArchivedCache()
-    expect(cache.at).toBe(0)
-    expect(cache.ids.size).toBe(0)
+    expect(cache.value.at).toBe(0)
+    expect(cache.value.ids.size).toBe(0)
+  })
+})
+
+describe('readArchivedSessionIds', () => {
+  it('reads the archive set and closes the stream', async () => {
+    let returned = false
+    const gateway = gatewayYielding(
+      { type: 'baseline', value: { archivedSessionIds: ['session-x'] } },
+      { onReturn: () => { returned = true } },
+    )
+    const cache = emptyArchivedCache()
+    expect([...await readArchivedSessionIds(gateway, cache)]).toEqual(['session-x'])
+    expect(returned).toBe(true)
+    expect(cache.value.ids.has('session-x')).toBe(true)
+  })
+
+  it('serves the cached set inside the TTL without opening a stream', async () => {
+    let opened = 0
+    const inner = gatewayYielding({ type: 'baseline', value: { archivedSessionIds: ['x'] } })
+    const gateway = asGateway({
+      open: async (endpoint, payload, signal, uplink) => {
+        opened += 1
+        return inner.open(endpoint, payload, signal, uplink)
+      },
+    })
+    const cache = { value: { at: Date.now(), ids: new Set(['cached']) } }
+    expect([...await readArchivedSessionIds(gateway, cache)]).toEqual(['cached'])
+    expect(opened).toBe(0)
+  })
+
+  it('falls back to the cached set when the frame is not a baseline', async () => {
+    const cache = { value: { at: 0, ids: new Set(['previous']) } }
+    const ids = await readArchivedSessionIds(gatewayYielding({ type: 'increment', value: {} }), cache)
+    expect([...ids]).toEqual(['previous'])
+    expect(cache.value.at).toBe(0)
+  })
+
+  it('returns the cached set when open() rejects', async () => {
+    const cache = { value: { at: 0, ids: new Set(['previous']) } }
+    const gateway = asGateway({ open: async () => { throw new Error('host refused') } })
+    expect([...await readArchivedSessionIds(gateway, cache)]).toEqual(['previous'])
+  })
+
+  it('stays bounded when open() never settles and ignores the signal', async () => {
+    const cache = emptyArchivedCache()
+    const startedAt = Date.now()
+    const ids = await readArchivedSessionIds(gatewayThatNeverOpens(), cache)
+    expect(ids.size).toBe(0)
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+  })
+
+  it('stays bounded when the stream never settles and ignores the signal', async () => {
+    const cache = emptyArchivedCache()
+    const startedAt = Date.now()
+    const ids = await readArchivedSessionIds(gatewayThatIgnoresAbort(), cache)
+    expect(ids.size).toBe(0)
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+  })
+})
+
+describe('closeStream', () => {
+  it('aborts the lifetime and closes the iterator', async () => {
+    let closed = false
+    const lifetime = new AbortController()
+    const iterator = {
+      next: async () => ({ done: true as const, value: undefined }),
+      return: async () => {
+        expect(lifetime.signal.aborted).toBe(true)
+        closed = true
+        return { done: true as const, value: undefined }
+      },
+    }
+    await closeStream(iterator, lifetime)
+    expect(closed).toBe(true)
+    expect(lifetime.signal.aborted).toBe(true)
+  })
+
+  it('tolerates a missing iterator', async () => {
+    const lifetime = new AbortController()
+    await expect(closeStream(undefined, lifetime)).resolves.toBeUndefined()
+    expect(lifetime.signal.aborted).toBe(true)
+  })
+
+  it('stays bounded when return() never settles', async () => {
+    const startedAt = Date.now()
+    await closeStream({ next: async () => ({ done: true as const, value: undefined }), return: () => new Promise<never>(() => {}) }, new AbortController())
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+  })
+
+  it('swallows a rejecting return()', async () => {
+    const iterator = {
+      next: async () => ({ done: true as const, value: undefined }),
+      return: async () => { throw new Error('close failed') },
+    }
+    await expect(closeStream(iterator, new AbortController())).resolves.toBeUndefined()
   })
 })

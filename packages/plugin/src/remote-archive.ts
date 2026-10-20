@@ -15,6 +15,23 @@ import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contr
 /** How long the archive projection is reused before asking the Host again. */
 export const ARCHIVE_CACHE_TTL_MS = 3_000
 
+/**
+ * Bound on the optional archive read.
+ *
+ * `session/list` has already produced its result when this runs, so a slow or
+ * stalled `workspace/follow` must not delay the list. Short enough to be
+ * invisible to a caller, long enough for a healthy local Host to answer.
+ */
+export const ARCHIVE_READ_TIMEOUT_MS = 1_000
+
+/**
+ * Bound on the stream teardown after the read is done or has timed out.
+ *
+ * Shorter than the read timeout: the result has already been decided, so a
+ * slow close earns nothing and must not extend the caller's wait.
+ */
+export const ARCHIVE_CLOSE_TIMEOUT_MS = 250
+
 export interface ArchivedCache {
   readonly at: number
   readonly ids: ReadonlySet<string>
@@ -53,6 +70,16 @@ export function archivedIdsFromBaseline(frame: unknown): ReadonlySet<string> | u
  * in `finally`. On any failure the previously cached set is returned rather
  * than throwing, so a transient Host error hides nothing new.
  *
+ * This read is optional: `session/list` has already succeeded by the time it
+ * runs, so it must never hold the list open. A short timeout bounds the whole
+ * read (`open()`, the first frame, and the stream teardown).
+ *
+ * The teardown is ordered abort → `return()`, and the `return()` is itself
+ * bounded. Aborting first is necessary but not sufficient: an iterator whose
+ * `return()` waits for the abort signal will never see it if the signal was
+ * already aborted before `return()` attached its listener, so the teardown
+ * must not be awaited unbounded.
+ *
  * `cache` is a mutable holder owned by the caller, so the TTL entry can be
  * refreshed in place without the bridge tracking timestamps itself.
  */
@@ -63,22 +90,79 @@ export async function readArchivedSessionIds(
 ): Promise<ReadonlySet<string>> {
   if (now - cache.value.at < ARCHIVE_CACHE_TTL_MS) return cache.value.ids
   const lifetime = new AbortController()
+  const timer = setTimeout(() => lifetime.abort('archive-baseline-timeout'), ARCHIVE_READ_TIMEOUT_MS)
+  let iterator: AsyncIterator<unknown> | undefined
   try {
-    const source = await gateway.open('workspace/follow', { args: {} }, lifetime.signal)
-    const iterator = source[Symbol.asyncIterator]()
-    try {
-      const first = await iterator.next()
-      const ids = first.done ? undefined : archivedIdsFromBaseline(first.value)
-      if (ids === undefined) return cache.value.ids
-      cache.value = { at: now, ids }
-      return ids
-    } finally {
-      await iterator.return?.()
-    }
+    // Every await below is raced against the deadline rather than relying on
+    // the Host honouring `lifetime.signal`: a carrier that ignores cancellation
+    // would otherwise keep `session/list` pending forever.
+    const source = await boundedRead(
+      gateway.open('workspace/follow', { args: {} }, lifetime.signal),
+      lifetime.signal,
+    )
+    iterator = source[Symbol.asyncIterator]()
+    const first = await boundedRead(iterator.next(), lifetime.signal)
+    const ids = first.done ? undefined : archivedIdsFromBaseline(first.value)
+    if (ids === undefined) return cache.value.ids
+    cache.value = { at: now, ids }
+    return ids
   } catch {
     return cache.value.ids
   } finally {
-    lifetime.abort('archive-baseline-read')
+    clearTimeout(timer)
+    await closeStream(iterator, lifetime)
+  }
+}
+
+/**
+ * Settle a promise or give up when the signal fires, whichever comes first.
+ *
+ * Used instead of trusting the far side to honour cancellation: the point of
+ * the deadline is to bound the wait even when a stalled carrier never reacts to
+ * the abort. Rejects with the `cancelled` truthy marker so callers can treat it
+ * like any other failed read.
+ */
+async function boundedRead<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('cancelled'))
+      return
+    }
+    const onAbort = (): void => reject(new Error('cancelled'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    pending.then(
+      value => { signal.removeEventListener('abort', onAbort); resolve(value) },
+      error => { signal.removeEventListener('abort', onAbort); reject(error) },
+    )
+  })
+}
+
+/**
+ * Tear down the single-use `workspace/follow` stream without ever blocking the
+ * caller: abort first, then close, with the close itself time-bounded.
+ *
+ * Exported so the exit paths can be tested without a Host.
+ */
+export async function closeStream(iterator: AsyncIterator<unknown> | undefined, lifetime: AbortController): Promise<void> {
+  lifetime.abort('archive-baseline-read')
+  if (iterator?.return === undefined) return
+  // `setTimeout` returns `number` under lib.dom and `NodeJS.Timeout` under
+  // @types/node; this project compiles with both, so the handle is kept opaque
+  // and cancelled through a closure rather than typed by `ReturnType`.
+  let cancel: (() => void) | undefined
+  try {
+    await Promise.race([
+      iterator.return().catch(() => undefined),
+      new Promise<void>(resolve => {
+        const handle = setTimeout(resolve, ARCHIVE_CLOSE_TIMEOUT_MS)
+        cancel = () => { clearTimeout(handle) }
+      }),
+    ])
+  } catch {
+    // A failing close must not surface: the read is best-effort by design.
+  } finally {
+    // Cleared on both branches so a fast close leaves no pending timer behind.
+    cancel?.()
   }
 }
 
