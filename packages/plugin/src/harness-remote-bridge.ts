@@ -28,6 +28,8 @@ import { listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
+import { emptyArchivedCache, filterArchivedResult, readArchivedSessionIds } from './remote-archive.js'
+import type { ArchivedCacheHolder } from './remote-archive.js'
 
 type PublishRemoteFrame = (
   event: 'harness.remote.frame' | 'harness.remote.stream.closed',
@@ -198,6 +200,9 @@ export class HarnessRemoteBridge {
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
 
+  /** Short-lived cache of the Workspace archive projection. */
+  private readonly archivedCache: ArchivedCacheHolder = emptyArchivedCache()
+
   constructor(
     private readonly gateway: LocalTypertGateway,
     private readonly publish: PublishRemoteFrame,
@@ -258,7 +263,12 @@ export class HarnessRemoteBridge {
       // to canonical base64. (Codex/ACP workspace bridges already return the
       // wire shape and are left unchanged.)
       const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result)
-      return reservation === undefined ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation)
+      // `session/list` carries no archived flag, so archived Sessions are only
+      // hidden where the list leaves the Host.
+      const visibleResult = params.endpoint === 'session/list'
+        ? filterArchivedResult(params.endpoint, wireResult, await readArchivedSessionIds(this.gateway, this.archivedCache))
+        : wireResult
+      return reservation === undefined ? visibleResult : this.terminal.result(params.endpoint, params.payload, visibleResult, reservation)
     } catch (error) {
       if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
       if (params.endpoint === 'directoryPicker/list') {
