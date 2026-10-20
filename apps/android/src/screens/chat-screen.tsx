@@ -46,7 +46,7 @@ import type { CustomPrompt } from '../services/storage'
 import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts } from '../services/storage'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import type { ChatSection } from '../state/message-helpers'
-import { chatSections, inboxQueuedItems, inboxRpcIds, limitToLatestTurn, mergeReplyReasoning } from '../state/message-helpers'
+import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../state/message-helpers'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { placeUiArtifacts, projectUiArtifacts, type UiArtifact } from '../state/ui-artifacts'
 import type {
@@ -320,20 +320,14 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       // Output-less failure turns keep an empty assistant row carrying only the
       // turnEnd reason — it must stay visible so the failure is explainable.
       || item.turnEnd !== undefined))), [messages, session?.backend])
-  // Render one turn only. `visibleMessages` above still drives every state
-  // judgement (blank session, running turn, scroll gates, empty-list style);
-  // this trim applies to the render data path alone, so a history page that
-  // starts inside a turn cannot blank the screen and no scroll or busy gate
-  // changes meaning.
-  const latestTurnMessages = useMemo(() => limitToLatestTurn(visibleMessages), [visibleMessages])
   // Feed the previous list back so untouched groups keep their identity; the
   // streaming delta then only rebuilds the group that actually changed.
   const previousSectionsRef = useRef<readonly ChatSection[]>([])
   const visibleSections = useMemo(() => {
-    const next = chatSections(latestTurnMessages, previousSectionsRef.current)
+    const next = chatSections(visibleMessages, previousSectionsRef.current)
     previousSectionsRef.current = next
     return next
-  }, [latestTurnMessages])
+  }, [visibleMessages])
   const uiBySectionCache = useRef<ReadonlyMap<string, SectionArtifacts>>(EMPTY_UI_BY_SECTION)
   const uiBySection = useMemo<ReadonlyMap<string, SectionArtifacts>>(() => {
     if (hostId === undefined || session === undefined
@@ -1171,7 +1165,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         <View style={styles.splitMain}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}><BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
         key={session.sessionId}
         style={[styles.list, readableColumn]}
@@ -1216,7 +1210,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
           </Pressable>
         ) : undefined}
-      />}</BlurHeaderFrame></ChatErrorBoundary>
+      />}</ChatErrorBoundary>}</BlurHeaderFrame>
 
       {mentionType !== null && (
         <Pressable
