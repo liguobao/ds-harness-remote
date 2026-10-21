@@ -98,8 +98,12 @@ export async function readCodexSession(
   client: CodexRemoteClient,
   threadId: string,
   permissionPreset = CODEX_PERMISSION_DEFAULT,
+  signal?: AbortSignal,
 ): Promise<CodexSessionRead> {
-  const result = record(await client.request('thread/read', { threadId, includeTurns: false }))
+  const params = { threadId, includeTurns: false }
+  const result = record(await (signal === undefined
+    ? client.request('thread/read', params)
+    : client.request('thread/read', params, signal)))
   const thread = record(result.thread)
   const display = projectCodexThread(thread)
   if (display === undefined || display.nativeId !== threadId) throw new Error(strings.runtime.codexInvalidResponse)
@@ -111,12 +115,16 @@ export async function readCodexHistoryPage(
   threadId: string,
   beforeSeq?: number,
   maxMessages = 60,
+  signal?: AbortSignal,
 ): Promise<SessionHistoryPage> {
-  const page = record(await client.request('dsh/sessionHistory', {
+  const params = {
     threadId,
     ...(beforeSeq === undefined ? {} : { beforeSeq }),
     maxMessages,
-  }))
+  }
+  const page = record(await (signal === undefined
+    ? client.request('dsh/sessionHistory', params)
+    : client.request('dsh/sessionHistory', params, signal)))
   const header = record(page.header)
   if (header.id !== `codex:${threadId}` || !Array.isArray(page.records) || typeof page.hasMore !== 'boolean') {
     throw new Error(strings.runtime.codexInvalidResponse)
@@ -461,7 +469,9 @@ function parseCodexProject(value: unknown, fallbackPosition: number): CodexProje
 }
 
 async function loadThreads(client: CodexRemoteClient): Promise<Record<string, unknown>[]> {
-  const threads: Record<string, unknown>[] = []
+  // Native catalogs can list several rollout snapshots of the same thread,
+  // including across page boundaries. Project only its newest complete row.
+  const threads = new Map<string, Record<string, unknown>>()
   let cursor: string | undefined
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const result = record(await client.request('thread/list', {
@@ -474,12 +484,15 @@ async function loadThreads(client: CodexRemoteClient): Promise<Record<string, un
     if (!Array.isArray(result.data)) throw new Error(strings.runtime.codexInvalidResponse)
     for (const value of result.data) {
       const thread = record(value)
-      if (string(thread.id) !== undefined) threads.push(thread)
+      const id = string(thread.id)
+      if (id === undefined) continue
+      const previous = threads.get(id)
+      if (previous === undefined || timestamp(thread.updatedAt) > timestamp(previous.updatedAt)) threads.set(id, thread)
     }
     cursor = string(result.nextCursor)
     if (cursor === undefined) break
   }
-  return threads
+  return [...threads.values()]
 }
 
 function projectWorkspace(project: CodexProject): WorkspaceView {

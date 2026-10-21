@@ -1,4 +1,5 @@
 interface ForegroundServiceModule {
+  notifyTask(hostId: string, sessionId: string, title: string, body: string): void
   start(): Promise<void>
   stop(): Promise<void>
   setStatus(status: string): Promise<void>
@@ -23,6 +24,11 @@ function nativeModule(rn: typeof import('react-native')): ForegroundServiceModul
 
 /** iOS/web/Node skip this Android-only service; Android requires a rebuilt native module. */
 export const foregroundService = {
+  notifyTask(hostId: string, sessionId: string, title: string, body: string): void {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return
+    nativeModule(rn).notifyTask(hostId, sessionId, title.slice(0, 100), body)
+  },
   async start(): Promise<void> {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return

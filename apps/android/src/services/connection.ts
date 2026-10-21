@@ -200,7 +200,7 @@ export class AndroidRemoteConnection {
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
-    if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core)
+    if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
     this.acpBackends.clear()
     for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const) {
       if (remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, backend, `agent.acp.${backend}.v1`)) {

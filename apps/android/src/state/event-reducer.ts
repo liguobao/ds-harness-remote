@@ -344,6 +344,8 @@ function applyToolCall(
     id,
     sessionId,
     toolName: name,
+    ...(isRecord(data.remoteDetail) && typeof data.remoteDetail.threadId === 'string' && typeof data.remoteDetail.detailId === 'string'
+      ? {remoteDetail: {threadId: data.remoteDetail.threadId, detailId: data.remoteDetail.detailId}} : {}),
     ...(stringValue(data.name) ?? stringValue(data.toolName) ? { toolKey: stringValue(data.name) ?? stringValue(data.toolName) } : {}),
     ...(argumentsText.length > 0 ? { arguments: argumentsText } : {}),
     ...(summary === undefined ? {} : { summary }),
@@ -363,6 +365,7 @@ function applyToolCall(
         ...(summary === undefined ? {} : { summary }),
         ...(next.callDetail === undefined ? {} : { callDetail: next.callDetail }),
         ...(next.resultDetail === undefined ? {} : { resultDetail: next.resultDetail }),
+        ...(state === 'finished' ? {remoteDetail: next.remoteDetail} : {}),
         // A new terminal result must not inherit an earlier success marker.
         ...(state === 'finished' ? { uiResultMeta: next.uiResultMeta } : {}),
         state: next.state,

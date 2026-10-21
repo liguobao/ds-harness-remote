@@ -21,11 +21,15 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
   'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'respondApproval' | 'respondQuestion'> {
   return {
     async sendMessage(input, images = [], reuseRpcId) {
+      if (get().busyAction?.startsWith('session:')) return 'rejected'
       runtime.flushPendingMuxFrames()
       set({ commandResult: undefined })
       const session = get().selectedSession
       const text = input.trim()
       if (session === undefined || (text.length === 0 && images.length === 0)) return 'rejected'
+      if (session.backend === 'codex' && (get().connection.phase !== 'connected'
+        || get().codexReadySessionId !== session.sessionId || runtime.activeCodexStream === undefined
+        || runtime.activeCodexTimeline?.session.nativeId !== codexThreadId(session))) return 'rejected'
       if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
         set({ busyAction: 'command', error: undefined })
         try {

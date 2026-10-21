@@ -71,6 +71,8 @@ export interface AppState {
   archivedSessionIds: string[]
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
+  /** History and the current connection's Codex event subscription are ready. */
+  codexReadySessionId?: string
   /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
   currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
@@ -180,7 +182,7 @@ export const disconnected: ConnectionSnapshot = {
 
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -205,6 +207,7 @@ export function initialData(): Pick<AppState,
     archivedSessionIds: [],
     sessions: [],
     selectedSession: undefined,
+    codexReadySessionId: undefined,
     currentWorkSessionIds: [],
     messages: {},
     sessionLifecycles: {},

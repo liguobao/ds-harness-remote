@@ -74,3 +74,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: undefined })
   },
 }))
+
+export const readToolHistoryDetail = async (params: {threadId: string; detailId: string}, signal: AbortSignal): Promise<unknown> => {
+  return runtime.connection.requireCodex().request('dsh/historyDetail', params, signal)
+}

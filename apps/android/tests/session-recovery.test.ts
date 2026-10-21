@@ -70,6 +70,7 @@ const prepareScenario1 = () => {
   useAppStore.setState({
     ...useAppStore.getInitialState(),
     selectedSession: session,
+    selectedDevice: { deviceId: 'host' } as never,
     sessions: [session],
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
   })
@@ -94,7 +95,7 @@ describe('Harness session history routing', () => {
       useAppStore.setState({ sessions: [target], selectedSession: target })
       proxy.sessionHistory.mockResolvedValueOnce({ ...page([call()]), hasMore: true })
       expect(await useAppStore.getState().openSession(target)).toBe(true)
-      expect(proxy.sessionHistory).toHaveBeenNthCalledWith(1, 's1', undefined, 60, parent)
+      expect(proxy.sessionHistory).toHaveBeenNthCalledWith(1, 's1', undefined, 16, parent)
       await useAppStore.getState().loadOlderHistory()
       expect(proxy.sessionHistory).toHaveBeenNthCalledWith(2, 's1', 2, 60, parent)
       expect(useAppStore.getState().error).toBeUndefined()
@@ -117,7 +118,7 @@ describe('Harness session history routing', () => {
       if (recover) expect(reconnect).toHaveBeenCalledWith({ forceRelay: true, restoreSession: false })
       expect(proxy.sessionHistory).toHaveBeenCalledTimes(recover ? 2 : 1)
       for (const args of proxy.sessionHistory.mock.calls) {
-        expect(args).toEqual(['s1', undefined, 60, origin === 'subagent' ? 'source' : undefined])
+        expect(args).toEqual(['s1', undefined, 16, origin === 'subagent' ? 'source' : undefined])
       }
     } })), prepareScenario1)
   })

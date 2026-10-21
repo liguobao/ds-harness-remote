@@ -23,7 +23,7 @@ import {
   Users,
   X,
 } from 'lucide-react-native'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import {
   AccessibilityInfo,
@@ -115,6 +115,8 @@ import { HostSessionsDrawer } from './host-sessions-drawer'
 import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
 
+import { browseScope, browseKey, useBrowseMemory, updateBrowseEntry } from '../services/browse-memory'
+const EMPTY_IMAGES: PromptImage[] = []
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
 const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
 const EMPTY_UI_BY_SECTION = new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
@@ -142,6 +144,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
+  const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
   const historyHasMore = useAppStore(state => state.historyHasMore)
   const historyLoadingOlder = useAppStore(state => state.historyLoadingOlder)
@@ -167,7 +170,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
-  const [draft, setDraft] = useState('')
+  const memoryScope = browseScope(useAppStore.getState())
+  const memoryKey = browseKey(memoryScope, session?.sessionId ?? '')
+  const draft = useBrowseMemory(state => state.entries[memoryKey]?.draft ?? '')
+  const memoryError = useBrowseMemory(state => state.error)
+  const setDraft = (value: string) => updateBrowseEntry(memoryScope, session?.sessionId ?? '', {draft: value})
   const [trajectory, setTrajectory] = useState(false)
   const [subagentsOpen, setSubagentsOpen] = useState(false)
   const [teamOpen, setTeamOpen] = useState(false)
@@ -177,7 +184,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
-  const [images, setImages] = useState<PromptImage[]>([])
+  const images = useBrowseMemory(state => state.entries[memoryKey]?.images ?? EMPTY_IMAGES)
+  const setImages = (value: PromptImage[] | ((previous: PromptImage[]) => PromptImage[])) => {
+    const previous = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
+    updateBrowseEntry(memoryScope, session?.sessionId ?? '', {images: typeof value === 'function' ? value(previous) : value})
+  }
   const [pickingImages, setPickingImages] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -199,7 +210,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const [mentionQuery, setMentionQuery] = useState('')
   const [selection, setSelection] = useState({ start: 0, end: 0 })
   const composerInputRef = useRef<TextInput>(null)
-  const draftRef = useRef('')
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const selectionRef = useRef({ start: 0, end: 0 })
   /** Start index of the active `/` / `@` trigger inside the draft. */
   const mentionSpanRef = useRef(0)
@@ -296,6 +308,17 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
+  const [newContent, setNewContent] = useState(false)
+  const visibleAnchor = useRef<string | undefined>(undefined)
+  const laidOutSessionRef = useRef<string | undefined>(undefined)
+  const restoringPosition = useRef(false)
+  const savedPosition = useRef(useBrowseMemory.getState().entries[memoryKey]?.position)
+  const lastPositionSave = useRef(0)
+  const lastContentVersion = useMemo(() => visibleMessageVersion(messages), [messages])
+  const contentBefore = useRef<{key: string; version?: string}>({key: memoryKey})
+  const viewability = useRef(({viewableItems}: {viewableItems: Array<{key: string}>}) => {
+    visibleAnchor.current = viewableItems[0]?.key
+  }).current
   /** Last reported scroll offset; content and viewport changes re-check the latest turn from it. */
   const listOffsetRef = useRef(0)
   /** Mirrors the floating jump button so scroll events only re-render on a crossing. */
@@ -427,23 +450,30 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     initialPinRef.current = true
     awayFromLatestRef.current = false
     setAwayFromLatest(false)
+    setNewContent(false)
+    restoringPosition.current = false
     listRef.current?.scrollToEnd({ animated: false })
     scheduleScrollToBottom()
   }, [cancelPendingScroll, scheduleScrollToBottom])
 
-  // Entering a session (or switching sessions) should land on the latest turn.
-  useEffect(() => {
+  // Restore reading position before the new list can emit scroll events.
+  useLayoutEffect(() => {
     cancelPendingScroll()
     setTrajectory(false)
-    pinToBottomRef.current = true
-    initialPinRef.current = true
+    savedPosition.current = useBrowseMemory.getState().entries[memoryKey]?.position
+    const bottom = savedPosition.current?.atBottom !== false
+    pinToBottomRef.current = bottom
+    initialPinRef.current = bottom
+    restoringPosition.current = !bottom
+    setNewContent(false)
+    laidOutSessionRef.current = undefined
     userScrollingRef.current = false
     listViewportRef.current = { width: 0, height: 0 }
     listContentRef.current = { width: 0, height: 0 }
     listOffsetRef.current = 0
-    awayFromLatestRef.current = false
-    setAwayFromLatest(false)
-  }, [sessionId, cancelPendingScroll])
+    awayFromLatestRef.current = !bottom
+    setAwayFromLatest(!bottom)
+  }, [memoryKey, cancelPendingScroll])
 
   useEffect(() => cancelPendingScroll, [cancelPendingScroll])
 
@@ -502,15 +532,51 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     scheduleScrollToBottom()
   }, [scheduleScrollToBottom, syncLatestTurnIndicator])
 
+  const restoreReadingPosition = useCallback(() => {
+    // A session switch can render the list before its viewport and markdown
+    // rows have measured. Defer one extra frame so the initial jump reaches
+    // the actual end rather than the pre-layout content height.
+    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (laidOutSessionRef.current === sessionId) return
+    const position = savedPosition.current
+    const anchorIndex = visibleSections.findIndex(item => item.key === position?.key)
+    if (position?.atBottom === false && anchorIndex < 0 && busy?.startsWith('session:')) return
+    laidOutSessionRef.current = sessionId
+    if (position?.atBottom === false) {
+      requestAnimationFrame(() => {
+        if (anchorIndex >= 0) listRef.current?.scrollToIndex({index: anchorIndex, animated: false, viewPosition: 0})
+        else listRef.current?.scrollToOffset({offset: position.key === undefined ? position.offset : 0, animated: false})
+        restoringPosition.current = false
+      })
+    } else scheduleScrollToBottom()
+  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length, visibleSections, busy])
+  useEffect(() => {restoreReadingPosition()}, [restoreReadingPosition])
+
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     listOffsetRef.current = contentOffset.y
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     // Content growth and IME resizing can also emit scroll events. Only a
     // user's drag/fling changes the intent to follow the latest response.
-    if (userScrollingRef.current) pinToBottomRef.current = distanceFromEnd <= LATEST_EDGE_PX
+    if (!userScrollingRef.current || restoringPosition.current) {
+      syncLatestTurnIndicator(distanceFromEnd)
+      return
+    }
+    const atBottom = distanceFromEnd <= LATEST_EDGE_PX
+    pinToBottomRef.current = atBottom
     syncLatestTurnIndicator(distanceFromEnd)
-  }, [syncLatestTurnIndicator])
+    if (atBottom) setNewContent(false)
+    if (session !== undefined && (Date.now() - lastPositionSave.current > 200 || atBottom)) {
+      lastPositionSave.current = Date.now()
+      updateBrowseEntry(memoryScope, session.sessionId, {position: {key: visibleAnchor.current, offset: contentOffset.y, atBottom},
+        ...(atBottom ? {seenAt: session.updatedAt} : {})})
+    }
+  }, [memoryScope, session?.sessionId, session?.updatedAt, syncLatestTurnIndicator])
+  useEffect(() => {
+    if (contentBefore.current.key === memoryKey && contentBefore.current.version !== undefined
+      && contentBefore.current.version !== lastContentVersion && !pinToBottomRef.current) setNewContent(true)
+    contentBefore.current = {key: memoryKey, version: lastContentVersion}
+  }, [lastContentVersion, memoryKey])
 
   const onListScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onListScroll(event)
@@ -657,7 +723,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   if (session === undefined) return null
 
   const submit = async () => {
-    if (!connected || permissionSelecting) return
+    if (!sendReady || permissionSelecting) return
     // Read the live ref: the render-closure `draft` can lag the last keystrokes
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
@@ -677,8 +743,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     if (outcome === 'rejected') {
       // Nothing was persisted (command failure): restore the draft without
       // clobbering input typed while the send was in flight.
-      const inFlight = draftRef.current
-      applyDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
+      const inFlight = useBrowseMemory.getState().entries[memoryKey]?.draft ?? ''
+      setDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
       setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
       Alert.alert(zhCN.messageActions.failed, useAppStore.getState().error ?? zhCN.messageActions.unavailable)
     } else if (outcome === 'sent') {
@@ -822,6 +888,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const connected = connection.phase === 'connected' && !reconnectingSession
+  const sendReady = connected && !busy?.startsWith('session:')
+    && (session?.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
@@ -1110,6 +1178,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     </>
   return (
     <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+      {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
       <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
         {tabletSplit && (
           <View style={styles.splitSidebar}>
@@ -1118,12 +1187,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               onBack={onBack}
               backLabel={zhCN.chat.backToWorkspaces}
               onClose={() => Keyboard.dismiss()}
-              onSelect={async next => {
-                if (await openSession(next)) {
-                  applyDraft('')
-                  setImages([])
-                }
-              }}
+              onSelect={async next => { await openSession(next) }}
             />
           </View>
         )}
@@ -1148,6 +1212,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           onLayout={onListLayout}
           onContentSizeChange={onListContentSizeChange}
           onScroll={onListScroll}
+          onViewableItemsChanged={viewability}
+          onScrollToIndexFailed={info => {
+            listRef.current?.scrollToOffset({offset: Math.max(0, info.averageItemLength * info.index), animated: false})
+          }}
+          maintainVisibleContentPosition={{minIndexForVisible: 0}}
           scrollEventThrottle={16}
           onScrollBeginDrag={() => {
             cancelPendingScroll()
@@ -1182,7 +1251,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             <View pointerEvents="box-none" style={[readableColumn, styles.latestTurnColumn]}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={zhCN.chat.jumpToLatest}
+                accessibilityLabel={newContent ? zhCN.comfort.newContent : zhCN.chat.jumpToLatest}
                 onPress={jumpToLatest}
                 hitSlop={6}
                 style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
@@ -1338,10 +1407,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
-                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
-                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
+                  accessibilityState={{ disabled: !sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
+                  disabled={!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
                   onPress={() => void submit()}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>
@@ -1512,9 +1581,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         }}
         onClose={() => setSessionsOpen(false)}
         onSelect={async next => {
-          if (await openSession(next)) {
-            applyDraft('')
-            setImages([])
+          const pending = openSession(next)
+          const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId
+          if (visible) {
+            setSessionsOpen(false)
+          }
+          if (await pending && !visible) {
             setSessionsOpen(false)
           }
         }}
@@ -1592,3 +1664,8 @@ function imageSize(uri: string): Promise<{ width: number; height: number }> {
 }
 
 export { ModalSurface,usePickerListMaxHeight } from './chat/modal'
+
+function visibleMessageVersion(items: ChatItem[]): string {
+  const last = items[items.length - 1]
+  return last === undefined ? '' : JSON.stringify(last)
+}

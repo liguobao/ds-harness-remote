@@ -1,3 +1,4 @@
+import { browseScope, browseKey, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import { strings as zhCN } from '../locales/i18n'
@@ -17,6 +18,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       if (config === undefined || identity === undefined) return false
       const generation = ++runtime.connectionGeneration
       ++runtime.sessionLoadGeneration
+      runtime.sessionReadAbort?.abort()
+      const memory = useBrowseMemory.getState()
+      const scope = browseScope({...get(), selectedDevice: device})
+      const cached = device.trusted ? memory.catalogs[scope] : undefined
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
@@ -24,12 +29,13 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       // In-memory catalogs belong to one Host; keep them only across its reconnect.
       set(state => ({
         ...(!recovering ? { currentWorkSessionIds: [] } : {}),
-        ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
+        ...(!sameHost ? { selectedSession: undefined, messages: Object.fromEntries((cached?.sessions ?? []).map(s => [s.sessionId, memory.entries[browseKey(scope, s.sessionId)]?.messages ?? []])), feedbackBySession: {} } : {}),
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
         permissionSelecting: false,
         modelSelecting: false,
         busyAction: undefined,
+        codexReadySessionId: undefined,
         selectedDevice: device,
         connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
         connectionStage: 'authenticating',
@@ -43,8 +49,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         opencodeAvailable: false,
         claudeAvailable: false,
         workspaceCatalog: undefined,
-        workspaces: sameHost ? state.workspaces : [],
-        sessions: sameHost ? state.sessions : [],
+        workspaces: sameHost ? state.workspaces : cached?.workspaces ?? [],
+        sessions: sameHost ? state.sessions : cached?.sessions ?? [],
         archivedSessionIds: sameHost ? state.archivedSessionIds : [],
         sessionModels: undefined,
         error: undefined,
