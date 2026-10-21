@@ -766,7 +766,11 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 - Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
 - 群聊管理：`create-room`、`update-room`、`delete-room`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`answer-question`、`dismiss-question`、`approval-answer`、`stop-member-work`。
+- 会话交互：`send`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
+
+`view-reply` 转发 DS Bot 0.2.0 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
+用于选择、确认和表单提交。待答卡片身份、答案合法性及重复提交由 Host 上 DS Bot 原生
+handler 校验；Remote 保留既有认证、消息大小与超时边界，不重放提交。
 
 `approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
 安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断

@@ -2,6 +2,8 @@
 
 - Make Server-initiated tunnel closes visible at the default log level (#140): retryable closes now use info instead of debug, and `peer connection disconnected` records `closedBy` (`server`/`host`) with `retryable`. `CONNECTION_FAILED` is both a Server-issued code and a Host fallback, so the debug-only message made the two paths indistinguishable. No runtime transport behavior changed.
 - 让 Server 主动关闭 tunnel 在默认日志级别可见（#140）：retryable 关闭由 debug 提升为 info，`peer connection disconnected` 增加 `closedBy`（`server`/`host`）与 `retryable` 字段。`CONNECTION_FAILED` 同时是 Server 下发的 code 和 Host 本地兜底，旧日志只在 debug 输出，无法区分两条路径。本次未改变运行时传输行为。
+- Allow DS Bot 0.2.0 interactive card replies (`view-reply`) over Remote; the Host's native DS Bot handler validates the pending card and answer. Cross-device acceptance remains pending.
+- 放行 DS Bot 0.2.0 交互卡片的远程回复（`view-reply`），由 Host 原生 DS Bot handler 校验待答卡片及答案；跨设备验收待完成。
 
 - Add an Android “Show status bar” switch in Settings, enabled by default. Changes apply after saving and persist across restarts and sign-out; clearing local data restores visibility. Android type checking passes; native device layout remains unverified. No presentation-only tests added.
 - Android 设置新增「显示状态栏」开关，默认开启，保存后生效，重启和退出账号保留选择，清除本地数据恢复显示。Android 类型检查通过；原生真机布局尚未验证，未新增纯展示测试。
