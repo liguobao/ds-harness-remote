@@ -35,7 +35,7 @@ import {
   type RtcSelectedTransport,
   type RtcSignal,
 } from '@dsh-remote/webrtc'
-import type { ConnectionController } from './connection-controller.js'
+import type { ConnectionCloseDetail, ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
 import type { SafeLogger } from './logging.js'
@@ -355,13 +355,19 @@ export class HostServerConnection {
         this.terminalError = payload.code
         this.socket?.close(4004, 'device revoked')
       } else if (payload.connectionId !== undefined) {
-        await this.dropTunnel(payload.connectionId, payload.code)
+        await this.dropTunnel(payload.connectionId, payload.code, {
+          closedBy: 'server',
+          retryable: payload.retryable,
+        })
         const fields = {
           code: payload.code,
           connectionId: shortId(payload.connectionId),
           retryable: payload.retryable,
         }
-        if (payload.retryable) this.logger.debug('server closed a remote connection', fields)
+        // Retryable closes also cover ordinary Client disconnects, so they stay
+        // at info. Debug hid the Server-side origin that shares the
+        // CONNECTION_FAILED fallback code with local channel failures.
+        if (payload.retryable) this.logger.info('server closed a remote connection', fields)
         else this.logger.warn('server closed a remote connection', fields)
       } else {
         this.terminalError = payload.code
@@ -803,7 +809,11 @@ export class HostServerConnection {
     await this.connections.close()
   }
 
-  private async dropTunnel(connectionId: string, code?: string): Promise<void> {
+  private async dropTunnel(
+    connectionId: string,
+    code?: string,
+    detail?: ConnectionCloseDetail,
+  ): Promise<void> {
     const tunnel = this.tunnels.get(connectionId)
     if (tunnel === undefined) return
     this.tunnels.delete(connectionId)
@@ -817,7 +827,9 @@ export class HostServerConnection {
     }
     if (tunnel.channel !== undefined) {
       try {
-        const closed = await this.connections.closeConnection(connectionId, code)
+        const closed = detail === undefined
+          ? await this.connections.closeConnection(connectionId, code)
+          : await this.connections.closeConnection(connectionId, code, detail)
         if (!closed) await tunnel.channel.close(code)
       } catch (error) {
         await tunnel.channel.close(code).catch(() => undefined)

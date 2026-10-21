@@ -196,7 +196,13 @@ Remote 按 `LAN -> P2P -> TURN -> Relay` 协商路径；
 
 WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
+已建立的路径失败时会关闭，并在新的 transport 与 Noise channel 上重建，不会把活动通道原地
+切换到另一条路径。
+
 所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
+
+`CONNECTION_FAILED` 可能由 Server 下发，也可能是 Host 的本地兜底；排查时应同时查看日志中的
+`closedBy` 与 `retryable` 字段，不要只凭 code 判断路径。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
 

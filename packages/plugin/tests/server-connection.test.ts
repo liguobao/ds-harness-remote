@@ -138,13 +138,14 @@ describe('HostServerConnection', () => {
       fingerprint: 'CLIENT',
       trustedAt: 1,
     }))
+    const log = logger()
     const server = new HostServerConnection(
       config(),
       identity,
       { trustedPeer: vi.fn(() => undefined), trustPeer } as unknown as IdentityStore,
       api,
       connections,
-      logger(),
+      log,
       () => socket,
       undefined,
       () => ['harness.api.v1', 'fileviewer.read.v1'],
@@ -238,7 +239,23 @@ describe('HostServerConnection', () => {
       connectionId: 'connection-1',
     }))
     await flush()
-    expect(connections.closeConnection).toHaveBeenCalledWith('connection-1', 'CONNECTION_FAILED')
+    expect(connections.closeConnection).toHaveBeenCalledWith(
+      'connection-1',
+      'CONNECTION_FAILED',
+      { closedBy: 'server', retryable: true },
+    )
+    // The default log level must show that the Server closed this tunnel.
+    // CONNECTION_FAILED is also the Host's local fallback code, so a debug-only
+    // message made both paths look identical in production logs.
+    expect(log.info).toHaveBeenCalledWith('server closed a remote connection', {
+      code: 'CONNECTION_FAILED',
+      connectionId: 'connection-1',
+      retryable: true,
+    })
+    expect(log.debug).not.toHaveBeenCalledWith(
+      'server closed a remote connection',
+      expect.anything(),
+    )
     expect(server.lastError()).toBeUndefined()
     expect(socket.readyState).toBe(1)
 

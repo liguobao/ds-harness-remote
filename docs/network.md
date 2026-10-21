@@ -172,6 +172,23 @@ Host 的 Control WebSocket 支持带 jitter 的指数退避重连。单条逻辑
 
 当前项目不维护另一套业务 event replay buffer，也不会自动重放结果未知的 Harness mutation。完整的网络切换 UI、心跳/RTT、重连后的 stream 自动重开仍是待完成工作。
 
+### 断开来源与 `CONNECTION_FAILED`
+
+`CONNECTION_FAILED` 有两个来源：
+
+- Server 下发的 `error` 控制帧，携带 `connectionId` 与 `retryable`；
+- Host 在本地 DataChannel、握手或 secure channel 失败时使用的兜底 code。
+
+两者都会关闭同一条逻辑 connection。排查时应先看日志来源，不要只凭 code 判断：
+
+- `server closed a remote connection` 表示 Server 主动关闭该 tunnel。`retryable: true` 使用
+  info 级别，因为它也覆盖普通 Client 断开；不可重试的关闭使用 warn。
+- `peer connection disconnected` 的 `closedBy` 为 `server` 或 `host`，并保留 `code` 与
+  `retryable`。
+
+Retryable 关闭后由 Client 重新执行完整选路与 Noise 握手。Host 不会把已认证的活动通道原地
+迁移到另一条路径，也不会重放关闭前的 mutation。
+
 ## 9. 网络可观察性与隐私
 
 Client 可以把当前模式显示为 `LAN`、`P2P`、`TURN`、`Relay` 或 `Disconnected`，并统计连接期间发送/接收的密文字节。WebRTC 诊断可包含 ICE、candidate pair 与 fallback 原因，用于定位网络问题。

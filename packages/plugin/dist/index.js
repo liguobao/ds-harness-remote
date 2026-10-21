@@ -38578,10 +38578,10 @@ var ConnectionController = class {
     const revoked = [...this.active.values()].filter((connection) => connection.channel.peerDeviceId === deviceId);
     await Promise.all(revoked.map((connection) => this.disconnect(connection, "DEVICE_REVOKED")));
   }
-  async closeConnection(connectionId, code) {
+  async closeConnection(connectionId, code, detail) {
     const connection = this.active.get(connectionId);
     if (connection === void 0) return false;
-    await this.disconnect(connection, code);
+    await this.disconnect(connection, code, detail);
     return true;
   }
   async close() {
@@ -38632,7 +38632,7 @@ var ConnectionController = class {
       throw error instanceof Error ? error : new Error("peer send failed", { cause: error });
     }
   }
-  async disconnect(connection, code) {
+  async disconnect(connection, code, detail) {
     if (!this.isActive(connection)) return;
     this.active.delete(connection.channel.security.connectionId);
     connection.unsubscribe();
@@ -38644,7 +38644,9 @@ var ConnectionController = class {
     this.logger?.info("peer connection disconnected", {
       peerDeviceId: shortId2(connection.channel.peerDeviceId),
       connectionId: shortId2(connection.channel.security.connectionId),
-      code: code ?? "closed"
+      code: code ?? "closed",
+      closedBy: detail?.closedBy ?? "host",
+      ...detail?.retryable === void 0 ? {} : { retryable: detail.retryable }
     });
   }
   isActive(connection) {
@@ -39346,13 +39348,16 @@ var HostServerConnection = class {
         this.terminalError = payload.code;
         this.socket?.close(4004, "device revoked");
       } else if (payload.connectionId !== void 0) {
-        await this.dropTunnel(payload.connectionId, payload.code);
+        await this.dropTunnel(payload.connectionId, payload.code, {
+          closedBy: "server",
+          retryable: payload.retryable
+        });
         const fields = {
           code: payload.code,
           connectionId: shortId3(payload.connectionId),
           retryable: payload.retryable
         };
-        if (payload.retryable) this.logger.debug("server closed a remote connection", fields);
+        if (payload.retryable) this.logger.info("server closed a remote connection", fields);
         else this.logger.warn("server closed a remote connection", fields);
       } else {
         this.terminalError = payload.code;
@@ -39726,7 +39731,7 @@ var HostServerConnection = class {
     }));
     await this.connections.close();
   }
-  async dropTunnel(connectionId, code) {
+  async dropTunnel(connectionId, code, detail) {
     const tunnel = this.tunnels.get(connectionId);
     if (tunnel === void 0) return;
     this.tunnels.delete(connectionId);
@@ -39740,7 +39745,7 @@ var HostServerConnection = class {
     }
     if (tunnel.channel !== void 0) {
       try {
-        const closed = await this.connections.closeConnection(connectionId, code);
+        const closed = detail === void 0 ? await this.connections.closeConnection(connectionId, code) : await this.connections.closeConnection(connectionId, code, detail);
         if (!closed) await tunnel.channel.close(code);
       } catch (error) {
         await tunnel.channel.close(code).catch(() => void 0);

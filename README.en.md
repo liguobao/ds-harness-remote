@@ -193,7 +193,10 @@ key lifecycle, visible metadata, replay protection, and security limits.
 The Host opens outbound connections only; it does not listen on a public port or require router
 port forwarding. Remote negotiates `LAN -> P2P -> TURN -> Relay`, falling back to the encrypted
 WebSocket Relay when WebRTC is unavailable or cannot connect. Every path carries the same Noise
-ciphertext and keeps the same Host/Client identity boundary. See [Network and transport](docs/network.md)
+ciphertext and keeps the same Host/Client identity boundary. An established path that fails is
+closed and re-established on a new transport and Noise channel. A `CONNECTION_FAILED` error can
+come from the Server or from the Host's local fallback, so check the `closedBy` and `retryable`
+log fields before blaming WebRTC. See [Network and transport](docs/network.md)
 for the topology, control and data planes, NAT behavior, fallback, reconnect semantics, and current
 validation status.
 
