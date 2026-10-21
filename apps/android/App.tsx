@@ -69,7 +69,8 @@ function AppShell() {
 
 function ThemedStatusBar() {
   const { scheme } = useTheme()
-  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+  const statusBarVisible = useAppStore(state => state.statusBarVisible)
+  return <StatusBar hidden={!statusBarVisible} style={scheme === 'dark' ? 'light' : 'dark'} />
 }
 
 function AppNavigator() {

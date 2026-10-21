@@ -108,6 +108,31 @@ describe('fast browsing without changing writer ownership', () => {
     expect(runtime.activeCodexStream?.close).toBe(newClose)
   })
 
+  it('rejects sends after subscription failure until the same session is reopened successfully', async () => {
+    const a = session('a')
+    client.subscribe.mockRejectedValueOnce(Object.assign(new Error('Too many Codex streams'), { code: 'RATE_LIMITED' }))
+    expect(await state.openSession(a)).toBe(false)
+    expect(state.selectedSession?.sessionId).toBe(a.sessionId)
+    expect(state.messages[a.sessionId]?.length).toBe(1)
+    expect(state.busyAction).toBeUndefined()
+    expect(state.codexReadySessionId).toBeUndefined()
+    const beforeSend = state.messages[a.sessionId]
+    client.request.mockClear()
+    expect(await state.sendMessage('must not start unseen work')).toBe('rejected')
+    expect(client.request).not.toHaveBeenCalled()
+    expect(state.messages[a.sessionId]).toBe(beforeSend)
+    expect(await state.openSession(a)).toBe(true)
+    expect(state.codexReadySessionId).toBe(a.sessionId)
+    expect(await state.sendMessage('now subscribed')).toBe('sent')
+    expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({ threadId: 'a' }))
+    const onClose = client.subscribe.mock.calls.at(-1)![3] as (reason: string) => void
+    onClose('failed')
+    expect(state.codexReadySessionId).toBeUndefined()
+    client.request.mockClear()
+    expect(await state.sendMessage('stream closed')).toBe('rejected')
+    expect(client.request).not.toHaveBeenCalled()
+  })
+
 
   it.each([true, false])('keeps cached pagination only with overlapping history: %s', async overlap => {
     const a = session('a'), b = session('b')

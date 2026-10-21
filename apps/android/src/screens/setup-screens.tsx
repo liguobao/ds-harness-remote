@@ -4,7 +4,7 @@ import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, QrCode as QrCodeIcon, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
@@ -339,6 +339,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
+  const statusBarVisible = useAppStore(state => state.statusBarVisible)
+  const setStatusBarVisible = useAppStore(state => state.setStatusBarVisible)
+  const [statusBarSaving, setStatusBarSaving] = useState(false)
   const defaultPermission = useAppStore(state => state.defaultPermissionPreset)
   const setDefaultPermission = useAppStore(state => state.setDefaultPermissionPreset)
   const [permissionSaving, setPermissionSaving] = useState(false)
@@ -349,6 +352,18 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   // Cap the read-only info column on wide landscape tablets; phone portrait
   // already fits inside contentMaxWidth, so nothing changes there.
   const { contentMaxWidth, landscape } = useResponsiveLayout()
+
+  const toggleStatusBar = async (visible: boolean) => {
+    if (statusBarSaving) return
+    setStatusBarSaving(true)
+    try {
+      await setStatusBarVisible(visible)
+    } catch {
+      Alert.alert(zhCN.settings.statusBarSaveFailed, zhCN.settings.statusBarSaveFailedBody)
+    } finally {
+      setStatusBarSaving(false)
+    }
+  }
 
   const pickDefaultPermission = (preset: DefaultPermissionPreset) => {
     if (permissionSaving || preset === defaultPermission) return
@@ -445,6 +460,20 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   </Pressable>
                 )
               })}
+            </View>
+
+            <View style={styles.preferenceList}>
+              <View style={styles.preferenceOption}>
+                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.settings.statusBar}</Text>
+                <Switch
+                  accessibilityLabel={zhCN.settings.statusBar}
+                  value={statusBarVisible}
+                  disabled={statusBarSaving}
+                  onValueChange={visible => void toggleStatusBar(visible)}
+                  trackColor={{ true: colors.primary }}
+                />
+              </View>
+              <Text style={styles.preferenceNote}>{zhCN.settings.statusBarNote}</Text>
             </View>
 
             <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>

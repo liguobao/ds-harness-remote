@@ -25,11 +25,10 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const busy = useAppStore(state => state.busyAction !== undefined)
   // The row's own session, not whatever happens to be selected afterwards.
-  const harness = useAppStore(state => {
-    const session = state.sessions.find(row => row.sessionId === item.sessionId)
-      ?? (state.selectedSession?.sessionId === item.sessionId ? state.selectedSession : undefined)
-    return session !== undefined && (session.backend === undefined || session.backend === 'harness')
-  })
+  const session = useAppStore(state => state.sessions.find(row => row.sessionId === item.sessionId)
+    ?? (state.selectedSession?.sessionId === item.sessionId ? state.selectedSession : undefined))
+  const backend = session?.backend
+  const harness = session !== undefined && (backend === undefined || backend === 'harness')
   // Only delivered Harness messages have an official event prefix to fork.
   const pending = item.sendState !== undefined
   const supportsBranch = harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
@@ -63,14 +62,16 @@ export function MessageActions({ item }: { item: ChatMessage }) {
     }}><Copy size={16} color={copied ? colors.primary : colors.muted} /></Pressable>
     {!user && !pending && <>
     {supportsBranch && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>}
-    {item.usage !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage.totalTokens === undefined ? strings.messageActions.usage : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>}
-    {time !== undefined && <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, flexShrink: 1 }}>{messageClock(time)}</Text>}
+    {backend !== 'codex' && item.usage !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage.totalTokens === undefined ? strings.messageActions.usage : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>}
+    {time !== undefined && <View style={styles.clockContainer}><Text style={[styles.clock, { color: colors.muted }]}>{messageClock(time)}</Text></View>}
     </>}
   </View>
 }
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 44 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 2, minHeight: 44 },
   userRow: { justifyContent: 'flex-end', gap: 8 },
   icon: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  clockContainer: { flexGrow: 1, flexShrink: 0, alignItems: 'flex-end' },
+  clock: { fontSize: 11 },
   usage: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
 })

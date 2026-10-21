@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
-    'saveThemePreference', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
+    'saveThemePreference', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets',
   ].map(name => [name, vi.fn()])),
   createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(),
@@ -57,7 +57,7 @@ function storeFixture() {
   let state = {
     ...initialData(), config: { baseUrl: 'https://example.invalid', account: 'A' },
     identity: { deviceId: 'phone' }, languagePreference: 'system', themePreference: 'system',
-    defaultPermissionPreset: 'default', disconnect: vi.fn(async () => undefined),
+    statusBarVisible: true, defaultPermissionPreset: 'default', disconnect: vi.fn(async () => undefined),
   } as unknown as AppState
   const access: StoreAccess = {
     get: () => state,

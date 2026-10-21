@@ -1,6 +1,8 @@
+import { isSubagentSession } from '../lib/session-kind'
 import * as ImagePicker from 'expo-image-picker'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowUp,
   Camera,
@@ -126,6 +128,13 @@ const LONG_DRAFT_HINT = 12_000
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
 
+/**
+ * Distance from the newest row that still counts as "at the latest message".
+ * Follow mode and the jump-to-latest button share this edge, so the button
+ * appears exactly when the viewport has left the turn streaming appends to.
+ */
+const LATEST_EDGE_PX = 80
+
 export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
@@ -135,6 +144,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
+  const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
   const historyHasMore = useAppStore(state => state.historyHasMore)
   const historyLoadingOlder = useAppStore(state => state.historyLoadingOlder)
@@ -298,7 +308,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
-  const [awayFromBottom, setAwayFromBottom] = useState(false)
   const [newContent, setNewContent] = useState(false)
   const visibleAnchor = useRef<string | undefined>(undefined)
   const laidOutSessionRef = useRef<string | undefined>(undefined)
@@ -310,6 +319,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const viewability = useRef(({viewableItems}: {viewableItems: Array<{key: string}>}) => {
     visibleAnchor.current = viewableItems[0]?.key
   }).current
+  /** Last reported scroll offset; content and viewport changes re-check the latest turn from it. */
+  const listOffsetRef = useRef(0)
+  /** Mirrors the floating jump button so scroll events only re-render on a crossing. */
+  const awayFromLatestRef = useRef(false)
+  const [awayFromLatest, setAwayFromLatest] = useState(false)
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
     item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued'
       // An adopted row is in the Host queue regardless of the local sendState
@@ -346,10 +360,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     // inbox rows carry the host item id needed for queue actions.
     return [...inboxItems, ...pending]
   }, [inboxProjection, messages])
-  // Child (subagent) sessions spawned by this session — the data has always
-  // been in `sessions` (parentSessionId/origin), it just had no UI.
+  // Fork ancestry does not make a conversation a subagent child.
   const childSessions = useMemo(
-    () => sessions.filter(item => item.parentSessionId === session?.sessionId),
+    () => sessions.filter(item => isSubagentSession(item) && item.parentSessionId === session?.sessionId),
     [sessions, session?.sessionId])
   // Agent team: the `agentTeam` projection carries the durable roster
   // (member name + role description + phase) and the task board (subject +
@@ -415,6 +428,34 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     }, Math.max(0, 100 - (Date.now() - lastAutoScrollAt.current)))
   }, [])
 
+  // Following the latest turn is suspended once the user scrolls away, so the
+  // floating button is the only way back without a manual fling. It follows
+  // measured metrics rather than a gesture, so an older history page loading
+  // above, a window resize or a running reply also re-check it.
+  const syncLatestTurnIndicator = useCallback((distanceFromEnd: number) => {
+    const away = !pinToBottomRef.current && !initialPinRef.current && distanceFromEnd > LATEST_EDGE_PX
+    if (awayFromLatestRef.current === away) return
+    awayFromLatestRef.current = away
+    setAwayFromLatest(away)
+  }, [])
+
+  // Re-enable follow mode before jumping, so a reply that streams in right
+  // after the tap keeps appending at the end. The queued follow pass also
+  // re-asserts the end once the rows below finish re-measuring, which a single
+  // scroll command cannot guarantee on a virtualized list.
+  const jumpToLatest = useCallback(() => {
+    cancelPendingScroll()
+    userScrollingRef.current = false
+    pinToBottomRef.current = true
+    initialPinRef.current = true
+    awayFromLatestRef.current = false
+    setAwayFromLatest(false)
+    setNewContent(false)
+    restoringPosition.current = false
+    listRef.current?.scrollToEnd({ animated: false })
+    scheduleScrollToBottom()
+  }, [cancelPendingScroll, scheduleScrollToBottom])
+
   // Restore reading position before the new list can emit scroll events.
   useLayoutEffect(() => {
     cancelPendingScroll()
@@ -424,12 +465,14 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     pinToBottomRef.current = bottom
     initialPinRef.current = bottom
     restoringPosition.current = !bottom
-    setAwayFromBottom(!bottom)
     setNewContent(false)
     laidOutSessionRef.current = undefined
     userScrollingRef.current = false
     listViewportRef.current = { width: 0, height: 0 }
     listContentRef.current = { width: 0, height: 0 }
+    listOffsetRef.current = 0
+    awayFromLatestRef.current = !bottom
+    setAwayFromLatest(!bottom)
   }, [memoryKey, cancelPendingScroll])
 
   useEffect(() => cancelPendingScroll, [cancelPendingScroll])
@@ -473,17 +516,21 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     const previous = listViewportRef.current
     if (previous.width === width && previous.height === height) return
     listViewportRef.current = { width, height }
+    // The viewport can change while the content stays put (keyboard, rotation,
+    // tablet split), which is exactly when the newest turn may leave the screen.
+    syncLatestTurnIndicator(listContentRef.current.height - height - listOffsetRef.current)
     if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [scheduleScrollToBottom])
+  }, [scheduleScrollToBottom, syncLatestTurnIndicator])
 
   const onListContentSizeChange = useCallback((width: number, height: number) => {
     const previous = listContentRef.current
     if (previous.width === width && previous.height === height) return
     listContentRef.current = { width, height }
+    syncLatestTurnIndicator(height - listViewportRef.current.height - listOffsetRef.current)
     if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [scheduleScrollToBottom])
+  }, [scheduleScrollToBottom, syncLatestTurnIndicator])
 
   const restoreReadingPosition = useCallback(() => {
     // A session switch can render the list before its viewport and markdown
@@ -506,22 +553,25 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   useEffect(() => {restoreReadingPosition()}, [restoreReadingPosition])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    listOffsetRef.current = contentOffset.y
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     // Content growth and IME resizing can also emit scroll events. Only a
     // user's drag/fling changes the intent to follow the latest response.
-    if (!userScrollingRef.current) return
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
-    const atBottom = distanceFromEnd <= 80
-    if (restoringPosition.current) return
+    if (!userScrollingRef.current || restoringPosition.current) {
+      syncLatestTurnIndicator(distanceFromEnd)
+      return
+    }
+    const atBottom = distanceFromEnd <= LATEST_EDGE_PX
     pinToBottomRef.current = atBottom
-    setAwayFromBottom(!atBottom)
+    syncLatestTurnIndicator(distanceFromEnd)
     if (atBottom) setNewContent(false)
     if (session !== undefined && (Date.now() - lastPositionSave.current > 200 || atBottom)) {
       lastPositionSave.current = Date.now()
       updateBrowseEntry(memoryScope, session.sessionId, {position: {key: visibleAnchor.current, offset: contentOffset.y, atBottom},
         ...(atBottom ? {seenAt: session.updatedAt} : {})})
     }
-  }, [memoryScope, session?.sessionId, session?.updatedAt])
+  }, [memoryScope, session?.sessionId, session?.updatedAt, syncLatestTurnIndicator])
   useEffect(() => {
     if (contentBefore.current.key === memoryKey && contentBefore.current.version !== undefined
       && contentBefore.current.version !== lastContentVersion && !pinToBottomRef.current) setNewContent(true)
@@ -546,10 +596,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // Back inside a subagent child returns to its parent conversation (the
   // official subagent UI's navigation), instead of leaving the chat entirely.
   const backFromChat = () => {
-    const parent = session?.parentSessionId === undefined
-      ? undefined
-      : sessions.find(item => item.sessionId === session.parentSessionId)
-    if (session?.parentSessionId !== undefined && parent !== undefined) {
+    const parent = session !== undefined && isSubagentSession(session)
+      ? sessions.find(item => item.sessionId === session.parentSessionId)
+      : undefined
+    if (parent !== undefined) {
       Keyboard.dismiss()
       void openSession(parent)
       return
@@ -673,7 +723,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   if (session === undefined) return null
 
   const submit = async () => {
-    if (!connected || permissionSelecting) return
+    if (!sendReady || permissionSelecting) return
     // Read the live ref: the render-closure `draft` can lag the last keystrokes
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
@@ -838,6 +888,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const connected = connection.phase === 'connected' && !reconnectingSession
+  const sendReady = connected && !busy?.startsWith('session:')
+    && (session?.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
@@ -1093,9 +1145,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         title={sessionTitle(session)}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        onBack={trajectory ? handleBack : tabletSplit ? backFromChat : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
-        backIcon={trajectory || tabletSplit ? ArrowLeft : Menu}
-        backLabel={trajectory || tabletSplit ? zhCN.common.back : zhCN.chat.openHostSessions}
+        onBack={tabletSplit ? undefined : trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
+        backIcon={trajectory ? ArrowLeft : Menu}
+        backLabel={trajectory ? zhCN.common.back : zhCN.chat.openHostSessions}
         action={<>
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
@@ -1132,7 +1184,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           <View style={styles.splitSidebar}>
             <HostSessionsDrawer
               inline
-              onBack={() => Keyboard.dismiss()}
+              onBack={onBack}
+              backLabel={zhCN.chat.backToWorkspaces}
               onClose={() => Keyboard.dismiss()}
               onSelect={async next => { await openSession(next) }}
             />
@@ -1140,57 +1193,75 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         <View style={styles.splitMain}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
-        ref={listRef}
-        key={session.sessionId}
-        style={[styles.list, readableColumn]}
-        contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
-        data={visibleSections}
-        keyExtractor={item => item.key}
-        renderItem={renderChatItem}
-        initialNumToRender={6}
-        maxToRenderPerBatch={6}
-        updateCellsBatchingPeriod={16}
-        windowSize={7}
-        removeClippedSubviews
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        onLayout={onListLayout}
-        onContentSizeChange={onListContentSizeChange}
-        onScroll={onListScroll}
-        onViewableItemsChanged={viewability}
-        onScrollToIndexFailed={info => {
-          listRef.current?.scrollToOffset({offset: Math.max(0, info.averageItemLength * info.index), animated: false})
-        }}
-        maintainVisibleContentPosition={{minIndexForVisible: 0}}
-        scrollEventThrottle={16}
-        onScrollBeginDrag={() => {
-          cancelPendingScroll()
-          userScrollingRef.current = true
-          pinToBottomRef.current = false
-          initialPinRef.current = false
-          Keyboard.dismiss()
-        }}
-        onScrollEndDrag={onListScrollEnd}
-        onMomentumScrollBegin={() => { userScrollingRef.current = true }}
-        onMomentumScrollEnd={onListScrollEnd}
-        ListEmptyComponent={busy === `session:${session.sessionId}`
-          ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
-          : <WelcomeMessage />}
-        ListHeaderComponent={historyHasMore ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={zhCN.chat.older}
-            disabled={historyLoadingOlder}
-            onPress={() => void loadOlderHistory()}
-            style={styles.olderButton}
-          >
-            {historyLoadingOlder
-              ? <ActivityIndicator size="small" color={colors.primary} />
-              : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
-          </Pressable>
-        ) : undefined}
-      />}</BlurHeaderFrame>
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+        <FlatList
+          ref={listRef}
+          key={session.sessionId}
+          style={[styles.list, readableColumn]}
+          contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
+          data={visibleSections}
+          keyExtractor={item => item.key}
+          renderItem={renderChatItem}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={16}
+          windowSize={7}
+          removeClippedSubviews
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          onLayout={onListLayout}
+          onContentSizeChange={onListContentSizeChange}
+          onScroll={onListScroll}
+          onViewableItemsChanged={viewability}
+          onScrollToIndexFailed={info => {
+            listRef.current?.scrollToOffset({offset: Math.max(0, info.averageItemLength * info.index), animated: false})
+          }}
+          maintainVisibleContentPosition={{minIndexForVisible: 0}}
+          scrollEventThrottle={16}
+          onScrollBeginDrag={() => {
+            cancelPendingScroll()
+            userScrollingRef.current = true
+            pinToBottomRef.current = false
+            initialPinRef.current = false
+            Keyboard.dismiss()
+          }}
+          onScrollEndDrag={onListScrollEnd}
+          onMomentumScrollBegin={() => { userScrollingRef.current = true }}
+          onMomentumScrollEnd={onListScrollEnd}
+          ListEmptyComponent={busy === `session:${session.sessionId}`
+            ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
+            : <WelcomeMessage />}
+          ListHeaderComponent={historyHasMore ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.older}
+              disabled={historyLoadingOlder}
+              onPress={() => void loadOlderHistory()}
+              style={styles.olderButton}
+            >
+              {historyLoadingOlder
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
+            </Pressable>
+          ) : undefined}
+        />
+        {/* Floats over the last row only while an older turn owns the viewport. */}
+        {awayFromLatest && (
+          <View pointerEvents="box-none" style={styles.latestTurnLayer}>
+            <View pointerEvents="box-none" style={[readableColumn, styles.latestTurnColumn]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={newContent ? zhCN.comfort.newContent : zhCN.chat.jumpToLatest}
+                onPress={jumpToLatest}
+                hitSlop={6}
+                style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
+              >
+                <ArrowDown size={20} color={colors.primary} strokeWidth={2.4} />
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </>}</BlurHeaderFrame>
 
       {mentionType !== null && (
         <Pressable
@@ -1200,11 +1271,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           accessibilityLabel={zhCN.common.close}
         />
       )}
-      {awayFromBottom && <Pressable accessibilityRole="button" onPress={() => {
-        pinToBottomRef.current = true; setAwayFromBottom(false); setNewContent(false); scheduleScrollToBottom()
-      }} style={{alignSelf: 'flex-end', margin: 8, padding: 10, borderRadius: 22, backgroundColor: colors.surfaceStrong}}>
-        <Text style={{color: colors.primary}}>{newContent ? zhCN.comfort.newContent : zhCN.comfort.returnLatest}</Text>
-      </Pressable>}
       <View style={styles.composerWrap}>
         <View style={[styles.composerInner, readableColumn]}>
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
@@ -1341,10 +1407,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
-                  accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
-                  disabled={!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
+                  accessibilityState={{ disabled: !sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
+                  disabled={!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
                   onPress={() => void submit()}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>

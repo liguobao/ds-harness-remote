@@ -16,12 +16,14 @@ import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup, loadWorkspac
 import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry } from '../services/browse-memory'
 const SESSION_PAGE_SIZE = 3
 
-export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false }: {
+export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, backLabel }: {
   onBack: () => void
   onClose: () => void
   onSelect: (session: RemoteSession) => Promise<void>
   /** Render as a persistent tablet sidebar instead of a modal drawer. */
   inline?: boolean
+  /** Override the generic back-to-devices label (the tablet pane returns to workspaces). */
+  backLabel?: string
 }) {
   // The store's catalog is scoped to selectedDevice and reset when changing hosts.
   const device = useAppStore(state => state.selectedDevice)
@@ -114,7 +116,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false }
 
   const pane = <>
         <View style={styles.header}>
-          {inline ? <View style={styles.headerSpacer} /> : <IconButton label={strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />}
+          <IconButton label={backLabel ?? strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />
           <Text style={styles.title} numberOfLines={1}>{device?.name}</Text>
           <IconButton label={strings.common.refresh} icon={RefreshCw} onPress={() => void refresh()} disabled={refreshing || busy !== undefined || !connected} />
         </View>
@@ -232,7 +234,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: colors.scrim },
   drawer: { flex: 1, width: '88%', maxWidth: 420, backgroundColor: colors.surface },
   inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
-  headerSpacer: { width: 40 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
   tabs: { flexGrow: 0, maxHeight: 48 },

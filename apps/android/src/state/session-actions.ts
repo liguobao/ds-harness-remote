@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../lib/session-kind'
 import { selectAcpModel } from '../services/acp-models'
 import { createCodexTimelineState, projectCodexThread } from '@dsh-remote/client-core'
 import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isStreamTimeoutError } from '../lib/errors'
@@ -139,6 +140,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       // session's model).
       set(state => ({
         busyAction: `session:${session.sessionId}`,
+        codexReadySessionId: undefined,
         ...((session.backend === 'codex' || session.backend === undefined || session.backend === 'harness') ? {
           selectedSession: session,
           historyHasMore: cachedPage?.historyHasMore ?? false,
@@ -188,16 +190,21 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             },
             ...pageState(history.hasMore, oldestSeq(history.events)),
           }))
+          let streamClosed = false
           const stream = await client.subscribe(
             threadId,
             frame => { if (current()) runtime.enqueueCodexFrame(loadGeneration, frame) },
-            readAbort.signal,
+            // History reads can abort locally. An open must retain its ACK so
+            // a superseded load can close the subscription created on the Host.
+            undefined,
             reason => {
+              streamClosed = true
               if (!current()) return
               if (runtime.activeCodexTimeline?.session.nativeId !== threadId) return
               runtime.activeCodexStream = undefined
               runtime.activeCodexTimeline = undefined
               set(state => ({
+                codexReadySessionId: undefined,
                 sessions: state.sessions.map(item => item.sessionId === session.sessionId ? {...item, running: false} : item),
                 selectedSession: state.selectedSession?.sessionId === session.sessionId
                   ? state.selectedSession
@@ -207,8 +214,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             },
           )
           if (!current()) { await stream.close().catch(() => undefined); return }
+          if (streamClosed) throw new Error(zhCN.runtime.codexUnavailable)
           runtime.activeCodexStream = stream
-          set({ busyAction: undefined })
+          set({ busyAction: undefined, codexReadySessionId: session.sessionId })
           void runtime.refreshCodexModels(session.sessionId)
           return
         }
@@ -268,7 +276,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         void runtime.closeActiveCodexStream()
         void runtime.closeActiveCursorStream()
         const [history, feedback] = await Promise.all([
-          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 16, session.parentSessionId),
+          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 16, isSubagentSession(session) ? session.parentSessionId : undefined),
           // Older carriers may not expose feedback; history must remain usable.
           runtime.connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
         ])
@@ -325,7 +333,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // cycle on every open; top-level session stalls still fall back to
         // forceRelay once (the pre-bounding recovery path).
         const transportRetry = (isRpcTimeoutError(error) || isRecoverableTransportError(error))
-          && !(isStreamTimeoutError(error) && session.parentSessionId !== undefined)
+          && !(isStreamTimeoutError(error) && isSubagentSession(session))
           && !runtime.sessionReadRetry
         if (transportRetry) {
           if (runtime.reconnectFlight !== undefined) {
@@ -780,7 +788,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       try {
         const page = session.backend === 'codex'
           ? await readCodexHistoryPage(runtime.connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
-          : await runtime.connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, session.parentSessionId)
+          : await runtime.connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, isSubagentSession(session) ? session.parentSessionId : undefined)
         if (!current()) return
         const items = foldHistory(page.events, session.sessionId, true)
         const older = oldestSeq(page.events)

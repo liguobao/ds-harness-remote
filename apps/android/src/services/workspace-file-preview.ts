@@ -3,6 +3,7 @@ import type { SessionTools, WorkspaceFileStat } from './session-tools'
 
 export type PreviewKind = 'text' | 'image' | 'pdf' | 'office' | 'unsupported'
 
+export const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024
 export const PREVIEW_CHUNK_BYTES = 512 * 1024
 export const MAX_OFFICE_SOURCE_BYTES = 50 * 1024 * 1024
@@ -111,12 +112,28 @@ async function readBoundedBytes(
   limit: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let total = 0
+  await readBoundedChunks(tools, sessionId, path, limit, bytes => {
+    chunks.push(bytes)
+    total += bytes.byteLength
+  }, signal)
+  return concatBytes(chunks, total)
+}
+
+async function readBoundedChunks(
+  tools: SessionTools,
+  sessionId: string,
+  path: string,
+  limit: number,
+  write: (bytes: Uint8Array) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
   assertActive(signal)
   const before = requireStat(await tools.statFile(sessionId, path, signal))
   if (before.bytes !== undefined && before.bytes > limit) {
     throw sizeLimit('The file exceeds the preview size limit.', { bytes: before.bytes, maxBytes: limit })
   }
-  const chunks: Uint8Array[] = []
   let total = before.bytes
   let read = 0
   let ended = false
@@ -138,17 +155,17 @@ async function readBoundedBytes(
     })
     if (chunk.totalBytes !== undefined) total = chunk.totalBytes
     read += chunk.data.byteLength
-    chunks.push(chunk.data)
     if (read > limit) throw sizeLimit('The file exceeds the preview size limit.', { bytes: read, maxBytes: limit })
     if (total !== undefined && read > total) throw changed('The file grew while it was being read.')
     if (chunk.eof && total !== undefined && read !== total) throw changed('The file changed while it was being read.')
+    assertActive(signal)
+    await write(chunk.data)
     ended = chunk.eof
   }
   assertActive(signal)
   const after = requireStat(await tools.statFile(sessionId, path, signal))
   if (!sameFileIdentity(before, after)) throw changed('The file changed while it was being read.')
   assertActive(signal)
-  return concatBytes(chunks, read)
 }
 
 interface ChunkExpectation {
@@ -365,4 +382,15 @@ function previewError(code: string, message: string, details: Record<string, unk
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Original bytes, including Office sources; never saves the converted preview. */
+export async function loadWorkspaceDownload(
+  tools: SessionTools,
+  sessionId: string,
+  path: string,
+  write: (bytes: Uint8Array) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  await readBoundedChunks(tools, sessionId, path, MAX_DOWNLOAD_BYTES, write, signal)
 }

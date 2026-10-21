@@ -45,6 +45,15 @@ describe('PluginRouteBridge', () => {
       { name: 'one-time approval', body: { endpoint: 'approval-answer', payload: { choice: 'allow' } }, allowed: true },
       { name: 'deny approval', body: { endpoint: 'approval-answer', payload: { choice: 'reject' } }, allowed: true },
       ...[
+        { name: 'choice', values: { selected: ['first'] } },
+        { name: 'confirmation', values: { confirmed: true } },
+        { name: 'form', values: { fields: { title: 'Remote answer' } } },
+      ].map(({ name, values }) => ({
+        name: `admit card ${name}`,
+        body: { endpoint: 'view-reply', payload: { sessionId: 'bot-session', viewId: 'pending-view', action: 'card-component', values } },
+        allowed: true,
+      })),
+      ...[
         'update-install', 'dsh-update-install', 'schedule-create', 'schedule-delete',
         'secret-set', 'secret-allow', 'secret-update', 'secret-delete', 'secret-cancel',
         'connector-connect', 'connector-disconnect', 'connector-retry',
@@ -65,6 +74,7 @@ describe('PluginRouteBridge', () => {
         if (row.allowed) {
           await expect(call).resolves.toMatchObject({ status: 200 })
           expect(dispatch).toHaveBeenCalledOnce()
+          expect(dispatch).toHaveBeenCalledWith('api/bot', row.body, expect.any(AbortSignal))
         } else {
           await expect(call).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
           expect(dispatch).not.toHaveBeenCalled()

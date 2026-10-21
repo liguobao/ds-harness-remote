@@ -35,6 +35,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         permissionSelecting: false,
         modelSelecting: false,
         busyAction: undefined,
+        codexReadySessionId: undefined,
         selectedDevice: device,
         connection: { phase: 'connecting', stats: { mode: 'Disconnected', connected: false } },
         connectionStage: 'authenticating',

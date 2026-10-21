@@ -23010,6 +23010,7 @@ var BOT_REMOTE_OPERATIONS = [
   "send",
   "answer-question",
   "dismiss-question",
+  "view-reply",
   "approval-answer",
   "stop-member-work"
 ];

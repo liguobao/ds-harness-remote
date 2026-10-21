@@ -5,6 +5,8 @@ import { imagePreviewMetadata, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from '../
 import {
   classifyWorkspaceFile,
   loadWorkspacePreview,
+  loadWorkspaceDownload,
+  MAX_DOWNLOAD_BYTES,
   MAX_MISSING_FONTS,
   MAX_OFFICE_SOURCE_BYTES,
   MAX_PREVIEW_BYTES,
@@ -660,4 +662,73 @@ describe('workspace Office previews', () => {
     ])
   }, 25000)
 
+})
+
+describe('workspace download bounds', () => {
+  it('uses an independent download limit and rejects oversized files before reading', async () => {
+    const { tools, mocks } = fakeTools()
+    mocks.statFile.mockResolvedValue(stat({ bytes: MAX_DOWNLOAD_BYTES + 1 }))
+    await expect(loadWorkspaceDownload(tools, 'session', 'archive.apk', () => {})).rejects.toMatchObject({ code: WORKSPACE_PREVIEW_TOO_LARGE })
+    expect(mocks.readBytes).not.toHaveBeenCalled()
+
+    // A file larger than the preview budget still downloads unchanged, in bounded chunks.
+    const bytes = new Uint8Array(MAX_PREVIEW_BYTES + 1).fill(42)
+    mocks.statFile.mockResolvedValue(stat({ bytes: bytes.length }))
+    mocks.readBytes.mockImplementation(async (_session, _path, offset, length) => {
+      const start = offset as number
+      const end = Math.min(bytes.length, start + (length as number))
+      return chunk(bytes.subarray(start, end), start, end === bytes.length, { bytes: bytes.length })
+    })
+    let written = 0
+    await loadWorkspaceDownload(tools, 'session', 'archive.apk', data => {
+      expect(data.byteLength).toBeLessThanOrEqual(PREVIEW_CHUNK_BYTES)
+      expect(data.every(value => value === 42)).toBe(true)
+      written += data.byteLength
+    })
+    expect(written).toBe(bytes.byteLength)
+  })
+})
+
+describe('workspace download interruption', () => {
+  it('stops on cancellation, sink failure, or a changed final version', async () => {
+    await runScenarios(['cancel', 'write-failure', 'changed'].map(name => ({
+      name,
+      run: async () => {
+        const { tools, mocks } = fakeTools()
+        const controller = new AbortController()
+        mocks.statFile.mockResolvedValue(stat({ bytes: 2 }))
+        if (name === 'changed') mocks.statFile.mockResolvedValueOnce(stat({ bytes: 2 }))
+          .mockResolvedValueOnce(stat({ bytes: 2, version: 'v2' }))
+        mocks.readBytes.mockResolvedValue(chunk(new Uint8Array([1, 2]), 0, true, { bytes: 2 }))
+        const failure = new Error('disk full')
+        const write = vi.fn(() => {
+          if (name === 'cancel') controller.abort()
+          if (name === 'write-failure') throw failure
+        })
+        const download = loadWorkspaceDownload(tools, 'session', IMAGE_PATH, write, controller.signal)
+        if (name === 'write-failure') await expect(download).rejects.toBe(failure)
+        else await expect(download).rejects.toMatchObject({ code: name === 'cancel' ? 'RPC_ABORTED' : WORKSPACE_PREVIEW_CHANGED })
+        expect(write).toHaveBeenCalledTimes(1)
+        expect(mocks.readBytes).toHaveBeenCalledTimes(1)
+      },
+    })))
+  })
+})
+
+
+describe('workspace download maximum', () => {
+  it('streams exactly 100 MiB without accumulating the file', async () => {
+    const { tools, mocks } = fakeTools()
+    const payload = base64(new Uint8Array(PREVIEW_CHUNK_BYTES))
+    mocks.statFile.mockResolvedValue(stat({ bytes: MAX_DOWNLOAD_BYTES }))
+    mocks.readBytes.mockImplementation(async (_session, _path, offset, length) => {
+      expect(length).toBe(PREVIEW_CHUNK_BYTES)
+      return { absolutePath: IMAGE_ABSOLUTE, version: VERSION, bytes: MAX_DOWNLOAD_BYTES,
+        offset, data: payload, eof: (offset as number) + PREVIEW_CHUNK_BYTES === MAX_DOWNLOAD_BYTES }
+    })
+    let written = 0
+    await loadWorkspaceDownload(tools, 'session', IMAGE_PATH, bytes => { written += bytes.byteLength })
+    expect(written).toBe(MAX_DOWNLOAD_BYTES)
+    expect(mocks.statFile).toHaveBeenCalledTimes(2)
+  }, 25000)
 })

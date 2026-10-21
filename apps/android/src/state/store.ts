@@ -65,6 +65,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   languagePreference: 'system',
   language: getActiveLanguage(),
   themePreference: 'system',
+  statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',
   refreshing: false,

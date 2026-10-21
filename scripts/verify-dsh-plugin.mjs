@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
@@ -50,6 +51,15 @@ assert.equal(
 )
 assert.equal(pluginManifest.bin?.remote, undefined, 'npm package must not install a standalone remote executable')
 assert.equal(manifest.exports?.['./client'], './packages/plugin/dist/client.github.js', 'root package must export the GitHub-root browser client entry')
+
+for (const [packageRoot, packageManifest] of [[root, manifest], [join(root, 'packages/plugin'), pluginManifest]]) {
+  const require = createRequire(join(packageRoot, 'package.json'))
+  assert.equal(
+    require.resolve(packageManifest.name),
+    join(packageRoot, packageManifest.main),
+    'DSH CJS-style discovery must resolve the Host entry for both GitHub and npm installations',
+  )
+}
 
 for (const file of [
   'index.js',

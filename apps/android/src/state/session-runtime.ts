@@ -212,6 +212,7 @@ export class SessionRuntime {
     const stream = this.activeCodexStream
     this.activeCodexStream = undefined
     this.activeCodexTimeline = undefined
+    this.store.set({ codexReadySessionId: undefined })
     if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
   }
 

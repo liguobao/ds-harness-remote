@@ -20,6 +20,7 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
+  statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
   hostSessionsDrawer: 'dshremote.host-sessions-drawer.v1',
@@ -156,6 +157,15 @@ export async function loadLanguagePreference(): Promise<LanguagePreference> {
 
 export async function saveLanguagePreference(value: LanguagePreference): Promise<void> {
   await writeJson(KEYS.languagePreference, { value })
+}
+
+export async function loadStatusBarVisible(): Promise<boolean> {
+  const stored = await readJson<{ value: unknown }>(KEYS.statusBarVisible)
+  return typeof stored?.value === 'boolean' ? stored.value : true
+}
+
+export async function saveStatusBarVisible(value: boolean): Promise<void> {
+  await writeJson(KEYS.statusBarVisible, { value })
 }
 
 export async function loadThemePreference(): Promise<ThemePreference> {
