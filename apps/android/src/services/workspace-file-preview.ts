@@ -182,12 +182,11 @@ function parseChunk(value: unknown, expected: ChunkExpectation): { data: Uint8Ar
   if (value.version !== expected.version) throw changed('The file changed while it was being read.')
   if (value.offset !== expected.offset) throw invalid('The Host returned a file chunk at an unexpected offset.')
   if (typeof value.eof !== 'boolean') throw invalid('The Host returned an invalid file chunk boundary.')
-  if (typeof value.data !== 'string') throw invalid('The Host returned an invalid file chunk payload.')
   const totalBytes = bytesOf(value.bytes)
   if (totalBytes !== undefined && expected.totalBytes !== undefined && totalBytes !== expected.totalBytes) {
     throw changed('The file size changed while it was being read.')
   }
-  const data = decodeBase64(value.data, expected.length)
+  const data = previewBytes(value.data, expected.length)
   if (data.byteLength > expected.length) throw invalid('The Host returned a file chunk larger than requested.')
   if (!value.eof && data.byteLength === 0) throw invalid('The Host returned an empty file chunk before the end of the file.')
   return { data, eof: value.eof, totalBytes }
@@ -199,15 +198,15 @@ function parseOfficeRender(value: unknown, source: WorkspaceFileStat, generation
   if (value.version !== source.version) throw changed('The document changed while it was being converted.')
   if (value.generation !== generation) throw changed('The Office conversion engine changed during the preview.')
   if (value.offset !== 0 || value.eof !== true) throw invalid('The Host returned an incomplete Office preview.')
-  if (typeof value.data !== 'string') throw invalid('The Host returned an invalid Office preview payload.')
   const declared = bytesOf(value.bytes)
   if (declared !== undefined && declared > MAX_PREVIEW_BYTES) {
     throw sizeLimit('The converted preview exceeds the preview size limit.', { bytes: declared, maxBytes: MAX_PREVIEW_BYTES })
   }
-  if (value.data.length > base64Length(MAX_PREVIEW_BYTES)) {
+  if ((typeof value.data === 'string' && value.data.length > base64Length(MAX_PREVIEW_BYTES))
+    || (value.data instanceof Uint8Array && value.data.byteLength > MAX_PREVIEW_BYTES)) {
     throw sizeLimit('The converted preview exceeds the preview size limit.', { maxBytes: MAX_PREVIEW_BYTES })
   }
-  const data = decodeBase64(value.data, MAX_PREVIEW_BYTES)
+  const data = previewBytes(value.data, MAX_PREVIEW_BYTES)
   if (data.byteLength === 0) throw invalid('The Host returned an empty Office preview.')
   if (data.byteLength > MAX_PREVIEW_BYTES) {
     throw sizeLimit('The converted preview exceeds the preview size limit.', { bytes: data.byteLength, maxBytes: MAX_PREVIEW_BYTES })
@@ -218,7 +217,7 @@ function parseOfficeRender(value: unknown, source: WorkspaceFileStat, generation
   if (!startsWithBytes(data, PDF_MAGIC) || !containsPdfTrailer(data)) {
     throw invalid('The Host returned a converted preview that is not a complete PDF.')
   }
-  return { data: value.data, mimeType: 'application/pdf', missingFonts: parseMissingFonts(value.missingFonts) }
+  return { data: typeof value.data === 'string' ? value.data : encodeBase64(data), mimeType: 'application/pdf', missingFonts: parseMissingFonts(value.missingFonts) }
 }
 
 function parseMissingFonts(value: unknown): string[] {
@@ -342,7 +341,13 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function decodeBase64(value: string, maxBytes: number): Uint8Array {
+/** The shared Gateway restores byte arrays; ACP and older carriers keep Base64. */
+function previewBytes(value: unknown, maxBytes: number): Uint8Array {
+  if (value instanceof Uint8Array) {
+    if (value.byteLength > maxBytes) throw invalid('The Host returned a preview payload larger than allowed.')
+    return value
+  }
+  if (typeof value !== 'string') throw invalid('The Host returned an invalid preview payload.')
   if (value.length > base64Length(maxBytes)) throw invalid('The Host returned a preview payload larger than allowed.')
   let binary: string
   try {

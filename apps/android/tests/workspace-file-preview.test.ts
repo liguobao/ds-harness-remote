@@ -1,6 +1,7 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
-import type { HarnessSessionTools } from '../src/services/session-tools'
+import { RemoteTypertGateway, type RemoteClientCore } from '@dsh-remote/client-core'
+import { HarnessSessionTools } from '../src/services/session-tools'
 import { imagePreviewMetadata, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from '../src/services/image-preview-metadata'
 import {
   classifyWorkspaceFile,
@@ -132,6 +133,41 @@ function imageTools(image: Uint8Array, overrides: Record<string, unknown> = {}) 
     chunk(image.subarray(offset as number), offset as number, true, { bytes: image.byteLength }))
   return fixture
 }
+
+describe('workspace bytes through the shared Remote Gateway', () => {
+  it('previews and downloads bytes restored by the Gateway', async () => {
+    await runScenarios((['image', 'pdf', 'office', 'download'] as const).map(kind => ({
+      name: kind,
+      run: async () => {
+        const path = kind === 'image' ? IMAGE_PATH : kind === 'pdf' ? 'docs/report.pdf'
+          : kind === 'office' ? DOC_PATH : 'archive.bin'
+        const absolutePath = `/workspace/${path}`
+        const bytes = kind === 'image' || kind === 'download' ? png(640, 480, PREVIEW_CHUNK_BYTES + 17) : PDF_BYTES
+        const source = { absolutePath, version: VERSION, bytes: kind === 'office' ? 128 : bytes.byteLength }
+        const rpc = vi.fn(async (_method: string, request: { endpoint: string; payload: { args: { range?: { offset: number; length: number } } } }) => {
+          if (request.endpoint === 'workspaceFiles/stat') return { ok: true, value: source }
+          if (request.endpoint === 'officeToPdf/generation') return { ok: true, value: 'renderer-1' }
+          if (request.endpoint === 'officeToPdf/render') return { ok: true, value: { ...source,
+            generation: 'renderer-1', missingFonts: [], offset: 0, eof: true, bytes: bytes.byteLength, data: base64(bytes) } }
+          const { offset, length } = request.payload.args.range!
+          return { ok: true, value: { ...source, offset, eof: offset + length >= bytes.byteLength,
+            data: base64(bytes.subarray(offset, offset + length)) } }
+        })
+        const tools = new HarnessSessionTools(new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore))
+        if (kind === 'download') {
+          const written: Uint8Array[] = []
+          await loadWorkspaceDownload(tools, 'codex:thread', path, chunk => { written.push(chunk) })
+          expect(written).toHaveLength(2)
+          expect(Buffer.concat(written)).toEqual(Buffer.from(bytes))
+        } else {
+          const preview = await loadWorkspacePreview(tools, 'codex:thread', path, kind)
+          expect(preview).toEqual({ data: base64(bytes), mimeType: kind === 'image' ? 'image/png' : 'application/pdf', missingFonts: [] })
+          if (kind === 'image') expect(rpc.mock.calls.filter(([, request]) => request.endpoint === 'workspaceFiles/readBytes')).toHaveLength(2)
+        }
+      },
+    })))
+  })
+})
 
 describe('workspace file classification', () => {
   it('routes known extensions and keeps unknown ones unsupported', () => {

@@ -22,7 +22,7 @@ export interface WorkspaceFileStat {
 }
 export interface WorkspaceFileBytes extends WorkspaceFileStat {
   offset: number
-  data: string
+  data: Uint8Array | string
   eof: boolean
 }
 export interface WorkspaceOfficeRender extends WorkspaceFileBytes {
