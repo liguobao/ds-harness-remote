@@ -39,6 +39,26 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 
 `ds-harness-remote@0.5.14`
 
+## 目录
+
+- [一次连接，随时可用](#一次连接随时可用)
+- [主要特性](#主要特性)
+- [支持的客户端](#支持的客户端)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [界面截图](#界面截图)
+- [工作方式](#工作方式)
+- [实验性 ACP 工作区](#实验性-acp-工作区)
+- [端到端加密](#端到端加密)
+- [网络与传输](#网络与传输)
+- [安全边界](#安全边界)
+- [常见问题](#常见问题)
+- [文档](#文档)
+- [友情链接](#友情链接)
+- [Star History](#star-history)
+- [项目声明与商标](#项目声明与商标)
+- [License](#license)
+
 ## 主要特性
 
 - 从另一台设备（Web、PC、移动端）远程到本地Harness实例：DSH 优先，CodeX、Cursor、Antigravity 一样可用。
@@ -51,6 +71,20 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 - 通过 Harness 原生侧栏提供工作区文件、只读预览、远程终端和已授权本机开发服务预览。
 - CodeX / ACP 终端使用 Host 默认 shell，在会话目录启动，并在重连时恢复终端屏幕。
 - Android 按对话保留草稿与阅读位置，提供后端分类搜索和本机收藏；切换时先显示保留的预览，再刷新最新历史。
+
+## 支持的客户端
+
+| 客户端 | 形态 | 状态 | 说明 |
+| --- | --- | --- | --- |
+| DSH Desktop 插件 | Harness 桌面版内的 Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.5.14`；Host 也可以就是这台电脑 |
+| Remote Web | 浏览器页面 | 已支持 | 打开 [dsh.r2049.cn/app](https://dsh.r2049.cn/app)，复用 Harness 原生界面 |
+| Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
+| iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
+| VS Code | IDE 扩展 | 实验性 | 登录、Host 指纹固定、工作区到会话导航与 Prompt；流式更新、自动重连与问答界面仍在开发，跨机端到端验证尚未完成 |
+| 浏览器扩展 | Chrome / Edge MV3 扩展 | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
+| dsh-TUI | 纯终端 CLI profile | 已支持 | 可作 Host，见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)；安装脚本不会为它自动创建 Web 服务 |
+
+多个客户端可以同时连接同一个 Host，RPC 与数据流按连接隔离。
 
 ## 安装
 
@@ -224,9 +258,44 @@ OAuth 登录方式由服务端动态提供。使用 `ds-harness-remote login lis
 - Codex Remote / Agent ACP是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
 
+## 常见问题
+
+**需要公网 IP 或端口转发吗？**
+
+不需要。Host 只建立出站连接，不监听公网端口。
+
+**服务端能看到我的会话内容吗？**
+
+不能。服务端只中继密文；它能读到的是完成授权、在线状态、选路与限流所需的控制元数据，例如设备归属、在线状态、连接时间与 `connectionId`，读不到 Prompt、对话内容、工具输入输出、Workspace 路径与文件预览内容。
+
+**哪台机器可以当 Host？**
+
+装了 Remote 插件并已登录的 Harness 实例。`web`、`desktop` 与 dsh-TUI profile 均可作 Host，命令行安装默认使用 `web`。安装脚本不会为 `headless`、SDK 与 dsh-TUI 自动创建 Web 服务，dsh-TUI 需自行管理进程。
+
+**可以几台设备同时连同一个 Host？**
+
+可以多设备并发连接，RPC 与数据流按连接隔离。
+
+**支持哪些 Harness 版本？**
+
+当前基线为 `dsh-v0.2.1-rc.1`，兼容 `0.2.0` rc.2 / rc.1，详见[兼容性说明](docs/compatibility.zh.md)。
+
+**Linux 安装为什么要求 root？**
+
+安装脚本要配置 systemd 系统服务；Host、Agent 工具与远程终端因此具备 root 权限，只应对可信账号开放。
+
+**iOS 可以直接装吗？**
+
+目前是 TestFlight 内测，未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20)。
+
+**和 frp、内网穿透或远程桌面有什么不同？**
+
+本项目不做端口映射，也不是远程桌面：只把 Harness 原生会话界面映射到远端，不开放通用工具 RPC 与桌面控制，权限与审批仍留在 Host 侧。
+
 ## 文档
 
 - [插件说明](packages/plugin/README.md)
+- [安装指南](docs/installation.zh.md)
 - [dsh-TUI Remote 使用指南](docs/dsh-tui.md)
 - [Codex Remote 技术说明](docs/codex-remote.md)
 - [ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)
@@ -237,6 +306,7 @@ OAuth 登录方式由服务端动态提供。使用 `ds-harness-remote login lis
 - [开发进度与路线图](docs/TODO.md)
 - [更新记录](docs/CHANGELOG.md)
 - [隐私说明](docs/PRIVACY.md)
+- [Android 说明](apps/android/README.md)
 - 当前开发适配基线为 `dsh-v0.2.1-rc.1`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接

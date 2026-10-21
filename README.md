@@ -37,6 +37,26 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 
 `ds-harness-remote@0.5.14`
 
+## Contents
+
+- [Connect once. Ready whenever you are](#connect-once-ready-whenever-you-are)
+- [Features](#features)
+- [Supported clients](#supported-clients)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Screenshots](#screenshots)
+- [How it works](#how-it-works)
+- [Experimental ACP workspaces](#experimental-acp-workspaces)
+- [End-to-end encryption](#end-to-end-encryption)
+- [Network and transport](#network-and-transport)
+- [Security](#security)
+- [FAQ](#faq)
+- [Documentation](#documentation)
+- [Links](#links)
+- [Star History](#star-history)
+- [Project status and trademarks](#project-status-and-trademarks)
+- [License](#license)
+
 ## Features
 
 - Access your local Harness instance remotely from the web, a PC, or a mobile device: DSH first, with Codex, Cursor, and Antigravity support too.
@@ -50,6 +70,20 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
 - Android keeps per-conversation drafts and reading positions, offers backend-separated search
   and local favorites, and loads retained previews before refreshing conversation history.
+
+## Supported clients
+
+| Client | Form | Status | Notes |
+| --- | --- | --- | --- |
+| DSH Desktop plugin | Remote sidebar inside DeepSeek Harness Desktop | Supported | Install `ds-harness-remote@0.5.14`; this computer can also be the Host |
+| Remote Web | Browser page | Supported | Open [dsh.r2049.cn/app](https://dsh.r2049.cn/app); reuses the native Harness interface |
+| Android | Native app | Supported | Download the APK from [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest); see the [Android guide](apps/android/README.md) |
+| iOS | TestFlight beta | Beta | Not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
+| VS Code | IDE extension | Experimental | Sign-in, Host fingerprint pinning, workspace-to-session navigation and prompts; streaming updates, automatic reconnect and the question UI are still in development, and cross-machine end-to-end validation is not finished |
+| Browser extension | Chrome / Edge MV3 extension | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
+| dsh-TUI | Terminal-only CLI profile | Supported | Can act as a Host; see the [dsh-TUI Remote guide](docs/dsh-tui.md). The installer never creates a Web service for it automatically |
+
+Several clients can connect to the same Host at once; RPC calls and streams are isolated per connection.
 
 ## Install
 
@@ -218,9 +252,44 @@ OAuth sign-in methods are loaded from the Server. Use `ds-harness-remote login l
 - Codex Remote / Agent ACP is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
 - Removing a device revokes its credentials, membership, and active Remote connections.
 
+## FAQ
+
+**Do I need a public IP or port forwarding?**
+
+No. The Host only opens outbound connections and never listens on a public port.
+
+**Can the service read my conversations?**
+
+No. The service relays ciphertext only. Routing, authorization, presence and rate limiting require control metadata such as account and device ownership, online status, connection times and `connectionId`; prompts, conversation content, tool input and output, workspace paths and file preview contents stay unreadable.
+
+**Which machine can act as a Host?**
+
+Any Harness instance with the Remote plugin installed and signed in. The `web`, `desktop` and dsh-TUI profiles can all act as a Host, and command-line installation uses `web` by default. The installer never creates a Web service automatically for `headless`, SDK or dsh-TUI profiles, so a dsh-TUI Host manages its own process.
+
+**Can several devices connect to one Host at the same time?**
+
+Yes. Multiple clients can connect concurrently, with RPC calls and streams isolated per connection.
+
+**Which Harness versions are supported?**
+
+The current baseline is `dsh-v0.2.1-rc.1`, compatible with `0.2.0` rc.2 / rc.1. See the [compatibility guide](docs/compatibility.md).
+
+**Why does the Linux installer require root?**
+
+It configures a systemd system service, so the Host, Agent tools and remote terminals run with root privileges. Only expose it to trusted accounts.
+
+**Can I install the iOS app directly?**
+
+It is in TestFlight beta today and not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20).
+
+**How is this different from frp, a tunnel, or remote desktop?**
+
+This is neither port forwarding nor remote desktop. Only the native Harness conversation interface is mapped to the remote client; general tool RPC and desktop control stay closed, and permissions and approvals remain on the Host.
+
 ## Documentation
 
 - [Plugin guide](packages/plugin/README.md)
+- [Installation guide](docs/installation.md)
 - [dsh-TUI Remote guide](docs/dsh-tui.md)
 - [Codex Remote technical notes](docs/codex-remote.md)
 - [ACP Remote / Agent adapter notes](docs/acp-remote.md)
@@ -231,6 +300,7 @@ OAuth sign-in methods are loaded from the Server. Use `ds-harness-remote login l
 - [Development status and roadmap](docs/TODO.md)
 - [Changelog](docs/CHANGELOG.md)
 - [Privacy policy](docs/PRIVACY.md)
+- [Android guide](apps/android/README.md)
 - The current development baseline is `dsh-v0.2.1-rc.1`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
 
 ## Links
