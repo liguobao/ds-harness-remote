@@ -70,6 +70,7 @@ const prepareScenario1 = () => {
   useAppStore.setState({
     ...useAppStore.getInitialState(),
     selectedSession: session,
+    selectedDevice: { deviceId: 'host' } as never,
     sessions: [session],
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
   })
@@ -82,6 +83,46 @@ const prepareScenario1 = () => {
   authenticate.mockResolvedValue({ api: {}, credentials: { accessToken: 'synthetic' } })
 }
 beforeEach(prepareScenario1)
+
+describe('Harness session history routing', () => {
+  it('uses subagent parent routing only for explicit subagent origins on open and pagination', async () => {
+    await runScenarios([
+      { name: 'ordinary session', metadata: {}, parent: undefined },
+      { name: 'fork with ancestry', metadata: { parentSessionId: 'source' }, parent: undefined },
+      { name: 'subagent child', metadata: { parentSessionId: 'source', origin: 'subagent' as const }, parent: 'source' },
+    ].map(({ name, metadata, parent }) => ({ name, run: async () => {
+      const target = { ...session, ...metadata }
+      useAppStore.setState({ sessions: [target], selectedSession: target })
+      proxy.sessionHistory.mockResolvedValueOnce({ ...page([call()]), hasMore: true })
+      expect(await useAppStore.getState().openSession(target)).toBe(true)
+      expect(proxy.sessionHistory).toHaveBeenNthCalledWith(1, 's1', undefined, 16, parent)
+      await useAppStore.getState().loadOlderHistory()
+      expect(proxy.sessionHistory).toHaveBeenNthCalledWith(2, 's1', 2, 60, parent)
+      expect(useAppStore.getState().error).toBeUndefined()
+      expect(useAppStore.getState().selectedSession).toMatchObject(target)
+    } })), prepareScenario1)
+  })
+
+  it('recovers stalled forks while keeping subagent timeout and authorization failures bounded', async () => {
+    await runScenarios([
+      { name: 'fork follow timeout retries', origin: undefined, code: 'STREAM_TIMEOUT', recover: true },
+      { name: 'subagent follow timeout stops', origin: 'subagent' as const, code: 'STREAM_TIMEOUT', recover: false },
+      { name: 'subagent authorization rejection never downgrades', origin: 'subagent' as const, code: 'subagent/unauthorized', recover: false },
+    ].map(({ name, origin, code, recover }) => ({ name, run: async () => {
+      const target = { ...session, parentSessionId: 'source', origin }
+      const reconnect = vi.fn(async () => true)
+      useAppStore.setState({ sessions: [target], selectedSession: target, reconnect })
+      proxy.sessionHistory.mockRejectedValueOnce(Object.assign(new Error(code === 'STREAM_TIMEOUT' ? 'Stream timed out' : 'Unauthorized'), { code }))
+      expect(await useAppStore.getState().openSession(target)).toBe(recover)
+      expect(reconnect).toHaveBeenCalledTimes(recover ? 1 : 0)
+      if (recover) expect(reconnect).toHaveBeenCalledWith({ forceRelay: true, restoreSession: false })
+      expect(proxy.sessionHistory).toHaveBeenCalledTimes(recover ? 2 : 1)
+      for (const args of proxy.sessionHistory.mock.calls) {
+        expect(args).toEqual(['s1', undefined, 16, origin === 'subagent' ? 'source' : undefined])
+      }
+    } })), prepareScenario1)
+  })
+})
 
 describe('Host-confirmed Harness archive recovery', () => {
   it('keeps archive state across refresh and reconnect without removing catalog membership', async () => {

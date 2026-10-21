@@ -50,6 +50,7 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 - 优先使用P2P网络，全球多TURN节点中转，极端情况下使用Server Relay确保可用。
 - 通过 Harness 原生侧栏提供工作区文件、只读预览、远程终端和已授权本机开发服务预览。
 - CodeX / ACP 终端使用 Host 默认 shell，在会话目录启动，并在重连时恢复终端屏幕。
+- Android 按对话保留草稿与阅读位置，提供后端分类搜索和本机收藏；切换时先显示保留的预览，再刷新最新历史。
 
 ## 安装
 
@@ -196,7 +197,13 @@ Remote 按 `LAN -> P2P -> TURN -> Relay` 协商路径；
 
 WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
+已建立的路径失败时会关闭，并在新的 transport 与 Noise channel 上重建，不会把活动通道原地
+切换到另一条路径。
+
 所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
+
+`CONNECTION_FAILED` 可能由 Server 下发，也可能是 Host 的本地兜底；排查时应同时查看日志中的
+`closedBy` 与 `retryable` 字段，不要只凭 code 判断路径。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
 

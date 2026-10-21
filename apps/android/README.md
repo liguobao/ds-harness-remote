@@ -59,6 +59,30 @@ CodeX App Server domain advertised by the Host.
 
 The app does not run in Expo Go because WebRTC includes native code. Use a development build.
 
+## Conversation browsing and local previews
+
+The conversation drawer separates backends and includes title/workspace search, local
+favorites, running conversations and recent visits. Codex catalog pages are deduplicated by
+native thread ID, retaining the newest complete row; different threads with the same title
+remain separate.
+
+Switching conversations immediately shows any retained content while a small fresh history
+page loads. Sending stays disabled until the read and new subscription succeed. Obsolete
+reads are cancelled, and their late results cannot replace the selected conversation.
+Large Codex tool results load when expanded on supporting Hosts; older Hosts retain the
+existing bounded-transfer path.
+
+Text drafts, favorites and reading anchors are local to the server/account/Host identity.
+Text previews are encrypted with a device-local SecureStore key: the 12 most recently visited
+conversations retain up to 16 confirmed text messages and 128 KiB each. Image drafts last only
+for the current process. Approval handles, pending sends, permissions and tool output are not
+saved as previews. They are not an offline task queue or a copy of full Host history.
+
+Settings offers optional last-conversation restoration (off by default), completion/live-input
+notifications, system notification settings and preview cleanup. Notifications require a live
+connection and Android permission; the app does not add a push service. Sign-out and local
+reset clear this private browsing state. Clearing previews alone keeps drafts and favorites.
+
 ## Development
 
 ```bash
@@ -187,8 +211,9 @@ When the Host enables the Antigravity ACP backend, Android loads its workspace r
 blank conversation. History and live frames use `agent.acp.*`; reconnect reloads durable history and
 reopens the stream. Replies refresh the conversation title. AGY supports text and PNG/JPEG/WebP/GIF
 images (8 MiB each, four per message); image prompts and history use bounded ACP transfers. Images
-remain in the Host's private temporary cache for up to 24 hours. The Android projection stays in
-memory and never writes DSH SessionStore or Workspace data. Cursor remains a separate backend.
+remain in the Host's private temporary cache for up to 24 hours. The live Android projection stays
+in memory and never writes DSH SessionStore or Workspace data; the separate encrypted text preview
+cache is described above. Cursor remains a separate backend.
 
 Validation: Android typecheck, 286 tests, and production Hermes export passed. An in-process test
 using the real AGY CLI verified image replies and catalog/history/image recovery after Host restart;

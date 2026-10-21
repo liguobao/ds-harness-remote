@@ -96,11 +96,20 @@ const DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+
 
 /** Shared Web/Android client for the independent Codex domain in Remote. */
 export class CodexRemoteClient {
-  constructor(private readonly core: RemoteClientCore) {}
+  constructor(private readonly core: RemoteClientCore, private readonly historyPreview = false) {}
 
   /** Low-level allowlisted request used by the Desktop Web loopback facade. */
-  request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
-    const largeHistory = method === 'dsh/sessionHistory'
+  private previewSupported = true
+  async request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+    if (method === 'dsh/sessionHistory' && this.historyPreview && this.previewSupported) {
+      try {return await this.core.rpc('codex.app.call', {method, params, previewHistory: true}, signal)}
+      catch (error) {
+        const code = (error as {code?: string})?.code
+        if (code !== 'INVALID_MESSAGE' && code !== 'RESPONSE_TOO_LARGE') throw error
+        if (code === 'INVALID_MESSAGE') this.previewSupported = false
+      }
+    }
+    const largeHistory = method === 'dsh/historyDetail' || method === 'dsh/sessionHistory'
       || method === 'thread/read' && isRecord(params) && params.includeTurns === true
     return this.call(method, params, largeHistory || hasImageInput(params), signal)
   }

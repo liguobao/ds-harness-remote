@@ -13,7 +13,7 @@ export const BOT_REMOTE_OPERATIONS = [
   'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
   'create-room', 'update-room', 'delete-room',
   'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
-  'send', 'answer-question', 'dismiss-question', 'approval-answer', 'stop-member-work',
+  'send', 'answer-question', 'dismiss-question', 'view-reply', 'approval-answer', 'stop-member-work',
 ] as const
 
 export function isAllowedPluginRoute(route: string): route is typeof PLUGIN_ROUTE_ALLOWLIST[number] {

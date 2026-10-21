@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
@@ -670,8 +671,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
 function resolveSessionTitle(session: RemoteSession): string {
   const resolvedTitle = resolveSessionDisplayTitle(session)
   if (resolvedTitle !== undefined) return resolvedTitle
-  if (session.blank && session.parentSessionId === undefined) return zhCN.sessions.untitled
-  return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
+  return isSubagentSession(session) ? zhCN.sessions.child : zhCN.sessions.untitled
 }
 
 

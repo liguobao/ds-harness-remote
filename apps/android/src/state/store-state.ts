@@ -71,6 +71,8 @@ export interface AppState {
   archivedSessionIds: string[]
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
+  /** History and the current connection's Codex event subscription are ready. */
+  codexReadySessionId?: string
   /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
   currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
@@ -89,6 +91,7 @@ export interface AppState {
   transportPreference: TransportPreference
   languagePreference: LanguagePreference
   language: AppLanguage
+  statusBarVisible: boolean
   themePreference: ThemePreference
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
@@ -158,6 +161,7 @@ export interface AppState {
   hostListDirectory(path?: string): Promise<import('../types').DirectoryListing | undefined>
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
+  setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
@@ -178,7 +182,7 @@ export const disconnected: ConnectionSnapshot = {
 
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -203,6 +207,7 @@ export function initialData(): Pick<AppState,
     archivedSessionIds: [],
     sessions: [],
     selectedSession: undefined,
+    codexReadySessionId: undefined,
     currentWorkSessionIds: [],
     messages: {},
     sessionLifecycles: {},

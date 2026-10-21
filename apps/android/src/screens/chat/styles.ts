@@ -15,6 +15,28 @@ export function createStyles(colors: ThemeColors) {
     modelChipText: { ...type.smallStrong, color: colors.ink, flexShrink: 1 },
     olderButton: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
     olderText: { ...type.smallStrong, color: colors.primary },
+    // Floats over the newest row so jumping back never moves the composer.
+    // The layer is transparent to touches; only the button itself is a target.
+    latestTurnLayer: { position: 'absolute', left: 0, right: 0, bottom: spacing.sm, alignItems: 'center', paddingHorizontal: spacing.lg },
+    // Touch slop never exceeds the parent bounds, so the padding keeps the
+    // 44 dp circle reachable as the 48 dp target the design system asks for.
+    latestTurnColumn: { alignItems: 'flex-end', paddingVertical: 2 },
+    latestTurnButton: {
+      width: 44,
+      height: 44,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.16,
+      shadowRadius: 6,
+      elevation: 4,
+    },
+    latestTurnButtonPressed: { opacity: 0.7 },
     modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
     // Keep the sheet above the full-screen dismiss target on Android. Without an
     // explicit stacking order, the transparent backdrop can win hit testing on

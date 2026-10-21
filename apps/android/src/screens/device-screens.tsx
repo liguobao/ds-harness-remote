@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import * as Haptics from 'expo-haptics'
@@ -994,7 +995,7 @@ export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
 function sessionTitle(session: RemoteSession): string {
   const resolvedTitle = resolveSessionDisplayTitle(session)
   if (resolvedTitle !== undefined) return resolvedTitle
-  return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
+  return isSubagentSession(session) ? zhCN.sessions.child : zhCN.sessions.untitled
 }
 
 function platformName(platform: string): string {

@@ -24,7 +24,7 @@ import { z } from 'zod'
 import { TerminalPolicy, TERMINAL_CALLS, TERMINAL_STREAMS } from './terminal-policy.js'
 import { harnessSessionGeneration } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
-import { listRemoteDirectory } from './remote-directory-browser.js'
+import { ensureHostWorkspaceDirectory, listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
@@ -235,6 +235,11 @@ export class HarnessRemoteBridge {
     if (codexResult !== undefined) return reservation === undefined ? codexResult : this.terminal.result(params.endpoint, params.payload, codexResult, reservation)
     if (params.endpoint === 'session/canOpenWorkspacePath') {
       return { ok: true, value: true }
+    }
+    if (params.endpoint === 'workspace/create') {
+      const request = requestArgs(params.payload)
+      const folder = typeof request.path === 'string' ? request.path : ''
+      await ensureHostWorkspaceDirectory(folder)
     }
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)

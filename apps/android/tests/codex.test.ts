@@ -110,6 +110,31 @@ describe('Android CodeX Remote projection', () => {
     )
   })
 
+  it('deduplicates native thread snapshots across pages before workspace projection', async () => {
+    const thread = (id: string, updatedAt: number, cwd = '/workspace/current') => ({
+      id, name: 'Same title', cwd, createdAt: 1, updatedAt, status: { type: 'idle' },
+    })
+    const newest = thread('repeated', 30)
+    const pages = [
+      {data: [thread('repeated', 10, '/workspace/stale'), thread('repeated', 20), thread('different-id', 5), thread('archived', 1)], nextCursor: 'second'},
+      {data: [newest, thread('repeated', 15), {...thread('archived', 40), archived: true}], nextCursor: null},
+    ]
+    const request = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'project/list') return {data: [], nextCursor: null}
+      if (method === 'thread/list') return pages[params?.cursor === 'second' ? 1 : 0]
+      throw new Error(`unexpected ${method}`)
+    })
+    const client = {request} as unknown as CodexRemoteClient
+    const catalog = await loadCodexCatalog(client)
+    expect(catalog.sessions.map(s => s.sessionId)).toEqual(['codex:repeated', 'codex:different-id'])
+    expect(catalog.sessions[0]).toMatchObject({title: 'Same title', cwd: '/workspace/current', updatedAt: 30_000})
+    expect(catalog.workspaces.filter(w => w.sessionIds.length)).toMatchObject([
+      {path: '/workspace/current', sessionIds: ['codex:repeated', 'codex:different-id']},
+    ])
+    expect(catalog.workspaces.some(w => w.path === '/workspace/stale')).toBe(false)
+    expect(await loadCodexCatalog(client)).toEqual(catalog)
+  })
+
   it('accepts only the bounded native History page shape', async () => {
     const client = {
       request: vi.fn(async () => ({

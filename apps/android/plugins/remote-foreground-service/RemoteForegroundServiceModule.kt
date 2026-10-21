@@ -16,6 +16,11 @@ class RemoteForegroundServiceModule(
   }
 
   @ReactMethod
+  fun notifyTask(hostId: String, sessionId: String, title: String, body: String) {
+    RemoteForegroundService.notifyTask(context, hostId, sessionId, title, body)
+  }
+
+  @ReactMethod
   fun stop(promise: Promise) {
     context.runOnUiQueueThread {
       RemoteForegroundService.stop(context)

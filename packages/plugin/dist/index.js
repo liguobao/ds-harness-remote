@@ -5586,10 +5586,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object2) => {
     const keys = [];
-    for (const key in object) {
-      if (Object.prototype.hasOwnProperty.call(object, key)) {
+    for (const key in object2) {
+      if (Object.prototype.hasOwnProperty.call(object2, key)) {
         keys.push(key);
       }
     }
@@ -8692,8 +8692,8 @@ var ZodSet = class _ZodSet extends ZodType {
       maxSize: { value: maxSize, message: errorUtil.toString(message) }
     });
   }
-  size(size, message) {
-    return this.min(size, message).max(size, message);
+  size(size2, message) {
+    return this.min(size2, message).max(size2, message);
   }
   nonempty(message) {
     return this.min(1, message);
@@ -9943,8 +9943,8 @@ function createRpcRequest(method, params, id5) {
 function createRpcResponse(requestId, result) {
   return createMessage("rpc.response", { requestId, result });
 }
-function createRpcError(requestId, code, message, details, retryable) {
-  return createMessage("rpc.error", { requestId, code, message, details, retryable });
+function createRpcError(requestId, code, message, details2, retryable) {
+  return createMessage("rpc.error", { requestId, code, message, details: details2, retryable });
 }
 function createEvent(event, data2, options = {}) {
   return createMessage("event", { event, data: data2, ...options });
@@ -10099,10 +10099,10 @@ function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id5, capabil
 var RemoteGatewayError = class extends Error {
   code;
   details;
-  constructor(code, message, details = {}, options) {
+  constructor(code, message, details2 = {}, options) {
     super(message, options);
     this.code = code;
-    this.details = details;
+    this.details = details2;
     this.name = "RemoteGatewayError";
   }
 };
@@ -10119,12 +10119,26 @@ var CODEX_IMAGE_MEDIA_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg"
 var DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
 var CodexRemoteClient = class {
   core;
-  constructor(core) {
+  historyPreview;
+  constructor(core, historyPreview = false) {
     this.core = core;
+    this.historyPreview = historyPreview;
   }
   /** Low-level allowlisted request used by the Desktop Web loopback facade. */
-  request(method, params, signal) {
-    const largeHistory = method === "dsh/sessionHistory" || method === "thread/read" && isRecord(params) && params.includeTurns === true;
+  previewSupported = true;
+  async request(method, params, signal) {
+    if (method === "dsh/sessionHistory" && this.historyPreview && this.previewSupported) {
+      try {
+        return await this.core.rpc("codex.app.call", { method, params, previewHistory: true }, signal);
+      } catch (error) {
+        const code = error?.code;
+        if (code !== "INVALID_MESSAGE" && code !== "RESPONSE_TOO_LARGE")
+          throw error;
+        if (code === "INVALID_MESSAGE")
+          this.previewSupported = false;
+      }
+    }
+    const largeHistory = method === "dsh/historyDetail" || method === "dsh/sessionHistory" || method === "thread/read" && isRecord(params) && params.includeTurns === true;
     return this.call(method, params, largeHistory || hasImageInput(params), signal);
   }
   async account(signal) {
@@ -11316,8 +11330,8 @@ function rcEndpoint(endpoint) {
 function success(value) {
   return { ok: true, value };
 }
-function failure(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
+function failure(code, message, details2 = {}) {
+  return { ok: false, error: { code, message, details: details2 } };
 }
 function business(value) {
   if (isRecord3(value) && value.ok === false && isRecord3(value.error)) {
@@ -11333,8 +11347,8 @@ function business(value) {
   if (isRecord3(value) && value.ok === true) return { ok: true, value: value.value };
   return { ok: true, value };
 }
-function fail(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
+function fail(code, message, details2 = {}) {
+  return { ok: false, error: { code, message, details: details2 } };
 }
 function failFrom(error) {
   const source = error instanceof Error ? error : new Error(String(error));
@@ -14203,19 +14217,19 @@ function isExplicitlyNonLanScope(scope2) {
 function increment(map, key) {
   map[key] = (map[key] ?? 0) + 1;
 }
-function selectedPathTelemetry(details) {
+function selectedPathTelemetry(details2) {
   return {
-    ...details.transport === void 0 ? {} : { transport: details.transport },
-    ...details.mode === void 0 ? {} : { mode: details.mode },
-    ...details.relayUrl === void 0 ? {} : { relayUrl: details.relayUrl },
-    ...details.localCandidateType === void 0 ? {} : { localCandidateType: details.localCandidateType },
-    ...details.remoteCandidateType === void 0 ? {} : { remoteCandidateType: details.remoteCandidateType },
-    ...details.localAddressScope === void 0 ? {} : { localAddressScope: details.localAddressScope },
-    ...details.remoteAddressScope === void 0 ? {} : { remoteAddressScope: details.remoteAddressScope },
-    ...details.protocol === void 0 ? {} : { protocol: details.protocol },
-    ...details.relayProtocol === void 0 ? {} : { relayProtocol: details.relayProtocol },
-    ...details.currentRoundTripTimeMs === void 0 ? {} : { currentRoundTripTimeMs: details.currentRoundTripTimeMs },
-    ...details.availableOutgoingBitrate === void 0 ? {} : { availableOutgoingBitrate: details.availableOutgoingBitrate }
+    ...details2.transport === void 0 ? {} : { transport: details2.transport },
+    ...details2.mode === void 0 ? {} : { mode: details2.mode },
+    ...details2.relayUrl === void 0 ? {} : { relayUrl: details2.relayUrl },
+    ...details2.localCandidateType === void 0 ? {} : { localCandidateType: details2.localCandidateType },
+    ...details2.remoteCandidateType === void 0 ? {} : { remoteCandidateType: details2.remoteCandidateType },
+    ...details2.localAddressScope === void 0 ? {} : { localAddressScope: details2.localAddressScope },
+    ...details2.remoteAddressScope === void 0 ? {} : { remoteAddressScope: details2.remoteAddressScope },
+    ...details2.protocol === void 0 ? {} : { protocol: details2.protocol },
+    ...details2.relayProtocol === void 0 ? {} : { relayProtocol: details2.relayProtocol },
+    ...details2.currentRoundTripTimeMs === void 0 ? {} : { currentRoundTripTimeMs: details2.currentRoundTripTimeMs },
+    ...details2.availableOutgoingBitrate === void 0 ? {} : { availableOutgoingBitrate: details2.availableOutgoingBitrate }
   };
 }
 function requireSdp(description) {
@@ -15694,11 +15708,11 @@ function bitLen(n) {
   return len;
 }
 var bitMask = (n) => (_1n << BigInt(n)) - _1n;
-function _validateObject(object, fields, optFields = {}) {
-  if (!object || typeof object !== "object")
+function _validateObject(object2, fields, optFields = {}) {
+  if (!object2 || typeof object2 !== "object")
     throw new Error("expected valid options object");
   function checkField(fieldName, expectedType, isOpt) {
-    const val = object[fieldName];
+    const val = object2[fieldName];
     if (isOpt && val === void 0)
       return;
     const current = typeof val;
@@ -16794,18 +16808,18 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
      */
     toMontgomery(publicKey) {
       const { y } = Point.fromBytes(publicKey);
-      const size = lengths.publicKey;
-      const is25519 = size === 32;
-      if (!is25519 && size !== 57)
+      const size2 = lengths.publicKey;
+      const is25519 = size2 === 32;
+      if (!is25519 && size2 !== 57)
         throw new Error("only defined for 25519 and 448");
       const u = is25519 ? Fp2.div(_1n4 + y, _1n4 - y) : Fp2.div(y - _1n4, y + _1n4);
       return Fp2.toBytes(u);
     },
     toMontgomerySecret(secretKey2) {
-      const size = lengths.secretKey;
-      _abytes2(secretKey2, size);
-      const hashed = cHash(secretKey2.subarray(0, size));
-      return adjustScalarBytes3(hashed).subarray(0, size);
+      const size2 = lengths.secretKey;
+      _abytes2(secretKey2, size2);
+      const hashed = cHash(secretKey2.subarray(0, size2));
+      return adjustScalarBytes3(hashed).subarray(0, size2);
     },
     /** @deprecated */
     randomPrivateKey: randomSecretKey,
@@ -18600,14 +18614,14 @@ var bitMask2 = (n) => {
   asafenumber(n, "n");
   return (_1n7 << BigInt(n)) - _1n7;
 };
-function validateObject2(object, fields = {}, optFields = {}, title = "object") {
-  aobject2(object, title);
+function validateObject2(object2, fields = {}, optFields = {}, title = "object") {
+  aobject2(object2, title);
   aobject2(fields, "fields");
   aobject2(optFields, "optFields");
   function checkField(fieldName, expectedType, isOpt) {
     const label = title === "object" ? `param "${String(fieldName)}"` : `"${title}.${String(fieldName)}"`;
-    const val = object[fieldName];
-    if (!Object.hasOwn(object, fieldName) && (isOpt ? val !== void 0 : expectedType !== "function")) {
+    const val = object2[fieldName];
+    if (!Object.hasOwn(object2, fieldName) && (isOpt ? val !== void 0 : expectedType !== "function")) {
       throw new TypeError(`${label} is invalid: expected own property`);
     }
     if (isOpt && val === void 0)
@@ -19118,24 +19132,24 @@ var pointWindowSizes2 = /* @__PURE__ */ new WeakMap();
 function getWindowSize(P) {
   return pointWindowSizes2.get(P) || 1;
 }
-function oddMultiples(p, size) {
+function oddMultiples(p, size2) {
   const dbl = p.double();
   const t = [p];
-  for (let j = 1; j < size; j++)
+  for (let j = 1; j < size2; j++)
     t.push(t[j - 1].add(dbl));
   return t;
 }
 function wnafDigits(n, W) {
-  const size = 2 ** W;
-  const half = size / 2;
-  const mask = BigInt(size - 1);
+  const size2 = 2 ** W;
+  const half = size2 / 2;
+  const mask = BigInt(size2 - 1);
   const d = [];
   while (n > _0n9) {
     let w = 0;
     if (n & _1n9) {
       w = Number(n & mask);
       if (w >= half)
-        w -= size;
+        w -= size2;
       n -= BigInt(w);
     }
     d.push(w);
@@ -19144,16 +19158,16 @@ function wnafDigits(n, W) {
   return d;
 }
 function signedWindowDigits(n, W, windows) {
-  const size = 2 ** W;
-  const half = size / 2;
-  const mask = BigInt(size - 1);
+  const size2 = 2 ** W;
+  const half = size2 / 2;
+  const mask = BigInt(size2 - 1);
   const shiftBy = BigInt(W);
   const d = [];
   for (let w = 0; w < windows; w++) {
     let v = Number(n & mask);
     n >>= shiftBy;
     if (v > half) {
-      v -= size;
+      v -= size2;
       n += _1n9;
     }
     d.push(v);
@@ -19324,11 +19338,11 @@ var ScalarMultiplier = class {
    */
   fixedWindowCT(point, n, bits) {
     const W = FW_WINDOW;
-    const size = 1 << W;
+    const size2 = 1 << W;
     const mask = bitMask2(W);
-    const table = new Array(size);
+    const table = new Array(size2);
     table[0] = this.ZERO;
-    for (let i = 1; i < size; i++)
+    for (let i = 1; i < size2; i++)
       table[i] = table[i - 1].add(point);
     const windows = Math.ceil(bits / W);
     let acc = this.ZERO;
@@ -19338,7 +19352,7 @@ var ScalarMultiplier = class {
           acc = acc.double();
       const digit = Number(n >> BigInt(window2 * W) & mask);
       let sel = table[0];
-      for (let i = 1; i < size; i++)
+      for (let i = 1; i < size2; i++)
         sel = i === digit ? table[i] : sel;
       acc = acc.add(sel);
     }
@@ -22464,10 +22478,10 @@ import { WebSocket as WebSocket2 } from "ws";
 
 // src/safe-error.ts
 var RpcError = class extends Error {
-  constructor(code, message, details, retryable = false) {
+  constructor(code, message, details2, retryable = false) {
     super(message);
     this.code = code;
-    this.details = details;
+    this.details = details2;
     this.retryable = retryable;
   }
 };
@@ -22996,6 +23010,7 @@ var BOT_REMOTE_OPERATIONS = [
   "send",
   "answer-question",
   "dismiss-question",
+  "view-reply",
   "approval-answer",
   "stop-member-work"
 ];
@@ -24080,8 +24095,8 @@ function rcEndpoint2(endpoint) {
 function success2(value) {
   return { ok: true, value };
 }
-function failure2(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
+function failure2(code, message, details2 = {}) {
+  return { ok: false, error: { code, message, details: details2 } };
 }
 function ok2(value) {
   return value === void 0 ? { ok: true } : { ok: true, value };
@@ -24095,8 +24110,8 @@ function business2(value) {
   }
   return ok2(value);
 }
-function fail3(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
+function fail3(code, message, details2 = {}) {
+  return { ok: false, error: { code, message, details: details2 } };
 }
 function failFrom2(error) {
   const source = error instanceof Error ? error : new Error(String(error));
@@ -28289,8 +28304,8 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details = "details" in source && isRecord11(source.details) ? source.details : {};
-    return { code, message: source.message, details };
+    const details2 = "details" in source && isRecord11(source.details) ? source.details : {};
+    return { code, message: source.message, details: details2 };
   }
 };
 function workspaceConnectionResult(endpoint, result) {
@@ -29645,12 +29660,12 @@ var ClientModeRuntime = class {
   async detailedStatus() {
     const connected = this.connected;
     if (connected === void 0 || this.identity === void 0) return this.status();
-    const details = await connected.transport.connectionDetails();
+    const details2 = await connected.transport.connectionDetails();
     if (this.connected !== connected) return this.status();
     return {
       ...this.status(),
       network: {
-        ...details,
+        ...details2,
         local: {
           deviceId: this.identity.deviceId,
           name: this.identity.name,
@@ -30513,7 +30528,7 @@ var ControlStatusStream = class {
 };
 
 // src/codex/domain.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { accessSync, constants, existsSync as existsSync2, readFileSync } from "node:fs";
 import { readdir, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
@@ -30885,6 +30900,57 @@ function threadIdFromParams(params) {
   return typeof params.threadId === "string" ? params.threadId : void 0;
 }
 
+// src/codex/history-preview.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+var object = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : {};
+var details = /* @__PURE__ */ new WeakMap();
+var MAX_CACHE = 16 * 1024 * 1024;
+var size = (v) => Buffer.byteLength(JSON.stringify(v), "utf8");
+async function previewCall(peer, input3, invoke) {
+  const call = object(input3), params = object(call.params);
+  if (call.method === "dsh/historyDetail") {
+    if (Object.keys(call).some((k) => !["method", "params"].includes(k)) || Object.keys(params).some((k) => !["threadId", "detailId"].includes(k)) || typeof params.threadId !== "string" || typeof params.detailId !== "string") throw new RpcError("INVALID_MESSAGE", "Invalid history detail request.");
+    const detail = details.get(peer)?.get(params.detailId);
+    if (!detail || detail.threadId !== params.threadId || detail.until < Date.now()) throw new RpcError("HISTORY_DETAIL_EXPIRED", "Tool details expired. Reopen the conversation and try again.");
+    await invoke({ method: "thread/read", params: { threadId: detail.threadId, includeTurns: false } });
+    return detail.record;
+  }
+  if (call.previewHistory !== true) return invoke(input3);
+  if (call.method !== "dsh/sessionHistory" || Object.keys(call).some((k) => !["method", "params", "previewHistory"].includes(k)))
+    throw new RpcError("INVALID_MESSAGE", "History preview is read-only.");
+  const result = object(await invoke({ method: call.method, params: call.params }));
+  if (!Array.isArray(result.records) || typeof params.threadId !== "string") return result;
+  let cache = details.get(peer);
+  if (!cache) details.set(peer, cache = /* @__PURE__ */ new Map());
+  for (const [id5, value] of cache) if (value.until < Date.now()) cache.delete(id5);
+  const records = result.records.map((raw) => {
+    const record9 = object(raw), event = object(record9.event), data2 = object(event.data);
+    if (event.type !== "tool/result" || size(record9) < 4096) return raw;
+    const bytes = size(record9);
+    if (bytes > MAX_CACHE) return raw;
+    while (cache.size >= 64 || [...cache.values()].reduce((n, v) => n + v.bytes, 0) + bytes > MAX_CACHE) cache.delete(cache.keys().next().value);
+    const id5 = randomUUID2();
+    cache.set(id5, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
+    const message = object(data2.message);
+    return { ...record9, view: void 0, event: { ...event, data: {
+      id: data2.id,
+      callId: data2.callId,
+      name: data2.name,
+      toolName: data2.toolName,
+      turn: data2.turn,
+      step: data2.step,
+      message: { source: message.source, isError: message.isError === true || Array.isArray(message.content) && message.content.some((v) => object(v).isError === true), content: [{ type: "text", text: "Expand to load tool output" }] },
+      isError: data2.isError === true,
+      failed: data2.failed,
+      error: data2.error ? { message: "Tool execution failed" } : void 0,
+      remoteDetail: { threadId: params.threadId, detailId: id5 }
+    } } };
+  });
+  const preview = { ...result, records };
+  if (size(preview) > 2 * 1024 * 1024) throw new RpcError("RESPONSE_TOO_LARGE", "History requires chunked transfer.");
+  return preview;
+}
+
 // src/codex/peer-bridge.ts
 import { Buffer as Buffer3 } from "node:buffer";
 var streamOpenSchema = external_exports.object({
@@ -30924,7 +30990,7 @@ var CodexPeerBridge = class {
   async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
-      return await this.domain.call(this.context.connectionId, input3);
+      return await previewCall(this, input3, (value) => this.domain.call(this.context.connectionId, value));
     } catch (error) {
       if (logFailure) {
         this.logger?.warn("Codex call failed", {
@@ -31690,7 +31756,7 @@ var CodexRemoteDomain = class {
       await appServer.respond(message.id, { decision: "decline" });
       return;
     }
-    const requestHandle = randomUUID2();
+    const requestHandle = randomUUID3();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner.connectionId,
@@ -34137,7 +34203,7 @@ var AcpWorkspaceTools = class {
 };
 
 // src/acp/gateway.ts
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { randomUUID as randomUUID5 } from "node:crypto";
 import { readdir as readdir3, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir5 } from "node:os";
 import { basename as basename4, isAbsolute as isAbsolute6, join as join11, relative as relative4, resolve as resolve4 } from "node:path";
@@ -34453,7 +34519,7 @@ function agySelectionArgs(catalog, modelId, effort) {
 import { promises as fs, realpathSync as realpathSync2, constants as constants3 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join8, basename as basename3 } from "node:path";
-import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash2, randomUUID as randomUUID4 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
 var TTL = 24 * 60 * 60 * 1e3;
@@ -34498,7 +34564,7 @@ async function stageImages(sessionId, images, root) {
   const paths = [];
   try {
     for (const image of parsed) {
-      const path = join8(directory, `${randomUUID3()}.${EXTENSIONS[image.mimeType]}`);
+      const path = join8(directory, `${randomUUID4()}.${EXTENSIONS[image.mimeType]}`);
       await fs.writeFile(path, Buffer.from(image.data, "base64"), { flag: "wx", mode: 384 });
       paths.push(path);
     }
@@ -37408,7 +37474,7 @@ var AcpRemoteGateway = class {
       await client.respondError(message.id, -32602, "The ACP permission options are invalid.");
       return;
     }
-    const requestHandle = randomUUID4();
+    const requestHandle = randomUUID5();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner,
@@ -38261,7 +38327,7 @@ function redact(value, key = "") {
 }
 
 // src/workspace-upload.ts
-import { randomUUID as randomUUID5 } from "node:crypto";
+import { randomUUID as randomUUID6 } from "node:crypto";
 import { constants as constants4 } from "node:fs";
 import { link, lstat as lstat2, open as open2, realpath as realpath6, stat as stat6, unlink } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute7, join as join12 } from "node:path";
@@ -38341,7 +38407,7 @@ var WorkspaceUploadHost = class {
     const root = await realpath6(sourceRoot);
     const directory = await stat6(root);
     if (!directory.isDirectory()) throw failure3("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join12(root, `.dsh-upload-${randomUUID5()}.part`);
+    const temp = join12(root, `.dsh-upload-${randomUUID6()}.part`);
     const handle = await open2(temp, constants4.O_CREAT | constants4.O_EXCL | constants4.O_RDWR | (constants4.O_NOFOLLOW ?? 0), 384);
     const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
     this.uploads.set(p.uploadId, upload);
@@ -38476,7 +38542,7 @@ function unavailable2() {
 }
 
 // src/service.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 
 // src/connection-controller.ts
 var ConnectionController = class {
@@ -38578,10 +38644,10 @@ var ConnectionController = class {
     const revoked = [...this.active.values()].filter((connection) => connection.channel.peerDeviceId === deviceId);
     await Promise.all(revoked.map((connection) => this.disconnect(connection, "DEVICE_REVOKED")));
   }
-  async closeConnection(connectionId, code) {
+  async closeConnection(connectionId, code, detail) {
     const connection = this.active.get(connectionId);
     if (connection === void 0) return false;
-    await this.disconnect(connection, code);
+    await this.disconnect(connection, code, detail);
     return true;
   }
   async close() {
@@ -38632,7 +38698,7 @@ var ConnectionController = class {
       throw error instanceof Error ? error : new Error("peer send failed", { cause: error });
     }
   }
-  async disconnect(connection, code) {
+  async disconnect(connection, code, detail) {
     if (!this.isActive(connection)) return;
     this.active.delete(connection.channel.security.connectionId);
     connection.unsubscribe();
@@ -38644,7 +38710,9 @@ var ConnectionController = class {
     this.logger?.info("peer connection disconnected", {
       peerDeviceId: shortId2(connection.channel.peerDeviceId),
       connectionId: shortId2(connection.channel.security.connectionId),
-      code: code ?? "closed"
+      code: code ?? "closed",
+      closedBy: detail?.closedBy ?? "host",
+      ...detail?.retryable === void 0 ? {} : { retryable: detail.retryable }
     });
   }
   isActive(connection) {
@@ -39346,13 +39414,16 @@ var HostServerConnection = class {
         this.terminalError = payload.code;
         this.socket?.close(4004, "device revoked");
       } else if (payload.connectionId !== void 0) {
-        await this.dropTunnel(payload.connectionId, payload.code);
+        await this.dropTunnel(payload.connectionId, payload.code, {
+          closedBy: "server",
+          retryable: payload.retryable
+        });
         const fields = {
           code: payload.code,
           connectionId: shortId3(payload.connectionId),
           retryable: payload.retryable
         };
-        if (payload.retryable) this.logger.debug("server closed a remote connection", fields);
+        if (payload.retryable) this.logger.info("server closed a remote connection", fields);
         else this.logger.warn("server closed a remote connection", fields);
       } else {
         this.terminalError = payload.code;
@@ -39726,7 +39797,7 @@ var HostServerConnection = class {
     }));
     await this.connections.close();
   }
-  async dropTunnel(connectionId, code) {
+  async dropTunnel(connectionId, code, detail) {
     const tunnel = this.tunnels.get(connectionId);
     if (tunnel === void 0) return;
     this.tunnels.delete(connectionId);
@@ -39740,7 +39811,7 @@ var HostServerConnection = class {
     }
     if (tunnel.channel !== void 0) {
       try {
-        const closed = await this.connections.closeConnection(connectionId, code);
+        const closed = detail === void 0 ? await this.connections.closeConnection(connectionId, code) : await this.connections.closeConnection(connectionId, code, detail);
         if (!closed) await tunnel.channel.close(code);
       } catch (error) {
         await tunnel.channel.close(code).catch(() => void 0);
@@ -41746,7 +41817,7 @@ var HostPluginRuntime = class {
     let reportedVersion;
     let errorCode6;
     try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID6(), payload: {} });
+      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID7(), payload: {} });
       if (response === void 0) throw new Error("ApiProxy is unavailable");
       if (!response.result.ok) {
         errorCode6 = response.result.error.code;
@@ -42125,16 +42196,16 @@ async function renderTerminalQr(url) {
 async function renderCompactTerminalQr(url) {
   const { default: QRCode } = await import("qrcode");
   const modules = QRCode.create(url, { errorCorrectionLevel: "M" }).modules;
-  const size = modules.size + TERMINAL_QR_MARGIN * 2;
+  const size2 = modules.size + TERMINAL_QR_MARGIN * 2;
   const lines = [];
   const isBlack = (row, column) => {
     const qrRow = row - TERMINAL_QR_MARGIN;
     const qrColumn = column - TERMINAL_QR_MARGIN;
     return qrRow >= 0 && qrRow < modules.size && qrColumn >= 0 && qrColumn < modules.size && modules.get(qrRow, qrColumn) === 1;
   };
-  for (let row = 0; row < size; row += 2) {
+  for (let row = 0; row < size2; row += 2) {
     let line = "\x1B[30;47m";
-    for (let column = 0; column < size; column += 1) {
+    for (let column = 0; column < size2; column += 1) {
       const top = isBlack(row, column);
       const bottom = isBlack(row + 1, column);
       line += top ? bottom ? "\u2588" : "\u2580" : bottom ? "\u2584" : " ";

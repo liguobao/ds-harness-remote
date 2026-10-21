@@ -39,6 +39,9 @@ export class SessionRuntime {
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
   private codexFlushTimer: ReturnType<typeof setTimeout> | undefined
+  readonly browsePages = new Map<string, {oldestLoadedSeq?: number; historyHasMore: boolean}>()
+  sessionReadAbort: AbortController | undefined
+  sessionReadRetry = false
   sessionLoadGeneration = 0
   reconnectFlight: Promise<boolean> | undefined
 
@@ -209,6 +212,7 @@ export class SessionRuntime {
     const stream = this.activeCodexStream
     this.activeCodexStream = undefined
     this.activeCodexTimeline = undefined
+    this.store.set({ codexReadySessionId: undefined })
     if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
   }
 

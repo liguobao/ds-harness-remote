@@ -766,7 +766,11 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 - Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
 - 群聊管理：`create-room`、`update-room`、`delete-room`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`answer-question`、`dismiss-question`、`approval-answer`、`stop-member-work`。
+- 会话交互：`send`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
+
+`view-reply` 转发 DS Bot 0.2.0 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
+用于选择、确认和表单提交。待答卡片身份、答案合法性及重复提交由 Host 上 DS Bot 原生
+handler 校验；Remote 保留既有认证、消息大小与超时边界，不重放提交。
 
 `approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
 安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断
@@ -1084,6 +1088,11 @@ Open Params：`{ "streamId", "endpoint", "payload" }`；Close Params：`{ "strea
 `endpoint` 可为 allowlisted stream Remote（例如 `workspace/follow`、`session/follow`、
 `session/control`）或 `$events`。每个 authenticated connection 最多 16 条 alpha stream；
 stream id、取消和断开清理均按 `connectionId` 隔离。
+
+`session/follow` 与 `session/page` 复用官方 `SessionAddress`：仅 catalog 明确标记
+`origin: 'subagent'` 的会话使用 `{ kind: 'subagent', parentSessionId, childSessionId, mode }`；
+普通会话和 fork 会话使用 `{ kind: 'session', sessionId }`。`parentSessionId` 也表示 fork
+来源，不能单独作为 subagent 判据；Host 的 origin/parent 校验失败不得通过地址降级绕过。
 
 Host 对每个 item 发送 `harness.remote.frame`：
 
@@ -1941,3 +1950,8 @@ successful local selections. Cursor uses one process per session because its ups
 model manager is process-wide (maximum 30 active sessions plus the catalog process);
 Claude keeps per-session model state in its existing adapter. Neither adds generic
 configuration RPC or fabricated choices. The display name is `Claude`, backend ID `claude`.
+
+
+### Optional read-only history preview
+
+`codex.app.call` accepts `{method: "dsh/sessionHistory", params, previewHistory: true}` on supporting Hosts. Ordinary history is returned directly up to 2 MiB. Tool-result bodies over 4 KiB are represented by an opaque `remoteDetail: {threadId, detailId}` handle; the original remains in a per-authenticated-peer memory cache (64 entries, 16 MiB, ten minutes). `dsh/historyDetail` accepts exactly that pair, verifies the peer/thread/expiry and revalidates `thread/read` before returning the original through the existing bounded transfer. Handles never authorize mutations. Clients fall back to the existing read-only transfer only on `INVALID_MESSAGE` (older Host) or `RESPONSE_TOO_LARGE`; timeouts and authority failures are not replayed.

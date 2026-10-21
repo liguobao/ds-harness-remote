@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../../lib/session-kind'
 import { strings as zhCN } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { resolveSessionDisplayTitle } from '../session-title'
@@ -13,6 +14,5 @@ export function relativeTime(timestamp: number): string {
 export function sessionTitle(session: RemoteSession): string {
   const title = resolveSessionDisplayTitle(session)
   if (title !== undefined) return title
-  if (session.blank && session.parentSessionId === undefined) return zhCN.sessions.untitled
-  return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
+  return isSubagentSession(session) ? zhCN.sessions.child : zhCN.sessions.untitled
 }

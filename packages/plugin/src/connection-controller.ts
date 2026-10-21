@@ -25,6 +25,16 @@ export interface ConnectedPeer {
   mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
 }
 
+/**
+ * Who closed the logical peer connection. `CONNECTION_FAILED` exists as both
+ * a Server-issued code and a Host fallback, so the disconnect log must name the
+ * source or operators cannot tell the two paths apart.
+ */
+export interface ConnectionCloseDetail {
+  closedBy: 'server' | 'host'
+  retryable?: boolean
+}
+
 export type RpcRouterFactory = (
   context: PeerConnectionContext,
   send: (message: RemoteMessage) => Promise<void>,
@@ -142,10 +152,10 @@ export class ConnectionController {
     await Promise.all(revoked.map(connection => this.disconnect(connection, 'DEVICE_REVOKED')))
   }
 
-  async closeConnection(connectionId: string, code?: string): Promise<boolean> {
+  async closeConnection(connectionId: string, code?: string, detail?: ConnectionCloseDetail): Promise<boolean> {
     const connection = this.active.get(connectionId)
     if (connection === undefined) return false
-    await this.disconnect(connection, code)
+    await this.disconnect(connection, code, detail)
     return true
   }
 
@@ -203,7 +213,11 @@ export class ConnectionController {
     }
   }
 
-  private async disconnect(connection: ActiveConnection, code?: string): Promise<void> {
+  private async disconnect(
+    connection: ActiveConnection,
+    code?: string,
+    detail?: ConnectionCloseDetail,
+  ): Promise<void> {
     if (!this.isActive(connection)) return
     this.active.delete(connection.channel.security.connectionId)
     connection.unsubscribe()
@@ -216,6 +230,8 @@ export class ConnectionController {
       peerDeviceId: shortId(connection.channel.peerDeviceId),
       connectionId: shortId(connection.channel.security.connectionId),
       code: code ?? 'closed',
+      closedBy: detail?.closedBy ?? 'host',
+      ...(detail?.retryable === undefined ? {} : { retryable: detail.retryable }),
     })
   }
 

@@ -3,12 +3,13 @@ import {
   saveDefaultPermissionPreset,
   saveLanguagePreference,
   saveThemePreference,
+  saveStatusBarVisible,
   saveTransportPreference,
 } from '../services/storage'
 import type { AppState, StoreAccess } from './store-state'
 
 export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppState,
-  'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setTransportPreference(preference) {
       await saveTransportPreference(preference)
@@ -21,6 +22,11 @@ export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppStat
       await saveLanguagePreference(languagePreference)
       const language = applyLanguagePreference(languagePreference)
       set({ languagePreference, language })
+    },
+
+    async setStatusBarVisible(statusBarVisible) {
+      await saveStatusBarVisible(statusBarVisible)
+      set({ statusBarVisible })
     },
 
     async setThemePreference(themePreference) {

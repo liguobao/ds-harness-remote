@@ -1,5 +1,7 @@
 package io.github.liguobao.dshremote
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +10,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.Handler
@@ -142,6 +145,21 @@ class RemoteForegroundService : Service() {
     private const val CHANNEL_ID = "remote_connection"
     private const val NOTIFICATION_ID = 7401
     private var running: RemoteForegroundService? = null
+
+    fun notifyTask(context: Context, hostId: String, sessionId: String, title: String, body: String) {
+      if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+      val manager = context.getSystemService(NotificationManager::class.java)
+      val channel = "remote_tasks"
+      if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(channel, "Remote tasks", NotificationManager.IMPORTANCE_DEFAULT))
+      val uri = Uri.Builder().scheme("dshremote").authority("conversation").appendQueryParameter("host", hostId).appendQueryParameter("session", sessionId).build()
+      val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      val id = (hostId + sessionId).hashCode() and 0x3fffffff
+      val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(context.applicationInfo.icon)
+        .setContentTitle(title).setContentText(body).setContentIntent(pending).setAutoCancel(true)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
+      try {manager.notify("remote_task", id, notification)} catch (_: SecurityException) { }
+    }
 
     fun start(context: Context, promise: Promise) {
       val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {

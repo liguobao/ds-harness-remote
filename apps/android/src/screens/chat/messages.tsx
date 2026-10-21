@@ -30,8 +30,8 @@ import {
 } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
-import { hasVisibleMessageText } from '../../state/event-reducer'
-import { useAppStore } from '../../state/store'
+import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
+import { readToolHistoryDetail, useAppStore } from '../../state/store'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -312,14 +312,33 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
   )
 }
 
-function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
+function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boolean }) {
+  const [loaded, setLoaded] = useState<ToolActivity>()
+  const [loadingDetail, setLoadingDetail] = useState(false)
+  const [detailError, setDetailError] = useState<string>()
+  const detailAbort = useRef<AbortController | undefined>(undefined)
+  const item = loaded ?? original
+  useEffect(() => {setLoaded(undefined); setLoadingDetail(false); setDetailError(undefined); return () => detailAbort.current?.abort()}, [original.remoteDetail?.detailId])
+  const loadDetail = async () => {
+    if (loadingDetail || loaded !== undefined || original.remoteDetail === undefined) return
+    const controller = new AbortController(); detailAbort.current = controller
+    setLoadingDetail(true); setDetailError(undefined)
+    try {
+      const record = await readToolHistoryDetail(original.remoteDetail, controller.signal) as {event: import('../../types').NativeSessionEvent; view?: import('../../types').HistoryEntry['view']}
+      if (controller.signal.aborted) return
+      const full = foldHistory([record], original.sessionId).find(row => row.kind === 'tool' && row.id === original.id)
+      if (full?.kind !== 'tool') throw new Error(zhCN.comfort.toolInvalid)
+      setLoaded({...original, ...full, callDetail: original.callDetail, remoteDetail: undefined})
+    } catch (error) {if (!controller.signal.aborted) setDetailError(error instanceof Error ? error.message : zhCN.comfort.toolUnavailable)}
+    finally {if (!controller.signal.aborted) setLoadingDetail(false)}
+  }
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [expanded, setExpanded] = useState(false)
   const stateText = item.state === 'running' ? zhCN.status.running : item.state === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const detail = processDetail(item)
   const name = toolDisplayName(item)
-  const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined)
+  const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined || item.remoteDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
       <Pressable
@@ -327,7 +346,7 @@ function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
         accessibilityLabel={hasDetail ? (expanded ? zhCN.chat.toolCollapse(name) : zhCN.chat.toolExpand(name)) : undefined}
         accessibilityState={hasDetail ? { expanded } : undefined}
         disabled={!hasDetail}
-        onPress={() => setExpanded(value => !value)}
+        onPress={() => {if (!expanded) void loadDetail(); setExpanded(value => !value)}}
         style={({ pressed }) => [styles.toolRow, pressed && hasDetail && styles.toolRowPressed]}
       >
         <View style={styles.toolIcon}>{/command|bash|shell|命令|终端/i.test(item.toolName)
@@ -345,6 +364,8 @@ function ToolRow({ item, compact }: { item: ToolActivity; compact: boolean }) {
       {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} tool />}
       {expanded && hasDetail && (
         <View style={styles.toolDetails}>
+          {loadingDetail && <Text>{zhCN.comfort.toolLoading}</Text>}
+          {detailError !== undefined && <Pressable accessibilityRole="button" onPress={() => void loadDetail()}><Text>{detailError} · {zhCN.common.retry}</Text></Pressable>}
           {item.callDetail !== undefined && <ToolDetailView label={zhCN.chat.toolCall} detail={item.callDetail} />}
           {item.resultDetail !== undefined && <ToolDetailView label={zhCN.chat.toolResult} detail={item.resultDetail} />}
         </View>

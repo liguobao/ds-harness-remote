@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, isAbsolute, parse, resolve } from 'node:path'
 
@@ -12,6 +12,19 @@ export interface DirectoryListing {
 }
 
 const MAX_ENTRIES = 500
+
+/**
+ * Native Harness `workspace/create` realpath's the folder and fails with ENOENT
+ * when parent directories are missing. Create them on the Host before forwarding.
+ * Only absolute, non-root paths are accepted.
+ */
+export async function ensureHostWorkspaceDirectory(path: string | undefined): Promise<void> {
+  const raw = String(path || '').trim()
+  if (!raw || raw.includes('\0')) return
+  const target = resolve(raw)
+  if (!isAbsolute(target) || target === parse(target).root) return
+  await mkdir(target, { recursive: true })
+}
 
 /** Read-only fallback used only over an authenticated Host channel when Harness has a native-only picker. */
 export async function listRemoteDirectory(path?: string, signal?: AbortSignal): Promise<DirectoryListing> {

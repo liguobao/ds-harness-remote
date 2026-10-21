@@ -1,3 +1,5 @@
+import { hydrateBrowseMemory, useBrowseMemory, browseScope } from './src/services/browse-memory'
+import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, BackHandler, Image, Linking, StyleSheet, Text, View } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
@@ -27,7 +29,7 @@ type Route =
   | { name: 'server' }
   | { name: 'devices' }
   | { name: 'device'; deviceId: string; source?: 'workspaces' }
-  | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string }
+  | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
   | { name: 'workspaces'; focusWorkspaceKey?: string }
   | { name: 'chat' }
   | { name: 'settings' }
@@ -67,11 +69,16 @@ function AppShell() {
 
 function ThemedStatusBar() {
   const { scheme } = useTheme()
-  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+  const statusBarVisible = useAppStore(state => state.statusBarVisible)
+  return <StatusBar hidden={!statusBarVisible} style={scheme === 'dark' ? 'light' : 'dark'} />
 }
 
 function AppNavigator() {
   const bootPhase = useAppStore(state => state.bootPhase)
+  const browseReady = useBrowseMemory(state => state.ready)
+  const [pendingConversation, setPendingConversation] = useState<{deviceId: string; sessionId: string}>()
+  const [linksReady, setLinksReady] = useState(false)
+  const autoRestored = useRef(false)
   const config = useAppStore(state => state.config)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
@@ -152,7 +159,53 @@ function AppNavigator() {
       : { name: 'device', deviceId: device.deviceId })
   }
 
-  useEffect(() => { void bootstrap() }, [bootstrap])
+  useEffect(() => {void hydrateBrowseMemory(); void bootstrap()}, [bootstrap])
+  useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
+
+  const openKnownSession = async (id: string) => {
+    const backend = id.startsWith('codex:') ? 'codex' : id.startsWith('cursor:') ? 'cursor' : id.startsWith('antigravity:') ? 'antigravity' : id.startsWith('pi:') ? 'pi' : id.startsWith('opencode:') ? 'opencode' : id.startsWith('claude:') ? 'claude' : 'harness'
+    const expectedScope = browseScope(useAppStore.getState())
+    await useAppStore.getState().refreshWorkspaces(backend)
+    if (browseScope(useAppStore.getState()) !== expectedScope || useAppStore.getState().connection.phase !== 'connected') return
+    const state = useAppStore.getState(), target = state.sessions.find(item => item.sessionId === id)
+    if (target === undefined) {goHomeWorkspaces(); useAppStore.setState({error: zhCN.comfort.conversationMissing}); return}
+    const pending = openSession(target)
+    if (useAppStore.getState().selectedSession?.sessionId === id) setRoutes([{name: 'workspaces'}, {name: 'chat'}])
+    const ok = await pending
+    if (ok && routeRef.current.name === 'connecting') setRoutes([{name: 'workspaces'}, {name: 'chat'}])
+  }
+  useEffect(() => {
+    const receive = (url: string) => {
+      try {
+        const link = new URL(url)
+        if (link.protocol !== 'dshremote:' || link.hostname !== 'conversation') return
+        const deviceId = link.searchParams.get('host'), sessionId = link.searchParams.get('session')
+        if (deviceId && sessionId) setPendingConversation({deviceId, sessionId})
+      } catch { /* Only known conversation links are accepted. */ }
+    }
+    const subscription = Linking.addEventListener('url', event => receive(event.url))
+    void Linking.getInitialURL().then(url => {if (url) receive(url)}).finally(() => setLinksReady(true))
+    return () => subscription.remove()
+  }, [])
+  useEffect(() => {
+    if (bootPhase !== 'ready' || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired || devices.length === 0) return
+    if (pendingConversation !== undefined) {
+      autoRestored.current = true
+      const target = pendingConversation
+      const device = devices.find(item => item.deviceId === target.deviceId && item.trusted)
+      setPendingConversation(undefined)
+      if (device === undefined) {useAppStore.setState({error: zhCN.comfort.unknownHost}); return}
+      if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') void openKnownSession(target.sessionId)
+      else push({name: 'connecting', deviceId: device.deviceId, sessionId: target.sessionId})
+      return
+    }
+    if (autoRestored.current || !didChooseInitialRoute.current || route.name !== 'devices') return
+    autoRestored.current = true
+    const memory = useBrowseMemory.getState(), last = memory.last
+    if (!memory.resume || !last || routeRef.current.name !== 'devices') return
+    const device = devices.find(item => item.deviceId === last.deviceId && item.trusted && item.online)
+    if (device && browseScope({config, selectedDevice: device}) === last.scope) push({name: 'connecting', deviceId: device.deviceId, sessionId: last.sessionId})
+  }, [bootPhase, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
 
   // Zhihu OAuth deep link: dshremote://oauth?token=... completes the
   // account authorization started from the server setup screen.
@@ -193,7 +246,7 @@ function AppNavigator() {
       reset({ name: 'server' })
       return
     }
-    // Always land on the device list; connecting is an explicit user choice.
+    // Resolve sign-in first; the optional resume preference runs after this route.
     reset({ name: 'devices' })
   }, [bootPhase, config, reauthRequired])
 
@@ -281,7 +334,7 @@ function AppNavigator() {
     return () => subscription.remove()
   }, [reconnect])
 
-  if (bootPhase === 'loading') return <LoadingScreen />
+  if (bootPhase === 'loading' || !browseReady) return <LoadingScreen />
   if (bootPhase === 'error') return <BootError onRetry={() => void bootstrap()} message={error} />
 
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
@@ -309,7 +362,8 @@ function AppNavigator() {
             else reset({ name: 'devices' })
           }}
           onConnected={() => {
-            if (route.focusWorkspaceKey === undefined) goHomeWorkspaces()
+            if (route.sessionId !== undefined) void openKnownSession(route.sessionId)
+            else if (route.focusWorkspaceKey === undefined) goHomeWorkspaces()
             else void openShortcutSession(route.focusWorkspaceKey)
           }}
         />

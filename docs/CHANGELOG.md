@@ -1,7 +1,31 @@
 ## Unreleased
 
+- Make Server-initiated tunnel closes visible at the default log level (#140): retryable closes now use info instead of debug, and `peer connection disconnected` records `closedBy` (`server`/`host`) with `retryable`. `CONNECTION_FAILED` is both a Server-issued code and a Host fallback, so the debug-only message made the two paths indistinguishable. No runtime transport behavior changed.
+- 让 Server 主动关闭 tunnel 在默认日志级别可见（#140）：retryable 关闭由 debug 提升为 info，`peer connection disconnected` 增加 `closedBy`（`server`/`host`）与 `retryable` 字段。`CONNECTION_FAILED` 同时是 Server 下发的 code 和 Host 本地兜底，旧日志只在 debug 输出，无法区分两条路径。本次未改变运行时传输行为。
+- Improve Android conversation browsing with backend-separated search, local favorites,
+  per-conversation drafts, reading anchors and a jump-to-latest action. Keep bounded encrypted
+  text previews scoped to server/account/Host identity, optional startup restoration and live
+  task notifications. Show cached content immediately while fresh history and subscriptions
+  are verified; ignore cancelled reads and deduplicate native Codex catalog snapshots.
+- Android 对话侧栏增加后端分类、搜索和本机收藏；按对话保留草稿、阅读位置和受限加密文字预览，
+  支持可选启动恢复与连接期间的任务通知。切换先显示缓存再核对最新历史，取消过期读取，并按原生
+  Codex 对话 ID 归并重复目录记录。
+- Add an opt-in read-only Codex history preview with authenticated-peer-scoped, expiring tool
+  detail handles. Android requests large tool bodies on expansion; existing clients and older
+  Hosts keep their original history flow.
+- Allow DS Bot 0.2.0 interactive card replies (`view-reply`) over Remote; the Host's native DS Bot handler validates the pending card and answer. Cross-device acceptance remains pending.
+- 放行 DS Bot 0.2.0 交互卡片的远程回复（`view-reply`），由 Host 原生 DS Bot handler 校验待答卡片及答案；跨设备验收待完成。
+
+- Add an Android “Show status bar” switch in Settings, enabled by default. Changes apply after saving and persist across restarts and sign-out; clearing local data restores visibility. Android type checking passes; native device layout remains unverified. No presentation-only tests added.
+- Android 设置新增「显示状态栏」开关，默认开启，保存后生效，重启和退出账号保留选择，清除本地数据恢复显示。Android 类型检查通过；原生真机布局尚未验证，未新增纯展示测试。
+
+- Fix Android fork history routing: only sessions explicitly marked `origin: 'subagent'` use their durable parent address. Fork ancestry keeps normal session history, pagination and timeout recovery; subagent navigation and fallback titles use the same distinction. Android type checks, 154 tests and Hermes export pass; APK/device acceptance remains pending.
+- 修复 Android 将 fork 会话误当 subagent 读取历史的问题：仅 `origin: 'subagent'` 使用父会话地址，fork 保持普通会话的历史、分页和超时恢复；子会话导航与默认标题同步区分。Android 类型检查、154 项测试与 Hermes 导出通过；APK/真机验收待完成。
+
 - Fix sidebar footer layout corruption on Harness 0.2.x: Remote styles only its own official footer-slot entry, without overriding host CSS Modules classes or legacy better-sidebar account/connection rows. Expanded entries can shrink beside other actions; collapsed entries keep a 36 px icon seat. The active entry keeps Exit in normal flow so long host names can shrink without overlapping it.
 - 修复 Harness 0.2.x 侧栏 footer 布局错乱：Remote 仅设置官方 footer slot 内自身入口的样式，移除对宿主 CSS Modules 类名及旧 better-sidebar 账号/连接条的覆盖；展开入口可与其他按钮并排收缩，折叠入口保持 36 px 图标区域；远程状态下退出按钮参与正常布局，长主机名收缩时不会与其重叠。
+- Add a jump-to-latest button to the Android chat: once the user scrolls away from the newest turn, a floating down-arrow appears above the composer and returns the list to the end in one tap. The tap re-enables follow mode before scrolling, so a reply that is still streaming keeps following, and the button is hidden while the viewport already shows the latest turn. No new tests (presentation-only); type checking, 152 Android tests and the Android Hermes export pass. Real-device scrolling, TalkBack, landscape and streaming behaviour were not verified locally.
+- Android 聊天新增「回到最新消息」按钮：向上翻离最新消息后，输入栏上方出现悬浮的向下箭头，点一下回到列表底部；点击先恢复自动跟随再滚动，仍在流式输出的回复会继续跟随最新一条，视口已在最新消息时不显示。本次不新增纯展示测试；类型检查、152 个 Android 测试与 Android Hermes 导出通过，真机滚动、TalkBack、横屏与流式表现未在本机验证。
 
 ## 0.5.14 - 2026-10-19
 
