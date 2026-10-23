@@ -1,0 +1,5 @@
+# Generated bundles vendor third-party sources (for example werift, which is
+# inlined on purpose). Their comments and templates contain trailing spaces, so
+# every rebuild would otherwise make `git diff --check` fail on the committed
+# artifact. Keep whitespace checks for hand-written files only.
+packages/plugin/dist/*.js whitespace=-trailing-space

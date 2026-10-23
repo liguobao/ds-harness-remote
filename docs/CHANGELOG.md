@@ -1,3 +1,8 @@
+## Unreleased
+
+- Inline `werift` into the Host bundle and drop it from the published dependencies. werift declares `buffer` — a Node core-module name — as a dependency, and DSH Desktop's generation peer validation resolves that name to the builtin id instead of an install path, so every ds-harness-remote install, update and rollback failed with `werift: buffer resolves outside the generation and installation closure: buffer`. Runtime behaviour is unchanged (Node resolved `buffer` to the builtin either way); the installed generation drops from 83 packages to 41 and passes the validator with zero problems. Verified locally by installing a packed tarball into a staging generation the same way the Desktop installer does; the published 0.5.18 tarball still reproduces the original failure in the same harness.
+- 把 `werift` 打进 Host bundle 并从发布依赖中移除。werift 把 `buffer`（Node 核心模块名）声明为依赖，DSH Desktop 的 generation peer 校验用 Node 解析该名字时得到内建 id 而非安装路径，于是任何版本的安装、更新、回滚都会报 `werift: buffer resolves outside the generation and installation closure: buffer`。运行时行为不变（Node 本来就把 `buffer` 解析到内建模块）；安装树从 83 个包降到 41 个，校验零问题。已把打包产物按 Desktop 安装器的同样方式装进 staging generation 本地验证；已发布的 0.5.18 在同一套校验下仍复现原错误。
+
 ## 0.5.18 — 2026-10-23
 
 - Harden reply parsing against deeply nested untrusted tool output and restrict truncated-result recovery to direct entries inside the replies array, preventing render-time stack overflow and unrelated-object attribution.

@@ -29,7 +29,14 @@ await buildBundle({
   format: 'esm',
   sourcemap: true,
   outfile: join(root, 'dist/index.js'),
-  external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'werift', 'ws'],
+  // werift must stay inside this bundle. It declares `buffer` (a Node
+  // core-module name) as a dependency; DSH's generation peer validation walks
+  // every installed package's dependencies, Node resolves a core-module name to
+  // the builtin id instead of a path, and the validator treats that id as
+  // outside the install closure, so the whole plugin install fails. Bundling
+  // werift removes it from the installed dependency graph; at runtime it only
+  // ever reached Node's builtin `buffer` anyway.
+  external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'ws'],
 })
 
 for (const [moduleId, outfile] of [
