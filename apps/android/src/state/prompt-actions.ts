@@ -3,14 +3,13 @@ import { friendlyError, isRecoverableTransportError, isRpcTimeoutError } from '.
 import { strings as zhCN } from '../locales/i18n'
 import { createNativeRpcId } from '../services/api-proxy'
 import {
-  codexPermissionPreset,
   codexPermissionPresetFromResponse,
   codexThreadId,
   readCodexHistoryPage,
 } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
 import type { ChatItem } from '../types'
-import { loadSavedCodexPermissions, withCodexPermissionState } from './codex-session-state'
+import { withCodexPermissionState } from './codex-session-state'
 import { findApproval, findQuestion, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isRecord, record, stringValue, withActiveCodexTurn } from './session-state'
@@ -92,27 +91,19 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             await client.request('turn/steer', { threadId, expectedTurnId: activeTurnId, input: promptInput })
           } else {
             const selection = get().sessionModels?.current
-            const latestSession = get().selectedSession?.sessionId === session.sessionId
-              ? get().selectedSession
-              : get().sessions.find(item => item.sessionId === session.sessionId)
-            const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
-            let permissionPreset = latestSession?.backend === 'codex'
-              ? codexPermissionPreset(latestSession)
-              : savedPermissions[threadId]
+            // Continuing a thread inherits its current Host policy. Permission
+            // overrides belong to selectPermission, where the user changes it.
             const resumeResult = await client.request('thread/resume', {
               threadId,
-              ...(permissionPreset === undefined ? {} : { permissionPreset }),
               ...(selection?.provider === 'codex' ? { model: selection.model } : {}),
             })
             const serverPreset = codexPermissionPresetFromResponse(resumeResult)
             if (serverPreset !== undefined) {
-              permissionPreset = serverPreset
               set(state => withCodexPermissionState(state, session.sessionId, serverPreset))
             }
             const result = record(await client.request('turn/start', {
               threadId,
               input: promptInput,
-              ...(permissionPreset === undefined ? {} : { permissionPreset }),
               ...(selection?.provider === 'codex' ? {
                 model: selection.model,
                 ...(selection.reasoningEffort === undefined ? {} : { effort: selection.reasoningEffort }),

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { HistoryEntry, RemoteSession } from '../src/types'
 import { backendGroups, browseStatus } from '../src/lib/backend-groups'
@@ -18,6 +19,7 @@ vi.mock('../src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
 import { SessionRuntime } from '../src/state/session-runtime'
 import { createSessionActions } from '../src/state/session-actions'
 import { createPromptActions } from '../src/state/prompt-actions'
+import { saveCodexPermissionPreset } from '../src/services/storage'
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: Error) => void
@@ -34,7 +36,7 @@ const event = (seq: number): HistoryEntry => ({ event: { type: 'assistant/messag
 const page = (id: string, seqs = [20], hasMore = false) => ({ header: { id: `codex:${id}` },
   records: seqs.map(seq => ({ type: 'event', ...event(seq) })), hasMore })
 let state: AppState, runtime: SessionRuntime, access: StoreAccess
-beforeEach(() => {
+function prepareScenario() {
   vi.resetAllMocks()
   state = { connection: { phase: 'connected' }, selectedDevice: { deviceId: 'host' }, sessions: [], messages: {},
     sessionLifecycles: {}, feedbackBySession: {}, currentWorkSessionIds: [], historyHasMore: false, historyLoadingOlder: false,
@@ -49,6 +51,57 @@ beforeEach(() => {
   client.subscribe.mockImplementation(async () => ({ close: vi.fn(async () => undefined) }))
   proxy.messageFeedbackList.mockResolvedValue([])
   proxy.sessionHistory.mockResolvedValue({ events: [event(20)], hasMore: false })
+}
+beforeEach(prepareScenario)
+
+describe('Codex permission inheritance', () => {
+  const policy = (preset: string) => ({approvalPolicy: preset === 'danger-full-access' ? 'never' : 'on-request', sandbox: preset})
+  async function openWithCachedPermission(preset: string) {
+    const target = session('a')
+    target.projections!.values!.permissions = {currentValue: preset}
+    state.sessions = [target]
+    expect(await state.openSession(target)).toBe(true)
+  }
+
+  it('inherits the Host permission when the phone cached a different preset', async () => {
+    await runScenarios(['workspace-write', 'danger-full-access'].map(cached => ({name: cached, run: async () => {
+      await openWithCachedPermission(cached)
+      const original = cached === 'workspace-write' ? 'danger-full-access' : 'workspace-write'
+      let effective = original
+      client.request.mockImplementation(async (method, args) => {
+        if (args.permissionPreset !== undefined) effective = args.permissionPreset
+        if (method === 'thread/resume') return {thread: thread('a'), ...policy(effective)}
+        return {turn: {id: 'next', status: 'inProgress'}}
+      })
+      client.request.mockClear()
+      expect(await state.sendMessage('continue')).toBe('sent')
+      expect(client.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume', 'turn/start'])
+      for (const [, args] of client.request.mock.calls) expect(args).not.toHaveProperty('permissionPreset')
+      expect(effective).toBe(original)
+      expect(state.selectedSession?.projections?.values?.permissions).toMatchObject({currentValue: original})
+      expect(state.sessions[0]?.projections?.values?.permissions).toMatchObject({currentValue: original})
+    }})), prepareScenario)
+  })
+
+  it('applies an explicit phone selection and inherits it on the following send', async () => {
+    await runScenarios(['workspace-write', 'danger-full-access'].map(selected => ({name: selected, run: async () => {
+      let effective = selected === 'workspace-write' ? 'danger-full-access' : 'workspace-write'
+      await openWithCachedPermission(effective)
+      client.request.mockImplementation(async (method, args) => {
+        if (args.permissionPreset !== undefined) effective = args.permissionPreset
+        if (method === 'thread/resume') return {thread: thread('a'), ...policy(effective)}
+        return {turn: {id: 'next', status: 'inProgress'}}
+      })
+      client.request.mockClear()
+      expect(await state.selectPermission(selected)).toBe(true)
+      expect(client.request).toHaveBeenCalledWith('thread/resume', {threadId: 'a', permissionPreset: selected})
+      expect(saveCodexPermissionPreset).toHaveBeenCalledWith('host', 'a', selected)
+      expect(await state.sendMessage('continue')).toBe('sent')
+      expect(client.request.mock.calls.filter(([, args]) => args.permissionPreset !== undefined)).toHaveLength(1)
+      expect(effective).toBe(selected)
+      expect(state.selectedSession?.projections?.values?.permissions).toMatchObject({currentValue: selected})
+    }})), prepareScenario)
+  })
 })
 
 describe('fast browsing without changing writer ownership', () => {
