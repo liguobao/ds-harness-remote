@@ -43,7 +43,8 @@ import type {
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
-import { NativeMarkdown } from '../../ui/markdown'
+import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
+import { PresentedFileCard } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { parseBotReplies } from '../bot/replies'
@@ -101,6 +102,38 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   const hasGroupRelayReplies = segments.some(segment => segment.kind === 'botReplies' && segment.groupRelay)
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
+  const onFilePress = useMarkdownLink()
+  const editedFiles = useMemo(() => {
+    const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
+    const seen = new Set<string>()
+    for (const item of items) {
+      if (item.kind !== 'tool' || item.state !== 'finished') continue
+      const name = (item.toolKey ?? item.toolName).toLowerCase()
+      if (!item.arguments) continue
+      try {
+        const args = JSON.parse(item.arguments) as Record<string, unknown>
+        let path: string | undefined
+        let action: 'created' | 'edited' = 'edited'
+        if (name === 'write' || name === 'write_file') {
+          path = (args.file_path || args.path || args.filename) as string | undefined
+          action = 'created'
+        } else if (name === 'edit' || name === 'edit_file' || name === 'patch') {
+          path = (args.file_path || args.path || args.filename) as string | undefined
+          action = 'edited'
+        } else if (name === 'str_replace_editor') {
+          const cmd = args.command as string | undefined
+          if (cmd === 'view') continue // Read-only command does not modify files
+          path = (args.path || args.file_path) as string | undefined
+          action = cmd === 'create' ? 'created' : 'edited'
+        }
+        if (typeof path === 'string' && path.trim() && !seen.has(path.trim())) {
+          seen.add(path.trim())
+          files.push({ path: path.trim(), action })
+        }
+      } catch {}
+    }
+    return files
+  }, [items])
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && hasGroupRelayReplies) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
@@ -110,6 +143,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
       : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+    {editedFiles.map(file => <PresentedFileCard key={file.path} file={file} onFilePress={onFilePress} />)}
     {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}

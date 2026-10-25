@@ -8,6 +8,9 @@ import { installMath } from './markdown-math'
 import { MathFormula } from './math-formula'
 import { type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
+import { CodeBlockView } from './code-block'
+import { PresentedFileCard } from './file-card'
+import { DshLinkIcon, classifyDshLinkPath } from './dsh-icons'
 
 // Remote messages are untrusted E2EE business content. Parse Markdown without
 // HTML/linkification and render native Text/View/SVG nodes: no WebView,
@@ -17,6 +20,10 @@ installMath(parser)
 
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
+
+export function useMarkdownLink(): MarkdownLinkHandler | undefined {
+  return useContext(markdownLinkContext)
+}
 
 const markdownTextContext = createContext<((text: string) => string) | undefined>(undefined)
 
@@ -39,7 +46,8 @@ export function markdownFilePath(href: string): string | undefined {
     } catch { return undefined }
   }
   try {
-    const path = decodeURIComponent(value.split(/[?#]/u, 1)[0] ?? '')
+    let path = decodeURIComponent(value.split(/[?#]/u, 1)[0] ?? '')
+    if (path.startsWith('./')) path = path.slice(2)
     return path.length > 0 && !path.startsWith('//') ? path : undefined
   } catch { return undefined }
 }
@@ -57,16 +65,60 @@ interface MarkdownNode {
  * result and their rendered element, so per-chunk work is O(tail) instead of
  * O(whole message).
  */
+function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: string }[] {
+  const files: { path: string; name?: string }[] = []
+  const seen = new Set<string>()
+
+  function walk(list: MarkdownNode[]) {
+    for (const node of list) {
+      if (node.token.type === 'fence' || node.token.type === 'code_block' || node.token.type === 'html') continue
+      if (node.token.type === 'inline' && node.token.children) {
+        const children = node.token.children
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i]!
+          if (child.type === 'link_open') {
+            const href = child.attrGet('href')
+            const path = href ? markdownFilePath(href) : undefined
+            if (path && !seen.has(path)) {
+              seen.add(path)
+              let label = ''
+              for (let j = i + 1; j < children.length && children[j]!.type !== 'link_close'; j += 1) {
+                if (children[j]!.content) label += children[j]!.content
+              }
+              files.push({ path, name: label || undefined })
+            }
+          }
+        }
+      }
+      if (node.children.length > 0) walk(node.children)
+    }
+  }
+  walk(nodes)
+  return files.slice(0, 4)
+}
+
 export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
   const styles = useThemedStyles(createStyles)
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
-  // markdown-it treats `\r\n?` as a line break; a lone CR would desync the
-  // incremental offsets and silently drop paragraphs. Normalize first.
-  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/gu, '\n')), [source])
-  return <View style={styles.container}>{nodes.map(node => renderBlockCached(node, styles, onLinkPress))}</View>
+  // Normalize CR / CRLF to LF
+  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, '\n')), [source])
+  const referencedFiles = useMemo(() => extractReferencedFiles(nodes), [nodes])
+
+  return (
+    <View style={styles.container}>
+      {nodes.map(node => renderBlockCached(node, styles, onLinkPress))}
+      {referencedFiles.length > 0 && (
+        <View style={{ marginTop: 6, gap: 4 }}>
+          {referencedFiles.map(file => (
+            <PresentedFileCard key={file.path} file={{ path: file.path, name: file.name }} onFilePress={onLinkPress} />
+          ))}
+        </View>
+      )}
+    </View>
+  )
 })
 
 interface BlockParseCache {
@@ -174,7 +226,8 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, onLinkPress?: M
     return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
   }
   if (token.type === 'fence' || token.type === 'code_block') {
-    return <View key={key} style={styles.codeBlock}><Text selectable style={styles.code}>{token.content.replace(/\n$/, '')}</Text></View>
+    const lang = token.type === 'fence' ? token.info.trim().split(/\s+/u)[0] : undefined
+    return <CodeBlockView key={key} code={token.content} language={lang} />
   }
   if (token.type === 'blockquote_open') {
     return <View key={key} style={styles.blockquote}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
@@ -248,7 +301,19 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
       else if (token.type === 's_open') output.push(<Text key={key} style={styles.strike}>{content}</Text>)
       else if (token.type === 'link_open') {
         const href = token.attrGet('href')
-        output.push(<Text key={key} style={styles.link} onPress={href !== null && onLinkPress !== undefined ? () => onLinkPress(href) : undefined}>{content}</Text>)
+        const filePath = href ? markdownFilePath(href) : undefined
+        const linkKind = filePath ? classifyDshLinkPath(filePath) : undefined
+        output.push(
+          <Text key={key} style={styles.link} onPress={href !== null && onLinkPress !== undefined ? () => onLinkPress(href) : undefined}>
+            {linkKind && (
+              <View style={{ marginRight: 3, top: 1 }}>
+                <DshLinkIcon kind={linkKind} size={14} color={styles.link.color} />
+              </View>
+            )}
+            {linkKind ? ' ' : ''}
+            {content}
+          </Text>
+        )
       }
       else output.push(...content)
       index = closing

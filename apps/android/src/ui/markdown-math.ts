@@ -10,13 +10,13 @@ export function installMath(parser: MarkdownIt): void {
     if (!open) return false
     const close = open === '$$' ? '$$' : '\\]'
     let line = start
-    let content = first.slice(2)
+    let content = first.slice(open.length)
     while (!content.trimEnd().endsWith(close)) {
       line += 1
       if (line >= end || (state.sCount[line]! < state.blkIndent && state.src.slice(state.bMarks[line], state.eMarks[line]).trim())) return false
       content += '\n' + state.src.slice(state.bMarks[line]! + state.tShift[line]!, state.eMarks[line])
     }
-    content = content.trimEnd().slice(0, -2).trim()
+    content = content.trimEnd().slice(0, -close.length).trim()
     if (!content) return false
     if (silent) return true
     const token = state.push('math_block', 'math', 0)
