@@ -48,7 +48,14 @@ import type { CustomPrompt } from '../services/storage'
 import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts } from '../services/storage'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import type { ChatSection } from '../state/message-helpers'
-import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../state/message-helpers'
+import {
+  chatSections,
+  computeStreamingSignature,
+  inboxQueuedItems,
+  inboxRpcIds,
+  LATEST_EDGE_PX,
+  mergeReplyReasoning,
+} from '../state/message-helpers'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { placeUiArtifacts, projectUiArtifacts, type UiArtifact } from '../state/ui-artifacts'
 import type {
@@ -148,13 +155,6 @@ const LONG_DRAFT_HINT = 12_000
 
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
-
-/**
- * Distance from the newest row that still counts as "at the latest message".
- * Follow mode and the jump-to-latest button share this edge, so the button
- * appears exactly when the viewport has left the turn streaming appends to.
- */
-const LATEST_EDGE_PX = 80
 
 export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
   // New subagent children and running-state changes must reach `sessions`
@@ -325,6 +325,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const listViewportRef = useRef({ width: 0, height: 0 })
   const listContentRef = useRef({ width: 0, height: 0 })
   const userScrollingRef = useRef(false)
+  const hasTrailingScrollRef = useRef(false)
+  const pendingScrollStreakRef = useRef(0)
+  const scrollIntentGenerationRef = useRef(0)
   /** Keep the viewport on the latest turn until the user scrolls away. */
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
@@ -478,6 +481,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
 
   const cancelPendingScroll = useCallback(() => {
+    hasTrailingScrollRef.current = false
+    pendingScrollStreakRef.current = 0
     if (scrollTimerRef.current !== null) clearTimeout(scrollTimerRef.current)
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
     scrollTimerRef.current = null
@@ -486,21 +491,51 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   // Follow measured content and viewport changes (including the keyboard).
   // Keep a trailing command so the last streaming measurement is never lost,
-  // while limiting native scrolls to ~10 Hz with no React state updates.
+  // while coalescing high-frequency deltas (~30 Hz) with no React state updates.
   const scheduleScrollToBottom = useCallback(() => {
-    if (scrollTimerRef.current !== null || scrollFrameRef.current !== null) return
-    scrollTimerRef.current = setTimeout(() => {
-      scrollTimerRef.current = null
+    if (!pinToBottomRef.current && !initialPinRef.current) return
+    if (userScrollingRef.current) return
+
+    if (scrollTimerRef.current !== null || scrollFrameRef.current !== null) {
+      hasTrailingScrollRef.current = true
+      return
+    }
+
+    const runScroll = () => {
       scrollFrameRef.current = requestAnimationFrame(() => {
         scrollFrameRef.current = null
         if (!autoScrollAllowedRef.current || userScrollingRef.current
-          || (!pinToBottomRef.current && !initialPinRef.current)) return
+          || (!pinToBottomRef.current && !initialPinRef.current)) {
+          hasTrailingScrollRef.current = false
+          pendingScrollStreakRef.current = 0
+          return
+        }
         lastAutoScrollAt.current = Date.now()
         // Nonanimated commands also keep native momentum callbacks reserved
         // for user flings, so they cannot disable following during a reply.
         listRef.current?.scrollToEnd({ animated: false })
+
+        if (hasTrailingScrollRef.current && pendingScrollStreakRef.current < 2) {
+          hasTrailingScrollRef.current = false
+          pendingScrollStreakRef.current += 1
+          scheduleScrollToBottom()
+        } else {
+          hasTrailingScrollRef.current = false
+          pendingScrollStreakRef.current = 0
+        }
       })
-    }, Math.max(0, 100 - (Date.now() - lastAutoScrollAt.current)))
+    }
+
+    const elapsed = Date.now() - lastAutoScrollAt.current
+    const delay = Math.max(0, 33 - elapsed)
+    if (delay === 0) {
+      runScroll()
+    } else {
+      scrollTimerRef.current = setTimeout(() => {
+        scrollTimerRef.current = null
+        runScroll()
+      }, delay)
+    }
   }, [])
 
   // Following the latest turn is suspended once the user scrolls away, so the
@@ -519,6 +554,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // re-asserts the end once the rows below finish re-measuring, which a single
   // scroll command cannot guarantee on a virtualized list.
   const jumpToLatest = useCallback(() => {
+    scrollIntentGenerationRef.current++
     cancelPendingScroll()
     userScrollingRef.current = false
     pinToBottomRef.current = true
@@ -538,6 +574,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   // Restore reading position before the new list can emit scroll events.
   useLayoutEffect(() => {
+    scrollIntentGenerationRef.current++
     cancelPendingScroll()
     setTrajectory(false)
     savedPosition.current = useBrowseMemory.getState().entries[memoryKey]?.position
@@ -583,13 +620,16 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     initialPinRef.current = false
   }, [historyLoadingOlder])
 
-  // Scroll when a brand-new item is appended. Streaming deltas keep the same
-  // item id, so this fires once per assistant step instead of once per chunk.
+  // Streaming deltas keep the same item id, but update text length / reasoning.
+  // Compute a cheap signature of the last item so streaming increments trigger auto-scroll.
+  const streamingSignature = useMemo(() => computeStreamingSignature(visibleMessages), [visibleMessages])
+
+  // Scroll when a brand-new item is appended or the last message receives streaming tokens.
   useEffect(() => {
     if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     scheduleScrollToBottom()
-  }, [visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
+  }, [streamingSignature, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
 
   const onListLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout
@@ -638,12 +678,22 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     // Content growth and IME resizing can also emit scroll events. Only a
     // user's drag/fling changes the intent to follow the latest response.
-    if (!userScrollingRef.current || restoringPosition.current) {
+    if (restoringPosition.current) {
       syncLatestTurnIndicator(distanceFromEnd)
       return
     }
     const atBottom = distanceFromEnd <= LATEST_EDGE_PX
-    pinToBottomRef.current = atBottom
+    if (userScrollingRef.current) {
+      if (distanceFromEnd > LATEST_EDGE_PX) {
+        pinToBottomRef.current = false
+        initialPinRef.current = false
+      } else {
+        pinToBottomRef.current = true
+      }
+    } else if (atBottom) {
+      pinToBottomRef.current = true
+      initialPinRef.current = false
+    }
     syncLatestTurnIndicator(distanceFromEnd)
     if (atBottom) setNewContent(false)
     if (session !== undefined && (Date.now() - lastPositionSave.current > 200 || atBottom)) {
@@ -658,10 +708,32 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     contentBefore.current = {key: memoryKey, version: lastContentVersion}
   }, [lastContentVersion, memoryKey])
 
-  const onListScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const onListDragEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    onListScroll(event)
+    const velocityY = Math.abs(event.nativeEvent.velocity?.y ?? 0)
+    if (velocityY <= 0.05) {
+      userScrollingRef.current = false
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+      const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
+      if (distanceFromEnd <= LATEST_EDGE_PX) {
+        pinToBottomRef.current = true
+        initialPinRef.current = false
+        scheduleScrollToBottom()
+      }
+    }
+  }, [onListScroll, scheduleScrollToBottom])
+
+  const onListMomentumEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onListScroll(event)
     userScrollingRef.current = false
-  }, [onListScroll])
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
+    if (distanceFromEnd <= LATEST_EDGE_PX) {
+      pinToBottomRef.current = true
+      initialPinRef.current = false
+      scheduleScrollToBottom()
+    }
+  }, [onListScroll, scheduleScrollToBottom])
 
   // Artifact changes must invalidate FlatList cells even when their section is
   // reused (a later turn can patch a card owned by an earlier turn).
@@ -819,8 +891,30 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     setMentionType(null)
     selectionRef.current = { start: 0, end: 0 }
     setSelection({ start: 0, end: 0 })
+    const targetSessionId = session.sessionId
+    const sendGeneration = ++scrollIntentGenerationRef.current
+    const previousPin = pinToBottomRef.current
+    const previousInitialPin = initialPinRef.current
+    const previousAway = awayFromLatestRef.current
+    pinToBottomRef.current = true
+    initialPinRef.current = true
+    pendingScrollStreakRef.current = 0
+    awayFromLatestRef.current = false
+    setAwayFromLatest(false)
+    setNewContent(false)
+    scheduleScrollToBottom()
     const outcome = await sendMessage(text, submittedImages)
     if (outcome === 'rejected') {
+      if (session.sessionId === targetSessionId && scrollIntentGenerationRef.current === sendGeneration) {
+        cancelPendingScroll()
+        pinToBottomRef.current = previousPin
+        initialPinRef.current = previousInitialPin
+        awayFromLatestRef.current = previousAway
+        setAwayFromLatest(previousAway)
+        if (previousPin || previousInitialPin) {
+          scheduleScrollToBottom()
+        }
+      }
       // Nothing was persisted (command failure): restore the draft without
       // clobbering input typed while the send was in flight.
       const inFlight = useBrowseMemory.getState().entries[memoryKey]?.draft ?? ''
@@ -1299,15 +1393,17 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           maintainVisibleContentPosition={{minIndexForVisible: 0}}
           scrollEventThrottle={16}
           onScrollBeginDrag={() => {
+            scrollIntentGenerationRef.current++
             cancelPendingScroll()
             userScrollingRef.current = true
-            pinToBottomRef.current = false
-            initialPinRef.current = false
             Keyboard.dismiss()
           }}
-          onScrollEndDrag={onListScrollEnd}
-          onMomentumScrollBegin={() => { userScrollingRef.current = true }}
-          onMomentumScrollEnd={onListScrollEnd}
+          onScrollEndDrag={onListDragEnd}
+          onMomentumScrollBegin={() => {
+            cancelPendingScroll()
+            userScrollingRef.current = true
+          }}
+          onMomentumScrollEnd={onListMomentumEnd}
           ListEmptyComponent={busy === `session:${session.sessionId}`
             ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
             : <WelcomeMessage />}
