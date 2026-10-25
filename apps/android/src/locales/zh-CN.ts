@@ -211,6 +211,8 @@ const zhCN = {
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     compactHistorySaveFailed: '无法保存会话精简设置',
     compactHistory: '会话精简模式', compactHistoryNote: '缩减历史工具详情，保留正文和状态。需 Host 支持；切换后重新打开会话生效。',
+    typographyDensity: '排版密度', typographyDensityNote: '调整正文行距、段间距与气泡紧凑度',
+    densityStandard: '标准', densityCompact: '紧凑', typographyDensitySaveFailed: '无法保存排版密度设置',
     statusBar: '显示状态栏', statusBarNote: '显示屏幕顶部的时间、电量和网络状态。关闭后隐藏系统状态栏。', statusBarSaveFailed: '无法保存状态栏设置', statusBarSaveFailedBody: '本地存储写入失败，请重试。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',

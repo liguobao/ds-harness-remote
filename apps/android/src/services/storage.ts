@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isThemePreference, type ThemePreference } from '../ui/theme'
+import { isThemePreference, isTypographyDensity, type ThemePreference, type TypographyDensity } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 const KEYS = {
@@ -19,6 +19,7 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
+  typographyDensity: 'dshremote.typography-density.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
@@ -438,4 +439,13 @@ export async function loadCompactHistory(): Promise<boolean> {
 }
 export async function saveCompactHistory(value: boolean): Promise<void> {
   await writeJson(KEYS.compactHistory, { value })
+}
+
+export async function loadTypographyDensity(): Promise<TypographyDensity> {
+  const stored = await readJson<{ value: unknown }>(KEYS.typographyDensity)
+  return isTypographyDensity(stored?.value) ? stored.value : 'compact'
+}
+
+export async function saveTypographyDensity(value: TypographyDensity): Promise<void> {
+  await writeJson(KEYS.typographyDensity, { value })
 }

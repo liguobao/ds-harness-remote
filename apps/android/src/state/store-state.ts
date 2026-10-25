@@ -26,7 +26,7 @@ import type {
   WorkspaceShortcut,
   WorkspaceView,
 } from '../types'
-import type { ThemePreference } from '../ui/theme'
+import type { ThemePreference, TypographyDensity } from '../ui/theme'
 
 type BootPhase = 'loading' | 'ready' | 'error'
 
@@ -95,6 +95,7 @@ export interface AppState {
   language: AppLanguage
   statusBarVisible: boolean
   themePreference: ThemePreference
+  typographyDensity: TypographyDensity
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
@@ -168,6 +169,7 @@ export interface AppState {
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
+  setTypographyDensity(density: TypographyDensity): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>

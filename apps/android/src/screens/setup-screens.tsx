@@ -20,7 +20,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ThemePreference } from '../ui/theme'
+import type { ThemePreference, TypographyDensity } from '../ui/theme'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
@@ -452,6 +452,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const showAllLanguages = allLanguagesVisible || !['system', 'zh-CN', 'en-US'].includes(languagePreference)
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
+  const typographyDensity = useAppStore(state => state.typographyDensity)
+  const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
+  const [densitySaving, setDensitySaving] = useState(false)
   const compactHistory = useAppStore(state => state.compactHistory)
   const setCompactHistory = useAppStore(state => state.setCompactHistory)
   const [compactSaving, setCompactSaving] = useState(false)
@@ -487,6 +490,14 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
     try { await setCompactHistory(value) }
     catch { Alert.alert(zhCN.settings.compactHistorySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setCompactSaving(false) }
+  }
+
+  const toggleTypographyDensity = async (value: TypographyDensity) => {
+    if (densitySaving || value === typographyDensity) return
+    setDensitySaving(true)
+    try { await setTypographyDensity(value) }
+    catch { Alert.alert(zhCN.settings.typographyDensitySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setDensitySaving(false) }
   }
 
   const toggleStatusBar = async (visible: boolean) => {
@@ -584,6 +595,36 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                     accessibilityRole="tab"
                     accessibilityState={{ selected: chosen }}
                     onPress={() => void setThemePreference(option.value)}
+                    style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
+                  >
+                    <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>
+                      {option.name}
+                    </Text>
+                  </Pressable>
+                )
+              })}
+            </View>
+
+            <View style={styles.preferenceList}>
+              <View style={styles.preferenceOption}>
+                <View style={styles.preferenceCopy}>
+                  <Text style={styles.preferenceName}>{zhCN.settings.typographyDensity}</Text>
+                  <Text style={styles.preferenceDescription}>{zhCN.settings.typographyDensityNote}</Text>
+                </View>
+              </View>
+            </View>
+            <View style={[styles.segmentRow, styles.appearanceSegments]} accessibilityRole="tablist">
+              {([
+                { value: 'standard' as const, name: zhCN.settings.densityStandard },
+                { value: 'compact' as const, name: zhCN.settings.densityCompact },
+              ]).map(option => {
+                const chosen = option.value === typographyDensity
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: chosen }}
+                    onPress={() => void toggleTypographyDensity(option.value)}
                     style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
                   >
                     <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>

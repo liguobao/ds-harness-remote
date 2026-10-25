@@ -146,7 +146,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
-        console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage)
+        console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage, error)
         await runtime.connection.close({ preserveRecovery: recovering && !isSessionAuthError(error) })
         if (isSessionAuthError(error)) {
           await get().requireReauth(friendlyError(error))

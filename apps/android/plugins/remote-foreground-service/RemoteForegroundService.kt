@@ -46,7 +46,11 @@ class RemoteForegroundService : Service() {
     }
     try {
       createChannel()
-      startForeground(NOTIFICATION_ID, notification())
+      if (Build.VERSION.SDK_INT >= 34) {
+        startForeground(NOTIFICATION_ID, notification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+      } else {
+        startForeground(NOTIFICATION_ID, notification())
+      }
       startRuntime()
       running = this
       receiver?.send(0, Bundle.EMPTY)

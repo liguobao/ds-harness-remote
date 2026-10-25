@@ -4,13 +4,14 @@ import {
   saveCompactHistory,
   saveLanguagePreference,
   saveThemePreference,
+  saveTypographyDensity,
   saveStatusBarVisible,
   saveTransportPreference,
 } from '../services/storage'
 import type { AppState, StoreAccess } from './store-state'
 
 export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
@@ -37,6 +38,11 @@ export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppStat
     async setThemePreference(themePreference) {
       await saveThemePreference(themePreference)
       set({ themePreference })
+    },
+
+    async setTypographyDensity(typographyDensity) {
+      await saveTypographyDensity(typographyDensity)
+      set({ typographyDensity })
     },
 
     async setDefaultPermissionPreset(defaultPermissionPreset) {

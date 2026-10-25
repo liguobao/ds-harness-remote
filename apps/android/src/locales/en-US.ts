@@ -213,6 +213,8 @@ const enUS = {
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
     compactHistorySaveFailed: 'Could not save compact conversation setting',
     compactHistory: 'Compact conversations', compactHistoryNote: 'Shortens tool history, keeping text and status. Requires Host support. Reopen the conversation after changing this.',
+    typographyDensity: 'Reading density', typographyDensityNote: 'Adjust text line height, paragraph spacing, and bubble padding',
+    densityStandard: 'Standard', densityCompact: 'Compact', typographyDensitySaveFailed: 'Could not save reading density setting',
     statusBar: 'Show status bar', statusBarNote: 'Show the time, battery and network status at the top of the screen. Turn off to hide the system status bar.', statusBarSaveFailed: 'Could not save status bar setting', statusBarSaveFailedBody: 'Could not write to local storage. Please try again.',
     theme: 'Dark mode', themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System',
     chat: 'Chat',

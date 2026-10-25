@@ -213,6 +213,8 @@ const esES = {
     language: "Idioma", languageSystem: "Seguir el sistema", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Con el sistema predeterminado, la aplicación sigue automáticamente la configuración de idioma de Android.",
     compactHistorySaveFailed: "No se pudo guardar la configuración de conversación compacta",
     compactHistory: "Conversaciones compactas", compactHistoryNote: "Acorta el historial de la herramienta, manteniendo el texto y el estado. Requiere soporte de anfitrión. Vuelva a abrir la conversación después de cambiar esto.",
+    typographyDensity: "Densidad de lectura", typographyDensityNote: "Ajustar interlineado, espacio entre párrafos y relleno de burbujas",
+    densityStandard: "Estándar", densityCompact: "Compacto", typographyDensitySaveFailed: "No se pudo guardar la configuración de densidad de lectura",
     statusBar: "Mostrar barra de estado", statusBarNote: "Muestra la hora, la batería y el estado de la red en la parte superior de la pantalla. Desactívelo para ocultar la barra de estado del sistema.", statusBarSaveFailed: "No se pudo guardar la configuración de la barra de estado", statusBarSaveFailedBody: "No se pudo escribir en el almacenamiento local. Por favor inténtalo de nuevo.",
     theme: "Modo oscuro", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
     chat: "Charlar",

@@ -2,6 +2,12 @@ export type ColorScheme = 'light' | 'dark'
 
 export type ThemePreference = 'system' | ColorScheme
 
+export type TypographyDensity = 'standard' | 'compact'
+
+export function isTypographyDensity(value: unknown): value is TypographyDensity {
+  return value === 'standard' || value === 'compact'
+}
+
 export function isThemePreference(value: unknown): value is ThemePreference {
   return value === 'system' || value === 'light' || value === 'dark'
 }
@@ -120,13 +126,30 @@ export const radius = {
   pill: 999,
 } as const
 
-export const type = {
-  hero: { fontSize: 32, lineHeight: 38, fontWeight: '700' as const, letterSpacing: -0.6 },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: '700' as const, letterSpacing: -0.3 },
-  heading: { fontSize: 18, lineHeight: 24, fontWeight: '600' as const },
-  body: { fontSize: 16, lineHeight: 24, fontWeight: '400' as const },
-  bodyStrong: { fontSize: 16, lineHeight: 22, fontWeight: '600' as const },
-  small: { fontSize: 14, lineHeight: 20, fontWeight: '400' as const },
-  smallStrong: { fontSize: 14, lineHeight: 20, fontWeight: '600' as const },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' as const },
+export const standardType = {
+  hero: { fontSize: 32, lineHeight: 38, fontWeight: '700' as const, letterSpacing: -0.6, includeFontPadding: false },
+  title: { fontSize: 24, lineHeight: 30, fontWeight: '700' as const, letterSpacing: -0.3, includeFontPadding: false },
+  heading: { fontSize: 18, lineHeight: 24, fontWeight: '600' as const, includeFontPadding: false },
+  body: { fontSize: 16, lineHeight: 22, fontWeight: '400' as const, includeFontPadding: false },
+  bodyStrong: { fontSize: 16, lineHeight: 22, fontWeight: '600' as const, includeFontPadding: false },
+  small: { fontSize: 14, lineHeight: 19, fontWeight: '400' as const, includeFontPadding: false },
+  smallStrong: { fontSize: 14, lineHeight: 19, fontWeight: '600' as const, includeFontPadding: false },
+  caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' as const, includeFontPadding: false },
 } as const
+
+export const compactType = {
+  hero: { fontSize: 30, lineHeight: 36, fontWeight: '700' as const, letterSpacing: -0.6, includeFontPadding: false },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: '700' as const, letterSpacing: -0.3, includeFontPadding: false },
+  heading: { fontSize: 17, lineHeight: 22, fontWeight: '600' as const, includeFontPadding: false },
+  body: { fontSize: 15, lineHeight: 20, fontWeight: '400' as const, includeFontPadding: false },
+  bodyStrong: { fontSize: 15, lineHeight: 20, fontWeight: '600' as const, includeFontPadding: false },
+  small: { fontSize: 13, lineHeight: 17, fontWeight: '400' as const, includeFontPadding: false },
+  smallStrong: { fontSize: 13, lineHeight: 17, fontWeight: '600' as const, includeFontPadding: false },
+  caption: { fontSize: 11, lineHeight: 15, fontWeight: '500' as const, includeFontPadding: false },
+} as const
+
+export function typeForDensity(density: TypographyDensity) {
+  return density === 'compact' ? compactType : standardType
+}
+
+export const type = standardType

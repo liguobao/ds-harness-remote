@@ -211,6 +211,8 @@ const zhTW = {
     language: '語言', languageSystem: '跟隨系統', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '選擇“跟隨系統”後，App 會隨 Android 的語言設定自動切換。',
     compactHistorySaveFailed: '無法儲存會話精簡設定',
     compactHistory: '會話精簡模式', compactHistoryNote: '縮減歷史工具詳情，保留正文和狀態。需 Host 支援；切換後重新開啟會話生效。',
+    typographyDensity: '排版密度', typographyDensityNote: '調整正文行距、段落間距與氣泡邊距',
+    densityStandard: '標準', densityCompact: '緊湊', typographyDensitySaveFailed: '無法儲存排版密度設定',
     statusBar: '顯示狀態列', statusBarNote: '顯示螢幕頂部的時間、電量和網路狀態。關閉後隱藏系統狀態列。', statusBarSaveFailed: '無法儲存狀態列設定', statusBarSaveFailedBody: '本地儲存寫入失敗，請重試。',
     theme: '深色模式', themeLight: '淺色', themeDark: '深色', themeSystem: '跟隨系統',
     chat: '對話',

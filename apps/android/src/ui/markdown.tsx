@@ -1,7 +1,7 @@
 import { createContext, memo, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import MarkdownIt, { type Token } from 'markdown-it'
-import { radius, spacing, type } from './theme'
+import { radius, spacing, typeForDensity, type TypographyDensity } from './theme'
 import { installMath } from './markdown-math'
 import { MathFormula } from './math-formula'
 import { type ThemeColors } from './theme-context'
@@ -272,35 +272,37 @@ function headingStyle(tag: string, styles: MarkdownStyles) {
   return styles.h4
 }
 
-function createStyles(colors: ThemeColors) {
+export function createStyles(colors: ThemeColors, density: TypographyDensity = 'compact') {
+  const isCompact = density === 'compact'
+  const t = typeForDensity(density)
   return StyleSheet.create({
     container: { alignSelf: 'stretch' },
-    paragraph: { ...type.body, color: colors.ink, marginBottom: spacing.xs },
-    heading: { color: colors.ink, fontWeight: '700', marginTop: spacing.xs, marginBottom: spacing.sm },
-    h1: { fontSize: 24, lineHeight: 30 },
-    h2: { fontSize: 21, lineHeight: 28 },
-    h3: { fontSize: 18, lineHeight: 25 },
-    h4: { fontSize: 16, lineHeight: 23 },
+    paragraph: { ...t.body, color: colors.ink, marginBottom: isCompact ? 4 : 6 },
+    heading: { color: colors.ink, fontWeight: '700', marginTop: isCompact ? 4 : 6, marginBottom: isCompact ? 6 : 8 },
+    h1: isCompact ? { fontSize: 20, lineHeight: 25, includeFontPadding: false } : { fontSize: 22, lineHeight: 28, includeFontPadding: false },
+    h2: isCompact ? { fontSize: 18, lineHeight: 23, includeFontPadding: false } : { fontSize: 19, lineHeight: 25, includeFontPadding: false },
+    h3: isCompact ? { fontSize: 16, lineHeight: 21, includeFontPadding: false } : { fontSize: 17, lineHeight: 23, includeFontPadding: false },
+    h4: isCompact ? { fontSize: 14, lineHeight: 19, includeFontPadding: false } : { fontSize: 15, lineHeight: 21, includeFontPadding: false },
     strong: { fontWeight: '700' },
     emphasis: { fontStyle: 'italic' },
     strike: { textDecorationLine: 'line-through' },
     link: { color: colors.primary, textDecorationLine: 'underline' },
-    inlineCode: { fontFamily: 'monospace', fontSize: 14, color: colors.ink, backgroundColor: colors.surfaceStrong },
+    inlineCode: { fontFamily: 'monospace', fontSize: isCompact ? 12.5 : 13.5, color: colors.ink, backgroundColor: colors.surfaceStrong, paddingHorizontal: 3, borderRadius: 3, includeFontPadding: false },
     mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 4, paddingHorizontal: 4 },
     imageAlt: { color: colors.muted, fontStyle: 'italic' },
-    codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.surface, padding: spacing.sm, marginBottom: spacing.sm },
-    code: { fontFamily: 'monospace', fontSize: 13, lineHeight: 20, color: colors.ink },
-    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: spacing.sm, marginBottom: spacing.sm },
-    list: { gap: spacing.xxs, marginBottom: spacing.sm },
+    codeBlock: { alignSelf: 'stretch', borderRadius: isCompact ? radius.sm : radius.md, backgroundColor: colors.surface, padding: isCompact ? 8 : 10, marginBottom: isCompact ? 5 : 8 },
+    code: { fontFamily: 'monospace', fontSize: isCompact ? 12 : 13, lineHeight: isCompact ? 17 : 18.5, color: colors.ink, includeFontPadding: false },
+    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: isCompact ? 8 : 10, marginBottom: isCompact ? 5 : 8 },
+    list: { gap: isCompact ? 1 : 2, marginBottom: isCompact ? 5 : 8 },
     listItem: { flexDirection: 'row', alignItems: 'flex-start' },
-    listMarker: { ...type.body, color: colors.muted, width: 26 },
+    listMarker: { ...t.body, color: colors.muted, width: isCompact ? 22 : 26 },
     listContent: { flex: 1 },
-    rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: spacing.md },
-    table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, overflow: 'hidden', marginBottom: spacing.sm },
+    rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: isCompact ? spacing.sm : spacing.md },
+    table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, overflow: 'hidden', marginBottom: isCompact ? 5 : 8 },
     tableRow: { flexDirection: 'row' },
-    tableCell: { flex: 1, padding: spacing.xs, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    tableCell: { flex: 1, padding: isCompact ? 4 : 6, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
     tableHeader: { backgroundColor: colors.surfaceStrong },
-    tableHeaderText: { ...type.smallStrong, color: colors.ink },
-    tableText: { ...type.small, color: colors.ink },
+    tableHeaderText: { ...t.smallStrong, color: colors.ink },
+    tableText: { ...t.small, color: colors.ink },
   })
 }
