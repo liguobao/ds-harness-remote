@@ -340,6 +340,9 @@ export interface ChatImage {
   sessionId?: string
   uri?: string
   name?: string
+  mediaType?: string
+  width?: number
+  height?: number
 }
 
 export interface ImageAttachmentLimits {

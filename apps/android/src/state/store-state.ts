@@ -88,6 +88,8 @@ export interface AppState {
   historyHasMore: boolean
   historyLoadingOlder: boolean
   oldestLoadedSeq?: number
+  previewImageUri?: string
+  setPreviewImageUri(uri?: string): void
   transportPreference: TransportPreference
   compactHistory: boolean
   setCompactHistory(value: boolean): Promise<void>

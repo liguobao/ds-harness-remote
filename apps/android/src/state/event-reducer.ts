@@ -658,10 +658,16 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
     const uri = imageDataUri(block)
     if (uri === undefined && attachmentId === undefined) return []
     const name = stringValue(block.name) ?? stringValue(attachment.name)
+    const mediaType = stringValue(block.mediaType) ?? stringValue(attachment.mediaType)
+    const width = typeof block.width === 'number' ? block.width : typeof attachment.width === 'number' ? attachment.width : undefined
+    const height = typeof block.height === 'number' ? block.height : typeof attachment.height === 'number' ? attachment.height : undefined
     return [{
       ...(attachmentId === undefined ? {} : { attachmentId, sessionId }),
       ...(uri === undefined ? {} : { uri }),
       ...(name === undefined ? {} : { name }),
+      ...(mediaType === undefined ? {} : { mediaType }),
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
     }]
   })
 }

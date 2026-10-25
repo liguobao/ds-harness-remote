@@ -3,13 +3,13 @@ import { strings as zhCN } from '../locales/i18n'
 import type { ImageAttachmentLimits, ImageMediaType, PromptImage, RemoteSession } from '../types'
 
 const IMAGE_MEDIA_TYPES: readonly ImageMediaType[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const DEFAULT_MAX_IMAGES_PER_MESSAGE = 4
 
 export function sessionImageLimits(session: RemoteSession): ImageAttachmentLimits | undefined {
   const value = session.projections?.values?.imageLimits
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const limits = value as Partial<ImageAttachmentLimits>
   if (!positiveNumber(limits.maxImageBytes)
-    || !positiveNumber(limits.maxImagesPerMessage)
     || !positiveNumber(limits.maxMessageImageBytes)
     || !positiveNumber(limits.maxImagePixels)
     || !positiveNumber(limits.maxImageDimension)
@@ -19,7 +19,9 @@ export function sessionImageLimits(session: RemoteSession): ImageAttachmentLimit
   if (mediaTypes.length === 0) return undefined
   return {
     maxImageBytes: limits.maxImageBytes,
-    maxImagesPerMessage: limits.maxImagesPerMessage,
+    maxImagesPerMessage: positiveInteger(limits.maxImagesPerMessage)
+      ? limits.maxImagesPerMessage
+      : DEFAULT_MAX_IMAGES_PER_MESSAGE,
     maxMessageImageBytes: limits.maxMessageImageBytes,
     maxImagePixels: limits.maxImagePixels,
     maxImageDimension: limits.maxImageDimension,
@@ -27,17 +29,23 @@ export function sessionImageLimits(session: RemoteSession): ImageAttachmentLimit
   }
 }
 
+export function sanitizeBase64(value: string): string {
+  return value.replace(/\s+/g, '').replace(/^data:image\/[a-zA-Z+.-]+;base64,/, '')
+}
+
 export function promptImageFromAsset(asset: ImagePicker.ImagePickerAsset): PromptImage {
   if (asset.base64 === undefined || asset.base64 === null || asset.base64.length === 0) {
     throw new Error('missing-image-data')
   }
-  const mediaType = imageMediaType(asset.mimeType, asset.fileName ?? asset.uri)
+  const base64 = sanitizeBase64(asset.base64)
+  if (base64.length === 0) throw new Error('missing-image-data')
+  const mediaType = imageMediaType(asset.mimeType, asset.fileName ?? asset.uri, base64)
   if (mediaType === undefined) throw new Error('unsupported-image-type')
   return {
     uri: asset.uri,
     mediaType,
-    data: asset.base64,
-    bytes: decodedBase64Bytes(asset.base64),
+    data: base64,
+    bytes: decodedBase64Bytes(base64),
     width: asset.width,
     height: asset.height,
     ...(asset.fileName === undefined || asset.fileName === null ? {} : { name: asset.fileName.split(/[\\/]/).at(-1)?.slice(0, 255) }),
@@ -54,13 +62,15 @@ export function promptImageFromBase64(input: {
   height: number
 }): PromptImage {
   if (input.base64.length === 0) throw new Error('missing-image-data')
-  const mediaType = imageMediaType(input.mimeType, input.name ?? input.uri)
+  const base64 = sanitizeBase64(input.base64)
+  if (base64.length === 0) throw new Error('missing-image-data')
+  const mediaType = imageMediaType(input.mimeType, input.name ?? input.uri, base64)
   if (mediaType === undefined) throw new Error('unsupported-image-type')
   return {
     uri: input.uri,
     mediaType,
-    data: input.base64,
-    bytes: decodedBase64Bytes(input.base64),
+    data: base64,
+    bytes: decodedBase64Bytes(base64),
     width: input.width,
     height: input.height,
     ...(input.name === undefined ? {} : { name: input.name.split(/[\\/]/).at(-1)?.slice(0, 255) }),
@@ -86,14 +96,35 @@ export function validatePromptImages(images: PromptImage[], limits?: ImageAttach
     : undefined
 }
 
-function imageMediaType(mimeType: string | undefined, name: string): ImageMediaType | undefined {
+export function sniffImageMediaType(base64: string): ImageMediaType | undefined {
+  if (base64.startsWith('iVBORw0KGgo')) return 'image/png'
+  if (base64.startsWith('/9j/')) return 'image/jpeg'
+  if (base64.startsWith('R0lGODlh') || base64.startsWith('R0lGODdh') || base64.startsWith('R0lGOD')) return 'image/gif'
+  if (base64.startsWith('UklGR')) {
+    try {
+      const header = atob(base64.slice(0, 32))
+      if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') return 'image/webp'
+    } catch {
+      return 'image/webp'
+    }
+  }
+  return undefined
+}
+
+export function imageMediaType(
+  mimeType: string | undefined,
+  name: string,
+  base64?: string,
+): ImageMediaType | undefined {
   const normalized = mimeType?.toLowerCase()
+  if (normalized === 'image/x-png') return 'image/png'
   if (IMAGE_MEDIA_TYPES.includes(normalized as ImageMediaType)) return normalized as ImageMediaType
   const extension = name.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
   if (extension === 'png') return 'image/png'
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
   if (extension === 'webp') return 'image/webp'
   if (extension === 'gif') return 'image/gif'
+  if (base64 !== undefined) return sniffImageMediaType(base64)
   return undefined
 }
 
@@ -104,6 +135,10 @@ function decodedBase64Bytes(value: string): number {
 
 function positiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
 function formatBytes(bytes: number): string {

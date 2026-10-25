@@ -37,6 +37,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -195,6 +196,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
+  const previewImageUri = useAppStore(state => state.previewImageUri)
+  const setPreviewImageUri = useAppStore(state => state.setPreviewImageUri)
   const memoryScope = browseScope(useAppStore.getState())
   const memoryKey = browseKey(memoryScope, session?.sessionId ?? '')
   const draft = useBrowseMemory(state => state.entries[memoryKey]?.draft ?? '')
@@ -938,9 +941,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const pickImages = async () => {
     const limits = sessionImageLimits(session)
-    const remaining = limits === undefined ? 0 : Math.max(0, limits.maxImagesPerMessage - images.length)
-    if (limits !== undefined && remaining === 0) {
-      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(limits.maxImagesPerMessage))
+    const maxAllowed = limits?.maxImagesPerMessage ?? 4
+    const remaining = Math.max(0, maxAllowed - images.length)
+    if (remaining === 0) {
+      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(maxAllowed))
       return
     }
     setPickingImages(true)
@@ -972,9 +976,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const takePhoto = async () => {
     const limits = sessionImageLimits(session)
-    const remaining = limits === undefined ? 0 : Math.max(0, limits.maxImagesPerMessage - images.length)
-    if (limits !== undefined && remaining === 0) {
-      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(limits.maxImagesPerMessage))
+    const maxAllowed = limits?.maxImagesPerMessage ?? 4
+    const remaining = Math.max(0, maxAllowed - images.length)
+    if (remaining === 0) {
+      Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(maxAllowed))
       return
     }
     setPickingImages(true)
@@ -1628,7 +1633,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-            {sessionImageLimits(session) !== undefined && (
+            {(sessionImageLimits(session) !== undefined || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex') && (
               <View style={styles.plusCardRow}>
                 <Pressable
                   accessibilityRole="button"
@@ -1804,6 +1809,33 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         onClose={() => setPromptEditing(null)}
         onSave={(title, text) => void savePromptEdit(title, text)}
       />
+      <Modal
+        visible={previewImageUri !== undefined}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewImageUri(undefined)}
+        statusBarTranslucent
+      >
+        <View style={styles.lightboxBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreviewImageUri(undefined)} />
+          {previewImageUri !== undefined && (
+            <Image
+              source={{ uri: previewImageUri }}
+              style={styles.lightboxImage}
+              resizeMode="contain"
+            />
+          )}
+          <Pressable
+            style={styles.lightboxClose}
+            onPress={() => setPreviewImageUri(undefined)}
+            accessibilityRole="button"
+            accessibilityLabel={zhCN.common.close}
+            hitSlop={12}
+          >
+            <X size={24} color="#ffffff" />
+          </Pressable>
+        </View>
+      </Modal>
     </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
   )
 }

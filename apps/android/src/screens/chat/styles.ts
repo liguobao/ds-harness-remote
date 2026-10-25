@@ -276,5 +276,26 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     promptInputLabel: { ...t.caption, color: colors.muted, marginBottom: 4, marginTop: 4 },
     promptInput: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.ink, paddingHorizontal: spacing.sm, paddingVertical: 8, ...t.body, minHeight: 40 },
     promptTextArea: { minHeight: 88, textAlignVertical: 'top' },
+    lightboxBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.92)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    lightboxImage: {
+      width: '100%',
+      height: '100%',
+    },
+    lightboxClose: {
+      position: 'absolute',
+      top: 50,
+      right: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
   })
 }

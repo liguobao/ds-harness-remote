@@ -20,6 +20,7 @@ const runtime: SessionRuntime = new SessionRuntime({
 })
 
 /** Only exposes the authenticated native carrier of the current connection. */
+export const requireProxy = () => runtime.connection.requireProxy()
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
 export const requireBotClient = () => runtime.connection.requireBotClient()
 
@@ -65,6 +66,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   agentPresetSelecting: false,
   historyHasMore: false,
   historyLoadingOlder: false,
+  previewImageUri: undefined,
+  setPreviewImageUri(uri?: string) {
+    set({ previewImageUri: uri })
+  },
   transportPreference: 'auto',
   languagePreference: 'system',
   language: getActiveLanguage(),
