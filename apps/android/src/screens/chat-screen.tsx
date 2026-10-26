@@ -1087,6 +1087,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     }
   }
 
+  const canAttachImages = sessionImageLimits(session) !== undefined
+    || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex'
+
   const pickFiles = async () => {
     const targetSessionId = session.sessionId
     const capturedGen = sessionGenerationRef.current
@@ -1114,6 +1117,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         const name = asset.name ?? 'file'
         const ext = name.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
         const isImage = asset.mimeType?.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext ?? '')
+
+        if (isImage && !canAttachImages) {
+          Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.unsupportedImage(name))
+          continue
+        }
 
         const fileObj = new File(asset.uri)
         let realSize = 0
@@ -1883,43 +1891,45 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-            {(sessionImageLimits(session) !== undefined || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex') && (
-              <View style={styles.plusCardRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={zhCN.chat.takePhoto}
-                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                  disabled={pickingImages || pickingFiles}
-                  onPress={() => { closePlusMenu(); void takePhoto() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
-                >
-                  <Camera size={22} color={colors.primary} />
-                  <Text style={styles.plusCardText}>{zhCN.chat.takePhoto}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={zhCN.chat.photos}
-                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                  disabled={pickingImages || pickingFiles}
-                  onPress={() => { closePlusMenu(); void pickImages() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
-                >
-                  <Images size={22} color={colors.primary} />
-                  <Text style={styles.plusCardText}>{zhCN.chat.photos}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={zhCN.chat.files}
-                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
-                  disabled={pickingImages || pickingFiles}
-                  onPress={() => { closePlusMenu(); void pickFiles() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
-                >
-                  <FileText size={22} color={colors.primary} />
-                  <Text style={styles.plusCardText}>{zhCN.chat.files}</Text>
-                </Pressable>
-              </View>
-            )}
+            <View style={styles.plusCardRow}>
+              {canAttachImages && (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={zhCN.chat.takePhoto}
+                    accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                    disabled={pickingImages || pickingFiles}
+                    onPress={() => { closePlusMenu(); void takePhoto() }}
+                    style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+                  >
+                    <Camera size={22} color={colors.primary} />
+                    <Text style={styles.plusCardText}>{zhCN.chat.takePhoto}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={zhCN.chat.photos}
+                    accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                    disabled={pickingImages || pickingFiles}
+                    onPress={() => { closePlusMenu(); void pickImages() }}
+                    style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+                  >
+                    <Images size={22} color={colors.primary} />
+                    <Text style={styles.plusCardText}>{zhCN.chat.photos}</Text>
+                  </Pressable>
+                </>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.files}
+                accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                disabled={pickingImages || pickingFiles}
+                onPress={() => { closePlusMenu(); void pickFiles() }}
+                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+              >
+                <FileText size={22} color={colors.primary} />
+                <Text style={styles.plusCardText}>{zhCN.chat.files}</Text>
+              </Pressable>
+            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={zhCN.chat.openWorkspaces}
