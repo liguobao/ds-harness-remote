@@ -29,6 +29,8 @@ import {
 } from 'lucide-react-native'
 import {
   type StagedFile,
+  documentImageReadBudget,
+  readDocumentImageBase64,
   formatUploadedFilesPrompt,
   formatFileBytes,
   isTextFile,
@@ -1102,6 +1104,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       const newStagedFiles: StagedFile[] = []
       const newImages: PromptImage[] = []
       const limits = sessionImageLimits(session)
+      const imageBudget = documentImageReadBudget(limits)
       const currentImages = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
       let stagedImagesCount = currentImages.length
       let stagedImagesBytes = currentImages.reduce((acc, img) => acc + img.bytes, 0)
@@ -1134,27 +1137,28 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(maxAllowed))
             continue
           }
-          if (limits !== undefined && realSize > limits.maxImageBytes) {
-            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imageTooLarge(name, formatFileBytes(limits.maxImageBytes)))
+          if (realSize > imageBudget.maxImageBytes) {
+            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imageTooLarge(name, formatFileBytes(imageBudget.maxImageBytes)))
             continue
           }
-          if (limits !== undefined && stagedImagesBytes + realSize > limits.maxMessageImageBytes) {
-            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imagesTooLarge(formatFileBytes(limits.maxMessageImageBytes)))
+          if (stagedImagesBytes + realSize > imageBudget.maxMessageImageBytes) {
+            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imagesTooLarge(formatFileBytes(imageBudget.maxMessageImageBytes)))
             continue
           }
           try {
-            const base64 = await fileObj.base64()
+            const base64 = await readDocumentImageBase64(fileObj, stagedImagesBytes, limits)
             const imgDim = await imageSize(asset.uri)
-            newImages.push(promptImageFromBase64({
+            const image = promptImageFromBase64({
               uri: asset.uri,
               base64,
               ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
               name,
               width: imgDim.width,
               height: imgDim.height,
-            }))
+            })
+            newImages.push(image)
             stagedImagesCount += 1
-            stagedImagesBytes += realSize
+            stagedImagesBytes += image.bytes
           } catch {
             Alert.alert(zhCN.chat.imagePickerFailedTitle, zhCN.chat.imagePickerFailedBody)
           }

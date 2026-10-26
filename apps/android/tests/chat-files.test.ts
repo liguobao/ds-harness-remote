@@ -1,36 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   type StagedFile,
-  formatFileBytes,
+  documentImageReadBudget,
+  readDocumentImageBase64,
   formatUploadedFilesPrompt,
   isTextFile,
   isValidUtf8Text,
-  MAX_SINGLE_FILE_BYTES,
-  MAX_TOTAL_FILES_BYTES,
 } from '../src/screens/chat-files'
 
 describe('chat-files utilities', () => {
-  describe('formatFileBytes', () => {
-    it('handles zero and negative or invalid values gracefully', () => {
-      expect(formatFileBytes(0)).toBe('0 B')
-      expect(formatFileBytes(-10)).toBe('0 B')
-      expect(formatFileBytes(Number.NaN)).toBe('0 B')
-    })
-
-    it('formats small files in bytes', () => {
-      expect(formatFileBytes(1)).toBe('1 B')
-      expect(formatFileBytes(512)).toBe('512 B')
-      expect(formatFileBytes(1023)).toBe('1023 B')
-    })
-
-    it('formats kilobytes and megabytes accurately', () => {
-      expect(formatFileBytes(1024)).toBe('1 KB')
-      expect(formatFileBytes(1536)).toBe('1.5 KB')
-      expect(formatFileBytes(1024 * 1024)).toBe('1 MB')
-      expect(formatFileBytes(2.5 * 1024 * 1024)).toBe('2.5 MB')
-    })
-  })
-
   describe('isTextFile', () => {
     it('detects common code and text file extensions', () => {
       expect(isTextFile('script.py')).toBe(true)
@@ -132,10 +110,29 @@ describe('chat-files utilities', () => {
     })
   })
 
-  describe('limits', () => {
-    it('defines realistic budgets for mobile uploads', () => {
-      expect(MAX_SINGLE_FILE_BYTES).toBe(512 * 1024)
-      expect(MAX_TOTAL_FILES_BYTES).toBe(2 * 1024 * 1024)
-    })
+  it('rejects oversized disk images before reading, including missing Host limits', async () => {
+    const fallback = documentImageReadBudget()
+    const smallHost = { maxImageBytes: 10, maxMessageImageBytes: 12 } as import('../src/types').ImageAttachmentLimits
+    for (const limits of [undefined, smallHost]) {
+      const budget = documentImageReadBudget(limits)
+      for (const [size, stagedBytes] of [[budget.maxImageBytes + 1, 0], [2, budget.maxMessageImageBytes - 1], [NaN, 0]]) {
+        const base64 = vi.fn(async () => 'YQ==')
+        await expect(readDocumentImageBase64({ size: size!, base64 }, stagedBytes!, limits)).rejects.toThrow('document-image-budget-exceeded')
+        expect(base64).not.toHaveBeenCalled()
+      }
+    }
+    // A permissive Host cannot raise the local memory ceiling.
+    const permissive = { maxImageBytes: fallback.maxImageBytes * 2, maxMessageImageBytes: fallback.maxMessageImageBytes * 2 } as import('../src/types').ImageAttachmentLimits
+    const base64 = vi.fn(async () => 'YQ==')
+    await expect(readDocumentImageBase64({ size: fallback.maxImageBytes + 1, base64 }, 0, permissive)).rejects.toThrow()
+    expect(base64).not.toHaveBeenCalled()
+  })
+
+  it('accepts exact byte budgets and rejects content that outgrows its stat', async () => {
+    const limits = { maxImageBytes: 3, maxMessageImageBytes: 6 } as import('../src/types').ImageAttachmentLimits
+    const base64 = vi.fn(async () => 'YWJj')
+    await expect(readDocumentImageBase64({ size: 3, base64 }, 3, limits)).resolves.toBe('YWJj')
+    expect(base64).toHaveBeenCalledOnce()
+    await expect(readDocumentImageBase64({ size: 1, base64: async () => 'YWJjZA==' }, 0, limits)).rejects.toThrow('document-image-budget-exceeded')
   })
 })

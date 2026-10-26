@@ -1,3 +1,5 @@
+import type { ImageAttachmentLimits } from '../types'
+
 /**
  * Chat file utilities.
  *
@@ -16,6 +18,35 @@ export interface StagedFile {
 
 export const MAX_SINGLE_FILE_BYTES = 512 * 1024 // 512 KB
 export const MAX_TOTAL_FILES_BYTES = 2 * 1024 * 1024 // 2 MB
+
+// Local memory ceilings also apply when an older Host omits imageLimits.
+const MAX_DOCUMENT_IMAGE_BYTES = 8 * 1024 * 1024
+const MAX_DOCUMENT_IMAGES_BYTES = 32 * 1024 * 1024
+
+export function documentImageReadBudget(limits?: ImageAttachmentLimits) {
+  return {
+    maxImageBytes: Math.min(limits?.maxImageBytes ?? MAX_DOCUMENT_IMAGE_BYTES, MAX_DOCUMENT_IMAGE_BYTES),
+    maxMessageImageBytes: Math.min(limits?.maxMessageImageBytes ?? MAX_DOCUMENT_IMAGES_BYTES, MAX_DOCUMENT_IMAGES_BYTES),
+  }
+}
+
+/** Guard actual disk bytes before allocating base64; picker metadata is not authoritative. */
+export async function readDocumentImageBase64(
+  file: { readonly size: number; base64(): Promise<string> },
+  stagedBytes: number,
+  limits?: ImageAttachmentLimits,
+): Promise<string> {
+  const budget = documentImageReadBudget(limits)
+  const size = file.size
+  const fits = (bytes: number) => Number.isSafeInteger(bytes) && bytes > 0
+    && Number.isSafeInteger(stagedBytes) && stagedBytes >= 0
+    && bytes <= budget.maxImageBytes && stagedBytes + bytes <= budget.maxMessageImageBytes
+  if (!fits(size)) throw new Error('document-image-budget-exceeded')
+  const base64 = await file.base64()
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
+  if (!fits(Math.floor(base64.length * 3 / 4) - padding)) throw new Error('document-image-budget-exceeded')
+  return base64
+}
 
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB'] as const
 const BYTE_UNIT_STEP = 1024
