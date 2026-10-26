@@ -4,6 +4,8 @@ interface ForegroundServiceModule {
   stop(): Promise<void>
   setStatus(status: string): Promise<void>
   waitUntilStopped(lifetimeId: string): Promise<void>
+  isIgnoringBatteryOptimizations?(): Promise<boolean>
+  requestIgnoreBatteryOptimizations?(): Promise<boolean>
 }
 
 function reactNative(): typeof import('react-native') | undefined {
@@ -55,6 +57,24 @@ export const foregroundService = {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
     await nativeModule(rn).waitUntilStopped(lifetimeId)
+  },
+  async isIgnoringBatteryOptimizations(): Promise<boolean> {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return false
+    try {
+      return (await nativeModule(rn).isIgnoringBatteryOptimizations?.()) ?? false
+    } catch {
+      return false
+    }
+  },
+  async requestIgnoreBatteryOptimizations(): Promise<boolean> {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return true
+    try {
+      return (await nativeModule(rn).requestIgnoreBatteryOptimizations?.()) ?? false
+    } catch {
+      return false
+    }
   },
 }
 

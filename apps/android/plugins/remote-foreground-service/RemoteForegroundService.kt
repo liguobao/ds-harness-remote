@@ -11,6 +11,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Handler
@@ -18,6 +19,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.Bundle
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.ReactApplication
@@ -31,6 +33,7 @@ import java.util.UUID
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
 class RemoteForegroundService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
+  private var wifiLock: WifiManager.WifiLock? = null
   private var taskId: Int? = null
   private var taskContext: ReactContext? = null
   private var lifetimeId: String? = null
@@ -81,6 +84,21 @@ class RemoteForegroundService : Service() {
       // called on every stop/failure/destroy path; no screen wake lock is used.
       acquire()
     }
+    if (wifiLock == null) {
+      val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+      if (wifiManager != null) {
+        @Suppress("DEPRECATION")
+        val mode = WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        try {
+          wifiLock = wifiManager.createWifiLock(mode, "$packageName:remote-wifi").apply {
+            setReferenceCounted(false)
+            acquire()
+          }
+        } catch (e: Exception) {
+          Log.w("RemoteForegroundService", "Could not acquire WifiLock: ${e.message}")
+        }
+      }
+    }
     taskContext = context
     lifetimeId = UUID.randomUUID().toString()
     taskId = HeadlessJsTaskContext.getInstance(context).startTask(
@@ -97,9 +115,25 @@ class RemoteForegroundService : Service() {
     taskContext = null
     taskId = null
     lifetimeId = null
-    if (context != null && id != null) HeadlessJsTaskContext.getInstance(context).finishTask(id)
-    wakeLock?.let { if (it.isHeld) it.release() }
-    wakeLock = null
+    try {
+      if (context != null && id != null) HeadlessJsTaskContext.getInstance(context).finishTask(id)
+    } catch (e: Exception) {
+      Log.w("RemoteForegroundService", "Error finishing task: ${e.message}")
+    } finally {
+      val currentWifiLock = wifiLock
+      wifiLock = null
+      try {
+        if (currentWifiLock?.isHeld == true) currentWifiLock.release()
+      } catch (e: Exception) {
+        Log.w("RemoteForegroundService", "Could not release WifiLock: ${e.message}")
+      }
+      try {
+        wakeLock?.let { if (it.isHeld) it.release() }
+      } catch (e: Exception) {
+        Log.w("RemoteForegroundService", "Could not release WakeLock: ${e.message}")
+      }
+      wakeLock = null
+    }
     val waiters = stopWaiters.toList()
     stopWaiters.clear()
     for (promise in waiters) promise.resolve(null)

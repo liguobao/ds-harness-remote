@@ -660,6 +660,25 @@ describe('session restore state machine', () => {
         },
       })),
       {
+        name: 'preserves carrier and bypasses reconnect when resume health probe succeeds on retry',
+        run: async () => {
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          transport.checkHealth.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+          await useAppStore.getState().resumeConnection()
+          expect(transport.connect).not.toHaveBeenCalled()
+          expect(proxy.sessionHistory).not.toHaveBeenCalled()
+        },
+      },
+      {
+        name: 'reconnects when resume health probe retry rejects',
+        run: async () => {
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          transport.checkHealth.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('NETWORK_TIMEOUT'))
+          await useAppStore.getState().resumeConnection()
+          expect(transport.connect).toHaveBeenCalledTimes(1)
+        },
+      },
+      {
         name: 'recovers when the carrier closes while the resume probe is in flight',
         run: async () => {
           const device = { deviceId: 'host' } as never

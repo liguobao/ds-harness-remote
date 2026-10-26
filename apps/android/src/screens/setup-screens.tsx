@@ -9,6 +9,7 @@ import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, Lo
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
+import { foregroundService } from '../services/foreground-service'
 import type { OAuthProviderInfo } from '../services/api'
 import { BlurHeaderFrame, Button, Field, IconButton, KeyValue, Screen, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -677,6 +678,27 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                 <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.comfort.systemNotifications}</Text>
                 <ExternalLink size={17} color={colors.muted} />
               </Pressable>
+              {Platform.OS === 'android' && (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={async () => {
+                    const ok = await foregroundService.requestIgnoreBatteryOptimizations()
+                    if (!ok) {
+                      Alert.alert(
+                        zhCN.comfort.batteryOptimization,
+                        zhCN.comfort.batteryOptimizationFailed,
+                      )
+                    }
+                  }}
+                  style={({ pressed }) => [styles.preferenceOption, styles.preferenceAction, pressed && styles.preferenceActionPressed]}
+                >
+                  <View style={styles.preferenceCopy}>
+                    <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.comfort.batteryOptimization}</Text>
+                    <Text style={styles.preferenceDescription}>{zhCN.comfort.batteryOptimizationDescription}</Text>
+                  </View>
+                  <ExternalLink size={17} color={colors.muted} />
+                </Pressable>
+              )}
               {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
             </View>
 

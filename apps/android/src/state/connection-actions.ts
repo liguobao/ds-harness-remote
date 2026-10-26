@@ -206,8 +206,16 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       }
       if (generation !== runtime.connectionGeneration || current.connection.phase !== 'connected') return
       if (!healthy) {
-        console.info('[dsh-remote] Resume health check failed; reconnecting')
-        await get().reconnect()
+        const retryHealthy = await runtime.connection.checkHealth().catch(() => false)
+        const refreshed = get()
+        if (refreshed.selectedDevice?.deviceId !== selectedDevice.deviceId || generation !== runtime.connectionGeneration || refreshed.connection.phase !== 'connected') return
+        if (!retryHealthy) {
+          console.info('[dsh-remote] Resume health check failed; reconnecting')
+          await get().reconnect()
+        } else {
+          console.info('[dsh-remote] Resume health restored after retry')
+          await get().refreshConnectionNetworkDetails()
+        }
       }
       else await get().refreshConnectionNetworkDetails()
     },

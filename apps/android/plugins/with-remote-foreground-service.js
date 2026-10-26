@@ -20,6 +20,8 @@ function withRemoteForegroundService(config) {
       'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING',
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.WAKE_LOCK',
+      'android.permission.ACCESS_WIFI_STATE',
+      'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
     ]) {
       if (!permissions.has(name)) manifest['uses-permission'].push({ $: { 'android:name': name } })
     }
