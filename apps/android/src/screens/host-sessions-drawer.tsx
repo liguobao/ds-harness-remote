@@ -95,10 +95,31 @@ export function HostSessionsDrawer({
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
 
+  const creatingSessionRef = useRef(false)
+  const lastNewSessionTimeRef = useRef(0)
+
   const handleNewSession = async () => {
+    const now = Date.now()
+    if (now - lastNewSessionTimeRef.current < 800) return
+    if (creatingSessionRef.current || busy !== undefined || !connected) return
+
     const targetWs = workspaces[0]?.workspaceId
-    const ok = await createSession(targetWs)
-    if (ok) onClose()
+    const currentMessages = selected === undefined ? [] : useAppStore.getState().messages[selected.sessionId] ?? []
+    const isCurrentBlank = selected !== undefined && currentMessages.length === 0 && selected.blank !== false
+    const currentWs = workspaces.find(w => selected !== undefined && w.sessionIds.includes(selected.sessionId))
+    if (isCurrentBlank && (targetWs === undefined || currentWs?.workspaceId === targetWs)) {
+      onClose()
+      return
+    }
+
+    creatingSessionRef.current = true
+    lastNewSessionTimeRef.current = now
+    try {
+      const ok = await createSession(targetWs)
+      if (ok) onClose()
+    } finally {
+      creatingSessionRef.current = false
+    }
   }
 
   const handleRefresh = async () => {

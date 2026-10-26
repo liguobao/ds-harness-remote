@@ -41,6 +41,7 @@ export class SessionRuntime {
   sessionReadRetry = false
   sessionLoadGeneration = 0
   reconnectFlight: Promise<boolean> | undefined
+  createSessionFlight: Promise<boolean> | undefined
 
   constructor(private readonly store: StoreAccess) {}
 

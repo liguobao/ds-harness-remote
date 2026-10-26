@@ -328,6 +328,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)
+  const creatingSessionRef = useRef(false)
+  const lastNewSessionTimeRef = useRef(0)
   const listRef = useRef<FlatList<ChatSection>>(null)
   const lastAutoScrollAt = useRef(0)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1136,8 +1138,23 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     setToolsMode(mode)
   }
 
+  const sessionBlank = visibleMessages.length === 0 && session.blank !== false
+
   const startNewSession = async () => {
-    if (newSessionPending || busy !== undefined) return
+    const now = Date.now()
+    if (now - lastNewSessionTimeRef.current < 800) return
+    if (creatingSessionRef.current || newSessionPending || busy !== undefined) return
+
+    if (sessionBlank) {
+      Keyboard.dismiss()
+      setMentionType(null)
+      applyDraft('')
+      setImages([])
+      return
+    }
+
+    creatingSessionRef.current = true
+    lastNewSessionTimeRef.current = now
     setNewSessionPending(true)
     try {
       const created = await createSession(currentWorkspace?.workspaceId)
@@ -1147,6 +1164,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         Alert.alert(zhCN.chat.newChatFailedTitle, zhCN.chat.newChatFailedBody)
       }
     } finally {
+      creatingSessionRef.current = false
       setNewSessionPending(false)
     }
   }
@@ -1203,8 +1221,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     const current = customPrompts ?? BUILT_IN_PROMPTS
     await persistPrompts(current.filter(item => item.id !== prompt.id))
   }
-
-  const sessionBlank = visibleMessages.length === 0 && session.blank !== false
 
   const moveSessionToWorkspace = async (workspace: WorkspaceView) => {
     const previousId = session.sessionId
