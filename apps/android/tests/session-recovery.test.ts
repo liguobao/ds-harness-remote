@@ -696,6 +696,40 @@ describe('session restore state machine', () => {
           expect(useAppStore.getState().connection.phase).toBe('connected')
         },
       },
+      ...['healthy', 'failed', 'rejected', 'disconnect', 'refused', 'replacement'].map(outcome => ({
+        name: `handles ${outcome} while the second resume probe is in flight`,
+        run: async () => {
+          const device = { deviceId: 'host' } as never
+          useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          await useAppStore.getState().connectDevice(device)
+          let finish!: (healthy: boolean) => void
+          let reject!: (error: Error) => void
+          transport.checkHealth.mockResolvedValueOnce(false).mockImplementationOnce(() => new Promise((resolve, fail) => {
+            finish = resolve
+            reject = fail
+          }))
+          const checking = useAppStore.getState().resumeConnection()
+          await vi.waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(2))
+          if (outcome === 'disconnect') await useAppStore.getState().disconnect()
+          else if (outcome === 'replacement') {
+            await useAppStore.getState().connectDevice({ deviceId: 'other-host' } as never)
+          } else {
+            const options = transport.connect.mock.calls[0]![5] as { onClose?: () => void }
+            options.onClose?.()
+            expect(useAppStore.getState().connection.phase).toBe('offline')
+            if (outcome === 'refused') useAppStore.setState(state => ({ connection: { ...state.connection, retryable: false } }))
+          }
+          if (outcome === 'rejected') reject(new Error('NETWORK_TIMEOUT'))
+          else finish(outcome === 'healthy')
+          await checking
+          const recovers = !['disconnect', 'refused', 'replacement'].includes(outcome)
+          expect(transport.connect).toHaveBeenCalledTimes(recovers || outcome === 'replacement' ? 2 : 1)
+          if (recovers) expect(useAppStore.getState().connection.phase).toBe('connected')
+          if (outcome === 'disconnect') expect(useAppStore.getState().selectedDevice).toBeUndefined()
+          if (outcome === 'replacement') expect(useAppStore.getState().selectedDevice?.deviceId).toBe('other-host')
+          if (outcome === 'refused') expect(useAppStore.getState().connection.phase).toBe('offline')
+        },
+      })),
       {
         name: 'ignores an old failed health check after explicit disconnect',
         run: async () => {

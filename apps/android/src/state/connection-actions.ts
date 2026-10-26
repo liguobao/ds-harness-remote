@@ -194,21 +194,23 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       }
       if (connection.phase !== 'connected') return
       const generation = runtime.connectionGeneration
-      const healthy = await runtime.connection.checkHealth()
-      const current = get()
-      if (current.selectedDevice?.deviceId !== selectedDevice.deviceId) return
-      // onClose may have invalidated the generation while the probe was in
-      // flight. Resume must still recover that newly confirmed offline state.
-      if (current.connection.phase === 'offline') {
-        if (current.connection.retryable === false) return
-        await get().reconnect()
-        return
+      // Both probes may race onClose, explicit disconnect or Host replacement.
+      const canContinueAfterProbe = async () => {
+        const current = get()
+        if (current.selectedDevice?.deviceId !== selectedDevice.deviceId) return false
+        // onClose can invalidate the generation while confirming a retryable
+        // offline carrier. Recover it before rejecting stale probe results.
+        if (current.connection.phase === 'offline') {
+          if (current.connection.retryable !== false) await get().reconnect()
+          return false
+        }
+        return generation === runtime.connectionGeneration && current.connection.phase === 'connected'
       }
-      if (generation !== runtime.connectionGeneration || current.connection.phase !== 'connected') return
+      const healthy = await runtime.connection.checkHealth().catch(() => false)
+      if (!await canContinueAfterProbe()) return
       if (!healthy) {
         const retryHealthy = await runtime.connection.checkHealth().catch(() => false)
-        const refreshed = get()
-        if (refreshed.selectedDevice?.deviceId !== selectedDevice.deviceId || generation !== runtime.connectionGeneration || refreshed.connection.phase !== 'connected') return
+        if (!await canContinueAfterProbe()) return
         if (!retryHealthy) {
           console.info('[dsh-remote] Resume health check failed; reconnecting')
           await get().reconnect()
