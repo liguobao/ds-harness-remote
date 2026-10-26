@@ -18,6 +18,7 @@
     "expo-clipboard": "~57.0.1",
     "expo-crypto": "~57.0.1",
     "expo-device": "~57.0.1",
+    "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.5",
     "expo-haptics": "~57.0.1",
     "expo-image-picker": "~57.0.10",

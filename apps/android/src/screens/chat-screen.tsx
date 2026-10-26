@@ -1,5 +1,7 @@
 import { ChatImageProvider } from '../ui/chat-image'
 import { isSubagentSession } from '../lib/session-kind'
+import * as DocumentPicker from 'expo-document-picker'
+import { File } from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import {
@@ -10,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleStop,
+  FileText,
   Folder,
   Images,
   Layers,
@@ -24,6 +27,15 @@ import {
   Users,
   X,
 } from 'lucide-react-native'
+import {
+  type StagedFile,
+  formatUploadedFilesPrompt,
+  formatFileBytes,
+  isTextFile,
+  isValidUtf8Text,
+  MAX_SINGLE_FILE_BYTES,
+  MAX_TOTAL_FILES_BYTES,
+} from './chat-files'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import {
@@ -92,7 +104,7 @@ import { useResponsiveLayout } from '../ui/responsive'
 import { spacing } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
-import { promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
+import { promptImageFromAsset, promptImageFromBase64, sessionImageLimits, validatePromptImages } from './chat-images'
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatErrorBoundary } from './chat-error-boundary'
 import { ChildAgentPanel, TeamAgentPanel } from './chat/agents'
@@ -221,6 +233,20 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', {images: typeof value === 'function' ? value(previous) : value})
   }
   const [pickingImages, setPickingImages] = useState(false)
+  const [pickingFiles, setPickingFiles] = useState(false)
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
+  const sessionGenerationRef = useRef(0)
+  useLayoutEffect(() => {
+    let lastSessionId = useAppStore.getState().selectedSession?.sessionId
+    return useAppStore.subscribe((state) => {
+      const currentId = state.selectedSession?.sessionId
+      if (currentId !== lastSessionId) {
+        lastSessionId = currentId
+        sessionGenerationRef.current += 1
+        setStagedFiles([])
+      }
+    })
+  }, [])
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [modePickerOpen, setModePickerOpen] = useState(false)
@@ -328,6 +354,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   }, [mentionType, session?.sessionId, session?.backend, connection.phase, skillCatalog, workspaceFileRefs])
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)
+  const creatingSessionRef = useRef(false)
+  const lastNewSessionTimeRef = useRef(0)
   const listRef = useRef<FlatList<ChatSection>>(null)
   const lastAutoScrollAt = useRef(0)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -914,18 +942,24 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
     const text = submittedDraft.trim()
-    if (text.length === 0 && images.length === 0) return
-    if (text.length > LONG_DRAFT_MAX) {
+    if (text.length === 0 && images.length === 0 && stagedFiles.length === 0) return
+    const submittedImages = images
+    const submittedFiles = stagedFiles
+    const promptText = submittedFiles.length > 0
+      ? formatUploadedFilesPrompt(text, submittedFiles)
+      : text
+    if (promptText.length > LONG_DRAFT_MAX) {
       Alert.alert(zhCN.chat.draftTooLongTitle, zhCN.chat.draftTooLong(LONG_DRAFT_MAX))
       return
     }
-    const submittedImages = images
     applyDraft('')
     setImages([])
+    setStagedFiles([])
     setMentionType(null)
     selectionRef.current = { start: 0, end: 0 }
     setSelection({ start: 0, end: 0 })
     const targetSessionId = session.sessionId
+    const sendSessionGen = sessionGenerationRef.current
     const sendGeneration = ++scrollIntentGenerationRef.current
     const previousPin = pinToBottomRef.current
     const previousInitialPin = initialPinRef.current
@@ -937,7 +971,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     setAwayFromLatest(false)
     setNewContent(false)
     scheduleScrollToBottom()
-    const outcome = await sendMessage(text, submittedImages)
+    const outcome = await sendMessage(promptText, submittedImages)
     if (outcome === 'rejected') {
       if (session.sessionId === targetSessionId && scrollIntentGenerationRef.current === sendGeneration) {
         cancelPendingScroll()
@@ -951,9 +985,22 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       }
       // Nothing was persisted (command failure): restore the draft without
       // clobbering input typed while the send was in flight.
-      const inFlight = useBrowseMemory.getState().entries[memoryKey]?.draft ?? ''
-      setDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
-      setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
+      if (sessionGenerationRef.current === sendSessionGen && useAppStore.getState().selectedSession?.sessionId === targetSessionId) {
+        const inFlight = useBrowseMemory.getState().entries[memoryKey]?.draft ?? ''
+        setDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
+        setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
+        setStagedFiles(current => {
+          const combined = [...submittedFiles, ...current]
+          let acc = 0
+          return combined.filter(f => {
+            if (acc + f.size <= MAX_TOTAL_FILES_BYTES) {
+              acc += f.size
+              return true
+            }
+            return false
+          })
+        })
+      }
       Alert.alert(zhCN.messageActions.failed, useAppStore.getState().error ?? zhCN.messageActions.unavailable)
     } else if (outcome === 'sent') {
       const result = useAppStore.getState().commandResult
@@ -1035,6 +1082,151 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       Alert.alert(zhCN.chat.imagePickerFailedTitle, zhCN.chat.imagePickerFailedBody)
     } finally {
       setPickingImages(false)
+    }
+  }
+
+  const pickFiles = async () => {
+    const targetSessionId = session.sessionId
+    const capturedGen = sessionGenerationRef.current
+    setPickingFiles(true)
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: true,
+        copyToCacheDirectory: true,
+      })
+      if (result.canceled || !result.assets) return
+
+      if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
+
+      const newStagedFiles: StagedFile[] = []
+      const newImages: PromptImage[] = []
+      const limits = sessionImageLimits(session)
+      const currentImages = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
+      let stagedImagesCount = currentImages.length
+      let stagedImagesBytes = currentImages.reduce((acc, img) => acc + img.bytes, 0)
+      let stagedTextBytes = stagedFiles.reduce((acc, f) => acc + f.size, 0)
+
+      for (const asset of result.assets) {
+        const name = asset.name ?? 'file'
+        const ext = name.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
+        const isImage = asset.mimeType?.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext ?? '')
+
+        const fileObj = new File(asset.uri)
+        let realSize = 0
+        try {
+          const statSize = fileObj.size
+          if (typeof statSize === 'number' && Number.isFinite(statSize) && statSize > 0) {
+            realSize = statSize
+          }
+        } catch {
+          realSize = 0
+        }
+
+        if (realSize <= 0) {
+          Alert.alert(zhCN.chat.filePickerFailedTitle, `无法获取 ${name} 的真实磁盘大小。`)
+          continue
+        }
+
+        if (isImage) {
+          const maxAllowed = limits?.maxImagesPerMessage ?? 4
+          if (stagedImagesCount >= maxAllowed) {
+            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.tooManyImages(maxAllowed))
+            continue
+          }
+          if (limits !== undefined && realSize > limits.maxImageBytes) {
+            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imageTooLarge(name, formatFileBytes(limits.maxImageBytes)))
+            continue
+          }
+          if (limits !== undefined && stagedImagesBytes + realSize > limits.maxMessageImageBytes) {
+            Alert.alert(zhCN.chat.imageLimitTitle, zhCN.chat.imagesTooLarge(formatFileBytes(limits.maxMessageImageBytes)))
+            continue
+          }
+          try {
+            const base64 = await fileObj.base64()
+            const imgDim = await imageSize(asset.uri)
+            newImages.push(promptImageFromBase64({
+              uri: asset.uri,
+              base64,
+              ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+              name,
+              width: imgDim.width,
+              height: imgDim.height,
+            }))
+            stagedImagesCount += 1
+            stagedImagesBytes += realSize
+          } catch {
+            Alert.alert(zhCN.chat.imagePickerFailedTitle, zhCN.chat.imagePickerFailedBody)
+          }
+        } else if (isTextFile(name, asset.mimeType)) {
+          if (realSize > MAX_SINGLE_FILE_BYTES) {
+            Alert.alert(zhCN.chat.filePickerFailedTitle, `${name} 超过单文件大小上限 (${formatFileBytes(MAX_SINGLE_FILE_BYTES)})`)
+            continue
+          }
+          if (stagedTextBytes + realSize > MAX_TOTAL_FILES_BYTES) {
+            Alert.alert(zhCN.chat.filePickerFailedTitle, `本次选择的文件合计超过上限 (${formatFileBytes(MAX_TOTAL_FILES_BYTES)})，后续文件已停止读取。`)
+            break
+          }
+          try {
+            const textContent = await fileObj.text()
+            if (!isValidUtf8Text(textContent)) {
+              Alert.alert(zhCN.chat.filePickerFailedTitle, `“${name}” 包含非有效 UTF-8 字符或控制字符，已跳过。`)
+              continue
+            }
+            newStagedFiles.push({
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              name,
+              size: realSize,
+              mimeType: asset.mimeType ?? 'text/plain',
+              uri: asset.uri,
+              content: textContent,
+            })
+            stagedTextBytes += realSize
+          } catch {
+            Alert.alert(zhCN.chat.filePickerFailedTitle, `无法读取 ${name}，请确保为有效的 UTF-8 文本文件。`)
+          }
+        } else {
+          Alert.alert(zhCN.chat.filePickerFailedTitle, `暂不支持二进制文件 “${name}”，请选择代码或文本文件。`)
+        }
+      }
+
+      if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
+
+      if (newImages.length > 0) {
+        setImages(current => {
+          const nextImages = [...current, ...newImages]
+          const problem = validatePromptImages(nextImages, limits)
+          if (problem !== undefined) {
+            Alert.alert(zhCN.chat.imageLimitTitle, problem)
+            return current
+          }
+          return nextImages
+        })
+      }
+
+      if (newStagedFiles.length > 0) {
+        setStagedFiles(current => {
+          let currentBytes = current.reduce((acc, f) => acc + f.size, 0)
+          const accepted: StagedFile[] = []
+          let exceeded = false
+          for (const file of newStagedFiles) {
+            if (currentBytes + file.size <= MAX_TOTAL_FILES_BYTES) {
+              currentBytes += file.size
+              accepted.push(file)
+            } else {
+              exceeded = true
+            }
+          }
+          if (exceeded) {
+            Alert.alert(zhCN.chat.filePickerFailedTitle, `部分文件超过总附件上限 (${formatFileBytes(MAX_TOTAL_FILES_BYTES)})，未能添加。`)
+          }
+          return [...current, ...accepted]
+        })
+      }
+    } catch {
+      Alert.alert(zhCN.chat.filePickerFailedTitle, zhCN.chat.filePickerFailedBody)
+    } finally {
+      setPickingFiles(false)
     }
   }
 
@@ -1510,6 +1702,28 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             ))}
           </ScrollView>
         )}
+        {stagedFiles.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.fileTray}>
+            {stagedFiles.map((file, index) => (
+              <View key={`${file.id}:${index}`} style={styles.fileCard}>
+                <FileText size={16} color={colors.primary} />
+                <View style={styles.fileCardMeta}>
+                  <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
+                  <Text style={styles.fileCardSize}>{formatFileBytes(file.size)}</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={file.name ? `移除文件“${file.name}”` : '移除文件'}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
+                  style={styles.removeFileButton}
+                >
+                  <X size={13} color={colors.muted} />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        )}
         {replyActive && (
           <View
             accessible
@@ -1590,7 +1804,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 {modelSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
               </Pressable>
             )}
-            {canStop && draft.trim().length === 0 && images.length === 0
+            {canStop && draft.trim().length === 0 && images.length === 0 && stagedFiles.length === 0
               ? <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.stop}
@@ -1625,10 +1839,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
-                  accessibilityState={{ disabled: !sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
-                  disabled={!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)}
+                  accessibilityState={{ disabled: !sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && stagedFiles.length === 0) }}
+                  disabled={!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && stagedFiles.length === 0)}
                   onPress={() => void submit()}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!sendReady || permissionSelecting || (draft.trim().length === 0 && images.length === 0 && stagedFiles.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
                 </Pressable>
@@ -1670,10 +1884,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.takePhoto}
-                  accessibilityState={{ disabled: pickingImages }}
-                  disabled={pickingImages}
+                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                  disabled={pickingImages || pickingFiles}
                   onPress={() => { closePlusMenu(); void takePhoto() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
+                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
                 >
                   <Camera size={22} color={colors.primary} />
                   <Text style={styles.plusCardText}>{zhCN.chat.takePhoto}</Text>
@@ -1681,13 +1895,24 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.photos}
-                  accessibilityState={{ disabled: pickingImages }}
-                  disabled={pickingImages}
+                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                  disabled={pickingImages || pickingFiles}
                   onPress={() => { closePlusMenu(); void pickImages() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, pickingImages && styles.plusMenuOptionDisabled]}
+                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
                 >
                   <Images size={22} color={colors.primary} />
                   <Text style={styles.plusCardText}>{zhCN.chat.photos}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.chat.files}
+                  accessibilityState={{ disabled: pickingImages || pickingFiles }}
+                  disabled={pickingImages || pickingFiles}
+                  onPress={() => { closePlusMenu(); void pickFiles() }}
+                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, (pickingImages || pickingFiles) && styles.plusMenuOptionDisabled]}
+                >
+                  <FileText size={22} color={colors.primary} />
+                  <Text style={styles.plusCardText}>{zhCN.chat.files}</Text>
                 </Pressable>
               </View>
             )}
