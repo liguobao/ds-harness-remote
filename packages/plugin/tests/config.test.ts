@@ -52,12 +52,15 @@ describe('plugin config', () => {
     expect(resolveConfig({ acp: { enabled: false, backends: [{ id: 'codex', enabled: true }] } }, {}).codex.enabled).toBe(false)
   })
 
-  it('rejects insecure non-local servers and embedded credentials', () => {
+  it('allows HTTP on private networks while rejecting insecure public servers and embedded credentials', () => {
     expect(() => resolveConfig({ serverUrl: 'http://remote.example.com' })).toThrow(/HTTPS/)
+    expect(() => resolveConfig({ serverUrl: 'http://100.128.0.1:8080' })).toThrow(/HTTPS/)
     expect(() => resolveConfig({ serverUrl: 'https://user:password@remote.example.com' })).toThrow(/credentials/)
     expect(() => resolveConfig({ serverUrl: 'https://remote.example.com?token=secret' })).toThrow(/query parameters/)
     expect(() => resolveConfig({ serverUrl: 'https://remote.example.com/api' })).toThrow(/without a path/)
     expect(resolveConfig({ serverUrl: 'http://localhost:8080' }).serverUrl).toBe('http://localhost:8080')
+    expect(resolveConfig({ serverUrl: 'http://192.168.1.20:8080' }).serverUrl).toBe('http://192.168.1.20:8080')
+    expect(resolveConfig({ serverUrl: 'http://100.79.68.68:8080' }).serverUrl).toBe('http://100.79.68.68:8080')
     expect(normalizeServerUrl('https://REMOTE.example.com/')).toBe('https://remote.example.com')
   })
 
