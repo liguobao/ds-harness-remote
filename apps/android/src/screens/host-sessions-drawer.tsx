@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, TextInput, ScrollView, SectionList, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, PanResponder, TextInput, ScrollView, SectionList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import * as Haptics from 'expo-haptics'
+import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Code2, Folder, FolderOpen, MessageSquare, Sparkles, RefreshCw, Star, Search } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
@@ -114,6 +116,219 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
     try { await refreshWorkspaces(backend) } finally { setRefreshing(false) }
   }
 
+  const { width: screenWidth } = useWindowDimensions()
+  const drawerWidth = Math.min(Math.round(screenWidth * 0.88), 420)
+  const translateX = useRef(new Animated.Value(-drawerWidth)).current
+  const overlayOpacity = useRef(new Animated.Value(0)).current
+  const dragStartX = useRef(0)
+  const closingRef = useRef(false)
+  const animSeq = useRef(0)
+  const currentAnim = useRef<Animated.CompositeAnimation | null>(null)
+  const gestureSeq = useRef(0)
+  const dragReady = useRef(false)
+  const pendingDx = useRef(0)
+  const enteredDoneRef = useRef(false)
+
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  const triggerHaptic = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+  }
+
+  const smoothClose = (withHaptic = true) => {
+    if (closingRef.current) return
+    closingRef.current = true
+    // Invalidate any in-flight gesture stopAnimation reads
+    gestureSeq.current++
+    dragReady.current = false
+    pendingDx.current = 0
+    if (withHaptic) triggerHaptic()
+    const seq = ++animSeq.current
+    currentAnim.current?.stop()
+
+    const anim = Animated.parallel([
+      Animated.timing(translateX, {
+        toValue: -drawerWidth,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ])
+    currentAnim.current = anim
+    anim.start(({ finished }) => {
+      if (!finished || seq !== animSeq.current) {
+        if (seq === animSeq.current) currentAnim.current = null
+        return
+      }
+      currentAnim.current = null
+      closingRef.current = false
+      onCloseRef.current()
+    })
+  }
+
+  useEffect(() => {
+    if (inline) return
+    const seq = ++animSeq.current
+    currentAnim.current?.stop()
+    gestureSeq.current++
+
+    // Preserve closing intent on resize
+    if (closingRef.current) {
+      const anim = Animated.parallel([
+        Animated.timing(translateX, {
+          toValue: -drawerWidth,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(overlayOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ])
+      currentAnim.current = anim
+      anim.start(({ finished }) => {
+        if (!finished || seq !== animSeq.current) return
+        currentAnim.current = null
+        closingRef.current = false
+        onCloseRef.current()
+      })
+      return () => {
+        currentAnim.current?.stop()
+        currentAnim.current = null
+        animSeq.current++
+        gestureSeq.current++
+      }
+    }
+
+    // Non-closing state (initial entry, spring-back interruption, or screen resize): smoothly align to fully open state
+    const anim = Animated.parallel([
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: enteredDoneRef.current ? 120 : 220,
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: enteredDoneRef.current ? 120 : 220,
+        useNativeDriver: true,
+      }),
+    ])
+    currentAnim.current = anim
+    anim.start(({ finished }) => {
+      if (finished && seq === animSeq.current) {
+        currentAnim.current = null
+        enteredDoneRef.current = true
+      }
+    })
+
+    return () => {
+      currentAnim.current?.stop()
+      currentAnim.current = null
+      animSeq.current++
+      gestureSeq.current++
+    }
+  }, [inline, drawerWidth, translateX, overlayOpacity])
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_e, g) => {
+          if (inline || closingRef.current) return false
+          return shouldStartSwipeLeftToClose({ dx: g.dx, dy: g.dy, x0: g.x0 })
+        },
+        onPanResponderGrant: () => {
+          if (closingRef.current) return
+          currentAnim.current?.stop()
+          currentAnim.current = null
+          animSeq.current++
+          const seq = ++gestureSeq.current
+          dragReady.current = false
+          pendingDx.current = 0
+          translateX.stopAnimation(value => {
+            if (seq !== gestureSeq.current || closingRef.current) return
+            dragStartX.current = value
+            dragReady.current = true
+            if (pendingDx.current !== 0) {
+              const next = clampDrawerTranslate(value + pendingDx.current, drawerWidth)
+              translateX.setValue(next)
+              overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
+            }
+          })
+        },
+        onPanResponderMove: (_e, g) => {
+          if (closingRef.current) return
+          if (!dragReady.current) {
+            pendingDx.current = g.dx
+            return
+          }
+          const next = clampDrawerTranslate(dragStartX.current + g.dx, drawerWidth)
+          translateX.setValue(next)
+          overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
+        },
+        onPanResponderRelease: (_e, g) => {
+          gestureSeq.current++
+          pendingDx.current = 0
+          if (closingRef.current) return
+          const sample = { dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx }
+          if (shouldConfirmSwipeLeftClose(sample)) {
+            smoothClose(true)
+          } else {
+            const seq = ++animSeq.current
+            const anim = Animated.parallel([
+              Animated.spring(translateX, {
+                toValue: 0,
+                bounciness: 0,
+                speed: 18,
+                useNativeDriver: true,
+              }),
+              Animated.timing(overlayOpacity, {
+                toValue: 1,
+                duration: 160,
+                useNativeDriver: true,
+              }),
+            ])
+            currentAnim.current = anim
+            anim.start(({ finished }) => {
+              if (finished && seq === animSeq.current) currentAnim.current = null
+            })
+          }
+        },
+        onPanResponderTerminate: () => {
+          gestureSeq.current++
+          pendingDx.current = 0
+          if (closingRef.current) return
+          const seq = ++animSeq.current
+          const anim = Animated.parallel([
+            Animated.spring(translateX, {
+              toValue: 0,
+              bounciness: 0,
+              speed: 18,
+              useNativeDriver: true,
+            }),
+            Animated.timing(overlayOpacity, {
+              toValue: 1,
+              duration: 160,
+              useNativeDriver: true,
+            }),
+          ])
+          currentAnim.current = anim
+          anim.start(({ finished }) => {
+            if (finished && seq === animSeq.current) currentAnim.current = null
+          })
+        },
+      }),
+    [inline, drawerWidth, translateX, overlayOpacity]
+  )
+
   const pane = <>
         <View style={styles.header}>
           <IconButton label={backLabel ?? strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />
@@ -217,15 +432,24 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
   if (inline) {
     return <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{pane}</View>
   }
-  return <Modal transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-    <View style={styles.overlay}>
-      <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} />
-      <View accessibilityViewIsModal style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{pane}</View>
+  return <Modal transparent animationType="none" onRequestClose={() => smoothClose(false)} statusBarTranslucent>
+    <View style={styles.overlayContainer}>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
+        <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={() => smoothClose(true)} />
+      </Animated.View>
+      <Animated.View
+        accessibilityViewIsModal
+        {...panResponder.panHandlers}
+        style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, transform: [{ translateX }] }]}
+      >
+        {pane}
+      </Animated.View>
     </View>
   </Modal>
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
+  overlayContainer: { flex: 1 },
   overlay: { flex: 1, backgroundColor: colors.scrim },
   drawer: { flex: 1, width: '88%', maxWidth: 420, backgroundColor: colors.surface },
   inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },

@@ -35,12 +35,15 @@ import {
   Image,
   Keyboard,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native'
+import * as Haptics from 'expo-haptics'
+import { shouldConfirmSwipeRightOpen, shouldStartSwipeRightToOpen } from '../lib/gesture-swipe-rules'
 import Svg,{ Path } from 'react-native-svg'
 import { strings as zhCN } from '../locales/i18n'
 import { sessionPermissions } from '../services/session-permissions'
@@ -483,6 +486,30 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     if (tabletSplit) setSessionsOpen(false)
   }, [tabletSplit])
   const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
+
+  // Swipe right gesture to open sessions drawer with haptic feedback
+  const edgeSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: (_evt, g) => {
+          if (tabletSplit || sessionsOpen) return false
+          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectory)
+        },
+        onMoveShouldSetPanResponderCapture: () => false,
+        onPanResponderRelease: (_evt, g) => {
+          if (tabletSplit || sessionsOpen) return
+          if (shouldConfirmSwipeRightOpen({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
+            Keyboard.dismiss()
+            setMentionType(null)
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+            setSessionsOpen(true)
+          }
+        },
+      }),
+    [sessionsOpen, tabletSplit, trajectory]
+  )
 
   const cancelPendingScroll = useCallback(() => {
     hasTrailingScrollRef.current = false
@@ -1323,7 +1350,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         title={sessionTitle(session)}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        onBack={tabletSplit ? undefined : trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
+        onBack={tabletSplit ? undefined : trajectory ? handleBack : () => {
+          Keyboard.dismiss()
+          setMentionType(null)
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+          setSessionsOpen(true)
+        }}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? zhCN.common.back : zhCN.chat.openHostSessions}
         action={<>
@@ -1369,7 +1401,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             />
           </View>
         )}
-        <View style={styles.splitMain}>
+        <View style={styles.splitMain} {...edgeSwipeResponder.panHandlers}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
