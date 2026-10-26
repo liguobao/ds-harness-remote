@@ -233,11 +233,30 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   }
 }
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+/** IPv4 hosts that are only reachable on loopback, a LAN, link-local, or CGNAT/VPN networks. */
+function isPrivateNetworkHostname(hostname: string): boolean {
+  if (LOCAL_HOSTS.has(hostname)) return true
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
+  if (match === null) return false
+  const octets = match.slice(1).map(Number)
+  if (octets.some(value => value > 255)) return false
+  const [a, b] = octets
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 100 && b >= 64 && b <= 127)
+  )
+}
+
 export function normalizeServerUrl(value: string): string {
   const url = new URL(value)
-  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1'
-  if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) {
-    throw new TypeError('serverUrl must use HTTPS (HTTP is allowed only for localhost)')
+  const privateHttp = url.protocol === 'http:' && isPrivateNetworkHostname(url.hostname)
+  if (url.protocol !== 'https:' && !privateHttp) {
+    throw new TypeError('serverUrl must use HTTPS (HTTP is allowed only for localhost or private-network addresses)')
   }
   if (url.username !== '' || url.password !== '') {
     throw new TypeError('serverUrl must not contain credentials')
