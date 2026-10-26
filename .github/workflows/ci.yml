@@ -104,6 +104,9 @@ jobs:
           git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/client.github.js
           node scripts/verify-dsh-plugin.mjs
 
+      - name: Verify packed Host WebRTC fallback and installation closure
+        run: node scripts/verify-packed-webrtc.mjs
+
   plugin-package:
     name: Package npm plugin
     needs: quality

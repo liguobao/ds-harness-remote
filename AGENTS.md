@@ -703,3 +703,33 @@ manifest 所需的 `_locales`，实际打包核验默认语言、消息键、入
 两份已提交 Plugin bundle 重建无差异；npm 包不含退役 rc.2 模块。
 未构建本轮 APK、未新增原生真机、Windows/Linux helper 或加密跨设备验收。
 Metro noble/hashes exports fallback 警告仍存在；发布以 Tag 工作流实际结果为准。
+
+
+## Desktop generation install / packed WebRTC fallback (Issue #149)
+
+基于 @Sandwich-git 的 #151 内联方向，将 werift 从 root/plugin 生产依赖移到 Plugin
+开发依赖；Host ESM banner 使用模块局部 createRequire，为内联 CommonJS 的 Node builtin
+加载提供 require，不修改全局对象。保留 0.5.19 / Android build 64 发布准备。
+
+`node scripts/verify-packed-webrtc.mjs` 在仓库构建后分别 pack root GitHub 与 npm Plugin，
+安装到临时生产 generation（禁用安装脚本、自动 peer 与原生 optional addon），Host peer
+置于独立 installation closure。检查每个生产包的依赖解析路径，故意不放行 builtin id，
+覆盖原 buffer 判定失败。此检查复现相关路径约束，不等同于运行真实 Desktop/app.asar
+安装器，也不模拟其完整 peer 协商或更新/回滚事务。
+
+子进程先加载未修改的包入口，再通过 Node loader 仅追加内部函数 export，调用同一 packed
+bundle 中真实 loadNodeRtcFactory / RtcDataChannelTransport；不替换其实现、不导入源码。
+阻止外置 werift 和 native addon，验证延迟初始化、首次/并发/缓存加载、有序双向帧及关闭。
+CI 在正常 Linux Node 22 环境运行原始脚本。旧 #151 bundle 在同一脚本下首次 fallback
+返回 undefined，可检出未绑定 require 的回归。
+
+本地 Node 24 容器禁止 os.networkInterfaces（ERR_SYSTEM_ERROR），但允许真实 loopback
+UDP；产物烟测以 scratch-only preload 提供 127.0.0.1 枚举 fixture，未 mock WebRTC/UDP。
+最终两种 packed 边界通过（GitHub 35 / npm 37 个生产包）。一次 npm loopback 建连曾在
+DataChannel 打开前报 RTC_FAILED，原样重跑两种边界均通过，仍需正常 CI 复核稳定性。
+标准 Plugin 单测为 393/397：两项因网卡枚举失败，另两项 native/default backend 八秒
+建连超时，不算全量通过，也不把后两项的具体根因当作已确认。
+Plugin check、共享包/Plugin build、DSH bundle 校验、生产重建哈希一致性和 diff check
+通过。真实 Desktop 更新/回滚、Windows/Electron 与跨设备 E2E 未新增验收。
+旧 generation 的依赖树不会被新插件重写；恢复旧包仍需要宿主正确识别 builtin 或使用
+官方插件管理恢复路径，不能宣称本修复覆盖所有历史回滚。

@@ -2,6 +2,12 @@
 
 Android build 64.
 
+- Fix Desktop plugin installation and updates failing with `werift: buffer resolves outside the generation and installation closure`; preserve the WebRTC fallback when native WebRTC is unavailable (#149, based on @Sandwich-git's work in #151).
+- 修复 Desktop 插件安装和更新时出现的 `werift: buffer resolves outside the generation and installation closure` 错误，并保持原生 WebRTC 不可用时的回退能力（#149，基于 @Sandwich-git 在 #151 的贡献）。
+
+Old generations containing external werift still need recovery through the host's official plugin management; this update does not rewrite their dependency trees.
+含外置 werift 的旧 generation 仍需通过宿主官方插件管理恢复，本次更新不会重写其依赖树。
+
 - **Compatibility:** the Host plugin, bundled client and Android no longer support legacy ApiProxy. Upgrade to a Host with Typert Remote support.
 - **兼容性变更：** Host 插件、随包客户端和 Android 不再支持旧版 ApiProxy，请升级到支持 Typert Remote 的 Host。
 
@@ -29,9 +35,9 @@ Android build 64.
 - Add a Japanese README and update installation instructions.
 - 新增日文 README，更新安装说明。
 
-Thanks @dreamfarer-space, @xiongyuyang, and @bluesmilery for their contributions.
+Thanks @dreamfarer-space, @xiongyuyang, @bluesmilery, and @Sandwich-git for their contributions.
 
-感谢 @dreamfarer-space、@xiongyuyang 和 @bluesmilery 的贡献。
+感谢 @dreamfarer-space、@xiongyuyang、@bluesmilery 和 @Sandwich-git 的贡献。
 
 ## 0.5.18 — 2026-10-23
 

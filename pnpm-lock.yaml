@@ -26,9 +26,6 @@ importers:
       react:
         specifier: '>=18.2.0 <19'
         version: 18.3.1
-      werift:
-        specifier: 0.24.4
-        version: 0.24.4
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -459,9 +456,6 @@ importers:
       react:
         specifier: '>=18.2.0 <19'
         version: 18.3.1
-      werift:
-        specifier: 0.24.4
-        version: 0.24.4
       ws:
         specifier: ^8.21.3
         version: 8.21.3
@@ -557,6 +551,9 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.33.0)(terser@5.50.0)
+      werift:
+        specifier: 0.24.4
+        version: 0.24.4
 
   packages/protocol:
     dependencies:

@@ -38,7 +38,14 @@ await buildBundle({
   format: 'esm',
   sourcemap: true,
   outfile: join(root, 'dist/index.js'),
-  external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'werift', 'ws'],
+  // Inline werift so Desktop's generation validator never walks its `buffer`
+  // dependency (Node resolves that name to a builtin id rather than a path).
+  external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'ws'],
+  // Inlined CommonJS dependencies require Node builtins lazily. A lexical
+  // require keeps esbuild's __require working in pure ESM without a global shim.
+  banner: {
+    js: 'import { createRequire as __dshCreateRequire } from "node:module";\nconst require = __dshCreateRequire(import.meta.url);',
+  },
 })
 
 for (const [moduleId, outfile] of [

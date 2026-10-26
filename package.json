@@ -87,7 +87,6 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5",
     "qrcode": "^1.5.4",
-    "werift": "0.24.4",
     "zod": "^3.24.1",
     "ws": "^8.21.3"
   },
