@@ -1,123 +1,164 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, PanResponder, TextInput, ScrollView, SectionList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  PanResponder,
+  TextInput,
+  SectionList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native'
+import Svg, { Path } from 'react-native-svg'
 import * as Haptics from 'expo-haptics'
-import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Code2, Folder, FolderOpen, MessageSquare, Sparkles, RefreshCw, Star, Search } from 'lucide-react-native'
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  MoreHorizontal,
+  PlusCircle,
+  RefreshCw,
+  Search,
+  Sliders,
+} from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
-import type { AgentBackend, RemoteSession } from '../types'
+import type { RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
-import { IconButton } from '../ui/components'
+import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { resolveSessionDisplayTitle } from './session-title'
-import { backendGroups, browseStatus } from '../lib/backend-groups'
-import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup, loadWorkspaceBackend, saveWorkspaceBackend } from '../services/storage'
+import { browseStatus } from '../lib/backend-groups'
+import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 
-import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry } from '../services/browse-memory'
-const SESSION_PAGE_SIZE = 3
+const SESSION_PAGE_SIZE = 8
 
-export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, backLabel }: {
+function formatRelativeTime(timestamp?: number | string): string {
+  if (!timestamp) return ''
+  const time = typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp
+  const diff = Math.max(0, Date.now() - time)
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d`
+}
+
+export function HostSessionsDrawer({
+  onBack,
+  onClose,
+  onSelect,
+  inline = false,
+  backLabel,
+}: {
   onBack: () => void
   onClose: () => void
   onSelect: (session: RemoteSession) => Promise<void>
-  /** Render as a persistent tablet sidebar instead of a modal drawer. */
   inline?: boolean
-  /** Override the generic back-to-devices label (the tablet pane returns to workspaces). */
   backLabel?: string
 }) {
-  // The store's catalog is scoped to selectedDevice and reset when changing hosts.
   const device = useAppStore(state => state.selectedDevice)
   const sessions = useAppStore(state => state.sessions)
-  const currentWorkSessionIds = useAppStore(state => state.currentWorkSessionIds)
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
   const archivedIds = useAppStore(state => state.archivedSessionIds)
   const workspaces = useAppStore(state => state.workspaces)
   const busy = useAppStore(state => state.busyAction)
-  const error = useAppStore(state => state.error)
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
+  const createSession = useAppStore(state => state.createSession)
+
   const [refreshing, setRefreshing] = useState(false)
-  const [query, setQuery] = useState('')
-  const memoryScope = browseScope(useAppStore.getState())
-  const entries = useBrowseMemory(state => state.entries)
-  const [visibleSessionCounts, setVisibleSessionCounts] = useState<Record<string, number>>({})
-  const [backend, setBackend] = useState<AgentBackend>(selected?.backend ?? 'codex')
-  const tabTouched = useRef(false)
-  const available = useAppStore(state => [
-    'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
-    state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
-    state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
-  ].filter(Boolean).join(','))
-  const backends = [...new Set<AgentBackend>([...available.split(',') as AgentBackend[], ...workspaces.map(w => w.backend ?? 'harness')])]
-  const selectBackend = (value: AgentBackend) => {
-    tabTouched.current = true
-    setBackend(value)
-    if (device?.deviceId !== undefined) void saveWorkspaceBackend(device.deviceId, value).catch(() => undefined)
-  }
-  const deviceId = device?.deviceId
-  const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>({})
-  const [storageErrors, setStorageErrors] = useState<Record<string, boolean>>({})
-  const [loadedDeviceId, setLoadedDeviceId] = useState<string>()
-  const groupsReady = deviceId === undefined || loadedDeviceId === deviceId
-  const expandedGroups = deviceId === undefined ? {} : groupsByDevice[deviceId] ?? {}
-  useEffect(() => {
-    if (connected && groupsReady) void refreshWorkspaces(backend)
-  }, [backend, connected, groupsReady, deviceId, refreshWorkspaces])
-  useEffect(() => {
-    if (deviceId === undefined) return
-    setLoadedDeviceId(undefined)
-    tabTouched.current = false
-    void loadWorkspaceBackend(deviceId).then(value => {
-      if (!cancelled && !tabTouched.current && value !== undefined) setBackend(value)
-    }).catch(() => undefined)
-    let cancelled = false
-    void loadHostSessionsDrawerGroups(deviceId).then(saved => {
-      if (cancelled) return
-      // Explicit user choices made while reading take precedence over hydration.
-      setGroupsByDevice(current => ({ ...current, [deviceId]: { ...saved, ...current[deviceId] } }))
-    }).catch(() => {
-      if (!cancelled) setStorageErrors(current => ({ ...current, [deviceId]: true }))
-    }).finally(() => {
-      if (!cancelled) setLoadedDeviceId(deviceId)
-    })
-    return () => { cancelled = true }
-  }, [deviceId])
-  const toggleGroup = (key: string, expanded: boolean) => {
-    if (deviceId === undefined) return
-    setGroupsByDevice(current => ({ ...current, [deviceId]: { ...current[deviceId], [key]: expanded } }))
-    // Keep a failure visible for this open drawer: later successful writes to
-    // another group do not imply the failed choice was persisted.
-    void saveHostSessionsDrawerGroup(deviceId, key, expanded).catch(() => {
-      setStorageErrors(current => ({ ...current, [deviceId]: true }))
-    })
-  }
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showConfigModal, setShowConfigModal] = useState(false)
+  const [groupBy, setGroupBy] = useState<'workspace' | 'list'>('workspace')
+  const [orderBy, setOrderBy] = useState<'manual' | 'updated'>('updated')
+  const [filterMode, setFilterMode] = useState<'hideArchived' | 'all' | 'archivedOnly'>('hideArchived')
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({})
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({})
+
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const groups = useMemo(() => backendGroups({ backend, workspaces, sessions,
-    archived: archivedIds, recent: currentWorkSessionIds, selected }),
-    [backend, workspaces, sessions, archivedIds, currentWorkSessionIds, selected])
-  const stars = sessions.filter(s => (s.backend ?? 'harness') === backend && !archivedIds.includes(s.sessionId) && entries[browseKey(memoryScope, s.sessionId)]?.starred)
-  const visibleGroups = [...(stars.length ? [{key: `starred:${backend}`, title: strings.comfort.starred, backend, sessions: stars}] : []), ...groups]
-  const search = query.trim().toLocaleLowerCase()
-  const sections = visibleGroups.map(group => ({...group, sessions: !search || group.title.toLocaleLowerCase().includes(search) ? group.sessions
-    : group.sessions.filter(s => (resolveSessionDisplayTitle(s) ?? '').toLocaleLowerCase().includes(search))})).filter(g => !search || g.sessions.length > 0).map(group => {
-    const isWorkspace = group.key.startsWith('workspace:')
-    const expanded = search ? true : expandedGroups[group.key] ?? (group.key.startsWith('starred:') || group.key.startsWith('recent:'))
-    const visibleSessions = isWorkspace && !search ? group.sessions.slice(0, visibleSessionCounts[group.key] ?? SESSION_PAGE_SIZE) : group.sessions
-    return { ...group, expanded, data: expanded ? visibleSessions : [] }
-  })
-  const refresh = async () => {
-    if (refreshing || busy !== undefined || !connected) return
-    setRefreshing(true)
-    try { await refreshWorkspaces(backend) } finally { setRefreshing(false) }
+
+  const handleNewSession = async () => {
+    const targetWs = workspaces[0]?.workspaceId
+    const ok = await createSession(targetWs)
+    if (ok) onClose()
   }
 
+  const handleRefresh = async () => {
+    if (refreshing || busy !== undefined || !connected) return
+    setRefreshing(true)
+    try {
+      await refreshWorkspaces()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const toggleWorkspace = (id: string) => {
+    setExpandedWorkspaces(prev => ({ ...prev, [id]: !(prev[id] ?? true) }))
+  }
+
+  const filteredSessions = useMemo(() => {
+    let list = [...sessions]
+    if (filterMode === 'hideArchived') {
+      list = list.filter(s => !archivedIds.includes(s.sessionId))
+    } else if (filterMode === 'archivedOnly') {
+      list = list.filter(s => archivedIds.includes(s.sessionId))
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      list = list.filter(s => (resolveSessionDisplayTitle(s) ?? '').toLowerCase().includes(q))
+    }
+    if (orderBy === 'updated') {
+      list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    }
+    return list
+  }, [sessions, archivedIds, filterMode, searchQuery, orderBy])
+
+  const sections = useMemo(() => {
+    if (groupBy === 'list') {
+      return [{ id: 'all', title: 'All Sessions', data: filteredSessions, total: filteredSessions.length, expanded: true }]
+    }
+    const wsList: Array<WorkspaceView | { workspaceId: string; title: string; path: string; sessionIds: string[] }> =
+      workspaces.length > 0 ? workspaces : [{ workspaceId: 'default', title: 'Default', path: '', sessionIds: [] }]
+    return wsList.map(ws => {
+      const isDefault = ws.workspaceId === 'default'
+      const wsSessions = filteredSessions.filter(s =>
+        isDefault ? !workspaces.some(w => w.sessionIds.includes(s.sessionId)) : ws.sessionIds.includes(s.sessionId)
+      )
+      const isExpanded = expandedWorkspaces[ws.workspaceId] ?? true
+      const limit = visibleCounts[ws.workspaceId] ?? SESSION_PAGE_SIZE
+      const title = ws.title || ws.path || ws.workspaceId
+      return {
+        id: ws.workspaceId,
+        title,
+        total: wsSessions.length,
+        expanded: isExpanded,
+        data: isExpanded ? wsSessions.slice(0, limit) : [],
+      }
+    })
+  }, [groupBy, workspaces, filteredSessions, expandedWorkspaces, visibleCounts])
+
+  // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
-  const drawerWidth = Math.min(Math.round(screenWidth * 0.88), 420)
+  const drawerWidth = Math.min(Math.round(screenWidth * 0.85), 360)
   const translateX = useRef(new Animated.Value(-drawerWidth)).current
   const overlayOpacity = useRef(new Animated.Value(0)).current
   const dragStartX = useRef(0)
@@ -127,46 +168,28 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
   const gestureSeq = useRef(0)
   const dragReady = useRef(false)
   const pendingDx = useRef(0)
-  const enteredDoneRef = useRef(false)
-
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
 
-  const triggerHaptic = () => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
-  }
-
   const smoothClose = (withHaptic = true) => {
     if (closingRef.current) return
     closingRef.current = true
-    // Invalidate any in-flight gesture stopAnimation reads
     gestureSeq.current++
     dragReady.current = false
     pendingDx.current = 0
-    if (withHaptic) triggerHaptic()
+    if (withHaptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
     const seq = ++animSeq.current
     currentAnim.current?.stop()
 
     const anim = Animated.parallel([
-      Animated.timing(translateX, {
-        toValue: -drawerWidth,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
+      Animated.timing(translateX, { toValue: -drawerWidth, duration: 200, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ])
     currentAnim.current = anim
     anim.start(({ finished }) => {
-      if (!finished || seq !== animSeq.current) {
-        if (seq === animSeq.current) currentAnim.current = null
-        return
-      }
+      if (!finished || seq !== animSeq.current) return
       currentAnim.current = null
       closingRef.current = false
       onCloseRef.current()
@@ -175,81 +198,23 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
 
   useEffect(() => {
     if (inline) return
-    const seq = ++animSeq.current
-    currentAnim.current?.stop()
-    gestureSeq.current++
-
-    // Preserve closing intent on resize
-    if (closingRef.current) {
-      const anim = Animated.parallel([
-        Animated.timing(translateX, {
-          toValue: -drawerWidth,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(overlayOpacity, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ])
-      currentAnim.current = anim
-      anim.start(({ finished }) => {
-        if (!finished || seq !== animSeq.current) return
-        currentAnim.current = null
-        closingRef.current = false
-        onCloseRef.current()
-      })
-      return () => {
-        currentAnim.current?.stop()
-        currentAnim.current = null
-        animSeq.current++
-        gestureSeq.current++
-      }
-    }
-
-    // Non-closing state (initial entry, spring-back interruption, or screen resize): smoothly align to fully open state
     const anim = Animated.parallel([
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: enteredDoneRef.current ? 120 : 220,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: 1,
-        duration: enteredDoneRef.current ? 120 : 220,
-        useNativeDriver: true,
-      }),
+      Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
     ])
     currentAnim.current = anim
-    anim.start(({ finished }) => {
-      if (finished && seq === animSeq.current) {
-        currentAnim.current = null
-        enteredDoneRef.current = true
-      }
-    })
-
-    return () => {
-      currentAnim.current?.stop()
-      currentAnim.current = null
-      animSeq.current++
-      gestureSeq.current++
-    }
+    anim.start()
+    return () => currentAnim.current?.stop()
   }, [inline, drawerWidth, translateX, overlayOpacity])
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => {
-          if (inline || closingRef.current) return false
-          return shouldStartSwipeLeftToClose({ dx: g.dx, dy: g.dy, x0: g.x0 })
-        },
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
         onPanResponderGrant: () => {
           if (closingRef.current) return
           currentAnim.current?.stop()
-          currentAnim.current = null
-          animSeq.current++
           const seq = ++gestureSeq.current
           dragReady.current = false
           pendingDx.current = 0
@@ -257,224 +222,464 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
             if (seq !== gestureSeq.current || closingRef.current) return
             dragStartX.current = value
             dragReady.current = true
-            if (pendingDx.current !== 0) {
-              const next = clampDrawerTranslate(value + pendingDx.current, drawerWidth)
-              translateX.setValue(next)
-              overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
-            }
           })
         },
         onPanResponderMove: (_e, g) => {
-          if (closingRef.current) return
-          if (!dragReady.current) {
-            pendingDx.current = g.dx
-            return
-          }
+          if (closingRef.current || !dragReady.current) return
           const next = clampDrawerTranslate(dragStartX.current + g.dx, drawerWidth)
           translateX.setValue(next)
           overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
         },
         onPanResponderRelease: (_e, g) => {
-          gestureSeq.current++
-          pendingDx.current = 0
           if (closingRef.current) return
-          const sample = { dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx }
-          if (shouldConfirmSwipeLeftClose(sample)) {
+          if (shouldConfirmSwipeLeftClose({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
             smoothClose(true)
           } else {
-            const seq = ++animSeq.current
-            const anim = Animated.parallel([
-              Animated.spring(translateX, {
-                toValue: 0,
-                bounciness: 0,
-                speed: 18,
-                useNativeDriver: true,
-              }),
-              Animated.timing(overlayOpacity, {
-                toValue: 1,
-                duration: 160,
-                useNativeDriver: true,
-              }),
-            ])
-            currentAnim.current = anim
-            anim.start(({ finished }) => {
-              if (finished && seq === animSeq.current) currentAnim.current = null
-            })
+            Animated.parallel([
+              Animated.spring(translateX, { toValue: 0, bounciness: 0, speed: 18, useNativeDriver: true }),
+              Animated.timing(overlayOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
+            ]).start()
           }
-        },
-        onPanResponderTerminate: () => {
-          gestureSeq.current++
-          pendingDx.current = 0
-          if (closingRef.current) return
-          const seq = ++animSeq.current
-          const anim = Animated.parallel([
-            Animated.spring(translateX, {
-              toValue: 0,
-              bounciness: 0,
-              speed: 18,
-              useNativeDriver: true,
-            }),
-            Animated.timing(overlayOpacity, {
-              toValue: 1,
-              duration: 160,
-              useNativeDriver: true,
-            }),
-          ])
-          currentAnim.current = anim
-          anim.start(({ finished }) => {
-            if (finished && seq === animSeq.current) currentAnim.current = null
-          })
         },
       }),
     [inline, drawerWidth, translateX, overlayOpacity]
   )
 
-  const pane = <>
-        <View style={styles.header}>
-          <IconButton label={backLabel ?? strings.app.backToDevices} icon={ArrowLeft} onPress={onBack} />
-          <Text style={styles.title} numberOfLines={1}>{device?.name}</Text>
-          <IconButton label={strings.common.refresh} icon={RefreshCw} onPress={() => void refresh()} disabled={refreshing || busy !== undefined || !connected} />
-        </View>
-        {error !== undefined && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
-        {deviceId !== undefined && storageErrors[deviceId] && <Text style={styles.error} accessibilityRole="alert">{strings.app.secureStorageUnavailable}</Text>}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabContent} accessibilityRole="tablist">
-          {backends.map(value => <Pressable key={value} accessibilityRole="tab"
-            accessibilityState={{selected: backend === value}} onPress={() => selectBackend(value)}
-            style={({ pressed }) => [styles.tab, backend === value && styles.activeRow, pressed && styles.pressedRow]}>
-            <Text style={[styles.sessionTitle, backend === value && styles.activeTitle]}>{value === 'harness' ? 'DSH' : value === 'codex' ? 'Codex' : value}</Text>
-          </Pressable>)}
-        </ScrollView>
-        <View style={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8}}>
-          <Search size={18} color={colors.muted} />
-          <TextInput value={query} onChangeText={setQuery} placeholder={strings.comfort.search}
-            placeholderTextColor={colors.muted} accessibilityLabel={strings.comfort.searchLabel} style={{flex: 1, minHeight: 44, color: colors.ink}} />
-        </View>
-        <SectionList
-          sections={groupsReady ? sections : []}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={groupsReady ? null : <ActivityIndicator style={styles.loading} color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
-          stickySectionHeadersEnabled={false}
-          keyExtractor={session => `${backend}:${session.sessionId}`}
-          contentContainerStyle={styles.list}
-          refreshing={refreshing}
-          onRefresh={() => void refresh()}
-          renderSectionFooter={({ section }) => {
-            if (!section.expanded) return null
-            if (section.data.length === section.sessions.length) return null
-            return <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${section.title} · ${strings.workspaces.showMoreSessions}`}
-              accessibilityState={{ expanded: false }}
-              onPress={() => setVisibleSessionCounts(current => ({ ...current, [section.key]: (current[section.key] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE }))}
-              style={({ pressed }) => [styles.showMoreSessions, pressed && styles.pressedRow]}
-            >
-              <Text style={styles.showMoreSessionsText}>{strings.workspaces.showMoreSessions}</Text>
-              <ChevronDown size={16} color={colors.muted} />
-            </Pressable>
-          }}
-          renderSectionHeader={({ section }) => <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={section.expanded ? strings.workspaces.collapseWorkspace(section.title) : strings.workspaces.expandWorkspace(section.title)}
-            accessibilityState={{ expanded: section.expanded }}
-            onPress={() => toggleGroup(section.key, !section.expanded)}
-            style={({ pressed }) => [styles.group, !section.expanded && styles.collapsedGroup, pressed && styles.pressedRow]}
+  const content = (
+    <View style={styles.container}>
+      {/* 品牌顶部区 */}
+      <View style={styles.brandHeader}>
+        <View style={styles.brandLeft}>
+          <Svg
+            width={18}
+            height={18}
+            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+            fill={colors.ink}
           >
-            <View style={styles.workspaceIcon}>
-              {section.backend === 'codex'
-                ? <Code2 size={18} color={colors.muted} />
-                : section.backend !== 'harness'
-                  ? <Sparkles size={18} color={colors.muted} />
-                  : section.expanded ? <FolderOpen size={18} color={colors.muted} /> : <Folder size={18} color={colors.muted} />}
-            </View>
-            <View style={styles.copy}>
-              <View style={styles.groupTitleRow}>
-                <Text style={styles.groupTitle} numberOfLines={1}>{section.title}</Text>
-                <Text style={styles.count}>{section.key.startsWith('workspace:') ? `${strings.workspaces[section.backend === 'harness' ? 'dsh' : section.backend]} · ` : ''}{section.sessions.length}</Text>
-              </View>
-            </View>
-            {section.expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
-          </Pressable>}
-          renderItem={({ item }) => {
-            const active = item.sessionId === selected?.sessionId
-            const status = browseStatus(item, lifecycles[item.sessionId])
-            const running = status === 'running'
-            const disabled = (busy !== undefined && !busy.startsWith('session:')) || !connected
-            return <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: active, disabled }}
-              disabled={disabled}
-              onPress={() => { if (active) onClose(); else void onSelect(item) }}
-              style={({ pressed }) => [styles.row, active && styles.activeRow, pressed && styles.pressedRow]}
-            >
-              <View style={styles.sessionIcon}>
-                {running
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <MessageSquare size={16} color={active ? colors.ink : colors.muted} />}
-              </View>
-              <View style={styles.copy}>
-                <Text style={[styles.sessionTitle, active && styles.activeTitle]} numberOfLines={1}>{resolveSessionDisplayTitle(item) ?? strings.sessions.untitled}</Text>
-              </View>
-              {entries[browseKey(memoryScope, item.sessionId)]?.seenAt !== undefined && item.updatedAt > entries[browseKey(memoryScope, item.sessionId)]!.seenAt! && !active && <Text style={{color: colors.primary}}>{strings.comfort.new}</Text>}
-              <Pressable accessibilityRole="button" accessibilityLabel={entries[browseKey(memoryScope, item.sessionId)]?.starred ? strings.comfort.unstar : strings.comfort.starred}
-                onPress={event => {event.stopPropagation(); updateBrowseEntry(memoryScope, item.sessionId, {starred: !entries[browseKey(memoryScope, item.sessionId)]?.starred})}}
-                style={{padding: 10}}>
-                <Star size={17} color={colors.muted} fill={entries[browseKey(memoryScope, item.sessionId)]?.starred ? colors.primary : 'transparent'} />
-              </Pressable>
-              {status === 'unknown' && <Text style={styles.count}>{strings.comfort.unknownStatus}</Text>}
-              {running && <Text style={styles.runningStatus} numberOfLines={1}>{strings.status.running}</Text>}
-              {busy === `session:${item.sessionId}`
-                ? <ActivityIndicator size="small" color={colors.primary} />
-                : active ? <Check size={16} color={colors.muted} /> : null}
+            <Path d={FISH_LOGO_PATH} />
+          </Svg>
+          <Text style={styles.brandTitle}>deepseek</Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>HARNESS</Text>
+          </View>
+        </View>
+        <View style={styles.brandRight}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.common.refresh}
+            onPress={() => void handleRefresh()}
+            hitSlop={8}
+            style={styles.iconBtn}
+          >
+            <RefreshCw size={15} color={colors.muted} />
+          </Pressable>
+          {onBack && (
+            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? 'Back'} onPress={onBack} hitSlop={8} style={styles.iconBtn}>
+              <ArrowLeft size={16} color={colors.muted} />
             </Pressable>
-          }}
-        />
-  </>
-  if (inline) {
-    return <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{pane}</View>
-  }
-  return <Modal transparent animationType="none" onRequestClose={() => smoothClose(false)} statusBarTranslucent>
-    <View style={styles.overlayContainer}>
-      <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={() => smoothClose(true)} />
-      </Animated.View>
-      <Animated.View
-        accessibilityViewIsModal
-        {...panResponder.panHandlers}
-        style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, transform: [{ translateX }] }]}
+          )}
+        </View>
+      </View>
+
+      {/* New Session 按钮 */}
+      <View style={styles.newSessionWrapper}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void handleNewSession()}
+          style={({ pressed }) => [styles.newSessionBtn, pressed && styles.pressedBg]}
+        >
+          <PlusCircle size={16} color={colors.ink} />
+          <Text style={styles.newSessionText}>New Session</Text>
+        </Pressable>
+      </View>
+
+      {/* 固定自动化入口 */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Automation tasks"
+        onPress={() => {
+          Alert.alert('Automation tasks', '当前设备暂无待处理定时或自动化任务')
+        }}
+        style={({ pressed }) => [styles.navItem, pressed && styles.pressedBg]}
       >
-        {pane}
-      </Animated.View>
+        <Clock size={16} color={colors.muted} />
+        <Text style={styles.navItemText}>Automation tasks</Text>
+      </Pressable>
+
+      {/* Workspaces 标题栏与工具栏 */}
+      <View style={styles.workspacesToolbar}>
+        <Text style={styles.workspacesTitle}>Workspaces</Text>
+        <View style={styles.toolbarActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.comfort.search}
+            hitSlop={6}
+            onPress={() => setShowSearch(prev => !prev)}
+            style={styles.iconBtn}
+          >
+            <Search size={14} color={showSearch ? colors.ink : colors.muted} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="View options"
+            hitSlop={6}
+            onPress={() => setShowConfigModal(true)}
+            style={styles.iconBtn}
+          >
+            <Sliders size={14} color={colors.muted} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add workspace"
+            hitSlop={6}
+            onPress={() => {
+              Alert.alert(
+                '工作区管理',
+                '前往工作区页面查看或添加新工作区？',
+                [
+                  { text: strings.common.cancel, style: 'cancel' },
+                  { text: '前往', onPress: () => { onClose(); onBack() } }
+                ]
+              )
+            }}
+            style={styles.iconBtn}
+          >
+            <FolderPlus size={14} color={colors.muted} />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* 搜索框 */}
+      {showSearch && (
+        <View style={styles.searchContainer}>
+          <Search size={14} color={colors.muted} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={strings.comfort.search}
+            placeholderTextColor={colors.muted}
+            style={styles.searchInput}
+            autoFocus
+          />
+        </View>
+      )}
+
+      {/* 会话树状列表 */}
+      <SectionList
+        sections={sections}
+        keyExtractor={item => item.sessionId}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.listContainer}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) => {
+          if (groupBy === 'list') return null
+          const isExp = section.expanded
+          return (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => toggleWorkspace(section.id)}
+              style={({ pressed }) => [styles.workspaceRow, pressed && styles.pressedBg]}
+            >
+              <View style={styles.workspaceRowLeft}>
+                {isExp ? <FolderOpen size={16} color={colors.muted} /> : <Folder size={16} color={colors.muted} />}
+                <Text style={styles.workspaceRowTitle} numberOfLines={1}>
+                  {section.title}
+                </Text>
+              </View>
+              {isExp ? <ChevronDown size={14} color={colors.muted} /> : <ChevronRight size={14} color={colors.muted} />}
+            </Pressable>
+          )
+        }}
+        renderSectionFooter={({ section }) => {
+          if (groupBy === 'list' || !section.expanded || section.data.length >= section.total) return null
+          const remaining = section.total - section.data.length
+          return (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                setVisibleCounts(c => ({
+                  ...c,
+                  [section.id]: (c[section.id] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE,
+                }))
+              }
+              style={styles.showMoreRow}
+            >
+              <Text style={styles.showMoreText}>Show {remaining} more sessions</Text>
+            </Pressable>
+          )
+        }}
+        renderItem={({ item }) => {
+          const isSelected = item.sessionId === selected?.sessionId
+          const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
+          const timeStr = formatRelativeTime(item.updatedAt)
+
+          return (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                if (isSelected) onClose()
+                else void onSelect(item)
+              }}
+              style={({ pressed }) => [
+                styles.sessionRow,
+                isSelected && styles.sessionRowSelected,
+                pressed && styles.pressedBg,
+              ]}
+            >
+              <View style={styles.statusIndicatorSlot}>
+                {isRunning && <View style={styles.runningDot} />}
+              </View>
+              <Text style={[styles.sessionText, isSelected && styles.sessionTextSelected]} numberOfLines={1}>
+                {resolveSessionDisplayTitle(item) ?? strings.sessions.untitled}
+              </Text>
+              {timeStr ? <Text style={styles.timeText}>{timeStr}</Text> : null}
+            </Pressable>
+          )
+        }}
+      />
+
+      {/* 底部 Footer */}
+      <View style={styles.footer}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="More"
+          onPress={() => {
+            Alert.alert(
+              device?.name ?? '设备信息',
+              `连接状态：${connected ? '在线' : '离线'}\n会话数：${sessions.length}\n工作区数：${workspaces.length}`,
+              [
+                { text: strings.common.refresh, onPress: () => void handleRefresh() },
+                { text: strings.app.backToDevices, onPress: () => { onClose(); onBack() } },
+                { text: strings.common.close, style: 'cancel' }
+              ]
+            )
+          }}
+          style={({ pressed }) => [styles.moreBtn, pressed && styles.pressedBg]}
+        >
+          <MoreHorizontal size={16} color={colors.muted} />
+          <Text style={styles.moreText}>More</Text>
+        </Pressable>
+      </View>
+
+      {/* 视图配置浮窗 Modal */}
+      <Modal visible={showConfigModal} transparent animationType="fade" onRequestClose={() => setShowConfigModal(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowConfigModal(false)}>
+          <View style={styles.configModal}>
+            <Text style={styles.modalSectionLabel}>Group by</Text>
+            <Pressable style={styles.modalItem} onPress={() => setGroupBy('workspace')}>
+              <Text style={styles.modalItemText}>WorkSpace</Text>
+              {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+            <Pressable style={styles.modalItem} onPress={() => setGroupBy('list')}>
+              <Text style={styles.modalItemText}>In one list</Text>
+              {groupBy === 'list' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+
+            <View style={styles.modalDivider} />
+
+            <Text style={styles.modalSectionLabel}>Order by</Text>
+            <Pressable style={styles.modalItem} onPress={() => setOrderBy('manual')}>
+              <Text style={styles.modalItemText}>Manual</Text>
+              {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+            <Pressable style={styles.modalItem} onPress={() => setOrderBy('updated')}>
+              <Text style={styles.modalItemText}>Last updated</Text>
+              {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+
+            <View style={styles.modalDivider} />
+
+            <Text style={styles.modalSectionLabel}>Filter sessions</Text>
+            <Pressable style={styles.modalItem} onPress={() => setFilterMode('hideArchived')}>
+              <Text style={styles.modalItemText}>Hide archived</Text>
+              {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+            <Pressable style={styles.modalItem} onPress={() => setFilterMode('all')}>
+              <Text style={styles.modalItemText}>All conversations</Text>
+              {filterMode === 'all' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+            <Pressable style={styles.modalItem} onPress={() => setFilterMode('archivedOnly')}>
+              <Text style={styles.modalItemText}>Archived only</Text>
+              {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
-  </Modal>
+  )
+
+  if (inline) {
+    return <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{content}</View>
+  }
+
+  return (
+    <Modal transparent animationType="none" onRequestClose={() => smoothClose(false)} statusBarTranslucent>
+      <View style={styles.overlayContainer}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
+        </Animated.View>
+        <Animated.View
+          accessibilityViewIsModal
+          {...panResponder.panHandlers}
+          style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, transform: [{ translateX }] }]}
+        >
+          {content}
+        </Animated.View>
+      </View>
+    </Modal>
+  )
 }
 
-const createStyles = (colors: ThemeColors) => StyleSheet.create({
-  overlayContainer: { flex: 1 },
-  overlay: { flex: 1, backgroundColor: colors.scrim },
-  drawer: { flex: 1, width: '88%', maxWidth: 420, backgroundColor: colors.surface },
-  inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
-  header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
-  tabs: { flexGrow: 0, flexShrink: 0 },
-  tabContent: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: spacing.sm, alignItems: 'center' },
-  tab: { minHeight: 48, minWidth: 92, padding: spacing.sm, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
-  list: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
-  loading: { paddingVertical: spacing.xl },
-  group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, marginTop: spacing.xs, borderRadius: radius.sm },
-  collapsedGroup: { marginTop: 0 },
-  workspaceIcon: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
-  groupTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  groupTitle: { ...type.smallStrong, color: colors.ink, flex: 1 },
-  count: { ...type.caption, color: colors.muted },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, marginLeft: spacing.lg, minHeight: 48, borderRadius: radius.sm },
-  showMoreSessions: { minHeight: 48, marginLeft: spacing.lg, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 20 + spacing.xs, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radius.sm },
-  showMoreSessionsText: { ...type.small, color: colors.muted },
-  sessionIcon: { width: 20, alignItems: 'center', justifyContent: 'center' },
-  activeRow: { backgroundColor: colors.surfaceStrong },
-  pressedRow: { backgroundColor: colors.surfaceStrong },
-  copy: { flex: 1, minWidth: 0 },
-  sessionTitle: { ...type.small, color: colors.ink },
-  activeTitle: { fontWeight: '600' },
-  runningStatus: { ...type.caption, color: colors.primary },
-  error: { ...type.small, color: colors.danger, padding: spacing.sm },
-})
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    overlayContainer: { flex: 1 },
+    overlay: { flex: 1, backgroundColor: colors.scrim },
+    drawer: { flex: 1, width: '85%', maxWidth: 360, backgroundColor: colors.surface },
+    inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
+    container: { flex: 1 },
+
+    brandHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    brandTitle: { ...type.heading, fontSize: 18, fontWeight: '700', color: colors.ink },
+    badge: {
+      backgroundColor: '#000000',
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      borderRadius: radius.sm,
+    },
+    badgeText: { color: '#ffffff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+    brandRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    iconBtn: { padding: 6, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+
+    newSessionWrapper: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+    newSessionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      height: 38,
+      borderWidth: 1,
+      borderColor: colors.separator,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surface,
+    },
+    newSessionText: { ...type.smallStrong, color: colors.ink },
+
+    navItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      height: 36,
+      marginHorizontal: spacing.xs,
+      borderRadius: radius.sm,
+    },
+    navItemText: { ...type.small, color: colors.ink },
+
+    workspacesToolbar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    workspacesTitle: { ...type.caption, fontWeight: '600', color: colors.muted },
+    toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      height: 32,
+      borderWidth: 1,
+      borderColor: colors.separator,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surfaceStrong,
+    },
+    searchInput: { flex: 1, ...type.small, color: colors.ink, paddingVertical: 0 },
+
+    listContainer: { paddingBottom: spacing.xl },
+
+    workspaceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.md,
+      height: 34,
+      borderRadius: radius.sm,
+    },
+    workspaceRowLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1 },
+    workspaceRowTitle: { ...type.smallStrong, color: colors.ink, flex: 1 },
+
+    sessionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingLeft: spacing.lg + spacing.xs,
+      paddingRight: spacing.md,
+      height: 34,
+      borderRadius: radius.sm,
+      marginHorizontal: spacing.xs,
+    },
+    sessionRowSelected: { backgroundColor: colors.surfaceStrong },
+    statusIndicatorSlot: { width: 12, alignItems: 'flex-start', justifyContent: 'center' },
+    runningDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' },
+    sessionText: { ...type.small, color: colors.ink, flex: 1, marginRight: spacing.xs },
+    sessionTextSelected: { fontWeight: '600' },
+    timeText: { ...type.caption, color: colors.muted, fontSize: 11 },
+
+    showMoreRow: {
+      paddingLeft: spacing.lg + spacing.md,
+      paddingVertical: spacing.xs,
+      height: 30,
+      justifyContent: 'center',
+    },
+    showMoreText: { ...type.caption, color: colors.muted },
+
+    footer: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+    },
+    moreBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      height: 36,
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.xs,
+    },
+    moreText: { ...type.small, color: colors.muted },
+
+    pressedBg: { opacity: 0.7, backgroundColor: colors.surfaceStrong },
+
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+    configModal: {
+      width: 250,
+      backgroundColor: colors.surface,
+      borderRadius: radius.sm,
+      padding: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.separator,
+    },
+    modalSectionLabel: { ...type.caption, color: colors.muted, marginBottom: 4, fontWeight: '600' },
+    modalItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 7,
+      paddingHorizontal: 4,
+    },
+    modalItemText: { ...type.small, color: colors.ink },
+    modalDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: 6 },
+  })
