@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   PanResponder,
@@ -24,7 +23,6 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  MoreHorizontal,
   PlusCircle,
   RefreshCw,
   Search,
@@ -43,6 +41,11 @@ import { browseStatus } from '../lib/backend-groups'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 
 const SESSION_PAGE_SIZE = 8
+
+/** 浮窗相对工具栏底部的间距 */
+const POPOVER_OFFSET = 4
+/** 浮窗到容器右边缘的距离（与工具栏 paddingHorizontal 对齐） */
+const POPOVER_RIGHT_INSET = spacing.md
 
 function formatRelativeTime(timestamp?: number | string): string {
   if (!timestamp) return ''
@@ -70,7 +73,6 @@ export function HostSessionsDrawer({
   inline?: boolean
   backLabel?: string
 }) {
-  const device = useAppStore(state => state.selectedDevice)
   const sessions = useAppStore(state => state.sessions)
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
@@ -91,12 +93,32 @@ export function HostSessionsDrawer({
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({})
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({})
 
+  // 浮窗定位：记录工具栏在覆盖层坐标系中的底部位置（默认兜底 200，测量后精准对齐）
+  const [popoverTop, setPopoverTop] = useState<number>(200)
+  const toolbarRef = useRef<View>(null)
+  const containerRef = useRef<View>(null)
+
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
 
   const creatingSessionRef = useRef(false)
   const lastNewSessionTimeRef = useRef(0)
+  // 打开浮窗时测量工具栏位置，确保浮窗紧贴工具栏下方
+  useEffect(() => {
+    if (!showConfigModal) return
+    const raf = requestAnimationFrame(() => {
+      if (!containerRef.current || !toolbarRef.current) return
+      containerRef.current.measureInWindow((_cx, cy) => {
+        toolbarRef.current?.measureInWindow((_tx, ty, _tw, th) => {
+          if (typeof cy !== 'number' || typeof ty !== 'number' || typeof th !== 'number') return
+          // 工具栏底部相对覆盖层顶部的偏移
+          setPopoverTop(ty - cy + th + POPOVER_OFFSET)
+        })
+      })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [showConfigModal])
 
   const handleNewSession = async () => {
     const now = Date.now()
@@ -188,7 +210,6 @@ export function HostSessionsDrawer({
   const currentAnim = useRef<Animated.CompositeAnimation | null>(null)
   const gestureSeq = useRef(0)
   const dragReady = useRef(false)
-  const pendingDx = useRef(0)
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
@@ -199,7 +220,6 @@ export function HostSessionsDrawer({
     closingRef.current = true
     gestureSeq.current++
     dragReady.current = false
-    pendingDx.current = 0
     if (withHaptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
     const seq = ++animSeq.current
     currentAnim.current?.stop()
@@ -238,7 +258,6 @@ export function HostSessionsDrawer({
           currentAnim.current?.stop()
           const seq = ++gestureSeq.current
           dragReady.current = false
-          pendingDx.current = 0
           translateX.stopAnimation(value => {
             if (seq !== gestureSeq.current || closingRef.current) return
             dragStartX.current = value
@@ -266,8 +285,58 @@ export function HostSessionsDrawer({
     [inline, drawerWidth, translateX, overlayOpacity]
   )
 
+  const closeConfig = () => setShowConfigModal(false)
+
+  /** 排序配置浮窗（在覆盖层内部渲染，供点击命中） */
+  const configPopover = (
+    <View
+      style={[
+        styles.configPopover,
+        { top: popoverTop, right: POPOVER_RIGHT_INSET },
+      ]}
+    >
+      <Text style={styles.modalSectionLabel}>Group by</Text>
+      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace'); closeConfig() }}>
+        <Text style={styles.modalItemText}>WorkSpace</Text>
+        {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('list'); closeConfig() }}>
+        <Text style={styles.modalItemText}>In one list</Text>
+        {groupBy === 'list' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+
+      <View style={styles.modalDivider} />
+
+      <Text style={styles.modalSectionLabel}>Order by</Text>
+      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('manual'); closeConfig() }}>
+        <Text style={styles.modalItemText}>Manual</Text>
+        {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('updated'); closeConfig() }}>
+        <Text style={styles.modalItemText}>Last updated</Text>
+        {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+
+      <View style={styles.modalDivider} />
+
+      <Text style={styles.modalSectionLabel}>Filter sessions</Text>
+      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('hideArchived'); closeConfig() }}>
+        <Text style={styles.modalItemText}>Hide archived</Text>
+        {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('all'); closeConfig() }}>
+        <Text style={styles.modalItemText}>All conversations</Text>
+        {filterMode === 'all' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('archivedOnly'); closeConfig() }}>
+        <Text style={styles.modalItemText}>Archived only</Text>
+        {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+    </View>
+  )
+
   const content = (
-    <View style={styles.container}>
+    <View ref={containerRef} style={styles.container} collapsable={false}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
         <View style={styles.brandLeft}>
@@ -328,45 +397,47 @@ export function HostSessionsDrawer({
       </Pressable>
 
       {/* Workspaces 标题栏与工具栏 */}
-      <View style={styles.workspacesToolbar}>
-        <Text style={styles.workspacesTitle}>Workspaces</Text>
-        <View style={styles.toolbarActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.comfort.search}
-            hitSlop={6}
-            onPress={() => setShowSearch(prev => !prev)}
-            style={styles.iconBtn}
-          >
-            <Search size={14} color={showSearch ? colors.ink : colors.muted} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="View options"
-            hitSlop={6}
-            onPress={() => setShowConfigModal(true)}
-            style={styles.iconBtn}
-          >
-            <Sliders size={14} color={colors.muted} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add workspace"
-            hitSlop={6}
-            onPress={() => {
-              Alert.alert(
-                '工作区管理',
-                '前往工作区页面查看或添加新工作区？',
-                [
-                  { text: strings.common.cancel, style: 'cancel' },
-                  { text: '前往', onPress: () => { onClose(); onBack() } }
-                ]
-              )
-            }}
-            style={styles.iconBtn}
-          >
-            <FolderPlus size={14} color={colors.muted} />
-          </Pressable>
+      <View ref={toolbarRef} style={styles.workspacesToolbarArea} collapsable={false}>
+        <View style={styles.workspacesToolbar}>
+          <Text style={styles.workspacesTitle}>Workspaces</Text>
+          <View style={styles.toolbarActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.comfort.search}
+              hitSlop={6}
+              onPress={() => setShowSearch(prev => !prev)}
+              style={styles.iconBtn}
+            >
+              <Search size={14} color={showSearch ? colors.ink : colors.muted} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="View options"
+              hitSlop={6}
+              onPress={() => setShowConfigModal(prev => !prev)}
+              style={styles.iconBtn}
+            >
+              <Sliders size={14} color={showConfigModal ? colors.ink : colors.muted} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add workspace"
+              hitSlop={6}
+              onPress={() => {
+                Alert.alert(
+                  '工作区管理',
+                  '前往工作区页面查看或添加新工作区？',
+                  [
+                    { text: strings.common.cancel, style: 'cancel' },
+                    { text: '前往', onPress: () => { onClose(); onBack() } }
+                  ]
+                )
+              }}
+              style={styles.iconBtn}
+            >
+              <FolderPlus size={14} color={colors.muted} />
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -459,73 +530,20 @@ export function HostSessionsDrawer({
         }}
       />
 
-      {/* 底部 Footer */}
-      <View style={styles.footer}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="More"
-          onPress={() => {
-            Alert.alert(
-              device?.name ?? '设备信息',
-              `连接状态：${connected ? '在线' : '离线'}\n会话数：${sessions.length}\n工作区数：${workspaces.length}`,
-              [
-                { text: strings.common.refresh, onPress: () => void handleRefresh() },
-                { text: strings.app.backToDevices, onPress: () => { onClose(); onBack() } },
-                { text: strings.common.close, style: 'cancel' }
-              ]
-            )
-          }}
-          style={({ pressed }) => [styles.moreBtn, pressed && styles.pressedBg]}
-        >
-          <MoreHorizontal size={16} color={colors.muted} />
-          <Text style={styles.moreText}>More</Text>
-        </Pressable>
-      </View>
-
-      {/* 视图配置浮窗 Modal */}
-      <Modal visible={showConfigModal} transparent animationType="fade" onRequestClose={() => setShowConfigModal(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowConfigModal(false)}>
-          <View style={styles.configModal}>
-            <Text style={styles.modalSectionLabel}>Group by</Text>
-            <Pressable style={styles.modalItem} onPress={() => setGroupBy('workspace')}>
-              <Text style={styles.modalItemText}>WorkSpace</Text>
-              {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-            <Pressable style={styles.modalItem} onPress={() => setGroupBy('list')}>
-              <Text style={styles.modalItemText}>In one list</Text>
-              {groupBy === 'list' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-
-            <View style={styles.modalDivider} />
-
-            <Text style={styles.modalSectionLabel}>Order by</Text>
-            <Pressable style={styles.modalItem} onPress={() => setOrderBy('manual')}>
-              <Text style={styles.modalItemText}>Manual</Text>
-              {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-            <Pressable style={styles.modalItem} onPress={() => setOrderBy('updated')}>
-              <Text style={styles.modalItemText}>Last updated</Text>
-              {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-
-            <View style={styles.modalDivider} />
-
-            <Text style={styles.modalSectionLabel}>Filter sessions</Text>
-            <Pressable style={styles.modalItem} onPress={() => setFilterMode('hideArchived')}>
-              <Text style={styles.modalItemText}>Hide archived</Text>
-              {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-            <Pressable style={styles.modalItem} onPress={() => setFilterMode('all')}>
-              <Text style={styles.modalItemText}>All conversations</Text>
-              {filterMode === 'all' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-            <Pressable style={styles.modalItem} onPress={() => setFilterMode('archivedOnly')}>
-              <Text style={styles.modalItemText}>Archived only</Text>
-              {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+      {/* 排序配置浮窗覆盖层：整层覆盖抽屉内容，遮罩与浮窗同级且顺序明确 */}
+      {showConfigModal && (
+        <View style={styles.popoverLayer} pointerEvents="box-none">
+          {/* 全屏透明遮罩：点击关闭浮窗，不会穿透到下层 */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            accessibilityRole="button"
+            accessibilityLabel="Close view options"
+            onPress={closeConfig}
+          />
+          {/* 浮窗内容：位于遮罩之上，点击不会穿透 */}
+          {configPopover}
+        </View>
+      )}
     </View>
   )
 
@@ -603,6 +621,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     navItemText: { ...type.small, color: colors.ink },
 
+    workspacesToolbarArea: { position: 'relative' },
     workspacesToolbar: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -666,32 +685,28 @@ const createStyles = (colors: ThemeColors) =>
     },
     showMoreText: { ...type.caption, color: colors.muted },
 
-    footer: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-    },
-    moreBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      height: 36,
-      borderRadius: radius.sm,
-      paddingHorizontal: spacing.xs,
-    },
-    moreText: { ...type.small, color: colors.muted },
-
     pressedBg: { opacity: 0.7, backgroundColor: colors.surfaceStrong },
 
-    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
-    configModal: {
-      width: 250,
+    // 浮窗覆盖层：铺满抽屉内容区，作为唯一命中层，避免跨父级层级问题
+    popoverLayer: {
+      ...StyleSheet.absoluteFill,
+      zIndex: 999,
+      elevation: 999,
+    },
+    configPopover: {
+      position: 'absolute',
+      width: 220,
       backgroundColor: colors.surface,
       borderRadius: radius.sm,
-      padding: spacing.md,
+      padding: spacing.sm,
       borderWidth: 1,
       borderColor: colors.separator,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 8,
+      zIndex: 1000,
     },
     modalSectionLabel: { ...type.caption, color: colors.muted, marginBottom: 4, fontWeight: '600' },
     modalItem: {

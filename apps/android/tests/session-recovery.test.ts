@@ -917,6 +917,55 @@ describe('session restore state machine', () => {
 
 })
 
+describe('session creation single flight', () => {
+  it('locks the real creation and opening lifecycle and releases after success or failure', async () => {
+    await runScenarios(['success', 'create failure', 'history failure'].map(outcome => ({
+      name: outcome,
+      run: async () => {
+        const created = { ...session, sessionId: 'new', blank: true }
+        useAppStore.setState({ defaultPermissionPreset: 'default' })
+        proxy.sessionList.mockResolvedValue([session, created])
+        let finishCreate!: (value: { sessionId: string }) => void
+        let failCreate!: (error: Error) => void
+        proxy.sessionCreate.mockImplementationOnce(() => new Promise((resolve, reject) => {
+          finishCreate = resolve
+          failCreate = reject
+        }))
+        let finishHistory!: (value: ReturnType<typeof page>) => void
+        let failHistory!: (error: Error) => void
+        proxy.sessionHistory.mockImplementationOnce(() => new Promise((resolve, reject) => {
+          finishHistory = resolve
+          failHistory = reject
+        }))
+        const first = useAppStore.getState().createSession('workspace-a')
+        expect(await useAppStore.getState().createSession('workspace-b')).toBe(false)
+        expect(proxy.sessionCreate).toHaveBeenCalledOnce()
+        if (outcome === 'create failure') {
+          failCreate(new Error('CREATE_FAILED'))
+        } else {
+          finishCreate({ sessionId: 'new' })
+          await vi.waitFor(() => expect(proxy.sessionHistory).toHaveBeenCalledOnce())
+          // busyAction has moved from creation to opening; the runtime lock must
+          // still reject a second entry until the actual history load settles.
+          expect(useAppStore.getState().busyAction).toBe('session:new')
+          expect(await useAppStore.getState().createSession('workspace-b')).toBe(false)
+          expect(proxy.sessionCreate).toHaveBeenCalledOnce()
+          if (outcome === 'history failure') failHistory(new Error('HISTORY_FAILED'))
+          else finishHistory(page([]))
+        }
+        expect(await first).toBe(outcome === 'success')
+        expect(useAppStore.getState().busyAction).toBeUndefined()
+        // A subsequent request runs normally after either completion path.
+        proxy.sessionCreate.mockResolvedValue({ sessionId: 'new' })
+        proxy.sessionHistory.mockReset().mockResolvedValue(page([]))
+        expect(await useAppStore.getState().createSession('workspace-b')).toBe(true)
+        expect(proxy.sessionCreate).toHaveBeenCalledTimes(2)
+        expect(proxy.sessionCreate).toHaveBeenLastCalledWith('workspace-b')
+      },
+    })), prepareScenario1)
+  })
+})
+
 describe('authoritative permission projection', () => {
   it('applies new Harness chat defaults only after Host confirmation', async () => {
     await runScenarios([
