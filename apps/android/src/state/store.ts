@@ -7,6 +7,7 @@ import { createAccountActions } from './account-actions'
 import { createConnectionActions } from './connection-actions'
 import { createPreferenceActions } from './preference-actions'
 import { createPromptActions } from './prompt-actions'
+import { createScheduleActions } from './schedule-actions'
 import { createSessionActions } from './session-actions'
 import { createSessionEventActions } from './session-event-actions'
 import { SessionRuntime } from './session-runtime'
@@ -33,6 +34,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createSessionEventActions({ set, get, runtime }),
   ...createAccountActions({ set, get }),
   ...createPreferenceActions({ set, get }),
+  ...createScheduleActions({
+    set,
+    get,
+    runtime,
+    getConnectionGeneration: () => runtime.connectionGeneration,
+  }),
   ...createWorkspaceActions({
     set, get, connection: runtime.connection,
     getConnectionGeneration: () => runtime.connectionGeneration,
@@ -70,6 +77,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPreviewImageUri(uri?: string) {
     set({ previewImageUri: uri })
   },
+  scheduleTasks: [],
+  scheduleLoading: false,
+  scheduleError: undefined,
   transportPreference: 'auto',
   languagePreference: 'system',
   language: getActiveLanguage(),

@@ -52,7 +52,7 @@ function formatRelativeTime(timestamp?: number | string): string {
   const time = typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp
   const diff = Math.max(0, Date.now() - time)
   const mins = Math.floor(diff / 60000)
-  if (mins < 1) return '刚刚'
+  if (mins < 1) return strings.time.now
   if (mins < 60) return `${mins}m`
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h`
@@ -64,15 +64,18 @@ export function HostSessionsDrawer({
   onBack,
   onClose,
   onSelect,
+  onOpenAutomationTasks,
   inline = false,
   backLabel,
 }: {
   onBack: () => void
   onClose: () => void
   onSelect: (session: RemoteSession) => Promise<void>
+  onOpenAutomationTasks?: () => void
   inline?: boolean
   backLabel?: string
 }) {
+  const language = useAppStore(state => state.language)
   const sessions = useAppStore(state => state.sessions)
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
@@ -157,7 +160,7 @@ export function HostSessionsDrawer({
 
   const sections = useMemo(() => {
     if (groupBy === 'list') {
-      return [{ id: 'all', title: 'All Sessions', data: filteredSessions, total: filteredSessions.length, expanded: true }]
+      return [{ id: 'all', title: strings.sessions.allSessions, data: filteredSessions, total: filteredSessions.length, expanded: true }]
     }
     const wsList: Array<WorkspaceView | { workspaceId: string; title: string; path: string; sessionIds: string[] }> =
       workspaces.length > 0 ? workspaces : [{ workspaceId: 'default', title: 'Default', path: '', sessionIds: [] }]
@@ -177,7 +180,7 @@ export function HostSessionsDrawer({
         data: isExpanded ? wsSessions.slice(0, limit) : [],
       }
     })
-  }, [groupBy, workspaces, filteredSessions, expandedWorkspaces, visibleCounts])
+  }, [groupBy, workspaces, filteredSessions, expandedWorkspaces, visibleCounts, language])
 
   // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
@@ -275,41 +278,41 @@ export function HostSessionsDrawer({
         { top: popoverTop, right: POPOVER_RIGHT_INSET },
       ]}
     >
-      <Text style={styles.modalSectionLabel}>Group by</Text>
+      <Text style={styles.modalSectionLabel}>{strings.sessions.groupBy}</Text>
       <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace'); closeConfig() }}>
-        <Text style={styles.modalItemText}>WorkSpace</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspace}</Text>
         {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
       </Pressable>
       <Pressable style={styles.modalItem} onPress={() => { setGroupBy('list'); closeConfig() }}>
-        <Text style={styles.modalItemText}>In one list</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.groupByList}</Text>
         {groupBy === 'list' && <Check size={14} color={colors.ink} />}
       </Pressable>
 
       <View style={styles.modalDivider} />
 
-      <Text style={styles.modalSectionLabel}>Order by</Text>
+      <Text style={styles.modalSectionLabel}>{strings.sessions.orderBy}</Text>
       <Pressable style={styles.modalItem} onPress={() => { setOrderBy('manual'); closeConfig() }}>
-        <Text style={styles.modalItemText}>Manual</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.orderManual}</Text>
         {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
       </Pressable>
       <Pressable style={styles.modalItem} onPress={() => { setOrderBy('updated'); closeConfig() }}>
-        <Text style={styles.modalItemText}>Last updated</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.orderUpdated}</Text>
         {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
       </Pressable>
 
       <View style={styles.modalDivider} />
 
-      <Text style={styles.modalSectionLabel}>Filter sessions</Text>
+      <Text style={styles.modalSectionLabel}>{strings.sessions.filterSessions}</Text>
       <Pressable style={styles.modalItem} onPress={() => { setFilterMode('hideArchived'); closeConfig() }}>
-        <Text style={styles.modalItemText}>Hide archived</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.filterHideArchived}</Text>
         {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
       </Pressable>
       <Pressable style={styles.modalItem} onPress={() => { setFilterMode('all'); closeConfig() }}>
-        <Text style={styles.modalItemText}>All conversations</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.filterAll}</Text>
         {filterMode === 'all' && <Check size={14} color={colors.ink} />}
       </Pressable>
       <Pressable style={styles.modalItem} onPress={() => { setFilterMode('archivedOnly'); closeConfig() }}>
-        <Text style={styles.modalItemText}>Archived only</Text>
+        <Text style={styles.modalItemText}>{strings.sessions.filterArchivedOnly}</Text>
         {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
       </Pressable>
     </View>
@@ -359,27 +362,31 @@ export function HostSessionsDrawer({
           style={({ pressed }) => [styles.newSessionBtn, pressed && styles.pressedBg]}
         >
           <PlusCircle size={16} color={colors.ink} />
-          <Text style={styles.newSessionText}>New Session</Text>
+          <Text style={styles.newSessionText}>{strings.sessions.newSession}</Text>
         </Pressable>
       </View>
 
       {/* 固定自动化入口 */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Automation tasks"
+        accessibilityLabel={strings.automation.nav}
         onPress={() => {
-          Alert.alert('Automation tasks', '当前设备暂无待处理定时或自动化任务')
+          if (onOpenAutomationTasks) {
+            onOpenAutomationTasks()
+          } else {
+            Alert.alert(strings.automation.title, strings.automation.empty)
+          }
         }}
         style={({ pressed }) => [styles.navItem, pressed && styles.pressedBg]}
       >
         <Clock size={16} color={colors.muted} />
-        <Text style={styles.navItemText}>Automation tasks</Text>
+        <Text style={styles.navItemText}>{strings.automation.nav}</Text>
       </Pressable>
 
       {/* Workspaces 标题栏与工具栏 */}
       <View ref={toolbarRef} style={styles.workspacesToolbarArea} collapsable={false}>
         <View style={styles.workspacesToolbar}>
-          <Text style={styles.workspacesTitle}>Workspaces</Text>
+          <Text style={styles.workspacesTitle}>{strings.sessions.workspaces}</Text>
           <View style={styles.toolbarActions}>
             <Pressable
               accessibilityRole="button"
@@ -392,7 +399,7 @@ export function HostSessionsDrawer({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="View options"
+              accessibilityLabel={strings.sessions.viewOptions}
               hitSlop={6}
               onPress={() => setShowConfigModal(prev => !prev)}
               style={styles.iconBtn}
@@ -401,15 +408,15 @@ export function HostSessionsDrawer({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Add workspace"
+              accessibilityLabel={strings.sessions.addWorkspace}
               hitSlop={6}
               onPress={() => {
                 Alert.alert(
-                  '工作区管理',
-                  '前往工作区页面查看或添加新工作区？',
+                  strings.workspaces.title,
+                  strings.sessions.manageWorkspacesPrompt,
                   [
                     { text: strings.common.cancel, style: 'cancel' },
-                    { text: '前往', onPress: () => { onClose(); onBack() } }
+                    { text: strings.sessions.goToWorkspaces, onPress: () => { onClose(); onBack() } }
                   ]
                 )
               }}
@@ -476,7 +483,7 @@ export function HostSessionsDrawer({
               }
               style={styles.showMoreRow}
             >
-              <Text style={styles.showMoreText}>Show {remaining} more sessions</Text>
+              <Text style={styles.showMoreText}>{strings.sessions.showMoreSessions(remaining)}</Text>
             </Pressable>
           )
         }}

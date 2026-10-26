@@ -19,6 +19,8 @@ import type {
   RedirectLoginMethod,
   RemoteDevice,
   RemoteSession,
+  ScheduleCatalogEntry,
+  ScheduleDeliveryRecord,
   SendMessageResult,
   ServerConfig,
   SessionModels,
@@ -101,6 +103,9 @@ export interface AppState {
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
+  scheduleTasks: ScheduleCatalogEntry[]
+  scheduleLoading: boolean
+  scheduleError?: string
   authPhase: AuthPhase
   refreshing: boolean
   busyAction?: string
@@ -116,6 +121,9 @@ export interface AppState {
   /** True when credentials are invalid and the UI should show the sign-in screen. */
   reauthRequired: boolean
 
+  loadScheduleTasks(): Promise<void>
+  deleteScheduleTask(sessionId: string, id: string): Promise<boolean>
+  loadScheduleHistory(sessionId: string, id: string): Promise<ScheduleDeliveryRecord[]>
   bootstrap(): Promise<void>
   requireReauth(message?: string): Promise<void>
   consumePendingAutoConnect(): string | undefined

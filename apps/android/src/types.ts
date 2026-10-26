@@ -496,3 +496,12 @@ export function transportPreferenceOptions(): TransportPreferenceOption[] {
     { value: 'relay', name: zhCN.transport.relay, description: zhCN.transport.relayDescription },
   ]
 }
+
+export type {
+  ScheduleCatalogEntry,
+  ScheduleDeleteResult,
+  ScheduleDeliveryHistoryResult,
+  ScheduleDeliveryReceipt,
+  ScheduleDeliveryRecord,
+  ScheduleKind,
+} from '@dsh-remote/client-core'

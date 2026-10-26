@@ -82,6 +82,50 @@ export interface HarnessWorkspaceList {
   archivedSessionIds: string[]
 }
 
+export type ScheduleKind = 'after' | 'at' | 'every' | 'daily' | 'weekly' | 'cron'
+
+export interface ScheduleDeliveryReceipt {
+  scheduledAt: string
+  deliveredAt: string
+  messageId: string
+}
+
+export interface ScheduleDeliveryRecord extends ScheduleDeliveryReceipt {
+  prompt?: string
+}
+
+export interface ScheduleCatalogEntry {
+  id: string
+  sessionId: string
+  kind: ScheduleKind
+  title: string
+  prompt: string
+  scheduledAt: string
+  status: 'active' | 'inactive'
+  afterSeconds?: number
+  everySeconds?: number
+  time?: string
+  timeZone?: string
+  weekdays?: number[]
+  expression?: string
+  lastDelivery?: ScheduleDeliveryReceipt
+}
+
+export interface ScheduleDeleteResult {
+  id: string
+  deleted?: boolean
+  code?: string
+}
+
+export interface ScheduleDeliveryHistoryResult {
+  id: string
+  records?: ScheduleDeliveryRecord[]
+  earlierRecordsUnavailable?: boolean
+  earlierRecordsPruned?: boolean
+  retention?: { days: number; records: number }
+  code?: string
+}
+
 export interface HarnessDirectoryEntry {
   name: string
   path: string
@@ -536,6 +580,25 @@ export class HarnessAlphaClient {
       },
     })
     return Array.isArray(result.workspaceIds) ? result.workspaceIds : []
+  }
+
+  async scheduleCatalog(): Promise<ScheduleCatalogEntry[]> {
+    const result = await this.callValue<ScheduleCatalogEntry[] | { items: ScheduleCatalogEntry[] }>('schedule/catalog', {})
+    if (Array.isArray(result)) return result
+    if (result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)) {
+      return (result as { items: ScheduleCatalogEntry[] }).items
+    }
+    throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
+  }
+
+  async scheduleDelete(sessionId: string, id: string): Promise<ScheduleDeleteResult> {
+    return this.callValue<ScheduleDeleteResult>('schedule/delete', { request: { sessionId, id } })
+  }
+
+  async scheduleHistory(sessionId: string, id: string, limit = 20, before?: string): Promise<ScheduleDeliveryHistoryResult> {
+    return this.callValue<ScheduleDeliveryHistoryResult>('schedule/history', {
+      request: { sessionId, id, limit, ...(before ? { before } : {}) },
+    })
   }
 
   async respondApproval(frameRpcId: string, sessionId: string, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void> {
