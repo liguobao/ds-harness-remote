@@ -95,6 +95,9 @@ REST、Control frame 和解密后的 Remote message 使用 UTF-8 JSON。发送�
 - 对未识别的必需 enum 值 fail closed。
 - 不把原始 parser 错误直接展示给用户。
 
+共享 Control 和解密消息解码器拒绝同一对象内的重复字段。转义后相同的字段名也视为重复。
+原始字节必须是有效 UTF-8。REST 入口尚未接入此检查。
+
 ### 4.2 标识符
 
 - `deviceId`：UUID 或 ULID 字符串。新实现应该生成 UUIDv7 或 ULID。

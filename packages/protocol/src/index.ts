@@ -1,4 +1,5 @@
 export * from './loopback.js'
+import { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 1
@@ -1179,8 +1180,7 @@ export function encodeControlFrame(frame: ControlFrame, limits: ControlFrameByte
 export function decodeControlFrame(data: Uint8Array | string, limits: ControlFrameByteLimits = {}): ControlFrame {
   const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
   if (encoded.byteLength > MAX_RELAY_FRAME_BYTES) throw new Error('Control frame exceeds the Relay frame limit.')
-  const text = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: true }).decode(data)
-  const frame = parseControlFrame(JSON.parse(text))
+  const frame = parseControlFrame(parseWireJson(data))
   assertControlFrameSize(encoded.byteLength, frame.type, limits)
   return frame
 }
@@ -1190,8 +1190,7 @@ export function encodeMessage(message: RemoteMessage): Uint8Array {
 }
 
 export function decodeMessage(data: Uint8Array | string): RemoteMessage {
-  const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
-  return parseRemoteMessage(JSON.parse(text))
+  return parseRemoteMessage(parseWireJson(data))
 }
 
 interface FragmentAssembly {

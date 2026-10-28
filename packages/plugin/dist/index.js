@@ -58764,6 +58764,46 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
+// ../protocol/dist/wire-json.js
+function parseWireJson(input3) {
+  try {
+    const text = typeof input3 === "string" ? input3 : new TextDecoder("utf-8", { fatal: true }).decode(input3);
+    const value = JSON.parse(text);
+    const objects = [];
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === "{")
+        objects.push(/* @__PURE__ */ new Set());
+      else if (char === "[")
+        objects.push(void 0);
+      else if (char === "}" || char === "]")
+        objects.pop();
+      else if (char === '"') {
+        const start = index;
+        for (index += 1; index < text.length; index += 1) {
+          if (text[index] === "\\")
+            index += 1;
+          else if (text[index] === '"')
+            break;
+        }
+        let next = index + 1;
+        while (next < text.length && /\s/u.test(text[next]))
+          next += 1;
+        if (text[next] !== ":")
+          continue;
+        const keys = objects[objects.length - 1];
+        const key = JSON.parse(text.slice(start, index + 1));
+        if (keys.has(key))
+          throw new Error("Duplicate JSON field.");
+        keys.add(key);
+      }
+    }
+    return value;
+  } catch {
+    throw new Error("Invalid wire JSON.");
+  }
+}
+
 // ../protocol/dist/index.js
 var PROTOCOL_VERSION = 1;
 var MAX_CONTROL_FRAME_BYTES = 64 * 1024;
@@ -59230,8 +59270,7 @@ function decodeControlFrame(data2, limits = {}) {
   const encoded = typeof data2 === "string" ? new TextEncoder().encode(data2) : data2;
   if (encoded.byteLength > MAX_RELAY_FRAME_BYTES)
     throw new Error("Control frame exceeds the Relay frame limit.");
-  const text = typeof data2 === "string" ? data2 : new TextDecoder("utf-8", { fatal: true }).decode(data2);
-  const frame = parseControlFrame(JSON.parse(text));
+  const frame = parseControlFrame(parseWireJson(data2));
   assertControlFrameSize(encoded.byteLength, frame.type, limits);
   return frame;
 }
@@ -59239,8 +59278,7 @@ function encodeMessage(message) {
   return new TextEncoder().encode(JSON.stringify(message));
 }
 function decodeMessage(data2) {
-  const text = typeof data2 === "string" ? data2 : new TextDecoder().decode(data2);
-  return parseRemoteMessage(JSON.parse(text));
+  return parseRemoteMessage(parseWireJson(data2));
 }
 var SecureMessageCodec = class {
   nextMessageId = 1;
