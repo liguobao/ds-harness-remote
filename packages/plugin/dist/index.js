@@ -58764,6 +58764,58 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
+// ../protocol/dist/wire-json.js
+function parseWireJson(input3) {
+  try {
+    const text = typeof input3 === "string" ? input3 : new TextDecoder("utf-8", { fatal: true }).decode(input3);
+    const value = JSON.parse(text);
+    const objects = [];
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === "{")
+        objects.push(/* @__PURE__ */ new Set());
+      else if (char === "[")
+        objects.push(void 0);
+      else if (char === "}" || char === "]")
+        objects.pop();
+      else if (char === '"') {
+        const start = index;
+        for (index += 1; index < text.length; index += 1) {
+          if (text[index] === "\\")
+            index += 1;
+          else if (text[index] === '"')
+            break;
+        }
+        let next = index + 1;
+        while (/\s/u.test(text[next] ?? "") && next < text.length)
+          next += 1;
+        if (text[next] !== ":")
+          continue;
+        const keys = objects[objects.length - 1];
+        const key = JSON.parse(text.slice(start, index + 1));
+        if (keys.has(key))
+          throw new Error("Duplicate JSON field.");
+        keys.add(key);
+      }
+    }
+    return value;
+  } catch {
+    throw new Error("Invalid wire JSON.");
+  }
+}
+function isCanonicalBase64Url(value) {
+  if (!/^[A-Za-z0-9_-]*$/u.test(value))
+    return false;
+  const remainder = value.length % 4;
+  if (remainder === 1)
+    return false;
+  if (remainder === 2)
+    return /[AQgw]$/u.test(value);
+  if (remainder === 3)
+    return /[AEIMQUYcgkosw048]$/u.test(value);
+  return true;
+}
+
 // ../protocol/dist/index.js
 var PROTOCOL_VERSION = 1;
 var MAX_CONTROL_FRAME_BYTES = 64 * 1024;
@@ -58967,6 +59019,8 @@ var identityKeySchema = external_exports.string().regex(/^[A-Za-z0-9_-]{42}[AEIM
 var deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH);
 var authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH);
 var expiresAtSchema = external_exports.number().int().positive().safe();
+var wireIdentifierSchema = boundedUtf8Schema(1, 128).refine((value) => !/[\s\u0000-\u001f\u007f]/u.test(value));
+var wireBinarySchema = external_exports.string().min(1).refine(isCanonicalBase64Url, "Expected canonical unpadded Base64URL.");
 var hostDeviceDescriptorSchema = external_exports.object({
   deviceId: deviceIdSchema,
   name: deviceNameSchema,
@@ -59031,23 +59085,23 @@ var browserAuthorizationExchangeResponseSchema = external_exports.object({
 }).strict();
 var remoteMessageSchema = external_exports.object({
   v: external_exports.literal(PROTOCOL_VERSION),
-  id: external_exports.string().min(1),
+  id: wireIdentifierSchema,
   type: messageTypeSchema,
-  timestamp: external_exports.number().int().positive(),
+  timestamp: external_exports.number().int().positive().safe(),
   payload: external_exports.unknown()
 });
 var controlFrameSchema = external_exports.object({
   v: external_exports.literal(PROTOCOL_VERSION),
-  id: external_exports.string().min(1),
+  id: wireIdentifierSchema,
   type: controlFrameTypeSchema,
-  timestamp: external_exports.number().int().positive(),
+  timestamp: external_exports.number().int().positive().safe(),
   payload: external_exports.unknown()
 }).strict();
 var transportEnum = external_exports.enum(["lan", "p2p", "turn", "relay"]);
 var selectedTransportEnum = external_exports.enum(selectedTransports);
 var helloPayloadSchema = external_exports.object({
   role: external_exports.enum(["host", "client"]),
-  deviceId: external_exports.string().min(1),
+  deviceId: wireIdentifierSchema,
   accessToken: external_exports.string().min(1),
   protocols: external_exports.array(external_exports.number().int().nonnegative().safe()).min(1).refine(uniqueNumbers),
   capabilities: external_exports.array(external_exports.string().min(1)).refine(uniqueStrings),
@@ -59057,13 +59111,13 @@ var helloPayloadSchema = external_exports.object({
 var helloAckPayloadSchema = external_exports.object({
   protocol: external_exports.literal(PROTOCOL_VERSION),
   serverVersion: external_exports.string().min(1),
-  connectionSessionId: external_exports.string().min(1),
-  heartbeatIntervalMs: external_exports.number().int().positive(),
+  connectionSessionId: wireIdentifierSchema,
+  heartbeatIntervalMs: external_exports.number().int().positive().max(2147483647),
   maxControlFrameBytes: external_exports.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: external_exports.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
   capabilities: external_exports.array(external_exports.string().min(1)).refine(uniqueStrings).optional(),
   webrtcEnabled: external_exports.boolean().optional(),
-  webrtcFallbackTimeoutMs: external_exports.number().int().positive().optional()
+  webrtcFallbackTimeoutMs: external_exports.number().int().positive().max(2147483647).optional()
 });
 var remoteWorkspaceTypeDescriptionSchema = external_exports.object({
   id: external_exports.string().min(1),
@@ -59088,44 +59142,44 @@ function parseRemoteWorkspaceTypes(value) {
   return types21;
 }
 var connectRequestPayloadSchema = external_exports.object({
-  hostDeviceId: external_exports.string().min(1),
-  preferredTransports: external_exports.array(transportEnum).min(1)
+  hostDeviceId: wireIdentifierSchema,
+  preferredTransports: external_exports.array(transportEnum).min(1).refine(uniqueStrings)
 });
 var connectIncomingPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  clientDeviceId: external_exports.string().min(1),
-  clientIdentityKey: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
+  clientDeviceId: wireIdentifierSchema,
+  clientIdentityKey: identityKeySchema,
   authorization: external_exports.literal("account"),
-  preferredTransports: external_exports.array(transportEnum).min(1)
+  preferredTransports: external_exports.array(transportEnum).min(1).refine(uniqueStrings)
 });
 var connectAcceptedPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1)
+  connectionId: wireIdentifierSchema
 });
 var connectRejectedPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
   code: external_exports.string().optional(),
   message: external_exports.string().optional()
 });
 var secureHandshakePayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  targetDeviceId: external_exports.string().min(1),
-  step: external_exports.number().int().positive(),
-  data: external_exports.string().min(1)
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
+  step: external_exports.union([external_exports.literal(1), external_exports.literal(2)]),
+  data: wireBinarySchema
 });
 var relayPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  targetDeviceId: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   counter: external_exports.number().int().nonnegative().safe(),
-  ciphertext: external_exports.string().min(1)
+  ciphertext: wireBinarySchema
 });
 var signalPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  targetDeviceId: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   sdp: external_exports.string().min(1)
 });
 var signalIcePayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  targetDeviceId: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   candidate: external_exports.object({
     candidate: external_exports.string().optional(),
     sdpMid: external_exports.string().nullable().optional(),
@@ -59134,18 +59188,18 @@ var signalIcePayloadSchema = external_exports.object({
   })
 });
 var transportSelectedPayloadSchema = external_exports.object({
-  connectionId: external_exports.string().min(1),
-  targetDeviceId: external_exports.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   transport: selectedTransportEnum
 });
 var pingPongPayloadSchema = external_exports.object({
-  nonce: external_exports.string().min(1)
+  nonce: wireIdentifierSchema
 });
 var controlErrorPayloadSchema = external_exports.object({
   code: external_exports.string().min(1),
   message: external_exports.string().min(1),
   retryable: external_exports.boolean().optional(),
-  connectionId: external_exports.string().min(1).optional()
+  connectionId: wireIdentifierSchema.optional()
 });
 var controlFramePayloadSchemas = {
   "hello": helloPayloadSchema,
@@ -59231,16 +59285,18 @@ function decodeControlFrame(data2, limits = {}) {
   if (encoded.byteLength > MAX_RELAY_FRAME_BYTES)
     throw new Error("Control frame exceeds the Relay frame limit.");
   const text = typeof data2 === "string" ? data2 : new TextDecoder("utf-8", { fatal: true }).decode(data2);
-  const frame = parseControlFrame(JSON.parse(text));
-  assertControlFrameSize(encoded.byteLength, frame.type, limits);
-  return frame;
+  const envelope = controlFrameSchema.parse(parseWireJson(text));
+  assertControlFrameSize(encoded.byteLength, envelope.type, limits);
+  return parseControlFrame(envelope);
 }
 function encodeMessage(message) {
   return new TextEncoder().encode(JSON.stringify(message));
 }
 function decodeMessage(data2) {
-  const text = typeof data2 === "string" ? data2 : new TextDecoder().decode(data2);
-  return parseRemoteMessage(JSON.parse(text));
+  const bytes = typeof data2 === "string" ? new TextEncoder().encode(data2).byteLength : data2.byteLength;
+  if (bytes > MAX_SECURE_MESSAGE_BYTES)
+    throw new Error("Secure message exceeds the reassembly limit.");
+  return parseRemoteMessage(parseWireJson(data2));
 }
 var SecureMessageCodec = class {
   nextMessageId = 1;
@@ -70069,6 +70125,9 @@ function toBase64Url2(bytes) {
   return base64.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 function fromBase64Url2(value) {
+  if (!/^[A-Za-z0-9_-]*$/u.test(value) || value.length % 4 === 1 || value.length % 4 === 2 && !/[AQgw]$/u.test(value) || value.length % 4 === 3 && !/[AEIMQUYcgkosw048]$/u.test(value)) {
+    throw new Error("Invalid canonical Base64URL.");
+  }
   const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
   if (typeof atob === "function") {
@@ -75943,7 +76002,7 @@ async function parseBody(response) {
   const text = await response.text();
   if (text.length === 0) return void 0;
   try {
-    return JSON.parse(text);
+    return parseWireJson(text);
   } catch {
     throw new ServerApiError("INVALID_MESSAGE", "The Server returned invalid JSON.", false, response.status);
   }

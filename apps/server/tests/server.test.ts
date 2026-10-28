@@ -125,6 +125,29 @@ const cleanupScenario2 = async () => {
 afterEach(cleanupScenario2)
 
 describe('account and device authorization', () => {
+  it('rejects ambiguous REST credentials and invalid UTF-8 before authorization', async () => {
+    await runScenarios(['duplicate-login', 'escaped-refresh-key', 'invalid-utf8'].map(reason => ({
+      name: reason,
+      run: async () => {
+        const d = await device()
+        const path = reason === 'escaped-refresh-key' ? '/auth/refresh' : '/auth/login'
+        const body = reason === 'escaped-refresh-key'
+          ? `{"deviceId":"${d.deviceId}","refreshToken":"wrong","refresh\\u0054oken":"${d.refreshToken}"}`
+          : reason === 'duplicate-login'
+            ? `{"email":"wrong","email":"${account}","password":"${password}"}`
+            : Buffer.concat([Buffer.from('{"email":"'), Buffer.from([0xc0, 0xaf]), Buffer.from(`","password":"${password}"}`)])
+        const response = await fetch(`${base}/api/v1${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+        })
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ error: { code: 'INVALID_MESSAGE' } })
+        expect((await request('/devices', 'GET', undefined, d.accessToken)).status).toBe(200)
+      },
+    })), async () => {
+      await cleanupScenario2()
+      await prepareScenario1()
+    })
+  })
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {
     expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' })).status).toBe(401)
     expect((await request('/auth/login', 'POST', { email: account, password }, undefined, { Origin: 'https://attacker.example' })).status).toBe(403)
@@ -169,7 +192,7 @@ describe('account and device authorization', () => {
 })
 describe('control authorization and encrypted relay', () => {
   it('rejects invalid Control messages at the WebSocket boundary', async () => {
-    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type'].map(reason => ({
+    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type', 'duplicate-version', 'escaped-duplicate-nonce', 'invalid-utf8'].map(reason => ({
       name: reason,
       run: async () => {
         const wire = await socket(await device())
@@ -180,7 +203,15 @@ describe('control authorization and encrypted relay', () => {
           ...(reason === 'unsupported-version' ? { v: 2 } : {}),
           ...(reason === 'unknown-frame-type' ? { type: 'unknown' } : {}),
         }
-        wire.ws.send(JSON.stringify(frame), { binary: reason === 'binary-control' })
+        let data: string | Buffer = JSON.stringify(frame)
+        if (reason === 'duplicate-version') data = data.replace('"v":1', '"v":2,"v":1')
+        if (reason === 'escaped-duplicate-nonce') data = data.replace('"nonce":"test"', '"nonce":"first","n\\u006fnce":"test"')
+        if (reason === 'invalid-utf8') data = Buffer.from([0xc0, 0xaf])
+        wire.ws.send(data, { binary: reason === 'binary-control' })
+        if (reason === 'invalid-utf8') {
+          expect((await closed)[0]).toBe(1007)
+          return
+        }
         expect((await wire.next('error')).code).toBe(reason === 'unsupported-version' ? 'UNSUPPORTED_VERSION' : 'INVALID_MESSAGE')
         expect((await closed)[0]).toBe(4001)
       },
@@ -216,7 +247,7 @@ describe('control authorization and encrypted relay', () => {
               connectionId: reason === 'unknown-connection' ? randomUUID() : ctx.connectionId,
               targetDeviceId: reason === 'wrong-target' ? randomUUID() : ctx.h.deviceId,
               counter: 0,
-              ciphertext: 'opaque',
+              ciphertext: 'AQIDBA',
             })
             expect((await attacker.next('error')).code).toBe(reason === 'before-handshake' ? 'INVALID_MESSAGE' : 'CONNECTION_NOT_FOUND')
             ctx.host.send('ping', { nonce: 'route-check' })

@@ -1,3 +1,4 @@
+import { parseWireJson } from '@dsh-remote/protocol'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { Credentials, DeviceIdentity, RemoteHost } from './types.js'
@@ -117,7 +118,7 @@ export class ServerApi {
       signal: AbortSignal.timeout(10_000),
     })
     const text = await response.text()
-    const body: unknown = text ? JSON.parse(text) : undefined
+    const body: unknown = text ? parseWireJson(text) : undefined
     if (!response.ok) {
       const error = isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string' ? body.error.message : `Server request failed (${response.status}).`
       throw new Error(error)

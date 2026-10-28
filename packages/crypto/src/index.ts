@@ -52,6 +52,11 @@ export function toBase64Url(bytes: Uint8Array): string {
 }
 
 export function fromBase64Url(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]*$/u.test(value) || value.length % 4 === 1
+    || (value.length % 4 === 2 && !/[AQgw]$/u.test(value))
+    || (value.length % 4 === 3 && !/[AEIMQUYcgkosw048]$/u.test(value))) {
+    throw new Error('Invalid canonical Base64URL.')
+  }
   const normalized = value.replaceAll('-', '+').replaceAll('_', '/')
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
   if (typeof atob === 'function') {

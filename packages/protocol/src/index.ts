@@ -1,4 +1,6 @@
 export * from './loopback.js'
+export { parseWireJson } from './wire-json.js'
+import { isCanonicalBase64Url, parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 1
@@ -840,6 +842,8 @@ const identityKeySchema = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]
 const deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH)
 const authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH)
 const expiresAtSchema = z.number().int().positive().safe()
+const wireIdentifierSchema = boundedUtf8Schema(1, 128).refine(value => !/[\s\u0000-\u001f\u007f]/u.test(value))
+const wireBinarySchema = z.string().min(1).refine(isCanonicalBase64Url, 'Expected canonical unpadded Base64URL.')
 
 export const hostDeviceDescriptorSchema: z.ZodType<HostDeviceDescriptor> = z.object({
   deviceId: deviceIdSchema,
@@ -921,17 +925,17 @@ export const browserAuthorizationExchangeResponseSchema: z.ZodType<BrowserAuthor
 
 export const remoteMessageSchema = z.object({
   v: z.literal(PROTOCOL_VERSION),
-  id: z.string().min(1),
+  id: wireIdentifierSchema,
   type: messageTypeSchema,
-  timestamp: z.number().int().positive(),
+  timestamp: z.number().int().positive().safe(),
   payload: z.unknown(),
 }) as unknown as z.ZodType<RemoteMessage>
 
 export const controlFrameSchema = z.object({
   v: z.literal(PROTOCOL_VERSION),
-  id: z.string().min(1),
+  id: wireIdentifierSchema,
   type: controlFrameTypeSchema,
-  timestamp: z.number().int().positive(),
+  timestamp: z.number().int().positive().safe(),
   payload: z.unknown(),
 }).strict() as unknown as z.ZodType<ControlFrame>
 
@@ -944,7 +948,7 @@ const selectedTransportEnum = z.enum(selectedTransports)
 
 export const helloPayloadSchema = z.object({
   role: z.enum(['host', 'client']),
-  deviceId: z.string().min(1),
+  deviceId: wireIdentifierSchema,
   accessToken: z.string().min(1),
   protocols: z.array(z.number().int().nonnegative().safe()).min(1).refine(uniqueNumbers),
   capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
@@ -955,13 +959,13 @@ export const helloPayloadSchema = z.object({
 export const helloAckPayloadSchema = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string().min(1),
-  connectionSessionId: z.string().min(1),
-  heartbeatIntervalMs: z.number().int().positive(),
+  connectionSessionId: wireIdentifierSchema,
+  heartbeatIntervalMs: z.number().int().positive().max(2_147_483_647),
   maxControlFrameBytes: z.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: z.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
   capabilities: z.array(z.string().min(1)).refine(uniqueStrings).optional(),
   webrtcEnabled: z.boolean().optional(),
-  webrtcFallbackTimeoutMs: z.number().int().positive().optional(),
+  webrtcFallbackTimeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
 })
 
 export const remoteWorkspaceTypeDescriptionSchema = z.object({
@@ -989,51 +993,51 @@ export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDe
 }
 
 export const connectRequestPayloadSchema = z.object({
-  hostDeviceId: z.string().min(1),
-  preferredTransports: z.array(transportEnum).min(1),
+  hostDeviceId: wireIdentifierSchema,
+  preferredTransports: z.array(transportEnum).min(1).refine(uniqueStrings),
 })
 
 export const connectIncomingPayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  clientDeviceId: z.string().min(1),
-  clientIdentityKey: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  clientDeviceId: wireIdentifierSchema,
+  clientIdentityKey: identityKeySchema,
   authorization: z.literal('account'),
-  preferredTransports: z.array(transportEnum).min(1),
+  preferredTransports: z.array(transportEnum).min(1).refine(uniqueStrings),
 })
 
 export const connectAcceptedPayloadSchema = z.object({
-  connectionId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
 })
 
 export const connectRejectedPayloadSchema = z.object({
-  connectionId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
   code: z.string().optional(),
   message: z.string().optional(),
 })
 
 export const secureHandshakePayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  targetDeviceId: z.string().min(1),
-  step: z.number().int().positive(),
-  data: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
+  step: z.union([z.literal(1), z.literal(2)]),
+  data: wireBinarySchema,
 })
 
 export const relayPayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  targetDeviceId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   counter: z.number().int().nonnegative().safe(),
-  ciphertext: z.string().min(1),
+  ciphertext: wireBinarySchema,
 })
 
 export const signalPayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  targetDeviceId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   sdp: z.string().min(1),
 })
 
 export const signalIcePayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  targetDeviceId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   candidate: z.object({
     candidate: z.string().optional(),
     sdpMid: z.string().nullable().optional(),
@@ -1043,20 +1047,20 @@ export const signalIcePayloadSchema = z.object({
 })
 
 export const transportSelectedPayloadSchema = z.object({
-  connectionId: z.string().min(1),
-  targetDeviceId: z.string().min(1),
+  connectionId: wireIdentifierSchema,
+  targetDeviceId: wireIdentifierSchema,
   transport: selectedTransportEnum,
 })
 
 export const pingPongPayloadSchema = z.object({
-  nonce: z.string().min(1),
+  nonce: wireIdentifierSchema,
 })
 
 export const controlErrorPayloadSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
   retryable: z.boolean().optional(),
-  connectionId: z.string().min(1).optional(),
+  connectionId: wireIdentifierSchema.optional(),
 })
 
 const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
@@ -1180,9 +1184,9 @@ export function decodeControlFrame(data: Uint8Array | string, limits: ControlFra
   const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
   if (encoded.byteLength > MAX_RELAY_FRAME_BYTES) throw new Error('Control frame exceeds the Relay frame limit.')
   const text = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: true }).decode(data)
-  const frame = parseControlFrame(JSON.parse(text))
-  assertControlFrameSize(encoded.byteLength, frame.type, limits)
-  return frame
+  const envelope = controlFrameSchema.parse(parseWireJson(text))
+  assertControlFrameSize(encoded.byteLength, envelope.type, limits)
+  return parseControlFrame(envelope)
 }
 
 export function encodeMessage(message: RemoteMessage): Uint8Array {
@@ -1190,8 +1194,9 @@ export function encodeMessage(message: RemoteMessage): Uint8Array {
 }
 
 export function decodeMessage(data: Uint8Array | string): RemoteMessage {
-  const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
-  return parseRemoteMessage(JSON.parse(text))
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength
+  if (bytes > MAX_SECURE_MESSAGE_BYTES) throw new Error('Secure message exceeds the reassembly limit.')
+  return parseRemoteMessage(parseWireJson(data))
 }
 
 interface FragmentAssembly {

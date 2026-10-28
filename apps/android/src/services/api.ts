@@ -1,3 +1,4 @@
+import { parseWireJson } from '@dsh-remote/protocol'
 import appConfig from '../../app.json'
 import { MAX_DEVICE_NAME_LENGTH, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import { RemoteApiError } from '../lib/errors'
@@ -333,7 +334,7 @@ export class RemoteServerApi {
     let body: unknown = undefined
     if (text.length > 0) {
       try {
-        body = JSON.parse(text)
+        body = parseWireJson(text)
       } catch {
         throw new RemoteApiError('INVALID_MESSAGE', 'The server returned invalid JSON.', response.status)
       }

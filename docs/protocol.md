@@ -95,6 +95,10 @@ REST、Control frame 和解密后的 Remote message 使用 UTF-8 JSON。发送�
 - 对未识别的必需 enum 值 fail closed。
 - 不把原始 parser 错误直接展示给用户。
 
+共享 `parseWireJson` 拒绝同一对象内的所有重复字段，包括转义后相同的字段名。
+Control、解密消息、自部署 REST 请求和随包 Client 的 REST 响应使用该检查。
+不同对象可以使用相同字段名。原始字节入口使用严格 UTF-8 解码。
+
 ### 4.2 标识符
 
 - `deviceId`：UUID 或 ULID 字符串。新实现应该生成 UUIDv7 或 ULID。
@@ -106,6 +110,10 @@ REST、Control frame 和解密后的 Remote message 使用 UTF-8 JSON。发送�
 
 ID 只能用于定位，不能单独作为授权凭据。
 
+当前共享 Control 与 Remote 接收端限制 ID 为 1–128 个 UTF-8 字节，并拒绝空白与控制字符。
+注册 descriptor 另行校验 UUID/ULID。Control 的完整 UUID/ULID 格式对齐仍是实现差距。
+不得把上述长度检查视为已完成本节格式约束。
+
 ### 4.3 时间
 
 所有 JSON 时间使用 Unix epoch milliseconds，字段名以 `At` 结尾。TTL 同时返回绝对 `expiresAt`；Client 不应仅依赖本机倒计时做安全判断。
@@ -113,6 +121,10 @@ ID 只能用于定位，不能单独作为授权凭据。
 ### 4.4 Binary/Base64URL
 
 REST/Control JSON 中的 key、nonce、handshake 和 ciphertext 使用无 padding Base64URL。WebRTC DataChannel 可直接发送 binary Noise transport frame，不再 Base64 编码。
+
+Base64URL 不允许空白、`+`、`/` 或 `=`。剩余编码位必须为零。
+`connect.incoming.clientIdentityKey` 必须使用 §7 的规范 32 字节公钥编码。
+Control ping/pong 的 `nonce` 是原样回显的非空标识符，不是加密 nonce。
 
 ## 5. 版本规则
 
@@ -443,7 +455,8 @@ Server 不能返回 Client 未宣告的 capability。Client 后续只能使用�
 `webrtcEnabled` 是可选实现扩展。值为 `false` 时，Client 只能使用 Relay。
 字段缺失时，Client 可以协商 WebRTC。Client 仍必须遵守 `hello.ack.capabilities`。
 
-`webrtcFallbackTimeoutMs` 是可选实现扩展。它必须是正安全整数。
+`heartbeatIntervalMs` 和 `webrtcFallbackTimeoutMs` 必须是 `1..2147483647` 范围内的整数。
+该上限避免 JavaScript 定时器溢出。`webrtcFallbackTimeoutMs` 是可选实现扩展。
 字段缺失时，Client 使用本地超时。字段存在时，Client 使用 Server 与本地值中的较大值。
 Host 的 WebRTC responder 同样取 Server 与本地等待时间中的较大值，避免在 Client 仍在协商时提前结束。
 
@@ -487,6 +500,8 @@ Server 校验 membership、双方账号归属一致且 Host online 后创建 `co
   }
 }
 ```
+
+`preferredTransports` 必须非空，且不得重复同一个 transport。
 
 WebRTC DataChannel 建立后，Initiator 必须先发送 `transport.selected`，再开始 Noise
 握手。Host 必须按同一 Control WebSocket 上的消息顺序，在创建 authenticated channel 前应用该
@@ -556,6 +571,9 @@ Noise handshake bytes 通过 Control frame 转发：
 ```
 
 Server 只校验 connection ownership、step 上限和 frame size，不解析 Noise payload。
+
+Noise IK 只使用两个 step：Client 发送 `1`，Host 发送 `2`。
+接收方同时校验发送方、当前握手阶段和 step。其他整数必须拒绝。
 
 ### 12.3 Transport frames
 
@@ -1663,6 +1681,9 @@ Client 收到后结束对应 iterator；`failed` 必须以 Gateway 归一化 fai
 本节旧 `sync.from` 机制已退出 Plugin。Desktop Client 重连后重新打开官方 mux/host
 stream，并由 Harness UI 重新读取原生 history baseline；Plugin 不维护第二套 replay buffer。
 
+下列 `sync.from`、`sessions.get` 和通用 seq buffer 仅为历史协议记录。
+当前 Host 不实现这些方法，也不以这些历史流程作为验收目标。
+
 Client 为每台 Host 持久化 `lastSeq`，但不必持久化解密后的 conversation。
 
 Secure channel 恢复后调用扩展 RPC：
@@ -1704,7 +1725,8 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 
 应用层 `connection.ping` 已退出 Plugin；只保留 Control Channel heartbeat。
 
-Control Channel heartbeat 默认 25 秒，75 秒未收到有效 pong 视为断开。应用层可通过 `connection.ping` 估计 Host RTT。
+Control Channel heartbeat 默认 25 秒，75 秒未收到有效 pong 视为断开。
+Control RTT 使用 ping/pong 计时，不恢复 `connection.ping`。
 
 Control ping：
 
@@ -1806,7 +1828,7 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | ICE candidates / connection | 256 |
 | Heartbeat interval | 25 s |
 | Heartbeat disconnect | 75 s |
-| Event replay window | 至少 10,000 events 或 15 min，取先达到者 |
+| Historical event replay window | 历史目标：10,000 events 或 15 min；当前 Host 不实现通用 replay buffer |
 
 工作区上传采用上述固定限额，`chunkBytes` 由 open 返回，不新增 hello/system.info 字段。
 其他限制如由 Server/Host 协商缩小，必须在 hello/system.info 中公布。超限必须返回稳定错误或关闭违规连接，不能无限缓存。
@@ -1843,7 +1865,7 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 - Workspace upload 连接/会话/后端 authority 隔离、路径穿越与根目录/临时条目替换拒绝
 - Workspace upload 取消/空闲/断线清理、迟到目录解析取消与提交点后文件保留
 - Workspace upload 提交缓存幂等、缓存失效后的结果未知与旧 Host capability 降级
-- event seq、duplicate、gap、replay 和 full resync
+- 官方 stream 事件顺序、重复、缺口和 history baseline 恢复
 - Host/Client account authorization、owner mismatch 与跨账号访问拒绝
 - Host registration code expire/single-use
 - Noise IK handshake、peer mismatch、tamper、replay 和 rekey

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
-import { createControlFrame, decodeControlFrame, MAX_CONTROL_FRAME_BYTES, MAX_RELAY_FRAME_BYTES, type ControlFrame, type HelloPayload, type ConnectRequestPayload, type SecureHandshakePayload, type RelayPayload, type TransportSelectedPayload } from '@dsh-remote/protocol'
+import { createControlFrame, decodeControlFrame, parseWireJson, MAX_CONTROL_FRAME_BYTES, MAX_RELAY_FRAME_BYTES, type ControlFrame, type HelloPayload, type ConnectRequestPayload, type SecureHandshakePayload, type RelayPayload, type TransportSelectedPayload } from '@dsh-remote/protocol'
 import { ApiError, Store } from './store.js'
 
 type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string }
@@ -68,10 +68,11 @@ export class Gateway {
       let frame: ControlFrame | undefined
       try {
         if (binary) throw new ApiError('INVALID_MESSAGE')
-        const text = raw.toString()
+        const data = Array.isArray(raw) ? Buffer.concat(raw) : raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(data)
         if (Date.now() - windowStart >= 1000) { windowStart = Date.now(); frames = 0; bytes = 0 }
         if (++frames > 512 || (bytes += Buffer.byteLength(text)) > 16 * MAX_RELAY_FRAME_BYTES) throw new ApiError('RATE_LIMITED')
-        const envelope = JSON.parse(text) as { v?: unknown }
+        const envelope = parseWireJson(text) as { v?: unknown }
         if (envelope && envelope.v !== 1) throw new ApiError('UNSUPPORTED_VERSION')
         frame = decodeControlFrame(text)
         if (!peer) {

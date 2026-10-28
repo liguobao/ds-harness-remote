@@ -133,7 +133,7 @@ describe('trusted device reconciliation', () => {
               name: 'New host',
               role: 'host' as const,
               platform: 'linux',
-              identityKey: 'new-key',
+              identityKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
               membershipId: 'membership-2',
               online: true,
             })),
@@ -144,7 +144,7 @@ describe('trusted device reconciliation', () => {
           expect(result.devices).toEqual([
             expect.objectContaining({
               deviceId: 'host-2',
-              identityKey: 'new-key',
+              identityKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
               online: true,
               trusted: false,
             }),

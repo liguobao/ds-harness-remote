@@ -34,6 +34,10 @@
     {
       "name": "account-authorization",
       "path": "account/authorization.json"
+    },
+    {
+      "name": "control-security",
+      "path": "control/security.json"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # TODO
 
-更新日期：2026-10-27。当前源码版本为 `0.5.21`，Android `versionCode 66`，Expo iOS `buildNumber 66`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
+更新日期：2026-10-28。当前源码版本为 `0.5.22`，Android `versionCode 67`，Expo iOS `buildNumber 67`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
 
 最近一次构建验证见 [AGENTS.md 的 0.5.20 合并后重建记录](../AGENTS.md#post-merge-0520-rebuild-2026-10-27)：全仓 check、847 tests、串行生产 build（含 Android Hermes）、DSH bundle 与打包检查通过。这是既有验证记录，本轮文档清理未重新运行；未新增 APK、原生真机或跨设备验收。Metro noble/hashes exports fallback 警告仍保留。
 
@@ -215,11 +215,11 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 
 本地集成验证不替代真实跨设备验收。
 
-- [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
-- [ ] 拒绝原始 JSON 中重复的安全字段。分别核对 Control 与 REST 入口。
-- [ ] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。
-- [ ] 明确握手 step、heartbeat 数值与标识符范围。同步 schema 和共享 fixtures。
-- [ ] 清理协议第 22 节的 `connection.ping` 冲突说明。区分 replay/rekey 目标与实现状态。
+- [ ] 完成跨仓库 schema 对齐。Control 的 UUID/ULID 格式仍未完全对齐 §4.2；现有 Server/Client 也使用 UUIDv4 和历史 opaque ID。必须先同步生成规则与共享 fixtures，不能只改文档放宽规范。当前校验与差距见 [WSL 协议安全验证](protocol-security-validation.md)。
+- [x] 拒绝原始 JSON 的重复字段，包括转义后重复。覆盖 Control、解密消息、自部署 REST 请求和随包 Client 的 REST 响应。独立 Server 的 REST 入口仍需同步。
+- [x] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。
+- [x] 固定握手 step 为 1/2，限制 heartbeat/协商超时数值与 ID 长度。新增共享边界 fixtures；UUID/ULID 格式差距见上项。
+- [x] 清理协议第 22 节的 `connection.ping` 冲突说明。区分当前恢复流程与历史 replay。
 - [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
@@ -227,6 +227,7 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [ ] 定义并实现长期连接 rekey 与连接最大生命周期。
 - [ ] 核对断线密钥清理。补齐清理策略与核心测试。
 - [ ] 增加剩余协议 golden vectors
+- [x] 新增 Control 编码、公钥、重复 JSON 字段、握手 step、定时器边界和 ID 长度的共享 fixtures。
 - [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
 - [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证

@@ -1,3 +1,4 @@
+import { parseWireJson } from '@dsh-remote/protocol'
 import { platform } from 'node:os'
 import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
@@ -568,7 +569,7 @@ async function parseBody(response: Response): Promise<unknown> {
   const text = await response.text()
   if (text.length === 0) return undefined
   try {
-    return JSON.parse(text)
+    return parseWireJson(text)
   } catch {
     throw new ServerApiError('INVALID_MESSAGE', 'The Server returned invalid JSON.', false, response.status)
   }
