@@ -216,7 +216,7 @@ describe('control authorization and encrypted relay', () => {
               connectionId: reason === 'unknown-connection' ? randomUUID() : ctx.connectionId,
               targetDeviceId: reason === 'wrong-target' ? randomUUID() : ctx.h.deviceId,
               counter: 0,
-              ciphertext: 'opaque',
+              ciphertext: 'AQIDBA',
             })
             expect((await attacker.next('error')).code).toBe(reason === 'before-handshake' ? 'INVALID_MESSAGE' : 'CONNECTION_NOT_FOUND')
             ctx.host.send('ping', { nonce: 'route-check' })

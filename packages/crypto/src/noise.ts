@@ -26,7 +26,7 @@ export interface NoiseIkSessionOptions {
  * transcript's remote static key before transport messages can be used.
  */
 export class NoiseIkSession {
-  private readonly handshake: NqHandshake
+  private handshake?: NqHandshake
   private readonly expectedRemoteStatic: Uint8Array
   private transport?: TransportState
   private destroyed = false
@@ -56,13 +56,13 @@ export class NoiseIkSession {
 
   get canWriteHandshake(): boolean {
     this.assertLive()
-    return !this.complete && this.handshake.isWriteTurn()
+    return !this.complete && this.handshake!.isWriteTurn()
   }
 
   writeHandshake(payload = new Uint8Array()): Uint8Array {
     this.assertHandshake(false)
-    const output = new Uint8Array(payload.byteLength + this.handshake.getNextMessageOverhead())
-    const length = this.handshake.writeMessage(payload, output)
+    const output = new Uint8Array(payload.byteLength + this.handshake!.getNextMessageOverhead())
+    const length = this.handshake!.writeMessage(payload, output)
     this.finishIfReady()
     return output.slice(0, length)
   }
@@ -70,7 +70,7 @@ export class NoiseIkSession {
   readHandshake(message: Uint8Array): Uint8Array {
     this.assertHandshake(true)
     const output = new Uint8Array(message.byteLength)
-    const length = this.handshake.readMessage(message, output)
+    const length = this.handshake!.readMessage(message, output)
     this.verifyRemoteStatic()
     this.finishIfReady()
     return output.slice(0, length)
@@ -99,19 +99,22 @@ export class NoiseIkSession {
   }
 
   destroy(): void {
+    if (this.destroyed) return
     this.destroyed = true
     this.expectedRemoteStatic.fill(0)
     this.transport = undefined
+    // clatterjs has no key erase API. Release its handshake and transport owners.
+    this.handshake = undefined
   }
 
   private finishIfReady(): void {
-    if (!this.handshake.isFinished()) return
+    if (!this.handshake!.isFinished()) return
     this.verifyRemoteStatic()
-    this.transport = this.handshake.finalize()
+    this.transport = this.handshake!.finalize()
   }
 
   private verifyRemoteStatic(): void {
-    const actual = this.handshake.getRemoteStatic()
+    const actual = this.handshake!.getRemoteStatic()
     if (actual === undefined || !constantTimeEqual(actual, this.expectedRemoteStatic)) {
       this.destroy()
       throw new NoiseSessionError('PEER_IDENTITY_MISMATCH', 'The Noise peer static key does not match local trust.')
@@ -121,7 +124,7 @@ export class NoiseIkSession {
   private assertHandshake(reading: boolean): void {
     this.assertLive()
     if (this.complete) throw new NoiseSessionError('NOISE_ALREADY_READY', 'The Noise handshake is already complete.')
-    if (this.handshake.isWriteTurn() === reading) {
+    if (this.handshake!.isWriteTurn() === reading) {
       throw new NoiseSessionError('NOISE_HANDSHAKE_ORDER', 'The Noise handshake message arrived out of order.')
     }
   }

@@ -16,6 +16,10 @@
       "path": "control/connect.json"
     },
     {
+      "name": "control-handshake",
+      "path": "control/handshake.json"
+    },
+    {
       "name": "control-relay",
       "path": "control/relay.json"
     },

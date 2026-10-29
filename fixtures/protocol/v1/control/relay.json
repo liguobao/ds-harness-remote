@@ -119,6 +119,40 @@
         }
       },
       "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-relay-with-padding",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc1-0008-7abc-8123-123456789abc",
+        "type": "relay",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc1-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc1-2001-7abc-8123-123456789abc",
+          "counter": 1,
+          "ciphertext": "AQIDBA=="
+        }
+      },
+      "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-relay-with-nonzero-unused-bits",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc1-0009-7abc-8123-123456789abc",
+        "type": "relay",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc1-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc1-2001-7abc-8123-123456789abc",
+          "counter": 1,
+          "ciphertext": "AQIDBB"
+        }
+      },
+      "expect": { "accepted": false }
     }
   ]
 }

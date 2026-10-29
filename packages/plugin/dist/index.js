@@ -74682,6 +74682,16 @@ var deviceIdSchema = external_exports.string().refine((value) => /^[0-9A-HJKMNP-
 var deviceNameSchema = boundedUtf8Schema(1, MAX_DEVICE_NAME_LENGTH).refine((value) => value.trim().length > 0, "Device name must contain visible text.");
 var devicePlatformSchema = external_exports.string().min(1).max(MAX_DEVICE_PLATFORM_LENGTH).regex(/^[a-z0-9][a-z0-9._-]*$/u);
 var identityKeySchema = external_exports.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u);
+var canonicalBase64UrlSchema = external_exports.string().min(1).regex(/^[A-Za-z0-9_-]+$/u).refine((value) => {
+  const remainder = value.length % 4;
+  if (remainder === 1)
+    return false;
+  if (remainder === 0)
+    return true;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const last = alphabet.indexOf(value.at(-1));
+  return remainder === 2 ? (last & 15) === 0 : (last & 3) === 0;
+}, "Value must use canonical Base64URL without padding.");
 var deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH);
 var authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH);
 var expiresAtSchema = external_exports.number().int().positive().safe();
@@ -74780,12 +74790,12 @@ var helloAckPayloadSchema = external_exports.object({
   protocol: external_exports.literal(PROTOCOL_VERSION),
   serverVersion: external_exports.string().min(1),
   connectionSessionId: external_exports.string().min(1),
-  heartbeatIntervalMs: external_exports.number().int().positive(),
+  heartbeatIntervalMs: external_exports.number().int().positive().safe(),
   maxControlFrameBytes: external_exports.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: external_exports.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
   capabilities: external_exports.array(external_exports.string().min(1)).max(MAX_CAPABILITY_ENTRIES).refine(uniqueStrings).optional(),
   webrtcEnabled: external_exports.boolean().optional(),
-  webrtcFallbackTimeoutMs: external_exports.number().int().positive().optional()
+  webrtcFallbackTimeoutMs: external_exports.number().int().positive().safe().optional()
 });
 var remoteWorkspaceTypeDescriptionSchema = external_exports.object({
   id: external_exports.string().min(1),
@@ -74818,7 +74828,7 @@ var connectRequestPayloadSchema = external_exports.object({
 var connectIncomingPayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
   clientDeviceId: external_exports.string().min(1),
-  clientIdentityKey: external_exports.string().min(1),
+  clientIdentityKey: identityKeySchema,
   authorization: external_exports.literal("account"),
   preferredTransports: external_exports.array(transportEnum).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES)
 });
@@ -74833,14 +74843,14 @@ var connectRejectedPayloadSchema = external_exports.object({
 var secureHandshakePayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
   targetDeviceId: external_exports.string().min(1),
-  step: external_exports.number().int().positive(),
-  data: external_exports.string().min(1)
+  step: external_exports.union([external_exports.literal(1), external_exports.literal(2)]),
+  data: canonicalBase64UrlSchema
 });
 var relayPayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
   targetDeviceId: external_exports.string().min(1),
   counter: external_exports.number().int().nonnegative().safe(),
-  ciphertext: external_exports.string().min(1)
+  ciphertext: canonicalBase64UrlSchema
 });
 var signalPayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
@@ -85715,9 +85725,12 @@ var NoiseIkSession = class {
     return this.transport.receivingNonce();
   }
   destroy() {
+    if (this.destroyed)
+      return;
     this.destroyed = true;
     this.expectedRemoteStatic.fill(0);
     this.transport = void 0;
+    this.handshake = void 0;
   }
   finishIfReady() {
     if (!this.handshake.isFinished())

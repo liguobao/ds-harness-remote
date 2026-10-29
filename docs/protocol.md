@@ -442,6 +442,7 @@ Server 不能返回 Client 未宣告的 capability。Client 后续只能使用�
 
 `maxControlFrameBytes` 和 `maxRelayFrameBytes` 可以声明更小的上限。
 双方必须对后续收发 frame 使用该上限。大于 v1 默认值的声明必须拒绝。
+`heartbeatIntervalMs` 必须是正安全整数。
 
 `webrtcEnabled` 是可选实现扩展。值为 `false` 时，Client 只能使用 Relay。
 字段缺失时，Client 可以协商 WebRTC。Client 仍必须遵守 `hello.ack.capabilities`。
@@ -559,6 +560,7 @@ Noise handshake bytes 通过 Control frame 转发：
 ```
 
 Server 只校验 connection ownership、step 上限和 frame size，不解析 Noise payload。
+`step` 只允许 `1` 或 `2`。`data` 必须是规范的无 padding Base64URL。
 
 ### 12.3 Transport frames
 
@@ -600,6 +602,7 @@ TLS/WSS 保护到 Server 的链路，但不能替代本节 E2EE。
 
 `counter` 必须是 `0..Number.MAX_SAFE_INTEGER` 范围内的整数。它用于 Server 基础限速和排序诊断，
 不作为解密 nonce 的权威来源。Noise frame 内部状态才是认证依据。
+`ciphertext` 必须是规范的无 padding Base64URL。
 
 Server 禁止解密、解析、缓存到数据库或记录 `ciphertext`。
 
@@ -1707,7 +1710,8 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 
 应用层 `connection.ping` 已退出 Plugin；只保留 Control Channel heartbeat。
 
-Control Channel heartbeat 默认 25 秒，75 秒未收到有效 pong 视为断开。应用层可通过 `connection.ping` 估计 Host RTT。
+Control Channel heartbeat 默认 25 秒。75 秒未收到有效 pong 时，连接断开。
+Control ping/pong 的 nonce 可用于估计 Server RTT。
 
 Control ping：
 

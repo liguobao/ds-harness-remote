@@ -1,0 +1,73 @@
+{
+  "name": "control-handshake",
+  "cases": [
+    {
+      "name": "accept-first-handshake-step",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc4-0001-7abc-8123-123456789abc",
+        "type": "secure.handshake",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc4-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc4-2001-7abc-8123-123456789abc",
+          "step": 1,
+          "data": "AQIDBA"
+        }
+      },
+      "expect": { "accepted": true }
+    },
+    {
+      "name": "accept-second-handshake-step",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc4-0002-7abc-8123-123456789abc",
+        "type": "secure.handshake",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc4-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc4-2001-7abc-8123-123456789abc",
+          "step": 2,
+          "data": "AQIDBA"
+        }
+      },
+      "expect": { "accepted": true }
+    },
+    {
+      "name": "reject-third-handshake-step",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc4-0003-7abc-8123-123456789abc",
+        "type": "secure.handshake",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc4-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc4-2001-7abc-8123-123456789abc",
+          "step": 3,
+          "data": "AQIDBA"
+        }
+      },
+      "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-handshake-data-with-nonzero-unused-bits",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc4-0004-7abc-8123-123456789abc",
+        "type": "secure.handshake",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc4-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc4-2001-7abc-8123-123456789abc",
+          "step": 1,
+          "data": "AQIDBB"
+        }
+      },
+      "expect": { "accepted": false }
+    }
+  ]
+}

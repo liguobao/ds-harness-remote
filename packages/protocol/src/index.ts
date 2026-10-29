@@ -841,6 +841,14 @@ const deviceNameSchema = boundedUtf8Schema(1, MAX_DEVICE_NAME_LENGTH)
 const devicePlatformSchema = z.string().min(1).max(MAX_DEVICE_PLATFORM_LENGTH)
   .regex(/^[a-z0-9][a-z0-9._-]*$/u)
 const identityKeySchema = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u)
+const canonicalBase64UrlSchema = z.string().min(1).regex(/^[A-Za-z0-9_-]+$/u).refine(value => {
+  const remainder = value.length % 4
+  if (remainder === 1) return false
+  if (remainder === 0) return true
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  const last = alphabet.indexOf(value.at(-1)!)
+  return remainder === 2 ? (last & 15) === 0 : (last & 3) === 0
+}, 'Value must use canonical Base64URL without padding.')
 const deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH)
 const authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH)
 const expiresAtSchema = z.number().int().positive().safe()
@@ -964,12 +972,12 @@ export const helloAckPayloadSchema = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string().min(1),
   connectionSessionId: z.string().min(1),
-  heartbeatIntervalMs: z.number().int().positive(),
+  heartbeatIntervalMs: z.number().int().positive().safe(),
   maxControlFrameBytes: z.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: z.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
   capabilities: z.array(z.string().min(1)).max(MAX_CAPABILITY_ENTRIES).refine(uniqueStrings).optional(),
   webrtcEnabled: z.boolean().optional(),
-  webrtcFallbackTimeoutMs: z.number().int().positive().optional(),
+  webrtcFallbackTimeoutMs: z.number().int().positive().safe().optional(),
 })
 
 export const remoteWorkspaceTypeDescriptionSchema = z.object({
@@ -1005,7 +1013,7 @@ export const connectRequestPayloadSchema = z.object({
 export const connectIncomingPayloadSchema = z.object({
   connectionId: z.string().min(1),
   clientDeviceId: z.string().min(1),
-  clientIdentityKey: z.string().min(1),
+  clientIdentityKey: identityKeySchema,
   authorization: z.literal('account'),
   preferredTransports: z.array(transportEnum).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES),
 })
@@ -1023,15 +1031,15 @@ export const connectRejectedPayloadSchema = z.object({
 export const secureHandshakePayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
-  step: z.number().int().positive(),
-  data: z.string().min(1),
+  step: z.union([z.literal(1), z.literal(2)]),
+  data: canonicalBase64UrlSchema,
 })
 
 export const relayPayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
   counter: z.number().int().nonnegative().safe(),
-  ciphertext: z.string().min(1),
+  ciphertext: canonicalBase64UrlSchema,
 })
 
 export const signalPayloadSchema = z.object({

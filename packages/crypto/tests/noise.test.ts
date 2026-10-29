@@ -76,6 +76,27 @@ describe('Noise IK secure session', () => {
     const followUp = initiator.encrypt(new TextEncoder().encode('after'))
     expect(new TextDecoder().decode(responder.decrypt(followUp))).toBe('after')
   })
+
+  it('rejects use after closing a handshake or transport session', () => {
+    const host = generateKeyPair(fixedBytes(8))
+    const client = generateKeyPair(fixedBytes(9))
+    const prologue = createNoisePrologue('connection-4', 'host-4', 'client-4')
+    const initiator = session('initiator', client, host.publicKey, prologue, 90)
+    const responder = session('responder', host, client.publicKey, prologue, 100)
+    initiator.destroy()
+    expect(() => initiator.writeHandshake()).toThrow(/closed/)
+    responder.destroy()
+    expect(() => responder.readHandshake(new Uint8Array())).toThrow(/closed/)
+
+    const liveInitiator = session('initiator', client, host.publicKey, prologue, 110)
+    const liveResponder = session('responder', host, client.publicKey, prologue, 120)
+    liveResponder.readHandshake(liveInitiator.writeHandshake())
+    liveInitiator.readHandshake(liveResponder.writeHandshake())
+    liveInitiator.destroy()
+    liveInitiator.destroy()
+    expect(() => liveInitiator.encrypt(new Uint8Array())).toThrow(/closed/)
+    expect(() => liveInitiator.decrypt(new Uint8Array())).toThrow(/closed/)
+  })
 })
 
 function session(
