@@ -570,6 +570,40 @@ describe('HostServerConnection', () => {
     expect(internals.tunnels.has(tunnel.connectionId)).toBe(false)
   })
 
+  it('closes an established WebRTC peer when the Server Control socket closes', async () => {
+    const socket = new FakeWebSocket()
+    const rtc = { close: vi.fn(async () => undefined) }
+    const channel = { close: vi.fn(async () => undefined) }
+    const connections = { close: vi.fn(async () => undefined) } as unknown as ConnectionController
+    const server = new HostServerConnection(
+      config(),
+      { schemaVersion: 1, deviceId: 'host-rtc', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+      { trustedPeer: vi.fn() } as unknown as IdentityStore,
+      { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })) } as unknown as HostServerApi,
+      connections,
+      logger(),
+      () => socket,
+    )
+    const internals = server as unknown as { tunnels: Map<string, unknown> }
+    try {
+      server.start()
+      await flush()
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', helloAck('control-rtc')))
+      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      internals.tunnels.set('connection-rtc', { transport: 'p2p', rtc, channel })
+
+      socket.close(1012, 'Server restart')
+
+      await vi.waitFor(() => expect(channel.close).toHaveBeenCalledOnce())
+      expect(rtc.close).toHaveBeenCalledOnce()
+      expect(connections.close).toHaveBeenCalledOnce()
+      expect(internals.tunnels.size).toBe(0)
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('keeps an authenticated Relay fallback when the parallel WebRTC negotiation later fails', async () => {
     const keys = generateKeyPair(new Uint8Array(32).fill(16))
     const closeConnection = vi.fn(async () => true)

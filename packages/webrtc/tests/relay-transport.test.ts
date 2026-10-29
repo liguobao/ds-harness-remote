@@ -181,6 +181,38 @@ describe('RelayTransport control handshake', () => {
 })
 
 describe('AdaptiveTransport capability negotiation', () => {
+  it('closes an established WebRTC data channel when the Control socket closes', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const rtc = stalledRtc()
+    const disconnected = vi.fn()
+    const closed = vi.fn()
+    const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, onDisconnect: disconnected })
+    transport.onClose(closed)
+
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'] }))
+    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+    await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+    rtc.channel.readyState = 'open'
+    rtc.channel.onopen?.()
+    await connecting
+    expect(transport.getStats().connected).toBe(true)
+
+    await transport.send(Uint8Array.of(1, 2, 3))
+    expect(rtc.channel.send).toHaveBeenCalledOnce()
+    socket.readyState = 3
+    socket.onclose?.({ code: 1012, reason: 'Server restart' })
+
+    await vi.waitFor(() => expect(rtc.channel.close).toHaveBeenCalledOnce())
+    expect(rtc.pc.close).toHaveBeenCalledOnce()
+    expect(transport.getStats().connected).toBe(false)
+    expect(disconnected).toHaveBeenCalledWith({ reason: 'control-closed', closeCode: 1012 })
+    expect(closed).toHaveBeenCalledOnce()
+    await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
+  })
+
   it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
     await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
       name: reason, run: async () => {
