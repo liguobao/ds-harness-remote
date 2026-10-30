@@ -31,7 +31,7 @@ export function getFileGlyph(path: string): FileGlyphInfo {
 
 export function markdownFilePath(href: string): string | undefined {
   const value = href.trim()
-  if (value.length === 0 || value.startsWith('#') || /^(?:https?|mailto|data|javascript):/iu.test(value)) return undefined
+  if (value.length === 0 || value.startsWith('#') || /^(?:https?|mailto|data|javascript|dsh-session):/iu.test(value)) return undefined
   if (value.startsWith('file://')) {
     try {
       const url = new URL(value)

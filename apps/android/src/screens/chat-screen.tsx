@@ -90,7 +90,7 @@ import type {
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { KeyboardInset } from '../ui/keyboard-inset'
-import { markdownFilePath, MarkdownLinkProvider } from '../ui/markdown'
+import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl } from '../ui/markdown'
 import type { MentionGroup, MentionItem, MentionType } from '../ui/mention-popover'
 import {
   detectMention,
@@ -948,13 +948,29 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     }
   }), [workspaceFileRefs])
 
-  const openFileLink = useCallback((href: string) => {
+  const openLink = useCallback((href: string) => {
+    // 1. Session reference navigation: dsh-session:<base64url>
+    const targetSessionId = decodeSessionMentionUri(href)
+    if (targetSessionId !== undefined) {
+      const targetSession = sessions.find(candidate => candidate.sessionId === targetSessionId)
+      if (targetSession !== undefined) {
+        void openSession(targetSession)
+      }
+      return
+    }
+
+    // 2. Safe external web URLs (http, https, mailto, www.*)
+    if (openSafeExternalUrl(href)) return
+
+    // 3. Workspace file navigation remains unavailable on the Claude backend
     if (session?.backend === 'claude') return
+
+    // 4. Workspace file link
     const path = markdownFilePath(href)
     if (path === undefined) return
     setFileLinkPath(path)
     setToolsMode('files')
-  }, [session?.backend])
+  }, [openSession, session?.backend, sessions])
 
   const connected = connection.phase === 'connected' && !reconnectingSession
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
@@ -1665,7 +1681,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
     </>
   return (
-    <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+    <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
       {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
       <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
         {tabletSplit && (

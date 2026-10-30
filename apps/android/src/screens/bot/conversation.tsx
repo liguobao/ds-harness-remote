@@ -6,7 +6,7 @@ import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, 
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
-import { markdownFilePath, MarkdownLinkProvider, NativeMarkdown } from '../../ui/markdown'
+import { markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatActivityGroup, ChatItemView } from '../chat/messages'
@@ -61,6 +61,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   useEffect(() => () => { if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current) }, [])
   const ready = selected?.sessionId === session.sessionId
   const onLinkPress = useCallback((href: string) => {
+    // External URLs open in browser regardless of bot readiness or connection state
+    if (openSafeExternalUrl(href)) return
+
     if (!ready || !connected) return
     const target = botMentionTarget(href, state.bots)
     if (target !== undefined) {

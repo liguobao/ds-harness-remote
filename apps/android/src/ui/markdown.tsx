@@ -13,11 +13,19 @@ import { PresentedFileCard } from './file-card'
 import { QuotePreview } from './quote-preview'
 import { DshLinkIcon, classifyDshLinkPath } from './dsh-icons'
 
+import {
+  createMarkdownParser,
+  decodeSessionMentionUri,
+  markdownFilePath,
+  openSafeExternalUrl,
+} from './link-helpers'
+
+export { decodeSessionMentionUri, markdownFilePath, openSafeExternalUrl }
+
 // Remote messages are untrusted E2EE business content. Parse Markdown without
-// HTML/linkification and render native Text/View/SVG nodes: no WebView,
-// external navigation, or remote image requests.
-const parser = new MarkdownIt({ html: false, linkify: false, breaks: true })
-installMath(parser)
+// raw HTML and render native Text/View/SVG nodes: no WebView or remote image requests.
+// Linkify is enabled so bare URLs in AI responses can be navigated safely.
+export const parser = createMarkdownParser()
 
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
@@ -32,25 +40,6 @@ export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
   onLinkPress?: MarkdownLinkHandler; transformText?: (text: string) => string; children: ReactNode
 }) {
   return <markdownLinkContext.Provider value={onLinkPress}><markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider></markdownLinkContext.Provider>
-}
-
-/** Convert an agent-produced Markdown link into a workspace path. Network links stay inert. */
-export function markdownFilePath(href: string): string | undefined {
-  const value = href.trim()
-  if (value.length === 0 || value.startsWith('#') || /^(?:https?|mailto|data|javascript):/iu.test(value)) return undefined
-  if (value.startsWith('file://')) {
-    try {
-      const url = new URL(value)
-      if (url.protocol !== 'file:') return undefined
-      const path = decodeURIComponent(url.pathname)
-      return path.length > 0 ? ( /^\/[A-Za-z]:\//u.test(path) ? path.slice(1) : path ) : undefined
-    } catch { return undefined }
-  }
-  try {
-    let path = decodeURIComponent(value.split(/[?#]/u, 1)[0] ?? '')
-    if (path.startsWith('./')) path = path.slice(2)
-    return path.length > 0 && !path.startsWith('//') ? path : undefined
-  } catch { return undefined }
 }
 
 interface MarkdownNode {
@@ -319,8 +308,17 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
         const href = token.attrGet('href')
         const filePath = href ? markdownFilePath(href) : undefined
         const linkKind = filePath ? classifyDshLinkPath(filePath) : undefined
+        const handlePress = href !== null
+          ? () => {
+              if (onLinkPress !== undefined) {
+                onLinkPress(href)
+              } else {
+                openSafeExternalUrl(href)
+              }
+            }
+          : undefined
         output.push(
-          <Text key={key} style={styles.link} onPress={href !== null && onLinkPress !== undefined ? () => onLinkPress(href) : undefined}>
+          <Text key={key} style={styles.link} onPress={handlePress}>
             {linkKind && (
               <View style={{ marginRight: 3, top: 1 }}>
                 <DshLinkIcon kind={linkKind} size={14} color={styles.link.color} />
