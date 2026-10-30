@@ -1271,6 +1271,95 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
+  it('re-authorizes a Host whose stored credential the Server no longer accepts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-repair-'))
+    directories.push(directory)
+    // The Server revoked the token family, but this process still holds the
+    // credential in memory and the file is still on disk, so both local checks
+    // keep claiming the Host is authorized while every credential_refresh fails
+    // with AUTH_INVALID. Signing in again must repair the Host instead of
+    // silently skipping it until the process restarts.
+    const host = {
+      hostStatus: vi.fn(() => ({
+        configured: true,
+        online: false,
+        reconnecting: false,
+        error: 'AUTH_INVALID',
+        authorized: true,
+        accountRequired: true,
+      })),
+      hasStoredAuthorization: vi.fn(async () => true),
+      reconnectHost: vi.fn(),
+      clearHostAuthorization: vi.fn(),
+      authorizeHostAsOwned: vi.fn(),
+      authorizeHostWithAccount: vi.fn(),
+      authorizeHostWithCode: vi.fn(),
+    } satisfies HostAuthorizationControl
+    const authenticate = vi.fn(async () => ({ accessToken: 'fresh-access-token', account: 'owner@example.com' }))
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      {
+        bindIdentity: vi.fn(),
+        hasStoredAuthorization: vi.fn(async () => true),
+        authenticate,
+        pollOAuthQrLogin: vi.fn(async () => ({ status: 'complete' })),
+      } as unknown as ClientServerApi,
+      gateway(),
+      logger(),
+      host,
+    )
+    await runtime.start()
+    expect(host.authorizeHostAsOwned).not.toHaveBeenCalled()
+
+    await runtime.pollClientOAuthQrLogin('qr-session-identifier-0001')
+
+    expect(authenticate).toHaveBeenCalledOnce()
+    expect(host.authorizeHostAsOwned).toHaveBeenCalledWith('fresh-access-token', 'owner@example.com')
+    await runtime.close()
+  })
+
+  it('leaves a working Host authorization untouched after signing in', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-keep-'))
+    directories.push(directory)
+    const host = {
+      hostStatus: vi.fn(() => ({
+        configured: true,
+        online: true,
+        reconnecting: false,
+        authorized: true,
+        accountRequired: false,
+      })),
+      hasStoredAuthorization: vi.fn(async () => true),
+      reconnectHost: vi.fn(),
+      clearHostAuthorization: vi.fn(),
+      authorizeHostAsOwned: vi.fn(),
+      authorizeHostWithAccount: vi.fn(),
+      authorizeHostWithCode: vi.fn(),
+    } satisfies HostAuthorizationControl
+    const authenticate = vi.fn(async () => ({ accessToken: 'fresh-access-token', account: 'owner@example.com' }))
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      {
+        bindIdentity: vi.fn(),
+        hasStoredAuthorization: vi.fn(async () => true),
+        authenticate,
+        pollOAuthQrLogin: vi.fn(async () => ({ status: 'complete' })),
+      } as unknown as ClientServerApi,
+      gateway(),
+      logger(),
+      host,
+    )
+    await runtime.start()
+
+    await runtime.pollClientOAuthQrLogin('qr-session-identifier-0002')
+
+    expect(authenticate).not.toHaveBeenCalled()
+    expect(host.authorizeHostAsOwned).not.toHaveBeenCalled()
+    await runtime.close()
+  })
+
   it('requires local Host authorization before listing devices', async () => {
     const rows = ['ACCOUNT_AUTH_REQUIRED', 'DEVICE_OWNERSHIP_REQUIRED', 'DEVICE_REVOKED', 'AUTH_INVALID', 'TOKEN_EXPIRED'] as const
     await runScenarios(

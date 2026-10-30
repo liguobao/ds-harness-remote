@@ -201,8 +201,19 @@ export class ClientModeRuntime {
     try {
       if (this.host === undefined) return
       if (this.config.hostControl?.enabled === false) return
-      if (this.host.hostStatus().authorized) return
-      if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
+      // `authorized` and `hasStoredAuthorization` both answer "a credential
+      // exists", never "the credential still works". The Server can revoke the
+      // token family while this process keeps the credential in memory, and
+      // nothing rewrites the file afterwards, so a dead Host still reports
+      // itself authorized. Once the control connection reports an
+      // authentication error that cache is disproven: re-authorize instead of
+      // trusting it, otherwise signing in again repairs nothing and the Host
+      // stays unusable until the process restarts.
+      const status = this.host.hostStatus()
+      if (!status.accountRequired) {
+        if (status.authorized) return
+        if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
+      }
       const credentials = await this.server.authenticate(this.requireIdentity())
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
     } catch (error) {
