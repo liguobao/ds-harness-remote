@@ -509,6 +509,7 @@ function fakeChannel(
 function config(): ResolvedConfig {
   return {
     terminal: { enabled: false },
+    sidebar: { entry: 'standard' },
     loopback: { ports: [] },
     enabled: true,
     role: 'host',

@@ -90,6 +90,7 @@ export class PluginControlRuntime {
       // A request arriving during replacement must use the new Server runtime.
       if (endpoint !== 'settings.server.set') await this.serverSwitchFlight
       if (endpoint === 'settings.development.set') return ok(await this.setDevelopment(payload))
+      if (endpoint === 'settings.appearance.set') return ok(await this.setAppearance(payload))
       if (endpoint === 'settings.get') return ok(await this.settingsView())
       if (endpoint === 'settings.configure') return ok(await this.configure(payload))
       if (endpoint === 'settings.server.set') return ok(await this.setServer(payload))
@@ -258,6 +259,15 @@ export class PluginControlRuntime {
     await this.settings.replace(editableConfig(next))
     if (value.terminalEnabled !== undefined) this.host?.setTerminalEnabled?.(value.terminalEnabled)
     if (value.ports !== undefined) this.host?.setLoopbackPorts?.(value.ports)
+    return this.settingsView()
+  }
+
+  private async setAppearance(payload: unknown): Promise<PluginSettingsView> {
+    if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    const entry = record(payload).sidebarEntry
+    if (entry !== 'standard' && entry !== 'compact') throw new ClientModeError('INVALID_MESSAGE', 'The sidebar entry style must be Standard or Compact.')
+    const current = editableConfig(resolveConfig(this.settings.get()))
+    await this.settings.replace(editableConfig(resolveConfig({ ...current, sidebar: { entry } })))
     return this.settingsView()
   }
 
@@ -459,6 +469,7 @@ function editableConfig(config: ResolvedConfig): Config {
     ...(config.serverUrl === undefined ? {} : { serverUrl: config.serverUrl }),
     terminal: config.terminal,
     remoteTools: config.remoteTools,
+    sidebar: config.sidebar,
     hostControl: config.hostControl ?? { enabled: true },
     loopback: config.loopback,
     forceRelay: config.forceRelay,

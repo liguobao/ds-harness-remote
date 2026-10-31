@@ -19,7 +19,14 @@ import type {
   PluginConfigureResult,
   PluginSettingsView,
   RemoteStatus,
+  SidebarEntryPreference,
+  SidebarEntryStyle,
 } from './types.js'
+
+const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sidebarEntryStandard' | 'sidebarEntryCompact' }> = [
+  { value: 'standard', label: 'sidebarEntryStandard' },
+  { value: 'compact', label: 'sidebarEntryCompact' },
+]
 
 export function createRemotePluginOptions(React: ClientReact) {
   function RemotePluginOptions(props: {
@@ -27,6 +34,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     statusFeed: StatusFeed<RemoteStatus>
     onSignIn?: () => void
     preferredQrProvider?: string
+    sidebarEntry: SidebarEntryPreference
     t: Translate
     view?: 'summary' | 'page'
   }): unknown {
@@ -41,6 +49,8 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [busy, setBusy] = React.useState(false)
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
+    const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry.read())
+    const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
     const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
     const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
     const [acpChecking, setAcpChecking] = React.useState<Record<string, boolean>>({})
@@ -85,6 +95,8 @@ export function createRemotePluginOptions(React: ClientReact) {
       setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
       setTerminalEnabled(view.config.terminal?.enabled ?? true)
       setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? true)
+      setSidebarEntry(view.config.sidebar?.entry ?? 'standard')
+      props.sidebarEntry.publish(view.config.sidebar?.entry ?? 'standard')
       setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
       setAcpAvailability(view.acpAvailability ?? {})
       if (updateAssociations) applyAssociations(view)
@@ -365,6 +377,25 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
+    const setSidebarEntryStyle = async (entry: SidebarEntryStyle): Promise<void> => {
+      if (entry === sidebarEntry) return
+      const previous = sidebarEntry
+      setSidebarEntry(entry)
+      setSidebarEntryBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.appearance.set', { sidebarEntry: entry })
+        applyView(view)
+        setNotice({ key: 'sidebarEntrySaved' })
+      } catch (reason) {
+        setSidebarEntry(previous)
+        setError(messageOf(reason))
+      } finally {
+        setSidebarEntryBusy(false)
+      }
+    }
+
     const setRemoteTools = async (enabled: boolean): Promise<void> => {
       setRemoteToolsBusy(true); setError(undefined); setNotice(undefined)
       try {
@@ -437,6 +468,26 @@ export function createRemotePluginOptions(React: ClientReact) {
           },
         })),
     )
+
+    // The entry style is presentation only, so it lives beside the development
+    // switches instead of inside the Host-facing settings block.
+    const sidebarEntrySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+      React.createElement('div', null,
+        React.createElement('strong', null, t('sidebarEntry')),
+        React.createElement('p', null, t('sidebarEntryHint'))),
+      React.createElement('div', {
+        className: 'dshRemoteEntryStyleChoices',
+        role: 'radiogroup',
+        'aria-label': t('sidebarEntry'),
+      }, sidebarEntryChoices.map(choice => React.createElement('button', {
+        key: choice.value,
+        type: 'button',
+        role: 'radio',
+        'aria-checked': sidebarEntry === choice.value,
+        className: sidebarEntry === choice.value ? 'isSelected' : undefined,
+        disabled: sidebarEntryBusy || !writable,
+        onClick: () => void setSidebarEntryStyle(choice.value),
+      }, t(choice.label)))))
 
     const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
       React.createElement('summary', null,
@@ -601,6 +652,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('span', null, t('deviceId')),
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
+              sidebarEntrySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
                 React.createElement('div', null,
@@ -656,6 +708,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('span', null, t('deviceId')),
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
+              sidebarEntrySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteSettingsSignIn' },
                 React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),

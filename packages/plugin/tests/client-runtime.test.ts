@@ -1480,6 +1480,7 @@ describe('ClientModeRuntime Host account control', () => {
 function config(): ResolvedConfig {
   return {
     terminal: { enabled: false },
+    sidebar: { entry: 'standard' },
     loopback: { ports: [] },
     enabled: true,
     role: 'both',

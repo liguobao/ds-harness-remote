@@ -205,7 +205,27 @@ interface PluginSettings {
     binary?: string
   }
   acp?: { enabled?: boolean; backends?: Array<{ id: string; enabled?: boolean; command?: string; args?: string[]; cwd?: string }> }
+  sidebar?: { entry?: SidebarEntryStyle }
 }
+
+/**
+ * Where the Remote entry lives in the Desktop sidebar: among the footer actions
+ * (Standard) or as an icon at the end of the account row (Compact).
+ */
+export type SidebarEntryStyle = 'standard' | 'compact'
+
+/**
+ * The entry style shared between the settings page and the sidebar entry, so a
+ * toggle takes effect without a reload. Owned by the client entry point.
+ */
+export interface SidebarEntryPreference {
+  read: () => SidebarEntryStyle
+  subscribe: (listener: () => void) => () => void
+  publish: (style: SidebarEntryStyle) => void
+}
+
+/** `ReactDOM.createPortal`, resolved once by the ModuleLoader factory. */
+export type PortalRenderer = (children: unknown, container: Element) => unknown
 
 export interface PluginSettingsView {
   config: PluginSettings
