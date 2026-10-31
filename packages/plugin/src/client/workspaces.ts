@@ -20,16 +20,73 @@ import type {
   RemoteStatus,
   RemoteWorkspaceView,
   PluginSettingsView,
+  PortalRenderer,
+  SidebarEntryPreference,
+  SidebarEntryStyle,
 } from './types.js'
 
 export function createRemoteWorkspaceAction(React: ClientReact) {
   const RemoteProgressView = createRemoteProgressView(React)
+
+  /**
+   * Renders the Compact entry at the end of the host account row. The host
+   * exposes no slot there, so the button is portalled into the settings row; the
+   * Standard entry stays in place until that row exists, so nothing is lost when
+   * the sidebar is collapsed.
+   */
+  function RemoteAccountEntry(props: {
+    portal: PortalRenderer | undefined
+    fallback: unknown
+    children: unknown
+  }): unknown {
+    const [container, setContainer] = React.useState<Element | null>(null)
+    const { portal } = props
+    React.useEffect(() => {
+      if (portal === undefined) return undefined
+      let attempt = 0
+      let timer: number | undefined
+      let host: HTMLElement | undefined
+      let observer: MutationObserver | undefined
+      const attach = (): void => {
+        const row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]')
+        if (row === null) {
+          // The row mounts with the footer area; give the host a moment before
+          // settling for the Standard entry.
+          if (attempt < 40) {
+            attempt += 1
+            timer = window.setTimeout(attach, 50)
+          }
+          return
+        }
+        host = document.createElement('span')
+        // The host re-renders its row without React knowing about this node, so
+        // put it back whenever it is dropped.
+        observer = new MutationObserver(() => {
+          if (host !== undefined && !host.isConnected) row.append(host)
+        })
+        observer.observe(row, { childList: true })
+        row.append(host)
+        setContainer(host)
+      }
+      attach()
+      return () => {
+        if (timer !== undefined) window.clearTimeout(timer)
+        observer?.disconnect()
+        host?.remove()
+      }
+    }, [portal])
+    if (portal === undefined || container === null) return props.fallback
+    return portal(props.children, container)
+  }
+
   function RemoteWorkspaceAction(props: {
     wide: boolean
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
     subscribeOpen: (listener: () => void) => () => void
     preferredQrProvider: OAuthProvider
+    sidebarEntry: SidebarEntryPreference
+    portal?: PortalRenderer
     t: Translate
     openSettings?: () => void
   }): unknown {
@@ -115,6 +172,19 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const pageRef = React.useRef<HTMLElement | null>(null)
     const [notice, setNotice] = React.useState<string | undefined>(undefined)
     const [error, setError] = React.useState<string | undefined>(undefined)
+    const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry.read())
+
+    // The settings page publishes the saved style, so the entry moves without a
+    // reload; the first fetch below seeds it for a fresh page.
+    React.useEffect(
+      () => props.sidebarEntry.subscribe(() => setSidebarEntry(props.sidebarEntry.read())),
+      [props.sidebarEntry],
+    )
+    React.useEffect(() => {
+      void props.control<PluginSettingsView>('settings.get')
+        .then(view => props.sidebarEntry.publish(view.config.sidebar?.entry ?? 'standard'))
+        .catch(() => undefined)
+    }, [props.control, props.sidebarEntry])
 
     React.useEffect(() => {
       if (!open) {
@@ -945,37 +1015,55 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     // panel below the list is visible without scrolling past every device.
     const listedHosts = connectingHost === undefined ? devices : [connectingHost]
 
-    return React.createElement(React.Fragment, null,
-      React.createElement('div', { className: `dshRemoteSidebarEntry${status?.mode === 'remote' ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}` },
-        React.createElement(status?.mode === 'remote' && props.wide ? 'div' : 'button', {
-          ...(status?.mode === 'remote' && props.wide ? {} : {
-            type: 'button',
-            disabled: status?.mode === 'remote' && busy,
-            onClick: () => void (status?.mode === 'remote' ? openLocalWorkspaces() : show()),
-          }),
-          className: 'dshRemoteModeButton',
-          title: props.wide ? remoteLabel : remoteActionLabel,
-          'aria-label': props.wide ? remoteLabel : remoteActionLabel,
-        }, React.createElement('svg', {
-          className: 'dshRemoteComputerIcon',
-          viewBox: '0 0 24 24',
-          fill: 'none',
-          stroke: 'currentColor',
-          strokeWidth: 1.7,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
-          'aria-hidden': true,
-        },
-          React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-          React.createElement('path', { d: 'M8 21h8M12 17v4' })), props.wide
-          ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
-          : null),
-        status?.mode === 'remote' && props.wide ? React.createElement('button', {
+    const computerIcon = React.createElement('svg', {
+      className: 'dshRemoteComputerIcon',
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.7,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': true,
+    },
+      React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
+      React.createElement('path', { d: 'M8 21h8M12 17v4' }))
+    const remoteActive = status?.mode === 'remote'
+    const entry = React.createElement('div', { className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}` },
+      React.createElement(remoteActive && props.wide ? 'div' : 'button', {
+        ...(remoteActive && props.wide ? {} : {
           type: 'button',
-          className: 'dshRemoteExitLink',
-          disabled: busy,
-          onClick: () => void openLocalWorkspaces(),
-        }, t('exitRemote')) : null),
+          disabled: remoteActive && busy,
+          onClick: () => void (remoteActive ? openLocalWorkspaces() : show()),
+        }),
+        className: 'dshRemoteModeButton',
+        title: props.wide ? remoteLabel : remoteActionLabel,
+        'aria-label': props.wide ? remoteLabel : remoteActionLabel,
+      }, computerIcon, props.wide
+        ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
+        : null),
+      remoteActive && props.wide ? React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteExitLink',
+        disabled: busy,
+        onClick: () => void openLocalWorkspaces(),
+      }, t('exitRemote')) : null)
+    // The Compact style drops the label and lives in the account row, so it is
+    // always a plain icon button regardless of the current Remote mode.
+    const accountEntry = React.createElement('div', { className: `dshRemoteAccountEntry${remoteActive ? ' isActive' : ''}` },
+      React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteAccountEntryButton',
+        disabled: remoteActive && busy,
+        title: remoteActionLabel,
+        'aria-label': remoteActionLabel,
+        onClick: () => void (remoteActive ? openLocalWorkspaces() : show()),
+      }, computerIcon))
+    const compact = sidebarEntry === 'compact' && props.wide && props.portal !== undefined
+
+    return React.createElement(React.Fragment, null,
+      compact
+        ? React.createElement(RemoteAccountEntry, { portal: props.portal, fallback: entry }, accountEntry)
+        : entry,
       !open ? null : React.createElement('div', {
         className: 'dshRemoteBackdrop',
         role: 'presentation',

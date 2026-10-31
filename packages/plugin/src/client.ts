@@ -11,11 +11,14 @@ import type {
   ClientReact,
   ControlResult,
   FileViewerClientServiceLike,
+  PortalRenderer,
   RemoteConnectionProgress,
   RemoteDevice,
   RemoteStatus,
   RemoteWorkspaceSelection,
   SessionsClientServiceLike,
+  SidebarEntryPreference,
+  SidebarEntryStyle,
   UiWorkspaceClientServiceLike,
   WorkspacesClientServiceLike,
 } from './client/types.js'
@@ -85,6 +88,16 @@ window.__ModuleLoader__.load({
   factory: require => {
     const module = { exports: {} as Record<string, unknown> }
     const React = require('react') as ClientReact
+    // The Compact entry is portalled into the host account row. Resolve the
+    // renderer once and degrade to the Standard entry when it is unavailable.
+    const portal = (() => {
+      try {
+        const reactDom = require('react-dom') as { createPortal?: PortalRenderer }
+        return typeof reactDom.createPortal === 'function' ? reactDom.createPortal.bind(reactDom) : undefined
+      } catch {
+        return undefined
+      }
+    })()
     const RemotePluginOptions = createRemotePluginOptions(React)
     const RemoteWorkspaceAction = createRemoteWorkspaceAction(React)
     const RemoteProgressView = createRemoteProgressView(React)
@@ -325,6 +338,22 @@ window.__ModuleLoader__.load({
       const subscribeOpen = (listener: () => void): (() => void) => {
         remoteOpenListeners.add(listener)
         return () => { remoteOpenListeners.delete(listener) }
+      }
+      // Entry style shared by the settings page and the sidebar entry, so the
+      // toggle moves the entry without a reload.
+      let sidebarEntryStyle: SidebarEntryStyle = 'standard'
+      const sidebarEntryListeners = new Set<() => void>()
+      const sidebarEntry: SidebarEntryPreference = {
+        read: () => sidebarEntryStyle,
+        subscribe: (listener) => {
+          sidebarEntryListeners.add(listener)
+          return () => { sidebarEntryListeners.delete(listener) }
+        },
+        publish: (style) => {
+          if (style === sidebarEntryStyle) return
+          sidebarEntryStyle = style
+          for (const listener of sidebarEntryListeners) listener()
+        },
       }
       let controlRouteRetryAfter = 0
       let controlRouteBackoffIndex = 0
@@ -571,6 +600,8 @@ window.__ModuleLoader__.load({
           subscribeOpen,
           openSettings: undefined,
           preferredQrProvider: ctx.locale.getLocale().active === 'zh' ? 'zhihu' : 'github',
+          sidebarEntry,
+          portal,
         }),
       }, RemoteWorkspaceAction))
       // rc.1 Plugins-page configuration surfaces. `plugins.item` is reserved
@@ -584,7 +615,7 @@ window.__ModuleLoader__.load({
         name: 'plugins.row.config',
         key: 'ds-harness-remote#ds-harness-remote',
         locale: localeNamespace,
-        inject: () => ({ control, statusFeed, onSignIn: openRemote }),
+        inject: () => ({ control, statusFeed, onSignIn: openRemote, sidebarEntry }),
       }, RemotePluginOptions))
       // Bundle-scoped: installed-bundle details resolve configuration by
       // package name.
@@ -592,7 +623,7 @@ window.__ModuleLoader__.load({
         name: 'plugins.bundle.config',
         key: 'ds-harness-remote',
         locale: localeNamespace,
-        inject: () => ({ control, statusFeed, onSignIn: openRemote }),
+        inject: () => ({ control, statusFeed, onSignIn: openRemote, sidebarEntry }),
       }, RemotePluginOptions))
     }
 
