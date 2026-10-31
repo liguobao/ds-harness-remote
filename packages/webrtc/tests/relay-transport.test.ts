@@ -277,6 +277,35 @@ describe('AdaptiveTransport capability negotiation', () => {
     await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
   })
 
+  it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
+    await runScenarios([
+      { code: 4001, reason: 'CONNECTION_FAILED', retryable: true },
+      { code: 4001, reason: 'AUTH_INVALID', retryable: false },
+      { code: 4001, reason: 'DEVICE_REVOKED', retryable: false },
+      { code: 4001, reason: '', retryable: false },
+      { code: 4001, reason: 'CONNECTION_FAILED: unknown detail', retryable: false },
+      { code: 4003, reason: 'CONNECTION_FAILED', retryable: false },
+      { code: 1008, reason: 'CONNECTION_FAILED', retryable: false },
+    ].map(row => ({ name: `${row.code}/${row.reason}`, run: async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const transport = createAdaptiveTransport({ forceRelay: true })
+      const closed = vi.fn()
+      transport.onClose(closed)
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.relay'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await connecting
+      socket.onclose?.(row)
+      expect(closed).toHaveBeenCalledOnce()
+      expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+        code: row.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED', retryable: row.retryable,
+      }))
+      await transport.close()
+    } })), cleanupScenario1)
+  })
+
   it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
     await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
       name: reason, run: async () => {

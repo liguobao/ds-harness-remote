@@ -676,13 +676,16 @@ export class AdaptiveTransport extends BaseTransport {
 }
 
 function adaptiveControlCloseError(event: CloseEvent): Error {
+  // Self-hosted heartbeat expiry closes the socket without an error frame.
+  // 4001 also carries authorization failures, so only this exact reason retries.
+  const heartbeatTimeout = event.code === 4001 && event.reason === 'CONNECTION_FAILED'
   const reason = event.reason.trim().slice(0, 300)
   const detail = reason.length > 0
     ? `${reason} (WebSocket ${event.code})`
     : `WebSocket closed with code ${event.code}`
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     code: event.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED',
-    retryable: event.code === 1000 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013,
+    retryable: heartbeatTimeout || event.code === 1000 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013,
   })
 }
 

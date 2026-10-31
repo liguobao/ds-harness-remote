@@ -1747,6 +1747,11 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 Control Channel heartbeat 默认 25 秒。75 秒未收到有效 pong 时，连接断开。
 Control ping/pong 的 nonce 可用于估计 Server RTT。
 
+开源自部署 Server 的心跳超时可能只发送 WebSocket close `4001` / `CONNECTION_FAILED`，
+不向超时的 peer 发送 `error` 帧。Client 将这一精确组合视为可重试的连接故障，重新进行
+授权与加密握手；不能重放业务请求。`4001` 也用于授权失败，因此不能仅按 close code
+重试；未知 reason 与 `4003`（连接被替换）仍须停止自动恢复。
+
 Control ping：
 
 ```json

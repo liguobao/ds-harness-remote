@@ -1,5 +1,15 @@
 # Repository Guide for Agents
 
+## Self-hosted heartbeat recovery (2026-10-31)
+
+AdaptiveTransport 将自部署 Server 的精确 close `4001 / CONNECTION_FAILED` 视为可重试；
+其余应用关闭原因不放宽，恢复沿用成员/固定公钥校验与新 Noise 握手，不重放业务请求。
+回归覆盖八小时睡眠后的延迟 close、随后三十分钟离线的封顶退避与恢复；时间均为模拟。
+全仓 check、985 tests、串行生产 build、DSH bundle 与 diff check 通过；既有 Metro
+noble/hashes exports fallback 警告保留。Desktop 0.6.0 仅回移该 classifier 的实测中，
+冻结本机 SSH 转发三分钟，恢复后约 2.3 秒自动建立新连接并刷新原会话；Host 未重启。
+这不是整机休眠/隔夜稳定性验收，未新增 Android 原生或其他平台的本轮验证。
+
 ## ApiProxy retirement (2026-10-25)
 
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。

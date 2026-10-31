@@ -79755,11 +79755,12 @@ var AdaptiveTransport = class extends BaseTransport {
   }
 };
 function adaptiveControlCloseError(event) {
+  const heartbeatTimeout = event.code === 4001 && event.reason === "CONNECTION_FAILED";
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
-    retryable: event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
+    retryable: heartbeatTimeout || event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
   });
 }
 function isObject2(value) {
