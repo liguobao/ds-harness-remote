@@ -980,6 +980,7 @@ function helloAck(connectionSessionId: string) {
 function config(): ResolvedConfig {
   return {
     terminal: { enabled: false },
+    sidebar: { entry: 'standard' },
     loopback: { ports: [] },
     enabled: true,
     role: 'host',

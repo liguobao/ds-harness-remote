@@ -91328,6 +91328,7 @@ var entryConfigSchema = s.object({
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
   remoteTools: s.object({ enabled: s.boolean() }),
+  sidebar: s.object({ entry: s.union(["standard", "compact"]) }),
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
@@ -91371,6 +91372,7 @@ var configSchema = external_exports.object({
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   remoteTools: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
+  sidebar: external_exports.object({ entry: external_exports.enum(["standard", "compact"]).optional() }).strict().optional(),
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
@@ -91411,6 +91413,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
     remoteTools: { enabled: parsed.remoteTools?.enabled ?? true },
+    sidebar: { entry: parsed.sidebar?.entry === "compact" ? "compact" : "standard" },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
@@ -102240,6 +102243,7 @@ var PluginControlRuntime = class {
     try {
       if (endpoint !== "settings.server.set") await this.serverSwitchFlight;
       if (endpoint === "settings.development.set") return ok3(await this.setDevelopment(payload));
+      if (endpoint === "settings.appearance.set") return ok3(await this.setAppearance(payload));
       if (endpoint === "settings.get") return ok3(await this.settingsView());
       if (endpoint === "settings.configure") return ok3(await this.configure(payload));
       if (endpoint === "settings.server.set") return ok3(await this.setServer(payload));
@@ -102399,6 +102403,14 @@ var PluginControlRuntime = class {
     await this.settings.replace(editableConfig(next));
     if (value.terminalEnabled !== void 0) this.host?.setTerminalEnabled?.(value.terminalEnabled);
     if (value.ports !== void 0) this.host?.setLoopbackPorts?.(value.ports);
+    return this.settingsView();
+  }
+  async setAppearance(payload) {
+    if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
+    const entry = record9(payload).sidebarEntry;
+    if (entry !== "standard" && entry !== "compact") throw new ClientModeError("INVALID_MESSAGE", "The sidebar entry style must be Standard or Compact.");
+    const current = editableConfig(resolveConfig(this.settings.get()));
+    await this.settings.replace(editableConfig(resolveConfig({ ...current, sidebar: { entry } })));
     return this.settingsView();
   }
   async setCodex(payload) {
@@ -102579,6 +102591,7 @@ function editableConfig(config2) {
     ...config2.serverUrl === void 0 ? {} : { serverUrl: config2.serverUrl },
     terminal: config2.terminal,
     remoteTools: config2.remoteTools,
+    sidebar: config2.sidebar,
     hostControl: config2.hostControl ?? { enabled: true },
     loopback: config2.loopback,
     forceRelay: config2.forceRelay,
