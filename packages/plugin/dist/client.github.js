@@ -1628,6 +1628,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
     terminalRemoteHint: "Allow trusted Remote devices to run an interactive shell as this Host user. On by default; independent of Agent approvals. Toggling saves and applies immediately.",
     terminalRemoteUnavailable: "Remote terminal is unavailable. Enable Remote terminal in the Host Remote settings; the switch applies immediately.",
     terminalSaved: "Remote terminal setting saved. Applies immediately.",
+    sidebarEntry: "Sidebar entry",
+    sidebarEntryHint: "Standard keeps the Remote button in the sidebar footer. Compact moves it to the account row as an icon. Toggling applies immediately.",
+    sidebarEntryStandard: "Standard",
+    sidebarEntryCompact: "Compact",
+    sidebarEntrySaved: "Sidebar entry style saved.",
     previewOpen: "Preview service",
     previewPort: "Host port",
     previewLocalOnly: "Preview requires Desktop or a browser connected to Harness on this computer.",
@@ -1904,6 +1909,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
     terminalRemoteHint: "\u5141\u8BB8\u53D7\u4FE1\u4EFB\u7684 Remote \u8BBE\u5907\u4EE5\u6B64 Host \u7528\u6237\u8EAB\u4EFD\u8FD0\u884C\u4EA4\u4E92\u5F0F Shell\u3002\u9ED8\u8BA4\u5F00\u542F\uFF0C\u72EC\u7ACB\u4E8E Agent \u5BA1\u6279\uFF1B\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002",
     terminalRemoteUnavailable: "\u8FDC\u7A0B\u7EC8\u7AEF\u4E0D\u53EF\u7528\u3002\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u4F1A\u7ACB\u5373\u751F\u6548\u3002",
     terminalSaved: "\u8FDC\u7A0B\u7EC8\u7AEF\u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u7ACB\u5373\u751F\u6548\u3002",
+    sidebarEntry: "\u4FA7\u680F\u5165\u53E3\u6837\u5F0F",
+    sidebarEntryHint: "\u300C\u6807\u51C6\u300D\u628A Remote \u6309\u94AE\u7559\u5728\u4FA7\u680F\u5E95\u90E8\uFF1B\u300C\u7B80\u6D01\u300D\u628A\u5B83\u6536\u8FDB\u8D26\u53F7\u884C\u53F3\u4FA7\uFF0C\u53EA\u663E\u793A\u56FE\u6807\u3002\u5207\u6362\u540E\u7ACB\u5373\u751F\u6548\u3002",
+    sidebarEntryStandard: "\u6807\u51C6",
+    sidebarEntryCompact: "\u7B80\u6D01",
+    sidebarEntrySaved: "\u4FA7\u680F\u5165\u53E3\u6837\u5F0F\u5DF2\u4FDD\u5B58\u3002",
     previewOpen: "\u9884\u89C8\u670D\u52A1",
     previewPort: "Host \u7AEF\u53E3",
     previewLocalOnly: "\u9884\u89C8\u9700\u8981 Desktop\uFF0C\u6216\u8FDE\u63A5\u5230\u672C\u673A Harness \u7684\u6D4F\u89C8\u5668\u3002",
@@ -2606,12 +2616,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
   }
 
   // src/client/settings.ts
+  var sidebarEntryChoices = [
+    { value: "standard", label: "sidebarEntryStandard" },
+    { value: "compact", label: "sidebarEntryCompact" }
+  ];
   function createRemotePluginOptions(React) {
     function RemotePluginOptions(props) {
-      let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), role = "host", [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
+      let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), role = "host", [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read()), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
         setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association }));
       }, applyView = (view, updateAssociations = !0) => {
-        setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? !0), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
+        setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? !0), setSidebarEntry(view.config.sidebar?.entry ?? "standard"), props.sidebarEntry.publish(view.config.sidebar?.entry ?? "standard"), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
       }, load = async () => {
         let run = ++associationReadRun.current, [view, status] = await Promise.all([
           props.control("settings.get"),
@@ -2686,6 +2700,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
         } finally {
           setTerminalBusy(!1);
         }
+      }, setSidebarEntryStyle = async (entry) => {
+        if (entry === sidebarEntry) return;
+        let previous = sidebarEntry;
+        setSidebarEntry(entry), setSidebarEntryBusy(!0), setError(void 0), setNotice(void 0);
+        try {
+          let view = await props.control("settings.appearance.set", { sidebarEntry: entry });
+          applyView(view), setNotice({ key: "sidebarEntrySaved" });
+        } catch (reason) {
+          setSidebarEntry(previous), setError(messageOf(reason));
+        } finally {
+          setSidebarEntryBusy(!1);
+        }
       }, setRemoteTools = async (enabled) => {
         setRemoteToolsBusy(!0), setError(void 0), setNotice(void 0);
         try {
@@ -2750,6 +2776,28 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setRemoteToolsEnabled(enabled), setRemoteTools(enabled);
           } })
         )
+      ), sidebarEntrySetting = React.createElement(
+        "div",
+        { className: "dshRemoteAuthorizationSetting" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("strong", null, t("sidebarEntry")),
+          React.createElement("p", null, t("sidebarEntryHint"))
+        ),
+        React.createElement("div", {
+          className: "dshRemoteEntryStyleChoices",
+          role: "radiogroup",
+          "aria-label": t("sidebarEntry")
+        }, sidebarEntryChoices.map((choice) => React.createElement("button", {
+          key: choice.value,
+          type: "button",
+          role: "radio",
+          "aria-checked": sidebarEntry === choice.value,
+          className: sidebarEntry === choice.value ? "isSelected" : void 0,
+          disabled: sidebarEntryBusy || !writable,
+          onClick: () => void setSidebarEntryStyle(choice.value)
+        }, t(choice.label))))
       ), acpSetting = React.createElement(
         "details",
         { className: "dshRemoteAuthorizationSetting dshRemoteAcpSetting" },
@@ -2863,6 +2911,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               )
             ),
             developmentSetting,
+            sidebarEntrySetting,
             acpSetting,
             React.createElement(
               "div",
@@ -2943,6 +2992,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               )
             ),
             developmentSetting,
+            sidebarEntrySetting,
             acpSetting,
             React.createElement(
               "div",
@@ -2999,6 +3049,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
       // Match native workspace rows: 8px inset, 16px icon slot and 6px label gap.
       ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:36px;margin:0}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;justify-content:flex-start;gap:6px;padding:0 8px;border-radius:8px;font:inherit;font-size:14px;line-height:20px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
       ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-secondary)}.dshRemoteSidebarEntry.isWide .dshRemoteComputerIcon{width:16px;height:16px;flex-basis:16px}",
+      // Compact entry: the same button portalled to the end of the host account row.
+      ".dshRemoteAccountEntry{display:inline-flex;align-items:center;flex:none}.dshRemoteAccountEntry .dshRemoteAccountEntryButton{box-sizing:border-box;width:26px;height:26px;min-width:26px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:disabled{opacity:.45;cursor:default}.dshRemoteAccountEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}",
+      // Segmented control for the entry style; scoped through the group because the
+      // page body rule for bare buttons outranks a single class.
+      ".dshRemoteEntryStyleChoices{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3)}.dshRemoteEntryStyleChoices>button{box-sizing:border-box;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;padding:3px 10px;border-radius:6px;white-space:nowrap;cursor:pointer}.dshRemoteEntryStyleChoices>button:hover:not(:disabled):not(.isSelected){color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button.isSelected{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteEntryStyleChoices>button:disabled{opacity:.45;cursor:default}",
       // Keep Exit in flow: an absolute action and reserved padding can overlap
       // the icon or adjacent plugins when the host shrinks this flex item.
       ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:8px}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
@@ -3099,6 +3154,25 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // src/client/workspaces.ts
   function createRemoteWorkspaceAction(React) {
     let RemoteProgressView = createRemoteProgressView(React);
+    function RemoteAccountEntry(props) {
+      let [container, setContainer] = React.useState(null), { portal } = props;
+      return React.useEffect(() => {
+        if (portal === void 0) return;
+        let attempt = 0, timer, host, observer, attach = () => {
+          let row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]');
+          if (row === null) {
+            attempt < 40 && (attempt += 1, timer = window.setTimeout(attach, 50));
+            return;
+          }
+          host = document.createElement("span"), observer = new MutationObserver(() => {
+            host !== void 0 && !host.isConnected && row.append(host);
+          }), observer.observe(row, { childList: !0 }), row.append(host), setContainer(host);
+        };
+        return attach(), () => {
+          timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
+        };
+      }, [portal]), portal === void 0 || container === null ? props.fallback : portal(props.children, container);
+    }
     function RemoteWorkspaceAction(props) {
       let { t } = props, connectionErrorMessageFor = (reason, translate) => {
         if (typeof reason == "object" && reason !== null && "code" in reason) {
@@ -3106,8 +3180,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
           if (typeof code == "string") return connectionErrorMessage(code, translate);
         }
         return messageOf(reason);
-      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
-      React.useEffect(() => {
+      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
+      React.useEffect(
+        () => props.sidebarEntry.subscribe(() => setSidebarEntry(props.sidebarEntry.read())),
+        [props.sidebarEntry]
+      ), React.useEffect(() => {
+        props.control("settings.get").then((view) => props.sidebarEntry.publish(view.config.sidebar?.entry ?? "standard")).catch(() => {
+        });
+      }, [props.control, props.sidebarEntry]), React.useEffect(() => {
         open || (setDevicesOpen(!1), qrFlowRun.current += 1, setBusy(!1));
       }, [open]), React.useEffect(() => {
         if (!open) return;
@@ -3140,9 +3220,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }, []), React.useEffect(() => {
         status?.serverUrl !== void 0 && setLoginServerUrl(status.serverUrl);
       }, [status?.serverUrl]), React.useEffect(() => {
-        let remoteActive = status?.mode === "remote";
-        return document.documentElement.classList.toggle("dshRemoteTargetActive", remoteActive), () => {
-          remoteActive && document.documentElement.classList.remove("dshRemoteTargetActive");
+        let remoteActive2 = status?.mode === "remote";
+        return document.documentElement.classList.toggle("dshRemoteTargetActive", remoteActive2), () => {
+          remoteActive2 && document.documentElement.classList.remove("dshRemoteTargetActive");
         };
       }, [status?.mode]);
       let startQrLogin = async (provider) => {
@@ -3489,44 +3569,55 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ))
           )
         ) : null
-      ) : null, listedHosts = connectingHost === void 0 ? devices : [connectingHost];
+      ) : null, listedHosts = connectingHost === void 0 ? devices : [connectingHost], computerIcon = React.createElement(
+        "svg",
+        {
+          className: "dshRemoteComputerIcon",
+          viewBox: "0 0 24 24",
+          fill: "none",
+          stroke: "currentColor",
+          strokeWidth: 1.7,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          "aria-hidden": !0
+        },
+        React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
+        React.createElement("path", { d: "M8 21h8M12 17v4" })
+      ), remoteActive = status?.mode === "remote", entry = React.createElement(
+        "div",
+        { className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}` },
+        React.createElement(remoteActive && props.wide ? "div" : "button", {
+          ...remoteActive && props.wide ? {} : {
+            type: "button",
+            disabled: remoteActive && busy,
+            onClick: () => void (remoteActive ? openLocalWorkspaces() : show())
+          },
+          className: "dshRemoteModeButton",
+          title: props.wide ? remoteLabel : remoteActionLabel,
+          "aria-label": props.wide ? remoteLabel : remoteActionLabel
+        }, computerIcon, props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null),
+        remoteActive && props.wide ? React.createElement("button", {
+          type: "button",
+          className: "dshRemoteExitLink",
+          disabled: busy,
+          onClick: () => void openLocalWorkspaces()
+        }, t("exitRemote")) : null
+      ), accountEntry = React.createElement(
+        "div",
+        { className: `dshRemoteAccountEntry${remoteActive ? " isActive" : ""}` },
+        React.createElement("button", {
+          type: "button",
+          className: "dshRemoteAccountEntryButton",
+          disabled: remoteActive && busy,
+          title: remoteActionLabel,
+          "aria-label": remoteActionLabel,
+          onClick: () => void (remoteActive ? openLocalWorkspaces() : show())
+        }, computerIcon)
+      ), compact = sidebarEntry === "compact" && props.wide && props.portal !== void 0;
       return React.createElement(
         React.Fragment,
         null,
-        React.createElement(
-          "div",
-          { className: `dshRemoteSidebarEntry${status?.mode === "remote" ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}` },
-          React.createElement(status?.mode === "remote" && props.wide ? "div" : "button", {
-            ...status?.mode === "remote" && props.wide ? {} : {
-              type: "button",
-              disabled: status?.mode === "remote" && busy,
-              onClick: () => void (status?.mode === "remote" ? openLocalWorkspaces() : show())
-            },
-            className: "dshRemoteModeButton",
-            title: props.wide ? remoteLabel : remoteActionLabel,
-            "aria-label": props.wide ? remoteLabel : remoteActionLabel
-          }, React.createElement(
-            "svg",
-            {
-              className: "dshRemoteComputerIcon",
-              viewBox: "0 0 24 24",
-              fill: "none",
-              stroke: "currentColor",
-              strokeWidth: 1.7,
-              strokeLinecap: "round",
-              strokeLinejoin: "round",
-              "aria-hidden": !0
-            },
-            React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-            React.createElement("path", { d: "M8 21h8M12 17v4" })
-          ), props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null),
-          status?.mode === "remote" && props.wide ? React.createElement("button", {
-            type: "button",
-            className: "dshRemoteExitLink",
-            disabled: busy,
-            onClick: () => void openLocalWorkspaces()
-          }, t("exitRemote")) : null
-        ),
+        compact ? React.createElement(RemoteAccountEntry, { portal: props.portal, fallback: entry }, accountEntry) : entry,
         open ? React.createElement("div", {
           className: "dshRemoteBackdrop",
           role: "presentation",
@@ -3900,12 +3991,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
                           onClick: () => void browseDirectory(crumb.path)
                         }, crumb.path === directory.home ? "\u2302" : crumb.name))
                       ),
-                      React.createElement("div", { className: "dshRemoteFolderList" }, directory.entries.filter((entry) => !entry.hidden).length === 0 ? React.createElement("p", null, t("emptyDirectory")) : directory.entries.filter((entry) => !entry.hidden).map((entry) => React.createElement("button", {
+                      React.createElement("div", { className: "dshRemoteFolderList" }, directory.entries.filter((entry2) => !entry2.hidden).length === 0 ? React.createElement("p", null, t("emptyDirectory")) : directory.entries.filter((entry2) => !entry2.hidden).map((entry2) => React.createElement("button", {
                         type: "button",
-                        key: entry.path,
+                        key: entry2.path,
                         disabled: busy,
-                        onClick: () => void browseDirectory(entry.path)
-                      }, React.createElement("span", { "aria-hidden": !0 }, "\u25B1"), React.createElement("span", null, entry.name)))),
+                        onClick: () => void browseDirectory(entry2.path)
+                      }, React.createElement("span", { "aria-hidden": !0 }, "\u25B1"), React.createElement("span", null, entry2.name)))),
                       directory.truncated ? React.createElement("small", null, t("directoryTruncated")) : null
                     )
                   ) : React.createElement(
@@ -4651,7 +4742,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
   window.__ModuleLoader__.load({
     id: clientModuleId,
     factory: (require2) => {
-      let module = { exports: {} }, React = require2("react"), RemotePluginOptions = createRemotePluginOptions(React), RemoteWorkspaceAction = createRemoteWorkspaceAction(React), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React), openHarnessSettings;
+      let module = { exports: {} }, React = require2("react"), portal = (() => {
+        try {
+          let reactDom = require2("react-dom");
+          return typeof reactDom.createPortal == "function" ? reactDom.createPortal.bind(reactDom) : void 0;
+        } catch {
+          return;
+        }
+      })(), RemotePluginOptions = createRemotePluginOptions(React), RemoteWorkspaceAction = createRemoteWorkspaceAction(React), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React), openHarnessSettings;
       function RemoteSettingsLauncher(props) {
         return openHarnessSettings = props.openSettings, null;
       }
@@ -4821,7 +4919,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
           for (let listener of remoteOpenListeners) listener();
         }, subscribeOpen = (listener) => (remoteOpenListeners.add(listener), () => {
           remoteOpenListeners.delete(listener);
-        }), controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
+        }), sidebarEntryStyle = "standard", sidebarEntryListeners = /* @__PURE__ */ new Set(), sidebarEntry = {
+          read: () => sidebarEntryStyle,
+          subscribe: (listener) => (sidebarEntryListeners.add(listener), () => {
+            sidebarEntryListeners.delete(listener);
+          }),
+          publish: (style) => {
+            if (style !== sidebarEntryStyle) {
+              sidebarEntryStyle = style;
+              for (let listener of sidebarEntryListeners) listener();
+            }
+          }
+        }, controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
           if (endpoint === "status" && Date.now() < controlRouteRetryAfter)
             return controlRouteUnavailableStatus();
           let result;
@@ -4971,18 +5080,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
             statusFeed,
             subscribeOpen,
             openSettings: void 0,
-            preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github"
+            preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github",
+            sidebarEntry,
+            portal
           })
         }, RemoteWorkspaceAction)), ctx.slots.inject("plugins.row.config", () => ctx.slots.register({
           name: "plugins.row.config",
           key: "ds-harness-remote#ds-harness-remote",
           locale: localeNamespace,
-          inject: () => ({ control, statusFeed, onSignIn: openRemote })
+          inject: () => ({ control, statusFeed, onSignIn: openRemote, sidebarEntry })
         }, RemotePluginOptions)), ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
           name: "plugins.bundle.config",
           key: "ds-harness-remote",
           locale: localeNamespace,
-          inject: () => ({ control, statusFeed, onSignIn: openRemote })
+          inject: () => ({ control, statusFeed, onSignIn: openRemote, sidebarEntry })
         }, RemotePluginOptions));
       }
       function isMissingControlRoute(reason) {
