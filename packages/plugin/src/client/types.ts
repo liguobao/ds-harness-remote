@@ -15,7 +15,7 @@ export type RemoteTransportPreference = 'lan' | 'p2p' | 'turn' | 'relay'
 
 export interface RemoteStatus {
   mode: 'local' | 'remote'
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
   target?: { deviceId: string; name: string }
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
@@ -44,6 +44,7 @@ export interface RemoteStatus {
     pi?: boolean
     opencode?: boolean
     claude?: boolean
+    hermes?: boolean
     workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
   }
   network?: RemoteNetworkDetails
@@ -147,7 +148,7 @@ export interface CursorWorkspaceView extends RemoteWorkspaceView {
 export interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
   sessionId?: string
 }
 

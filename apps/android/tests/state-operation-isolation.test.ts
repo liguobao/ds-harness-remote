@@ -227,8 +227,8 @@ function workspaceFixture() {
   }
   const runtime = {
     refreshBackends: vi.fn(), requireProxy: () => backend === proxy ? proxy : backend,
-    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true, hasClaude: () => true,
-    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend, requireClaude: () => backend,
+    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true, hasClaude: () => true, hasHermes: () => true,
+    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend, requireClaude: () => backend, requireHermes: () => backend,
   }
   backend = proxy
   const close = vi.fn(async () => undefined)

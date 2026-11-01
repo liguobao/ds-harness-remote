@@ -36,7 +36,7 @@ export type CursorAcpUnavailableHandler = (code: string) => void
 export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 
 export interface CursorAcpOptions {
-  modelBackend?: 'cursor' | 'claude'
+  modelBackend?: 'cursor' | 'claude' | 'hermes'
 
   args?: string[]
   cwd?: string

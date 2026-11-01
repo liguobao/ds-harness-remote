@@ -10,7 +10,7 @@ import { ForegroundConnectionRecovery } from '../src/services/connection-recover
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
@@ -32,11 +32,13 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   hasAntigravity = transport.hasAntigravity
   hasOpencode = transport.hasOpencode
   hasClaude = transport.hasClaude
+  hasHermes = transport.hasHermes
   requireCursor() { return acp }
   requireAntigravity() { return acp }
   requirePi() { return acp }
   requireOpencode() { return acp }
   requireClaude() { return acp }
+  requireHermes() { return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -64,6 +66,7 @@ const prepareScenario1 = () => {
   transport.hasPi.mockReturnValue(false)
   transport.hasOpencode.mockReturnValue(false)
   transport.hasClaude.mockReturnValue(false)
+  transport.hasHermes.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
   acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })

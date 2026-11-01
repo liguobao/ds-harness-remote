@@ -62,6 +62,30 @@ Claude 会话与目录来自上游标准 `session/list`；无效 envelope、异�
 
 上述为本机真实 SDK/Host Gateway 验证，不等于客户端重连 UI、Windows、APK/真机或加密跨设备 E2E。
 
+### Hermes Agent（Nous Research）
+
+Host 注册后端 ID 为 `hermes`，默认**关闭**（未安装 Hermes 的 Host 不会被触发拉起），默认命令 `hermes`、参数 `["acp"]`。
+
+Hermes 自带标准 ACP 服务端（`hermes acp`，另有 `hermes-acp` 兼容入口），因此不需要额外的 adapter 或协议转换：
+
+```yaml
+acp:
+  backends:
+    - id: hermes
+      enabled: true
+      command: hermes   # 或 hermes-acp（此时 args 留空）
+      args: [acp]
+```
+
+- 认证：Hermes 使用 Host 本机已有的 provider 与密钥配置，不向 Client 发起登录；Remote 只在初始化时发送 `initialize`，不发送 `authenticate`。
+- 目录与会话：`session/list` 按 cwd 列出 Hermes 已持久化的会话（标题、更新时间），`session/load` 在响应前回放历史。
+- 历史：由独立进程读取并转换为原生事件，模型来源标记为 `hermes`，不写入 Harness SessionStore。
+- 模型：`session/new`（或 `session/load`）返回的 `models.availableModels` 即 Host 上的 Hermes 模型清单，切换走标准 `session/set_model`。
+- 审批：Hermes 自己的审批策略决定何时请求确认，危险终端操作会通过 `session/request_permission` 交给 Client 单次允许/拒绝。
+- 限制：与 Claude 一样不开放 ACP workspace 文件/终端工具入口，也不接收图片 Prompt。
+
+真实验收记录：本机 Host Gateway → `hermes acp` 已完成工作区列举、会话新建、流式回复（`agent_message_chunk`）、工具执行（`terminal` 输出回传）与历史回放。
+
 ## 启用已有后端
 
 1. 在 Host 安装对应 CLI，完成其本机授权，并确认命令能运行：Cursor 使用 `agent`，AGY 使用 `agy`，Codex 使用 `codex`。
@@ -79,6 +103,7 @@ Codex 默认开启，Cursor 默认关闭；AGY 以 Host 配置为准。未就绪
 | OpenCode | `opencode acp` stdio | 工作区/历史、文字、流式回复、中断、模型/effort |
 | AGY | `agy --input-format stream-json --output-format stream-json` adapter | 工作区/历史、文字与受限图片、流式回复、模型选择 |
 | Pi Agent | `pi-acp` stdio（内部启动 `pi --mode rpc`） | 工作区/历史、文字、流式工具、中断、模型/Thinking |
+| Hermes | `hermes acp` stdio（Hermes Agent 自带 ACP 服务端） | 工作区/历史、文字、流式思考与工具、中断、单次审批、模型选择 |
 | Codex | `codex app-server` stdio | Project/Thread、历史、文字/图片、模型/权限、中断与审批 |
 
 AGY 图片每张最多 8 MiB、每次最多 4 张，写入 Host 专用私有 tmp 缓存，保留 24 小时；系统提前清理 tmp 后图片可能不可用。

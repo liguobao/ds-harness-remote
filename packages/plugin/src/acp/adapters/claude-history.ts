@@ -2,7 +2,7 @@ import type { CursorAcpInbound } from './cursor-process.js'
 
 // ACP replay has no reliable timestamps. Deterministic projection IDs and epoch time
 // avoid presenting the history read time as the conversation time.
-export function claudeHistoryEvents(messages: CursorAcpInbound[], sessionId: string): unknown[] {
+export function claudeHistoryEvents(messages: CursorAcpInbound[], sessionId: string, provider: string = 'claude'): unknown[] {
   type Block = { type: string; text: string }
   type Tool = { id: string; name: string; input: unknown; output: Block[]; failed: boolean; terminal: boolean; emitted: boolean }
   const events: any[] = []
@@ -14,12 +14,12 @@ export function claudeHistoryEvents(messages: CursorAcpInbound[], sessionId: str
   const push = (type: string, data: unknown, surface = false) => events.push({ type: 'event', event: {
     type, seq: events.length, time: 0, data, ...(surface ? { surfaceOp: 'append' } : {}),
   } })
-  const id = () => `claude-history:${sessionId}:${events.length}`
+  const id = () => `${provider}-history:${sessionId}:${events.length}`
   const flushMessage = () => {
     if (!pending) return
     const message = { id: id(), role: pending.role, content: pending.content }
     if (pending.role === 'user') push('user/message', { ...message, source: { kind: 'user' } }, true)
-    else push('assistant/message', { turn, step, message: { ...message, source: { kind: 'model', provider: 'claude', model: '' } }, stream: [] }, true)
+    else push('assistant/message', { turn, step, message: { ...message, source: { kind: 'model', provider, model: '' } }, stream: [] }, true)
     pending = undefined
   }
   const result = (tool: Tool) => {

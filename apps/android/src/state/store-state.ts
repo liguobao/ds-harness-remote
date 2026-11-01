@@ -65,6 +65,7 @@ export interface AppState {
   piAvailable: boolean
   opencodeAvailable: boolean
   claudeAvailable: boolean
+  hermesAvailable: boolean
   workspaceCatalog?: { backend: AgentBackend; loading: boolean; error?: string }
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
@@ -172,7 +173,7 @@ export interface AppState {
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
-  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): Promise<WorkspaceView | undefined>
+  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
@@ -205,7 +206,7 @@ export const disconnected: ConnectionSnapshot = {
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -224,6 +225,7 @@ export function initialData(): Pick<AppState,
     piAvailable: false,
     opencodeAvailable: false,
     claudeAvailable: false,
+    hermesAvailable: false,
     workspaceCatalog: undefined,
     workspaces: [],
     favoriteWorkspaces: [],
