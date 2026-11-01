@@ -1,12 +1,17 @@
-import { useState } from 'react'
-import { AccessibilityInfo, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { AccessibilityInfo, Alert, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
-import { Coins, Copy, GitBranch } from 'lucide-react-native'
-import type { ChatItemBase, ChatMessage } from '../types'
+import type { ChatItemBase, ChatMessage, RemoteSession } from '../types'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import { useTheme } from '../ui/theme-context'
 import { formatTokens } from '../ui/quote-helpers'
+import {
+  IconBranchOutline,
+  IconCheckOutline,
+  IconCopyOutline,
+  IconDatabaseOutline,
+} from '../ui/dsh-icons'
 
 export { formatTokens }
 
@@ -20,6 +25,111 @@ export function messageTime(item: ChatItemBase): number | undefined {
   if (item.nativeTime !== undefined && Number.isFinite(item.nativeTime) && item.nativeTime > 0) return item.nativeTime
   if (item.nativeSeq === undefined && Number.isFinite(item.createdAt) && item.createdAt > 0) return item.createdAt
   return undefined
+}
+
+/**
+ * Official DeepSeek Harness TurnUsagePanel popover modal dialog.
+ * 1:1 match with DeepSeek Harness desktop TurnUsagePanel.tsx.
+ */
+export function TurnUsageModal({
+  visible,
+  onClose,
+  item,
+  session,
+}: {
+  visible: boolean
+  onClose: () => void
+  item: ChatMessage
+  session?: RemoteSession
+}) {
+  const { colors } = useTheme()
+  const u = item.usage
+  if (!u) return null
+
+  const totalTokens = u.totalTokens ?? 0
+  const inputTokens = u.inputTokens ?? 0
+  const cacheReadTokens = u.cacheReadTokens ?? 0
+  const cacheWriteTokens = u.cacheWriteTokens ?? 0
+  const outputTokens = u.outputTokens ?? 0
+  const reasoningTokens = u.reasoningTokens ?? 0
+  const uncachedInput = Math.max(0, inputTokens - cacheReadTokens)
+  const modelName = (item as unknown as { model?: string }).model ?? (u as unknown as { model?: string }).model ?? session?.backend
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.border }]} onStartShouldSetResponder={() => true}>
+          {/* Header row */}
+          <View style={styles.usageTitleRow}>
+            <View style={styles.usageTitleLeft}>
+              <IconDatabaseOutline size={15} color={colors.ink} />
+              <Text style={[styles.usageTitleText, { color: colors.ink }]}>{strings.messageActions.turnUsageTitle ?? '本轮用量'}</Text>
+            </View>
+            <Text style={[styles.usageTotalText, { color: colors.ink }]}>
+              {totalTokens.toLocaleString()} tok
+            </Text>
+          </View>
+
+          {/* Divider */}
+          <View style={[styles.usageDivider, { backgroundColor: colors.separator }]} />
+
+          {/* Details */}
+          <View style={styles.usageGrid}>
+            {modelName !== undefined && (
+              <View style={styles.usageRow}>
+                <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.providerModel ?? '提供方 / 模型'}</Text>
+                <Text style={[styles.usageValue, { color: colors.ink }]} numberOfLines={1}>
+                  {modelName}
+                </Text>
+              </View>
+            )}
+            <View style={styles.usageRow}>
+              <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.uncachedInput ?? '未缓存输入'}</Text>
+              <Text style={[styles.usageValue, { color: colors.ink }]}>
+                {uncachedInput.toLocaleString()} tok
+              </Text>
+            </View>
+            {cacheReadTokens > 0 && (
+              <View style={styles.usageRow}>
+                <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.cacheRead ?? '缓存读取'}</Text>
+                <Text style={[styles.usageValue, { color: colors.ink }]}>
+                  {cacheReadTokens.toLocaleString()} tok
+                </Text>
+              </View>
+            )}
+            {cacheWriteTokens > 0 && (
+              <View style={styles.usageRow}>
+                <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.cacheWrite ?? '缓存写入'}</Text>
+                <Text style={[styles.usageValue, { color: colors.ink }]}>
+                  {cacheWriteTokens.toLocaleString()} tok
+                </Text>
+              </View>
+            )}
+            <View style={styles.usageRow}>
+              <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.output ?? '输出'}</Text>
+              <Text style={[styles.usageValue, { color: colors.ink }]}>
+                {outputTokens.toLocaleString()} tok
+              </Text>
+            </View>
+            {reasoningTokens > 0 && (
+              <View style={styles.usageRow}>
+                <Text style={[styles.usageLabel, { color: colors.muted }]}>{strings.messageActions.reasoning ?? '推理'}</Text>
+                <Text style={[styles.usageValue, { color: colors.ink }]}>
+                  {reasoningTokens.toLocaleString()} tok
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  )
 }
 
 /** Mutating icons only change after the official Host write has been read back. */
@@ -38,8 +148,42 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const time = messageTime(item)
   const fork = useAppStore(state => state.forkChatMessage)
   const [copied, setCopied] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const copyOpacity = useRef(new Animated.Value(1)).current
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+    }
+  }, [])
+
   const disabled = !connected || busy || item.streaming === true
   const report = () => Alert.alert(strings.messageActions.failed, useAppStore.getState().error ?? strings.messageActions.unavailable)
+
+  const handleCopy = () => {
+    if (item.text.length === 0) return
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+    Clipboard.setStringAsync(item.text)
+      .then(() => {
+        Animated.sequence([
+          Animated.timing(copyOpacity, { toValue: 0.3, duration: 80, useNativeDriver: true }),
+          Animated.timing(copyOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+        ]).start()
+        setCopied(true)
+        AccessibilityInfo.announceForAccessibility(strings.messageActions.copied)
+        copyTimeoutRef.current = setTimeout(() => {
+          Animated.sequence([
+            Animated.timing(copyOpacity, { toValue: 0.3, duration: 80, useNativeDriver: true }),
+            Animated.timing(copyOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+          ]).start()
+          setCopied(false)
+          copyTimeoutRef.current = null
+        }, 1800)
+      })
+      .catch(report)
+  }
+
   const branch = async () => {
     if (!supportsBranch) return
     Alert.alert(strings.messageActions.branch, undefined, [
@@ -47,34 +191,29 @@ export function MessageActions({ item }: { item: ChatMessage }) {
       { text: strings.messageActions.branch, onPress: () => { void fork(item).then(ok => { if (!ok) report() }) } },
     ])
   }
-  const showUsage = () => {
-    const u = item.usage
-    if (u === undefined) { Alert.alert(strings.messageActions.usage, strings.messageActions.usageUnavailable); return }
-    const rows = [
-      [strings.messageActions.input, u.inputTokens], [strings.messageActions.output, u.outputTokens],
-      [strings.messageActions.cacheRead, u.cacheReadTokens], [strings.messageActions.cacheWrite, u.cacheWriteTokens],
-      [strings.messageActions.reasoning, u.reasoningTokens], [strings.messageActions.total, u.totalTokens],
-    ] as const
-    Alert.alert(strings.messageActions.usage, rows.filter(([, value]) => value !== undefined).map(([label, value]) => `${label}: ${value}`).join('\n'))
-  }
+
   const user = item.role === 'user'
 
   if (user) {
     return (
       <View style={[styles.row, styles.userRow]}>
         {time !== undefined && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
-          disabled={item.text.length === 0}
-          hitSlop={8}
-          style={styles.actionBtn}
-          onPress={() => {
-            void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
-          }}
-        >
-          <Copy size={14} color={copied ? colors.primary : colors.muted} strokeWidth={1.8} />
-        </Pressable>
+        <Animated.View style={{ opacity: copyOpacity }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
+            disabled={item.text.length === 0}
+            hitSlop={8}
+            style={styles.actionBtn}
+            onPress={handleCopy}
+          >
+            {copied ? (
+              <IconCheckOutline size={14} color={colors.primary} />
+            ) : (
+              <IconCopyOutline size={14} color={colors.muted} />
+            )}
+          </Pressable>
+        </Animated.View>
       </View>
     )
   }
@@ -83,47 +222,62 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const usageLabel = totalTokens !== undefined ? `${strings.messageActions.usage} ${formatTokens(totalTokens)} tok` : strings.messageActions.usage
 
   return (
-    <View style={styles.assistantRow}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
-        disabled={item.text.length === 0}
-        hitSlop={8}
-        style={styles.actionBtn}
-        onPress={() => {
-          void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
-        }}
-      >
-        <Copy size={14} color={copied ? colors.primary : colors.muted} strokeWidth={1.8} />
-      </Pressable>
-      {!pending && supportsBranch && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={strings.messageActions.branch}
-          accessibilityState={{ disabled }}
-          disabled={disabled}
-          hitSlop={8}
-          style={styles.actionBtn}
-          onPress={() => void branch()}
-        >
-          <GitBranch size={14} color={colors.muted} strokeWidth={1.8} />
-        </Pressable>
+    <>
+      <View style={styles.assistantRow}>
+        <Animated.View style={{ opacity: copyOpacity }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
+            disabled={item.text.length === 0}
+            hitSlop={8}
+            style={styles.actionBtn}
+            onPress={handleCopy}
+          >
+            {copied ? (
+              <IconCheckOutline size={14} color={colors.primary} />
+            ) : (
+              <IconCopyOutline size={14} color={colors.muted} />
+            )}
+          </Pressable>
+        </Animated.View>
+        {!pending && supportsBranch && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.messageActions.branch}
+            accessibilityState={{ disabled }}
+            disabled={disabled}
+            hitSlop={8}
+            style={styles.actionBtn}
+            onPress={() => void branch()}
+          >
+            <IconBranchOutline size={14} color={colors.muted} />
+          </Pressable>
+        )}
+        {!pending && backend !== 'codex' && item.usage !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.messageActions.usage}
+            hitSlop={8}
+            style={styles.usageBtn}
+            onPress={() => setUsageOpen(true)}
+          >
+            <IconDatabaseOutline size={14} color={colors.muted} />
+            <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
+              {usageLabel}
+            </Text>
+          </Pressable>
+        )}
+      </View>
+
+      {item.usage !== undefined && (
+        <TurnUsageModal
+          visible={usageOpen}
+          onClose={() => setUsageOpen(false)}
+          item={item}
+          session={session}
+        />
       )}
-      {!pending && backend !== 'codex' && item.usage !== undefined && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={strings.messageActions.usage}
-          hitSlop={8}
-          style={styles.usageBtn}
-          onPress={showUsage}
-        >
-          <Coins size={14} color={colors.muted} strokeWidth={1.8} />
-          <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
-            {usageLabel}
-          </Text>
-        </Pressable>
-      )}
-    </View>
+    </>
   )
 }
 
@@ -154,5 +308,67 @@ const styles = StyleSheet.create({
   usageText: {
     fontSize: 12,
     fontWeight: '400',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  usageCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  usageTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  usageTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  usageTitleText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  usageTotalText: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  usageDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+  },
+  usageGrid: {
+    gap: 8,
+  },
+  usageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  usageLabel: {
+    fontSize: 12,
+  },
+  usageValue: {
+    fontSize: 12,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+    textAlign: 'right',
+    flexShrink: 1,
   },
 })

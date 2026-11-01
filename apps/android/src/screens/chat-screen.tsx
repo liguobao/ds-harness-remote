@@ -124,7 +124,7 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
 
 import { browseScope, browseKey, useBrowseMemory, updateBrowseEntry } from '../services/browse-memory'
-import { InlineQuotePreview, QuotePreview, formatQuoteText } from '../ui/quote-preview'
+import { InlineQuotePreview, QuoteMarkIcon, QuotePreview, formatQuoteDraftSnippet, formatQuoteText } from '../ui/quote-preview'
 const EMPTY_QUOTES: string[] = []
 const EMPTY_IMAGES: PromptImage[] = []
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
@@ -1846,14 +1846,21 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
           </Pressable>
         </View> : <View style={styles.composerCard}>
-          {quotes.map((quoteText: string, index: number) => (
-            <InlineQuotePreview
-              key={`inline-quote-${index}`}
-              text={quoteText}
-              onRemove={() => setQuotes(current => current.filter((_, i) => i !== index))}
-            />
-          ))}
           <View style={styles.composerInputWrap}>
+            {quotes.map((quoteText: string, index: number) => (
+              <Pressable
+                key={`inline-quote-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.removeQuote}
+                onPress={() => setQuotes(current => current.filter((_, i) => i !== index))}
+                style={styles.composerInlineQuoteBadge}
+              >
+                <QuoteMarkIcon size={14} color={colors.primary} />
+                <Text style={[styles.composerInlineQuoteText, { color: colors.primary }]}>
+                  “{formatQuoteDraftSnippet(quoteText, 14)}”
+                </Text>
+              </Pressable>
+            ))}
             {/* Native attributed text keeps references blue without an opaque Android value layer. */}
             <TextInput
               ref={composerInputRef}

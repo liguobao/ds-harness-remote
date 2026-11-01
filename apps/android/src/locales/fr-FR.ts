@@ -440,9 +440,11 @@ const frFR = {
   messageActions: {
     quote: "Citer", quoted: "Cité", copy: "Copier la réponse", copied: "Copié", good: "Bonne réponse", bad: "Mauvaise réponse", branch: "Brancher dans un nouveau chat",
     askAgent: 'Demander à l\'agent', selectAll: 'Tout sélectionner',
-    unavailable: "Cet hôte ou ce message ne prend pas en charge cette action", failed: "Action non terminée", feedbackSaved: "Commentaires enregistrés sur l'hôte",
-    usageUnavailable: "Utilisation indisponible", timeUnavailable: "Temps indisponible", usage: "Utilisation réelle", input: "Saisir", output: "Sortir",
-    cacheRead: "Lecture du cache", cacheWrite: "Écriture en cache", reasoning: "Raisonnement", total: "Total",
+    unavailable: "Opération non prise en charge", failed: "Échec de l'action", feedbackSaved: "Commentaires enregistrés",
+    usageUnavailable: "Utilisation non disponible", timeUnavailable: "Heure non disponible", usage: "Utilisation", input: "Entrée", output: "Sortie",
+    cacheRead: "Lecture du cache", cacheWrite: "Écriture dans le cache", reasoning: "Raisonnement", total: "Total",
+    turnUsageTitle: 'Consommation du tour', providerModel: 'Fournisseur / modèle', uncachedInput: 'Entrée non mise en cache',
+    quoteSelectedSnippet: 'Citer le fragment', copySelectedSnippet: 'Copier le texte sélectionné',
   },
   sessionActivity: {
     relatedFiles: "Fichiers associés",

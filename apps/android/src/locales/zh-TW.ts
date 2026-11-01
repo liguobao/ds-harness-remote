@@ -438,9 +438,11 @@ const zhTW = {
   messageActions: {
     quote: '引用', quoted: '已引用', copy: '複製回答', copied: '已複製', good: '好的回答', bad: '有問題的回答', branch: '在新對話中分支',
     askAgent: '詢問智慧體', selectAll: '全選',
-    unavailable: '當前主機或訊息不支援此操作', failed: '操作未完成', feedbackSaved: '反饋已儲存到主機',
-    usageUnavailable: '用量不可用', timeUnavailable: '時間不可用', usage: '真實用量', input: '輸入', output: '輸出',
-    cacheRead: '快取讀取', cacheWrite: '快取寫入', reasoning: '推理', total: '總計',
+    unavailable: '當前主機或消息不支持此操作', failed: '操作未完成', feedbackSaved: '反饋已保存到主機',
+    usageUnavailable: '用量不可用', timeUnavailable: '時間不可用', usage: '用量', input: '輸入', output: '輸出',
+    cacheRead: '緩存讀取', cacheWrite: '緩存寫入', reasoning: '推理', total: '總計',
+    turnUsageTitle: '本輪用量', providerModel: '提供方 / 模型', uncachedInput: '未緩存輸入',
+    quoteSelectedSnippet: '選取文字引用', copySelectedSnippet: '複製選中文本',
   },
   sessionActivity: {
     relatedFiles: "相關檔案",

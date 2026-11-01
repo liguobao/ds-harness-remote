@@ -20,6 +20,8 @@ import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
+import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
+import { IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -276,82 +278,99 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
-
+/**
+ * In-place free text selection on assistant prose (Figure 2 / IMG_1488).
+ * Allows the user to freely select any snippet using native handles.
+ * When text is selected, floating callout menu [询问智能体] [拷贝] appears
+ * right above the selection.
+ */
 function AssistantMessageCallout({ item }: { item: ChatMessage }) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const [calloutOpen, setCalloutOpen] = useState(false)
   const quote = useAppStore(state => state.quoteChatMessage)
+  const [selectedRange, setSelectedRange] = useState<{ start: number; end: number } | null>(null)
+  const [copied, setCopied] = useState(false)
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const handleAskAgent = (textToQuote: string) => {
-    setCalloutOpen(false)
-    quote(textToQuote, item.sessionId)
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+    }
+  }, [])
+
+  const selectedSnippet = useMemo(() => {
+    if (!selectedRange || selectedRange.start === selectedRange.end) return ''
+    const start = Math.min(selectedRange.start, selectedRange.end)
+    const end = Math.max(selectedRange.start, selectedRange.end)
+    return item.text.slice(start, end).trim()
+  }, [item.text, selectedRange])
+
+  const handleAskAgent = () => {
+    if (selectedSnippet.length === 0) return
+    quote(selectedSnippet, item.sessionId)
+    setSelectedRange(null)
     AccessibilityInfo.announceForAccessibility(zhCN.messageActions.quoted)
   }
 
-  const handleCopy = (textToCopy: string) => {
-    setCalloutOpen(false)
-    Clipboard.setStringAsync(textToCopy)
-      .then(() => {
-        AccessibilityInfo.announceForAccessibility(zhCN.messageActions.copied)
-      })
-      .catch(() => {
-        Alert.alert(zhCN.messageActions.failed, zhCN.messageActions.unavailable)
-      })
+  const handleCopy = () => {
+    if (selectedSnippet.length === 0) return
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+    void Clipboard.setStringAsync(selectedSnippet).then(() => {
+      setCopied(true)
+      AccessibilityInfo.announceForAccessibility(zhCN.messageActions.copied)
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false)
+        copyTimeoutRef.current = null
+        setSelectedRange(null)
+      }, 1800)
+    })
   }
 
   return (
     <View style={styles.assistantProseWrap}>
-      <Pressable
-        onLongPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-          setCalloutOpen(true)
-        }}
-        delayLongPress={350}
-        accessibilityRole="button"
-        accessibilityLabel={item.text}
-        accessibilityHint={zhCN.messageActions.askAgent}
-        accessibilityActions={[{ name: 'activate', label: zhCN.messageActions.askAgent }]}
-        onAccessibilityAction={(event: { nativeEvent: { actionName: string } }) => {
-          if (event.nativeEvent.actionName === 'activate') {
-            handleAskAgent(item.text)
-          }
-        }}
-        style={styles.assistantText}
-      >
-        <NativeMarkdown text={item.text} />
-      </Pressable>
-
-      <Modal
-        visible={calloutOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCalloutOpen(false)}
-        statusBarTranslucent
-      >
-        <Pressable style={styles.calloutBackdrop} onPress={() => setCalloutOpen(false)}>
-          <View style={styles.calloutMenu} onStartShouldSetResponder={() => true}>
+      {selectedSnippet.length > 0 && (
+        <View style={styles.floatingCalloutAnchor} pointerEvents="box-none">
+          <View style={[styles.calloutMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={zhCN.messageActions.askAgent}
               hitSlop={6}
               style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
-              onPress={() => handleAskAgent(item.text)}
+              onPress={handleAskAgent}
             >
-              <Text numberOfLines={1} style={styles.calloutBtnText}>{zhCN.messageActions.askAgent}</Text>
+              <Text numberOfLines={1} style={[styles.calloutBtnText, { color: colors.ink }]}>
+                {zhCN.messageActions.askAgent}
+              </Text>
             </Pressable>
-            <View style={styles.calloutDivider} />
+            <View style={[styles.calloutDivider, { backgroundColor: colors.separator }]} />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={zhCN.messageActions.copy}
               hitSlop={6}
               style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
-              onPress={() => handleCopy(item.text)}
+              onPress={handleCopy}
             >
-              <Text numberOfLines={1} style={styles.calloutBtnText}>{zhCN.messageActions.copy}</Text>
+              <Text numberOfLines={1} style={[styles.calloutBtnText, { color: colors.ink }]}>
+                {copied ? zhCN.messageActions.copied : zhCN.messageActions.copy}
+              </Text>
             </Pressable>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      )}
+
+      <TextInput
+        multiline
+        editable={false}
+        scrollEnabled={false}
+        showSoftInputOnFocus={false}
+        value={item.text}
+        onSelectionChange={(e) => {
+          const { start, end } = e.nativeEvent.selection
+          setSelectedRange(start !== end ? { start, end } : null)
+        }}
+        selectionColor={colors.primarySoft ?? 'rgba(77, 107, 254, 0.3)'}
+        style={[styles.assistantSelectableText, { color: colors.ink }]}
+      />
     </View>
   )
 }
