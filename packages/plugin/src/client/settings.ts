@@ -34,7 +34,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     statusFeed: StatusFeed<RemoteStatus>
     onSignIn?: () => void
     preferredQrProvider?: string
-    sidebarEntry: SidebarEntryPreference
+    sidebarEntry?: SidebarEntryPreference
     t: Translate
     view?: 'summary' | 'page'
   }): unknown {
@@ -49,7 +49,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [busy, setBusy] = React.useState(false)
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
-    const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry.read())
+    const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
     const [acpBackends, setAcpBackends] = React.useState<Array<{ id: string; enabled: boolean }>>([])
     const [acpAvailability, setAcpAvailability] = React.useState<Record<string, boolean>>({})
@@ -96,7 +96,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       setTerminalEnabled(view.config.terminal?.enabled ?? true)
       setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? true)
       setSidebarEntry(view.config.sidebar?.entry ?? 'standard')
-      props.sidebarEntry.publish(view.config.sidebar?.entry ?? 'standard')
+      props.sidebarEntry?.publish(view.config.sidebar?.entry ?? 'standard')
       setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
       setAcpAvailability(view.acpAvailability ?? {})
       if (updateAssociations) applyAssociations(view)
