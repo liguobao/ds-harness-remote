@@ -3,6 +3,7 @@ const path = require('node:path')
 const {
   withAndroidManifest,
   withDangerousMod,
+  withMainActivity,
   withMainApplication,
 } = require('@expo/config-plugins')
 
@@ -72,6 +73,68 @@ function withRemoteForegroundService(config) {
       const anchor = 'PackageList(this).packages.apply {'
       if (!config.modResults.contents.includes(anchor)) throw new Error('MainApplication package list anchor is missing')
       config.modResults.contents = config.modResults.contents.replace(anchor, `${anchor}\n          ${marker}`)
+    }
+    return config
+  })
+
+  config = withMainActivity(config, config => {
+    const onActionModeSnippet = `
+  override fun onActionModeStarted(mode: android.view.ActionMode?) {
+    super.onActionModeStarted(mode)
+    val menu = mode?.menu ?: return
+    try {
+      var askAgentItem: android.view.MenuItem? = null
+      var copyItem: android.view.MenuItem? = null
+      var translateItem: android.view.MenuItem? = null
+
+      for (i in 0 until menu.size()) {
+        val item = menu.getItem(i)
+        val title = item.title?.toString() ?: ""
+        val intentClass = item.intent?.component?.className ?: ""
+        if (intentClass.contains("AskAgent") || title == "询问智能体" || title == "Ask Agent" || title == "詢問智慧體" || title == "エージェントに質問") {
+          askAgentItem = item
+        } else if (item.itemId == android.R.id.copy || title == "Copy" || title == "复制" || title == "複製") {
+          copyItem = item
+        } else if (title.contains("Translate") || title.contains("翻译") || title.contains("翻譯")) {
+          translateItem = item
+        }
+      }
+
+      if (translateItem != null) {
+        val title = translateItem.title
+        val intent = translateItem.intent
+        val icon = translateItem.icon
+        val itemId = translateItem.itemId
+        menu.removeItem(itemId)
+        val newTrans = menu.add(android.view.Menu.NONE, itemId, 999, title)
+        newTrans.intent = intent
+        newTrans.icon = icon
+        newTrans.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+      }
+
+      if (askAgentItem != null) {
+        val title = askAgentItem.title
+        val intent = askAgentItem.intent
+        val icon = askAgentItem.icon
+        val itemId = askAgentItem.itemId
+        menu.removeItem(itemId)
+        val newAsk = menu.add(android.view.Menu.NONE, itemId, 0, title)
+        newAsk.intent = intent
+        newAsk.icon = icon
+        newAsk.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+      }
+
+      if (copyItem != null) {
+        copyItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+      }
+    } catch (_: Throwable) {}
+  }
+`
+    if (!config.modResults.contents.includes('override fun onActionModeStarted')) {
+      const lastBrace = config.modResults.contents.lastIndexOf('}')
+      if (lastBrace > 0) {
+        config.modResults.contents = config.modResults.contents.slice(0, lastBrace) + onActionModeSnippet + '\n}\n'
+      }
     }
     return config
   })
