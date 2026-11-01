@@ -134,7 +134,16 @@ export class AcpPeerBridge {
         this.toolControllers.delete(params.streamId)
         throw error
       }
-    } else await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
+    } else {
+      await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
+      // Replay gives a reconnecting Client the frames it missed; when the adapter
+      // behind the session is gone it must not then wait for a producer that no
+      // longer exists, so the stream closes as failed.
+      if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+        this.streams.delete(params.streamId)
+        await this.publish('agent.acp.stream.closed', { streamId: params.streamId, reason: 'failed' }).catch(() => undefined)
+      }
+    }
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId }
   }
 
@@ -329,8 +338,13 @@ export class AcpPeerBridge {
     if (this.closed) return
     const streamIds = [...this.streams].filter(([, sessionId]) => sessions === undefined || sessions.has(sessionId)).map(([id]) => id)
     for (const id of streamIds) { this.streams.delete(id); this.toolControllers.get(id)?.abort(); this.toolControllers.delete(id) }
-    this.incomingTransfers.clear()
-    this.outgoingTransfers.clear()
+    // Transfers are connection-scoped and carry no session, so a failure limited
+    // to some sessions leaves them alone; only a whole-connection failure
+    // invalidates every in-flight transfer.
+    if (sessions === undefined) {
+      this.incomingTransfers.clear()
+      this.outgoingTransfers.clear()
+    }
     await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {
       streamId,
       reason,
