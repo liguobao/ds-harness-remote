@@ -344,6 +344,7 @@ CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。
 
 ## 友情链接
 
+- 友情链接：[DSH Go](https://github.com/ccch1mneyyy/dsh-go) — 把 DeepSeek Harness 装进口袋：手机本机运行，也能遥控你的电脑。「已适配 Remote。」
 - 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（已适配 Remote，参见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)）
 - 友情链接：[LINUX DO 社区](https://linux.do/)
 - 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)

@@ -329,6 +329,7 @@ systemd のシステムサービスを設定するためです。そのため Ho
 
 ## 関連リンク
 
+- 関連プロジェクト: [DSH Go](https://github.com/ccch1mneyyy/dsh-go) — DeepSeek Harness をポケットに。スマートフォン上で直接実行でき、パソコンのリモート操作も可能です。Remote 連携に対応しています。
 - 関連プロジェクト: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote 連携に対応しています。[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。
 - 相互リンク: [LINUX DO](https://linux.do/)
 - 相互リンク: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
