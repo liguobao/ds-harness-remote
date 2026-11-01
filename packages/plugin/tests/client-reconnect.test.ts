@@ -82,12 +82,16 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   const first = f.remotes[0]!.carrier
   first.reply = false
   const prompt = f.gateway.invoke({ namespace: 'session', method: 'prompt', args: { sessionId: 'existing-host-session' } })
-  const rejected = expect(prompt).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+  const approval = f.gateway.invoke({ namespace: '$events', method: 'result', args: {
+    clientId: 'event-client', eventId: 'approval-1', outcome: { kind: 'result', value: 'allowed-once' },
+  } })
+  const rejectedPrompt = expect(prompt).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+  const rejectedApproval = expect(approval).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
   f.connect.mockRejectedValueOnce(new TypeError('fetch failed'))
     .mockRejectedValueOnce(Object.assign(new Error('HTTP 503'), { code: 'INTERNAL_ERROR', retryable: true }))
     .mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
   first.drop()
-  await rejected
+  await Promise.all([rejectedPrompt, rejectedApproval])
   expect(f.runtime.status()).toMatchObject({ mode: 'remote', connected: false, target: { deviceId: 'host-1' } })
   await expect(f.gateway.invoke({ namespace: 'session', method: 'list', args: {} })).rejects.toMatchObject({ code: 'remote/disconnected' })
   await vi.advanceTimersByTimeAsync(99)
@@ -109,7 +113,7 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   expect(f.remotes[1]!.carrier.sent).toEqual([])
   await expect(f.gateway.invoke({ namespace: 'session', method: 'list', args: {} })).resolves.toBe('existing-host-session')
   expect(f.localInvoke).not.toHaveBeenCalled()
-  expect(first.sent).toHaveLength(1)
+  expect(first.sent).toHaveLength(2)
   f.remotes[1]!.carrier.drop()
   await vi.advanceTimersByTimeAsync(100)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 2 })
