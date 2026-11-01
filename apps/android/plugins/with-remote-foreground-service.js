@@ -85,31 +85,33 @@ function withRemoteForegroundService(config) {
     try {
       var askAgentItem: android.view.MenuItem? = null
       var copyItem: android.view.MenuItem? = null
-      var translateItem: android.view.MenuItem? = null
+      val otherItems = mutableListOf<Triple<Int, CharSequence?, android.content.Intent?>>()
 
       for (i in 0 until menu.size()) {
         val item = menu.getItem(i)
         val title = item.title?.toString() ?: ""
         val intentClass = item.intent?.component?.className ?: ""
-        if (intentClass.contains("AskAgent") || title == "询问智能体" || title == "Ask Agent" || title == "詢問智慧體" || title == "エージェントに質問") {
+        val isAskAgent = intentClass.contains("AskAgent") ||
+          title == "询问智能体" || title == "Ask Agent" || title == "詢問智慧體" || title == "エージェントに質問" ||
+          title == "Preguntar al agente" || title.contains("Demander") || title == "Agent fragen"
+        val isCopy = item.itemId == android.R.id.copy || title == "Copy" || title == "复制" || title == "複製"
+
+        if (isAskAgent) {
           askAgentItem = item
-        } else if (item.itemId == android.R.id.copy || title == "Copy" || title == "复制" || title == "複製") {
+        } else if (isCopy) {
           copyItem = item
-        } else if (title.contains("Translate") || title.contains("翻译") || title.contains("翻譯")) {
-          translateItem = item
+        } else {
+          otherItems.add(Triple(item.itemId, item.title, item.intent))
         }
       }
 
-      if (translateItem != null) {
-        val title = translateItem.title
-        val intent = translateItem.intent
-        val icon = translateItem.icon
-        val itemId = translateItem.itemId
-        menu.removeItem(itemId)
-        val newTrans = menu.add(android.view.Menu.NONE, itemId, 999, title)
-        newTrans.intent = intent
-        newTrans.icon = icon
-        newTrans.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+      for ((id, title, intent) in otherItems) {
+        menu.removeItem(id)
+        if (title != null) {
+          val overflowItem = menu.add(android.view.Menu.NONE, id, 100, title)
+          overflowItem.intent = intent
+          overflowItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        }
       }
 
       if (askAgentItem != null) {
@@ -125,7 +127,15 @@ function withRemoteForegroundService(config) {
       }
 
       if (copyItem != null) {
-        copyItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+        val title = copyItem.title
+        val intent = copyItem.intent
+        val icon = copyItem.icon
+        val itemId = copyItem.itemId
+        menu.removeItem(itemId)
+        val newCopy = menu.add(android.view.Menu.NONE, itemId, 1, title)
+        newCopy.intent = intent
+        newCopy.icon = icon
+        newCopy.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
       }
     } catch (_: Throwable) {}
   }

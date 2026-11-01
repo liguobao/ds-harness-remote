@@ -29,13 +29,9 @@
 
 ## Connect once. Ready whenever you are.
 
-Continue using your DeepSeek Harness instance from a phone, computer, or browser.
+Continue using your DeepSeek Harness instance from a phone, computer, or browser. Return to the same Harness session from whichever device is with you.
 
-Return to the same Harness session from whichever device is with you.
-
-Harness keeps running on your work computer, with the same workspaces, tools, and project setup.
-
-DS Harness Remote is simply another window into that environment.
+Harness keeps running on your work computer, with the same workspaces, tools, and project setup. DS Harness Remote is simply another window into that environment.
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
@@ -44,17 +40,15 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 ## Features
 
 - Access your local Harness instance remotely from the web, a PC, or a mobile device: DSH first, with Codex, Cursor, and Antigravity support too.
-- Use the native DeepSeek Harness interface without a separate desktop conversation UI.
+- DeepSeek Harness Desktop is ready to use after installation, with its native interface and no separate desktop conversation UI.
 - Create workspaces, configure models, and switch conversation models with the same smooth workflow as local use.
-- Support DeepSeek Harness Desktop, ready to use after installation.
-- Run a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile as a Host.
 - No public listening port or public IP is required on the Harness Host. Connect from anywhere with internet access over a bidirectional end-to-end encrypted channel.
-- Prefer P2P connections, use TURN relay nodes worldwide, and fall back to Server Relay when needed.
+- Prefer P2P connections, use TURN relay nodes worldwide, and fall back to multiple Server Relays when needed.
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
-- Remote Agent tools let native Harness Agents discover Hosts and workspaces, create and manage Harness sessions, read history, wait for execution, request interruption, and transfer authorized files; CodeX/ACP supports workspace discovery only ([details](packages/plugin/README.md#remote-agent-tools)).
-- CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
-- Android keeps per-conversation drafts and reading positions, offers backend-separated search
-  and local favorites. Conversation text is loaded from the connected Host.
+- Remote Tool context injection supports Host and workspace discovery, Harness session creation and management, history reading, waiting for execution, interruption requests, and authorized file transfers. [Details](packages/plugin/README.md#remote-agent-tools).
+- Alongside DeepSeek Harness, access native workspaces for Codex, Cursor, Google Antigravity, Pi, OpenCode, Claude Code, Hermes Agent, and other tools through ACP integrations, with remote file browsing and terminals.
+- Clients are available across Android, iOS, Web, and native DSH.
+- Multiple clients can connect to the same Harness Host simultaneously, with RPC calls and streams isolated per connection.
 
 ## Contents
 
@@ -83,9 +77,11 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 | DSH&nbsp;Desktop&nbsp;plugin | Remote sidebar | Supported | Install `ds-harness-remote@0.6.0`; this computer can also be the Host |
 | Web | Browser page | Supported | Open [https://dsh.r2049.cn](https://dsh.r2049.cn); reuses the native Harness interface |
 | Android | Native app | Supported | Download the APK from [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest); see the [Android guide](apps/android/README.md) |
+| DSH Go | A standout app by ccch1mneyyy | Supported | See [ccch1mneyyy/dsh-go: an Android client for DeepSeek Harness. Run it directly on your phone or control DSH on your computer remotely.](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight beta | Beta | Not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
 | Browser&nbsp;extension | Chrome | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
 | dsh-TUI | Terminal-only CLI | Supported | Can act as a Host; see the [dsh-TUI Remote guide](docs/dsh-tui.md). The installer never creates a Web service for it automatically |
+| Linux | Cloud server | Supported | Sign in on the [official website](https://dsh.r2049.cn/) for unattended installation with a single command and no configuration. |
 
 Several clients can connect to the same Host at once; RPC calls and streams are isolated per connection.
 
@@ -101,55 +97,26 @@ from npm, and enter this package:
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
 with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.0`.
 
+### Linux one-command installation
+
+Visit [https://dsh.r2049.cn](https://dsh.r2049.cn/), sign in, and obtain an installation authorization code to install with one command.
+
 ### dsh-TUI Host
 
 For terminal Host setup with [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI), see the
 [dsh-TUI Remote guide](docs/dsh-tui.md).
 
-### Command-line installation
-
-Add the exact package version through DSH's plugin manager for the `web` profile:
-
-```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.0
-```
-
-Restart DeepSeek Harness after installation.
-
-For CLI installation, use `dsh plugin` to install the npm package into the selected profile
-and add its bundle configuration layer.
-
-### Plugin installer
-
-The sole installer is `scripts/install.sh`:
-
-- **Linux:** requires root; reuses an existing DSH or bootstraps private Node.js/DSH, accepts a one-time Host registration token, and enables/starts a systemd system service. The Host and remote tools run as **root**; grant access only to trusted accounts.
-- **macOS:** run as a normal user; reuses Desktop's official launcher or an existing CLI, without installing DSH or creating services.
-- Windows users use official Plugin management or existing Harness commands; no Windows installer is provided.
-
-See the [installation guide](docs/installation.md) for private token input, updates, service controls and validation limits. Repository changes do not automatically deploy the hosted installer.
-
-### Recommended companion: Intelligent UI
-
-[Intelligent UI](https://github.com/dreamfarer-space/deepseek-harness-intelligent-ui) lets the model answer
-with cards, tables, charts and forms. The Android client renders them natively, and lists the plugin under
-**Plugins → Remote ready**, where you can switch it on or off and edit its live settings.
-
-Install it on the computer, **into the same profile as Remote** (plugins cannot be installed from the phone):
-
-| Host | Command |
-| --- | --- |
-| Desktop | Plugin management → install from npm → `deepseek-harness-intelligent-ui` |
-| CLI `web` profile | `dsh plugin --profile web add -w deepseek-harness-intelligent-ui` |
-| `scripts/install.sh` | `INTELLIGENT_UI=1` (optionally `INTELLIGENT_UI_VERSION=...`) |
-
-Restart that Harness instance afterward. Editing its settings from the phone needs Intelligent UI 0.2.10 or later.
-
-### Android client
+### Native Android client
 
 Keep conversations connected across multiple workspaces at once, and use **Bot mode**, powered by [Fei2411/DS-Bot](https://github.com/Fei2411/DS-Bot).
 
-Download the latest APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest), sign in to the same account, and select a Host and workspace to continue your conversation.
+Download the latest APK from [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest), and sign in to the same account to see your Hosts.
+
+## DSH Go — DeepSeek Harness in your pocket: run it locally on your phone or control your computer remotely.
+
+[ccch1mneyyy/dsh-go](https://github.com/ccch1mneyyy/dsh-go) has built-in support for the ds-harness-remote protocol. You can run DeepSeek Harness locally on your phone or connect to your computer remotely.
+
+After installing the ds-harness-remote plugin in DSH Go on your phone, you can also connect to the phone’s DSH from your computer or the web and use Mobile Use seamlessly.
 
 ### iOS client
 
@@ -157,38 +124,33 @@ Download the latest APK from [GitHub Releases](https://github.com/liguobao/ds-ha
 
 ## Quick start
 
-1. Open **Remote** from the Harness sidebar.
-2. Sign in using a Server-provided OAuth QR-code method, or use your account and password. The provider list is loaded dynamically; new Server integrations need no further plugin release.
-3. The Host starts with control of the current computer enabled. Remote terminal access is also enabled by default; you can turn it off in the detailed Remote settings.
-4. On another device, open the DeepSeek Harness desktop edition, Remote Web, or the Android client and sign in to the same account.
-5. Select the online Host, then choose an existing workspace or browse remote directories to open one.
+1. Open **Remote** from the DeepSeek Harness sidebar.
+2. Choose Zhihu, GitHub, or Google authorization, or sign in with an account and password. Account registration requires an invitation code; email the repository author to request one.
+3. On another device, install the same plugin in DeepSeek Harness and sign in as described in steps 1–2. Alternatively, use Remote Web, iOS, Android, or DSH Go directly without installing a plugin.
+4. Select an online Host, then choose an existing workspace or browse remote directories to open one.
 
 By default, Remote uses this project's hosted Server at [https://dsh.r2049.cn](https://dsh.r2049.cn).
 
-For self-hosting, use the repository's [minimal Server](apps/server/README.md); its Web page shows device status only.
+For self-hosting, use the repository's [minimal Server](apps/server/README.md). The current version includes P2P coordination and a Relay Server, but does not provide the full hosted Remote Web experience.
 
 ## Screenshots
 
 ### Desktop
 
-The current computer starts with **Allow control of this device** enabled and is available as a Host. Remote terminal access is also enabled by default and can be turned off in the Host's detailed Remote settings.
-
-On another computer, select an online Host and open one of its workspaces.
+On another computer, select an online Host and open its workspace. The workspace opens in the native Harness interface, with the active Host and encrypted connection status in the header.
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="Remote workspace picker listing online Hosts" width="900">
+  <img src="docs/images/host-list.png" alt="Remote workspace picker listing online Hosts" width="40%">
+  <img src="docs/images/remote.png" alt="A Harness conversation running through an encrypted remote connection" width="40%">
 </p>
 
-The workspace opens in the native Harness interface, with the active Host and encrypted
-connection status shown in the header.
-
-<p align="center">
-  <img src="docs/images/remote.png" alt="A Harness conversation running through an encrypted remote connection" width="900">
-</p>
+To prevent this computer from controlling other Hosts, open the Host list at [https://dsh.r2049.cn/](https://dsh.r2049.cn/) and enable **Controlled only**. This device will no longer see other devices under your account, while Web and other clients can still connect to it remotely.
 
 ### Android
 
-Use text or image prompts, switch models, and access supported workspace files and terminals. The interface follows the system language and supports English, Simplified and Traditional Chinese, Japanese, Spanish, German, and French. In language settings, tap “More ...” to show all languages. See the [Android guide](apps/android/README.md) for details.
+Use text or image prompts, switch models, and access supported workspace files and terminals.
+
+The interface follows the system language and supports English, Simplified and Traditional Chinese, Japanese, Spanish, German, and French. In language settings, tap “More ...” to show all languages. See the [Android guide](apps/android/README.md) for details.
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
@@ -210,21 +172,15 @@ Remote Plugin on the Host
 Harness sessions/workspaces or Codex projects
 ```
 
-The Harness Host does not need a public listening port. You can connect from anywhere with internet access.
+The Harness Host does not need a public listening port. Connect from anywhere with internet access over ds-harness-remote’s bidirectional end-to-end encrypted channel.
 
-Remote communicates over a bidirectional end-to-end encrypted channel and switches the client to the selected Host's native Harness API.
+The client switches to the selected Host’s native Harness API, keeping the original workspaces, tools, and permission flows on that computer.
 
-The original workspace, tools, and permission flow remain on that computer.
-
-Every settings namespace currently registered by the Host can also be configured remotely through the official Harness settings API.
-
-Credential values remain write-only, and Host-local document/open actions are never exposed.
+Every settings namespace registered by the Host can also be configured remotely through the official Harness settings API, with full support for most plugin settings.
 
 ## Experimental ACP workspaces
 
-The Host runs local AI backends and forwards prompts, streamed replies and approvals through the encrypted Remote channel.
-
-Desktop and Android project their workspaces and sessions into the existing interface in memory, without writing them to Harness storage.
+The Host runs local ACP-capable Agents and forwards prompts, streamed replies, and approvals through ds-harness-remote. Each Agent keeps its own workspaces and sessions; only session translation for DSH is performed, without writing to Harness storage.
 
 Supported backends:
 
@@ -239,7 +195,7 @@ Supported backends:
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
 
-Model selection for Cursor, Claude, Hermes, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog and waits for backend confirmation.
+Model selection for Cursor, Claude, Hermes, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog as determined by the Agent’s ACP interface.
 
 Reasoning effort options depend on what the backend provides. Cursor uses a separate process per session, so model changes do not affect other conversations.
 
@@ -267,9 +223,10 @@ See [Network and transport](docs/network.md) for the topology, control and data 
 
 ## Security
 
+- On LAN and P2P paths, data bypasses the Server except for connection coordination. TURN uses the open-source coturn server; Relay mode forwards traffic over WebSocket.
 - Session traffic is end-to-end encrypted. The service relays ciphertext without storing session plaintext or device private keys.
 - Server membership and the Host's locally pinned peer identity must both authorize a connection.
-- [Remote Tools injection](docs/remote-tools.md) — optional `remote_*` session tools; disabled by default and enabled from detailed Remote settings.
+- [Remote Tools injection](docs/remote-tools.md) — optional `remote_*` session tools; enabled by default and configurable in detailed Remote settings.
 
 - Interactive terminals use the Host-local `terminal.enabled` switch (on by default). They run as the Host user, independently of Agent approvals.
 - General tool RPC and remote desktop are not exposed.
@@ -290,11 +247,11 @@ No. The service relays ciphertext only. Routing, authorization, presence and rat
 
 **Which machine can act as a Host?**
 
-Any Harness instance with the Remote plugin installed and signed in. The `web`, `desktop` and dsh-TUI profiles can all act as a Host, and command-line installation uses `web` by default. The installer never creates a Web service automatically for `headless`, SDK or dsh-TUI profiles, so a dsh-TUI Host manages its own process.
+Any signed-in Harness instance with the Remote plugin installed can act as a Host, whether on Windows, macOS, Linux, or even DSH Go.
 
 **Can several devices connect to one Host at the same time?**
 
-Yes. Multiple clients can connect concurrently, with RPC calls and streams isolated per connection.
+There is currently no limit on concurrent client connections, with RPC calls and streams isolated per connection.
 
 **Which Harness versions are supported?**
 
@@ -321,6 +278,18 @@ This project probes four connection modes in sequence to establish P2P connectio
 Remote desktop captures the entire computer screen and reproduces it on the client, placing demands on upload and download bandwidth as well as computer performance.
 
 This project encrypts and transmits only the messages needed by the native Harness conversation interface. General tool RPC and desktop control are not exposed, and permissions and approvals remain on the Host.
+
+Tailscale, CF Turn, and UU Remote are also excellent solutions; choose whichever fits your needs.
+
+## Recommended plugins
+
+### Intelligent UI
+
+[Intelligent UI](https://github.com/dreamfarer-space/deepseek-harness-intelligent-ui) lets models answer with cards, tables, charts, and forms. The Android client renders them natively and lists the plugin under **Plugins → Remote ready**, where you can enable or disable it and edit live settings.
+
+### [Fei2411/DS-Bot](https://github.com/Fei2411/DS-Bot)
+
+DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You can chat and work with the bots you create.
 
 ## Documentation
 

@@ -76019,6 +76019,7 @@ var RemoteClientCore = class {
   unsubscribeClose;
   closeHandlers = /* @__PURE__ */ new Set();
   closeNotified = false;
+  // Keep the first close reason so late stream cleanup fails without a new timer.
   terminalCode;
   constructor(transport, timeoutMs = 3e4) {
     this.transport = transport;
