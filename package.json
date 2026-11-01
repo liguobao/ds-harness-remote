@@ -22,7 +22,6 @@
   },
   "author": "liguobao <lgb835485368@gmail.com>",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "main": "./index.js",
   "bin": {

@@ -119,6 +119,12 @@ docs/
 构建脚本，所以根 `index.js`、`packages/plugin/dist/index.js`、`client.github.js` 与
 `packages/plugin/bin/ds-harness-remote.js` 是需要提交的发布入口。
 
+根包不标记 `private: true`，兼容仅读取根清单、遇到 private 就跳过 npm 查询的插件索引。
+根包与 npm 包保持相同 name/version，但安装入口布局不同；npm 发布仍只能由 release
+workflow 在 `packages/plugin` 执行，不在仓库根目录运行 `npm publish`。
+实际发布包通过标准 `repository.directory: "packages/plugin"` 标明源码位置，
+根包的 repository 不带 directory，以保持 GitHub 安装入口语义。
+
 Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm isolated / hoisted 安装布局
 造成已提交 JS 差异；保留 source map 的真实路径以便本地调试。CI 重建后必须同时检查
 `packages/plugin/dist/index.js` 和 `packages/plugin/dist/client.github.js` 与提交版本一致。

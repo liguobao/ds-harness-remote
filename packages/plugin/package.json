@@ -15,7 +15,8 @@
   "homepage": "https://github.com/liguobao/ds-harness-remote#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liguobao/ds-harness-remote.git"
+    "url": "git+https://github.com/liguobao/ds-harness-remote.git",
+    "directory": "packages/plugin"
   },
   "bugs": {
     "url": "https://github.com/liguobao/ds-harness-remote/issues"
