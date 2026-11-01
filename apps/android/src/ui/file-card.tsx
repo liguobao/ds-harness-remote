@@ -1,6 +1,7 @@
-import React, { memo } from 'react'
+import React, { memo, useState } from 'react'
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
-import { ChevronRight } from 'lucide-react-native'
+import { ChevronDown, ChevronRight, Files } from 'lucide-react-native'
+import { strings } from '../locales/i18n'
 import { useTheme } from './theme-context'
 import { DshFileTypeIcon, classifyDshFileType, getDshCategoryTheme } from './dsh-icons'
 
@@ -24,7 +25,7 @@ export const PresentedFileCard = memo(function PresentedFileCard({ file, onFileP
   const category = classifyDshFileType(file.path)
   const theme = getDshCategoryTheme(category)
   const filename = file.name || file.path.split(/[/\\]/u).pop() || file.path
-  const actionLabel = file.action === 'created' ? 'Created' : file.action === 'deleted' ? 'Deleted' : 'Edited'
+  const actionLabel = file.action === 'created' ? 'Created' : file.action === 'deleted' ? 'Deleted' : file.action === 'edited' ? 'Edited' : ''
   const isImageOrBinary =
     file.binary || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(filename.split('.').pop()?.toLowerCase() || '')
 
@@ -53,7 +54,7 @@ export const PresentedFileCard = memo(function PresentedFileCard({ file, onFileP
       </View>
       <View style={styles.info}>
         <Text numberOfLines={1} style={[styles.title, { color: colors.ink }]}>
-          {actionLabel} <Text style={styles.filename}>{filename}</Text>
+          {actionLabel ? `${actionLabel} ` : ''}<Text style={styles.filename}>{filename}</Text>
         </Text>
         <Text numberOfLines={1} style={[styles.subtitle, { color: colors.muted }]}>
           {metaText}
@@ -102,4 +103,27 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     marginTop: 2,
   },
+})
+
+/** File references and real tool edits remain available without repeating a card stack in every reply. */
+export const PresentedFileGroup = memo(function PresentedFileGroup({ files, onFilePress }: {
+  files: PresentedFileItem[]
+  onFilePress?: (path: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const { colors } = useTheme()
+  if (files.length === 0) return null
+  const label = `${strings.sessionActivity.relatedFiles} · ${files.length}`
+  return <View>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded }}
+      onPress={() => setExpanded(value => !value)} style={({ pressed }) => ({
+        minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8,
+        paddingHorizontal: 6, borderRadius: 8, backgroundColor: pressed ? colors.surfaceStrong : 'transparent',
+      })}>
+      <Files size={17} color={colors.muted} />
+      <Text style={{ flex: 1, fontSize: 13, lineHeight: 18, color: colors.muted }} numberOfLines={1}>{label}</Text>
+      {expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
+    </Pressable>
+    {expanded && files.map(file => <PresentedFileCard key={file.path} file={file} onFilePress={onFilePress} />)}
+  </View>
 })

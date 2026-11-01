@@ -443,7 +443,33 @@ const esES = {
     usageUnavailable: "Uso no disponible", timeUnavailable: "Hora no disponible", usage: "Uso real", input: "Aporte", output: "Producción",
     cacheRead: "lectura de caché", cacheWrite: "escritura en caché", reasoning: "Razonamiento", total: "Total",
   },
+  sessionActivity: {
+    relatedFiles: "Archivos relacionados",
+    composeRunning: "Generando · Añade un mensaje",
+    todos: "Tareas",
+    goal: "Objetivo",
+    jobs: "Tareas en segundo plano",
+    viewJobs: "Ver tareas en segundo plano",
+    noJobs: "No hay tareas en segundo plano",
+    loading: "Cargando…",
+    retry: "Conexión interrumpida. Toca para reintentar",
+    truncated: "Salida anterior omitida",
+    active: "En curso",
+    paused: "En pausa",
+    blocked: "Bloqueado",
+    complete: "Completado",
+    pending: "Pendiente",
+    stopping: "Deteniendo",
+    killed: "Detenido",
+    failed: "Error",
+  },
   chatProcess: {
+    toolCalls: "llamadas de herramientas",
+    activityCounts: {
+      commands: (count: number) => `${count} ejecuciones de comandos`,
+      read: (count: number) => `${count} lecturas de archivos`,
+      edit: (count: number) => `${count} ediciones de archivos`,
+    },
     processActivity: {
       "thinking": {
         "running": "Analizando la solicitud",

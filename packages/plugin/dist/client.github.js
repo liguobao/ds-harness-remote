@@ -1619,6 +1619,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
+  // src/client/portal.ts
+  function renderBodyPortal(portal, children) {
+    return portal === void 0 || typeof document > "u" || document.body === null ? children : portal(children, document.body);
+  }
+
   // src/client-locale.ts
   var localeNamespace = "ds-harness-remote", en = {
     remoteTools: "Inject Remote Tools",
@@ -2295,7 +2300,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
   }
 
   // src/client/header.ts
-  function createRemoteSessionHeaderAction(React) {
+  function createRemoteSessionHeaderAction(React, portal) {
     function RemoteSessionHeaderAction(props) {
       let { t } = props, status = React.useSyncExternalStore(
         props.statusFeed.subscribe,
@@ -2335,7 +2340,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         };
         return document.addEventListener("keydown", closeOnEscape), () => document.removeEventListener("keydown", closeOnEscape);
       }, [routeOpen]);
-      let renderHostReference = () => hostReference === void 0 ? null : React.createElement(
+      let renderHostReference = () => hostReference === void 0 ? null : renderBodyPortal(portal, React.createElement(
         "aside",
         { className: "dshRemoteHostReferencePanel", role: "dialog", "aria-label": "Remote Host" },
         React.createElement(
@@ -2352,7 +2357,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           React.createElement("div", null, React.createElement("dt", null, "\u8BBE\u5907 ID"), React.createElement("dd", { className: "isMono" }, hostReference.deviceId)),
           React.createElement("div", null, React.createElement("dt", null, "\u8C03\u7528\u5185\u5BB9"), React.createElement("dd", { className: "isMono" }, hostReference.invocation))
         )
-      );
+      ));
       if (status?.mode !== "remote") return renderHostReference();
       let exit = async () => {
         setBusy(!0);
@@ -2392,7 +2397,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         networkOnline ? React.createElement("span", { className: "dshRemoteEncrypted" }, t("remoteLinkEncrypted")) : null,
         renderHostReference(),
         React.createElement("button", { type: "button", className: "dshRemoteHeaderExitLink", disabled: busy, onClick: () => void exit() }, t("exitRemote")),
-        routeOpen ? React.createElement("div", {
+        routeOpen ? renderBodyPortal(portal, React.createElement("div", {
           className: "dshRemoteRouteBackdrop",
           role: "presentation",
           onMouseDown: (event) => {
@@ -2472,7 +2477,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             )
           ),
           React.createElement("p", null, t("connectionRouteEncrypted"))
-        )) : null
+        ))) : null
       );
     }
     return RemoteSessionHeaderAction;
@@ -3391,12 +3396,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
   var deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC";
 
   // src/client/workspaces.ts
-  function createRemoteWorkspaceAction(React) {
+  function createRemoteWorkspaceAction(React, portal) {
     let RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
-      let [container, setContainer] = React.useState(null), { portal } = props;
+      let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       return React.useEffect(() => {
-        if (portal === void 0) return;
+        if (portal2 === void 0) return;
         let attempt = 0, timer, host, observer, attach = () => {
           let row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]');
           if (row === null) {
@@ -3410,7 +3415,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         return attach(), () => {
           timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
         };
-      }, [portal]), portal === void 0 || container === null ? props.fallback : portal(props.children, container);
+      }, [portal2]), portal2 === void 0 || container === null ? props.fallback : portal2(props.children, container);
     }
     function RemoteWorkspaceAction(props) {
       let { t } = props, connectionErrorMessageFor = (reason, translate) => {
@@ -3857,7 +3862,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         React.Fragment,
         null,
         compact ? React.createElement(RemoteAccountEntry, { portal: props.portal, fallback: entry }, accountEntry) : entry,
-        open ? React.createElement("div", {
+        open ? renderBodyPortal(portal, React.createElement("div", {
           className: "dshRemoteBackdrop",
           role: "presentation",
           onMouseDown: (event) => {
@@ -4655,7 +4660,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, notice),
             error === void 0 ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
           )
-        )) : null
+        ))) : null
       );
     }
     return RemoteWorkspaceAction;
@@ -4988,7 +4993,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         } catch {
           return;
         }
-      })(), RemotePluginOptions = createRemotePluginOptions(React), RemoteWorkspaceAction = createRemoteWorkspaceAction(React), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React), openHarnessSettings;
+      })(), RemotePluginOptions = createRemotePluginOptions(React), RemoteWorkspaceAction = createRemoteWorkspaceAction(React, portal), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React, portal), openHarnessSettings;
       function RemoteSettingsLauncher(props) {
         return openHarnessSettings = props.openSettings, null;
       }
@@ -5067,7 +5072,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             "aria-label": t("switchTarget"),
             onClick: () => setOpen(!0)
           }, React.createElement("span", { "aria-hidden": !0 }, "\u25CE"), props.wide ? React.createElement("span", null, label) : null),
-          open ? React.createElement(
+          open ? renderBodyPortal(portal, React.createElement(
             "div",
             { className: "dshRemoteBackdrop", role: "presentation" },
             React.createElement(
@@ -5144,7 +5149,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               ) : null,
               error === void 0 ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
             )
-          ) : null
+          )) : null
         ) : null;
       }
       function apply(ctx) {

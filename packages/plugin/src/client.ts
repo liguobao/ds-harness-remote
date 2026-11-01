@@ -1,3 +1,4 @@
+import { renderBodyPortal } from './client/portal.js'
 import type { Translate } from './client-locale.js'
 import { en, localeNamespace, zh } from './client-locale.js'
 import { createRemoteSessionHeaderAction } from './client/header.js'
@@ -88,8 +89,7 @@ window.__ModuleLoader__.load({
   factory: require => {
     const module = { exports: {} as Record<string, unknown> }
     const React = require('react') as ClientReact
-    // The Compact entry is portalled into the host account row. Resolve the
-    // renderer once and degrade to the Standard entry when it is unavailable.
+    // Share the host renderer for floating panels and the Compact sidebar entry.
     const portal = (() => {
       try {
         const reactDom = require('react-dom') as { createPortal?: PortalRenderer }
@@ -99,9 +99,9 @@ window.__ModuleLoader__.load({
       }
     })()
     const RemotePluginOptions = createRemotePluginOptions(React)
-    const RemoteWorkspaceAction = createRemoteWorkspaceAction(React)
+    const RemoteWorkspaceAction = createRemoteWorkspaceAction(React, portal)
     const RemoteProgressView = createRemoteProgressView(React)
-    const RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React)
+    const RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React, portal)
     let openHarnessSettings: ((page?: string) => void) | undefined
     function RemoteSettingsLauncher(props: { openSettings?: (page?: string) => void }): unknown {
       openHarnessSettings = props.openSettings
@@ -228,7 +228,7 @@ window.__ModuleLoader__.load({
         }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
           ? React.createElement('span', null, label)
           : null),
-        open ? React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
+        open ? renderBodyPortal(portal, React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
           React.createElement('section', {
             className: 'dshRemoteDialog',
             role: 'dialog',
@@ -300,7 +300,7 @@ window.__ModuleLoader__.load({
                   onClick: () => void registerHostWithCode(),
                 }, t(busy ? 'registering' : 'useRegistrationCode'))) : null)
             : null,
-          error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))
+          error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error))))
           : null)
     }
 

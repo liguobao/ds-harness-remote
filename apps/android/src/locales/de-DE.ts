@@ -443,7 +443,33 @@ const deDE = {
     usageUnavailable: "Nutzung nicht verfügbar", timeUnavailable: "Zeit nicht verfügbar", usage: "Tatsächliche Nutzung", input: "Eingang", output: "Ausgabe",
     cacheRead: "Cache gelesen", cacheWrite: "Cache-Schreiben", reasoning: "Argumentation", total: "Gesamt",
   },
+  sessionActivity: {
+    relatedFiles: "Zugehörige Dateien",
+    composeRunning: "Wird generiert · Nachricht hinzufügen",
+    todos: "Aufgaben",
+    goal: "Ziel",
+    jobs: "Hintergrundaufgaben",
+    viewJobs: "Hintergrundaufgaben anzeigen",
+    noJobs: "Keine Hintergrundaufgaben",
+    loading: "Wird geladen…",
+    retry: "Verbindung unterbrochen. Zum Wiederholen tippen",
+    truncated: "Frühere Ausgabe ausgelassen",
+    active: "In Bearbeitung",
+    paused: "Pausiert",
+    blocked: "Blockiert",
+    complete: "Abgeschlossen",
+    pending: "Ausstehend",
+    stopping: "Wird beendet",
+    killed: "Beendet",
+    failed: "Fehlgeschlagen",
+  },
   chatProcess: {
+    toolCalls: "Tool-Aufrufe",
+    activityCounts: {
+      commands: (count: number) => `${count} Befehlsaufrufe`,
+      read: (count: number) => `${count} Dateilesevorgänge`,
+      edit: (count: number) => `${count} Dateibearbeitungen`,
+    },
     processActivity: {
       "thinking": {
         "running": "Analyse der Anfrage",

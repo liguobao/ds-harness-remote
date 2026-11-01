@@ -441,7 +441,33 @@ const zhCN = {
     usageUnavailable: '用量不可用', timeUnavailable: '时间不可用', usage: '真实用量', input: '输入', output: '输出',
     cacheRead: '缓存读取', cacheWrite: '缓存写入', reasoning: '推理', total: '总计',
   },
+  sessionActivity: {
+    relatedFiles: "相关文件",
+    composeRunning: "生成中 · 可直接插话",
+    todos: "待办",
+    goal: "目标",
+    jobs: "后台任务",
+    viewJobs: "查看后台任务",
+    noJobs: "暂无后台任务",
+    loading: "加载中…",
+    retry: "连接已中断，点击重试",
+    truncated: "较早的输出已省略",
+    active: "进行中",
+    paused: "已暂停",
+    blocked: "受阻",
+    complete: "已完成",
+    pending: "待处理",
+    stopping: "正在停止",
+    killed: "已停止",
+    failed: "失败",
+  },
   chatProcess: {
+    toolCalls: "次工具调用",
+    activityCounts: {
+      commands: (count: number) => `执行命令 ${count} 次`,
+      read: (count: number) => `读取文件 ${count} 次`,
+      edit: (count: number) => `修改文件 ${count} 次`,
+    },
     processActivity: {
       "thinking": {
         "running": "正在分析请求",

@@ -1,5 +1,13 @@
 # Repository Guide for Agents
 
+## Remote popup portals (2026-11-01, Issue #222)
+
+Workspace、连接线路、Host reference 和旧模式切换面板复用宿主 ReactDOM Portal，
+挂到 document.body，避开 shell 祖先 filter/transform 的包含块与层叠上下文。
+宿主未提供 Portal 或 body 不可用时保留原位渲染。遮罩、关闭行为和状态条插槽不变。
+Plugin check、build、DSH bundle 与 diff check 通过，样式检测无发现；未在 Windows
+壁纸插件环境做交互验收，body/html 自身的 filter 不在本次修复覆盖范围。
+
 ## Self-hosted heartbeat recovery (2026-10-31)
 
 AdaptiveTransport 将自部署 Server 的精确 close `4001 / CONNECTION_FAILED` 视为可重试；

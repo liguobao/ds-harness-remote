@@ -443,7 +443,33 @@ const jaJP = {
     usageUnavailable: "使用不可", timeUnavailable: "利用できない時間", usage: "実際の使用状況", input: "入力", output: "出力",
     cacheRead: "キャッシュ読み取り", cacheWrite: "キャッシュ書き込み", reasoning: "推論", total: "合計",
   },
+  sessionActivity: {
+    relatedFiles: "関連ファイル",
+    composeRunning: "生成中 · メッセージを追加",
+    todos: "やること",
+    goal: "目標",
+    jobs: "バックグラウンドタスク",
+    viewJobs: "バックグラウンドタスクを表示",
+    noJobs: "タスクはありません",
+    loading: "読み込み中…",
+    retry: "接続が切れました。タップして再試行",
+    truncated: "以前の出力は省略されました",
+    active: "進行中",
+    paused: "一時停止",
+    blocked: "ブロック中",
+    complete: "完了",
+    pending: "未着手",
+    stopping: "停止中",
+    killed: "停止済み",
+    failed: "失敗",
+  },
   chatProcess: {
+    toolCalls: "回のツール呼び出し",
+    activityCounts: {
+      commands: (count: number) => `コマンド実行 ${count} 回`,
+      read: (count: number) => `ファイル読み取り ${count} 回`,
+      edit: (count: number) => `ファイル編集 ${count} 回`,
+    },
     processActivity: {
       "thinking": {
         "running": "リクエストの分析",

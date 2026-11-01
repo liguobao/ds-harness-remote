@@ -1,5 +1,5 @@
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowUp, Bot, Check, ChevronDown, ChevronRight, ChevronUp, Code2, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, User, X } from 'lucide-react-native'
+import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -30,14 +30,14 @@ import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
 import { parseMessageQuotes, QuotePreview } from '../../ui/quote-preview'
-import { PresentedFileCard } from '../../ui/file-card'
+import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { parseBotReplies } from '../bot/replies'
 import { BotReplies } from '../bot/reply-view'
 import type { BotObject } from '../../services/bot-catalog'
 import type { ProcessActivity, ProcessSegment } from '../chat-process'
-import { completedProcessTitle, processDetail, processSegments, toolActivity, toolDisplayName } from '../chat-process'
+import { processSummary, processDetail, processSegments, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import { createStyles } from './styles'
@@ -86,6 +86,8 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
       || (item.uiResultMeta as { ok?: unknown }).ok !== false))
   const hasGroupRelayReplies = segments.some(segment => segment.kind === 'botReplies' && segment.groupRelay)
+  const hasToolSummary = segments.some(segment => segment.kind === 'activity'
+    && segment.items.some(item => item.kind === 'tool'))
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const onFilePress = useMarkdownLink()
@@ -121,7 +123,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     return files
   }, [items])
   return <View style={styles.processGroup}>
-    {end !== undefined && !(end.reason === 'completed' && hasGroupRelayReplies) && <View style={styles.turnProcessHeader}>
+    {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
     </View>}
     {segments.map((segment, index) => segment.kind === 'response'
@@ -129,7 +131,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
       : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
-    {editedFiles.map(file => <PresentedFileCard key={file.path} file={file} onFilePress={onFilePress} />)}
+    <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />
     {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
@@ -179,29 +181,41 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   const running = activeTool !== undefined || runningReasoning !== undefined
   const counts = new Map<ProcessActivity, number>()
   for (const tool of tools) counts.set(toolActivity(tool), (counts.get(toolActivity(tool)) ?? 0) + 1)
-  const ranked = [...counts].sort((a, b) => b[1] - a[1]).map(([kind]) => kind)
   const labels = zhCN.chatProcess.processActivity
-  const label = pending ? labels.questions.running
-    : running ? labels[activeTool === undefined ? 'thinking' : toolActivity(activeTool)].running
-      : completedProcessTitle(ranked)
+  const completedSummary = tools.length > 0 && !running && closed
+  const label = completedSummary
+    ? `${zhCN.chat.completed} · ${tools.length} ${zhCN.chatProcess.toolCalls}`
+    : tools.length > 0 ? processSummary(counts) : pending ? labels.questions.running
+      : running ? labels[activeTool === undefined ? 'thinking' : toolActivity(activeTool)].running
+        : processSummary(counts)
+  const primary = activeTool ? toolActivity(activeTool) : [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
+  const ActivityIcon = completedSummary ? CircleCheck : primary === 'commands' || primary === 'code' ? Terminal
+    : primary === 'read' || primary === 'search' || primary === 'readImage' ? FileSearch
+      : primary === 'edit' || primary === 'write' ? FilePenLine
+        : primary === 'plan' ? ListTree : tools.length > 0 ? Wrench : Sparkles
   const detail = activeTool !== undefined ? processDetail(activeTool)
     : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
-  return <View style={styles.processGroup}>
+  return <View style={styles.activityGroup}>
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
       accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
       hitSlop={dense ? { top: 6, bottom: 6 } : undefined}
       style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
+      <View style={styles.processIcon}><ActivityIcon size={17} color={colors.muted} /></View>
+      <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
       {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
-      <Text style={styles.processLabel} numberOfLines={1}>{label}{detail === undefined ? '' : ` · ${detail}`}</Text>
     </Pressable>
+    {running && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
+      <ReplyStatusDots />
+      <Text style={styles.processCurrentText} numberOfLines={2}>{activeTool ? toolDisplayName(activeTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
+    </View>}
     {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={() => { if (running) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
       {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text) && !item.images?.length
         ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>
-        : <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+        : <ChatItemView key={item.id} item={item} compact={item.kind === 'tool'} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
     </ScrollView>}
   </View>
 })
@@ -387,7 +401,7 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
   const stateText = item.state === 'running' ? zhCN.status.running : item.state === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const detail = processDetail(item)
   const name = toolDisplayName(item)
-  const hasDetail = !compact && (item.callDetail !== undefined || item.resultDetail !== undefined || item.remoteDetail !== undefined)
+  const hasDetail = (item.callDetail !== undefined || item.resultDetail !== undefined || item.remoteDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
       <Pressable

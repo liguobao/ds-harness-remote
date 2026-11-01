@@ -1,3 +1,4 @@
+import { renderBodyPortal } from './portal.js'
 import QRCode from 'qrcode'
 import type { Translate } from '../client-locale.js'
 import type { OAuthProviderInfo } from '../server-api.js'
@@ -25,7 +26,7 @@ import type {
   SidebarEntryStyle,
 } from './types.js'
 
-export function createRemoteWorkspaceAction(React: ClientReact) {
+export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const RemoteProgressView = createRemoteProgressView(React)
 
   /**
@@ -1064,7 +1065,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       compact
         ? React.createElement(RemoteAccountEntry, { portal: props.portal, fallback: entry }, accountEntry)
         : entry,
-      !open ? null : React.createElement('div', {
+      !open ? null : renderBodyPortal(portal, React.createElement('div', {
         className: 'dshRemoteBackdrop',
         role: 'presentation',
         onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setOpen(false) },
@@ -1675,7 +1676,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                       onClick: () => void openWorkspace(),
                     }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
           notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),
-              error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error)))))
+              error === undefined ? null : React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, error))))))
   }
 
   return RemoteWorkspaceAction

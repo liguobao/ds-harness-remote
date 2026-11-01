@@ -443,7 +443,33 @@ const frFR = {
     usageUnavailable: "Utilisation indisponible", timeUnavailable: "Temps indisponible", usage: "Utilisation réelle", input: "Saisir", output: "Sortir",
     cacheRead: "Lecture du cache", cacheWrite: "Écriture en cache", reasoning: "Raisonnement", total: "Total",
   },
+  sessionActivity: {
+    relatedFiles: "Fichiers associés",
+    composeRunning: "Génération · Ajouter un message",
+    todos: "À faire",
+    goal: "Objectif",
+    jobs: "Tâches en arrière-plan",
+    viewJobs: "Voir les tâches en arrière-plan",
+    noJobs: "Aucune tâche en arrière-plan",
+    loading: "Chargement…",
+    retry: "Connexion interrompue. Appuyez pour réessayer",
+    truncated: "Sortie précédente omise",
+    active: "En cours",
+    paused: "En pause",
+    blocked: "Bloqué",
+    complete: "Terminé",
+    pending: "En attente",
+    stopping: "Arrêt en cours",
+    killed: "Arrêté",
+    failed: "Échec",
+  },
   chatProcess: {
+    toolCalls: "appels d’outils",
+    activityCounts: {
+      commands: (count: number) => `${count} exécutions de commandes`,
+      read: (count: number) => `${count} lectures de fichiers`,
+      edit: (count: number) => `${count} modifications de fichiers`,
+    },
     processActivity: {
       "thinking": {
         "running": "Analyser la demande",

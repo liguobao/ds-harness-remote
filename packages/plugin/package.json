@@ -46,6 +46,7 @@
   "files": [
     "bin",
     "dist",
+    "!dist/**/*.map",
     "dsh-plugin.json",
     "cordis.patch.yml",
     "locale",

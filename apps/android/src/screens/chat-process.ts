@@ -35,12 +35,18 @@ export type ProcessActivity = 'thinking' | 'read' | 'readImage' | 'write' | 'sea
 
 /** Official ui-chat/process-activity.ts categories, retaining display-title fallbacks for old Hosts. */
 export function toolActivity(tool: ToolActivity): ProcessActivity {
-  const name = tool.toolKey ?? tool.toolName
-  if (name === 'read' || name === 'view_file') return 'read'
+  const name = (tool.toolKey ?? tool.toolName).toLowerCase().split(/[./]/).at(-1)!
+  if (['read', 'view_file', 'read_file'].includes(name)) return 'read'
+  if (name === 'str_replace_editor') {
+    try {
+      const command = JSON.parse(tool.arguments ?? '{}').command
+      return command === 'view' ? 'read' : command === 'create' ? 'write' : 'edit'
+    } catch { return 'tools' }
+  }
   if (name === 'read_image') return 'readImage'
   if (name === 'grep' || name === 'glob' || name.endsWith('_inspect')) return 'search'
-  if (name === 'write') return 'write'
-  if (name === 'edit' || name === 'apply_patch') return 'edit'
+  if (name === 'write' || name === 'write_file') return 'write'
+  if (['edit', 'edit_file', 'apply_patch', 'patch'].includes(name)) return 'edit'
   if (['bash', 'pwsh', 'exec_command', 'write_stdin', 'run_command'].includes(name) || name.startsWith('terminal_')) return 'commands'
   if (name === 'run_code') return 'code'
   if (name === 'web_search') return 'webSearch'
@@ -102,4 +108,18 @@ export function toolDisplayName(tool: ToolActivity): string {
   if (tool.toolKey !== undefined && tool.toolName !== tool.toolKey) return tool.toolName
   const names: Partial<Record<string, string>> = strings.chatProcess.toolTitles
   return names[tool.toolKey ?? tool.toolName] ?? tool.toolName
+}
+
+/** Counts tool invocations, never inferred numbers of affected files. */
+export function processSummary(counts: ReadonlyMap<ProcessActivity, number>): string {
+  const merged = new Map(counts)
+  const edits = (merged.get('edit') ?? 0) + (merged.get('write') ?? 0)
+  merged.delete('write')
+  if (edits > 0) merged.set('edit', edits)
+  const ranked = [...merged].sort((a, b) => b[1] - a[1])
+  if (ranked.length === 0) return completedProcessTitle([])
+  return ranked.map(([kind, count]) => {
+    if (kind === 'commands' || kind === 'read' || kind === 'edit') return strings.chatProcess.activityCounts[kind](count)
+    return `${strings.chatProcess.processActivity[kind].done} × ${count}`
+  }).join(' · ')
 }

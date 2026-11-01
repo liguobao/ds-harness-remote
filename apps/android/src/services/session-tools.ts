@@ -68,7 +68,19 @@ export const OFFICE_PREVIEW_TIMEOUT_MS = 120_000
 export const OFFICE_PREVIEW_MAX_RESPONSE_BYTES = 12 * 1024 * 1024
 
 /** Official Typert endpoints only; Host owns scope, device ownership and input authorization. */
+export interface BackgroundJob {
+  startedAt?: number
+  id: string
+  label: string
+  owner?: string
+  status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
+  progress?: string
+  detail?: string
+}
+
 export interface SessionTools {
+  watchJobs?(sessionId: string, signal: AbortSignal): Promise<RemoteGatewayStream>
+  followJob?(sessionId: string, jobId: string, signal: AbortSignal): Promise<RemoteGatewayStream>
   permissionOptions(signal?: AbortSignal): Promise<PermissionSelect['options']>
   listSkills(sessionId: string, signal?: AbortSignal): Promise<SkillEntry[]>
   executeCommand(sessionId: string, line: string): Promise<CommandExecutionResult>
@@ -90,6 +102,14 @@ export interface SessionTools {
 
 export class HarnessSessionTools implements SessionTools {
   constructor(private readonly gateway: RemoteTypertGateway) {}
+
+  watchJobs(sessionId: string, signal: AbortSignal): Promise<RemoteGatewayStream> {
+    return this.gateway.open('job/list', { args: { request: { sessionId } } }, signal)
+  }
+
+  followJob(sessionId: string, jobId: string, signal: AbortSignal): Promise<RemoteGatewayStream> {
+    return this.gateway.open('job/follow', { args: { request: { sessionId, jobId } } }, signal)
+  }
 
   async permissionOptions(signal?: AbortSignal): Promise<PermissionSelect['options']> {
     const value = await this.gateway.call<{ options: PermissionSelect['options'] }>('permissionPresets/catalog', { args: {} }, signal)

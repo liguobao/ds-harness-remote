@@ -441,7 +441,33 @@ const zhTW = {
     usageUnavailable: '用量不可用', timeUnavailable: '時間不可用', usage: '真實用量', input: '輸入', output: '輸出',
     cacheRead: '快取讀取', cacheWrite: '快取寫入', reasoning: '推理', total: '總計',
   },
+  sessionActivity: {
+    relatedFiles: "相關檔案",
+    composeRunning: "產生中 · 可直接插話",
+    todos: "待辦",
+    goal: "目標",
+    jobs: "背景工作",
+    viewJobs: "查看背景工作",
+    noJobs: "尚無背景工作",
+    loading: "載入中…",
+    retry: "連線已中斷，點擊重試",
+    truncated: "較早的輸出已省略",
+    active: "進行中",
+    paused: "已暫停",
+    blocked: "受阻",
+    complete: "已完成",
+    pending: "待處理",
+    stopping: "正在停止",
+    killed: "已停止",
+    failed: "失敗",
+  },
   chatProcess: {
+    toolCalls: "次工具呼叫",
+    activityCounts: {
+      commands: (count: number) => `執行命令 ${count} 次`,
+      read: (count: number) => `讀取檔案 ${count} 次`,
+      edit: (count: number) => `修改檔案 ${count} 次`,
+    },
     processActivity: {
       "thinking": {
         "running": "正在分析請求",

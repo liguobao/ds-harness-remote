@@ -443,7 +443,33 @@ const enUS = {
     usageUnavailable: 'Usage unavailable', timeUnavailable: 'Time unavailable', usage: 'Actual usage', input: 'Input', output: 'Output',
     cacheRead: 'Cache read', cacheWrite: 'Cache write', reasoning: 'Reasoning', total: 'Total',
   },
+  sessionActivity: {
+    relatedFiles: "Related files",
+    composeRunning: "Generating · Add a message",
+    todos: "To-dos",
+    goal: "Goal",
+    jobs: "Background tasks",
+    viewJobs: "View background tasks",
+    noJobs: "No background tasks",
+    loading: "Loading…",
+    retry: "Connection interrupted. Tap to retry",
+    truncated: "Earlier output omitted",
+    active: "In progress",
+    paused: "Paused",
+    blocked: "Blocked",
+    complete: "Completed",
+    pending: "Pending",
+    stopping: "Stopping",
+    killed: "Stopped",
+    failed: "Failed",
+  },
   chatProcess: {
+    toolCalls: "tool calls",
+    activityCounts: {
+      commands: (count: number) => `${count} command calls`,
+      read: (count: number) => `${count} file reads`,
+      edit: (count: number) => `${count} file edits`,
+    },
     processActivity: {
       "thinking": {
         "running": "Analyzing the request",

@@ -1,3 +1,4 @@
+import { SessionActivityDock } from './chat/session-activity'
 import { ChatImageProvider } from '../ui/chat-image'
 import { isSubagentSession } from '../lib/session-kind'
 import * as DocumentPicker from 'expo-document-picker'
@@ -203,6 +204,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const memoryError = useBrowseMemory(state => state.error)
   const setDraft = (value: string) => updateBrowseEntry(memoryScope, session?.sessionId ?? '', {draft: value})
   const [trajectory, setTrajectory] = useState(false)
+  const [composingDuringRun, setComposingDuringRun] = useState(false)
   const [subagentsOpen, setSubagentsOpen] = useState(false)
   const [teamOpen, setTeamOpen] = useState(false)
 
@@ -977,6 +979,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     }
   }, [session, onBack])
 
+  useEffect(() => {
+    if (!replyActive) setComposingDuringRun(false)
+    else if (composingDuringRun) composerInputRef.current?.focus()
+  }, [replyActive, composingDuringRun])
   if (session === undefined) return null
 
   const submit = async () => {
@@ -1355,6 +1361,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0
   const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem) && !hasComposerContent
+  const compactRunning = canStop && !composingDuringRun
   const stopping = busy === 'stop-session'
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
@@ -1687,7 +1694,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           ref={listRef}
           key={session.sessionId}
           style={[styles.list, readableColumn]}
-          contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
+          contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 ? styles.emptyList : styles.shortConversation]}
           data={visibleSections}
           keyExtractor={item => item.key}
           renderItem={renderChatItem}
@@ -1765,6 +1772,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
       <View style={styles.composerWrap}>
         <View style={[styles.composerInner, readableColumn]}>
+        {connected && (session.backend === undefined || session.backend === 'harness') && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
         {quotes.length > 0 && (
@@ -1838,7 +1846,21 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           {mentionType !== null && (
             <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={zhCN.mention.noMatches} />
           )}
-        <View style={styles.composerCard}>
+        {compactRunning ? <View style={[styles.composerCard, styles.runningComposer]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.moreActions} onPress={openPlusMenu}
+            style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}>
+            <Plus size={22} color={colors.ink} />
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.sessionActivity.composeRunning}
+            onPress={() => setComposingDuringRun(true)} style={styles.runningComposerPrompt}>
+            <Text style={styles.runningComposerText} numberOfLines={1}>{zhCN.sessionActivity.composeRunning}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={zhCN.chat.stop} disabled={stopping}
+            accessibilityState={{ disabled: stopping, busy: stopping }} onPress={() => void stopSession()}
+            style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed]}>
+            {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
+          </Pressable>
+        </View> : <View style={styles.composerCard}>
           <View style={styles.composerInputWrap}>
             {/* Native attributed text keeps references blue without an opaque Android value layer. */}
             <TextInput
@@ -1945,7 +1967,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 </Pressable>
                 </>}
           </View>
-        </View>
+        </View>}
         </View>
         {draft.length > LONG_DRAFT_HINT && (
           <Text style={styles.composerHint}>{zhCN.chat.draftLong(draft.length)}</Text>

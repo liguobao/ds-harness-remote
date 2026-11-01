@@ -14,3 +14,20 @@ CodeX/Claude 不因此获得新的文件读取权限。PNG 发送报错尚无复
 
 验证：Android check、36 文件 / 209 tests、production Hermes export 与 git diff --check
 通过；保留 Metro 的 @noble/hashes/crypto.js exports fallback 警告。未构建或发布新 APK。
+
+## Conversation activity dock (2026-11-01)
+
+Harness 会话输入框上方新增待办、目标与后台任务折叠行。待办与目标直接读取官方
+`todos` / `goal` 投影；后台任务使用已放行的 `job/list` / `job/follow` 只读流，
+始终传入当前 sessionId，切换会话/连接时取消订阅，不增加 Host allowlist 或任务控制权限。
+后台列表运行中优先、按时间倒序并使用虚拟列表；输出仅保留组件内存中的末尾 64K 字符，
+丢失/截断有提示，观察不消费模型输出。工具分类摘要统计调用次数，不推断受影响文件数。
+七种语言已补齐。Android check、Release APK 构建与 MIX 3 安装通过；真机已显示真实
+目标、待办进度与后台任务列表。未验证本轮暗色、横屏、无障碍、目标操作或后台任务取消；
+本轮仅提供只读展示。既有 Metro noble/hashes exports fallback 警告保留。
+
+同日布局修正：非空短对话通过 contentContainer 的 flexGrow / flex-end 贴近输入区，
+不在工具摘要与底部状态之间留整屏空白；按用户参考将目标/待办/后台任务显示为独立纤细胶囊，
+目标状态、待办进度、当前后台任务与耗时在折叠态可见。生成中空输入区收成单行，
+点击文字区展开原输入框；状态不伪造上下文百分比。摘要使用普通正文权重，保持 44dp 点击区域。
+类型检查与 Release 构建通过。

@@ -9,7 +9,7 @@ import { MathFormula } from './math-formula'
 import { type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { CodeBlockView } from './code-block'
-import { PresentedFileCard } from './file-card'
+import { PresentedFileGroup } from './file-card'
 import { QuotePreview } from './quote-preview'
 import { DshLinkIcon, classifyDshLinkPath } from './dsh-icons'
 
@@ -84,7 +84,7 @@ function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: s
     }
   }
   walk(nodes)
-  return files.slice(0, 4)
+  return files
 }
 
 export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
@@ -100,13 +100,7 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: str
   return (
     <View style={styles.container}>
       {nodes.map(node => renderBlockCached(node, styles, onLinkPress))}
-      {referencedFiles.length > 0 && (
-        <View style={{ marginTop: 6, gap: 4 }}>
-          {referencedFiles.map(file => (
-            <PresentedFileCard key={file.path} file={{ path: file.path, name: file.name }} onFilePress={onLinkPress} />
-          ))}
-        </View>
-      )}
+      <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />
     </View>
   )
 })

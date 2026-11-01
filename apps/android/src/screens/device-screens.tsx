@@ -123,7 +123,10 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                             {showingFavorites
                               ? <Star size={19} color={colors.primary} fill={colors.primary} strokeWidth={1.8} />
                               : <FolderOpen size={19} color={colors.muted} strokeWidth={1.8} />}
-                            <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
+                            <View style={styles.favoriteLinkContent}>
+                              <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
+                              <Text style={styles.favoriteLinkMeta} numberOfLines={1}>{shortcutDeviceName(shortcut)}</Text>
+                            </View>
                             {!showingFavorites && <ChevronRight size={18} color={colors.subtle} />}
                           </Pressable>
                           {showingFavorites && (
@@ -1135,13 +1138,14 @@ function createStyles(colors: ThemeColors) {
   favoriteLink: { flex: 1, minWidth: 0, minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingLeft: spacing.md, paddingRight: spacing.xs },
   favoriteRemove: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
   favoriteLinkPressed: { opacity: 0.6 },
+  favoriteLinkContent: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
   favoriteLinkText: { ...type.body, color: colors.ink, flex: 1, minWidth: 0 },
-  favoriteLinkMeta: { ...type.caption, color: colors.muted, flexShrink: 1 },
+  favoriteLinkMeta: { ...type.caption, color: colors.muted, maxWidth: '45%', textAlign: 'right' },
   deviceSummary: { ...type.small, color: colors.muted, fontWeight: '500' },
   deviceCard: { marginTop: spacing.xxs, backgroundColor: colors.card },
   flatCard: { backgroundColor: colors.card },
   deviceRowName: { ...type.bodyStrong, fontSize: 16, lineHeight: 22, color: colors.ink, flex: 1, minWidth: 0, marginRight: spacing.sm },
-  deviceStatus: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
+  deviceStatus: { ...type.body, fontSize: 16, lineHeight: 22, color: colors.muted },
   deviceStatusOnline: { color: colors.success },
   deviceRowSubtitle: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, flex: 1, minWidth: 0, marginRight: spacing.sm },
   deviceRowMeta: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, textAlign: 'right' },

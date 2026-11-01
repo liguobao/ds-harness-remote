@@ -1,9 +1,10 @@
+import { renderBodyPortal } from './portal.js'
 import type { Translate } from '../client-locale.js'
 import type { StatusFeed } from '../status-stream.js'
 import { formatBitrate, formatByteSize, formatLocalTime, shortDeviceId, transportLabel } from './presentation.js'
-import type { ClientReact, RemoteStatus } from './types.js'
+import type { ClientReact, PortalRenderer, RemoteStatus } from './types.js'
 
-export function createRemoteSessionHeaderAction(React: ClientReact) {
+export function createRemoteSessionHeaderAction(React: ClientReact, portal?: PortalRenderer) {
   function RemoteSessionHeaderAction(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
@@ -73,7 +74,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact) {
       return () => document.removeEventListener('keydown', closeOnEscape)
     }, [routeOpen])
 
-    const renderHostReference = (): unknown => hostReference === undefined ? null : React.createElement('aside', { className: 'dshRemoteHostReferencePanel', role: 'dialog', 'aria-label': 'Remote Host' },
+    const renderHostReference = (): unknown => hostReference === undefined ? null : renderBodyPortal(portal, React.createElement('aside', { className: 'dshRemoteHostReferencePanel', role: 'dialog', 'aria-label': 'Remote Host' },
       React.createElement('header', null,
         React.createElement('strong', null, 'Remote Host'),
         React.createElement('button', { type: 'button', 'aria-label': t('close'), onClick: () => setHostReference(undefined) }, '×')),
@@ -81,7 +82,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact) {
         React.createElement('div', null, React.createElement('dt', null, '名称'), React.createElement('dd', null, hostReference.label)),
         React.createElement('div', null, React.createElement('dt', null, '系统'), React.createElement('dd', null, hostReference.platform)),
         React.createElement('div', null, React.createElement('dt', null, '设备 ID'), React.createElement('dd', { className: 'isMono' }, hostReference.deviceId)),
-        React.createElement('div', null, React.createElement('dt', null, '调用内容'), React.createElement('dd', { className: 'isMono' }, hostReference.invocation))))
+        React.createElement('div', null, React.createElement('dt', null, '调用内容'), React.createElement('dd', { className: 'isMono' }, hostReference.invocation)))))
     if (status?.mode !== 'remote') return renderHostReference()
     const exit = async (): Promise<void> => {
       setBusy(true)
@@ -159,7 +160,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact) {
       networkOnline ? React.createElement('span', { className: 'dshRemoteEncrypted' }, t('remoteLinkEncrypted')) : null,
       renderHostReference(),
       React.createElement('button', { type: 'button', className: 'dshRemoteHeaderExitLink', disabled: busy, onClick: () => void exit() }, t('exitRemote')),
-      !routeOpen ? null : React.createElement('div', {
+      !routeOpen ? null : renderBodyPortal(portal, React.createElement('div', {
         className: 'dshRemoteRouteBackdrop',
         role: 'presentation',
         onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setRouteOpen(false) },
@@ -212,7 +213,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact) {
               : formatBitrate(webRtc.availableOutgoingBitrate)),
             fact(t('bytesSent'), webRtc.bytesSent === undefined ? t('notProvided') : formatByteSize(webRtc.bytesSent)),
             fact(t('bytesReceived'), webRtc.bytesReceived === undefined ? t('notProvided') : formatByteSize(webRtc.bytesReceived)))),
-        React.createElement('p', null, t('connectionRouteEncrypted')))))
+        React.createElement('p', null, t('connectionRouteEncrypted'))))))
   }
 
   return RemoteSessionHeaderAction
