@@ -10,7 +10,7 @@ import { ForegroundConnectionRecovery } from '../src/services/connection-recover
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
@@ -37,8 +37,8 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   requireAntigravity() { return acp }
   requirePi() { return acp }
   requireOpencode() { return acp }
-  requireClaude() { return acp }
-  requireHermes() { return acp }
+  requireClaude() { transport.requireClaude(); return acp }
+  requireHermes() { transport.requireHermes(); return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -778,6 +778,8 @@ describe('session restore state machine', () => {
             transport.hasAntigravity.mockReturnValue(backend === 'antigravity')
             transport.hasPi.mockReturnValue(backend === 'pi')
             transport.hasOpencode.mockReturnValue(backend === 'opencode')
+            transport.hasClaude.mockReturnValue(backend === 'claude')
+            transport.hasHermes.mockReturnValue(backend === 'hermes')
             const first = useAppStore.getState().reconnect()
             const second = useAppStore.getState().reconnect()
             expect(await first).toBe(true)
@@ -785,6 +787,10 @@ describe('session restore state machine', () => {
             expect(transport.connect).toHaveBeenCalledTimes(1)
             expect(acp.openStream).toHaveBeenCalledTimes(1)
             expect(acp.transferCall).toHaveBeenCalledTimes(backend !== 'cursor' ? 1 : 0)
+            if (backend !== 'cursor') {
+              // Restoring a session must read its history from its own backend.
+              expect(acp.transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { sessionId: 'native-session', backend })
+            }
             expect(await useAppStore.getState().reconnect({ restoreSession: false })).toBe(true)
             expect(acp.openStream).toHaveBeenCalledTimes(1)
             expect(acp.transferCall).toHaveBeenCalledTimes(backend !== 'cursor' ? 1 : 0)
@@ -1049,6 +1055,15 @@ describe('ACP session creation targets the workspace backend', () => {
         expect(await useAppStore.getState().createSession(workspace.workspaceId)).toBe(true)
         // A Hermes workspace must never be created through the Claude client.
         expect(acp.createSession).toHaveBeenCalledWith('/repo', 'agent', backend)
+        // Opening the new session also reads history and opens a stream through the
+        // same capability, so only the absence is exact.
+        if (backend === 'hermes') {
+          expect(transport.requireHermes).toHaveBeenCalled()
+          expect(transport.requireClaude).not.toHaveBeenCalled()
+        } else {
+          expect(transport.requireClaude).toHaveBeenCalled()
+          expect(transport.requireHermes).not.toHaveBeenCalled()
+        }
         expect(useAppStore.getState().sessions.some(item => item.sessionId === `${backend}:new-1`)).toBe(true)
         expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new-1`)
       },

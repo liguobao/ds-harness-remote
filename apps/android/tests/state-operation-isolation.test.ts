@@ -269,6 +269,11 @@ describe('workspace operation isolation', () => {
         for (const [name, load] of Object.entries(loaders)) expect(load).toHaveBeenCalledTimes(backend === name ? 1 : 0)
         expect(fixture.get().workspaces).toContainEqual(other)
         expect(fixture.get().error).toBe('unrelated error')
+        if (outcome === 'success' && backend !== 'harness' && backend !== 'codex' && backend !== 'cursor') {
+          const flag = { antigravity: 'antigravityAvailable', pi: 'piAvailable', opencode: 'opencodeAvailable',
+            claude: 'claudeAvailable', hermes: 'hermesAvailable' }[backend]
+          expect(fixture.get()[flag as 'hermesAvailable']).toBe(true)
+        }
         expect(fixture.get().workspaceCatalog).toEqual({ backend, loading: false,
           ...(outcome === 'error' && backend !== 'cursor' ? { error: 'category unavailable' } : {}) })
       } }))), prepare)
