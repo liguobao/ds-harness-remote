@@ -1882,12 +1882,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               <Pressable
                 key={`inline-quote-${index}`}
                 accessibilityRole="button"
-                accessibilityLabel={zhCN.chat.removeQuote}
+                accessibilityLabel={`${zhCN.chat.removeQuote}: ${quoteText}`}
                 onPress={() => setQuotes(current => current.filter((_, i) => i !== index))}
                 style={styles.composerInlineQuoteBadge}
               >
                 <QuoteMarkIcon size={14} color={colors.primary} />
-                <Text style={[styles.composerInlineQuoteText, { color: colors.primary }]}>
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 180 }]}>
                   “{formatQuoteDraftSnippet(quoteText, 14)}”
                 </Text>
               </Pressable>
@@ -2081,7 +2081,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                       setQuotes(current => [...current, text.trim()])
                       composerInputRef.current?.focus()
                     }
-                  })
+                  }).catch(() => {})
                 }}
                 style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed]}
               >

@@ -13,6 +13,8 @@ class RemoteProcessTextModule(
   private val reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext), ActivityEventListener {
 
+  private var pendingText: String? = null
+
   init {
     reactContext.addActivityEventListener(this)
   }
@@ -22,24 +24,42 @@ class RemoteProcessTextModule(
   @ReactMethod
   fun getInitialText(promise: Promise) {
     val currentActivity = reactContext.currentActivity
-    val text = extractProcessText(currentActivity?.intent)
+    val fromIntent = extractProcessText(currentActivity?.intent)
+    if (fromIntent != null) {
+      // Consume once so it doesn't replay when remounting or switching sessions
+      currentActivity?.intent?.removeExtra(Intent.EXTRA_PROCESS_TEXT)
+    }
+    val text = fromIntent ?: pendingText
+    pendingText = null
     promise.resolve(text)
   }
 
   override fun onNewIntent(intent: Intent) {
     try {
       val text = extractProcessText(intent)
-      if (!text.isNullOrEmpty() && reactContext.hasActiveReactInstance()) {
-        reactContext
-          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-          .emit("onProcessText", text)
+      if (!text.isNullOrEmpty()) {
+        if (reactContext.hasActiveReactInstance()) {
+          reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("onProcessText", text)
+        } else {
+          pendingText = text
+        }
       }
     } catch (_: Throwable) {
-      // Ignore if react context is not yet fully active
+      val text = extractProcessText(intent)
+      if (!text.isNullOrEmpty()) {
+        pendingText = text
+      }
     }
   }
 
   override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {}
+
+  override fun invalidate() {
+    super.invalidate()
+    reactContext.removeActivityEventListener(this)
+  }
 
   private fun extractProcessText(intent: Intent?): String? {
     if (intent?.action == Intent.ACTION_PROCESS_TEXT) {

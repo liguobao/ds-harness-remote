@@ -49,7 +49,7 @@ function withRemoteForegroundService(config) {
       'intent-filter': [
         {
           $: {
-            'android:priority': '2147483647',
+            'android:priority': '1000',
           },
           action: [{ $: { 'android:name': 'android.intent.action.PROCESS_TEXT' } }],
           category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
