@@ -39,22 +39,29 @@ function withRemoteForegroundService(config) {
 
     // Native text selection toolbar action: 询问智能体 (android.intent.action.PROCESS_TEXT)
     application['activity-alias'] ??= []
-    if (!application['activity-alias'].some(item => item.$?.['android:name'] === '.AskAgentProcessTextActivity')) {
-      application['activity-alias'].push({
-        $: {
-          'android:name': '.AskAgentProcessTextActivity',
-          'android:targetActivity': '.MainActivity',
-          'android:label': '询问智能体',
-          'android:exported': 'true',
-        },
-        'intent-filter': [
-          {
-            action: [{ $: { 'android:name': 'android.intent.action.PROCESS_TEXT' } }],
-            category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-            data: [{ $: { 'android:mimeType': 'text/plain' } }],
+    const aliasObj = {
+      $: {
+        'android:name': '.AskAgentProcessTextActivity',
+        'android:targetActivity': '.MainActivity',
+        'android:label': '@string/ask_agent_process_text',
+        'android:exported': 'true',
+      },
+      'intent-filter': [
+        {
+          $: {
+            'android:priority': '2147483647',
           },
-        ],
-      })
+          action: [{ $: { 'android:name': 'android.intent.action.PROCESS_TEXT' } }],
+          category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+          data: [{ $: { 'android:mimeType': 'text/plain' } }],
+        },
+      ],
+    }
+    const existingAliasIndex = application['activity-alias'].findIndex(item => item.$?.['android:name'] === '.AskAgentProcessTextActivity')
+    if (existingAliasIndex >= 0) {
+      application['activity-alias'][existingAliasIndex] = aliasObj
+    } else {
+      application['activity-alias'].push(aliasObj)
     }
     return config
   })
@@ -75,6 +82,39 @@ function withRemoteForegroundService(config) {
     for (const file of fs.readdirSync(SOURCE_DIR)) {
       fs.copyFileSync(path.join(SOURCE_DIR, file), path.join(destination, file))
     }
+
+    // Localized strings for PROCESS_TEXT selection action
+    const resDir = path.join(config.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res')
+    const stringLocales = {
+      'values': 'Ask Agent',
+      'values-zh': '询问智能体',
+      'values-zh-rCN': '询问智能体',
+      'values-zh-rTW': '詢問智慧體',
+      'values-zh-rHK': '詢問智慧體',
+      'values-ja': 'エージェントに質問',
+      'values-es': 'Preguntar al agente',
+      'values-fr': "Demander à l\\'agent",
+      'values-de': 'Agent fragen',
+    }
+
+    for (const [folder, text] of Object.entries(stringLocales)) {
+      const targetDir = path.join(resDir, folder)
+      fs.mkdirSync(targetDir, { recursive: true })
+      const stringsFile = path.join(targetDir, 'strings.xml')
+      if (fs.existsSync(stringsFile)) {
+        let content = fs.readFileSync(stringsFile, 'utf8')
+        if (content.includes('name="ask_agent_process_text"')) {
+          content = content.replace(/<string name="ask_agent_process_text">.*?<\/string>/s, `<string name="ask_agent_process_text">${text}</string>`)
+        } else {
+          content = content.replace('</resources>', `  <string name="ask_agent_process_text">${text}</string>\n</resources>`)
+        }
+        fs.writeFileSync(stringsFile, content, 'utf8')
+      } else {
+        const content = `<resources>\n  <string name="ask_agent_process_text">${text}</string>\n</resources>\n`
+        fs.writeFileSync(stringsFile, content, 'utf8')
+      }
+    }
+
     return config
   }])
 }

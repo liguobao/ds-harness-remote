@@ -27,11 +27,15 @@ class RemoteProcessTextModule(
   }
 
   override fun onNewIntent(intent: Intent) {
-    val text = extractProcessText(intent)
-    if (!text.isNullOrEmpty()) {
-      reactContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("onProcessText", text)
+    try {
+      val text = extractProcessText(intent)
+      if (!text.isNullOrEmpty() && reactContext.hasActiveReactInstance()) {
+        reactContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit("onProcessText", text)
+      }
+    } catch (_: Throwable) {
+      // Ignore if react context is not yet fully active
     }
   }
 
