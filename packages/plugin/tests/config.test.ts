@@ -58,6 +58,17 @@ describe('plugin config', () => {
     expect(resolveConfig({ acp: { enabled: false, backends: [{ id: 'codex', enabled: true }] } }, {}).codex.enabled).toBe(false)
   })
 
+  it('registers the Hermes backend as an explicitly enabled standard ACP backend', () => {
+    const off = resolveConfig({}, {})
+    expect(off.acp?.backends.find(item => item.id === 'hermes')).toMatchObject({ enabled: false, command: 'hermes', args: ['acp'] })
+    const on = resolveConfig({ acp: { enabled: true, backends: [{ id: 'hermes', enabled: true }] } }, {})
+    expect(on.acp?.backends.find(item => item.id === 'hermes')).toMatchObject({ enabled: true, command: 'hermes', args: ['acp'] })
+    const custom = resolveConfig({ acp: { enabled: true, backends: [{ id: 'hermes', enabled: true, command: '/opt/hermes/bin/hermes-acp', args: [], cwd: '/srv/repo' }] } }, {})
+    expect(custom.acp?.backends.find(item => item.id === 'hermes')).toEqual({
+      id: 'hermes', enabled: true, command: '/opt/hermes/bin/hermes-acp', args: [], cwd: '/srv/repo',
+    })
+  })
+
   it('allows HTTP on private networks while rejecting insecure public servers and embedded credentials', () => {
     expect(() => resolveConfig({ serverUrl: 'http://remote.example.com' })).toThrow(/HTTPS/)
     expect(() => resolveConfig({ serverUrl: 'http://100.128.0.1:8080' })).toThrow(/HTTPS/)

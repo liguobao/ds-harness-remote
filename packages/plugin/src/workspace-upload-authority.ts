@@ -16,7 +16,7 @@ export function workspaceUploadRootResolver(
       if (!parsed) throw unavailable()
       return codex(parsed.threadId)
     }
-    if (/^(acp|cursor|pi|opencode|claude):/.test(sessionId)) return acp(sessionId)
+    if (/^(acp|cursor|pi|opencode|claude|hermes):/.test(sessionId)) return acp(sessionId)
     if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable()
     // The official authenticated Peer filters this list by session visibility.
     const result = await gateway.dispatch('session/list', { args: { _request: {} } }, signal)

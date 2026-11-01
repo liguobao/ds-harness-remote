@@ -55,6 +55,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   piAvailable: false,
   opencodeAvailable: false,
   claudeAvailable: false,
+  hermesAvailable: false,
   workspaceCatalog: undefined,
   workspaces: [],
   favoriteWorkspaces: [],
@@ -125,7 +126,7 @@ export function sessionChatImageLoader(session: RemoteSession) {
       return runtime.connection.readSessionImageAttachment(sessionId, attachmentId, signal)
     },
     workspace: (path, signal) => {
-      if (session.backend === 'codex' || session.backend === 'claude') throw new Error('Image preview unavailable')
+      if (session.backend === 'codex' || session.backend === 'claude' || session.backend === 'hermes') throw new Error('Image preview unavailable')
       return loadWorkspacePreview(runtime.connection.requireSessionTools(session.sessionId), session.sessionId, path, 'image', signal)
     },
   })

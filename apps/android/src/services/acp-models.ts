@@ -1,7 +1,7 @@
 import type { AgentAcpClient } from '@dsh-remote/client-core'
 import type { ModelSelection, SessionModels } from '../types'
 
-type ModelBackend = 'cursor' | 'claude' | 'pi' | 'opencode' | 'antigravity'
+type ModelBackend = 'cursor' | 'claude' | 'pi' | 'opencode' | 'antigravity' | 'hermes'
 
 export async function loadAcpModels(client: AgentAcpClient, sessionId: string, backend: ModelBackend): Promise<SessionModels> {
   const result = await client.sessionModels(sessionId, backend)
@@ -18,7 +18,7 @@ export async function loadAcpModels(client: AgentAcpClient, sessionId: string, b
         : undefined
       return [{ id: model.id, name: model.name, ...(reasoning === undefined ? {} : { reasoning }) }]
     })
-    return [{ id: backend, name: typeof group.name === 'string' ? group.name : { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity' }[backend], models }]
+    return [{ id: backend, name: typeof group.name === 'string' ? group.name : { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes' }[backend], models }]
   })
   return { current: { provider: backend, model: result.current.model,
     ...(typeof result.current.reasoningEffort === 'string' ? { reasoningEffort: result.current.reasoningEffort } : {}) },

@@ -8,8 +8,8 @@ interface SelectOption {
 
 /** Only configuration advertised by this session may be selected. */
 export class AcpSessionModelState {
-  constructor(private readonly backend: 'cursor' | 'claude' | 'opencode') {}
-  private get label(): string { return { cursor: 'Cursor', claude: 'Claude', opencode: 'OpenCode' }[this.backend] }
+  constructor(private readonly backend: 'cursor' | 'claude' | 'opencode' | 'hermes') {}
+  private get label(): string { return { cursor: 'Cursor', claude: 'Claude', opencode: 'OpenCode', hermes: 'Hermes' }[this.backend] }
 
   private model?: SelectOption
   private effort?: SelectOption

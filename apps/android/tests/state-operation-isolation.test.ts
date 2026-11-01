@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
     'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
-  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(),
+  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(), loadHermes: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ notificationAsync: vi.fn(), NotificationFeedbackType: { Success: 'success' } }))
 vi.mock('../src/services/storage', () => mocks.storage)
@@ -35,6 +35,9 @@ vi.mock('../src/services/claude', async importOriginal => ({
 }))
 vi.mock('../src/services/pi', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/pi')>(), loadPiCatalog: mocks.loadPi,
+}))
+vi.mock('../src/services/hermes', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/services/hermes')>(), loadHermesCatalog: mocks.loadHermes,
 }))
 vi.mock('../src/services/opencode', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/opencode')>(), loadOpencodeCatalog: mocks.loadOpencode,
@@ -227,8 +230,8 @@ function workspaceFixture() {
   }
   const runtime = {
     refreshBackends: vi.fn(), requireProxy: () => backend === proxy ? proxy : backend,
-    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true, hasClaude: () => true,
-    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend, requireClaude: () => backend,
+    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true, hasClaude: () => true, hasHermes: () => true,
+    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend, requireClaude: () => backend, requireHermes: () => backend,
   }
   backend = proxy
   const close = vi.fn(async () => undefined)
@@ -250,8 +253,8 @@ function createResponse(backend: typeof backendCases[number], id: string) {
 
 describe('workspace operation isolation', () => {
   it('loads only the requested backend and keeps other catalogs and failures isolated', async () => {
-    const loaders = { codex: mocks.loadCodex, antigravity: mocks.loadAgy, pi: mocks.loadPi, opencode: mocks.loadOpencode, claude: mocks.loadClaude }
-    await runScenarios((['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const).flatMap(backend =>
+    const loaders = { codex: mocks.loadCodex, antigravity: mocks.loadAgy, pi: mocks.loadPi, opencode: mocks.loadOpencode, claude: mocks.loadClaude, hermes: mocks.loadHermes }
+    await runScenarios((['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const).flatMap(backend =>
       ['success', 'error'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
         const fixture = workspaceFixture()
         const other = workspace('other', backend === 'codex' ? 'harness' : 'codex')
@@ -266,6 +269,11 @@ describe('workspace operation isolation', () => {
         for (const [name, load] of Object.entries(loaders)) expect(load).toHaveBeenCalledTimes(backend === name ? 1 : 0)
         expect(fixture.get().workspaces).toContainEqual(other)
         expect(fixture.get().error).toBe('unrelated error')
+        if (outcome === 'success' && backend !== 'harness' && backend !== 'codex' && backend !== 'cursor') {
+          const flag = { antigravity: 'antigravityAvailable', pi: 'piAvailable', opencode: 'opencodeAvailable',
+            claude: 'claudeAvailable', hermes: 'hermesAvailable' }[backend]
+          expect(fixture.get()[flag as 'hermesAvailable']).toBe(true)
+        }
         expect(fixture.get().workspaceCatalog).toEqual({ backend, loading: false,
           ...(outcome === 'error' && backend !== 'cursor' ? { error: 'category unavailable' } : {}) })
       } }))), prepare)

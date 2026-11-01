@@ -509,7 +509,7 @@ export class HostPluginRuntime {
     for (const backend of this.acp.enabledBackends()) {
       types.push({
         id: backend,
-        name: backend === 'claude' ? 'Claude' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
+        name: backend === 'claude' ? 'Claude' : backend === 'hermes' ? 'Hermes' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend),
       })

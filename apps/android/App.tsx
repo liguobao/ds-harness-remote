@@ -24,6 +24,7 @@ import { spacing, type } from './src/ui/theme'
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/theme-context'
 import { useThemedStyles } from './src/ui/use-themed-styles'
 import { strings as zhCN } from './src/locales/i18n'
+import { sessionBackendFromId } from './src/lib/session-backend'
 // Keep the native first frame visible until boot completes. The native splash
 // is the only startup view; the app then enters the login or device route.
 void SplashScreen.preventAutoHideAsync().catch(() => undefined)
@@ -175,7 +176,7 @@ function AppNavigator() {
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
   const openKnownSession = async (id: string) => {
-    const backend = id.startsWith('codex:') ? 'codex' : id.startsWith('cursor:') ? 'cursor' : id.startsWith('antigravity:') ? 'antigravity' : id.startsWith('pi:') ? 'pi' : id.startsWith('opencode:') ? 'opencode' : id.startsWith('claude:') ? 'claude' : 'harness'
+    const backend = sessionBackendFromId(id)
     const expectedScope = browseScope(useAppStore.getState())
     await useAppStore.getState().refreshWorkspaces(backend)
     if (browseScope(useAppStore.getState()) !== expectedScope || useAppStore.getState().connection.phase !== 'connected') return

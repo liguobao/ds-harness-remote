@@ -7,13 +7,22 @@ import type {
 import { ACP_TOOL_CALL_ENDPOINTS } from '@dsh-remote/protocol'
 import type { TypertRpcResult } from '../typert-gateway-contract.js'
 import type { AcpImage } from './image-content.js'
-import type { AcpModelSelection } from './virtual-catalog.js'
+import type { AcpCatalogBackend, AcpModelSelection } from './virtual-catalog.js'
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
 
 const ACP_SESSION_PREFIX = 'acp:'
 
 const OPENCODE_SESSION_PREFIX = 'opencode:'
+
+const SESSION_PREFIXES: Record<AcpCatalogBackend, string> = {
+  cursor: CURSOR_SESSION_PREFIX,
+  antigravity: ACP_SESSION_PREFIX,
+  pi: 'pi:',
+  opencode: OPENCODE_SESSION_PREFIX,
+  claude: 'claude:',
+  hermes: 'hermes:',
+}
 
 export type JsonRecord = Record<string, unknown>
 
@@ -96,17 +105,17 @@ export interface AcpClientLike {
   supportsArchive?(backend: string): boolean
   archiveSession?(sessionId: string, backend: string, signal?: AbortSignal): Promise<unknown>
   onSessionArchived?(handler: (data: { backend: 'opencode'; sessionId: string; archived: true }) => void): () => void
-  sessionModels?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", signal?: AbortSignal): Promise<AcpSessionModels>
-  selectModel?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
-  selectPermission?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", preset: string, signal?: AbortSignal): Promise<unknown>
+  sessionModels?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: AcpCatalogBackend, selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  selectPermission?(sessionId: string, backend: AcpCatalogBackend, preset: string, signal?: AbortSignal): Promise<unknown>
   workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
     mode?: "agent" | "plan" | "ask",
-    backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude",
+    backend?: AcpCatalogBackend,
     signal?: AbortSignal,
   ): Promise<{ sessionId: string; cwd?: string }>
-  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude"): Promise<unknown>
+  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: AcpCatalogBackend): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
@@ -173,11 +182,11 @@ export function extractSessionId(request: JsonRecord): string {
   throw new Error('The sessionId is required.')
 }
 
-export function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): string {
-  return backend === 'claude' ? 'claude:' : backend === 'pi' ? 'pi:' : backend === 'opencode' ? OPENCODE_SESSION_PREFIX : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+export function sessionPrefix(backend: AcpCatalogBackend): string {
+  return SESSION_PREFIXES[backend] ?? CURSOR_SESSION_PREFIX
 }
 
-export function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): string {
+export function nativeAcpId(sessionId: string, backend: AcpCatalogBackend): string {
   const prefix = sessionPrefix(backend)
   if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')

@@ -76,6 +76,8 @@ export class AndroidRemoteRuntime {
   hasOpencode() { return this.client.hasOpencode() }
   requireClaude() { return this.client.requireClaude() }
   hasClaude() { return this.client.hasClaude() }
+  requireHermes() { return this.client.requireHermes() }
+  hasHermes() { return this.client.hasHermes() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
   checkHealth() { return this.client.checkHealth() }

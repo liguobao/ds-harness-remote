@@ -82,6 +82,7 @@ const HARNESS_OPTIONS: HarnessOption[] = [
   { value: 'harness', name: 'DeepSeek Harness', desc: '官方 DeepSeek 智能体框架' },
   { value: 'codex', name: 'CodeX', desc: 'OpenAI CodeX 编程智能体' },
   { value: 'claude', name: 'Claude', desc: 'Anthropic Claude 智能体' },
+  { value: 'hermes', name: 'Hermes', desc: 'Nous Research Hermes Agent 智能体' },
   { value: 'cursor', name: 'Cursor', desc: 'Cursor IDE 交互智能体' },
   { value: 'antigravity', name: 'Antigravity', desc: 'Antigravity 研发框架' },
   { value: 'opencode', name: 'OpenCode', desc: 'OpenCode 开源智能体' },
@@ -93,6 +94,7 @@ function harnessDisplayName(value: AgentBackend): string {
     case 'harness': return 'DeepSeek'
     case 'codex': return 'CodeX'
     case 'claude': return 'Claude'
+    case 'hermes': return 'Hermes'
     case 'cursor': return 'Cursor'
     case 'antigravity': return 'Antigravity'
     case 'opencode': return 'OpenCode'
@@ -129,6 +131,7 @@ export function HostSessionsDrawer({
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
+    state.hermesAvailable && 'hermes',
   ].filter(Boolean).join(','))
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
@@ -195,6 +198,7 @@ export function HostSessionsDrawer({
       case 'pi': return useAppStore.getState().piAvailable
       case 'opencode': return useAppStore.getState().opencodeAvailable
       case 'claude': return useAppStore.getState().claudeAvailable
+      case 'hermes': return useAppStore.getState().hermesAvailable
       default: return false
     }
   }
@@ -1186,6 +1190,7 @@ function backendLabel(value: AgentBackend): string {
     case 'codex': return strings.workspaces.codex
     case 'cursor': return strings.workspaces.cursor
     case 'claude': return strings.workspaces.claude
+    case 'hermes': return strings.workspaces.hermes
     case 'opencode': return strings.workspaces.opencode
     case 'pi': return strings.workspaces.pi
     case 'antigravity': return strings.workspaces.antigravity
