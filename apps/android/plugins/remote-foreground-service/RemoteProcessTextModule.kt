@@ -26,7 +26,7 @@ class RemoteProcessTextModule(
     promise.resolve(text)
   }
 
-  override fun onNewIntent(intent: Intent?) {
+  override fun onNewIntent(intent: Intent) {
     val text = extractProcessText(intent)
     if (!text.isNullOrEmpty()) {
       reactContext
@@ -35,7 +35,7 @@ class RemoteProcessTextModule(
     }
   }
 
-  override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {}
+  override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {}
 
   private fun extractProcessText(intent: Intent?): String? {
     if (intent?.action == Intent.ACTION_PROCESS_TEXT) {
