@@ -54,6 +54,7 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 - Harness 主机无需开放公网监听端口，无需公网IP，可以从任意可上网的地方，通过双向端到端加密链路安全连接。
 - 优先使用P2P网络，全球多TURN节点中转，极端情况下使用Server Relay确保可用。
 - 通过 Harness 原生侧栏提供工作区文件、只读预览、远程终端和已授权本机开发服务预览。
+- Remote Agent 工具支持原生 Harness Agent 发现主机与工作区、创建和管理 Harness 会话、读取历史、等待执行、请求中断及传输获准文件；CodeX/ACP 仅支持工作区发现（[详情](packages/plugin/README.md#remote-agent-tools)）。
 - CodeX / ACP 终端使用 Host 默认 shell，在会话目录启动，并在重连时恢复终端屏幕。
 - Android 按对话保留草稿与阅读位置，提供后端分类搜索和本机收藏；对话正文从已连接的 Host 加载。
 
@@ -272,6 +273,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 - 会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
 - Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
+- [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认关闭，可在详细 Remote 设置中开启。
 - 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
 - 不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
@@ -363,8 +365,3 @@ CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-### Remote Agent 工具
-
-在本地 Remote 面板登录后，原生 Harness Agent 可发现在线主机与工作区、创建 Harness 会话、发送任务、读取历史、等待执行、请求中断、下载工作区文件到插件运行的本机，以及将获准发送的本地文件上传到 Harness 工作区。CodeX/ACP 暂仅支持工作区发现。操作回执与投递语义见 [Remote Agent tools](packages/plugin/README.md#remote-agent-tools)。
-- [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认关闭，可在详细 Remote 设置中开启。

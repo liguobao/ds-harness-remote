@@ -51,6 +51,7 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - No public listening port or public IP is required on the Harness Host. Connect from anywhere with internet access over a bidirectional end-to-end encrypted channel.
 - Prefer P2P connections, use TURN relay nodes worldwide, and fall back to Server Relay when needed.
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
+- Remote Agent tools let native Harness Agents discover Hosts and workspaces, create and manage Harness sessions, read history, wait for execution, request interruption, and transfer authorized files; CodeX/ACP supports workspace discovery only ([details](packages/plugin/README.md#remote-agent-tools)).
 - CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
 - Android keeps per-conversation drafts and reading positions, offers backend-separated search
   and local favorites. Conversation text is loaded from the connected Host.
@@ -361,7 +362,3 @@ DeepSeek and related names and marks belong to their respective owners.
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-### Remote Agent tools
-
-After signing in through the local Remote panel, native Harness Agents can discover online Hosts and workspaces, create and message Harness sessions, read history, wait for execution, request interruption, download workspace files to the local plugin machine, and upload authorized local files to a Harness workspace. CodeX/ACP support workspace discovery only. See [Remote Agent tools](packages/plugin/README.md#remote-agent-tools) for operation receipts and delivery semantics.
