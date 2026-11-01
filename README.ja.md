@@ -29,13 +29,9 @@
 
 ## 一度つなげば、いつでも使える
 
-スマートフォン、パソコン、ブラウザーから、お使いの DeepSeek Harness をそのまま利用できます。
+スマートフォン、パソコン、ブラウザーから、お使いの DeepSeek Harness をそのまま利用できます。どのデバイスからでも、同じ Harness セッションの続きを始められます。
 
-どのデバイスからでも、同じ Harness セッションの続きを始められます。
-
-Harness は作業用パソコン上で動作し続け、ワークスペース、ツール、プロジェクト設定もそのままです。
-
-DS Harness Remote は、その環境にアクセスするためのもう一つの窓です。
+Harness は作業用パソコン上で動作し続け、ワークスペース、ツール、プロジェクト設定もそのままです。DS Harness Remote は、その環境にアクセスするためのもう一つの窓です。
 
 DeepSeek Harness デスクトップ版に対応しています。最新リリースをインストールしてください。
 
@@ -44,15 +40,15 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 ## 主な機能
 
 - Web、パソコン、モバイル端末からローカルの Harness にアクセスできます。DSH を中心に、Codex、Cursor、Antigravity にも対応しています。
-- 独自のデスクトップ会話 UI を追加せず、DeepSeek Harness のネイティブ UI を利用します。
+- DeepSeek Harness Desktop に対応し、インストール後すぐにネイティブ UI を利用できます。独自のデスクトップ会話 UI は追加しません。
 - ワークスペースの作成、モデルの設定、会話モデルの切り替えを、ローカルと同じ流れで行えます。
-- DeepSeek Harness Desktop に対応し、インストール後すぐに利用できます。
-- ターミナル専用の [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) プロファイルも Host として利用できます。
 - Harness Host に公開待ち受けポートやパブリック IP は不要です。インターネット接続があれば、双方向のエンドツーエンド暗号化チャネルでどこからでも接続できます。
-- P2P 接続を優先し、世界各地の TURN 中継ノードを利用できます。必要に応じて Server Relay にフォールバックします。
+- P2P 接続を優先し、世界各地の TURN 中継ノードを利用できます。必要に応じて複数の Server Relay にフォールバックします。
 - ネイティブの Harness サイドバーから、ワークスペースのファイル、読み取り専用プレビュー、リモートターミナル、許可されたローカル開発サービスのプレビューにアクセスできます。
-- CodeX と ACP のターミナルは、セッションのディレクトリで Host のデフォルトシェルを使用し、再接続時にはターミナル画面を復元します。
-- Android は会話ごとの下書きと閲覧位置を保存し、バックエンド別の検索とローカルのお気に入りを提供します。会話本文は接続先の Host から読み込みます。
+- Remote Tool のコンテキスト注入により、Host とワークスペースの検出、Harness セッションの作成・管理、履歴の読み取り、実行待機、中断要求、許可されたファイルの転送が可能です。[詳細](packages/plugin/README.md#remote-agent-tools)。
+- DeepSeek Harness に加え、ACP 連携を通じて Codex、Cursor、Google Antigravity、Pi、OpenCode、Claude Code、Hermes Agent などのネイティブワークスペースを利用でき、リモートファイル閲覧やターミナルにも対応します。
+- Android、iOS、Web、ネイティブ DSH 向けのクライアントを提供しています。
+- 複数のクライアントから同じ Harness Host に同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
 
 ## 目次
 
@@ -81,9 +77,11 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 | DSH Desktop プラグイン | Remote サイドバー | 対応 | `ds-harness-remote@0.6.0` をインストールします。このパソコンを Host としても利用できます |
 | Web | ブラウザーページ | 対応 | [https://dsh.r2049.cn](https://dsh.r2049.cn) を開きます。ネイティブの Harness UI を再利用します |
 | Android | ネイティブアプリ | 対応 | [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から APK をダウンロードできます。[Android ガイド](apps/android/README.md)を参照してください |
+| DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: DeepSeek Harness の Android クライアント。スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
 | ブラウザー拡張機能 | Chrome | アクセス入口のみ | ログイン済み Web の認可を独立したデバイス認証情報に交換し、オンラインの Host を一覧表示して同一オリジンの Remote Web を開きます。拡張機能自体に会話 UI はありません |
 | dsh-TUI | ターミナル専用 CLI | 対応 | Host として利用できます。[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。インストーラーが自動的に Web サービスを作成することはありません |
+| Linux | クラウドサーバー | 対応 | [公式サイト](https://dsh.r2049.cn/)にログインすると、設定不要のワンコマンド無人インストールを利用できます。 |
 
 複数のクライアントから同じ Host に同時接続できます。RPC 呼び出しとストリームは接続ごとに分離されます。
 
@@ -97,52 +95,25 @@ DeepSeek Harness Desktop の **Extensions / Plugin management** を開き、npm 
 
 インストール後に Desktop を再起動してください。公式の `dsh` ランチャーでも、`dsh plugin --profile desktop add -w ds-harness-remote@0.6.0` を実行して指定バージョンをインストールできます。
 
+### Linux ワンコマンドインストール
+
+[公式サイト](https://dsh.r2049.cn/)にログインし、ワンコマンドインストール用の認可コードを取得してインストールしてください。
+
 ### dsh-TUI Host
 
 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) を使ったターミナル Host のセットアップは、[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。
 
-### コマンドラインからのインストール
-
-DSH のプラグインマネージャーを使い、`web` プロファイルに指定バージョンのパッケージを追加します。
-
-```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.0
-```
-
-インストール後に DeepSeek Harness を再起動してください。
-
-CLI からは `dsh plugin` を使って npm パッケージを選択したプロファイルにインストールし、バンドル設定レイヤーを追加します。
-
-### プラグインインストーラー
-
-提供するインストーラーは [`scripts/install.sh`](scripts/install.sh) のみです。
-
-- **Linux:** root 権限が必要です。既存の DSH を再利用するか、専用の Node.js／DSH をセットアップします。ワンタイム Host 登録トークンに対応し、systemd のシステムサービスを有効化・起動します。Host とリモートツールは **root** として動作するため、信頼できるアカウントにのみアクセスを許可してください。
-- **macOS:** 一般ユーザーとして実行します。Desktop の公式ランチャーまたは既存の CLI を再利用し、DSH のインストールやサービスの作成は行いません。
-- Windows では公式のプラグイン管理機能または既存の Harness コマンドを使用してください。Windows 用インストーラーは提供していません。
-
-トークンを安全に入力する方法、更新、サービス管理、検証範囲については[インストールガイド](docs/installation.md)を参照してください。リポジトリの変更が、公開中のインストーラーへ自動的にデプロイされるわけではありません。
-
-### おすすめの組み合わせ：Intelligent UI
-
-[Intelligent UI](https://github.com/dreamfarer-space/deepseek-harness-intelligent-ui) を使うと、モデルがカード・表・グラフ・フォームで回答できます。
-Android クライアントはこれらをネイティブ表示し、**プラグイン → Remote 対応** に表示されたプラグインのオン/オフやライブ設定を変更できます。
-
-パソコンで、**Remote と同じ profile に**インストールしてください（スマホからはインストールできません）：
-
-| Host | 方法 |
-| --- | --- |
-| Desktop | プラグイン管理 → npm からインストール → `deepseek-harness-intelligent-ui` |
-| CLI `web` profile | `dsh plugin --profile web add -w deepseek-harness-intelligent-ui` |
-| `scripts/install.sh` | `INTELLIGENT_UI=1`（任意で `INTELLIGENT_UI_VERSION=...`） |
-
-インストール後、その Harness を再起動してください。スマホから設定を変更するには Intelligent UI 0.2.10 以降が必要です。
-
-### Android クライアント
+### ネイティブ Android クライアント
 
 複数のワークスペースで同時に接続して会話を続けられます。[Fei2411/DS-Bot](https://github.com/Fei2411/DS-Bot) を利用した **Bot モード**も搭載しています。
 
-[GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から最新の APK をダウンロードし、同じアカウントでログインして、Host とワークスペースを選ぶと会話を続けられます。
+[GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から最新の APK をダウンロードし、同じアカウントでログインすると Host が表示されます。
+
+## DSH Go — DeepSeek Harness をポケットに。スマートフォンで実行し、パソコンもリモート操作。
+
+[ccch1mneyyy/dsh-go](https://github.com/ccch1mneyyy/dsh-go) は ds-harness-remote プロトコルを内蔵しており、スマートフォン上で DeepSeek Harness を実行したり、パソコンにリモート接続したりできます。
+
+スマートフォンの DSH Go に ds-harness-remote プラグインをインストールすると、パソコンや Web からスマートフォン上の DSH にもリモート接続でき、Mobile Use をスムーズに利用できます。
 
 ### iOS クライアント
 
@@ -150,37 +121,33 @@ Android クライアントはこれらをネイティブ表示し、**プラグ�
 
 ## クイックスタート
 
-1. Harness のサイドバーから **Remote** を開きます。
-2. Server が提供する OAuth の QR コード方式、またはアカウントとパスワードでログインします。プロバイダー一覧は動的に取得するため、Server 側に連携が追加されてもプラグインの追加リリースは不要です。
-3. Host は、このパソコンの操作を許可した状態で起動します。リモートターミナルもデフォルトで有効です。Remote の詳細設定で無効にできます。
-4. 別のデバイスで DeepSeek Harness デスクトップ版、Remote Web、または Android クライアントを開き、同じアカウントでログインします。
-5. オンラインの Host を選び、既存のワークスペースを選択するか、リモートのディレクトリを参照して開きます。
+1. DeepSeek Harness のサイドバーから **Remote** を開きます。
+2. 知乎、GitHub、Google の認可ログイン、またはアカウントとパスワードでログインします。アカウント登録には招待コードが必要です。リポジトリの作者にメールで申請できます。
+3. 別のデバイスの DeepSeek Harness に同じプラグインをインストールし、手順 1〜2 と同じ方法でログインします。Remote Web、iOS、Android、DSH Go のクライアントなら、プラグインのインストールなしですぐに利用できます。
+4. オンラインの Host を選び、既存のワークスペースを選択するか、リモートのディレクトリを参照して開きます。
 
 デフォルトでは、本プロジェクトが運営する Server [https://dsh.r2049.cn](https://dsh.r2049.cn) を使用します。
 
-セルフホスティングには、このリポジトリの[最小構成 Server](apps/server/README.md) を利用できます。その Web ページはデバイスの状態表示のみを提供します。
+セルフホスティングには、このリポジトリの[最小構成 Server](apps/server/README.md) を利用できます。現在のバージョンには P2P 接続調整と Relay Server が含まれますが、ホスト型 Remote Web の全機能は提供しません。
 
 ## スクリーンショット
 
 ### Desktop
 
-このパソコンは **Allow control of this device** が有効な状態で起動し、Host として利用できます。リモートターミナルもデフォルトで有効ですが、Host の Remote 詳細設定で無効にできます。
-
-別のパソコンでオンラインの Host を選び、そのワークスペースを開きます。
+別のパソコンでオンラインの Host を選び、そのワークスペースを開きます。ネイティブの Harness UI で開かれ、ヘッダーに接続先の Host と暗号化接続の状態が表示されます。
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="オンラインの Host を表示する Remote ワークスペース選択画面" width="900">
+  <img src="docs/images/host-list.png" alt="オンラインの Host を表示する Remote ワークスペース選択画面" width="40%">
+  <img src="docs/images/remote.png" alt="暗号化されたリモート接続で利用する Harness の会話画面" width="40%">
 </p>
 
-ワークスペースはネイティブの Harness UI で開かれ、ヘッダーに接続先の Host と暗号化接続の状態が表示されます。
-
-<p align="center">
-  <img src="docs/images/remote.png" alt="暗号化されたリモート接続で利用する Harness の会話画面" width="900">
-</p>
+このパソコンから他の Host を操作できないようにするには、[https://dsh.r2049.cn/](https://dsh.r2049.cn/) のホスト一覧で「被操作専用（仅被控）」を有効にしてください。このデバイスからは同じアカウントの他のデバイスが見えなくなりますが、Web や他のクライアントからこのデバイスへのリモート接続は引き続き利用できます。
 
 ### Android
 
-テキストや画像のプロンプト送信、モデルの切り替え、対応するワークスペースのファイルやターミナルへのアクセスが可能です。UI はシステム言語に従い、英語、簡体字・繁体字中国語、日本語、スペイン語、ドイツ語、フランス語に対応しています。言語設定で「More ...」をタップすると、すべての言語が表示されます。詳細は [Android ガイド](apps/android/README.md)を参照してください。
+テキストや画像のプロンプト送信、モデルの切り替え、対応するワークスペースのファイルやターミナルへのアクセスが可能です。
+
+UI はシステム言語に従い、英語、簡体字・繁体字中国語、日本語、スペイン語、ドイツ語、フランス語に対応しています。言語設定で「More ...」をタップすると、すべての言語が表示されます。詳細は [Android ガイド](apps/android/README.md)を参照してください。
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="オンラインとオフラインのパソコンを表示する Android クライアント" width="30%">
@@ -202,21 +169,15 @@ Host 上の Remote プラグイン
 Harness のセッション／ワークスペース、または Codex のプロジェクト
 ```
 
-Harness Host に公開待ち受けポートは不要です。インターネット接続があれば、どこからでも接続できます。
+Harness Host に公開待ち受けポートは不要です。インターネット接続があれば、ds-harness-remote の双方向エンドツーエンド暗号化チャネルでどこからでも接続できます。
 
-Remote は双方向のエンドツーエンド暗号化チャネルで通信し、クライアントの接続先を選択した Host のネイティブ Harness API に切り替えます。
+クライアントの接続先を選択した Host のネイティブ Harness API に切り替えるため、元のワークスペース、ツール、権限確認の流れはそのパソコン上に残ります。
 
-元のワークスペース、ツール、権限確認の流れは、そのパソコン上に残ります。
-
-Host に現在登録されているすべての設定セクションも、公式の Harness 設定 API を通じてリモートから設定できます。
-
-認証情報の値は書き込み専用のままで、Host ローカルのドキュメントを開く操作などは公開されません。
+Host に登録されたすべての設定セクションも、公式の Harness 設定 API を通じてリモート設定でき、ほとんどのプラグイン設定に完全対応しています。
 
 ## 実験的な ACP ワークスペース
 
-Host はローカルの AI バックエンドを実行し、暗号化された Remote チャネルを通じてプロンプト、ストリーミング応答、承認要求を転送します。
-
-Desktop と Android は、ワークスペースとセッションをメモリ内で既存の UI に表示します。Harness のストレージには書き込みません。
+Host はローカルの ACP 対応 Agent を起動し、ds-harness-remote を通じてプロンプト、ストリーミング応答、承認要求を転送します。各 Agent は自身のワークスペースとセッションを使用し、DSH 向けのセッション変換のみを行います。Harness のストレージには書き込みません。
 
 対応バックエンド:
 
@@ -226,10 +187,11 @@ Desktop と Android は、ワークスペースとセッションをメモリ内
 - **Pi Agent（実験的）** — Host に `@earendil-works/pi-coding-agent` と `pi-acp` をインストールし、Pi のプロバイダーをローカルで設定してください。Remote 設定で明示的に無効化しない限り、Pi を自動検出して初期化します。ワークスペースは ACP の初期化に成功した場合にのみ利用できます。独立した ACP データプレーンを使用します。ツールは Host ユーザーの権限で実行されます。ツールごとの確認には Pi 拡張機能が必要で、デフォルトでは有効ではありません。
 - **OpenCode** — `opencode acp` を通じて接続し、ワークスペースの検出と履歴の復元に対応します。Host 起動時に CLI の対応オプションを確認し、ネイティブリスナー方式と stdio 専用方式の両方の ACP ビルドに対応します。Desktop／Android からのネイティブなセッションアーカイブには、認証付きループバック API が必要です。非対応ビルドではアーカイブを利用できないことを通知します。アーカイブ状態は OpenCode が保存し、履歴は保持されます。アーカイブ解除はまだ提供していません。
 - **Claude** — Host 上でローカル認証済みの `claude-agent-acp` を使用します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、テキストプロンプト、承認に対応します。画像入力と Files／Terminal への直接アクセスは利用できません。
+- **Hermes** — Hermes Agent 自身の ACP サーバー（`hermes acp`）を通じて接続します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、思考とツール出力のストリーミング、テキストプロンプト、承認、モデル選択に対応します。画像入力と Files／Terminal への直接アクセスは利用できません。
 
 セットアップとアダプター開発については、[Agent ワークスペース連携ガイド](docs/acp-integration.md)を参照してください。
 
-Desktop／Android での Cursor、Claude、Pi、OpenCode、AGY のモデル選択には、Host の実際のモデル一覧を使用し、バックエンドの確認を待って変更を反映します。
+Desktop／Android での Cursor、Claude、Hermes、Pi、OpenCode、AGY のモデル選択には Host の実際のモデル一覧を使用し、Agent の ACP インターフェースに従います。
 
 推論の強度（Effort）の選択肢は、バックエンドが実際に提供するものに従います。Cursor はセッションごとに別のプロセスを使用するため、モデルの変更が他の会話に影響することはありません。
 
@@ -257,8 +219,10 @@ WebRTC が利用できない場合や接続できない場合は、暗号化さ�
 
 ## セキュリティ
 
+- LAN・P2P 接続では、接続調整の指示を除き、データは Server を経由しません。TURN はオープンソースの coturn サーバーを使用し、Relay モードは WebSocket で転送します。
 - セッションの通信はエンドツーエンドで暗号化されます。サービスは暗号文を中継し、セッションの平文やデバイスの秘密鍵を保存しません。
 - 接続には、Server 上の所属関係と Host にローカル保存された接続相手の識別情報の両方による認可が必要です。
+- [Remote Tools の注入](docs/remote-tools.md)：オプションの `remote_*` セッションツールです。デフォルトで有効で、Remote の詳細設定から変更できます。
 - 対話型ターミナルは Host ローカルの `terminal.enabled` 設定を使用します（デフォルトは有効）。Agent の承認とは独立して、Host ユーザーの権限で動作します。
 - 汎用ツール RPC とリモートデスクトップは公開していません。
 - ワークスペース選択画面はフォルダーのみを一覧表示し、上限付きの読み取り専用ディレクトリメタデータを返します。
@@ -278,11 +242,11 @@ WebRTC が利用できない場合や接続できない場合は、暗号化さ�
 
 **どのマシンを Host にできますか？**
 
-Remote プラグインがインストールされ、ログイン済みの Harness インスタンスなら Host にできます。`web`、`desktop`、dsh-TUI の各プロファイルに対応し、コマンドラインからのインストールはデフォルトで `web` を使用します。インストーラーは `headless`、SDK、dsh-TUI プロファイルに対して Web サービスを自動作成しないため、dsh-TUI Host は自身でプロセスを管理します。
+Remote プラグインをインストールしてログインした Harness インスタンスなら、Windows、macOS、Linux、さらには DSH Go でも Harness Remote Host として利用できます。
 
 **複数のデバイスから同じ Host に同時接続できますか？**
 
-はい。複数のクライアントが同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
+現在、同時接続台数に制限はありません。複数のクライアントが同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
 
 **対応する Harness のバージョンは？**
 
@@ -309,6 +273,18 @@ systemd のシステムサービスを設定するためです。そのため Ho
 リモートデスクトップでは、パソコンの画面全体を取得してクライアント側で再現するため、上り・下りの帯域幅とパソコンの処理性能が必要です。
 
 本プロジェクトは、ネイティブの Harness 会話 UI に必要なメッセージのみを暗号化してリモートに送信します。汎用ツール RPC やデスクトップ操作は公開せず、権限と承認は Host 側に残ります。
+
+Tailscale、CF Turn、UU Remote も優れたソリューションです。用途に合わせてお選びください。
+
+## おすすめのプラグイン
+
+### Intelligent UI
+
+[Intelligent UI](https://github.com/dreamfarer-space/deepseek-harness-intelligent-ui) を使うと、モデルがカード・表・グラフ・フォームで回答できます。Android クライアントはこれらをネイティブ表示し、**プラグイン → Remote 対応** に表示されたプラグインのオン・オフやライブ設定を変更できます。
+
+### [Fei2411/DS-Bot](https://github.com/Fei2411/DS-Bot)
+
+DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにするプラグインです。自分で作成した bot と会話したり、作業したりできます。
 
 ## ドキュメント
 
