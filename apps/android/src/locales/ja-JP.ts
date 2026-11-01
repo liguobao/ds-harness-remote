@@ -439,6 +439,7 @@ const jaJP = {
   },
   messageActions: {
     quote: "引用", quoted: "引用済み", copy: "回答をコピーする", copied: "コピーされました", good: "良い回答", bad: "良くない回答", branch: "新しいチャットで分岐する",
+    askAgent: 'エージェントに質問', selectAll: 'すべて選択',
     unavailable: "このホストまたはメッセージはこのアクションをサポートしていません", failed: "アクションが完了していません", feedbackSaved: "ホストに保存されたフィードバック",
     usageUnavailable: "使用不可", timeUnavailable: "利用できない時間", usage: "実際の使用状況", input: "入力", output: "出力",
     cacheRead: "キャッシュ読み取り", cacheWrite: "キャッシュ書き込み", reasoning: "推論", total: "合計",

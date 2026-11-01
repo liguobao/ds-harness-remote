@@ -439,6 +439,7 @@ const enUS = {
   },
   messageActions: {
     quote: 'Quote', quoted: 'Quoted', copy: 'Copy answer', copied: 'Copied', good: 'Good response', bad: 'Bad response', branch: 'Branch in a new chat',
+    askAgent: 'Ask Agent', selectAll: 'Select All',
     unavailable: 'This Host or message does not support this action', failed: 'Action not completed', feedbackSaved: 'Feedback saved on the Host',
     usageUnavailable: 'Usage unavailable', timeUnavailable: 'Time unavailable', usage: 'Actual usage', input: 'Input', output: 'Output',
     cacheRead: 'Cache read', cacheWrite: 'Cache write', reasoning: 'Reasoning', total: 'Total',

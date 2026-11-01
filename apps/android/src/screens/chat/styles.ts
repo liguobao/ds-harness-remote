@@ -266,16 +266,52 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     effortRowLabel: { ...t.smallStrong, color: colors.ink },
     effortRowValue: { ...t.small, color: colors.muted, flexShrink: 1 },
     composerInputWrap: { position: 'relative' },
-    quoteTray: {
-      paddingHorizontal: spacing.md,
-      paddingTop: spacing.xs,
-      gap: spacing.xs,
-    },
-    composerQuoteItem: {
-      marginVertical: 0,
-    },
     messageQuotePreview: {
       marginBottom: spacing.xs,
+    },
+    assistantProseWrap: {
+      position: 'relative',
+    },
+    calloutBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.25)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.md,
+    },
+    calloutMenu: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      elevation: 8,
+      paddingHorizontal: spacing.xs,
+      height: 42,
+      maxWidth: 320,
+    },
+    calloutBtn: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: radius.sm,
+    },
+    calloutBtnPressed: {
+      backgroundColor: colors.surfaceStrong,
+    },
+    calloutBtnText: {
+      ...t.small,
+      color: colors.ink,
+      fontWeight: '600',
+    },
+    calloutDivider: {
+      width: StyleSheet.hairlineWidth,
+      height: 16,
+      backgroundColor: colors.separator,
     },
 
     composerInput: { ...t.body, fontSize: 16, color: colors.ink, minHeight: 44, maxHeight: 126, paddingVertical: 10, paddingHorizontal: spacing.sm, textAlignVertical: 'top' },

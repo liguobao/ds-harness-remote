@@ -41,6 +41,27 @@ export function formatQuoteText(text: string): string {
   return text.replace(/\r\n?/gu, '\n').split('\n').map(line => `> ${line}`).join('\n')
 }
 
+/**
+ * Format a quote text snippet for inline composer preview (Figure 3).
+ * Truncates cleanly and adds ellipsis if necessary.
+ */
+export function formatQuoteDraftSnippet(text: string, maxLength = 24): string {
+  const normalized = text.replace(/[\s]+/gu, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength)}...`
+}
+
+/**
+ * Format a token count as compact readable string (Figure 4).
+ * e.g. 20600 -> '20.6k', 850 -> '850'.
+ */
+export function formatTokens(count?: number): string {
+  if (count === undefined || !Number.isFinite(count) || count < 0) return ''
+  if (count < 1000) return `${count}`
+  const k = count / 1000
+  return `${k >= 100 ? Math.round(k) : k.toFixed(1)}k`
+}
+
 export interface ParsedMessageQuotes {
   readonly quotes: readonly string[]
   readonly body: string

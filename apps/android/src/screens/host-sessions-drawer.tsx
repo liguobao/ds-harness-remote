@@ -106,6 +106,7 @@ export function HostSessionsDrawer({
   onClose,
   onOpenWorkspaces,
   onSelect,
+  onNewSession,
   onOpenAutomationTasks,
   onOpenPlugins,
   inline = false,
@@ -115,6 +116,7 @@ export function HostSessionsDrawer({
   onClose: () => void
   onOpenWorkspaces: () => void
   onSelect: (session: RemoteSession) => Promise<void>
+  onNewSession?: () => Promise<void> | void
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
   inline?: boolean
@@ -334,20 +336,44 @@ export function HostSessionsDrawer({
     if (now - lastNewSessionTimeRef.current < 800) return
     if (creatingSessionRef.current || busy !== undefined || !connected) return
 
-    const targetWs = backendWorkspaces[0]?.workspaceId
-    const currentMessages = selected === undefined ? [] : useAppStore.getState().messages[selected.sessionId] ?? []
-    const isCurrentBlank = selected !== undefined && currentMessages.length === 0 && selected.blank !== false
-    const currentWs = workspaces.find(w => selected !== undefined && w.sessionIds.includes(selected.sessionId))
-    if (isCurrentBlank && (targetWs === undefined || currentWs?.workspaceId === targetWs)) {
-      onClose()
-      return
-    }
-
     creatingSessionRef.current = true
     lastNewSessionTimeRef.current = now
     try {
+      if (onNewSession) {
+        closeDrawer()
+        await onNewSession()
+        return
+      }
+
+      const isReusableBlank = (s: RemoteSession): boolean => {
+        if (s.blank === true) return true
+        if (s.blank === false) return false
+        const localMsgs = useAppStore.getState().messages[s.sessionId]
+        return Array.isArray(localMsgs) && localMsgs.length === 0
+      }
+
+      const isCurrentBlank = selected !== undefined && isReusableBlank(selected)
+      if (isCurrentBlank && (selected.backend ?? 'harness') === backend) {
+        closeDrawer()
+        return
+      }
+
+      const existingBlank = sessions.find((s: RemoteSession) =>
+        (s.backend ?? 'harness') === backend
+        && !archivedIds.includes(s.sessionId)
+        && isReusableBlank(s),
+      )
+      if (existingBlank) {
+        closeDrawer()
+        await onSelect(existingBlank)
+        return
+      }
+
+      const targetWs = workspaces.find((w: WorkspaceView) => (w.backend ?? 'harness') === backend)?.workspaceId ?? backendWorkspaces[0]?.workspaceId
       const ok = await createSession(targetWs, backend)
-      if (ok) onClose()
+      if (ok) closeDrawer()
+    } catch {
+      // guard unhandled promise rejections
     } finally {
       creatingSessionRef.current = false
     }
@@ -851,10 +877,9 @@ export function HostSessionsDrawer({
           accessibilityRole="button"
           accessibilityLabel={strings.sessions.newSession}
           onPress={() => void handleNewSession()}
-          style={({ pressed }) => [styles.newSessionBtn, pressed && styles.pressedFade]}
+          style={({ pressed }) => [styles.newSessionBtnRound, pressed && styles.pressedFade]}
         >
-          <Plus size={19} color={colors.onInverse} strokeWidth={2.2} />
-          <Text style={styles.newSessionText}>{strings.sessions.newSession}</Text>
+          <OfficialMenuIcons.newChat size={22} color={colors.onInverse} />
         </Pressable>
       </View>
 
@@ -1218,18 +1243,15 @@ const createStyles = (colors: ThemeColors) =>
 
     // Floating black pill, as in the reference sidebar.
     newSessionFloat: { position: 'absolute', right: spacing.lg, bottom: spacing.lg, zIndex: 20 },
-    newSessionBtn: {
-      flexDirection: 'row',
+    newSessionBtnRound: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
       alignItems: 'center',
       justifyContent: 'center',
-      gap: spacing.xs,
-      height: 52,
-      paddingHorizontal: spacing.xl,
-      borderRadius: radius.pill,
       backgroundColor: colors.inverse,
       ...brandGlowShadow(colors),
     },
-    newSessionText: { ...type.bodyStrong, color: colors.onInverse },
 
     navItem: {
       flexDirection: 'row',

@@ -5,13 +5,17 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
+  Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
@@ -273,6 +277,85 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
   )
 }
 
+function AssistantMessageCallout({ item }: { item: ChatMessage }) {
+  const styles = useThemedStyles(createStyles)
+  const [calloutOpen, setCalloutOpen] = useState(false)
+  const quote = useAppStore(state => state.quoteChatMessage)
+
+  const handleAskAgent = (textToQuote: string) => {
+    setCalloutOpen(false)
+    quote(textToQuote, item.sessionId)
+    AccessibilityInfo.announceForAccessibility(zhCN.messageActions.quoted)
+  }
+
+  const handleCopy = (textToCopy: string) => {
+    setCalloutOpen(false)
+    Clipboard.setStringAsync(textToCopy)
+      .then(() => {
+        AccessibilityInfo.announceForAccessibility(zhCN.messageActions.copied)
+      })
+      .catch(() => {
+        Alert.alert(zhCN.messageActions.failed, zhCN.messageActions.unavailable)
+      })
+  }
+
+  return (
+    <View style={styles.assistantProseWrap}>
+      <Pressable
+        onLongPress={() => {
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+          setCalloutOpen(true)
+        }}
+        delayLongPress={350}
+        accessibilityRole="button"
+        accessibilityLabel={item.text}
+        accessibilityHint={zhCN.messageActions.askAgent}
+        accessibilityActions={[{ name: 'activate', label: zhCN.messageActions.askAgent }]}
+        onAccessibilityAction={(event: { nativeEvent: { actionName: string } }) => {
+          if (event.nativeEvent.actionName === 'activate') {
+            handleAskAgent(item.text)
+          }
+        }}
+        style={styles.assistantText}
+      >
+        <NativeMarkdown text={item.text} />
+      </Pressable>
+
+      <Modal
+        visible={calloutOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCalloutOpen(false)}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.calloutBackdrop} onPress={() => setCalloutOpen(false)}>
+          <View style={styles.calloutMenu} onStartShouldSetResponder={() => true}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.messageActions.askAgent}
+              hitSlop={6}
+              style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
+              onPress={() => handleAskAgent(item.text)}
+            >
+              <Text numberOfLines={1} style={styles.calloutBtnText}>{zhCN.messageActions.askAgent}</Text>
+            </Pressable>
+            <View style={styles.calloutDivider} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.messageActions.copy}
+              hitSlop={6}
+              style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
+              onPress={() => handleCopy(item.text)}
+            >
+              <Text numberOfLines={1} style={styles.calloutBtnText}>{zhCN.messageActions.copy}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  )
+}
+
 function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -290,9 +373,7 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
         {showReasoning && <ReasoningDisclosure item={item} />}
         {showImages && <ChatImages images={item.images!} />}
         {showText && (
-          <View style={styles.assistantText}>
-            <NativeMarkdown text={item.text} />
-          </View>
+          <AssistantMessageCallout item={item} />
         )}
         {showStreaming && (
           <View style={styles.assistantText}>

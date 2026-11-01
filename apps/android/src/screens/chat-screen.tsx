@@ -124,7 +124,7 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
 
 import { browseScope, browseKey, useBrowseMemory, updateBrowseEntry } from '../services/browse-memory'
-import { QuotePreview, formatQuoteText } from '../ui/quote-preview'
+import { InlineQuotePreview, QuotePreview, formatQuoteText } from '../ui/quote-preview'
 const EMPTY_QUOTES: string[] = []
 const EMPTY_IMAGES: PromptImage[] = []
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
@@ -1682,6 +1682,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               backLabel={zhCN.chat.backToWorkspaces}
               onClose={() => Keyboard.dismiss()}
               onSelect={async next => { await openSession(next) }}
+              onNewSession={startNewSession}
               onOpenAutomationTasks={() => setAutomationTasksOpen(true)}
               onOpenPlugins={pluginsAvailable ? () => setPluginsOpen(true) : undefined}
             />
@@ -1775,22 +1776,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         {connected && (session.backend === undefined || session.backend === 'harness') && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
-        {quotes.length > 0 && (
-          <View style={styles.quoteTray} accessibilityLabel={zhCN.chat.quoteTrayLabel}>
-            {quotes.map((quoteText, index) => (
-              <QuotePreview
-                key={`composer-quote-${index}`}
-                text={quoteText}
-                removal={{
-                  label: zhCN.chat.removeQuote,
-                  onRemove: () => setQuotes(current => current.filter((_, i) => i !== index)),
-                }}
-                style={styles.composerQuoteItem}
-              />
-            ))}
-          </View>
-        )}
-
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -1861,6 +1846,13 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
           </Pressable>
         </View> : <View style={styles.composerCard}>
+          {quotes.map((quoteText: string, index: number) => (
+            <InlineQuotePreview
+              key={`inline-quote-${index}`}
+              text={quoteText}
+              onRemove={() => setQuotes(current => current.filter((_, i) => i !== index))}
+            />
+          ))}
           <View style={styles.composerInputWrap}>
             {/* Native attributed text keeps references blue without an opaque Android value layer. */}
             <TextInput
@@ -1875,6 +1867,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
               onChangeText={onChangeText}
               onSelectionChange={onSelectionChange}
+              onKeyPress={(event: { nativeEvent: { key: string } }) => {
+                if (event.nativeEvent.key === 'Backspace' && draft.length === 0 && quotes.length > 0) {
+                  setQuotes(current => current.slice(0, -1))
+                }
+              }}
 
               selection={selection}
               placeholder={session.backend === 'codex'
@@ -2168,6 +2165,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             setSessionsOpen(false)
           }
         }}
+        onNewSession={startNewSession}
       />}
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />

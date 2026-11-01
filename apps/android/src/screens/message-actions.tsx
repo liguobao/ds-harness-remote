@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { AccessibilityInfo, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
-import { Copy, GitBranch } from 'lucide-react-native'
-import { QuoteMarkIcon } from '../ui/quote-preview'
+import { Coins, Copy, GitBranch } from 'lucide-react-native'
 import type { ChatItemBase, ChatMessage } from '../types'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import { useTheme } from '../ui/theme-context'
+import { formatTokens } from '../ui/quote-helpers'
+
+export { formatTokens }
 
 export function messageClock(time?: number): string {
   if (time === undefined || !Number.isFinite(time) || time <= 0) return strings.messageActions.timeUnavailable
@@ -35,9 +37,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const supportsBranch = harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
   const time = messageTime(item)
   const fork = useAppStore(state => state.forkChatMessage)
-  const quote = useAppStore(state => state.quoteChatMessage)
   const [copied, setCopied] = useState(false)
-  const [quoted, setQuoted] = useState(false)
   const disabled = !connected || busy || item.streaming === true
   const report = () => Alert.alert(strings.messageActions.failed, useAppStore.getState().error ?? strings.messageActions.unavailable)
   const branch = async () => {
@@ -58,37 +58,101 @@ export function MessageActions({ item }: { item: ChatMessage }) {
     Alert.alert(strings.messageActions.usage, rows.filter(([, value]) => value !== undefined).map(([label, value]) => `${label}: ${value}`).join('\n'))
   }
   const user = item.role === 'user'
-  return <View style={[styles.row, user && styles.userRow]}>
-    {user && time !== undefined && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
-    <Pressable accessibilityRole="button" accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy} disabled={item.text.length === 0} style={styles.icon} onPress={() => {
-      void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
-    }}><Copy size={16} color={copied ? colors.primary : colors.muted} /></Pressable>
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={quoted ? strings.messageActions.quoted : strings.messageActions.quote}
-      disabled={item.text.length === 0}
-      style={styles.icon}
-      onPress={() => {
-        quote(item.text, item.sessionId)
-        setQuoted(true)
-        AccessibilityInfo.announceForAccessibility(strings.messageActions.quoted)
-        setTimeout(() => setQuoted(false), 1500)
-      }}
-    >
-      <QuoteMarkIcon size={14} color={quoted ? colors.primary : colors.muted} />
-    </Pressable>
-    {!user && !pending && <>
-    {supportsBranch && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>}
-    {backend !== 'codex' && item.usage !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage.totalTokens === undefined ? strings.messageActions.usage : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>}
-    {time !== undefined && <View style={styles.clockContainer}><Text style={[styles.clock, { color: colors.muted }]}>{messageClock(time)}</Text></View>}
-    </>}
-  </View>
+
+  if (user) {
+    return (
+      <View style={[styles.row, styles.userRow]}>
+        {time !== undefined && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
+          disabled={item.text.length === 0}
+          hitSlop={8}
+          style={styles.actionBtn}
+          onPress={() => {
+            void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
+          }}
+        >
+          <Copy size={14} color={copied ? colors.primary : colors.muted} strokeWidth={1.8} />
+        </Pressable>
+      </View>
+    )
+  }
+
+  const totalTokens = item.usage?.totalTokens
+  const usageLabel = totalTokens !== undefined ? `${strings.messageActions.usage} ${formatTokens(totalTokens)} tok` : strings.messageActions.usage
+
+  return (
+    <View style={styles.assistantRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
+        disabled={item.text.length === 0}
+        hitSlop={8}
+        style={styles.actionBtn}
+        onPress={() => {
+          void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
+        }}
+      >
+        <Copy size={14} color={copied ? colors.primary : colors.muted} strokeWidth={1.8} />
+      </Pressable>
+      {!pending && supportsBranch && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.messageActions.branch}
+          accessibilityState={{ disabled }}
+          disabled={disabled}
+          hitSlop={8}
+          style={styles.actionBtn}
+          onPress={() => void branch()}
+        >
+          <GitBranch size={14} color={colors.muted} strokeWidth={1.8} />
+        </Pressable>
+      )}
+      {!pending && backend !== 'codex' && item.usage !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.messageActions.usage}
+          hitSlop={8}
+          style={styles.usageBtn}
+          onPress={showUsage}
+        >
+          <Coins size={14} color={colors.muted} strokeWidth={1.8} />
+          <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
+            {usageLabel}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  )
 }
+
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 2, minHeight: 44 },
-  userRow: { justifyContent: 'flex-end', gap: 8 },
-  icon: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  clockContainer: { flexGrow: 1, flexShrink: 0, alignItems: 'flex-end' },
-  clock: { fontSize: 11 },
-  usage: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 32 },
+  userRow: { justifyContent: 'flex-end', gap: 8, paddingTop: 4 },
+  assistantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 32,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  actionBtn: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  usageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 28,
+    paddingHorizontal: 2,
+  },
+  usageText: {
+    fontSize: 12,
+    fontWeight: '400',
+  },
 })

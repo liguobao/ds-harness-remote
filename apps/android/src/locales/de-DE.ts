@@ -439,6 +439,7 @@ const deDE = {
   },
   messageActions: {
     quote: "Zitieren", quoted: "Zitiert", copy: "Antwort kopieren", copied: "Kopiert", good: "Gute Antwort", bad: "Schlechte Reaktion", branch: "Zweig in einem neuen Chat",
+    askAgent: 'Agent fragen', selectAll: 'Alles auswählen',
     unavailable: "Dieser Host oder diese Nachricht unterstützt diese Aktion nicht", failed: "Aktion nicht abgeschlossen", feedbackSaved: "Feedback auf dem Host gespeichert",
     usageUnavailable: "Nutzung nicht verfügbar", timeUnavailable: "Zeit nicht verfügbar", usage: "Tatsächliche Nutzung", input: "Eingang", output: "Ausgabe",
     cacheRead: "Cache gelesen", cacheWrite: "Cache-Schreiben", reasoning: "Argumentation", total: "Gesamt",

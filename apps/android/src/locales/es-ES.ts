@@ -439,6 +439,7 @@ const esES = {
   },
   messageActions: {
     quote: "Citar", quoted: "Citado", copy: "Copiar respuesta", copied: "Copiado", good: "Buena respuesta", bad: "Mala respuesta", branch: "Bifurcación en un nuevo chat",
+    askAgent: 'Preguntar al agente', selectAll: 'Seleccionar todo',
     unavailable: "Este Host o mensaje no soporta esta acción", failed: "Acción no completada", feedbackSaved: "Comentarios guardados en el anfitrión",
     usageUnavailable: "Uso no disponible", timeUnavailable: "Hora no disponible", usage: "Uso real", input: "Aporte", output: "Producción",
     cacheRead: "lectura de caché", cacheWrite: "escritura en caché", reasoning: "Razonamiento", total: "Total",

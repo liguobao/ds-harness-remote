@@ -439,6 +439,7 @@ const frFR = {
   },
   messageActions: {
     quote: "Citer", quoted: "Cité", copy: "Copier la réponse", copied: "Copié", good: "Bonne réponse", bad: "Mauvaise réponse", branch: "Brancher dans un nouveau chat",
+    askAgent: 'Demander à l\'agent', selectAll: 'Tout sélectionner',
     unavailable: "Cet hôte ou ce message ne prend pas en charge cette action", failed: "Action non terminée", feedbackSaved: "Commentaires enregistrés sur l'hôte",
     usageUnavailable: "Utilisation indisponible", timeUnavailable: "Temps indisponible", usage: "Utilisation réelle", input: "Saisir", output: "Sortir",
     cacheRead: "Lecture du cache", cacheWrite: "Écriture en cache", reasoning: "Raisonnement", total: "Total",
