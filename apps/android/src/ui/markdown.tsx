@@ -1,12 +1,17 @@
 import { ChatImageView } from './chat-image'
 import { chatImageWorkspacePath } from '../services/chat-image-loader'
-import { createContext, memo, useContext, useMemo, useRef, type ReactNode } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
-import MarkdownIt, { type Token } from 'markdown-it'
-import { radius, spacing, typeForDensity, type TypographyDensity } from './theme'
+import { createContext, memo, useContext, useMemo, useRef } from 'react'
+import type { ReactNode } from 'react'
+import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import Svg, { Path } from 'react-native-svg'
+import MarkdownIt from 'markdown-it'
+import type { Token } from 'markdown-it'
+import { radius, spacing, typeForDensity } from './theme'
+import type { TypographyDensity } from './theme'
 import { installMath } from './markdown-math'
 import { MathFormula } from './math-formula'
-import { type ThemeColors } from './theme-context'
+import { useTheme } from './theme-context'
+import type { ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { CodeBlockView } from './code-block'
 import { PresentedFileGroup } from './file-card'
@@ -21,6 +26,27 @@ import {
 } from './link-helpers'
 
 export { decodeSessionMentionUri, markdownFilePath, openSafeExternalUrl }
+
+import {
+  type MarkdownNode,
+  type TaskItemInfo,
+  type CalloutInfo,
+  getTaskInfo,
+  detectAndStripTask,
+  parseCalloutNode,
+  parseCallout,
+  headingStyle,
+  createMarkdownStyles,
+} from './markdown-helpers'
+
+export {
+  type TaskItemInfo,
+  type CalloutInfo,
+  getTaskInfo,
+  detectAndStripTask,
+  parseCalloutNode,
+  parseCallout,
+}
 
 // Remote messages are untrusted E2EE business content. Parse Markdown without
 // raw HTML and render native Text/View/SVG nodes: no WebView or remote image requests.
@@ -40,12 +66,6 @@ export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
   onLinkPress?: MarkdownLinkHandler; transformText?: (text: string) => string; children: ReactNode
 }) {
   return <markdownLinkContext.Provider value={onLinkPress}><markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider></markdownLinkContext.Provider>
-}
-
-interface MarkdownNode {
-  key: number
-  token: Token
-  children: MarkdownNode[]
 }
 
 /**
@@ -88,18 +108,19 @@ function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: s
 }
 
 export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
+  const { colors } = useTheme()
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
   const styles = useThemedStyles(createStyles)
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
-  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, '\n')), [source])
+  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, "\n")), [source])
   const referencedFiles = useMemo(() => extractReferencedFiles(nodes), [nodes])
 
   return (
     <View style={styles.container}>
-      {nodes.map(node => renderBlockCached(node, styles, onLinkPress))}
+      {nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))}
       <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />
     </View>
   )
@@ -172,13 +193,55 @@ function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: s
  * the incremental parse return their previous element, so React bails out of
  * the whole closed-block subtree instead of re-rendering it per chunk.
  */
-const renderedBlocks = new WeakMap<MarkdownNode, { styles: MarkdownStyles; onLinkPress: MarkdownLinkHandler | undefined; element: ReactNode }>()
+function CalloutCard({
+  callout,
+  children,
+  styles,
+  colors,
+  onLinkPress,
+}: {
+  callout: { type: CalloutInfo['type']; title: string }
+  children: MarkdownNode[]
+  styles: MarkdownStyles
+  colors: ThemeColors
+  onLinkPress?: MarkdownLinkHandler
+}) {
+  const isWarning = callout.type === 'WARNING' || callout.type === 'CAUTION'
+  const isTip = callout.type === 'TIP'
+  const accentColor = isWarning ? colors.warning : isTip ? colors.success : colors.primary
+  const bgColor = isWarning ? colors.warningSoft : colors.surfaceStrong
+  const borderColor = isWarning ? colors.warning : colors.border
 
-function renderBlockCached(node: MarkdownNode, styles: MarkdownStyles, onLinkPress: MarkdownLinkHandler | undefined): ReactNode {
+  return (
+    <View style={[styles.calloutCard, { backgroundColor: bgColor, borderColor }]}>
+      <View style={styles.calloutHeader}>
+        <View style={[styles.calloutIconWrap, { backgroundColor: accentColor }]}>
+          <Svg width={12} height={12} viewBox="0 0 16 16" fill="none">
+            {isWarning ? (
+              <Path d="M8 2L14.5 13.5H1.5L8 2ZM8 6.5V9.5M8 11.5V12" stroke="#FFFFFF" strokeWidth={1.8} strokeLinecap="round" />
+            ) : (
+              <Path d="M8 2C4.686 2 2 4.686 2 8s2.686 6 6 6 6-2.686 6-6-2.686-6-6-6zm0 3a1 1 0 110 2 1 1 0 010-2zm0 3v4" stroke="#FFFFFF" strokeWidth={1.8} strokeLinecap="round" />
+            )}
+          </Svg>
+        </View>
+        <Text style={[styles.calloutTitle, { color: colors.ink }]}>{callout.title}</Text>
+      </View>
+      {children.length > 0 && (
+        <View style={styles.calloutBodyContainer}>
+          {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
+        </View>
+      )}
+    </View>
+  )
+}
+
+const renderedBlocks = new WeakMap<MarkdownNode, { styles: MarkdownStyles; colors: ThemeColors; onLinkPress: MarkdownLinkHandler | undefined; element: ReactNode }>()
+
+function renderBlockCached(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress: MarkdownLinkHandler | undefined): ReactNode {
   const cached = renderedBlocks.get(node)
-  if (cached !== undefined && cached.styles === styles && cached.onLinkPress === onLinkPress) return cached.element
-  const element = renderBlock(node, styles, onLinkPress)
-  renderedBlocks.set(node, { styles, onLinkPress, element })
+  if (cached !== undefined && cached.styles === styles && cached.colors === colors && cached.onLinkPress === onLinkPress) return cached.element
+  const element = renderBlock(node, styles, colors, onLinkPress)
+  renderedBlocks.set(node, { styles, colors, onLinkPress, element })
   return element
 }
 
@@ -205,22 +268,35 @@ function extractBlockText(node: MarkdownNode): string {
   return node.children.map(extractBlockText).filter(Boolean).join('\n')
 }
 
-function renderBlock(node: MarkdownNode, styles: MarkdownStyles, onLinkPress?: MarkdownLinkHandler): ReactNode {
+function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode {
   const { token, key, children } = node
   if (token.type === 'math_block') return <MathFormula key={key} source={token.content} display />
   if (token.type === 'paragraph_open') {
-    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
+    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
   }
   if (token.type === 'heading_open') {
-    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
+    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
   }
   if (token.type === 'fence' || token.type === 'code_block') {
     const lang = token.type === 'fence' ? token.info.trim().split(/\s+/u)[0] : undefined
     return <CodeBlockView key={key} code={token.content} language={lang} />
   }
   if (token.type === 'blockquote_open') {
+    const callout = parseCalloutNode(node)
+    if (callout) {
+      return (
+        <CalloutCard
+          key={key}
+          callout={callout}
+          children={callout.children}
+          styles={styles}
+          colors={colors}
+          onLinkPress={onLinkPress}
+        />
+      )
+    }
     const rawQuote = children.map(extractBlockText).filter(Boolean).join('\n').trim()
-    if (rawQuote.length > 0) {
+    if (rawQuote.startsWith('“') || rawQuote.startsWith('"')) {
       return (
         <QuotePreview
           key={key}
@@ -229,48 +305,90 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, onLinkPress?: M
         />
       )
     }
-    return <View key={key} style={styles.blockquote}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+    return (
+      <View key={key} style={styles.blockquote}>
+        {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
+      </View>
+    )
   }
   if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') {
     const ordered = token.type === 'ordered_list_open'
     const start = Number(token.attrGet('start') ?? '1')
     return (
       <View key={key} style={styles.list}>
-        {children.map((child, index) => renderListItem(child, styles, ordered ? start + index : undefined, onLinkPress))}
+        {children.map((child, index) => renderListItem(child, styles, colors, ordered ? start + index : undefined, onLinkPress))}
       </View>
     )
   }
   if (token.type === 'hr') return <View key={key} style={styles.rule} />
-  if (token.type === 'table_open') return <View key={key} style={styles.table}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
-  if (token.type === 'thead_open' || token.type === 'tbody_open') return <View key={key}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
-  if (token.type === 'tr_open') return <View key={key} style={styles.tableRow}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+  if (token.type === 'table_open') {
+    return (
+      <ScrollView
+        key={key}
+        horizontal
+        nestedScrollEnabled
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.tableScrollContent}
+        style={styles.tableContainer}
+      >
+        <View style={styles.table}>
+          {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
+        </View>
+      </ScrollView>
+    )
+  }
+  if (token.type === 'thead_open' || token.type === 'tbody_open') return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
+  if (token.type === 'tr_open') return <View key={key} style={styles.tableRow}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
   if (token.type === 'th_open' || token.type === 'td_open') {
     return (
       <View key={key} style={[styles.tableCell, token.type === 'th_open' && styles.tableHeader]}>
-        <Text selectable style={token.type === 'th_open' ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
+        <Text selectable style={token.type === 'th_open' ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
       </View>
     )
   }
   if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`, onLinkPress)}</Text>
-  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
   if (token.content.length > 0) return <Text key={key} selectable style={styles.paragraph}>{token.content}</Text>
   return null
 }
 
-function renderListItem(node: MarkdownNode, styles: MarkdownStyles, number?: number, onLinkPress?: MarkdownLinkHandler): ReactNode {
-  if (node.token.type !== 'list_item_open') return renderBlock(node, styles, onLinkPress)
+function renderListItem(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, number?: number, onLinkPress?: MarkdownLinkHandler): ReactNode {
+  if (node.token.type !== 'list_item_open') return renderBlock(node, styles, colors, onLinkPress)
+  const task = getTaskInfo(node)
   return (
     <View key={node.key} style={styles.listItem}>
-      <Text style={styles.listMarker}>{number === undefined ? '•' : `${number}.`}</Text>
-      <View style={styles.listContent}>{node.children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+      {task.isTask ? (
+        task.checked ? (
+          <View
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: true, disabled: true }}
+            accessibilityLabel="已完成"
+            style={[styles.checkboxChecked, { backgroundColor: colors.primary }]}
+          >
+            <Svg width={10} height={10} viewBox="0 0 16 16" fill="none">
+              <Path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#FFFFFF" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </View>
+        ) : (
+          <View
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: false, disabled: true }}
+            accessibilityLabel="未完成"
+            style={[styles.checkboxUnchecked, { borderColor: colors.subtle }]}
+          />
+        )
+      ) : (
+        <Text style={styles.listMarker}>{number === undefined ? '•' : `${number}.`}</Text>
+      )}
+      <View style={styles.listContent}>{task.children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
     </View>
   )
 }
 
-function renderInlineChildren(nodes: MarkdownNode[], styles: MarkdownStyles, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
+function renderInlineChildren(nodes: MarkdownNode[], styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
   return nodes.flatMap(node => node.token.type === 'inline'
     ? renderInline(node.token.children ?? [], styles, `inline:${node.key}`, onLinkPress)
-    : [renderBlock(node, styles, onLinkPress)])
+    : [renderBlock(node, styles, colors, onLinkPress)])
 }
 
 function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
@@ -343,45 +461,4 @@ function findClosingToken(tokens: Token[], opening: number): number {
   return -1
 }
 
-function headingStyle(tag: string, styles: MarkdownStyles) {
-  if (tag === 'h1') return styles.h1
-  if (tag === 'h2') return styles.h2
-  if (tag === 'h3') return styles.h3
-  return styles.h4
-}
-
-export function createStyles(colors: ThemeColors, density: TypographyDensity = 'compact') {
-  const isCompact = density === 'compact'
-  const t = typeForDensity(density)
-  return StyleSheet.create({
-    container: { alignSelf: 'stretch' },
-    paragraph: { ...t.body, color: colors.ink, marginBottom: isCompact ? 4 : 6 },
-    heading: { color: colors.ink, fontWeight: '700', marginTop: isCompact ? 4 : 6, marginBottom: isCompact ? 6 : 8 },
-    h1: isCompact ? { fontSize: 20, lineHeight: 25, includeFontPadding: false } : { fontSize: 22, lineHeight: 28, includeFontPadding: false },
-    h2: isCompact ? { fontSize: 18, lineHeight: 23, includeFontPadding: false } : { fontSize: 19, lineHeight: 25, includeFontPadding: false },
-    h3: isCompact ? { fontSize: 16, lineHeight: 21, includeFontPadding: false } : { fontSize: 17, lineHeight: 23, includeFontPadding: false },
-    h4: isCompact ? { fontSize: 14, lineHeight: 19, includeFontPadding: false } : { fontSize: 15, lineHeight: 21, includeFontPadding: false },
-    strong: { fontWeight: '700' },
-    emphasis: { fontStyle: 'italic' },
-    strike: { textDecorationLine: 'line-through' },
-    link: { color: colors.primary, textDecorationLine: 'underline' },
-    inlineCode: { fontFamily: 'monospace', fontSize: isCompact ? 12.5 : 13.5, color: colors.ink, backgroundColor: colors.surfaceStrong, paddingHorizontal: 3, borderRadius: 3, includeFontPadding: false },
-    mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 4, paddingHorizontal: 4 },
-    imageAlt: { color: colors.muted, fontStyle: 'italic' },
-    codeBlock: { alignSelf: 'stretch', borderRadius: isCompact ? radius.sm : radius.md, backgroundColor: colors.surface, padding: isCompact ? 8 : 10, marginBottom: isCompact ? 5 : 8 },
-    code: { fontFamily: 'monospace', fontSize: isCompact ? 12 : 13, lineHeight: isCompact ? 17 : 18.5, color: colors.ink, includeFontPadding: false },
-    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: isCompact ? 8 : 10, marginBottom: isCompact ? 5 : 8 },
-    blockquotePreview: { backgroundColor: colors.surfaceStrong, borderColor: 'transparent', borderLeftWidth: 3, borderLeftColor: colors.primary, borderRadius: 6, marginVertical: isCompact ? 4 : 6 },
-    list: { gap: isCompact ? 1 : 2, marginBottom: isCompact ? 5 : 8 },
-    listItem: { flexDirection: 'row', alignItems: 'flex-start' },
-    listMarker: { ...t.body, color: colors.muted, width: isCompact ? 22 : 26 },
-    listContent: { flex: 1 },
-    rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: isCompact ? spacing.sm : spacing.md },
-    table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, overflow: 'hidden', marginBottom: isCompact ? 5 : 8 },
-    tableRow: { flexDirection: 'row' },
-    tableCell: { flex: 1, padding: isCompact ? 4 : 6, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-    tableHeader: { backgroundColor: colors.surfaceStrong },
-    tableHeaderText: { ...t.smallStrong, color: colors.ink },
-    tableText: { ...t.small, color: colors.ink },
-  })
-}
+export const createStyles = createMarkdownStyles
