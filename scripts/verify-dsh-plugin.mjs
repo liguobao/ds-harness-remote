@@ -27,7 +27,9 @@ assert.ok(
 assert.equal(pluginManifest.description, manifest.description, 'root and npm package descriptions must stay unified')
 assert.deepEqual(pluginManifest.keywords, manifest.keywords, 'root and npm package keywords must stay unified')
 assert.equal(pluginManifest.homepage, manifest.homepage, 'root and npm package homepages must stay unified')
-assert.deepEqual(pluginManifest.repository, manifest.repository, 'root and npm package repositories must stay unified')
+const { directory: pluginRepositoryDirectory, ...pluginRepository } = pluginManifest.repository
+assert.deepEqual(pluginRepository, manifest.repository, 'root and npm package repositories must stay unified')
+assert.equal(pluginRepositoryDirectory, 'packages/plugin', 'npm package must identify its source directory within the repository')
 assert.deepEqual(pluginManifest.bugs, manifest.bugs, 'root and npm package issue trackers must stay unified')
 assert.equal(pluginManifest.author, manifest.author, 'root and npm package authors must stay unified')
 assert.equal(pluginManifest.license, manifest.license, 'root and npm package licenses must stay unified')

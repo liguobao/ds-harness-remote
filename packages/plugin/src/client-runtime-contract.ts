@@ -29,6 +29,7 @@ export interface RemoteHostFeatures {
   pi?: boolean
   opencode: boolean
   claude?: boolean
+  hermes?: boolean
   acpModelLoadsSession?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
   pluginRoute: boolean
@@ -87,7 +88,7 @@ export interface RemoteWorkspaceView {
 export interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
   sessionId?: string
 }
 

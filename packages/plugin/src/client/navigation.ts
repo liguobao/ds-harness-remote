@@ -14,7 +14,7 @@ export function storedWorkspaceSelection(): RemoteWorkspaceSelection | undefined
       && value.backend !== 'cursor'
       && value.backend !== 'antigravity'
       && value.backend !== 'pi'
-      && value.backend !== 'claude' && value.backend !== 'opencode') throw new Error('invalid')
+      && value.backend !== 'claude' && value.backend !== 'opencode' && value.backend !== 'hermes') throw new Error('invalid')
     if (value.sessionId !== undefined && typeof value.sessionId !== 'string') throw new Error('invalid')
     return value as RemoteWorkspaceSelection
   } catch {

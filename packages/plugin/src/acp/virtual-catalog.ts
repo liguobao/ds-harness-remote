@@ -6,9 +6,57 @@ const AGY_WORKSPACE_PREFIX = 'antigravity:cwd:'
 
 const OPENCODE_WORKSPACE_PREFIX = 'opencode:cwd:'
 
+const CLAUDE_WORKSPACE_PREFIX = 'claude:cwd:'
+
+const HERMES_WORKSPACE_PREFIX = 'hermes:cwd:'
+
 const CURSOR_PROVIDER = 'cursor'
 
 const OPENCODE_PROVIDER = 'opencode'
+
+/** Every ACP backend the Host can project into the Client's virtual Harness. */
+export type AcpCatalogBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+
+const WORKSPACE_PREFIXES: Record<AcpCatalogBackend, string> = {
+  cursor: CURSOR_WORKSPACE_PREFIX,
+  antigravity: AGY_WORKSPACE_PREFIX,
+  pi: 'pi:cwd:',
+  opencode: OPENCODE_WORKSPACE_PREFIX,
+  claude: CLAUDE_WORKSPACE_PREFIX,
+  hermes: HERMES_WORKSPACE_PREFIX,
+}
+
+const BACKEND_LABELS: Record<AcpCatalogBackend, string> = {
+  cursor: 'Cursor',
+  antigravity: 'Antigravity',
+  pi: 'Pi',
+  opencode: 'OpenCode',
+  claude: 'Claude',
+  hermes: 'Hermes',
+}
+
+const BACKEND_PROVIDERS: Record<AcpCatalogBackend, string> = {
+  cursor: CURSOR_PROVIDER,
+  antigravity: 'antigravity',
+  pi: 'pi',
+  opencode: OPENCODE_PROVIDER,
+  claude: 'claude',
+  hermes: 'hermes',
+}
+
+export function acpWorkspacePrefix(backend: AcpCatalogBackend): string {
+  return WORKSPACE_PREFIXES[backend]
+}
+
+export function acpBackendLabel(backend: AcpCatalogBackend): string {
+  return BACKEND_LABELS[backend]
+}
+
+export function acpBackendProvider(backend: AcpCatalogBackend): string {
+  return BACKEND_PROVIDERS[backend]
+}
+
+export const ACP_CATALOG_BACKENDS: readonly AcpCatalogBackend[] = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes']
 
 export interface AcpVirtualWorkspaceView {
   workspaceId: string
@@ -21,13 +69,12 @@ export interface AcpVirtualWorkspaceView {
 }
 
 /** Build a backend-scoped virtual Workspace id for an absolute Host cwd. */
-export function acpCwdWorkspaceId(path: string, backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude"): string {
-  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode" && backend !== "claude") throw new Error("An explicit ACP workspace backend is required.")
-  const prefix = backend === "claude" ? "claude:cwd:" : backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
-  return `${prefix}${encodeURIComponent(path)}`
+export function acpCwdWorkspaceId(path: string, backend: AcpCatalogBackend): string {
+  if (!(backend in WORKSPACE_PREFIXES)) throw new Error("An explicit ACP workspace backend is required.")
+  return `${acpWorkspacePrefix(backend)}${encodeURIComponent(path)}`
 }
 
-export function createAcpWorkspaceView(path: string, backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude", title?: string): AcpVirtualWorkspaceView {
+export function createAcpWorkspaceView(path: string, backend: AcpCatalogBackend, title?: string): AcpVirtualWorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
@@ -44,7 +91,7 @@ export function createAcpWorkspaceView(path: string, backend: "cursor" | "antigr
 /** Discover ACP virtual workspaces visible on the Host. */
 export async function discoverAcpVirtualWorkspaces(
   client: AcpClientLike,
-  backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude",
+  backend: AcpCatalogBackend,
   signal?: AbortSignal,
 ): Promise<AcpVirtualWorkspaceView[]> {
   if (client?.listWorkspaces !== undefined) {
@@ -60,15 +107,15 @@ export async function discoverAcpVirtualWorkspaces(
           })
       }
     } catch (error) {
-      if (backend === 'pi' || backend === 'claude') throw error
+      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
       // Discovery is optional for legacy backends; an unavailable Host returns no workspaces.
     }
   }
   return []
 }
 
-export function recreateWorkspaceFromId(workspaceId: string, backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude"): AcpVirtualWorkspaceView | undefined {
-  const prefix = backend === "claude" ? "claude:cwd:" : backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
+export function recreateWorkspaceFromId(workspaceId: string, backend: AcpCatalogBackend): AcpVirtualWorkspaceView | undefined {
+  const prefix = acpWorkspacePrefix(backend)
   if (!workspaceId.startsWith(prefix)) return undefined
   try {
     const path = decodeURIComponent(workspaceId.slice(prefix.length))
@@ -106,14 +153,14 @@ export interface AcpModelView {
   }
 }
 
-export function modelCatalog(backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude" = "cursor"): {
+export function modelCatalog(backend: AcpCatalogBackend = "cursor"): {
   default: AcpModelSelection
   routableProviders: string[]
   groups: Array<{ id: string; name: string; models: AcpModelView[] }>
   failures: Array<{ id: string; name: string; message: string }>
 } {
-  const provider = backend === 'claude' ? 'claude' : backend === 'pi' ? 'pi' : backend === 'opencode' ? OPENCODE_PROVIDER : backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
-  const name = backend === 'claude' ? 'Claude' : backend === 'pi' ? 'Pi' : backend === 'opencode' ? 'OpenCode' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  const provider = acpBackendProvider(backend)
+  const name = acpBackendLabel(backend)
   const models: AcpModelView[] = []
   const defaultModel = models[0]?.id ?? 'host-settings'
   return {

@@ -87,7 +87,7 @@ export class ClientModeRuntime {
   private readonly codexOpenedSessions = new Map<string, string>()
   private codexOpenGeneration = 0
   private cursorVirtual?: AcpVirtualHarness
-  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor'
+  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor'
   private readonly gatewaySwitch: TypertGatewaySwitch
   private readonly codexStreams = new Map<string, CodexLoopbackStream>()
   private connectionProgress?: ConnectionProgressState
@@ -461,7 +461,7 @@ export class ClientModeRuntime {
       if (remote.features.codex) {
         await read('codex', () => discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), activeSignal))
       }
-      for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const) {
+      for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const) {
         if (!remote.features[backend]) continue
         // Use the existing ACP catalog RPC directly: optional UI discovery swallows
         // backend errors, whereas a tool must distinguish unavailable from empty.
@@ -629,7 +629,7 @@ export class ClientModeRuntime {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal)
   }
 
-  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
+  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     await this.refreshRemoteFeatures(remote)
     if (!remote.features[backend]) {
@@ -647,7 +647,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     workspaceId: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     await this.refreshRemoteFeatures(remote)
@@ -695,7 +695,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     path: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
     if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', `A ${backend} project directory is required.`)

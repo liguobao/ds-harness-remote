@@ -342,7 +342,7 @@ export class PluginControlRuntime {
   private async removeAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const id = record(payload).id
-    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
+    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
     const current = resolveConfig(this.settings.get())
     const backends = (current.acp?.backends ?? []).filter(item => item.id !== id)
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))

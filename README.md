@@ -235,10 +235,11 @@ Supported backends:
 
 - **OpenCode** — connected through `opencode acp`, with workspace discovery and history recovery. Host startup checks the CLI's supported options, accepting both native-listener and stdio-only ACP builds. Native session archiving on Desktop/Android requires the authenticated loopback API; builds without it report archiving unavailable. Archive state is saved by OpenCode; history is retained. Unarchive is not yet exposed.
 - **Claude** — uses a locally authorized `claude-agent-acp` on the Host; enable it in Remote settings. Desktop/Android support workspaces, history, text prompts and approvals. Image input and direct Files/Terminal access are not available.
+- **Hermes** — runs Nous Research's Hermes Agent through its own ACP server (`hermes acp`); opt-in in Remote settings. Desktop/Android support workspaces, history, streamed thinking and tool output, text prompts, approvals and model selection. Image input and direct Files/Terminal access are not available.
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
 
-Model selection for Cursor, Claude, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog and waits for backend confirmation.
+Model selection for Cursor, Claude, Hermes, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog and waits for backend confirmation.
 
 Reasoning effort options depend on what the backend provides. Cursor uses a separate process per session, so model changes do not affect other conversations.
 
@@ -340,6 +341,7 @@ This project encrypts and transmits only the messages needed by the native Harne
 
 ## Links
 
+- Friendly link: [DSH Go](https://github.com/ccch1mneyyy/dsh-go) — DeepSeek Harness in your pocket: run it locally on your phone or control your computer remotely. Remote integration is available.
 - Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
 - Friendly link: [LINUX DO](https://linux.do/)
 - Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)

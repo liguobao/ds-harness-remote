@@ -242,6 +242,7 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [ ] 完善 `connecting -> direct -> relay -> reconnecting -> offline` UI 状态机和网络切换恢复
 - [ ] 核对 direct 超时和 Relay fallback。验证切换不重复提交 Typert mutation。
 - [ ] 核对 Desktop 重连后的官方 stream 与 history baseline 恢复。补齐缺失路径。
+  - WSL 模拟已覆盖旧 stream 中断、新连接重订阅，以及从 Host 读取新的快照和历史。已修复关闭后清理 RPC 等待超时。真实 Desktop 验收仍待完成。
 - [ ] 验证休眠唤醒、Wi-Fi/蜂窝切换与高延迟 Relay。检查 Prompt 和审批不重放。
 
 ## P1：跨仓库 Server 联调（已完成）

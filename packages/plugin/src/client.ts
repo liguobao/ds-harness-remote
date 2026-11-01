@@ -228,7 +228,7 @@ window.__ModuleLoader__.load({
         }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
           ? React.createElement('span', null, label)
           : null),
-        open ? renderBodyPortal(portal, React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
+        open ? renderBodyPortal(portal, React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation', onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setOpen(false) } },
           React.createElement('section', {
             className: 'dshRemoteDialog',
             role: 'dialog',
@@ -411,7 +411,7 @@ window.__ModuleLoader__.load({
           if (!workspacesReady(workspaceSnapshot)
             || !workspaceSnapshot.items.some(workspace => workspace.workspaceId === pending.workspaceId)) return
           const sessionSnapshot = ctx.sessions.list.getSnapshot()
-          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity' || pending.backend === 'pi' || pending.backend === 'opencode' || pending.backend === 'claude'
+          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity' || pending.backend === 'pi' || pending.backend === 'opencode' || pending.backend === 'claude' || pending.backend === 'hermes'
           if (isVirtualBackend && pending.sessionId !== undefined
             && sessionSnapshot.phase !== 'ready') return
 

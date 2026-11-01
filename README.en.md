@@ -340,6 +340,7 @@ This project encrypts and transmits only the messages needed by the native Harne
 
 ## Links
 
+- Friendly link: [DSH Go](https://github.com/ccch1mneyyy/dsh-go) — DeepSeek Harness in your pocket: run it locally on your phone or control your computer remotely. Remote integration is available.
 - Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote integration is available; see the [dsh-TUI Remote guide](docs/dsh-tui.md).
 - Friendly link: [LINUX DO](https://linux.do/)
 - Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)

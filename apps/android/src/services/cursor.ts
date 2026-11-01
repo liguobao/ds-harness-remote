@@ -59,6 +59,10 @@ export function claudeWorkspaceId(path: string): string {
   return `claude:cwd:${encodeURIComponent(path)}`
 }
 
+export function hermesWorkspaceId(path: string): string {
+  return `hermes:cwd:${encodeURIComponent(path)}`
+}
+
 export function opencodeWorkspacePath(workspaceId: string): string | undefined {
   if (!workspaceId.startsWith('opencode:cwd:')) return undefined
   try {
@@ -144,6 +148,7 @@ export function cursorNativeId(session: RemoteSession): string {
   if (session.sessionId.startsWith('pi:')) return session.sessionId.slice('pi:'.length)
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
   if (session.sessionId.startsWith('claude:')) return session.sessionId.slice('claude:'.length)
+  if (session.sessionId.startsWith('hermes:')) return session.sessionId.slice('hermes:'.length)
   if (session.sessionId.startsWith('opencode:')) return session.sessionId.slice('opencode:'.length)
   return session.sessionId
 }
@@ -227,6 +232,40 @@ export function createOpencodeSession(input: {
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
       values: { backend: 'opencode' },
+    },
+  }
+}
+
+export function createHermesWorkspace(path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: hermesWorkspaceId(path),
+    backend: 'hermes',
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createHermesSession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return {
+    sessionId: `hermes:${input.acpSessionId}`,
+    backend: 'hermes',
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: { backend: 'hermes' },
     },
   }
 }

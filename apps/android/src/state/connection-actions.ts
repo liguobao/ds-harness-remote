@@ -48,6 +48,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
+        hermesAvailable: false,
         workspaceCatalog: undefined,
         workspaces: sameHost ? state.workspaces : cached?.workspaces ?? [],
         sessions: sameHost ? state.sessions : cached?.sessions ?? [],
@@ -115,6 +116,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   piAvailable: false,
                   opencodeAvailable: false,
                   claudeAvailable: false,
+                  hermesAvailable: false,
                   busyAction: undefined,
                 })
               }
@@ -136,6 +138,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: runtime.connection.hasPi(),
           opencodeAvailable: runtime.connection.hasOpencode(),
           claudeAvailable: runtime.connection.hasClaude(),
+        hermesAvailable: runtime.connection.hasHermes(),
           connectionStage: 'ready',
           connectionNetworkDetails,
           lastConnectedDeviceId: device.deviceId,
@@ -162,6 +165,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: false,
           opencodeAvailable: false,
           claudeAvailable: false,
+          hermesAvailable: false,
           error: message,
         })
         return false
@@ -257,6 +261,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
+        hermesAvailable: false,
         workspaceCatalog: undefined,
         workspaces: [],
         archivedSessionIds: [],
@@ -291,6 +296,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: false,
           opencodeAvailable: false,
           claudeAvailable: false,
+          hermesAvailable: false,
         })
       }
     },

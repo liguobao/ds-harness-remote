@@ -239,7 +239,7 @@ export function saveHostSessionsDrawerGroup(deviceId: string, groupKey: string, 
 export async function loadWorkspaceBackend(deviceId: string): Promise<AgentBackend | undefined> {
   const stored = await readJson<{ byDevice?: Record<string, unknown> }>(KEYS.workspaceBackends)
   const value = stored?.byDevice?.[deviceId]
-  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' || value === 'opencode' || value === 'claude' ? value : undefined
+  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes' ? value : undefined
 }
 
 let workspaceBackendsWrite = Promise.resolve()

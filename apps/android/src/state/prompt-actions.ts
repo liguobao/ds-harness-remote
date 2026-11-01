@@ -124,7 +124,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
                 : state.selectedSession,
             }))
           }
-        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
+        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
           if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
           if (session.backend === 'pi' && images.length > 0) throw new Error(zhCN.runtime.piTextOnly)
           // Always re-bind the ACP stream on the current RemoteClientCore before
@@ -141,7 +141,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           }))
           // Host may return immediately with stopReason=in_progress so frames can
           // interleave; keep running until prompt_completed / failure.
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'opencode'
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
             ? runtime.connection.requireOpencode()
             : session.backend === 'pi'
               ? runtime.connection.requirePi()
@@ -211,7 +211,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           // Only a deterministic failure may claim the agent is idle again; an
           // unconfirmed outcome leaves `running` untouched (the prompt may have
           // started on the Host).
-          ...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') && !unconfirmed ? {
+          ...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') && !unconfirmed ? {
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
             selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
           } : {}),
@@ -289,8 +289,8 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           }
           if (turnId === undefined) throw new Error(zhCN.runtime.codexTurnUnavailable)
           await client.interrupt(threadId, turnId)
-        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'opencode'
+        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
             ? runtime.connection.requireOpencode()
             : session.backend === 'pi'
               ? runtime.connection.requirePi()
@@ -323,8 +323,8 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
         if (session?.backend === 'codex') {
           await runtime.connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
-        } else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'opencode'
+        } else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude' || session?.backend === 'hermes') {
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
             ? runtime.connection.requireOpencode()
             : session.backend === 'pi'
               ? runtime.connection.requirePi()

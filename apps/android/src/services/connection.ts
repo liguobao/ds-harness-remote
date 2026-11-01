@@ -203,7 +203,7 @@ export class AndroidRemoteConnection {
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
     this.acpBackends.clear()
-    for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const) {
+    for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const) {
       if (remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, backend, `agent.acp.${backend}.v1`)) {
         this.acpBackends.add(backend)
       }
@@ -261,6 +261,7 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('pi:')) return new AcpSessionTools(this.requirePi(), 'pi')
     if (sessionId?.startsWith('antigravity:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'antigravity')
     if (sessionId?.startsWith('claude:')) throw new Error('Claude workspace tools are not available.')
+    if (sessionId?.startsWith('hermes:')) throw new Error('Hermes workspace tools are not available.')
     if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
@@ -316,6 +317,16 @@ export class AndroidRemoteConnection {
 
   hasClaude(): boolean {
     return this.cursor !== undefined && this.acpBackends.has('claude')
+  }
+
+  /** Optional Agent ACP client (Hermes Agent UI backend); available when the Host advertises agent.acp.hermes.v1. */
+  requireHermes(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('hermes')) throw new Error(strings.runtime.hermesUnavailable)
+    return this.cursor
+  }
+
+  hasHermes(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('hermes')
   }
 
   getStats() {
