@@ -83,8 +83,8 @@ assert.match(
 )
 assert.match(
   patch,
-  /inject:\s*\[settings, typertGateway, commands, tuiCommandTrees, tuiScenes\]/,
-  'root patch must expose dsh-TUI command and scene services to the Host plugin',
+  /inject:\s*\[settings, typertGateway, commands\]/,
+  'root patch must require only the dsh-TUI command service; optional UI seams must not block activation',
 )
 
 const rootHostEntry = readFileSync(join(root, 'index.js'), 'utf8')

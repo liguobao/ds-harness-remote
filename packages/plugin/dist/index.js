@@ -106242,8 +106242,6 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
   const commands = tuiContext.get("commands", false);
   if (commands === void 0) return;
   const pluginHost = tuiContext.get("tuiPluginHost", false);
-  const trees = tuiContext.get("tuiCommandTrees", false);
-  const scenes = tuiContext.get("tuiScenes", false);
   const login2 = new RemoteLoginController(resolveTarget);
   const LoginScene = createRemoteLoginScene(login2);
   const StatusScene = createRemoteStatusScene(resolveTarget);
@@ -106254,6 +106252,7 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
       input: { hint: "[status | login [provider|list] | logout]" },
       recordInput: false,
       handler: async ({ rawInput }) => {
+        const scenes = tuiContext.get("tuiScenes", false);
         const args = rawInput.trim().split(/\s+/u).filter(Boolean);
         const command = args[0] ?? "status";
         if (command === "status" && args.length <= 1) {
@@ -106311,32 +106310,43 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
       }
     };
     const disposeCommand = registerRemoteCommand(tuiContext, commands, pluginHost, definition);
-    const disposeTree = registerOptional(tuiContext, "command completion", () => trees?.register({
-      root: "remote",
-      descriptions: {
-        en: "Manage Remote Host login and connection status",
-        zh: "\u7BA1\u7406 Remote Host \u767B\u5F55\u548C\u8FDE\u63A5\u72B6\u6001"
-      },
-      children: (path) => remoteCommandChildren(path, login2.completionProviders())
-    }));
-    const disposeScene = registerOptional(tuiContext, "login scene", () => scenes?.register({
-      id: REMOTE_LOGIN_SCENE_ID,
-      title: "Remote Host login",
-      component: LoginScene
-    }, tuiContext));
-    const disposeStatusScene = registerOptional(tuiContext, "status scene", () => scenes?.register({
-      id: REMOTE_STATUS_SCENE_ID,
-      title: "Remote Host status",
-      component: StatusScene
-    }, tuiContext));
     return () => {
-      login2.cancel();
       disposeCommand();
-      disposeTree();
-      disposeScene();
-      disposeStatusScene();
     };
   }, "ds-harness-remote: dsh-tui /remote command");
+  tuiContext.inject(["tuiCommandTrees"], (treeContext) => {
+    treeContext.effect(() => {
+      const trees = treeContext.get("tuiCommandTrees", false);
+      return registerOptional(treeContext, "command completion", () => trees?.register({
+        root: "remote",
+        descriptions: {
+          en: "Manage Remote Host login and connection status",
+          zh: "\u7BA1\u7406 Remote Host \u767B\u5F55\u548C\u8FDE\u63A5\u72B6\u6001"
+        },
+        children: (path) => remoteCommandChildren(path, login2.completionProviders())
+      }));
+    }, "ds-harness-remote: dsh-TUI /remote completion");
+  });
+  tuiContext.inject(["tuiScenes"], (sceneContext) => {
+    sceneContext.effect(() => {
+      const scenes = sceneContext.get("tuiScenes", false);
+      const disposeScene = registerOptional(sceneContext, "login scene", () => scenes?.register({
+        id: REMOTE_LOGIN_SCENE_ID,
+        title: "Remote Host login",
+        component: LoginScene
+      }, tuiContext));
+      const disposeStatusScene = registerOptional(sceneContext, "status scene", () => scenes?.register({
+        id: REMOTE_STATUS_SCENE_ID,
+        title: "Remote Host status",
+        component: StatusScene
+      }, tuiContext));
+      return () => {
+        disposeScene();
+        disposeStatusScene();
+      };
+    }, "ds-harness-remote: dsh-TUI /remote scenes");
+  });
+  tuiContext.effect(() => () => login2.cancel(), "ds-harness-remote: dsh-TUI /remote login");
 }
 function registerRemoteCommand(ctx, commands, pluginHost, definition) {
   if (pluginHost === void 0) return commands.register(definition);
@@ -106800,7 +106810,8 @@ function apply(ctx, entry = void 0) {
     if (isLegacySettingsProvider(settings)) return;
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
-  const tuiCommandsAvailable = ctx.get("commands", false) !== void 0 && ctx.get("tuiScenes", false) !== void 0;
+  const tuiEntry = entryId === "ds-harness-remote-tui";
+  const tuiCommandsAvailable = ctx.get("commands", false) !== void 0 && (tuiEntry || ctx.get("tuiScenes", false) !== void 0);
   const tuiBinding = tuiCommandsAvailable ? {} : void 0;
   if (tuiBinding !== void 0) installTuiRemoteCommand(ctx, () => tuiBinding.target);
   const activateWhenCarrierReady = (runtimeContext) => {

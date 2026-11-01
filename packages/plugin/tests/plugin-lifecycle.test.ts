@@ -195,6 +195,31 @@ describe('Cordis plugin lifecycle', () => {
     }
   })
 
+  it('does not block a scoped TUI Host when optional scene registries are absent', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-tui-optional-seams-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+
+    const register = vi.fn(() => () => undefined)
+    const ctx = new Context()
+    ctx.provide('loader', {
+      locate: () => 'include:ds-harness-remote-tui',
+      entries: () => [{ id: 'include:ds-harness-remote-tui', options: { id: 'ds-harness-remote-tui', name: 'ds-harness-remote' } }],
+    } as never)
+    ctx.provide('commands', { register })
+    ctx.provide('settings', settings({ deviceName: 'Cordis optional-seams host' }))
+    ctx.provide('typertGateway', typertGateway())
+
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis optional-seams host' })
+    try {
+      await vi.waitFor(() => expect(ctx.dshRemote.currentIdentity()).toBeDefined())
+      expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'remote' }))
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('keeps a carrier-less Desktop unavailable even when legacy ApiProxy is provided', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-late-apiproxy-'))
     directories.push(dshHome)

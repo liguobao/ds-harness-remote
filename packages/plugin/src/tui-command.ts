@@ -102,8 +102,6 @@ export function installTuiRemoteCommand(
   // Newer dsh-TUI versions attribute commands to their owning plugin through
   // this optional service. Older versions only expose the direct registry.
   const pluginHost = tuiContext.get('tuiPluginHost', false) as TuiPluginHostLike | undefined
-  const trees = tuiContext.get('tuiCommandTrees', false) as CommandTreeRuntimeLike | undefined
-  const scenes = tuiContext.get('tuiScenes', false) as SceneRuntimeLike | undefined
   const login = new RemoteLoginController(resolveTarget)
   const LoginScene = createRemoteLoginScene(login)
   const StatusScene = createRemoteStatusScene(resolveTarget)
@@ -115,6 +113,7 @@ export function installTuiRemoteCommand(
       input: { hint: '[status | login [provider|list] | logout]' },
       recordInput: false,
       handler: async ({ rawInput }) => {
+        const scenes = tuiContext.get('tuiScenes', false) as SceneRuntimeLike | undefined
         const args = rawInput.trim().split(/\s+/u).filter(Boolean)
         const command = args[0] ?? 'status'
         if (command === 'status' && args.length <= 1) {
@@ -171,33 +170,48 @@ export function installTuiRemoteCommand(
       },
     }
     const disposeCommand = registerRemoteCommand(tuiContext, commands, pluginHost, definition)
-    const disposeTree = registerOptional(tuiContext, 'command completion', () => trees?.register({
+    return () => {
+      disposeCommand()
+    }
+  }, 'ds-harness-remote: dsh-tui /remote command')
+
+  // These are optional TUI seams. Keep their fibers outside the Loader entry
+  // dependency list so a stale/partial profile does not block Host startup,
+  // while still attaching the richer completion and scene UI if the services
+  // arrive after the Remote entry itself.
+  tuiContext.inject(['tuiCommandTrees'], treeContext => {
+    treeContext.effect(() => {
+      const trees = treeContext.get('tuiCommandTrees', false) as CommandTreeRuntimeLike | undefined
+      return registerOptional(treeContext, 'command completion', () => trees?.register({
         root: 'remote',
         descriptions: {
           en: 'Manage Remote Host login and connection status',
           zh: '管理 Remote Host 登录和连接状态',
         },
         children: path => remoteCommandChildren(path, login.completionProviders()),
-    }))
-    const disposeScene = registerOptional(tuiContext, 'login scene', () => scenes?.register({
+      }))
+    }, 'ds-harness-remote: dsh-TUI /remote completion')
+  })
+  tuiContext.inject(['tuiScenes'], sceneContext => {
+    sceneContext.effect(() => {
+      const scenes = sceneContext.get('tuiScenes', false) as SceneRuntimeLike | undefined
+      const disposeScene = registerOptional(sceneContext, 'login scene', () => scenes?.register({
         id: REMOTE_LOGIN_SCENE_ID,
         title: 'Remote Host login',
         component: LoginScene,
-    }, tuiContext))
-    const disposeStatusScene = registerOptional(tuiContext, 'status scene', () => scenes?.register({
+      }, tuiContext))
+      const disposeStatusScene = registerOptional(sceneContext, 'status scene', () => scenes?.register({
         id: REMOTE_STATUS_SCENE_ID,
         title: 'Remote Host status',
         component: StatusScene,
-    }, tuiContext))
-
-    return () => {
-      login.cancel()
-      disposeCommand()
-      disposeTree()
-      disposeScene()
-      disposeStatusScene()
-    }
-  }, 'ds-harness-remote: dsh-tui /remote command')
+      }, tuiContext))
+      return () => {
+        disposeScene()
+        disposeStatusScene()
+      }
+    }, 'ds-harness-remote: dsh-TUI /remote scenes')
+  })
+  tuiContext.effect(() => () => login.cancel(), 'ds-harness-remote: dsh-TUI /remote login')
 }
 
 function registerRemoteCommand(

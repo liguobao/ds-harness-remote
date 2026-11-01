@@ -4,6 +4,8 @@
 
 The development baseline is `dsh-v0.2.1-rc.5`, retaining the previous `dsh-v0.2.0-rc.2` (and rc.1) official Typert / Session V3 carrier. Peer ranges explicitly admit `0.2.1` and `0.2.2` prereleases and stable releases. A future `0.2.2` RC with the same official carrier contract requires no version-only package edit; that future runtime has not been validated.
 
+The Remote Plugin baseline and the dsh-TUI baseline are separate. The current public dsh-TUI `0.17.0` release lists `dsh-v0.2.1-rc.3` as its primary compatibility line, so the dsh-TUI `0.17.0` plus Harness `0.2.1-rc.5` pairing is not claimed as runtime-validated here.
+
 Harness `0.1.1-rc.2` ApiProxy support has been removed from the Host plugin, its bundled Remote client, and Android. Use a Host with the official Typert Remote carrier; ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP keep their independent data planes and use Typert for Desktop projection. This change does not update the standalone VS Code client or the independent Remote Web repository.
 
 Timed questions claim `userQuestions/attachWait`, return foreground answers or `ASK_TIMED_OUT` through `$events/result`, and recover late replies only from the official `userQuestions` projection. Late replies use `userQuestions/answer`; disconnect never replays answers. The previous RC's indefinite question flow retains its existing event path.

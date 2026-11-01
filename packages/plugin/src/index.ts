@@ -112,11 +112,17 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (isLegacySettingsProvider(settings)) return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
+  // `commands` identifies the terminal front door for the scoped TUI entry.
+  // `tuiCommandTrees` and `tuiScenes` are optional dsh-TUI seams and must not
+  // keep the whole Host entry pending when an older/partial profile omits
+  // them. Direct plugin callers still need the scene service to opt into the
+  // TUI path, which keeps ordinary Desktop composition unchanged.
+  const tuiEntry = entryId === 'ds-harness-remote-tui'
   const tuiCommandsAvailable = ctx.get('commands', false) !== undefined
-    && ctx.get('tuiScenes', false) !== undefined
+    && (tuiEntry || ctx.get('tuiScenes', false) !== undefined)
   const tuiBinding: TuiRemoteBinding | undefined = tuiCommandsAvailable ? {} : undefined
-  // Entry-level TUI injects make this synchronous with the Loader activation,
-  // which is required by dsh-TUI's authenticated scene/completion registries.
+  // The scoped TUI entry keeps command registration synchronous with Loader
+  // activation; optional scene/completion registries are soft capabilities.
   if (tuiBinding !== undefined) installTuiRemoteCommand(ctx, () => tuiBinding.target)
 
   // A terminal-only dsh-TUI profile has no browser `connection` service.
