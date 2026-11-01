@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RemoteClientCore } from '@dsh-remote/client-core'
 import { BaseTransport } from '@dsh-remote/webrtc'
-import { createRpcResponse, decodeMessage, encodeMessage } from '@dsh-remote/protocol'
+import { createEvent, createRpcResponse, decodeMessage, encodeMessage } from '@dsh-remote/protocol'
 import { afterEach, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { ClientModeRuntime, remoteHostFeatures } from '../src/client-runtime.js'
@@ -20,6 +20,7 @@ class Carrier extends BaseTransport {
   connected = true
   reply = true
   sendGate?: Promise<void>
+  responseFor?: (request: ReturnType<typeof decodeMessage>) => unknown
   sent: ReturnType<typeof decodeMessage>[] = []
   async connect() {}
   async close() { this.connected = false }
@@ -27,10 +28,11 @@ class Carrier extends BaseTransport {
     const request = decodeMessage(bytes)
     this.sent.push(request)
     await this.sendGate
-    if (this.reply) this.emit(encodeMessage(createRpcResponse(request.id, { ok: true, value: 'existing-host-session' })))
+    if (this.reply) this.emit(encodeMessage(createRpcResponse(request.id, this.responseFor?.(request) ?? { ok: true, value: 'existing-host-session' })))
   }
   getStats() { return { connected: this.connected, mode: this.connected ? 'Relay' as const : 'Disconnected' as const } }
   drop(error?: Error) { this.connected = false; this.emitClose(error) }
+  pushEvent(event: 'harness.remote.frame', data: unknown) { this.emit(encodeMessage(createEvent(event, data))) }
 }
 
 let directory: string | undefined
@@ -48,9 +50,13 @@ afterEach(cleanup)
 async function fixture(enabled = true) {
   directory = await mkdtemp(join(tmpdir(), 'remote-reconnect-'))
   const localInvoke = vi.fn(async () => 'local')
-  const gateway: TypertGatewayLike & { dispatchRpc: (_endpoint: string, _payload: unknown, _signal: AbortSignal) => Promise<{ ok: true }> } = {
+  const gateway: TypertGatewayLike & {
+    dispatchRpc: (_endpoint: string, _payload: unknown, _signal: AbortSignal) => Promise<{ ok: true }>
+    openWireStream: (_endpoint: string, _payload: unknown, _signal: AbortSignal) => Promise<AsyncIterable<unknown>>
+  } = {
     invoke: localInvoke,
     dispatchRpc: async () => ({ ok: true }),
+    openWireStream: async () => (async function* () {})(),
     wireStream: { open: async () => (async function* () {})(), failure: error => {
       const failure = error as { code?: unknown; message?: unknown }
       return {
@@ -155,6 +161,60 @@ it('does not replay an approval whose old carrier send settles after recovery', 
   await vi.advanceTimersByTimeAsync(0)
   expect(f.remotes[1]!.carrier.sent).toEqual([])
   expect(f.localInvoke).not.toHaveBeenCalled()
+})
+
+it('reopens a read stream and loads Host history from the recovered carrier', async () => {
+  const f = await fixture()
+  const first = f.remotes[0]!.carrier
+  const record = (seq: number) => ({ type: 'event', event: { seq, time: seq, type: 'test/entry', data: { text: `host-${seq}` } } })
+  const respond = (cursor: number) => (request: ReturnType<typeof decodeMessage>): unknown => {
+    const payload = request.payload as { method: string; params?: { endpoint?: string } }
+    if (payload.method === 'harness.transport.describe') return { capabilities: [] }
+    if (payload.method === 'harness.remote.stream.open') return { opened: true }
+    if (payload.method === 'harness.remote.call' && payload.params?.endpoint === 'session/history') {
+      return { ok: true, value: { records: [record(cursor)], throughSeq: cursor } }
+    }
+    return { ok: true, value: 'existing-host-session' }
+  }
+  const streamId = (carrier: Carrier): string => {
+    const opening = carrier.sent.find(request => (request.payload as { method?: string }).method === 'harness.remote.stream.open')
+    return (opening?.payload as { params?: { streamId?: string } } | undefined)?.params?.streamId ?? ''
+  }
+  const request = { args: { request: { sessionId: 'existing-host-session' } } }
+  const signal = new AbortController().signal
+  first.responseFor = respond(3)
+  const oldStream = await f.gateway.openWireStream('session/follow', request, signal)
+  const oldIterator = oldStream[Symbol.asyncIterator]()
+  const oldId = streamId(first)
+  expect(oldId).not.toBe('')
+  first.pushEvent('harness.remote.frame', { streamId: oldId, hasValue: true, value: {
+    type: 'snapshot', cursor: 3, records: [record(3)], hasMore: false,
+  } })
+  await expect(oldIterator.next()).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 3 } })
+  const interrupted = expect(oldIterator.next()).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+
+  first.drop()
+  await interrupted
+  await vi.advanceTimersByTimeAsync(100)
+  expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1 })
+
+  const next = f.remotes[1]!.carrier
+  next.responseFor = respond(8)
+  const newStream = await f.gateway.openWireStream('session/follow', request, signal)
+  const newIterator = newStream[Symbol.asyncIterator]()
+  const newId = streamId(next)
+  expect(newId).not.toBe('')
+  expect(newId).not.toBe(oldId)
+  next.pushEvent('harness.remote.frame', { streamId: newId, hasValue: true, value: {
+    type: 'snapshot', cursor: 8, records: [record(8)], hasMore: false,
+  } })
+  await expect(newIterator.next()).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 8, records: [record(8)] } })
+  await expect(f.gateway.dispatchRpc('session/history', request, signal)).resolves.toMatchObject({
+    ok: true, value: { throughSeq: 8, records: [record(8)] },
+  })
+  expect(next.sent.filter(frame => (frame.payload as { method?: string }).method === 'harness.remote.call')).toHaveLength(1)
+  expect(f.localInvoke).not.toHaveBeenCalled()
+  await newIterator.return?.()
 })
 
 it('stops timers and retires late candidates on exit, sign-out, shutdown and Host replacement', async () => {

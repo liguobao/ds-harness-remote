@@ -76019,11 +76019,14 @@ var RemoteClientCore = class {
   unsubscribeClose;
   closeHandlers = /* @__PURE__ */ new Set();
   closeNotified = false;
+  terminalCode;
   constructor(transport, timeoutMs = 3e4) {
     this.transport = transport;
     this.timeoutMs = timeoutMs;
   }
   async connect() {
+    if (this.terminalCode !== void 0)
+      throw new RemoteClientError(this.terminalCode, "The remote client has closed.");
     if (this.unsubscribeTransport !== void 0)
       return;
     this.closeNotified = false;
@@ -76042,6 +76045,9 @@ var RemoteClientCore = class {
   async rpc(method, params, signal, options) {
     if (signal?.aborted)
       throw rpcAbortedError(method, signal.reason);
+    if (this.terminalCode !== void 0) {
+      throw new RemoteClientError(this.terminalCode, `RPC ${method} cannot start after the remote client closed`);
+    }
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
     const request = createRpcRequest(method, params);
     const result = new Promise((resolve6, reject) => {
@@ -76087,6 +76093,7 @@ var RemoteClientCore = class {
     return this.transport.getStats();
   }
   async close() {
+    this.terminalCode ??= "CLIENT_CLOSED";
     this.unsubscribeTransport?.();
     this.unsubscribeTransport = void 0;
     this.unsubscribeClose?.();
@@ -76096,6 +76103,7 @@ var RemoteClientCore = class {
     await this.transport.close();
   }
   handleTransportClose(error62) {
+    this.terminalCode ??= "TRANSPORT_CLOSED";
     this.rejectAllPending((pending) => new RemoteClientError("TRANSPORT_CLOSED", `RPC ${pending.method} terminated because the remote transport closed`));
     this.notifyClose(error62);
   }
