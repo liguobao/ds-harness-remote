@@ -76,8 +76,14 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         host?.remove()
       }
     }, [portal])
-    if (portal === undefined || container === null) return props.fallback
-    return portal(props.children, container)
+    if (typeof portal !== 'function' || container === null) return props.fallback
+    // The Compact entry is portalled into a host-owned row, so a stale or
+    // detached container must not blank the sidebar; fall back in place.
+    try {
+      return portal(props.children, container)
+    } catch {
+      return props.fallback
+    }
   }
 
   function RemoteWorkspaceAction(props: {
