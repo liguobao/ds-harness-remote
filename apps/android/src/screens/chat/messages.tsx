@@ -285,92 +285,10 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
  * right above the selection.
  */
 function AssistantMessageCallout({ item }: { item: ChatMessage }) {
-  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const quote = useAppStore(state => state.quoteChatMessage)
-  const [selectedRange, setSelectedRange] = useState<{ start: number; end: number } | null>(null)
-  const [copied, setCopied] = useState(false)
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
-    }
-  }, [])
-
-  const selectedSnippet = useMemo(() => {
-    if (!selectedRange || selectedRange.start === selectedRange.end) return ''
-    const start = Math.min(selectedRange.start, selectedRange.end)
-    const end = Math.max(selectedRange.start, selectedRange.end)
-    return item.text.slice(start, end).trim()
-  }, [item.text, selectedRange])
-
-  const handleAskAgent = () => {
-    if (selectedSnippet.length === 0) return
-    quote(selectedSnippet, item.sessionId)
-    setSelectedRange(null)
-    AccessibilityInfo.announceForAccessibility(zhCN.messageActions.quoted)
-  }
-
-  const handleCopy = () => {
-    if (selectedSnippet.length === 0) return
-    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
-    void Clipboard.setStringAsync(selectedSnippet).then(() => {
-      setCopied(true)
-      AccessibilityInfo.announceForAccessibility(zhCN.messageActions.copied)
-      copyTimeoutRef.current = setTimeout(() => {
-        setCopied(false)
-        copyTimeoutRef.current = null
-        setSelectedRange(null)
-      }, 1800)
-    })
-  }
-
   return (
     <View style={styles.assistantProseWrap}>
-      {selectedSnippet.length > 0 && (
-        <View style={styles.floatingCalloutAnchor} pointerEvents="box-none">
-          <View style={[styles.calloutMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={zhCN.messageActions.askAgent}
-              hitSlop={6}
-              style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
-              onPress={handleAskAgent}
-            >
-              <Text numberOfLines={1} style={[styles.calloutBtnText, { color: colors.ink }]}>
-                {zhCN.messageActions.askAgent}
-              </Text>
-            </Pressable>
-            <View style={[styles.calloutDivider, { backgroundColor: colors.separator }]} />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={zhCN.messageActions.copy}
-              hitSlop={6}
-              style={({ pressed }) => [styles.calloutBtn, pressed && styles.calloutBtnPressed]}
-              onPress={handleCopy}
-            >
-              <Text numberOfLines={1} style={[styles.calloutBtnText, { color: colors.ink }]}>
-                {copied ? zhCN.messageActions.copied : zhCN.messageActions.copy}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-
-      <TextInput
-        multiline
-        editable={false}
-        scrollEnabled={false}
-        showSoftInputOnFocus={false}
-        value={item.text}
-        onSelectionChange={(e) => {
-          const { start, end } = e.nativeEvent.selection
-          setSelectedRange(start !== end ? { start, end } : null)
-        }}
-        selectionColor={colors.primarySoft ?? 'rgba(77, 107, 254, 0.3)'}
-        style={[styles.assistantSelectableText, { color: colors.ink }]}
-      />
+      <NativeMarkdown text={item.text} />
     </View>
   )
 }
