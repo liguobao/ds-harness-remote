@@ -1,5 +1,5 @@
 import React, { memo } from 'react'
-import Svg, { Path, G, Rect } from 'react-native-svg'
+import Svg, { Path, G, Rect, Circle } from 'react-native-svg'
 import {
   type DshLinkIconKind,
   type DshFileCategory,
@@ -154,6 +154,53 @@ export const IconCheckOutline = memo(function IconCheckOutline({ size = 14, colo
         d="M2.25 8.5L5.49732 11.7473C5.90519 12.1552 6.57263 12.1344 6.95426 11.7018L13.75 4"
         stroke={color}
         strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  )
+})
+
+/** Official DSH IconBranchOutlineRegular from TurnActions / MessageActions */
+export const IconBranchOutline = memo(function IconBranchOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path
+        d="M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Circle cx="12.4502" cy="3.3079" r="1.56962" stroke={color} strokeWidth={1.2} />
+      <Circle cx="12.4502" cy="12.6921" r="1.56962" stroke={color} strokeWidth={1.2} />
+    </Svg>
+  )
+})
+
+/** Official DSH IconDatabaseOutlineRegular from TurnUsagePanel.tsx */
+export const IconDatabaseOutline = memo(function IconDatabaseOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M13.1967 5.1869C13.7232 4.77378 14.0003 4.30517 14.0001 3.82819C14.0003 3.3512 13.7232 2.88259 13.1967 2.46947C12.6702 2.05635 11.9128 1.71328 11.0006 1.47475C10.0885 1.23621 9.05371 1.11062 8.00039 1.1106C6.94707 1.11057 5.9123 1.23612 5.00009 1.47461C4.08742 1.71301 3.32948 2.05604 2.80249 2.46919C2.2755 2.88235 1.99805 3.35106 1.99805 3.82819C1.99805 4.30531 2.2755 4.77402 2.80249 5.18718C3.32948 5.60033 4.08742 5.94336 5.00009 6.18176C5.9123 6.42025 6.94707 6.5458 8.00039 6.54578C9.05371 6.54575 10.0885 6.42016 11.0006 6.18163C11.9128 5.94309 12.6702 5.60002 13.1967 5.1869Z"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path d="M2 3.80371V11.7848" stroke={color} strokeWidth={1.2} />
+      <Path d="M14 3.80371V11.7848" stroke={color} strokeWidth={1.2} />
+      <Path
+        d="M2 7.81396C2 8.60524 2.63214 9.36411 3.75736 9.92363C4.88258 10.4832 6.4087 10.7975 8 10.7975C9.5913 10.7975 11.1174 10.4832 12.2426 9.92363C13.3679 9.36411 14 8.60524 14 7.81396"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path
+        d="M2 11.7847C2 12.6081 2.63214 13.3977 3.75736 13.98C4.88258 14.5622 6.4087 14.8893 8 14.8893C9.5913 14.8893 11.1174 14.5622 12.2426 13.98C13.3679 13.3977 14 12.6081 14 11.7847"
+        stroke={color}
+        strokeWidth={1.2}
       />
     </Svg>
   )

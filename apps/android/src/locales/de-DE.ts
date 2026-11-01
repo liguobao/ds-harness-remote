@@ -439,9 +439,12 @@ const deDE = {
   },
   messageActions: {
     quote: "Zitieren", quoted: "Zitiert", copy: "Antwort kopieren", copied: "Kopiert", good: "Gute Antwort", bad: "Schlechte Reaktion", branch: "Zweig in einem neuen Chat",
-    unavailable: "Dieser Host oder diese Nachricht unterstützt diese Aktion nicht", failed: "Aktion nicht abgeschlossen", feedbackSaved: "Feedback auf dem Host gespeichert",
-    usageUnavailable: "Nutzung nicht verfügbar", timeUnavailable: "Zeit nicht verfügbar", usage: "Tatsächliche Nutzung", input: "Eingang", output: "Ausgabe",
-    cacheRead: "Cache gelesen", cacheWrite: "Cache-Schreiben", reasoning: "Argumentation", total: "Gesamt",
+    askAgent: 'Agent fragen', selectAll: 'Alles auswählen',
+    unavailable: "Aktion wird vom Host nicht unterstützt", failed: "Aktion fehlgeschlagen", feedbackSaved: "Feedback gespeichert",
+    usageUnavailable: "Nutzung nicht verfügbar", timeUnavailable: "Zeit nicht verfügbar", usage: "Nutzung", input: "Eingabe", output: "Ausgabe",
+    cacheRead: "Cache-Lesen", cacheWrite: "Cache-Schreiben", reasoning: "Denken", total: "Gesamt",
+    turnUsageTitle: 'Turn-Nutzung', providerModel: 'Anbieter / Modell', uncachedInput: 'Ungecachte Eingabe',
+    quoteSelectedSnippet: 'Textabschnitt zitieren', copySelectedSnippet: 'Ausgewählten Text kopieren',
   },
   sessionActivity: {
     relatedFiles: "Zugehörige Dateien",

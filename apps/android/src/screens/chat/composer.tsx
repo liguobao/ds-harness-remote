@@ -6,6 +6,8 @@ import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { MentionPopover, splitDraftSegments } from '../../ui/mention-popover'
+import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
+import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ReplyStatusDots } from './messages'
@@ -35,6 +37,8 @@ const LONG_DRAFT_HINT = 12_000
 type Props = {
   backend: RemoteSession['backend']
   draft: string
+  quotes?: string[]
+  onRemoveQuote?: (index: number) => void
   input: ReturnType<typeof useChatMentions>
   replyActive: boolean
   stopping: boolean
@@ -54,7 +58,7 @@ type Props = {
   onStop: () => void
 }
 
-export function ChatComposer({ backend, draft, input, replyActive, stopping, compactRunning,
+export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning,
   hasComposerContent, connected, composerDisabled, sendDisabled, compactComposer,
   composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
@@ -96,6 +100,20 @@ export function ChatComposer({ backend, draft, input, replyActive, stopping, com
         </Pressable>
       </View> : <View style={styles.composerCard}>
         <View style={styles.composerInputWrap}>
+          {quotes?.map((quoteText, index) => (
+            <Pressable
+              key={`inline-quote-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
+              onPress={() => onRemoveQuote?.(index)}
+              style={styles.composerInlineQuoteBadge}
+            >
+              <QuoteMarkIcon size={14} color={colors.primary} />
+              <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 180 }]}>
+                “{formatQuoteDraftSnippet(quoteText, 14)}”
+              </Text>
+            </Pressable>
+          ))}
           {/* Native attributed text keeps references blue without an opaque Android value layer. */}
           <TextInput
             ref={composerInputRef}
@@ -103,6 +121,11 @@ export function ChatComposer({ backend, draft, input, replyActive, stopping, com
             style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
             onChangeText={onChangeText}
             onSelectionChange={onSelectionChange}
+            onKeyPress={({ nativeEvent }) => {
+              if (nativeEvent.key === 'Backspace' && draft.length === 0 && quotes && quotes.length > 0) {
+                onRemoveQuote?.(quotes.length - 1)
+              }
+            }}
 
             selection={selection}
             placeholder={strings.chat[backendTextKeys.placeholder]}

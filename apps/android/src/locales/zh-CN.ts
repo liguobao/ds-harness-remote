@@ -446,9 +446,12 @@ const zhCN = {
   },
   messageActions: {
     quote: '引用', quoted: '已引用', copy: '复制回答', copied: '已复制', good: '好的回答', bad: '有问题的回答', branch: '在新对话中分支',
+    askAgent: '询问智能体', selectAll: '全选',
     unavailable: '当前主机或消息不支持此操作', failed: '操作未完成', feedbackSaved: '反馈已保存到主机',
-    usageUnavailable: '用量不可用', timeUnavailable: '时间不可用', usage: '真实用量', input: '输入', output: '输出',
+    usageUnavailable: '用量不可用', timeUnavailable: '时间不可用', usage: '用量', input: '输入', output: '输出',
     cacheRead: '缓存读取', cacheWrite: '缓存写入', reasoning: '推理', total: '总计',
+    turnUsageTitle: '本轮用量', providerModel: '提供方 / 模型', uncachedInput: '未缓存输入',
+    quoteSelectedSnippet: '选取文字引用', copySelectedSnippet: '复制选中文本',
   },
   sessionActivity: {
     relatedFiles: "相关文件",

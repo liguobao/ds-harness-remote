@@ -439,9 +439,12 @@ const esES = {
   },
   messageActions: {
     quote: "Citar", quoted: "Citado", copy: "Copiar respuesta", copied: "Copiado", good: "Buena respuesta", bad: "Mala respuesta", branch: "Bifurcación en un nuevo chat",
-    unavailable: "Este Host o mensaje no soporta esta acción", failed: "Acción no completada", feedbackSaved: "Comentarios guardados en el anfitrión",
-    usageUnavailable: "Uso no disponible", timeUnavailable: "Hora no disponible", usage: "Uso real", input: "Aporte", output: "Producción",
-    cacheRead: "lectura de caché", cacheWrite: "escritura en caché", reasoning: "Razonamiento", total: "Total",
+    askAgent: 'Preguntar al agente', selectAll: 'Seleccionar todo',
+    unavailable: "Acción no disponible en este host", failed: "Acción no completada", feedbackSaved: "Comentarios guardados",
+    usageUnavailable: "Uso no disponible", timeUnavailable: "Hora no disponible", usage: "Uso", input: "Entrada", output: "Salida",
+    cacheRead: "Lectura de caché", cacheWrite: "Escritura de caché", reasoning: "Razonamiento", total: "Total",
+    turnUsageTitle: 'Uso de este turno', providerModel: 'Proveedor / modelo', uncachedInput: 'Entrada sin caché',
+    quoteSelectedSnippet: 'Citar fragmento', copySelectedSnippet: 'Copiar texto seleccionado',
   },
   sessionActivity: {
     relatedFiles: "Archivos relacionados",
