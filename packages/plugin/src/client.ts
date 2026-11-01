@@ -228,7 +228,7 @@ window.__ModuleLoader__.load({
         }, React.createElement('span', { 'aria-hidden': true }, '◎'), props.wide
           ? React.createElement('span', null, label)
           : null),
-        open ? renderBodyPortal(portal, React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation' },
+        open ? renderBodyPortal(portal, React.createElement('div', { className: 'dshRemoteBackdrop', role: 'presentation', onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setOpen(false) } },
           React.createElement('section', {
             className: 'dshRemoteDialog',
             role: 'dialog',

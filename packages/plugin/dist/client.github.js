@@ -1621,7 +1621,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // src/client/portal.ts
   function renderBodyPortal(portal, children) {
-    return portal === void 0 || typeof document > "u" || document.body === null ? children : portal(children, document.body);
+    if (typeof portal != "function" || typeof document > "u" || document === null) return children;
+    let body = document.body;
+    if (body == null) return children;
+    try {
+      return portal(children, body);
+    } catch {
+      return children;
+    }
   }
 
   // src/client-locale.ts
@@ -3308,7 +3315,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       ".dshRemoteSessionHeader{left:auto;right:148px;transform:none;max-width:calc(100vw - 420px)}@media(max-width:760px){.dshRemoteSessionHeader{left:auto;right:104px;transform:none;max-width:calc(100vw - 124px)}}",
       ".dshRemoteHostReferencePanel{position:fixed;z-index:2147483000;top:56px;right:20px;bottom:auto;width:min(380px,calc(100vw - 40px));box-sizing:border-box;padding:16px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 12px 36px var(--dsw-alias-shadow-l2);}.dshRemoteHostReferencePanel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dshRemoteHostReferencePanel header button{border:0;background:transparent;color:inherit;font-size:20px;cursor:pointer}.dshRemoteHostReferencePanel dl{margin:0}.dshRemoteHostReferencePanel dl>div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostReferencePanel dt{color:var(--dsw-alias-label-tertiary)}.dshRemoteHostReferencePanel dd{margin:0;overflow-wrap:anywhere}.dshRemoteHostReferencePanel .isMono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}",
       ".dshRemoteModeButton:focus-visible,.dshRemotePage button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}",
-      ".dshRemotePage{width:min(720px,100%);max-height:min(760px,calc(100vh - 40px));display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:14px;overflow:hidden;animation:dshRemotePageIn .18s cubic-bezier(.25,1,.5,1);-webkit-app-region:no-drag}",
+      ".dshRemotePage{width:min(720px,100%);max-height:min(760px,calc(100vh - 40px));display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.35);overflow:hidden;animation:dshRemotePageIn .18s cubic-bezier(.25,1,.5,1);-webkit-app-region:no-drag}",
       ".dshRemotePageHeader{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:14px 24px;border-bottom:1px solid var(--dsw-alias-border-l2);-webkit-app-region:no-drag}.dshRemotePageIntro{min-width:0;flex:1;-webkit-app-region:no-drag}.dshRemotePageHeader strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;line-height:1.4}.dshRemotePageHeader p{min-width:0;max-width:70ch;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5}.dshRemoteStarLink{-webkit-app-region:no-drag}.dshRemotePageActions{flex:0 0 auto;display:flex;align-items:center;gap:4px;-webkit-app-region:no-drag;pointer-events:auto}.dshRemotePageActions>button{height:40px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;border:0;border-radius:8px;background:transparent;color:inherit;line-height:1;cursor:pointer;-webkit-app-region:no-drag;pointer-events:auto}.dshRemotePageActions>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemotePageActions>button:disabled{opacity:.45;cursor:default}.dshRemotePageBack,.dshRemotePageRefresh{min-width:48px;padding:0 10px;font:inherit;font-size:13px}.dshRemotePageBack{color:var(--dsw-alias-label-secondary)!important}.dshRemotePageClose{width:40px;padding:0;font-size:24px}",
       ".dshRemotePageBody{padding:24px;overflow:auto;display:flex;flex-direction:column;gap:24px}.dshRemotePageBody button{font:inherit;color:inherit}",
       ".dshRemotePageTitleRow{display:flex;align-items:center;gap:10px;min-width:0}.dshRemotePageTitleRow>strong{min-width:0;flex:0 1 auto}.dshRemoteStarLink{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;text-decoration:none}.dshRemoteStarLink:hover{color:var(--dsw-alias-label-primary);text-decoration:underline;text-underline-offset:3px}.dshRemoteStarLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px;border-radius:3px}",
@@ -3400,7 +3407,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     let RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
-      return React.useEffect(() => {
+      if (React.useEffect(() => {
         if (portal2 === void 0) return;
         let attempt = 0, timer, host, observer, attach = () => {
           let row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]');
@@ -3415,7 +3422,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
         return attach(), () => {
           timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
         };
-      }, [portal2]), portal2 === void 0 || container === null ? props.fallback : portal2(props.children, container);
+      }, [portal2]), typeof portal2 != "function" || container === null) return props.fallback;
+      try {
+        return portal2(props.children, container);
+      } catch {
+        return props.fallback;
+      }
     }
     function RemoteWorkspaceAction(props) {
       let { t } = props, connectionErrorMessageFor = (reason, translate) => {
@@ -5074,7 +5086,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
           }, React.createElement("span", { "aria-hidden": !0 }, "\u25CE"), props.wide ? React.createElement("span", null, label) : null),
           open ? renderBodyPortal(portal, React.createElement(
             "div",
-            { className: "dshRemoteBackdrop", role: "presentation" },
+            { className: "dshRemoteBackdrop", role: "presentation", onMouseDown: (event) => {
+              event.target === event.currentTarget && setOpen(!1);
+            } },
             React.createElement(
               "section",
               {
