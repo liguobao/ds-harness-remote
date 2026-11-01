@@ -83,6 +83,10 @@ describe('RemoteClientCore', () => {
               code: 'TRANSPORT_CLOSED',
             })
             expect(closed).toBe(true)
+            await expect(client.rpc('harness.remote.stream.close', {})).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+            await client.close()
+            await expect(client.rpc('harness.remote.stream.close', {})).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+            expect(transport.sent).toHaveLength(1)
           },
         },
         {
@@ -99,6 +103,8 @@ describe('RemoteClientCore', () => {
               name: 'RemoteClientError',
               code: 'CLIENT_CLOSED',
             })
+            await expect(client.rpc('harness.remote.stream.close', {})).rejects.toMatchObject({ code: 'CLIENT_CLOSED' })
+            expect(transport.sent).toHaveLength(1)
           },
         },
         {

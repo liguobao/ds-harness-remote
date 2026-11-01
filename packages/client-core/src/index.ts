@@ -48,10 +48,13 @@ export class RemoteClientCore {
   private unsubscribeClose?: () => void
   private readonly closeHandlers = new Set<(error?: Error) => void>()
   private closeNotified = false
+  // Keep the first close reason so late stream cleanup fails without a new timer.
+  private terminalCode?: 'TRANSPORT_CLOSED' | 'CLIENT_CLOSED'
 
   constructor(private readonly transport: RemoteTransport, private readonly timeoutMs = 30_000) {}
 
   async connect(): Promise<void> {
+    if (this.terminalCode !== undefined) throw new RemoteClientError(this.terminalCode, 'The remote client has closed.')
     if (this.unsubscribeTransport !== undefined) return
     this.closeNotified = false
     this.unsubscribeTransport = this.transport.onMessage(data => this.handleMessage(data))
@@ -74,6 +77,9 @@ export class RemoteClientCore {
     options?: RemoteRpcOptions | number,
   ): Promise<TResult> {
     if (signal?.aborted) throw rpcAbortedError(method, signal.reason)
+    if (this.terminalCode !== undefined) {
+      throw new RemoteClientError(this.terminalCode, `RPC ${method} cannot start after the remote client closed`)
+    }
 
     const timeoutMs = typeof options === 'number' ? options : callTimeoutMs(this.timeoutMs, options)
     const request = createRpcRequest(method as RpcMethod, params)
@@ -130,6 +136,7 @@ export class RemoteClientCore {
   }
 
   async close(): Promise<void> {
+    this.terminalCode ??= 'CLIENT_CLOSED'
     this.unsubscribeTransport?.()
     this.unsubscribeTransport = undefined
     this.unsubscribeClose?.()
@@ -145,6 +152,7 @@ export class RemoteClientCore {
   }
 
   private handleTransportClose(error?: Error): void {
+    this.terminalCode ??= 'TRANSPORT_CLOSED'
     this.rejectAllPending(
       pending => new RemoteClientError(
         'TRANSPORT_CLOSED',
