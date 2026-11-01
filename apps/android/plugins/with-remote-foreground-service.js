@@ -36,6 +36,26 @@ function withRemoteForegroundService(config) {
       } })
     }
     application.service = services
+
+    // Native text selection toolbar action: 询问智能体 (android.intent.action.PROCESS_TEXT)
+    application['activity-alias'] ??= []
+    if (!application['activity-alias'].some(item => item.$?.['android:name'] === '.AskAgentProcessTextActivity')) {
+      application['activity-alias'].push({
+        $: {
+          'android:name': '.AskAgentProcessTextActivity',
+          'android:targetActivity': '.MainActivity',
+          'android:label': '询问智能体',
+          'android:exported': 'true',
+        },
+        'intent-filter': [
+          {
+            action: [{ $: { 'android:name': 'android.intent.action.PROCESS_TEXT' } }],
+            category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+            data: [{ $: { 'android:mimeType': 'text/plain' } }],
+          },
+        ],
+      })
+    }
     return config
   })
 

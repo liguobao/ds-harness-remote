@@ -9,6 +9,7 @@ class RemoteForegroundServicePackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> = listOf(
     RemoteForegroundServiceModule(reactContext),
     RemoteDownloadsModule(reactContext),
+    RemoteProcessTextModule(reactContext),
   )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()

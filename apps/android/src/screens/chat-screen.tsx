@@ -1,6 +1,7 @@
 import { SessionActivityDock } from './chat/session-activity'
 import { ChatImageProvider } from '../ui/chat-image'
 import { isSubagentSession } from '../lib/session-kind'
+import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
 import { File } from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
@@ -24,10 +25,12 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  DeviceEventEmitter,
   FlatList,
   Image,
   Keyboard,
   Modal,
+  NativeModules,
   PanResponder,
   Pressable,
   ScrollView,
@@ -1336,6 +1339,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     })
   }
 
+  const quoteChatMessage = useAppStore(state => state.quoteChatMessage)
   const reconnectCurrentSession = async () => {
     if (reconnectingSession) return
     setReconnectingSession(true)
@@ -1345,6 +1349,33 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       setReconnectingSession(false)
     }
   }
+
+  useEffect(() => {
+    // 1. Initial process text intent when opening the app from native selection toolbar
+    const dshProcessText = NativeModules.DshProcessText
+    if (dshProcessText?.getInitialText) {
+      dshProcessText.getInitialText()
+        .then((text: string | null) => {
+          if (text && text.trim().length > 0) {
+            quoteChatMessage(text.trim(), session.sessionId)
+            composerInputRef.current?.focus()
+          }
+        })
+        .catch(() => undefined)
+    }
+
+    // 2. Runtime process text event when selecting text while app is active
+    const sub = DeviceEventEmitter.addListener('onProcessText', (text: string) => {
+      if (text && text.trim().length > 0) {
+        quoteChatMessage(text.trim(), session.sessionId)
+        composerInputRef.current?.focus()
+      }
+    })
+
+    return () => {
+      sub.remove()
+    }
+  }, [session.sessionId, quoteChatMessage])
 
   const currentAgentPresetId = session.agentPreset ?? agentPresetOptions?.find(option => option.isDefault)?.id
   const currentWorkspace = workspaces.find(workspace => workspace.sessionIds.includes(session.sessionId))
@@ -2039,6 +2070,23 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               >
                 <FileText size={22} color={colors.primary} />
                 <Text style={styles.plusCardText}>{zhCN.chat.files}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.messageActions.quote}
+                onPress={() => {
+                  closePlusMenu()
+                  void Clipboard.getStringAsync().then((text: string) => {
+                    if (text && text.trim().length > 0) {
+                      setQuotes(current => [...current, text.trim()])
+                      composerInputRef.current?.focus()
+                    }
+                  })
+                }}
+                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed]}
+              >
+                <QuoteMarkIcon size={22} color={colors.primary} />
+                <Text style={styles.plusCardText}>{zhCN.messageActions.quote}</Text>
               </Pressable>
             </View>
             <Pressable

@@ -53,7 +53,16 @@ export function TurnUsageModal({
   const outputTokens = u.outputTokens ?? 0
   const reasoningTokens = u.reasoningTokens ?? 0
   const uncachedInput = Math.max(0, inputTokens - cacheReadTokens)
-  const modelName = (item as unknown as { model?: string }).model ?? (u as unknown as { model?: string }).model ?? session?.backend
+  const sessionModels = useAppStore.getState().sessionModels
+  const currentModelStr = sessionModels?.current
+    ? `${sessionModels.current.provider ? `${sessionModels.current.provider}/` : ''}${sessionModels.current.model}`
+    : undefined
+  const modelName = (item as unknown as { model?: string }).model
+    ?? (u as unknown as { model?: string }).model
+    ?? (session as unknown as { model?: string })?.model
+    ?? (session?.backend ? `dsh/${session.backend}` : undefined)
+    ?? currentModelStr
+    ?? 'deepseek-v4.1-flash'
 
   return (
     <Modal
@@ -224,48 +233,55 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   return (
     <>
       <View style={styles.assistantRow}>
-        <Animated.View style={{ opacity: copyOpacity }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
-            disabled={item.text.length === 0}
-            hitSlop={8}
-            style={styles.actionBtn}
-            onPress={handleCopy}
-          >
-            {copied ? (
-              <IconCheckOutline size={14} color={colors.primary} />
-            ) : (
-              <IconCopyOutline size={14} color={colors.muted} />
-            )}
-          </Pressable>
-        </Animated.View>
-        {!pending && supportsBranch && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.messageActions.branch}
-            accessibilityState={{ disabled }}
-            disabled={disabled}
-            hitSlop={8}
-            style={styles.actionBtn}
-            onPress={() => void branch()}
-          >
-            <IconBranchOutline size={14} color={colors.muted} />
-          </Pressable>
-        )}
-        {!pending && backend !== 'codex' && item.usage !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.messageActions.usage}
-            hitSlop={8}
-            style={styles.usageBtn}
-            onPress={() => setUsageOpen(true)}
-          >
-            <IconDatabaseOutline size={14} color={colors.muted} />
-            <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
-              {usageLabel}
-            </Text>
-          </Pressable>
+        <View style={styles.assistantLeftActions}>
+          <Animated.View style={{ opacity: copyOpacity }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
+              disabled={item.text.length === 0}
+              hitSlop={8}
+              style={styles.actionBtn}
+              onPress={handleCopy}
+            >
+              {copied ? (
+                <IconCheckOutline size={14} color={colors.primary} />
+              ) : (
+                <IconCopyOutline size={14} color={colors.muted} />
+              )}
+            </Pressable>
+          </Animated.View>
+          {!pending && supportsBranch && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.messageActions.branch}
+              accessibilityState={{ disabled }}
+              disabled={disabled}
+              hitSlop={8}
+              style={styles.actionBtn}
+              onPress={() => void branch()}
+            >
+              <IconBranchOutline size={14} color={colors.muted} />
+            </Pressable>
+          )}
+          {!pending && backend !== 'codex' && item.usage !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.messageActions.usage}
+              hitSlop={8}
+              style={styles.usageBtn}
+              onPress={() => setUsageOpen(true)}
+            >
+              <IconDatabaseOutline size={14} color={colors.muted} />
+              <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
+                {usageLabel}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        {time !== undefined && (
+          <Text style={[styles.timeText, { color: colors.muted }]}>
+            {messageClock(time)}
+          </Text>
         )}
       </View>
 
@@ -286,11 +302,20 @@ const styles = StyleSheet.create({
   userRow: { justifyContent: 'flex-end', gap: 8, paddingTop: 4 },
   assistantRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
     minHeight: 32,
     paddingTop: 8,
     paddingBottom: 2,
+  },
+  assistantLeftActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  timeText: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
   },
   actionBtn: {
     width: 28,
