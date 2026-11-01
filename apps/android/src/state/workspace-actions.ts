@@ -111,6 +111,9 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           case 'claude':
             catalog = mergeClaudeCatalog(await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces), get().workspaces, get().sessions)
             break
+          case 'hermes':
+            catalog = mergeHermesCatalog(await loadHermesCatalog(scope.bind(() => connection.requireHermes()), get().workspaces), get().workspaces, get().sessions)
+            break
           case 'cursor':
             catalog = { workspaces: get().workspaces.filter(item => item.backend === 'cursor'), sessions: get().sessions.filter(item => item.backend === 'cursor') }
             break
@@ -123,6 +126,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           piAvailable: connection.hasPi(),
           opencodeAvailable: connection.hasOpencode(),
           claudeAvailable: connection.hasClaude(),
+          hermesAvailable: connection.hasHermes(),
           workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
           sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
           ...(archivedSessionIds === undefined ? {} : { archivedSessionIds }),

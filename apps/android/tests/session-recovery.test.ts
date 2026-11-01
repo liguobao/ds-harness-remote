@@ -11,7 +11,7 @@ const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() =>
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn() },
-  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
   authenticate: vi.fn(),
@@ -750,7 +750,7 @@ describe('session restore state machine', () => {
     ], prepareScenario1)
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
-    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -934,7 +934,7 @@ describe('session restore state machine', () => {
   })
 
   it('isolates late ACP prompt subscriptions from the new conversation', async () => {
-    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -1019,6 +1019,40 @@ describe('session creation single flight', () => {
         expect(proxy.sessionCreate).toHaveBeenLastCalledWith('workspace-b')
       },
     })), prepareScenario1)
+  })
+})
+
+describe('ACP session creation targets the workspace backend', () => {
+  it('creates Claude and Hermes sessions through their own backend', async () => {
+    await runScenarios((['claude', 'hermes'] as const).map(backend => ({
+      name: backend,
+      run: async () => {
+        vi.resetAllMocks()
+        transport.checkHealth.mockResolvedValue(true)
+        transport.hasClaude.mockReturnValue(backend === 'claude')
+        transport.hasHermes.mockReturnValue(backend === 'hermes')
+        acp.transferCall.mockResolvedValue({ events: [] })
+        acp.openStream.mockResolvedValue({ streamId: 'stream', close: async () => undefined })
+        acp.createSession.mockResolvedValue({ sessionId: 'new-1' })
+        const workspace = {
+          workspaceId: `${backend}:cwd:/repo`, backend, title: 'repo', path: '/repo',
+          sessionIds: [], createdAt: '', updatedAt: '',
+        }
+        useAppStore.setState({
+          ...useAppStore.getInitialState(),
+          selectedDevice: { deviceId: 'host', platform: 'linux' } as never,
+          connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
+          workspaces: [workspace],
+          sessions: [],
+          workspaceCatalog: { backend, loading: false } as never,
+        })
+        expect(await useAppStore.getState().createSession(workspace.workspaceId)).toBe(true)
+        // A Hermes workspace must never be created through the Claude client.
+        expect(acp.createSession).toHaveBeenCalledWith('/repo', 'agent', backend)
+        expect(useAppStore.getState().sessions.some(item => item.sessionId === `${backend}:new-1`)).toBe(true)
+        expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new-1`)
+      },
+    })))
   })
 })
 

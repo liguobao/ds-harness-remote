@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
     'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
-  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(),
+  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(), loadHermes: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ notificationAsync: vi.fn(), NotificationFeedbackType: { Success: 'success' } }))
 vi.mock('../src/services/storage', () => mocks.storage)
@@ -35,6 +35,9 @@ vi.mock('../src/services/claude', async importOriginal => ({
 }))
 vi.mock('../src/services/pi', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/pi')>(), loadPiCatalog: mocks.loadPi,
+}))
+vi.mock('../src/services/hermes', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/services/hermes')>(), loadHermesCatalog: mocks.loadHermes,
 }))
 vi.mock('../src/services/opencode', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/opencode')>(), loadOpencodeCatalog: mocks.loadOpencode,
@@ -250,8 +253,8 @@ function createResponse(backend: typeof backendCases[number], id: string) {
 
 describe('workspace operation isolation', () => {
   it('loads only the requested backend and keeps other catalogs and failures isolated', async () => {
-    const loaders = { codex: mocks.loadCodex, antigravity: mocks.loadAgy, pi: mocks.loadPi, opencode: mocks.loadOpencode, claude: mocks.loadClaude }
-    await runScenarios((['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const).flatMap(backend =>
+    const loaders = { codex: mocks.loadCodex, antigravity: mocks.loadAgy, pi: mocks.loadPi, opencode: mocks.loadOpencode, claude: mocks.loadClaude, hermes: mocks.loadHermes }
+    await runScenarios((['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const).flatMap(backend =>
       ['success', 'error'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
         const fixture = workspaceFixture()
         const other = workspace('other', backend === 'codex' ? 'harness' : 'codex')

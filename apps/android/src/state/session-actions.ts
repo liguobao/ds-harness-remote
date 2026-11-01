@@ -18,6 +18,7 @@ import {
   createCursorSession,
   createOpencodeSession,
   createClaudeSession,
+  createHermesSession,
   createPiSession,
   cursorNativeId,
   foldAcpHistory,
@@ -558,12 +559,16 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (backend === 'claude' || backend === 'hermes') {
-            const created = await runtime.connection.requireClaude().createSession(cwd, 'agent', 'claude')
+            const created = backend === 'hermes'
+              ? await runtime.connection.requireHermes().createSession(cwd, 'agent', 'hermes')
+              : await runtime.connection.requireClaude().createSession(cwd, 'agent', 'claude')
             if (generation !== runtime.connectionGeneration) return false
-            const session = createClaudeSession({
-              acpSessionId: created.sessionId,
-              cwd,
-            })
+            const session = backend === 'hermes'
+              ? createHermesSession({ acpSessionId: created.sessionId, cwd })
+              : createClaudeSession({
+                acpSessionId: created.sessionId,
+                cwd,
+              })
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {

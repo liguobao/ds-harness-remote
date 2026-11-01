@@ -68,6 +68,8 @@ describe('HermesAcpClient', () => {
       return false
     })
     try {
+      // The default launch must pass `acp`, otherwise `hermes` drops into its REPL.
+      expect((client as unknown as { options: { args?: string[] } }).options.args).toEqual(['acp'])
       await client.start()
       const created = await client.call('session/new', { cwd: '/work/repo', mcpServers: [] })
       expect(created).toMatchObject({ sessionId: 'native-1' })
