@@ -19,12 +19,14 @@ import type { RemoteStatus } from '../src/client/types.js'
 class Carrier extends BaseTransport {
   connected = true
   reply = true
+  sendGate?: Promise<void>
   sent: ReturnType<typeof decodeMessage>[] = []
   async connect() {}
   async close() { this.connected = false }
   async send(bytes: Uint8Array) {
     const request = decodeMessage(bytes)
     this.sent.push(request)
+    await this.sendGate
     if (this.reply) this.emit(encodeMessage(createRpcResponse(request.id, { ok: true, value: 'existing-host-session' })))
   }
   getStats() { return { connected: this.connected, mode: this.connected ? 'Relay' as const : 'Disconnected' as const } }
@@ -46,10 +48,17 @@ afterEach(cleanup)
 async function fixture(enabled = true) {
   directory = await mkdtemp(join(tmpdir(), 'remote-reconnect-'))
   const localInvoke = vi.fn(async () => 'local')
-  const gateway: TypertGatewayLike & { dispatchRpc: () => Promise<{ ok: true }> } = {
+  const gateway: TypertGatewayLike & { dispatchRpc: (_endpoint: string, _payload: unknown, _signal: AbortSignal) => Promise<{ ok: true }> } = {
     invoke: localInvoke,
     dispatchRpc: async () => ({ ok: true }),
-    wireStream: { open: async () => (async function* () {})(), failure: () => ({ code: 'internal', message: '', details: {} }) },
+    wireStream: { open: async () => (async function* () {})(), failure: error => {
+      const failure = error as { code?: unknown; message?: unknown }
+      return {
+        code: typeof failure?.code === 'string' ? failure.code : 'internal',
+        message: typeof failure?.message === 'string' ? failure.message : '',
+        details: {},
+      }
+    } },
   }
   runtime = new ClientModeRuntime(
     resolveConfig({ reconnect: enabled ? { initialDelayMs: 100, maxDelayMs: 1000, jitter: 0 } : false }),
@@ -82,11 +91,12 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   const first = f.remotes[0]!.carrier
   first.reply = false
   const prompt = f.gateway.invoke({ namespace: 'session', method: 'prompt', args: { sessionId: 'existing-host-session' } })
-  const approval = f.gateway.invoke({ namespace: '$events', method: 'result', args: {
+  const approval = f.gateway.dispatchRpc('$events/result', { args: {
     clientId: 'event-client', eventId: 'approval-1', outcome: { kind: 'result', value: 'allowed-once' },
-  } })
+  } }, new AbortController().signal)
   const rejectedPrompt = expect(prompt).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
-  const rejectedApproval = expect(approval).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+  const rejectedApproval = expect(approval).resolves.toMatchObject({ ok: false, error: { code: 'TRANSPORT_CLOSED' } })
+  expect(first.sent[1]).toMatchObject({ payload: { method: 'harness.remote.call', params: { endpoint: '$events/result' } } })
   f.connect.mockRejectedValueOnce(new TypeError('fetch failed'))
     .mockRejectedValueOnce(Object.assign(new Error('HTTP 503'), { code: 'INTERNAL_ERROR', retryable: true }))
     .mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
@@ -94,6 +104,10 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   await Promise.all([rejectedPrompt, rejectedApproval])
   expect(f.runtime.status()).toMatchObject({ mode: 'remote', connected: false, target: { deviceId: 'host-1' } })
   await expect(f.gateway.invoke({ namespace: 'session', method: 'list', args: {} })).rejects.toMatchObject({ code: 'remote/disconnected' })
+  await expect(f.gateway.dispatchRpc('$events/result', { args: {
+    clientId: 'event-client', eventId: 'approval-1', outcome: { kind: 'result', value: 'allowed-once' },
+  } }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { code: 'remote/disconnected' } })
+  expect(first.sent).toHaveLength(2)
   await vi.advanceTimersByTimeAsync(99)
   expect(f.connect).toHaveBeenCalledTimes(1)
   await vi.advanceTimersByTimeAsync(1)
@@ -117,6 +131,30 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   f.remotes[1]!.carrier.drop()
   await vi.advanceTimersByTimeAsync(100)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 2 })
+})
+
+it('does not replay an approval whose old carrier send settles after recovery', async () => {
+  const f = await fixture()
+  const first = f.remotes[0]!.carrier
+  let finishSend!: () => void
+  first.sendGate = new Promise<void>(resolve => { finishSend = resolve })
+  const approval = f.gateway.dispatchRpc('$events/result', { args: {
+    clientId: 'event-client', eventId: 'approval-2', outcome: { kind: 'result', value: 'allowed-once' },
+  } }, new AbortController().signal)
+  const rejected = expect(approval).resolves.toMatchObject({ ok: false, error: { code: 'TRANSPORT_CLOSED' } })
+  expect(first.sent).toHaveLength(1)
+  expect(first.sent[0]).toMatchObject({ payload: { method: 'harness.remote.call', params: { endpoint: '$events/result' } } })
+
+  first.drop()
+  await rejected
+  await vi.advanceTimersByTimeAsync(100)
+  expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1 })
+  expect(f.remotes[1]!.carrier.sent).toEqual([])
+
+  finishSend()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(f.remotes[1]!.carrier.sent).toEqual([])
+  expect(f.localInvoke).not.toHaveBeenCalled()
 })
 
 it('stops timers and retires late candidates on exit, sign-out, shutdown and Host replacement', async () => {
