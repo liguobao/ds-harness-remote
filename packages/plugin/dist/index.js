@@ -100812,7 +100812,13 @@ var AcpPeerBridge = class {
         this.toolControllers.delete(params.streamId);
         throw error62;
       }
-    } else await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+    } else {
+      await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+      if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+        this.streams.delete(params.streamId);
+        await this.publish("agent.acp.stream.closed", { streamId: params.streamId, reason: "failed" }).catch(() => void 0);
+      }
+    }
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
   }
   async followTool(streamId, source, controller) {
@@ -100997,8 +101003,10 @@ var AcpPeerBridge = class {
       this.toolControllers.get(id6)?.abort();
       this.toolControllers.delete(id6);
     }
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
+    if (sessions === void 0) {
+      this.incomingTransfers.clear();
+      this.outgoingTransfers.clear();
+    }
     await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
       streamId,
       reason
@@ -101064,6 +101072,7 @@ function concatChunks2(chunks, totalBytes) {
 
 // src/acp/gateway.ts
 var APPROVAL_TTL_MS2 = 5 * 6e4;
+var BACKEND_STABLE_MS = 3e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
 var CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes"]);
 var isCatalogBackend = (value) => typeof value === "string" && CATALOG_BACKENDS.has(value);
@@ -101111,8 +101120,9 @@ var AcpRemoteGateway = class {
   sessionPermissions = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
-  restartTimer;
-  restartAttempt = 0;
+  restartAttempts = /* @__PURE__ */ new Map();
+  restartTimers = /* @__PURE__ */ new Map();
+  launching = /* @__PURE__ */ new Map();
   available = false;
   closed = false;
   state = "disabled";
@@ -101178,7 +101188,7 @@ var AcpRemoteGateway = class {
       enabled: this.config.enabled,
       available: this.isAvailable(),
       state: this.state,
-      restartAttempt: this.restartAttempt,
+      restartAttempt: Math.max(0, ...this.restartAttempts.values()),
       availableBackends: this.availableBackends(),
       ...this.unavailableCode === void 0 ? {} : { error: this.unavailableCode }
     };
@@ -101565,7 +101575,8 @@ var AcpRemoteGateway = class {
     return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === "string" ? call.params.backend : sessionBackend).call(call.method, call.params));
   }
   async runPromptInBackground(sessionId, params, task) {
-    const current = () => !this.closed && this.promptsInProgress.get(sessionId) === task && !this.pendingReconfiguration.has(task.backend) && this.backendInstances.get(task.backend)?.client === task.client;
+    const accepted = () => !this.closed && this.promptsInProgress.get(sessionId) === task;
+    const current = () => accepted() && !this.pendingReconfiguration.has(task.backend) && this.backendInstances.get(task.backend)?.client === task.client;
     try {
       const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
@@ -101589,10 +101600,10 @@ var AcpRemoteGateway = class {
         }
       });
     } catch (error62) {
-      if (!current()) return;
+      if (!accepted()) return;
       this.logger?.warn("ACP session/prompt failed", { code: errorCode3(error62) });
       await this.inboundChain.catch(() => void 0);
-      if (!current()) return;
+      if (!accepted()) return;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       await this.publishToSession(sessionId, {
         method: "session/update",
@@ -101606,8 +101617,15 @@ var AcpRemoteGateway = class {
         }
       }).catch(() => void 0);
     } finally {
-      if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId);
+      if (this.promptsInProgress.get(sessionId) === task) {
+        this.promptsInProgress.delete(sessionId);
+        if (!this.isSessionBackendReady(sessionId)) await this.failSessionStreams(sessionId);
+      }
     }
+  }
+  async failSessionStreams(sessionId) {
+    const sessions = /* @__PURE__ */ new Set([sessionId]);
+    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions).catch(() => void 0)));
   }
   async respond(connectionId, input4) {
     const params = parseRespondEnvelope(input4);
@@ -101674,6 +101692,18 @@ var AcpRemoteGateway = class {
   assertStreamable(connectionId, sessionId) {
     this.claimSession(connectionId, sessionId);
   }
+  /** Whether the session still has a turn whose terminal event has not arrived. */
+  hasTurnInFlight(sessionId) {
+    return this.promptsInProgress.has(sessionId);
+  }
+  /** Whether the adapter that owns this session can still produce frames. */
+  isSessionBackendReady(sessionId) {
+    const backend = this.sessionBackends.get(sessionId);
+    if (backend === void 0) return true;
+    if (!this.isAvailable()) return false;
+    const instance = this.backendInstances.get(backend);
+    return instance !== void 0 && instance.client.isReady() && !this.pendingReconfiguration.has(backend);
+  }
   /**
    * After a Client reconnect, session ownership may have been cleared with the
    * old peer. Reclaim the in-memory ACP session for the new connection so
@@ -101714,8 +101744,7 @@ var AcpRemoteGateway = class {
     });
     this.config = config2;
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config2)) && this.pendingReconfiguration.size === 0) return;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = void 0;
+    this.clearBackendRestarts();
     const changed = /* @__PURE__ */ new Set([...this.pendingReconfiguration, ...previous.backends.filter((item) => {
       const next = config2.backends.find((candidate) => candidate.id === item.id);
       return previous.enabled !== config2.enabled || JSON.stringify(item) !== JSON.stringify(next);
@@ -101747,17 +101776,20 @@ var AcpRemoteGateway = class {
     this.available = this.availableBackends().length > 0;
     const cleanupFailed = terminalError !== void 0 || [...stopping, ...processes].some((result) => result.status === "rejected");
     this.state = this.available ? "ready" : cleanupFailed && this.enabledBackends().length > 0 ? "unavailable" : "disabled";
-    this.restartAttempt = 0;
     this.unavailableCode = terminalError?.code ?? (cleanupFailed ? "ACP_RECONFIGURE_FAILED" : void 0);
     if (terminalError) throw terminalError;
     if (cleanupFailed) throw new RpcError("ACP_RECONFIGURE_FAILED", "Some ACP backend processes could not be stopped. Save the backend settings again to retry.");
     for (const id6 of changed) this.pendingReconfiguration.delete(id6);
     await this.start();
+    if (this.closed) return;
+    for (const id6 of this.enabledBackends()) {
+      if (!this.availableBackends().includes(id6)) this.scheduleBackendRestart(id6);
+    }
   }
   async close() {
     if (this.closed) return;
     this.closed = true;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
+    this.clearBackendRestarts();
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
     for (const peer of this.peers.values()) await peer.closeAll();
     this.peers.clear();
@@ -101782,19 +101814,7 @@ var AcpRemoteGateway = class {
   async launchAcp() {
     const candidates = this.config.backends.filter((item) => !this.pendingReconfiguration.has(item.id) && this.enabledBackends().includes(item.id));
     const results = await Promise.allSettled(candidates.map(async (candidate) => {
-      if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
-      let lastError;
-      for (const binary of cursorBinaryCandidates(candidate.command)) {
-        if (this.closed || !this.backendCurrent(candidate)) return;
-        try {
-          await this.launchBackendCandidate(candidate, binary);
-          return;
-        } catch (error62) {
-          lastError = error62;
-          this.logger.debug?.("ACP candidate failed", { id: candidate.id, code: errorCode3(error62) });
-        }
-      }
-      throw lastError;
+      await this.launchSerialized(candidate.id);
     }));
     if (this.closed) return;
     if (this.enabledBackends().length === 0) {
@@ -101804,11 +101824,42 @@ var AcpRemoteGateway = class {
     if (this.isAvailable()) {
       this.state = "ready";
       if (this.pendingReconfiguration.size === 0) this.unavailableCode = void 0;
-      this.restartAttempt = 0;
       return;
     }
     const failure5 = results.find((result) => result.status === "rejected");
     throw failure5?.status === "rejected" ? failure5.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
+  }
+  /**
+   * Launch one backend at most once at a time. A retry and a `start()` (from a
+   * reconfigure or a later failure) can target the same missing backend; without
+   * this both would capture the same previous instance and leak a replacement.
+   */
+  launchSerialized(id6) {
+    const candidate = this.config.backends.find((item) => item.id === id6);
+    if (candidate === void 0 || !this.enabledBackends().includes(id6) || this.pendingReconfiguration.has(id6)) return Promise.resolve();
+    if (this.backendInstances.get(id6)?.client.isReady()) return Promise.resolve();
+    const inFlight = this.launching.get(id6);
+    if (inFlight !== void 0) return inFlight;
+    let task;
+    task = this.launchCandidateBinaries(candidate).finally(() => {
+      if (this.launching.get(id6) === task) this.launching.delete(id6);
+    });
+    this.launching.set(id6, task);
+    return task;
+  }
+  async launchCandidateBinaries(candidate) {
+    let lastError;
+    for (const binary of cursorBinaryCandidates(candidate.command)) {
+      if (this.closed || !this.backendCurrent(candidate)) return;
+      try {
+        await this.launchBackendCandidate(candidate, binary);
+        return;
+      } catch (error62) {
+        lastError = error62;
+        this.logger.debug?.("ACP candidate failed", { id: candidate.id, code: errorCode3(error62) });
+      }
+    }
+    throw lastError;
   }
   backendCurrent(backend) {
     return this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
@@ -101835,7 +101886,7 @@ var AcpRemoteGateway = class {
       });
     });
     const unsubscribeUnavailable = acp.onUnavailable((code) => {
-      void this.handleUnavailable(code);
+      void this.handleUnavailable(id6, code);
     });
     const prev = this.backendInstances.get(id6);
     if (prev !== void 0) {
@@ -101852,7 +101903,8 @@ var AcpRemoteGateway = class {
       id: id6,
       client: acp,
       unsubscribeInbound,
-      unsubscribeUnavailable
+      unsubscribeUnavailable,
+      startedAt: Date.now()
     });
   }
   async handleInbound(backend, message) {
@@ -101923,21 +101975,14 @@ var AcpRemoteGateway = class {
   async publishToSession(sessionId, frame) {
     this.recordTurnCatchUp(sessionId, frame);
     const ownerId = this.sessionOwners.get(sessionId);
-    const entries = [...this.peers.entries()];
-    if (entries.length === 0) {
+    const owner = ownerId === void 0 ? void 0 : this.peers.get(ownerId);
+    if (owner === void 0) {
       this.bufferFrame(sessionId, frame);
       return;
     }
-    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
-      try {
-        await peer.publishInbound(sessionId, frame);
-        return { connectionId, ok: true };
-      } catch {
-        return { connectionId, ok: false };
-      }
-    }));
-    const ownerDelivered = ownerId !== void 0 && deliveries.some((item) => item.connectionId === ownerId && item.ok);
-    if (ownerId !== void 0 ? !ownerDelivered : deliveries.every((item) => !item.ok)) {
+    try {
+      await owner.publishInbound(sessionId, frame);
+    } catch {
       this.bufferFrame(sessionId, frame);
     }
   }
@@ -101971,27 +102016,64 @@ var AcpRemoteGateway = class {
     if (next.length === 0) this.recentFrames.delete(sessionId);
     else this.recentFrames.set(sessionId, next);
   }
-  async handleUnavailable(code) {
+  async handleUnavailable(backend, code) {
     if (this.closed) return;
-    this.available = false;
-    this.state = "restarting";
-    this.unavailableCode = code;
-    await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
-    this.scheduleRestart();
+    const sessions = /* @__PURE__ */ new Set();
+    for (const [sessionId, ownerBackend] of this.sessionBackends) {
+      if (ownerBackend === backend && !this.promptsInProgress.has(sessionId)) sessions.add(sessionId);
+    }
+    const failures = sessions.size === 0 ? Promise.resolve() : Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
+    const instance = this.backendInstances.get(backend);
+    if (instance !== void 0) await this.disposeInstance(instance).catch(() => void 0);
+    if (instance !== void 0 && Date.now() - instance.startedAt >= BACKEND_STABLE_MS) {
+      this.restartAttempts.delete(backend);
+    }
+    await failures;
+    if (this.closed) return;
+    this.available = this.availableBackends().length > 0;
+    if (this.available) {
+      this.state = "ready";
+      this.logger.warn("ACP backend unavailable; other backends remain ready", { id: backend, code });
+    } else {
+      this.state = "restarting";
+      this.unavailableCode = code;
+    }
+    this.scheduleBackendRestart(backend);
   }
-  scheduleRestart() {
+  // Retries are tracked per backend so one failing adapter cannot consume, or be
+  // reset by, another adapter's attempts.
+  scheduleBackendRestart(backend) {
     if (this.closed || !this.config.enabled) return;
-    if (this.restartAttempt >= this.restartDelaysMs.length) {
-      this.state = "unavailable";
+    if (this.restartTimers.has(backend)) return;
+    const attempt = this.restartAttempts.get(backend) ?? 0;
+    if (attempt >= this.restartDelaysMs.length) {
+      this.logger.warn("ACP backend restart attempts exhausted", { id: backend });
       return;
     }
-    const delay = this.restartDelaysMs[this.restartAttempt];
-    this.restartAttempt += 1;
-    if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
-    this.restartTimer = setTimeout(() => {
-      void this.start().catch(() => void 0);
-    }, delay);
-    this.restartTimer.unref?.();
+    this.restartAttempts.set(backend, attempt + 1);
+    const timer2 = setTimeout(() => {
+      this.restartTimers.delete(backend);
+      void this.restartBackend(backend);
+    }, this.restartDelaysMs[attempt]);
+    timer2.unref?.();
+    this.restartTimers.set(backend, timer2);
+  }
+  async restartBackend(backend) {
+    if (this.closed) return;
+    try {
+      await this.launchSerialized(backend);
+      if (!this.closed && this.pendingReconfiguration.size === 0 && this.isAvailable()) this.state = "ready";
+    } catch (error62) {
+      this.logger.warn("ACP backend restart failed", { id: backend, code: errorCode3(error62) });
+    }
+    if (this.closed) return;
+    if (this.availableBackends().includes(backend)) return;
+    this.scheduleBackendRestart(backend);
+  }
+  clearBackendRestarts() {
+    for (const timer2 of this.restartTimers.values()) clearTimeout(timer2);
+    this.restartTimers.clear();
+    this.restartAttempts.clear();
   }
   scheduleApprovalExpiry() {
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);

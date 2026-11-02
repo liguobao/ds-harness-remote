@@ -32,6 +32,9 @@ import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscr
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
+// A backend that stayed up this long before failing starts a fresh retry budget.
+const BACKEND_STABLE_MS = 30_000
+
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
 /** Backends that expose a Host-side session catalog (session/list) and replayed history. */
 type CatalogBackend = 'pi' | 'claude' | 'opencode' | 'hermes'
@@ -100,6 +103,7 @@ export class AcpRemoteGateway {
     client: CursorAcpLike
     unsubscribeInbound: () => void
     unsubscribeUnavailable: () => void
+    startedAt: number
   }>()
   private readonly sessionCwds = new Map<string, { backend: string; cwd: string }>()
   private readonly workspaceState = new WorkspaceBridgeState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
@@ -111,8 +115,9 @@ export class AcpRemoteGateway {
   private readonly sessionPermissions = new Map<string, string>()
   private readonly approvals = new Map<string, PendingApproval>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
-  private restartTimer?: ReturnType<typeof setTimeout>
-  private restartAttempt = 0
+  private readonly restartAttempts = new Map<string, number>()
+  private readonly restartTimers = new Map<string, NodeJS.Timeout>()
+  private readonly launching = new Map<string, Promise<void>>()
   private available = false
   private closed = false
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
@@ -211,7 +216,7 @@ export class AcpRemoteGateway {
       enabled: this.config.enabled,
       available: this.isAvailable(),
       state: this.state,
-      restartAttempt: this.restartAttempt,
+      restartAttempt: Math.max(0, ...this.restartAttempts.values()),
       availableBackends: this.availableBackends(),
       ...(this.unavailableCode === undefined ? {} : { error: this.unavailableCode }),
     }
@@ -662,8 +667,11 @@ export class AcpRemoteGateway {
   }
 
   private async runPromptInBackground(sessionId: string, params: unknown, task: PromptTask): Promise<void> {
-    const current = () => !this.closed && this.promptsInProgress.get(sessionId) === task
-      && !this.pendingReconfiguration.has(task.backend) && this.backendInstances.get(task.backend)?.client === task.client
+    // A turn belongs to the session, not to the adapter that ran it: a retry may
+    // replace the crashed client while the inbound queue drains.
+    const accepted = () => !this.closed && this.promptsInProgress.get(sessionId) === task
+    const current = () => accepted() && !this.pendingReconfiguration.has(task.backend)
+      && this.backendInstances.get(task.backend)?.client === task.client
     try {
       const result = await task.client.call('session/prompt', params)
       // Cursor emits final session/update lines before the JSON-RPC result.
@@ -692,10 +700,10 @@ export class AcpRemoteGateway {
         },
       })
     } catch (error) {
-      if (!current()) return
+      if (!accepted()) return
       this.logger?.warn('ACP session/prompt failed', { code: errorCode(error) })
       await this.inboundChain.catch(() => undefined)
-      if (!current()) return
+      if (!accepted()) return
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
       await this.publishToSession(sessionId, {
         method: 'session/update',
@@ -709,8 +717,18 @@ export class AcpRemoteGateway {
         },
       }).catch(() => undefined)
     } finally {
-      if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId)
+      if (this.promptsInProgress.get(sessionId) === task) {
+        this.promptsInProgress.delete(sessionId)
+        // The Client has now been told how the turn ended, so a session whose
+        // adapter died can be closed instead of waiting for a producer.
+        if (!this.isSessionBackendReady(sessionId)) await this.failSessionStreams(sessionId)
+      }
     }
+  }
+
+  private async failSessionStreams(sessionId: string): Promise<void> {
+    const sessions = new Set([sessionId])
+    await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions).catch(() => undefined)))
   }
 
   async respond(connectionId: string, input: unknown): Promise<{ resolved: true }> {
@@ -786,6 +804,20 @@ export class AcpRemoteGateway {
     this.claimSession(connectionId, sessionId)
   }
 
+  /** Whether the session still has a turn whose terminal event has not arrived. */
+  hasTurnInFlight(sessionId: string): boolean {
+    return this.promptsInProgress.has(sessionId)
+  }
+
+  /** Whether the adapter that owns this session can still produce frames. */
+  isSessionBackendReady(sessionId: string): boolean {
+    const backend = this.sessionBackends.get(sessionId)
+    if (backend === undefined) return true
+    if (!this.isAvailable()) return false
+    const instance = this.backendInstances.get(backend)
+    return instance !== undefined && instance.client.isReady() && !this.pendingReconfiguration.has(backend)
+  }
+
   /**
    * After a Client reconnect, session ownership may have been cleared with the
    * old peer. Reclaim the in-memory ACP session for the new connection so
@@ -826,8 +858,7 @@ export class AcpRemoteGateway {
       backends: value.backends.filter(item => ['cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id)) })
     this.config = config
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
-    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
-    this.restartTimer = undefined
+    this.clearBackendRestarts()
     const changed = new Set([...this.pendingReconfiguration, ...previous.backends.filter(item => {
       const next = config.backends.find(candidate => candidate.id === item.id)
       return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
@@ -862,18 +893,23 @@ export class AcpRemoteGateway {
     this.available = this.availableBackends().length > 0
     const cleanupFailed = terminalError !== undefined || [...stopping, ...processes].some(result => result.status === 'rejected')
     this.state = this.available ? 'ready' : cleanupFailed && this.enabledBackends().length > 0 ? 'unavailable' : 'disabled'
-    this.restartAttempt = 0
     this.unavailableCode = terminalError?.code ?? (cleanupFailed ? 'ACP_RECONFIGURE_FAILED' : undefined)
     if (terminalError) throw terminalError
     if (cleanupFailed) throw new RpcError('ACP_RECONFIGURE_FAILED', 'Some ACP backend processes could not be stopped. Save the backend settings again to retry.')
     for (const id of changed) this.pendingReconfiguration.delete(id)
     await this.start()
+    if (this.closed) return
+    // A backend that did not come back is retried like any other failure, so a
+    // settings change elsewhere cannot leave it parked.
+    for (const id of this.enabledBackends()) {
+      if (!this.availableBackends().includes(id)) this.scheduleBackendRestart(id)
+    }
   }
 
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+    this.clearBackendRestarts()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
@@ -899,30 +935,51 @@ export class AcpRemoteGateway {
   private async launchAcp(): Promise<void> {
     const candidates = this.config.backends.filter(item => !this.pendingReconfiguration.has(item.id) && this.enabledBackends().includes(item.id))
     const results = await Promise.allSettled(candidates.map(async candidate => {
-      if (this.backendInstances.get(candidate.id)?.client.isReady()) return
-      let lastError: unknown
-      for (const binary of cursorBinaryCandidates(candidate.command)) {
-        if (this.closed || !this.backendCurrent(candidate)) return
-        try {
-          await this.launchBackendCandidate(candidate, binary)
-          return
-        } catch (error) {
-          lastError = error
-          this.logger.debug?.('ACP candidate failed', { id: candidate.id, code: errorCode(error) })
-        }
-      }
-      throw lastError
+      await this.launchSerialized(candidate.id)
     }))
     if (this.closed) return
     if (this.enabledBackends().length === 0) { this.state = 'disabled'; return }
     if (this.isAvailable()) {
       this.state = 'ready'
       if (this.pendingReconfiguration.size === 0) this.unavailableCode = undefined
-      this.restartAttempt = 0
       return
     }
     const failure = results.find(result => result.status === 'rejected')
     throw failure?.status === 'rejected' ? failure.reason : new CursorAcpError('CURSOR_BINARY_UNAVAILABLE', 'No ACP backend is available.')
+  }
+
+  /**
+   * Launch one backend at most once at a time. A retry and a `start()` (from a
+   * reconfigure or a later failure) can target the same missing backend; without
+   * this both would capture the same previous instance and leak a replacement.
+   */
+  private launchSerialized(id: string): Promise<void> {
+    const candidate = this.config.backends.find(item => item.id === id)
+    if (candidate === undefined || !this.enabledBackends().includes(id) || this.pendingReconfiguration.has(id)) return Promise.resolve()
+    if (this.backendInstances.get(id)?.client.isReady()) return Promise.resolve()
+    const inFlight = this.launching.get(id)
+    if (inFlight !== undefined) return inFlight
+    let task: Promise<void>
+    task = this.launchCandidateBinaries(candidate).finally(() => {
+      if (this.launching.get(id) === task) this.launching.delete(id)
+    })
+    this.launching.set(id, task)
+    return task
+  }
+
+  private async launchCandidateBinaries(candidate: ResolvedAcpBackendConfig): Promise<void> {
+    let lastError: unknown
+    for (const binary of cursorBinaryCandidates(candidate.command)) {
+      if (this.closed || !this.backendCurrent(candidate)) return
+      try {
+        await this.launchBackendCandidate(candidate, binary)
+        return
+      } catch (error) {
+        lastError = error
+        this.logger.debug?.('ACP candidate failed', { id: candidate.id, code: errorCode(error) })
+      }
+    }
+    throw lastError
   }
 
   private backendCurrent(backend: ResolvedAcpBackendConfig): boolean {
@@ -953,7 +1010,7 @@ export class AcpRemoteGateway {
           this.logger.warn('ACP inbound fanout failed', { id, code: errorCode(error) })
         })
     })
-    const unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(code) })
+    const unsubscribeUnavailable = acp.onUnavailable(code => { void this.handleUnavailable(id, code) })
     const prev = this.backendInstances.get(id)
     if (prev !== undefined) {
       await this.disposeInstance(prev)
@@ -970,7 +1027,9 @@ export class AcpRemoteGateway {
       client: acp,
       unsubscribeInbound,
       unsubscribeUnavailable,
+      startedAt: Date.now(),
     })
+
   }
 
   private async handleInbound(backend: string, message: CursorAcpInbound): Promise<void> {
@@ -1038,27 +1097,21 @@ export class AcpRemoteGateway {
   private async publishToSession(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
     this.recordTurnCatchUp(sessionId, frame)
     const ownerId = this.sessionOwners.get(sessionId)
-    const entries = [...this.peers.entries()]
-    if (entries.length === 0) {
+    const owner = ownerId === undefined ? undefined : this.peers.get(ownerId)
+    // A session belongs to exactly one connection (claimSession rejects a second
+    // owner), so its live output must never reach another device. Unclaimed or
+    // departed owners buffer for the next claimer instead of broadcasting.
+    if (owner === undefined) {
       this.bufferFrame(sessionId, frame)
       return
     }
-    const deliveries = await Promise.all(entries.map(async ([connectionId, peer]) => {
-      try {
-        await peer.publishInbound(sessionId, frame)
-        return { connectionId, ok: true as const }
-      } catch {
-        return { connectionId, ok: false as const }
-      }
-    }))
-    const ownerDelivered = ownerId !== undefined
-      && deliveries.some(item => item.connectionId === ownerId && item.ok)
-    // Loopback peers resolve successfully while swallowing events. Only treat
-    // the session owner's delivery as proof the Remote Client received the frame.
-    if (ownerId !== undefined ? !ownerDelivered : deliveries.every(item => !item.ok)) {
+    try {
+      await owner.publishInbound(sessionId, frame)
+    } catch {
       this.bufferFrame(sessionId, frame)
     }
   }
+
 
   private recordTurnCatchUp(sessionId: string, frame: { method: string; params: unknown }): void {
     const list = this.turnCatchUp.get(sessionId)
@@ -1095,31 +1148,84 @@ export class AcpRemoteGateway {
     else this.recentFrames.set(sessionId, next)
   }
 
-  private async handleUnavailable(code: string): Promise<void> {
+  private async handleUnavailable(backend: string, code: string): Promise<void> {
     if (this.closed) return
-    this.available = false
-    this.state = 'restarting'
-    this.unavailableCode = code
-    await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
-    this.scheduleRestart()
+    // Scope and close the failed backend's streams before any await: a restart can
+    // install a replacement adapter while this handler is suspended, and its own
+    // streams must not be failed by the previous generation.
+    const sessions = new Set<string>()
+    for (const [sessionId, ownerBackend] of this.sessionBackends) {
+      // A session with a running turn keeps its stream: closing it now would make a
+      // connected Client stop listening before the turn reports how it ended.
+      if (ownerBackend === backend && !this.promptsInProgress.has(sessionId)) sessions.add(sessionId)
+    }
+    const failures = sessions.size === 0
+      ? Promise.resolve()
+      : Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
+    // The instance entry stays in place: a prompt already running against it
+    // publishes its terminal failure only while `current()` still matches. It is
+    // not ready, so `launchAcp` replaces it on the next start.
+    const instance = this.backendInstances.get(backend)
+    if (instance !== undefined) await this.disposeInstance(instance).catch(() => undefined)
+    // A crash after real uptime is a new episode; one shortly after launch keeps
+    // its budget so a permanently broken adapter cannot retry forever.
+    if (instance !== undefined && Date.now() - instance.startedAt >= BACKEND_STABLE_MS) {
+      this.restartAttempts.delete(backend)
+    }
+    await failures
+    if (this.closed) return
+    this.available = this.availableBackends().length > 0
+    if (this.available) {
+      // Another adapter still answers; surface the loss and retry this one later
+      // instead of reporting the whole Remote domain as down.
+      this.state = 'ready'
+      this.logger.warn('ACP backend unavailable; other backends remain ready', { id: backend, code })
+    } else {
+      this.state = 'restarting'
+      this.unavailableCode = code
+    }
+    this.scheduleBackendRestart(backend)
   }
 
-  private scheduleRestart(): void {
+  // Retries are tracked per backend so one failing adapter cannot consume, or be
+  // reset by, another adapter's attempts.
+  private scheduleBackendRestart(backend: string): void {
     if (this.closed || !this.config.enabled) return
-    if (this.restartAttempt >= this.restartDelaysMs.length) {
-      this.state = 'unavailable'
+    if (this.restartTimers.has(backend)) return
+    const attempt = this.restartAttempts.get(backend) ?? 0
+    if (attempt >= this.restartDelaysMs.length) {
+      this.logger.warn('ACP backend restart attempts exhausted', { id: backend })
       return
     }
-    const delay = this.restartDelaysMs[this.restartAttempt]!
-    this.restartAttempt += 1
-    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
-    this.restartTimer = setTimeout(() => {
-      void this.start().catch(() => undefined)
-    }, delay)
-    this.restartTimer.unref?.()
+    this.restartAttempts.set(backend, attempt + 1)
+    const timer = setTimeout(() => {
+      this.restartTimers.delete(backend)
+      void this.restartBackend(backend)
+    }, this.restartDelaysMs[attempt]!)
+    timer.unref?.()
+    this.restartTimers.set(backend, timer)
   }
 
-  private scheduleApprovalExpiry(): void {
+  private async restartBackend(backend: string): Promise<void> {
+    if (this.closed) return
+    try {
+      await this.launchSerialized(backend)
+      if (!this.closed && this.pendingReconfiguration.size === 0 && this.isAvailable()) this.state = 'ready'
+    } catch (error) {
+      this.logger.warn('ACP backend restart failed', { id: backend, code: errorCode(error) })
+    }
+    if (this.closed) return
+    if (this.availableBackends().includes(backend)) return
+    this.scheduleBackendRestart(backend)
+  }
+
+  private clearBackendRestarts(): void {
+    for (const timer of this.restartTimers.values()) clearTimeout(timer)
+    this.restartTimers.clear()
+    this.restartAttempts.clear()
+  }
+
+    private scheduleApprovalExpiry(): void {
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     const next = [...this.approvals.values()].reduce<number | undefined>((min, item) => {
       if (min === undefined || item.expiresAt < min) return item.expiresAt
