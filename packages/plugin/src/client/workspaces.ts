@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import type { Translate } from '../client-locale.js'
 import type { OAuthProviderInfo } from '../server-api.js'
 import type { StatusFeed } from '../status-stream.js'
+import { compareVersions } from '../version-compare.js'
 import { deepSeekWorkspaceIcon, gptWorkspaceIcon } from './icons.js'
 import { pendingWorkspaceSelectionKey } from './navigation.js'
 import { connectedClientModeLabel, connectedProgress, connectionErrorMessage, formatPlatform, messageOf } from './presentation.js'
@@ -727,12 +728,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     React.useEffect(() => props.subscribeOpen(() => { void show() }), [props.subscribeOpen, show])
 
     React.useEffect(() => {
-      // While the host picker lists Hosts, the pushed status keeps the Host
-      // account line and the connection progress current; the subscription
-      // replays the latest status immediately.
-      if (!open || selectedHost !== undefined) return
+      // The pushed status drives the sidebar entry (update badge, remote mode)
+      // and the open modal alike; the subscription replays the latest status
+      // immediately, so the entry reflects the startup registry check without
+      // waiting for the modal to be opened.
       return props.statusFeed.subscribe(setStatus)
-    }, [open, selectedHost])
+    }, [props.statusFeed])
 
     const chooseAnotherHost = (): void => {
       setSelectedHost(undefined)
@@ -1005,10 +1006,21 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const opencodeAvailable = status?.remoteFeatures?.opencode === true
     const claudeAvailable = status?.remoteFeatures?.claude === true
     const hermesAvailable = status?.remoteFeatures?.hermes === true
+    const updateInfo = status?.update
+    const localUpdateAvailable = updateInfo !== undefined
+      && compareVersions(updateInfo.currentVersion, updateInfo.latestVersion) < 0
+    const updateNotice = updateInfo !== undefined && localUpdateAvailable
+      ? t('updateAvailable', { latest: updateInfo.latestVersion, current: updateInfo.currentVersion })
+      : undefined
+    const deviceUpdateAvailable = (device: RemoteDevice): boolean =>
+      updateInfo !== undefined
+      && device.clientVersion !== undefined
+      && compareVersions(device.clientVersion, updateInfo.latestVersion) < 0
     const selectedHostDetails = selectedHost === undefined ? undefined : [
       formatPlatform(selectedHost.platform),
       selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),
       selectedHost.clientVersion === undefined ? undefined : t('pluginVersion', { version: selectedHost.clientVersion }),
+      deviceUpdateAvailable(selectedHost) ? t('updateAvailableTag') : undefined,
     ].filter(Boolean).join(' · ')
     const connectedClients = status?.host?.connectedClients ?? []
     const connectedCount = connectedClients.length
@@ -1073,7 +1085,19 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
       React.createElement('path', { d: 'M8 21h8M12 17v4' }))
     const remoteActive = status?.mode === 'remote'
-    const entry = React.createElement('div', { className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}` },
+    // Wide entry: the button stretches full width and carries the update suffix
+    // in the host's own update-indicator look. Rail/Compact entries are
+    // icon-only, so they get the official 6px brand dot instead.
+    const updateSuffix = localUpdateAvailable && props.wide
+      ? React.createElement('span', {
+        className: 'dshRemoteUpdateSuffix',
+        title: updateNotice, 'aria-hidden': true,
+      }, t('updateShort', { version: updateInfo?.latestVersion ?? '' }))
+      : null
+    const updateDot = localUpdateAvailable
+      ? React.createElement('span', { className: 'dshRemoteUpdateDot', title: t('updateBadge'), 'aria-hidden': true })
+      : null
+    const entry = React.createElement('div', { className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}` },
       React.createElement(remoteActive && props.wide ? 'div' : 'button', {
         ...(remoteActive && props.wide ? {} : {
           type: 'button',
@@ -1085,7 +1109,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         'aria-label': props.wide ? remoteLabel : remoteActionLabel,
       }, computerIcon, props.wide
         ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
-        : null),
+        : null, props.wide ? updateSuffix : updateDot),
       remoteActive && props.wide ? React.createElement('button', {
         type: 'button',
         className: 'dshRemoteExitLink',
@@ -1102,7 +1126,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         title: remoteActionLabel,
         'aria-label': remoteActionLabel,
         onClick: () => void (remoteActive ? openLocalWorkspaces() : show()),
-      }, computerIcon))
+      }, computerIcon, updateDot))
     const compact = sidebarEntry === 'compact' && props.wide && props.portal !== undefined
 
     return React.createElement(React.Fragment, null,
@@ -1302,6 +1326,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                       formatPlatform(device.platform),
                       device.harnessVersion === undefined ? undefined : t('harnessVersion', { version: device.harnessVersion }),
                       device.clientVersion === undefined ? undefined : t('pluginVersion', { version: device.clientVersion }),
+                      deviceUpdateAvailable(device) ? t('updateAvailableTag') : undefined,
                     ].filter(Boolean).join(' · '))),
                     React.createElement('small', null, t(device.online ? 'online' : 'offline')))))) : null,
               React.createElement(RemoteProgressView, { progress, t }),
@@ -1310,6 +1335,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
                   React.createElement('footer', { className: 'dshRemoteAccountFooter' },
                     React.createElement('span', null, status?.target?.name ?? status?.deviceName ?? status?.host?.account ?? t('account')),
+                    updateNotice === undefined ? null : React.createElement('a', {
+                      className: 'dshRemoteAccountUpdate',
+                      href: 'https://github.com/liguobao/ds-harness-remote/releases',
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      title: updateNotice,
+                    }, t('updateAvailableShort', { version: updateInfo?.latestVersion ?? '' })),
                     props.openSettings === undefined ? null : React.createElement('button', {
                       type: 'button', className: 'dshRemoteAccountSettings',
                       onClick: props.openSettings,
