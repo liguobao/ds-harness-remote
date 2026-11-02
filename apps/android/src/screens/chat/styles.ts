@@ -171,6 +171,7 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     optionDot: { width: 20, height: 20, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
     optionDotChosen: { borderColor: colors.accent, backgroundColor: colors.accent },
     optionLabel: { ...t.small, color: colors.ink, flex: 1 },
+    optionDescription: { ...t.caption, color: colors.muted, marginTop: 2 },
     welcome: { alignItems: 'center', paddingHorizontal: spacing.lg },
     welcomeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.lg },
     welcomeSlogan: { ...t.title, fontSize: 24, lineHeight: 30, fontWeight: '600', letterSpacing: -0.4, color: colors.ink },

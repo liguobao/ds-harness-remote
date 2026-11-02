@@ -294,4 +294,75 @@ describe('portable UI artifact projection (Issue #124 & #126)', () => {
       expect(INTELLIGENT_UI_RENDERER_CODE).toBe('')
     }
   })
+
+  it('supports modern Table properties, dataRef and componentVersion (Issue #246)', () => {
+    const modernTableTree = {
+      title: 'Benchmarks',
+      root: 'tbl',
+      components: [
+        {
+          id: 'tbl',
+          type: 'Table',
+          componentVersion: '1.0.0',
+          props: {
+            columns: ['Algorithm', 'Time (ms)', 'Comparisons'],
+            rows: [
+              ['QuickSort', 83.4, 733160],
+              ['MergeSort', 95.1, 650000],
+            ],
+            sortable: true,
+            searchable: true,
+            filterable: true,
+            pageSize: 10,
+            exportable: true,
+            columnTypes: ['text', 'number', 'number'],
+          },
+        },
+      ],
+    }
+
+    const modernDataRefTree = {
+      title: 'DataRef Table',
+      root: 'tbl',
+      components: [
+        {
+          id: 'tbl',
+          type: 'Table',
+          props: {
+            dataRef: { scope: 's1', id: 'd1' },
+            pageSize: 20,
+            exportable: true,
+          },
+        },
+      ],
+    }
+
+    const rows = [
+      tool('ui-modern-table', 'ui_render', 1, modernTableTree, { ok: true }),
+      tool('ui-dataref-table', 'ui_render', 2, modernDataRefTree, { ok: true }),
+    ]
+
+    const artifacts = projectUiArtifacts(rows, 'hostA', 's1')
+    expect(artifacts).toHaveLength(2)
+    expect(artifacts[0]).toMatchObject({
+      uiId: 'ui-modern-table',
+      version: 1,
+      definition: modernTableTree,
+    })
+    expect(artifacts[1]).toMatchObject({
+      uiId: 'ui-dataref-table',
+      version: 1,
+      definition: modernDataRefTree,
+    })
+
+    if (INTELLIGENT_UI_RENDERER_CODE) {
+      // Bundled renderer must contain modern Table capabilities and detailed errors
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('searchable')
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('filterable')
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('pageSize')
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('columnTypes')
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('componentVersion')
+      expect(INTELLIGENT_UI_RENDERER_CODE).toContain('Unsupported or invalid UI definition')
+    }
+  })
 })

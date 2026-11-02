@@ -4,7 +4,7 @@
  * bundle's sandboxed widget iframe, never as this page's document.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, StyleSheet, Text, View } from 'react-native'
+import { Alert, Share, StyleSheet, Text, View } from 'react-native'
 import * as Crypto from 'expo-crypto'
 import WebView from 'react-native-webview'
 import type { WebViewMessageEvent } from 'react-native-webview'
@@ -21,9 +21,24 @@ function documentFor(token: string): string {
   // This is a trusted local bootstrap, not Host-supplied markup. Never place
   // the artifact itself in HTML: it enters via a JSON argument after load.
   const code = INTELLIGENT_UI_RENDERER_CODE.replace(/<\/script/gi, '<\\/script')
-  return '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">'
+  const mobileStyles = [
+    'html,body{padding:0;margin:0;overflow-x:hidden;background:transparent;-webkit-tap-highlight-color:transparent}',
+    '.diui-remote-title{display:none!important}',
+    '.diui-remote{padding:2px 0 6px;font-size:13px}',
+    '.diui-table-wrap{-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;overscroll-behavior-x:contain;border-radius:8px}',
+    '.diui-table th,.diui-table td{padding:8px 12px;font-size:13px}',
+    '.diui-table th{white-space:nowrap;font-weight:600}',
+    '.diui-button,.diui-choice-submit,.diui-table-tools button{min-height:36px;padding:6px 14px;border-radius:8px;touch-action:manipulation;font-size:13px}',
+    '.diui-table-tools{gap:8px;margin-bottom:8px}',
+    '.diui-table-tools input[type=search]{height:36px;padding:0 10px;font-size:13px;border-radius:8px}',
+    '.diui-choice-option{padding:12px 14px;border-radius:10px}',
+    '.diui-choice-submit{width:100%;justify-content:center;min-height:42px;font-weight:600;font-size:14px}',
+    '.diui-choice-hint{font-size:11px;line-height:1.4}',
+    '.diui-stat{padding:12px 14px;border-radius:10px}',
+  ].join('')
+  return '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' blob:; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src about: data: blob:; form-action \'none\'; base-uri \'none\'">'
-    + '<style>html,body{padding:0;margin:0;overflow-x:hidden;background:transparent}</style></head><body><main id="ui"></main>'
+    + '<style>' + mobileStyles + '</style></head><body><main id="ui"></main>'
     + '<script>' + code + '</script>'
     + '<script>(function(){'
     + 'var token=' + JSON.stringify(token) + ';var seq=0;var pending=new Map();'
@@ -33,8 +48,16 @@ function documentFor(token: string): string {
     + 'var host={sendPrompt:function(text){return new Promise(function(resolve,reject){var id=++seq;pending.set(id,{resolve:resolve,reject:reject});send("prompt",{id:id,text:text})})},'
     + 'onHeight:function(height){send("resize",{height:height})}};'
     + 'var renderer=window.DshIntelligentUiRenderer.mount(document.getElementById("ui"),host);'
-    + 'window.__diuiSetArtifact=function(value){renderer.render(value)};'
+    + 'document.addEventListener("click",function(e){'
+    + 'var a=e.target&&e.target.closest?e.target.closest("a[download]"):null;'
+    + 'if(a&&a.href&&a.href.indexOf("blob:")===0){'
+    + 'e.preventDefault();'
+    + 'fetch(a.href).then(function(r){return r.text()}).then(function(t){send("download",{name:a.download||"data.txt",text:t})}).catch(function(){});'
+    + '}'
+    + '},true);'
+    + 'window.__diuiSetArtifact=function(value){try{renderer.render(value)}catch(e){send("error",{message:String(e&&e.message||e)})}};'
     + 'window.__diuiSetTheme=function(value){renderer.setTheme(value)};'
+    + 'window.__diuiSetLocale=function(value){renderer.setLocale&&renderer.setLocale(value)};'
     + 'send("ready",{});'
     + '}catch(e){send("error",{message:String(e&&e.message||e)})}'
     + '})();</script></body></html>'
@@ -100,11 +123,17 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     if (msg.type === 'ready') {
       ready.current = true
       postArtifact()
-      ref.current?.injectJavaScript('window.__diuiSetTheme && window.__diuiSetTheme(' + JSON.stringify(scheme) + ');true;')
+      ref.current?.injectJavaScript('window.__diuiSetTheme && window.__diuiSetTheme(' + JSON.stringify(scheme) + ');'
+        + 'window.__diuiSetLocale && window.__diuiSetLocale("zh-CN");true;')
       return
     }
     if (msg.type === 'error' && typeof msg.message === 'string') {
       setError(msg.message.slice(0, 240))
+      return
+    }
+    if (msg.type === 'download' && typeof msg.text === 'string') {
+      const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : 'data.txt'
+      void Share.share({ title: name, message: msg.text })
       return
     }
     if (msg.type === 'resize' && typeof msg.height === 'number' && Number.isFinite(msg.height)) {
@@ -165,44 +194,54 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     </View>
   )
   return <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <Text style={[styles.title, { color: colors.ink }]}>{artifact.title || 'Intelligent UI'}</Text>
-    {error !== undefined
-      ? <Text style={{ color: colors.danger }}>Could not display UI: {error}</Text>
-      : <WebView
-          ref={ref}
-          // Let our navigation callback reject all external URLs before the
-          // default origin-whitelist handler can hand them to Android Linking.
-          originWhitelist={['*']}
-          source={source}
-          style={{ height, backgroundColor: 'transparent' }}
-          scrollEnabled={false}
-          nestedScrollEnabled={false}
-          javaScriptEnabled
-          domStorageEnabled={false}
-          javaScriptCanOpenWindowsAutomatically={false}
-          setSupportMultipleWindows={false}
-          allowFileAccess={false}
-          allowUniversalAccessFromFileURLs={false}
-          mixedContentMode="never"
-          onShouldStartLoadWithRequest={request =>
-            request.url === 'about:blank' || request.url === 'about:srcdoc'}
-          onMessage={handle}
-          onLoadStart={() => { ready.current = false; actions.current.invalidate() }}
-          onLoadEnd={() => { if (!ready.current) postArtifact() }}
-          onError={() => {
-            ready.current = false
-            actions.current.invalidate()
-            setError('WebView failed to load')
-          }}
-          onRenderProcessGone={() => {
-            ready.current = false
-            actions.current.invalidate()
-            setError('WebView process stopped')
-          }}
-        />}
+    <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.grouped }]}>
+      <Text style={[styles.titleIcon, { color: colors.primary }]}>◇</Text>
+      <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
+        {artifact.title || 'Intelligent UI'}
+      </Text>
+    </View>
+    <View style={styles.content}>
+      {error !== undefined
+        ? <Text style={{ color: colors.danger, padding: 8 }}>Could not display UI: {error}</Text>
+        : <WebView
+            ref={ref}
+            // Let our navigation callback reject all external URLs before the
+            // default origin-whitelist handler can hand them to Android Linking.
+            originWhitelist={['*']}
+            source={source}
+            style={{ height, backgroundColor: 'transparent' }}
+            scrollEnabled={false}
+            nestedScrollEnabled={true}
+            javaScriptEnabled
+            domStorageEnabled={false}
+            javaScriptCanOpenWindowsAutomatically={false}
+            setSupportMultipleWindows={false}
+            allowFileAccess={false}
+            allowUniversalAccessFromFileURLs={false}
+            mixedContentMode="never"
+            onShouldStartLoadWithRequest={request =>
+              request.url === 'about:blank' || request.url === 'about:srcdoc'}
+            onMessage={handle}
+            onLoadStart={() => { ready.current = false; actions.current.invalidate() }}
+            onLoadEnd={() => { if (!ready.current) postArtifact() }}
+            onError={() => {
+              ready.current = false
+              actions.current.invalidate()
+              setError('WebView failed to load')
+            }}
+            onRenderProcessGone={() => {
+              ready.current = false
+              actions.current.invalidate()
+              setError('WebView process stopped')
+            }}
+          />}
+    </View>
   </View>
 }
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 8, marginVertical: 8, overflow: 'hidden' },
-  title: { fontSize: 14, fontWeight: '600', marginBottom: 6 },
+  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginVertical: 6, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
+  titleIcon: { fontSize: 13, fontWeight: '700' },
+  title: { fontSize: 13, fontWeight: '600', flex: 1 },
+  content: { padding: 4 },
 })
