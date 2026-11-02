@@ -24,7 +24,7 @@ import { sessionPermissions } from '../services/session-permissions'
 import type { CustomPrompt } from '../services/storage'
 import { BUILT_IN_PROMPTS } from '../services/storage'
 import type { ChatSection } from '../state/message-helpers'
-import { chatImageConnectionGeneration, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
+import { chatImageConnectionGeneration, requireConnectionRpc, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
 import { type UiArtifact } from '../state/ui-artifacts'
 import type {
   ChatItem,
@@ -49,7 +49,9 @@ import { ChatErrorBoundary } from './chat-error-boundary'
 import {
   formatFileBytes,
   formatUploadedFilesPrompt,
+  formatUploadedFilesReferencePrompt,
   MAX_TOTAL_FILES_BYTES,
+  uploadStagedFilesToWorkspace,
   type StagedFile
 } from './chat-files'
 import { ChatTrajectory } from './chat-trajectory'
@@ -388,9 +390,21 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       const formattedQuotes = submittedQuotes.map(formatQuoteText).join('\n\n')
       promptWithQuotes = text.length > 0 ? `${formattedQuotes}\n\n${text}` : formattedQuotes
     }
-    const promptText = submittedFiles.length > 0
-      ? formatUploadedFilesPrompt(promptWithQuotes, submittedFiles)
-      : promptWithQuotes
+    let promptText = promptWithQuotes
+    if (submittedFiles.length > 0) {
+      try {
+        const rpc = requireConnectionRpc()
+        const uploaded = await uploadStagedFilesToWorkspace(rpc, session.sessionId, submittedFiles)
+        promptText = formatUploadedFilesReferencePrompt(promptWithQuotes, uploaded)
+      } catch (uploadError) {
+        const isUnsupported = (uploadError as { code?: string })?.code === 'FEATURE_NOT_SUPPORTED'
+        const errorMsg = isUnsupported
+          ? strings.chat.uploadUnavailable
+          : strings.chat.uploadFileFailed(submittedFiles[0]?.name ?? '', (uploadError as Error).message)
+        Alert.alert(strings.messageActions.failed, errorMsg)
+        return
+      }
+    }
     if (promptText.length > LONG_DRAFT_MAX) {
       Alert.alert(strings.chat.draftTooLongTitle, strings.chat.draftTooLong(LONG_DRAFT_MAX))
       return
