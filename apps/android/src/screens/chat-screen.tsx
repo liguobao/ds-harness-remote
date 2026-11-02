@@ -793,7 +793,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
       <View style={styles.composerWrap}>
         <View style={[styles.composerInner, readableColumn]}>
-        {connected && (session.backend === undefined || session.backend === 'harness') && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
+        {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal)) && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
         {images.length > 0 && (

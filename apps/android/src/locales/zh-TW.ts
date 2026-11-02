@@ -457,6 +457,7 @@ const zhTW = {
     relatedFiles: "相關檔案",
     composeRunning: "產生中 · 可直接插話",
     todos: "待辦",
+    taskChecklist: "任務進度清單",
     goal: "目標",
     jobs: "背景工作",
     viewJobs: "查看背景工作",

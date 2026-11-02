@@ -450,6 +450,7 @@ const deDE = {
     relatedFiles: "Zugehörige Dateien",
     composeRunning: "Wird generiert · Nachricht hinzufügen",
     todos: "Aufgaben",
+    taskChecklist: "Aufgabenfortschritts-Checkliste",
     goal: "Ziel",
     jobs: "Hintergrundaufgaben",
     viewJobs: "Hintergrundaufgaben anzeigen",

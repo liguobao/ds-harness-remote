@@ -459,6 +459,7 @@ const enUS = {
     relatedFiles: "Related files",
     composeRunning: "Generating · Add a message",
     todos: "To-dos",
+    taskChecklist: "Task Progress Checklist",
     goal: "Goal",
     jobs: "Background tasks",
     viewJobs: "View background tasks",

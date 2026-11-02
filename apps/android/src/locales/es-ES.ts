@@ -450,6 +450,7 @@ const esES = {
     relatedFiles: "Archivos relacionados",
     composeRunning: "Generando · Añade un mensaje",
     todos: "Tareas",
+    taskChecklist: "Lista de progreso de tareas",
     goal: "Objetivo",
     jobs: "Tareas en segundo plano",
     viewJobs: "Ver tareas en segundo plano",

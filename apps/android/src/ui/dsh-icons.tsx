@@ -230,6 +230,30 @@ export const IconCheckOutline = memo(function IconCheckOutline({ size = 14, colo
   )
 })
 
+/** Official DSH IconChecklistOutlineRegular from ui-primitives */
+export const IconChecklistOutline = memo(function IconChecklistOutline({
+  size = 14,
+  color = '#6E7681',
+  strokeWidth = 1.3,
+}: { size?: number; color?: string; strokeWidth?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M3.75 6.25C4.7165 6.25 5.5 5.4665 5.5 4.5C5.5 3.5335 4.7165 2.75 3.75 2.75C2.7835 2.75 2 3.5335 2 4.5C2 5.4665 2.7835 6.25 3.75 6.25Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Path d="M7.5 4.5H13.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M3.75 13.25C4.7165 13.25 5.5 12.4665 5.5 11.5C5.5 10.5335 4.7165 9.75 3.75 9.75C2.7835 9.75 2 10.5335 2 11.5C2 12.4665 2.7835 13.25 3.75 13.25Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Path d="M7.5 11.5H13.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  )
+})
+
 /** Official DSH IconBranchOutlineRegular from TurnActions / MessageActions */
 export const IconBranchOutline = memo(function IconBranchOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
   return (

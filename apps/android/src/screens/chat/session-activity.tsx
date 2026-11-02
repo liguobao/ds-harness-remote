@@ -9,6 +9,7 @@ import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
+import { TaskProgressChecklist, type TodoItem } from './task-progress-checklist'
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 type Todo = { content: string; status: 'pending' | 'in_progress' | 'completed' }
@@ -34,7 +35,7 @@ export function SessionActivityDock({ session }: { session: RemoteSession }) {
   const todos = todosFrom(values?.todos)
   const projection = record(values?.goal) ? values.goal : undefined
   const goal = record(projection?.goal) && typeof projection.goal.objective === 'string' ? projection.goal : undefined
-  const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs'>()
+  const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs' | undefined>()
   const toggle = (section: 'todos' | 'goal' | 'jobs') => setExpanded(value => value === section ? undefined : section)
   const { height } = useWindowDimensions()
   const detailsHeight = Math.min(180, height * 0.24)
@@ -89,16 +90,14 @@ export function SessionActivityDock({ session }: { session: RemoteSession }) {
   }, [session.sessionId, attempt])
 
   return <View style={styles.dock}>
-    {todos.length > 0 && <Disclosure title={`${completed}/${todos.length}${current ? ` · ${copy.active}: ${current.content}` : ` · ${copy.complete}`}`} trailing={<View style={styles.inlineTrack}><View style={[styles.progressFill, completed === todos.length && styles.progressComplete, { width: `${completed / todos.length * 100}%` }]} /></View>}
-      icon={completed === todos.length ? <CircleCheck size={18} color={colors.success} /> : <ListChecks size={18} color={colors.muted} />} open={expanded === 'todos'} onPress={() => toggle('todos')}>
-      <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${completed / todos.length * 100}%` }]} /></View>
-      <ScrollView style={[styles.details, { maxHeight: detailsHeight }]} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-        {todos.map((todo, index) => <View key={index} style={styles.todo}>
-          {todo.status === 'completed' ? <Check size={16} color={colors.success} /> : <Circle size={14} color={todo.status === 'in_progress' ? colors.primary : colors.muted} />}
-          <Text style={styles.todoText}>{todo.content}<Text style={styles.muted}> · {phase(todo.status === 'in_progress' ? 'active' : todo.status)}</Text></Text>
-        </View>)}
-      </ScrollView>
-    </Disclosure>}
+    {todos.length > 0 && (
+      <TaskProgressChecklist
+        todos={todos}
+        expanded={expanded === 'todos'}
+        onToggle={() => toggle('todos')}
+        maxHeight={detailsHeight}
+      />
+    )}
     {goal && <Disclosure title={`${copy.goal} · ${goal.objective}`} trailing={<Text style={styles.status}>{phase(goal.phase)}</Text>}
       icon={goal.phase === 'paused' ? <PauseCircle size={18} color={colors.muted} /> : <Flag size={18} color={colors.muted} />}
       open={expanded === 'goal'} onPress={() => toggle('goal')}>
