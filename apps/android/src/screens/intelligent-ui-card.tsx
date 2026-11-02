@@ -4,7 +4,7 @@
  * bundle's sandboxed widget iframe, never as this page's document.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, StyleSheet, Text, View } from 'react-native'
+import { Alert, Share, StyleSheet, Text, View } from 'react-native'
 import * as Crypto from 'expo-crypto'
 import WebView from 'react-native-webview'
 import type { WebViewMessageEvent } from 'react-native-webview'
@@ -33,7 +33,14 @@ function documentFor(token: string): string {
     + 'var host={sendPrompt:function(text){return new Promise(function(resolve,reject){var id=++seq;pending.set(id,{resolve:resolve,reject:reject});send("prompt",{id:id,text:text})})},'
     + 'onHeight:function(height){send("resize",{height:height})}};'
     + 'var renderer=window.DshIntelligentUiRenderer.mount(document.getElementById("ui"),host);'
-    + 'window.__diuiSetArtifact=function(value){renderer.render(value)};'
+    + 'document.addEventListener("click",function(e){'
+    + 'var a=e.target&&e.target.closest?e.target.closest("a[download]"):null;'
+    + 'if(a&&a.href&&a.href.indexOf("blob:")===0){'
+    + 'e.preventDefault();'
+    + 'fetch(a.href).then(function(r){return r.text()}).then(function(t){send("download",{name:a.download||"data.txt",text:t})}).catch(function(){});'
+    + '}'
+    + '},true);'
+    + 'window.__diuiSetArtifact=function(value){try{renderer.render(value)}catch(e){send("error",{message:String(e&&e.message||e)})}};'
     + 'window.__diuiSetTheme=function(value){renderer.setTheme(value)};'
     + 'send("ready",{});'
     + '}catch(e){send("error",{message:String(e&&e.message||e)})}'
@@ -105,6 +112,11 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     }
     if (msg.type === 'error' && typeof msg.message === 'string') {
       setError(msg.message.slice(0, 240))
+      return
+    }
+    if (msg.type === 'download' && typeof msg.text === 'string') {
+      const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : 'data.txt'
+      void Share.share({ title: name, message: msg.text })
       return
     }
     if (msg.type === 'resize' && typeof msg.height === 'number' && Number.isFinite(msg.height)) {
