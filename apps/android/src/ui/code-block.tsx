@@ -141,7 +141,7 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     marginVertical: 6,
