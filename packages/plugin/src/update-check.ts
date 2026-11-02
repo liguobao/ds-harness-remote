@@ -47,8 +47,8 @@ export class PluginUpdateChecker {
   /** Run the first check and re-check daily. Safe to call more than once. */
   start(): void {
     if (this.stopped || this.timer !== undefined) return
-    void this.check()
-    this.timer = setInterval(() => { void this.check() }, RECHECK_INTERVAL_MS)
+    void this.check().catch(() => undefined)
+    this.timer = setInterval(() => { void this.check().catch(() => undefined) }, RECHECK_INTERVAL_MS)
     this.timer.unref?.()
   }
 
@@ -98,6 +98,9 @@ export class PluginUpdateChecker {
         pending -= 1
         if (pending === 0) resolve(undefined)
       }
+      // An empty source list must still resolve, or the shared in-flight
+      // promise would hang and block every later check.
+      if (pending === 0) { settle(undefined); return }
       for (const url of DIST_TAG_URLS) {
         this.fetchDistTags(url).then(settle, () => settle(undefined))
       }

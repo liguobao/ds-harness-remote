@@ -1006,7 +1006,14 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const opencodeAvailable = status?.remoteFeatures?.opencode === true
     const claudeAvailable = status?.remoteFeatures?.claude === true
     const hermesAvailable = status?.remoteFeatures?.hermes === true
-    const updateInfo = status?.update
+    // The status payload crosses the loopback SSE wire; a malformed update
+    // field reads as "no update info" rather than feeding render-time parsing.
+    const rawUpdate = status?.update
+    const updateInfo = rawUpdate !== undefined
+      && typeof rawUpdate.currentVersion === 'string'
+      && typeof rawUpdate.latestVersion === 'string'
+      ? rawUpdate
+      : undefined
     const localUpdateAvailable = updateInfo !== undefined
       && compareVersions(updateInfo.currentVersion, updateInfo.latestVersion) < 0
     const updateNotice = updateInfo !== undefined && localUpdateAvailable

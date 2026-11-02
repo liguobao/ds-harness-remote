@@ -106804,9 +106804,9 @@ var PluginUpdateChecker = class {
   /** Run the first check and re-check daily. Safe to call more than once. */
   start() {
     if (this.stopped || this.timer !== void 0) return;
-    void this.check();
+    void this.check().catch(() => void 0);
     this.timer = setInterval(() => {
-      void this.check();
+      void this.check().catch(() => void 0);
     }, RECHECK_INTERVAL_MS);
     this.timer.unref?.();
   }
@@ -106854,6 +106854,10 @@ var PluginUpdateChecker = class {
         pending -= 1;
         if (pending === 0) resolve6(void 0);
       };
+      if (pending === 0) {
+        settle2(void 0);
+        return;
+      }
       for (const url2 of DIST_TAG_URLS) {
         this.fetchDistTags(url2).then(settle2, () => settle2(void 0));
       }
