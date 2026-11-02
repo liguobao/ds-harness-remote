@@ -21,9 +21,24 @@ function documentFor(token: string): string {
   // This is a trusted local bootstrap, not Host-supplied markup. Never place
   // the artifact itself in HTML: it enters via a JSON argument after load.
   const code = INTELLIGENT_UI_RENDERER_CODE.replace(/<\/script/gi, '<\\/script')
-  return '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">'
+  const mobileStyles = [
+    'html,body{padding:0;margin:0;overflow-x:hidden;background:transparent;-webkit-tap-highlight-color:transparent}',
+    '.diui-remote-title{display:none!important}',
+    '.diui-remote{padding:2px 0 6px;font-size:13px}',
+    '.diui-table-wrap{-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;overscroll-behavior-x:contain;border-radius:8px}',
+    '.diui-table th,.diui-table td{padding:8px 12px;font-size:13px}',
+    '.diui-table th{white-space:nowrap;font-weight:600}',
+    '.diui-button,.diui-choice-submit,.diui-table-tools button{min-height:36px;padding:6px 14px;border-radius:8px;touch-action:manipulation;font-size:13px}',
+    '.diui-table-tools{gap:8px;margin-bottom:8px}',
+    '.diui-table-tools input[type=search]{height:36px;padding:0 10px;font-size:13px;border-radius:8px}',
+    '.diui-choice-option{padding:12px 14px;border-radius:10px}',
+    '.diui-choice-submit{width:100%;justify-content:center;min-height:42px;font-weight:600;font-size:14px}',
+    '.diui-choice-hint{font-size:11px;line-height:1.4}',
+    '.diui-stat{padding:12px 14px;border-radius:10px}',
+  ].join('')
+  return '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' blob:; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; frame-src about: data: blob:; form-action \'none\'; base-uri \'none\'">'
-    + '<style>html,body{padding:0;margin:0;overflow-x:hidden;background:transparent}</style></head><body><main id="ui"></main>'
+    + '<style>' + mobileStyles + '</style></head><body><main id="ui"></main>'
     + '<script>' + code + '</script>'
     + '<script>(function(){'
     + 'var token=' + JSON.stringify(token) + ';var seq=0;var pending=new Map();'
@@ -42,6 +57,7 @@ function documentFor(token: string): string {
     + '},true);'
     + 'window.__diuiSetArtifact=function(value){try{renderer.render(value)}catch(e){send("error",{message:String(e&&e.message||e)})}};'
     + 'window.__diuiSetTheme=function(value){renderer.setTheme(value)};'
+    + 'window.__diuiSetLocale=function(value){renderer.setLocale&&renderer.setLocale(value)};'
     + 'send("ready",{});'
     + '}catch(e){send("error",{message:String(e&&e.message||e)})}'
     + '})();</script></body></html>'
@@ -107,7 +123,8 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     if (msg.type === 'ready') {
       ready.current = true
       postArtifact()
-      ref.current?.injectJavaScript('window.__diuiSetTheme && window.__diuiSetTheme(' + JSON.stringify(scheme) + ');true;')
+      ref.current?.injectJavaScript('window.__diuiSetTheme && window.__diuiSetTheme(' + JSON.stringify(scheme) + ');'
+        + 'window.__diuiSetLocale && window.__diuiSetLocale("zh-CN");true;')
       return
     }
     if (msg.type === 'error' && typeof msg.message === 'string') {
@@ -177,7 +194,14 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     </View>
   )
   return <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <Text style={[styles.title, { color: colors.ink }]}>{artifact.title || 'Intelligent UI'}</Text>
+    <View style={styles.header}>
+      <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
+        {artifact.title || 'Intelligent UI'}
+      </Text>
+      <Text style={[styles.badge, { backgroundColor: colors.border, color: colors.muted }]}>
+        UI
+      </Text>
+    </View>
     {error !== undefined
       ? <Text style={{ color: colors.danger }}>Could not display UI: {error}</Text>
       : <WebView
@@ -188,7 +212,7 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
           source={source}
           style={{ height, backgroundColor: 'transparent' }}
           scrollEnabled={false}
-          nestedScrollEnabled={false}
+          nestedScrollEnabled={true}
           javaScriptEnabled
           domStorageEnabled={false}
           javaScriptCanOpenWindowsAutomatically={false}
@@ -215,6 +239,8 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
   </View>
 }
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 8, marginVertical: 8, overflow: 'hidden' },
-  title: { fontSize: 14, fontWeight: '600', marginBottom: 6 },
+  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, marginVertical: 8, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  title: { fontSize: 14, fontWeight: '600', flex: 1, marginRight: 8 },
+  badge: { fontSize: 10, fontWeight: '600', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
 })
