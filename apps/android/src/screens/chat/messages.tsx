@@ -610,7 +610,12 @@ function QuestionCard({ item, busy, onRespond }: {
                 style={[styles.optionRow, chosen && styles.optionChosen]}
               >
                 <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <Check size={12} color={colors.white} />}</View>
-                <Text style={styles.optionLabel}>{option.label}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.optionLabel}>{option.label}</Text>
+                  {option.description !== undefined && (
+                    <Text style={styles.optionDescription}>{option.description}</Text>
+                  )}
+                </View>
               </Pressable>
             )
           })}
