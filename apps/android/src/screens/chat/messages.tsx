@@ -128,17 +128,25 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     }
     return files
   }, [items])
+  const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
     </View>}
     {segments.map((segment, index) => segment.kind === 'response'
-      ? <MessageBubble key={segment.key} item={segment.item} compact />
+      ? <MessageBubble
+          key={segment.key}
+          item={segment.item}
+          compact
+          artifacts={index === lastResponseIndex ? artifacts : undefined}
+          editedFiles={index === lastResponseIndex ? editedFiles : undefined}
+          onFilePress={onFilePress}
+        />
       : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
-    <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />
-    {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
+    {lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
+    {lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
@@ -293,7 +301,13 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
-function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
+function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress }: {
+  item: ChatMessage
+  compact: boolean
+  artifacts?: UiArtifact[]
+  editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
+  onFilePress?: (path: string) => void
+}) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
@@ -302,6 +316,7 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
   const showText = hasVisibleMessageText(item.text)
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
+  const hasArtifacts = artifacts !== undefined && artifacts.length > 0
 
   // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
@@ -317,7 +332,11 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
             <StreamingCursor />
           </View>
         )}
-        {!item.streaming && showText && <MessageActions item={item} />}
+        {artifacts?.map(ui => (
+          <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />
+        ))}
+        {editedFiles?.length && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
+        {!item.streaming && (showText || hasArtifacts) && <MessageActions item={item} />}
       </View>
     )
   }

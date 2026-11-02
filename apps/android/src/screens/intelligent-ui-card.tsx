@@ -194,53 +194,54 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
     </View>
   )
   return <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <View style={styles.header}>
+    <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.grouped }]}>
+      <Text style={[styles.titleIcon, { color: colors.primary }]}>◇</Text>
       <Text style={[styles.title, { color: colors.ink }]} numberOfLines={1}>
         {artifact.title || 'Intelligent UI'}
       </Text>
-      <Text style={[styles.badge, { backgroundColor: colors.border, color: colors.muted }]}>
-        UI
-      </Text>
     </View>
-    {error !== undefined
-      ? <Text style={{ color: colors.danger }}>Could not display UI: {error}</Text>
-      : <WebView
-          ref={ref}
-          // Let our navigation callback reject all external URLs before the
-          // default origin-whitelist handler can hand them to Android Linking.
-          originWhitelist={['*']}
-          source={source}
-          style={{ height, backgroundColor: 'transparent' }}
-          scrollEnabled={false}
-          nestedScrollEnabled={true}
-          javaScriptEnabled
-          domStorageEnabled={false}
-          javaScriptCanOpenWindowsAutomatically={false}
-          setSupportMultipleWindows={false}
-          allowFileAccess={false}
-          allowUniversalAccessFromFileURLs={false}
-          mixedContentMode="never"
-          onShouldStartLoadWithRequest={request =>
-            request.url === 'about:blank' || request.url === 'about:srcdoc'}
-          onMessage={handle}
-          onLoadStart={() => { ready.current = false; actions.current.invalidate() }}
-          onLoadEnd={() => { if (!ready.current) postArtifact() }}
-          onError={() => {
-            ready.current = false
-            actions.current.invalidate()
-            setError('WebView failed to load')
-          }}
-          onRenderProcessGone={() => {
-            ready.current = false
-            actions.current.invalidate()
-            setError('WebView process stopped')
-          }}
-        />}
+    <View style={styles.content}>
+      {error !== undefined
+        ? <Text style={{ color: colors.danger, padding: 8 }}>Could not display UI: {error}</Text>
+        : <WebView
+            ref={ref}
+            // Let our navigation callback reject all external URLs before the
+            // default origin-whitelist handler can hand them to Android Linking.
+            originWhitelist={['*']}
+            source={source}
+            style={{ height, backgroundColor: 'transparent' }}
+            scrollEnabled={false}
+            nestedScrollEnabled={true}
+            javaScriptEnabled
+            domStorageEnabled={false}
+            javaScriptCanOpenWindowsAutomatically={false}
+            setSupportMultipleWindows={false}
+            allowFileAccess={false}
+            allowUniversalAccessFromFileURLs={false}
+            mixedContentMode="never"
+            onShouldStartLoadWithRequest={request =>
+              request.url === 'about:blank' || request.url === 'about:srcdoc'}
+            onMessage={handle}
+            onLoadStart={() => { ready.current = false; actions.current.invalidate() }}
+            onLoadEnd={() => { if (!ready.current) postArtifact() }}
+            onError={() => {
+              ready.current = false
+              actions.current.invalidate()
+              setError('WebView failed to load')
+            }}
+            onRenderProcessGone={() => {
+              ready.current = false
+              actions.current.invalidate()
+              setError('WebView process stopped')
+            }}
+          />}
+    </View>
   </View>
 }
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, marginVertical: 8, overflow: 'hidden' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  title: { fontSize: 14, fontWeight: '600', flex: 1, marginRight: 8 },
-  badge: { fontSize: 10, fontWeight: '600', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginVertical: 6, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
+  titleIcon: { fontSize: 13, fontWeight: '700' },
+  title: { fontSize: 13, fontWeight: '600', flex: 1 },
+  content: { padding: 4 },
 })
