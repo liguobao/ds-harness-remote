@@ -95,6 +95,8 @@ export class AppRuntime {
   email: string = '';
   devices: RemoteHostDevice[] = [];
   sessions: HarnessRemoteSession[] = [];
+  /** True when the session list failed to load; the chat shows a retry entry point. */
+  sessionsLoadFailed: boolean = false;
   messages: ChatItem[] = [];
   generating: boolean = false;
   currentSessionId: string = '';
@@ -337,17 +339,14 @@ export class AppRuntime {
       if (this.connectCancelled) {
         return;
       }
-      const sessions: HarnessRemoteSession[] = await this.sessionListWithRetry(harness);
-      if (this.connectCancelled) {
-        return;
-      }
-      this.sessions = sortSessions(sessions);
+      // Enter the chat as soon as the secure harness channel is live: the session
+      // list is loaded afterwards so a slow host never keeps the user locked out.
       this.connectedHostName = host.name.length > 0 ? host.name : '远程主机';
       this.connectedDeviceId = host.deviceId;
       logInfo('connected to host ' + host.deviceId);
       this.phase = PHASE_CHAT;
       this.notify();
-      await this.pickInitialSession();
+      await this.loadSessionsAfterConnect();
       return;
     } catch (error) {
       logError('connect failed: ' + errorMessage(error));
@@ -636,7 +635,7 @@ export class AppRuntime {
       return;
     }
     try {
-      const sessions: HarnessRemoteSession[] = await harness.sessionList();
+      const sessions: HarnessRemoteSession[] = await harness.sessionList(12000);
       if (this.harness === harness && this.phase === PHASE_CHAT) {
         this.sessions = sortSessions(sessions);
         this.notify();
@@ -955,17 +954,87 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * Load the session list right after entering the chat phase. A slow or stuck
+   * Host must not fail the whole connection: on failure the chat stays usable
+   * and the user can retry from the empty-state entry point.
+   */
+  private async loadSessionsAfterConnect(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || this.phase !== PHASE_CHAT) {
+      return;
+    }
+    this.busy = true;
+    this.sessionsLoadFailed = false;
+    this.notify();
+    try {
+      const sessions: HarnessRemoteSession[] = await this.sessionListWithRetry(harness);
+      if (this.harness !== harness || this.phase !== PHASE_CHAT) {
+        return;
+      }
+      this.sessions = sortSessions(sessions);
+      this.busy = false;
+      this.sessionsLoadFailed = false;
+      this.notify();
+      await this.pickInitialSession();
+    } catch (error) {
+      logError('session list failed after connect: ' + errorMessage(error));
+      if (this.harness !== harness || this.phase !== PHASE_CHAT) {
+        return;
+      }
+      this.sessions = [];
+      this.sessionsLoadFailed = true;
+      this.currentSessionId = '';
+      this.currentSessionTitle = '会话列表加载失败';
+      this.messages = [];
+      this.generating = false;
+      this.busy = false;
+      this.errorMsg = '会话列表加载失败：' + errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** User-triggered retry for a failed session-list load; keeps the live connection. */
+  async retrySessionLoad(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || this.phase !== PHASE_CHAT || this.busy) {
+      return;
+    }
+    this.busy = true;
+    this.sessionsLoadFailed = false;
+    this.errorMsg = '';
+    this.notify();
+    try {
+      const sessions: HarnessRemoteSession[] = await this.sessionListWithRetry(harness);
+      if (this.harness !== harness || this.phase !== PHASE_CHAT) {
+        return;
+      }
+      this.sessions = sortSessions(sessions);
+      this.busy = false;
+      this.notify();
+      await this.pickInitialSession();
+    } catch (error) {
+      if (this.harness !== harness || this.phase !== PHASE_CHAT) {
+        return;
+      }
+      this.sessionsLoadFailed = true;
+      this.busy = false;
+      this.errorMsg = '会话列表加载失败：' + errorMessage(error);
+      this.notify();
+    }
+  }
+
   private async sessionListWithRetry(harness: HarnessAlphaClient): Promise<HarnessRemoteSession[]> {
     try {
-      return await harness.sessionList();
+      return await harness.sessionList(12000);
     } catch (error) {
       const wrapped: Error = asError(error);
       if (!(wrapped instanceof RemoteGatewayError) || wrapped.code !== 'RPC_TIMEOUT') {
         throw wrapped;
       }
       logWarn('session/list timed out, retrying once');
-      await delay(2000);
-      return await harness.sessionList();
+      await delay(1500);
+      return await harness.sessionList(12000);
     }
   }
 

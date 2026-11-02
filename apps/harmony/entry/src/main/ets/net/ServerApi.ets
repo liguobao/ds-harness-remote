@@ -3,8 +3,8 @@ import { bundleManager } from '@kit.AbilityKit';
 import { jsonStr, jsonNum, jsonBool, jsonArr } from '../protocol/Types';
 import { AccountLoginResult, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, DeviceIdentity } from '../model/Types';
 
-/** Fallback when the bundle info cannot be read; aligned with the mainline client version. */
-const CLIENT_VERSION_FALLBACK: string = '0.5.21';
+/** Fallback when the bundle info cannot be read; must match AppScope/app.json5. */
+const CLIENT_VERSION_FALLBACK: string = '0.02';
 
 let clientVersionValue: string = CLIENT_VERSION_FALLBACK;
 

@@ -118,10 +118,10 @@ export class HarnessAlphaClient {
     this.eventClientId = '';
   }
 
-  async sessionList(): Promise<HarnessRemoteSession[]> {
+  async sessionList(timeoutMs?: number): Promise<HarnessRemoteSession[]> {
     const request: Record<string, Object> = {};
     const args: Record<string, Object> = { '_request': request };
-    const value: Object = await this.callValue('session/list', args);
+    const value: Object = await this.callValue('session/list', args, timeoutMs);
     const root: Record<string, Object> | undefined = asRecord(value);
     const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
     const sessions: HarnessRemoteSession[] = [];
@@ -276,7 +276,7 @@ export class HarnessAlphaClient {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }
     this.followStream = stream;
-    const first: Object = await withTimeout(firstFrame, 60000);
+    const first: Object = await withTimeout(firstFrame, 25000);
     if (generation !== this.followGeneration) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }
@@ -346,9 +346,9 @@ export class HarnessAlphaClient {
     await this.gateway.call('$events/result', payload);
   }
 
-  private async callValue(endpoint: string, args: Record<string, Object>): Promise<Object> {
+  private async callValue(endpoint: string, args: Record<string, Object>, timeoutMs?: number): Promise<Object> {
     const payload: Record<string, Object> = { 'args': args };
-    const value: Object = await this.gateway.call(endpoint, payload);
+    const value: Object = await this.gateway.call(endpoint, payload, timeoutMs);
     const root: Record<string, Object> | undefined = asRecord(value);
     if (root !== undefined) {
       const okValue: Object | undefined = root['ok'];

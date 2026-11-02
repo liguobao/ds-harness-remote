@@ -159,14 +159,14 @@ export class RemoteGateway {
   }
 
   /** One `harness.remote.call` round trip; unwraps the Gateway result envelope. */
-  async call(endpoint: string, payload: Object): Promise<Object> {
+  async call(endpoint: string, payload: Object, timeoutMs?: number): Promise<Object> {
     const params: Record<string, Object> = {
       'endpoint': endpoint,
       'payload': payload
     };
     let response: Object;
     try {
-      response = await this.client.rpc('harness.remote.call', params);
+      response = await this.client.rpc('harness.remote.call', params, timeoutMs);
     } catch (error) {
       throw toGatewayError(error);
     }

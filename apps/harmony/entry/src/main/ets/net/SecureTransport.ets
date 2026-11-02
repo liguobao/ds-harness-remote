@@ -66,9 +66,9 @@ export class SecureTransport {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
-        logError('noise: timeout waiting msg2 (10s)');
+        logError('noise: timeout waiting msg2 (15s)');
         finish(new Error('安全握手超时'));
-      }, 10000);
+      }, 15000);
       logInfo('noise: waiting for msg2, sending msg1');
       this.inner.onHandshakeStep = (step: number, data: Uint8Array) => {
         logInfo('noise: got handshake step=' + step + ' len=' + data.length);

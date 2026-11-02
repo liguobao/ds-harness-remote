@@ -23,6 +23,7 @@ struct Index {
   @State errorMsg: string = '';
   @State devices: RemoteHostDevice[] = [];
   @State sessions: HarnessRemoteSession[] = [];
+  @State sessionsLoadFailed: boolean = false;
   @State messages: ChatItem[] = [];
   @State generating: boolean = false;
   @State currentSessionId: string = '';
@@ -134,6 +135,7 @@ struct Index {
     this.errorMsg = this.runtime.errorMsg;
     this.devices = this.runtime.devices.slice();
     this.sessions = this.runtime.sessions.slice();
+    this.sessionsLoadFailed = this.runtime.sessionsLoadFailed;
     this.messages = this.runtime.messages.slice();
     this.generating = this.runtime.generating;
     this.currentSessionId = this.runtime.currentSessionId;
@@ -996,13 +998,38 @@ struct Index {
       List({ scroller: this.scroller, space: 14 }) {
         if (this.messages.length === 0) {
           ListItem() {
-            Column() {
-              Text(this.busy ? '正在加载会话…' : '发送第一条消息开始对话')
-                .fontSize(13)
-                .fontColor(this.pal().text3)
-                .padding(32)
+            Column({ space: 12 }) {
+              if (this.sessionsLoadFailed) {
+                Text('会话列表加载失败')
+                  .fontSize(13)
+                  .fontColor('#F85749')
+                Button('重试')
+                  .height(34)
+                  .fontSize(13)
+                  .padding({ left: 24, right: 24 })
+                  .backgroundColor(Color.Transparent)
+                  .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+                  .fontColor('#FFFFFF')
+                  .borderRadius(17)
+                  .enabled(!this.busy)
+                  .onClick(() => {
+                    this.runtime.retrySessionLoad();
+                  })
+                if (this.busy) {
+                  Text('正在重新加载…')
+                    .fontSize(11)
+                    .fontColor(this.pal().text3)
+                }
+              } else {
+                Text(this.busy ? '正在加载会话…' : '发送第一条消息开始对话')
+                  .fontSize(13)
+                  .fontColor(this.pal().text3)
+                  .padding(32)
+              }
             }
             .width('100%')
+            .alignItems(HorizontalAlign.Center)
+            .padding({ top: 40 })
           }
         }
         ForEach(this.messages, (item: ChatItem) => {
@@ -1219,18 +1246,23 @@ struct Index {
   MessageRow(item: ChatItem) {
     if (item.kind === 'user') {
       Row() {
-        Column() {
-          Text(item.text)
-            .fontSize(15)
-            .fontColor('#FFFFFF')
-            .textAlign(TextAlign.Start)
+        // A definite-width inner row gives the bubble a hard wrap budget, so long
+        // text lines break inside the gradient instead of overflowing it.
+        Row() {
+          Column() {
+            Text(item.text)
+              .fontSize(15)
+              .fontColor('#FFFFFF')
+              .textAlign(TextAlign.Start)
+          }
+          .padding({ top: 10, bottom: 10, left: 14, right: 14 })
+          .linearGradient({ angle: 135, colors: [['#3D5CF6', 0], ['#2E7CF0', 0.6], ['#22D3EE', 1]] })
+          .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 18, bottomRight: 6 })
+          .alignItems(HorizontalAlign.Start)
+          .shadow({ radius: 12, color: 'rgba(61,92,246,0.30)', offsetX: 0, offsetY: 3 })
         }
-        .padding({ top: 10, bottom: 10, left: 14, right: 14 })
-        .linearGradient({ angle: 135, colors: [['#3D5CF6', 0], ['#2E7CF0', 0.6], ['#22D3EE', 1]] })
-        .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 18, bottomRight: 6 })
-        .constraintSize({ maxWidth: '80%' })
-        .alignItems(HorizontalAlign.Start)
-        .shadow({ radius: 12, color: 'rgba(61,92,246,0.30)', offsetX: 0, offsetY: 3 })
+        .width('80%')
+        .justifyContent(FlexAlign.End)
       }
       .width('100%')
       .justifyContent(FlexAlign.End)
@@ -1248,41 +1280,44 @@ struct Index {
   @Builder
   AssistantRow(item: ChatItem) {
     Row() {
-      Column({ space: 6 }) {
-        if (item.reasoning.length > 0) {
-          Text(item.reasoning)
-            .fontSize(12)
-            .fontColor(this.pal().text2)
-            .maxLines(8)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .textAlign(TextAlign.Start)
-            .width('100%')
-        }
-        if (item.text.length > 0) {
-          Text(item.streaming ? `${item.text}▍` : item.text)
-            .fontSize(15)
-            .fontColor(this.pal().text)
-            .textAlign(TextAlign.Start)
-            .width('100%')
-        }
-        if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
-          Row({ space: 8 }) {
-            LoadingProgress()
-              .width(14)
-              .height(14)
-              .color('#22D3EE')
-            Text('正在思考…')
+      // A definite-width inner row gives the bubble a hard wrap budget; the inner
+      // Texts carry no percentage width so they can never stretch past the card.
+      Row() {
+        Column({ space: 6 }) {
+          if (item.reasoning.length > 0) {
+            Text(item.reasoning)
               .fontSize(12)
               .fontColor(this.pal().text2)
+              .maxLines(8)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .textAlign(TextAlign.Start)
+          }
+          if (item.text.length > 0) {
+            Text(item.streaming ? `${item.text}▍` : item.text)
+              .fontSize(15)
+              .fontColor(this.pal().text)
+              .textAlign(TextAlign.Start)
+          }
+          if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
+            Row({ space: 8 }) {
+              LoadingProgress()
+                .width(14)
+                .height(14)
+                .color('#22D3EE')
+              Text('正在思考…')
+                .fontSize(12)
+                .fontColor(this.pal().text2)
+            }
           }
         }
+        .padding({ top: 10, bottom: 10, left: 14, right: 14 })
+        .backgroundColor(this.pal().card)
+        .borderRadius({ topLeft: 6, topRight: 18, bottomLeft: 18, bottomRight: 18 })
+        .border({ width: 1, color: this.pal().border })
+        .alignItems(HorizontalAlign.Start)
       }
-      .padding({ top: 10, bottom: 10, left: 14, right: 14 })
-      .backgroundColor(this.pal().card)
-      .borderRadius({ topLeft: 6, topRight: 18, bottomLeft: 18, bottomRight: 18 })
-      .border({ width: 1, color: this.pal().border })
-      .constraintSize({ maxWidth: '88%' })
-      .alignItems(HorizontalAlign.Start)
+      .width('88%')
+      .justifyContent(FlexAlign.Start)
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
