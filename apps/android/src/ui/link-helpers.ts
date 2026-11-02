@@ -1,9 +1,25 @@
 import { Linking } from 'react-native'
 import MarkdownIt from 'markdown-it'
 import { installMath } from './markdown-math'
-import { markdownFilePath, classifyDshLinkPath, type DshLinkIconKind } from './file-glyph'
+import {
+  markdownFilePath,
+  parseDshFileLink,
+  parseWorkspaceTarget,
+  classifyDshLinkPath,
+  classifyDshWebBrand,
+  type DshLinkIconKind,
+  type DshParsedFileLink,
+} from './file-glyph'
 
-export { markdownFilePath, classifyDshLinkPath, type DshLinkIconKind }
+export {
+  markdownFilePath,
+  parseDshFileLink,
+  parseWorkspaceTarget,
+  classifyDshLinkPath,
+  classifyDshWebBrand,
+  type DshLinkIconKind,
+  type DshParsedFileLink,
+}
 
 export type LinkKind = 'citation' | 'external' | 'workspace' | 'session' | 'standard'
 
@@ -16,9 +32,11 @@ export interface MarkdownLinkInfo {
   displayText: string
   isBlocked: boolean
   blockReason?: BlockReason
+  iconKind?: DshLinkIconKind
+  filePath?: string
+  fileLine?: number
   citationIndex?: string
   domain?: string
-  workspacePath?: string
   sessionId?: string
 }
 
@@ -89,10 +107,10 @@ export function sanitizeAndValidateHref(rawHref: string): SanitizeResult {
     return { safeHref: null, isBlocked: true, reason: 'malformed_uri' }
   }
 
-  // 1. 协议相对 URL 必须在常规斜杠相对路径之前优先识别并补齐协议
+  // 1. 协议相对 URL 必须在常规斜杠相对路径之前优先识别并补齐协议（必须包含有效公网域名点号，拒绝 UNC 本地机器名 //server/share）
   let candidate = cleaned
   if (candidate.startsWith('//')) {
-    if (candidate.startsWith('///') || candidate.startsWith('//\\')) {
+    if (candidate.startsWith('///') || candidate.startsWith('//\\') || !candidate.slice(2).split(/[/?#]/u)[0]?.includes('.')) {
       return { safeHref: null, isBlocked: true, reason: 'malformed_uri' }
     }
     candidate = `https:${candidate}`
@@ -102,14 +120,20 @@ export function sanitizeAndValidateHref(rawHref: string): SanitizeResult {
 
   const schemeMatch = SCHEME_REGEX.exec(candidate)
 
-  // 无协议头：相对路径、页面锚点
-  if (!schemeMatch) {
-    if (candidate.startsWith('#') || candidate.startsWith('/') || candidate.startsWith('./') || candidate.startsWith('../')) {
+  // 无协议头：相对路径、页面锚点、Windows 盘符路径（D:/...）
+  if (!schemeMatch || (schemeMatch[1]!.length === 1 && (candidate.charAt(2) === '/' || candidate.charAt(2) === '\\'))) {
+    // 页面内纯锚点直接放行
+    if (candidate.startsWith('#')) {
       return { safeHref: candidate, isBlocked: false }
     }
-    const colonIndex = candidate.indexOf(':')
-    if (colonIndex > 0) {
-      return { safeHref: null, isBlocked: true, reason: 'unsafe_protocol' }
+    // 严格阻断路径穿越 (../)
+    if (/(?:^|[/\\])\.\.(?:[/\\]|$)/.test(candidate)) {
+      return { safeHref: null, isBlocked: true, reason: 'malformed_uri' }
+    }
+    // Windows 盘符绝对路径与常规相对路径：必须通过本地解析器验证
+    const parsed = parseDshFileLink(candidate)
+    if (!parsed) {
+      return { safeHref: null, isBlocked: true, reason: 'malformed_uri' }
     }
     return { safeHref: candidate, isBlocked: false }
   }
@@ -132,26 +156,8 @@ export function sanitizeAndValidateHref(rawHref: string): SanitizeResult {
   // 3. 内部工作区协议：必须是合法相对路径，拒绝 UNC、nested scheme、盘符及路径穿越
   if (protocol === 'workspace:') {
     const raw = candidate.slice('workspace:'.length).trim()
-    if (
-      !raw ||
-      raw.startsWith('/') ||
-      raw.startsWith('\\') ||
-      raw.startsWith('//') ||
-      raw.includes('://') ||
-      /^[a-zA-Z]:/.test(raw) ||
-      /(?:^|[/\\])\.\.(?:[/\\]|$)/.test(raw)
-    ) {
-      return { safeHref: null, isBlocked: true, reason: 'malformed_uri', protocol }
-    }
-    const path = markdownFilePath(candidate)
-    if (
-      !path ||
-      path.length === 0 ||
-      path.startsWith('/') ||
-      path.startsWith('\\') ||
-      /^[a-zA-Z]:/.test(path) ||
-      /(?:^|[/\\])\.\.(?:[/\\]|$)/.test(path)
-    ) {
+    const parsed = parseWorkspaceTarget(raw)
+    if (!parsed) {
       return { safeHref: null, isBlocked: true, reason: 'malformed_uri', protocol }
     }
     return { safeHref: candidate, isBlocked: false, protocol }
@@ -259,9 +265,15 @@ function isBareUrlText(text: string, href: string): boolean {
 }
 
 /**
- * 链接多态分类器：
- * 将 Markdown 链接精准分类为 citation | external | workspace | session | standard。
- * 优先级：安全校验 → 内部目标（session / workspace）→ 引用角标 → 外部网络跳转 → 普通语义链接
+ * 链接多态分类器（1:1 对齐官方 DeepSeek Harness 桌面端逻辑）：
+ * 优先级：
+ *  1. 外部 Web 链接（优先于无 scheme 的本地检查，避免 www. 域名被误判为本地文件）
+ *  2. 会话内部引用（dsh-session:）
+ *  3. 工作区内部协议（workspace:）
+ *  4. 引用来源角标（isCitationLink：[^1], [1], [来源 1]）
+ *  5. 本地工作区文件（parseDshFileLink：支持相对路径、盘符绝对路径、尖括号包路径、行号 #L...）
+ *     注：非锚点的无协议相对路径若被 parseDshFileLink 拒绝（如路径穿越、带查询参数、UNC 等），一律严格阻断（isBlocked: true），绝不放行！
+ *  6. 页面内部锚点（#...）与普通语义链接
  */
 export function classifyMarkdownLink(href: string, text: string): MarkdownLinkInfo {
   const rawHref = typeof href === 'string' ? href : ''
@@ -291,62 +303,21 @@ export function classifyMarkdownLink(href: string, text: string): MarkdownLinkIn
     }
   }
 
-  const { safeHref, isBlocked, reason } = sanitizeAndValidateHref(rawHref)
-  if (isBlocked || !safeHref) {
-    return {
-      kind: 'standard',
-      rawHref,
-      safeHref: null,
-      displayText: plainLabel,
-      isBlocked: true,
-      blockReason: reason,
+  // 1. 外部 Web 链接判定（包括裸 www. 链接）
+  if (WWW_PREFIX_REGEX.test(trimmedHref) || /^https?:\/\//i.test(trimmedHref) || /^\/\//.test(trimmedHref)) {
+    const { safeHref, isBlocked, reason } = sanitizeAndValidateHref(trimmedHref)
+    if (isBlocked || !safeHref) {
+      return {
+        kind: 'standard',
+        rawHref,
+        safeHref: null,
+        displayText: plainLabel,
+        isBlocked: true,
+        blockReason: reason,
+      }
     }
-  }
-
-  const protocol = getProtocol(safeHref)
-
-  // 1. 内置会话引用
-  if (protocol === 'dsh-session:') {
-    const sessionId = decodeSessionMentionUri(safeHref)
-    return {
-      kind: 'session',
-      rawHref,
-      safeHref,
-      displayText: plainLabel || sessionId || '会话',
-      isBlocked: false,
-      sessionId,
-    }
-  }
-
-  // 2. 工作区文件/代码资产链接（优先于纯文本数字检测，避免工作区文件被误判为角标）
-  const wsPath = markdownFilePath(safeHref)
-  if (wsPath !== undefined || protocol === 'workspace:') {
-    return {
-      kind: 'workspace',
-      rawHref,
-      safeHref,
-      displayText: plainLabel,
-      isBlocked: false,
-      workspacePath: wsPath,
-    }
-  }
-
-  // 3. 引用来源角标
-  const citation = isCitationLink(trimmedText, safeHref)
-  if (citation.isCitation && citation.index) {
-    return {
-      kind: 'citation',
-      rawHref,
-      safeHref,
-      displayText: citation.index,
-      isBlocked: false,
-      citationIndex: citation.index,
-    }
-  }
-
-  // 4. 外部网络跳转链接
-  if (protocol === 'http:' || protocol === 'https:') {
     const domain = extractDomain(safeHref)
+    const iconKind = classifyDshWebBrand(safeHref) ?? 'globe'
     const displayText = isBareUrlText(rawText, rawHref)
       ? formatDisplayUrl(safeHref)
       : plainLabel
@@ -358,16 +329,126 @@ export function classifyMarkdownLink(href: string, text: string): MarkdownLinkIn
       displayText,
       isBlocked: false,
       domain,
+      iconKind,
     }
   }
 
-  // 5. 普通语义行内链接（mailto、相对路径等）
+  // 2. 内置会话引用协议
+  if (trimmedHref.toLowerCase().startsWith('dsh-session:')) {
+    const { safeHref, isBlocked, reason } = sanitizeAndValidateHref(trimmedHref)
+    if (isBlocked || !safeHref) {
+      return {
+        kind: 'standard',
+        rawHref,
+        safeHref: null,
+        displayText: plainLabel,
+        isBlocked: true,
+        blockReason: reason,
+      }
+    }
+    const sessionId = decodeSessionMentionUri(safeHref)
+    return {
+      kind: 'session',
+      rawHref,
+      safeHref,
+      displayText: plainLabel || sessionId || '会话',
+      isBlocked: false,
+      sessionId,
+      iconKind: 'code',
+    }
+  }
+
+  // 3. 内部 workspace 协议（剥离协议后进行严格相对路径本地文件校验）
+  if (trimmedHref.toLowerCase().startsWith('workspace:')) {
+    const rawTarget = trimmedHref.slice('workspace:'.length).trim()
+    const fileParsed = parseWorkspaceTarget(rawTarget)
+    if (!fileParsed) {
+      return {
+        kind: 'standard',
+        rawHref,
+        safeHref: null,
+        displayText: plainLabel,
+        isBlocked: true,
+        blockReason: 'malformed_uri',
+      }
+    }
+    const iconKind = classifyDshLinkPath(fileParsed.path)
+    return {
+      kind: 'workspace',
+      rawHref,
+      safeHref: trimmedHref,
+      displayText: plainLabel,
+      isBlocked: false,
+      iconKind,
+      filePath: fileParsed.path,
+      fileLine: fileParsed.line,
+    }
+  }
+
+  // 4. 本地工作区文件（1:1 官方 DSH ow(e) 规则，优先于纯文本角标匹配）
+  const fileParsed = parseDshFileLink(trimmedHref)
+  if (fileParsed) {
+    const iconKind = classifyDshLinkPath(fileParsed.path)
+    return {
+      kind: 'workspace',
+      rawHref,
+      safeHref: trimmedHref,
+      displayText: plainLabel,
+      isBlocked: false,
+      iconKind,
+      filePath: fileParsed.path,
+      fileLine: fileParsed.line,
+    }
+  }
+
+  // 5. 引用来源角标（仅允许目标为空或合法页面内锚点，非锚点的非法目标绝不能借角标文本逃逸阻断）
+  if (!trimmedHref || trimmedHref.startsWith('#')) {
+    const citation = isCitationLink(trimmedText, trimmedHref)
+    if (citation.isCitation && citation.index) {
+      return {
+        kind: 'citation',
+        rawHref,
+        safeHref: trimmedHref.startsWith('#') ? trimmedHref : null,
+        displayText: citation.index,
+        isBlocked: false,
+        citationIndex: citation.index,
+      }
+    }
+  }
+
+  // 6. 纯页面内锚点 (#section)
+  if (trimmedHref.startsWith('#')) {
+    return {
+      kind: 'standard',
+      rawHref,
+      safeHref: trimmedHref,
+      displayText: plainLabel,
+      isBlocked: false,
+    }
+  }
+
+  // 7. mailto 协议
+  if (/^mailto:/i.test(trimmedHref)) {
+    const { safeHref, isBlocked, reason } = sanitizeAndValidateHref(trimmedHref)
+    return {
+      kind: 'standard',
+      rawHref,
+      safeHref: isBlocked ? null : safeHref,
+      displayText: plainLabel,
+      isBlocked,
+      blockReason: reason,
+      iconKind: 'globe',
+    }
+  }
+
+  // 8. 其他所有被 parseDshFileLink 拒绝的相对路径（如 ../secret.txt, src/../a.js, query 等）或危险伪协议一律阻断！
   return {
     kind: 'standard',
     rawHref,
-    safeHref,
+    safeHref: null,
     displayText: plainLabel,
-    isBlocked: false,
+    isBlocked: true,
+    blockReason: 'malformed_uri',
   }
 }
 

@@ -21,6 +21,9 @@ import {
   decodeSessionMentionUri,
   decodeBase64ToBytes,
   decodeUtf8Bytes,
+  parseDshFileLink,
+  classifyDshWebBrand,
+  classifyDshLinkPath,
 } from '../src/ui/link-helpers'
 
 describe('会话链接排版与交互系统 (Link & Citation System)', () => {
@@ -228,8 +231,9 @@ describe('会话链接排版与交互系统 (Link & Citation System)', () => {
     it('优先识别内部工作区链接，防止被角标规则误识别', () => {
       const info = classifyMarkdownLink('./src/ui/markdown.tsx', '[1]')
       expect(info.kind).toBe('workspace')
-      expect(info.workspacePath).toBe('src/ui/markdown.tsx')
+      expect(info.filePath).toBe('src/ui/markdown.tsx')
       expect(info.displayText).toBe('[1]')
+      expect(info.iconKind).toBe('code')
     })
 
     it('正确分类 session 内部会话引用', () => {
@@ -238,14 +242,25 @@ describe('会话链接排版与交互系统 (Link & Citation System)', () => {
       expect(info.kind).toBe('session')
       expect(info.sessionId).toBe('session-456')
       expect(info.displayText).toBe('对话456')
+      expect(info.iconKind).toBe('code')
     })
 
-    it('正确分类 external 外部链接并提取域名', () => {
+    it('正确分类 external 外部链接并提取域名与品牌图标', () => {
       const info = classifyMarkdownLink('https://github.com/liguobao/ds-harness-remote', '项目仓库')
       expect(info.kind).toBe('external')
       expect(info.isBlocked).toBe(false)
       expect(info.domain).toBe('github.com')
       expect(info.displayText).toBe('项目仓库')
+      expect(info.iconKind).toBe('github')
+
+      const googleInfo = classifyMarkdownLink('https://www.google.com/search?q=dsh', 'Google')
+      expect(googleInfo.iconKind).toBe('google')
+
+      const mdnInfo = classifyMarkdownLink('https://developer.mozilla.org/zh-CN/', 'MDN')
+      expect(mdnInfo.iconKind).toBe('mdn')
+
+      const generalInfo = classifyMarkdownLink('https://deepseek.com', 'DeepSeek')
+      expect(generalInfo.iconKind).toBe('globe')
     })
 
     it('对裸长外部链接文本自动执行格式化截断', () => {
@@ -299,6 +314,146 @@ describe('会话链接排版与交互系统 (Link & Citation System)', () => {
       expect(openSafeExternalUrl(validSessionHref)).toBe(false)
       expect(openSafeExternalUrl('workspace:src/index.ts')).toBe(false)
       expect(mockOpenURL).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('6. 官方 DSH 桌面端本地文件链接语法 (parseDshFileLink)', () => {
+    it('支持标准相对路径', () => {
+      expect(parseDshFileLink('src/resolver.js')).toEqual({ path: 'src/resolver.js' })
+      expect(parseDshFileLink('client-src/markdown.js')).toEqual({ path: 'client-src/markdown.js' })
+    })
+
+    it('支持单行号与行号区间锚点 (#L24, #L9-L12, #L1-L7)', () => {
+      expect(parseDshFileLink('src/resolver.js#L24')).toEqual({ path: 'src/resolver.js', line: 24 })
+      expect(parseDshFileLink('src/resolver.js#L9-L12')).toEqual({ path: 'src/resolver.js', line: 9 })
+      expect(parseDshFileLink('client-src/markdown.js#L1-L7')).toEqual({ path: 'client-src/markdown.js', line: 1 })
+    })
+
+    it('支持 Windows 盘符绝对路径 (D:/...) 与正反斜杠', () => {
+      expect(parseDshFileLink('D:/123pan/dsh-git-manage/scripts/build-client.mjs')).toEqual({
+        path: 'D:/123pan/dsh-git-manage/scripts/build-client.mjs',
+      })
+      expect(parseDshFileLink('C:\\Users\\admin\\project\\index.ts#L10')).toEqual({
+        path: 'C:\\Users\\admin\\project\\index.ts',
+        line: 10,
+      })
+    })
+
+    it('支持尖括号包裹含空格特殊路径 (<docs/my file.md>)', () => {
+      expect(parseDshFileLink('<docs/e2e-demo.mp4>')).toEqual({ path: 'docs/e2e-demo.mp4' })
+      expect(parseDshFileLink('<docs/my special file.md#L5>')).toEqual({
+        path: 'docs/my special file.md',
+        line: 5,
+      })
+    })
+
+    it('严格阻断带有 ? 查询参数的本地文件链接', () => {
+      expect(parseDshFileLink('src/resolver.js?query=1')).toBeUndefined()
+    })
+
+    it('阻断 UNC 路径与网络 scheme', () => {
+      expect(parseDshFileLink('//server/share')).toBeUndefined()
+      expect(parseDshFileLink('\\\\server\\share')).toBeUndefined()
+      expect(parseDshFileLink('https://github.com')).toBeUndefined()
+      expect(parseDshFileLink('javascript:alert(1)')).toBeUndefined()
+    })
+
+    it('阻断路径穿越 (../)', () => {
+      expect(parseDshFileLink('../secret.txt')).toBeUndefined()
+      expect(parseDshFileLink('src/../../etc/passwd')).toBeUndefined()
+    })
+
+    it('防御规范化前置注入绕过 (./https://, .///server, %3F)', () => {
+      expect(parseDshFileLink('./https://example.com')).toBeUndefined()
+      expect(parseDshFileLink('.///server/share')).toBeUndefined()
+      expect(parseDshFileLink('src/a.ts%3Fquery=1')).toBeUndefined()
+    })
+  })
+
+  describe('7. 贯穿分类与渲染的安全阻断断言 (End-to-End Safety)', () => {
+    it('被 parseDshFileLink 拒绝的非法本地目标在分类层必须阻断 (isBlocked: true, safeHref: null)', () => {
+      const targets = [
+        '../secret.txt',
+        'src/../../etc/passwd',
+        'src/resolver.js?query=1',
+        '\\\\\\\\server\\\\share',
+        './//server/share',
+        'workspace:%2e%2e/secret.txt',
+        'workspace:%2fetc/passwd',
+        'workspace:%43%3A%2Fsecret.txt',
+        'workspace:./C:/secret.txt',
+        'workspace:<C:/secret.txt>',
+        'workspace:././C:/secret.txt',
+        'workspace:././%43%3A%2Fsecret.txt',
+        'workspace:<././C:/secret.txt>',
+        'workspace:././https://example.com',
+        'workspace:././javascript:alert(1)',
+        'workspace:<././file:///etc/passwd>',
+        'workspace:././file:///etc/passwd',
+      ]
+      for (const target of targets) {
+        // 两处入口（校验层与分类层）均必须 100% 阻断
+        const sanitizeRes = sanitizeAndValidateHref(target)
+        expect(sanitizeRes.isBlocked).toBe(true)
+        expect(sanitizeRes.safeHref).toBeNull()
+
+        // 普通标签必须阻断
+        const info = classifyMarkdownLink(target, '目标')
+        expect(info.isBlocked).toBe(true)
+        expect(info.safeHref).toBeNull()
+
+        // 尝试用引用角标伪装的非法目标也必须严格阻断，绝对不能逃逸！
+        for (const citationLabel of ['[1]', '[^2]', '[来源 3]']) {
+          const spoofed = classifyMarkdownLink(target, citationLabel)
+          expect(spoofed.isBlocked).toBe(true)
+          expect(spoofed.safeHref).toBeNull()
+        }
+      }
+    })
+
+    it('文件类型与图标分类映射完整覆盖 (代码、文档、图片、目录与通用)', () => {
+      expect(classifyDshLinkPath('src/resolver.js')).toBe('code')
+      expect(classifyDshLinkPath('src/resolver.ts')).toBe('code')
+      expect(classifyDshLinkPath('package.json')).toBe('code')
+      expect(classifyDshLinkPath('cordis.patch.yml')).toBe('code')
+
+      expect(classifyDshLinkPath('docs/my file.md')).toBe('document')
+      expect(classifyDshLinkPath('README.mdx')).toBe('document')
+      expect(classifyDshLinkPath('notes.txt')).toBe('document')
+      expect(classifyDshLinkPath('report.pdf')).toBe('document')
+      expect(classifyDshLinkPath('data.csv')).toBe('document')
+
+      expect(classifyDshLinkPath('icon.svg')).toBe('image')
+      expect(classifyDshLinkPath('photo.png')).toBe('image')
+
+      expect(classifyDshLinkPath('scripts/')).toBe('folder')
+      expect(classifyDshLinkPath('other.bin')).toBe('other')
+    })
+
+    it('合法的 workspace: 链接正常解析出 filePath 与 iconKind', () => {
+      const info = classifyMarkdownLink('workspace:src/ui/markdown.tsx', '组件代码')
+      expect(info.kind).toBe('workspace')
+      expect(info.filePath).toBe('src/ui/markdown.tsx')
+      expect(info.iconKind).toBe('code')
+      expect(info.isBlocked).toBe(false)
+    })
+
+    it('www. 链接具备高优先级，正确分类为 external 并匹配对应图标', () => {
+      const google = classifyMarkdownLink('www.google.com', 'Google')
+      expect(google.kind).toBe('external')
+      expect(google.iconKind).toBe('google')
+
+      const github = classifyMarkdownLink('www.github.com/features', 'GitHub Features')
+      expect(github.kind).toBe('external')
+      expect(github.iconKind).toBe('github')
+    })
+
+    it('严格防御域名伪造攻击 (evilgithub.com, github.com.evil.example 等)', () => {
+      expect(classifyDshWebBrand('https://evilgithub.com')).toBe('globe')
+      expect(classifyDshWebBrand('https://github.com.evil.example')).toBe('globe')
+      expect(classifyDshWebBrand('https://google.com.fake.site')).toBe('globe')
+      expect(classifyDshWebBrand('https://github.com/liguobao')).toBe('github')
+      expect(classifyDshWebBrand('https://raw.githubusercontent.com/user/repo')).toBe('github')
     })
   })
 })

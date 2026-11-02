@@ -421,13 +421,12 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
         const href = token.attrGet('href') ?? ''
         const rawText = tokens.slice(index + 1, closing).map(t => t.content).join('')
         const linkInfo = classifyMarkdownLink(href, rawText)
-        const filePath = linkInfo.kind === 'workspace' ? (linkInfo.workspacePath ?? markdownFilePath(href)) : undefined
-        const linkKind = filePath ? classifyDshLinkPath(filePath) : undefined
+        const iconKind = linkInfo.iconKind
         const handlePress = !linkInfo.isBlocked && linkInfo.safeHref !== null
           ? () => {
               if (onLinkPress !== undefined) {
                 onLinkPress(linkInfo.safeHref!)
-              } else {
+              } else if (linkInfo.kind === 'external') {
                 openSafeExternalUrl(linkInfo.safeHref!)
               }
             }
@@ -458,29 +457,28 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
               </Text>
             </Text>
           )
-        } else if (linkInfo.kind === 'external') {
+        } else {
           output.push(
             <Text
               key={key}
-              style={styles.linkExternal}
+              style={styles.link}
               accessibilityRole="link"
-              accessibilityLabel={`${rawText || linkInfo.displayText}, 外部链接${linkInfo.domain ? ` (${linkInfo.domain})` : ''}`}
+              accessibilityLabel={
+                linkInfo.kind === 'external'
+                  ? `${rawText || linkInfo.displayText}, 外部链接${linkInfo.domain ? ` (${linkInfo.domain})` : ''}`
+                  : (linkInfo.fileLine ? `${rawText || linkInfo.filePath}, 第 ${linkInfo.fileLine} 行` : undefined)
+              }
               onPress={handlePress}
             >
-              {linkInfo.displayText !== rawText && linkInfo.displayText.length > 0 ? linkInfo.displayText : content}
-              <Text style={styles.linkExternalIcon}> ↗</Text>
-            </Text>
-          )
-        } else {
-          output.push(
-            <Text key={key} style={styles.link} accessibilityRole="link" onPress={handlePress}>
-              {linkKind && (
+              {iconKind && (
                 <View style={{ marginRight: 3, top: 1 }}>
-                  <DshLinkIcon kind={linkKind} size={14} color={styles.link.color} />
+                  <DshLinkIcon kind={iconKind} size={14} color={styles.link.color} />
                 </View>
               )}
-              {linkKind ? ' ' : ''}
-              {content}
+              {iconKind ? ' ' : ''}
+              {linkInfo.kind === 'external' && linkInfo.displayText !== rawText && linkInfo.displayText.length > 0
+                ? linkInfo.displayText
+                : content}
             </Text>
           )
         }
