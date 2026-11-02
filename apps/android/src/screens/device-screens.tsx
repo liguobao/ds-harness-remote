@@ -1043,7 +1043,6 @@ function deviceSubtitle(device: RemoteDevice): string {
   return [
     platformName(device.platform),
     device.harnessVersion,
-    device.clientVersion,
   ].filter(Boolean).join(' · ')
 }
 

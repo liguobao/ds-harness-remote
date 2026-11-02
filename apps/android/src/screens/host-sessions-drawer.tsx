@@ -1163,15 +1163,14 @@ export function HostSessionsDrawer({
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
               <GroupCard>
-                {HARNESS_OPTIONS.map((option, index) => {
+                {HARNESS_OPTIONS.filter(option => backends.includes(option.value)).map((option, index) => {
                   const chosen = option.value === backend
-                  const available = isBackendAvailable(option.value)
                   return (
                     <GroupRow
                       key={option.value}
                       first={index === 0}
                       label={option.name}
-                      detail={available ? option.desc : `${option.desc}（未启用）`}
+                      detail={option.desc}
                       selected={chosen}
                       chevron={false}
                       accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
