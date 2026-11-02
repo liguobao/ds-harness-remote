@@ -1,0 +1,29 @@
+diff --git a/lib/common/src/transport.js b/lib/common/src/transport.js
+index 4f11da0c6df6a8c6e8cb44cf6e1a1c2090c1e60e..44e688903f6f7b047b3e65438a41ad3af960ff73 100644
+--- a/lib/common/src/transport.js
++++ b/lib/common/src/transport.js
+@@ -380,6 +380,11 @@ class StreamTransport {
+             client.once(this.connectEvent, onConnect);
+             client.once("error", onConnectError);
+         });
++        // A redial triggered by the "end" listener below has no caller
++        // awaiting `connecting`. Observe the rejection here so a failed
++        // redial cannot escape as an unhandled rejection; the stored promise
++        // stays rejected and later send() callers still see the failure.
++        this.connecting.catch(() => { });
+         client.on("data", (data) => {
+             const addr = [
+                 this.client.remoteAddress,
+diff --git a/lib/index.mjs b/lib/index.mjs
+index bd453cff7e694f564dff562025b3f6047d86ee50..14e046754d115c8e2e772c6c7abb9848738617e6 100644
+--- a/lib/index.mjs
++++ b/lib/index.mjs
+@@ -826,6 +826,8 @@ var StreamTransport = class {
+       client.once(this.connectEvent, onConnect);
+       client.once("error", onConnectError);
+     });
++    this.connecting.catch(() => {
++    });
+     client.on("data", (data) => {
+       const addr = [
+         this.client.remoteAddress,

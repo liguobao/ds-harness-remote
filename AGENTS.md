@@ -1,5 +1,20 @@
 # Repository Guide for Agents
 
+## werift TURN redial patch (2026-11-02, Issue #241)
+
+DSH Host 的 fail-loud 把任何 unhandled rejection 升级为 `process.exit(1)`。werift 0.24.4 的
+`StreamTransport`（TURN-TCP/TLS 底层，`lib/common/src/transport.js` 与预打包的 `lib/index.mjs`
+各有一份）在收到对端 `end` 后会自动重拨，但替换后的 `connecting` promise 没有任何调用方
+await：重拨失败（如 TUN 假 IP 下 `connect ETIMEDOUT`）即成为 unhandled rejection，杀死整个
+Desktop Host（Issue #241 的五次崩溃签名）。经 `pnpm.patchedDependencies`
+（`patches/werift@0.24.4.patch`）在赋值处对 `connecting` 附加 catch：rejection 被观察、
+存储的 promise 保持 rejected，后续 `send()` 调用方仍能看到失败；初始连接、ICE gather 与
+transaction 路径原本就被观察，不受影响。两份副本都必须打（发布 bundle 经 ESM 入口
+`lib/index.mjs` 内联 werift，CJS 树只在 require 路径使用）。回归测试
+`packages/plugin/tests/werift-turn-redial.test.ts`：行为测试断言重拨失败不产生 unhandled
+rejection 且 `send()` 仍 reject；另断言提交的 `dist/index.js` 内嵌守卫，防止在未应用补丁的
+环境重建 bundle 时静默丢失。升级 werift 版本时需重放该补丁。
+
 ## Startup plugin update check (2026-11-02)
 
 启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags

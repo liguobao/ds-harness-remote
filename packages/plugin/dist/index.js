@@ -33804,6 +33804,8 @@ var init_lib = __esm({
           client.once(this.connectEvent, onConnect);
           client.once("error", onConnectError);
         });
+        this.connecting.catch(() => {
+        });
         client.on("data", (data2) => {
           const addr = [
             this.client.remoteAddress,

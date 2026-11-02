@@ -81,6 +81,9 @@
       "js-yaml@4": "^4.3.2",
       "shell-quote@1": "^1.11.0",
       "source-map-js@1": "^1.2.2"
+    },
+    "patchedDependencies": {
+      "werift@0.24.4": "patches/werift@0.24.4.patch"
     }
   },
   "dependencies": {
