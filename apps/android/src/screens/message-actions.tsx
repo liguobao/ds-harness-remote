@@ -150,7 +150,8 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const session = useAppStore(state => state.sessions.find(row => row.sessionId === item.sessionId)
     ?? (state.selectedSession?.sessionId === item.sessionId ? state.selectedSession : undefined))
   const backend = session?.backend
-  const harness = session !== undefined && (backend === undefined || backend === 'harness')
+  const isDeepSeekHarness = backend === undefined || backend === 'harness'
+  const harness = session !== undefined && isDeepSeekHarness
   // Only delivered Harness messages have an official event prefix to fork.
   const pending = item.sendState !== undefined
   const supportsBranch = harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
@@ -262,7 +263,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
             <IconBranchOutline size={14} color={colors.muted} />
           </Pressable>
         )}
-        {!pending && backend !== 'codex' && item.usage !== undefined && (
+        {!pending && isDeepSeekHarness && item.usage !== undefined && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.usage}
