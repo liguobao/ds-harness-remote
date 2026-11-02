@@ -1,8 +1,35 @@
 import { http } from '@kit.NetworkKit';
+import { bundleManager } from '@kit.AbilityKit';
 import { jsonStr, jsonNum, jsonBool, jsonArr } from '../protocol/Types';
 import { AccountLoginResult, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, DeviceIdentity } from '../model/Types';
 
-export const CLIENT_VERSION: string = '1.0.0';
+/** Fallback when the bundle info cannot be read; aligned with the mainline client version. */
+const CLIENT_VERSION_FALLBACK: string = '0.5.21';
+
+let clientVersionValue: string = CLIENT_VERSION_FALLBACK;
+
+/**
+ * Load the client version from the app bundle so `clientVersion` always matches the
+ * installed build. The Server routes protocol compatibility by this value, so it must
+ * never drift from AppScope/app.json5 `versionName`.
+ */
+export async function initClientVersion(): Promise<void> {
+  try {
+    const info: bundleManager.BundleInfo =
+      await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+    const name: string = info.versionName;
+    if (name.length > 0) {
+      clientVersionValue = name;
+    }
+  } catch (e) {
+    // Keep the compiled-in fallback when the bundle info is unavailable.
+  }
+}
+
+/** Current client version, resolved from the bundle at bootstrap. */
+export function clientVersion(): string {
+  return clientVersionValue;
+}
 
 export class RemoteApiError extends Error {
   code: string;
@@ -288,7 +315,7 @@ export class RemoteServerApi {
       'role': 'client',
       'platform': identity.platform,
       'identityKey': identity.publicKey,
-      'clientVersion': CLIENT_VERSION
+      'clientVersion': clientVersion()
     };
     return device;
   }

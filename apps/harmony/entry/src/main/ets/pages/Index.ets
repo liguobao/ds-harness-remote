@@ -1,8 +1,8 @@
 import { UIContext, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { AppRuntime, ChatItem, ChatQuestion, PHASE_BOOT, PHASE_CHAT, PHASE_CONNECTING,
-  PHASE_DEVICES, PHASE_SETUP, getAppRuntime } from '../services/AppRuntime';
+import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHASE_CHAT,
+  PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, getAppRuntime } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
@@ -155,7 +155,8 @@ struct Index {
       this.runtime.loadProviders(this.serverInput);
     }
     if (!this.fieldsPrefilled) {
-      this.serverInput = this.runtime.serverUrl;
+      // Prefill the official public Server so a fresh install never dials an empty or dead address.
+      this.serverInput = this.runtime.serverUrl.length > 0 ? this.runtime.serverUrl : DEFAULT_SERVER_URL;
       this.emailInput = this.runtime.email;
       this.fieldsPrefilled = true;
     }

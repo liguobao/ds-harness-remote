@@ -10,6 +10,9 @@ export class SecureTransport {
   private inner: RelayTransport;
   private identity: DeviceIdentity;
   private host: AuthorizedPeerDevice;
+  /** Locally pinned Host identity key (protocol §2 / §12.1). Empty when the caller has no
+   *  pin yet; when set it must match the Server-supplied key or the handshake is aborted. */
+  private pinnedHostKey: string;
   private noise: NoiseIkInitiator | undefined = undefined;
   private incoming: SecureMessageCodec = new SecureMessageCodec();
   private outgoing: SecureMessageCodec = new SecureMessageCodec();
@@ -17,10 +20,12 @@ export class SecureTransport {
   private sendTail: Promise<void> = Promise.resolve();
   public onClosed: (() => void) | undefined = undefined;
 
-  constructor(inner: RelayTransport, identity: DeviceIdentity, host: AuthorizedPeerDevice) {
+  constructor(inner: RelayTransport, identity: DeviceIdentity, host: AuthorizedPeerDevice,
+    pinnedHostKey: string = '') {
     this.inner = inner;
     this.identity = identity;
     this.host = host;
+    this.pinnedHostKey = pinnedHostKey;
     if (host.identityKey.length === 0) {
       throw new Error('主机缺少身份公钥');
     }
@@ -30,6 +35,11 @@ export class SecureTransport {
     this.closed = false;
     this.incoming.reset();
     this.outgoing.reset();
+    if (this.pinnedHostKey.length > 0 && this.pinnedHostKey !== this.host.identityKey) {
+      logError('secure transport: host identity key differs from local pin, aborting handshake');
+      this.inner.close();
+      throw new Error('主机身份公钥与本地固定记录不一致，已中断安全握手');
+    }
     await this.inner.connect();
     const info = this.inner.connectionInfo();
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {

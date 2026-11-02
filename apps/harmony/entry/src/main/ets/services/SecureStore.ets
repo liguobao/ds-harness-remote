@@ -10,6 +10,7 @@ const KEY_IDENTITY = 'dshremote.identity.v1';
 const KEY_CREDENTIALS = 'dshremote.credentials.v1';
 const KEY_DEVICE_ALIASES = 'dshremote.deviceAliases.v1';
 const KEY_THEME_MODE = 'dshremote.themeMode.v1';
+const KEY_HOST_PINS = 'dshremote.hostPins.v1';
 
 /** Persisted server + account config. */
 /** UUIDv7 or ULID, the only shapes the Server accepts for a device id. */
@@ -220,6 +221,35 @@ export class SecureStore {
 
   async saveThemeMode(mode: number): Promise<void> {
     await this.putSync(KEY_THEME_MODE, `${mode}`);
+  }
+
+  /** Locally pinned Host identity keys (protocol §2 / §12.1), keyed by Host deviceId.
+   *  A Host whose key no longer matches its pin must never be connected silently. */
+  loadHostPins(): Record<string, string> {
+    const result: Record<string, string> = {};
+    const raw: string = this.getSync(KEY_HOST_PINS, '{}');
+    if (raw.length === 0) {
+      return result;
+    }
+    try {
+      const parsed: Object = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const rec: Record<string, Object> = parsed as Record<string, Object>;
+        for (const key of Object.keys(rec)) {
+          const value: Object | undefined = rec[key];
+          if (typeof value === 'string' && value.length > 0) {
+            result[key] = value;
+          }
+        }
+      }
+    } catch (error) {
+      // Malformed store: start from an empty pin map (trust-on-first-use again).
+    }
+    return result;
+  }
+
+  async saveHostPins(pins: Record<string, string>): Promise<void> {
+    await this.putSync(KEY_HOST_PINS, JSON.stringify(pins));
   }
 
   private getSync(key: string, fallback: string): string {

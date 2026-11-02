@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { SecureStore, StoredServerConfig } from './SecureStore';
-import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll, OAuthProvider, HostPresence } from '../net/ServerApi';
+import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
+  OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
 import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
@@ -17,6 +18,10 @@ export const PHASE_SETUP: string = 'setup';
 export const PHASE_DEVICES: string = 'devices';
 export const PHASE_CONNECTING: string = 'connecting';
 export const PHASE_CHAT: string = 'chat';
+
+/** Official public Server, used to prefill the setup screen and as the QR-login fallback
+ *  so a fresh install never dials a dead placeholder address. */
+export const DEFAULT_SERVER_URL: string = 'https://dsh.r2049.cn';
 
 const MAX_TOOL_DETAIL_CHARS: number = 8000;
 
@@ -190,6 +195,7 @@ export class AppRuntime {
       return;
     }
     try {
+      await initClientVersion();
       await this.store.init(context);
       this.config = await this.store.loadConfig();
       this.identity = await this.store.loadOrCreateIdentity();
@@ -296,6 +302,7 @@ export class AppRuntime {
       if (!host.online) {
         throw new Error('设备不在线');
       }
+      const pinnedHostKey: string = await this.enforceHostPin(host);
       // ensureApi() may have renewed the credentials above: the relay handshake must use
       // the current access token, not the one captured before the renewal.
       const current: TokenPair | undefined = this.credentials;
@@ -304,7 +311,7 @@ export class AppRuntime {
       relayOptions.accessToken = current !== undefined ? current.accessToken : credentials.accessToken;
       relayOptions.targetDeviceId = host.deviceId;
       const relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
-      const secure: SecureTransport = new SecureTransport(relay, identity, host);
+      const secure: SecureTransport = new SecureTransport(relay, identity, host, pinnedHostKey);
       const core: RemoteClientCore = new RemoteClientCore(secure, 35000);
       this.core = core;
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
@@ -600,6 +607,29 @@ export class AppRuntime {
     }, 300);
   }
 
+  /**
+   * Trust-on-first-use pin of the Host identity key (protocol §2 / §12.1): the Client must
+   * keep a local Pinned Key record per Host, and a changed key for the same Host deviceId
+   * aborts the connection to block man-in-the-middle attacks. The Noise IK handshake then
+   * proves the pinned Host actually holds the matching private key. Returns the effective
+   * pinned key so the secure handshake can enforce it as well.
+   */
+  private async enforceHostPin(host: AuthorizedPeerDevice): Promise<string> {
+    const pins: Record<string, string> = this.store.loadHostPins();
+    const pinned: string | undefined = pins[host.deviceId];
+    if (pinned !== undefined) {
+      if (pinned !== host.identityKey) {
+        logError(`host identity key mismatch for ${host.deviceId}; aborting to prevent MITM`);
+        throw new Error('主机身份公钥与本地固定记录不一致，为防中间人攻击已中断连接。若主机确已重置，请先清除本机固定记录后重试');
+      }
+      return pinned;
+    }
+    pins[host.deviceId] = host.identityKey;
+    await this.store.saveHostPins(pins);
+    logInfo(`pinned host identity key for ${host.deviceId}`);
+    return host.identityKey;
+  }
+
   private async refreshSessions(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined || this.phase !== PHASE_CHAT) {
@@ -653,7 +683,7 @@ export class AppRuntime {
   /** Load the provider list once so the login screen can offer Google / Zhihu / GitHub. */
   async loadProviders(baseUrl: string): Promise<void> {
     try {
-      const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : 'https://dsh.example.com';
+      const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : DEFAULT_SERVER_URL;
       const api: RemoteServerApi = new RemoteServerApi(normalizeServerUrl(raw));
       const items: OAuthProvider[] = await api.oauthProviders();
       if (items.length > 0) {
@@ -686,7 +716,7 @@ export class AppRuntime {
     this.errorMsg = '';
     this.stopQrPolling();
     try {
-      const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : 'https://dsh.example.com';
+      const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : DEFAULT_SERVER_URL;
       const normalized: string = normalizeServerUrl(raw);
       const api: RemoteServerApi = new RemoteServerApi(normalized);
       const session: QrLoginSession = await api.startQrLogin(this.providerId);

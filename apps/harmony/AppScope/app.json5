@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.example.myapplication",
     "vendor": "example",
-    "versionCode": 1000006,
-    "versionName": "0.01",
+    "versionCode": 5000021,
+    "versionName": "0.5.21",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }
