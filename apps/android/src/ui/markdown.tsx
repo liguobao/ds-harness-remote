@@ -22,10 +22,11 @@ import {
   createMarkdownParser,
   decodeSessionMentionUri,
   markdownFilePath,
+  classifyMarkdownLink,
   openSafeExternalUrl,
 } from './link-helpers'
 
-export { decodeSessionMentionUri, markdownFilePath, openSafeExternalUrl }
+export { decodeSessionMentionUri, markdownFilePath, classifyMarkdownLink, openSafeExternalUrl }
 
 import {
   type MarkdownNode,
@@ -417,29 +418,72 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
       else if (token.type === 'em_open') output.push(<Text key={key} style={styles.emphasis}>{content}</Text>)
       else if (token.type === 's_open') output.push(<Text key={key} style={styles.strike}>{content}</Text>)
       else if (token.type === 'link_open') {
-        const href = token.attrGet('href')
-        const filePath = href ? markdownFilePath(href) : undefined
+        const href = token.attrGet('href') ?? ''
+        const rawText = tokens.slice(index + 1, closing).map(t => t.content).join('')
+        const linkInfo = classifyMarkdownLink(href, rawText)
+        const filePath = linkInfo.kind === 'workspace' ? (linkInfo.workspacePath ?? markdownFilePath(href)) : undefined
         const linkKind = filePath ? classifyDshLinkPath(filePath) : undefined
-        const handlePress = href !== null
+        const handlePress = !linkInfo.isBlocked && linkInfo.safeHref !== null
           ? () => {
               if (onLinkPress !== undefined) {
-                onLinkPress(href)
+                onLinkPress(linkInfo.safeHref!)
               } else {
-                openSafeExternalUrl(href)
+                openSafeExternalUrl(linkInfo.safeHref!)
               }
             }
           : undefined
-        output.push(
-          <Text key={key} style={styles.link} onPress={handlePress}>
-            {linkKind && (
-              <View style={{ marginRight: 3, top: 1 }}>
-                <DshLinkIcon kind={linkKind} size={14} color={styles.link.color} />
-              </View>
-            )}
-            {linkKind ? ' ' : ''}
-            {content}
-          </Text>
-        )
+
+        if (linkInfo.isBlocked) {
+          output.push(
+            <Text
+              key={key}
+              style={styles.blockedLink}
+              accessibilityRole="none"
+              accessibilityLabel={`${rawText || href} (链接已被安全阻断)`}
+            >
+              {content}
+            </Text>
+          )
+        } else if (linkInfo.kind === 'citation') {
+          output.push(
+            <Text
+              key={key}
+              style={styles.citationBadge}
+              accessibilityRole={handlePress ? 'link' : 'none'}
+              accessibilityLabel={`引用来源 [${linkInfo.citationIndex ?? rawText}]`}
+              onPress={handlePress}
+            >
+              <Text style={styles.citationText}>
+                {linkInfo.citationIndex ? `[${linkInfo.citationIndex}]` : content}
+              </Text>
+            </Text>
+          )
+        } else if (linkInfo.kind === 'external') {
+          output.push(
+            <Text
+              key={key}
+              style={styles.linkExternal}
+              accessibilityRole="link"
+              accessibilityLabel={`${rawText || linkInfo.displayText}, 外部链接${linkInfo.domain ? ` (${linkInfo.domain})` : ''}`}
+              onPress={handlePress}
+            >
+              {linkInfo.displayText !== rawText && linkInfo.displayText.length > 0 ? linkInfo.displayText : content}
+              <Text style={styles.linkExternalIcon}> ↗</Text>
+            </Text>
+          )
+        } else {
+          output.push(
+            <Text key={key} style={styles.link} accessibilityRole="link" onPress={handlePress}>
+              {linkKind && (
+                <View style={{ marginRight: 3, top: 1 }}>
+                  <DshLinkIcon kind={linkKind} size={14} color={styles.link.color} />
+                </View>
+              )}
+              {linkKind ? ' ' : ''}
+              {content}
+            </Text>
+          )
+        }
       }
       else output.push(...content)
       index = closing
