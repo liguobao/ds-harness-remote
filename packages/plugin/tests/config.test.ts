@@ -10,7 +10,7 @@ describe('plugin config', () => {
       terminal: { enabled: true },
       remoteTools: { enabled: true },
       forceRelay: false,
-      reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
+      reconnect: { enabled: true, initialDelayMs: 4_000, maxDelayMs: 30_000, jitter: 0.2 },
       codex: { enabled: true, binary: 'codex' },
       cursor: { enabled: false, binary: 'agent' },
     })

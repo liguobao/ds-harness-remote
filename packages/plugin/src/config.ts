@@ -199,7 +199,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
-  const initialDelayMs = reconnect.initialDelayMs ?? 1_000
+  const initialDelayMs = reconnect.initialDelayMs ?? 4_000
   const maxDelayMs = reconnect.maxDelayMs ?? 30_000
   if (maxDelayMs < initialDelayMs) {
     throw new TypeError('reconnect.maxDelayMs must be greater than or equal to reconnect.initialDelayMs')
