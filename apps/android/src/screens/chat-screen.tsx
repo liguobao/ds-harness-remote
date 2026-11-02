@@ -1144,7 +1144,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   }
 
   const canAttachImages = sessionImageLimits(session) !== undefined
-    || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex'
+    || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex' || session.backend === 'hermes'
 
   const pickFiles = async () => {
     const targetSessionId = session.sessionId

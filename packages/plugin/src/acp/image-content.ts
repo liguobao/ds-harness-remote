@@ -60,6 +60,6 @@ export function acpImageContent(image: AcpImage, attachmentId: string): Record<s
 }
 
 export function acpImageLimits(backend: string): Record<string, unknown> {
-  return backend === 'antigravity' ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 40_000_000, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] }
+  return (backend === 'antigravity' || backend === 'hermes') ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 40_000_000, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] }
     : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] }
 }

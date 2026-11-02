@@ -3,6 +3,8 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { HermesAcpClient } from '../src/acp/adapters/hermes-process.js'
+import { acpImageLimits } from '../src/acp/image-content.js'
+import { discoverHermesSessions, discoverHermesWorkspaces } from '../src/acp/adapters/hermes-discovery.js'
 
 type Wire = Record<string, any>
 
@@ -120,6 +122,20 @@ describe('HermesAcpClient', () => {
       // The reader is its own process, so an in-flight turn is never interrupted.
       expect(children.length).toBe(2)
     } finally { await client.close() }
+  })
+
+  it('exposes image prompt limits for the hermes backend', () => {
+    const limits = acpImageLimits('hermes') as { maxImageBytes: number; maxImagesPerMessage: number; mediaTypes: string[] }
+    expect(limits.maxImageBytes).toBeGreaterThan(0)
+    expect(limits.maxImagesPerMessage).toBeGreaterThanOrEqual(1)
+    expect(limits.mediaTypes).toContain('image/png')
+  })
+
+  it('safely discovers local hermes workspaces and sessions', async () => {
+    const workspaces = await discoverHermesWorkspaces()
+    expect(Array.isArray(workspaces)).toBe(true)
+    const sessions = await discoverHermesSessions(process.cwd(), 10)
+    expect(Array.isArray(sessions)).toBe(true)
   })
 
   it('surfaces a missing Hermes binary instead of reporting a ready backend', async () => {

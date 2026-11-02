@@ -29,6 +29,7 @@ import {
   type AllowedAcpMethod,
 } from './method-policy.js'
 import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { discoverHermesSessions, discoverHermesWorkspaces } from './adapters/hermes-discovery.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -358,6 +359,20 @@ export class AcpRemoteGateway {
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend)
         const discovered = [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
+        if (requestedBackend === 'hermes') {
+          try {
+            const extraDirs = await discoverHermesWorkspaces()
+            const existing = new Set(discovered.map(d => resolve(d.path).toLowerCase()))
+            for (const dir of extraDirs) {
+              if (!existing.has(resolve(dir).toLowerCase())) {
+                discovered.push({ path: dir, title: basename(dir) || 'workspace' })
+                existing.add(resolve(dir).toLowerCase())
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
         if (discovered.length > 0 || requestedBackend !== 'opencode') return discovered
         const defaultCandidates = new Set<string>()
         const cwd = process.cwd()
@@ -438,6 +453,22 @@ export class AcpRemoteGateway {
       if (isCatalogBackend(backend)) {
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
         const sessions = await this.listCatalogSessions(backend, cwd)
+        if (backend === 'hermes' && cwd) {
+          try {
+            const localSessions = await discoverHermesSessions(cwd, limit)
+            const seen = new Set(sessions.map(s => s.sessionId))
+            for (const s of localSessions) {
+              if (!seen.has(s.sessionId)) {
+                this.sessionCwds.set(s.sessionId, { backend, cwd: s.cwd })
+                this.sessionBackends.set(s.sessionId, backend)
+                sessions.push(s)
+                seen.add(s.sessionId)
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
         sessions.sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)
           || a.sessionId.localeCompare(b.sessionId))
         return { items: sessions.slice(0, limit).map(item => ({ conversationId: item.sessionId, title: item.title ?? 'Untitled Session', createdAt: Date.parse(item.updatedAt ?? '') || 0, updatedAt: Date.parse(item.updatedAt ?? '') || 0, cwd: item.cwd })) }
@@ -524,7 +555,7 @@ export class AcpRemoteGateway {
       const requested = typeof call.params.backend === 'string' ? call.params.backend : selected ?? this.defaultBackend()
       if (selected !== undefined && selected !== requested) throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       this.requireAcp(requested)
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && requested !== 'antigravity') throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && requested !== 'antigravity' && requested !== 'hermes') throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
       this.sessionBackends.set(sessionId!, requested)
     }
 
@@ -1167,7 +1198,7 @@ export class AcpRemoteGateway {
       authMethods: [],
       capabilities: {
         loadSession: true,
-        promptTypes: actualBackend === 'antigravity' ? ['text', 'image'] : ['text'],
+        promptTypes: (actualBackend === 'antigravity' || actualBackend === 'hermes') ? ['text', 'image'] : ['text'],
         methods: [...ACP_METHOD_ALLOWLIST],
       },
     }
