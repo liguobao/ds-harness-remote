@@ -31,6 +31,7 @@ import {
   type TuiRemoteTarget,
 } from './tui-command.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
+import { PluginUpdateChecker } from './update-check.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -203,6 +204,9 @@ async function activate(
     warn: message => { ctx.logger.warn(message); console.warn(message) },
     error: message => { ctx.logger.error(message); console.error(message) },
   }, config.logLevel)
+  // Startup and daily npm dist-tags lookup backing the client update notice.
+  // Lives for the whole activation so Server switches keep its snapshot.
+  const updateChecker = new PluginUpdateChecker(logger)
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
@@ -310,7 +314,7 @@ async function activate(
 
   const controlRuntime = connection === undefined
     ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer)
+    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker)
 
   ctx.provide('dshRemote', runtime)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
@@ -333,6 +337,9 @@ async function activate(
         }
       })()
       await startup
+      // Only the browser/Desktop connection surfaces the update notice; a
+      // headless dsh-TUI Host has no consumer, so it skips the registry calls.
+      if (connection !== undefined) updateChecker.start()
     } catch (error) {
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
@@ -342,6 +349,7 @@ async function activate(
     }
     return async () => {
       closed = true
+      updateChecker.stop()
       await replacement?.catch(() => undefined)
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
