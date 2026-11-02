@@ -450,6 +450,7 @@ const jaJP = {
     relatedFiles: "関連ファイル",
     composeRunning: "生成中 · メッセージを追加",
     todos: "やること",
+    taskChecklist: "タスク進捗チェックリスト",
     goal: "目標",
     jobs: "バックグラウンドタスク",
     viewJobs: "バックグラウンドタスクを表示",

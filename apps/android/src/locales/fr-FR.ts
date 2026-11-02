@@ -450,6 +450,7 @@ const frFR = {
     relatedFiles: "Fichiers associés",
     composeRunning: "Génération · Ajouter un message",
     todos: "À faire",
+    taskChecklist: "Liste de progression des tâches",
     goal: "Objectif",
     jobs: "Tâches en arrière-plan",
     viewJobs: "Voir les tâches en arrière-plan",

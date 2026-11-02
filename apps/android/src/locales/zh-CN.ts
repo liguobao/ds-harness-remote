@@ -457,6 +457,7 @@ const zhCN = {
     relatedFiles: "相关文件",
     composeRunning: "生成中 · 可直接插话",
     todos: "待办",
+    taskChecklist: "任务进度清单",
     goal: "目标",
     jobs: "后台任务",
     viewJobs: "查看后台任务",

@@ -21,7 +21,7 @@ import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
-import { IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
+import { IconChecklistOutline, IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -449,8 +449,15 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
         onPress={() => {if (!expanded) void loadDetail(); setExpanded(value => !value)}}
         style={({ pressed }) => [styles.toolRow, pressed && hasDetail && styles.toolRowPressed]}
       >
-        <View style={styles.toolIcon}>{/command|bash|shell|命令|终端/i.test(item.toolName)
-          ? <Terminal size={16} color={colors.muted} /> : <Code2 size={16} color={colors.muted} />}</View>
+        <View style={styles.toolIcon}>
+          {item.toolName === 'todo_write' || (item.toolKey ?? '').endsWith('todo_write') ? (
+            <IconChecklistOutline size={16} color={colors.primary} />
+          ) : /command|bash|shell|命令|终端/i.test(item.toolName) ? (
+            <Terminal size={16} color={colors.muted} />
+          ) : (
+            <Code2 size={16} color={colors.muted} />
+          )}
+        </View>
         <View style={styles.toolCopy}>
           <Text style={styles.toolName} numberOfLines={1}>{name}</Text>
           {detail !== undefined && <Text style={styles.activitySeparator}>·</Text>}
