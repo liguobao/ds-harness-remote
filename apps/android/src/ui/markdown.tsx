@@ -471,7 +471,7 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
               onPress={handlePress}
             >
               {iconKind && (
-                <View style={{ marginRight: 3, top: 1 }}>
+                <View style={{ marginRight: 3, top: ['github', 'google', 'mdn', 'globe'].includes(iconKind) ? 2.5 : 1.8 }}>
                   <DshLinkIcon kind={iconKind} size={14} color={styles.link.color} />
                 </View>
               )}
