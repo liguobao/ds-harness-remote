@@ -13,6 +13,7 @@ import { ClientServerApi, HostServerApi } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
+import type { PluginUpdateSnapshot } from './update-check.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
 
@@ -62,6 +63,8 @@ export class PluginControlRuntime {
       client: ClientModeRuntime | undefined
       host: HostAuthorizationControl
     }>,
+    /** Update-check snapshots merged into every `status` result; absent when the plugin is disabled. */
+    private readonly updates?: { snapshot(): PluginUpdateSnapshot | undefined },
   ) {}
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -114,11 +117,18 @@ export class PluginControlRuntime {
       if (endpoint === 'host.reconnect') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         this.host.reconnectHost()
-        return ok(this.hostOnlyStatus())
+        return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
+      }
+      if (endpoint === 'status') {
+        // Both mode paths merge the update snapshot here, so the SSE stream,
+        // polling, and the unary call always observe the same payload shape.
+        const base = this.client !== undefined
+          ? await this.client.handleControl(endpoint, payload, signal)
+          : ok(this.hostOnlyStatus())
+        return withUpdate(base, this.updates?.snapshot())
       }
       if (this.client !== undefined) return this.client.handleControl(endpoint, payload, signal)
 
-      if (endpoint === 'status') return ok(this.hostOnlyStatus())
       if (endpoint === 'devices') return ok([])
       if (endpoint === 'host.account.login') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
@@ -136,7 +146,9 @@ export class PluginControlRuntime {
         }
         return ok(await this.host.authorizeHostWithCode(value.code))
       }
-      if (endpoint === 'mode.set' && record(payload).mode === 'local') return ok(this.hostOnlyStatus())
+      if (endpoint === 'mode.set' && record(payload).mode === 'local') {
+        return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
+      }
       throw new ClientModeError('METHOD_NOT_ALLOWED', 'Remote Client mode is disabled by the plugin role.')
     } catch (error) {
       return fail(error)
@@ -503,6 +515,12 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function ok(value: unknown): ControlResult<unknown> { return { ok: true, value } }
+
+/** Attach the update-check snapshot to a successful status-shaped result. */
+function withUpdate(result: ControlResult<unknown>, update: PluginUpdateSnapshot | undefined): ControlResult<unknown> {
+  if (update === undefined || !result.ok || !isRecord(result.value)) return result
+  return ok({ ...result.value, update })
+}
 
 function fail(error: unknown): ControlResult<unknown> {
   const source = error instanceof Error ? error : undefined

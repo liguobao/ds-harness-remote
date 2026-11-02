@@ -1,5 +1,30 @@
 # Repository Guide for Agents
 
+## Startup plugin update check (2026-11-02)
+
+启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags
+端点做一次匿名查询：npmjs.org 与 npmmirror **并发竞速**，首个有效应胜出（国内网络不再等
+npmjs 超时）。结果 `{currentVersion, latestVersion, checkedAt}` 经 `withUpdate` 合并进
+control `status`、`host.reconnect` 与 `mode.set local`，随既有 SSE 推送；失败仅记 debug
+日志，不阻塞启动。无 connection 的 dsh-TUI Host 与 disabled 插件不发起请求。semver 比较在
+client-safe 的 `version-compare.ts`（无法解析的版本比较为相等，不产生提示），host 与
+client bundle 共用。不新增配置项与自动化测试（非核心展示功能，按测试政策）。
+
+UI 展示：侧栏 Remote 入口（保持 0.6.0 的内容自适应几何）在本地版本落后时套用宿主
+DesktopUpdateIndicator 的品牌色外观（8% 底 + 20% 描边），标准形态标签右侧追加
+「⬆ {latest}」后缀，轨/紧凑形态为官方同款 6px 品牌色圆点；Remote 弹窗账号 footer 行内
+追加「{latest} 可用」品牌色链接（title 为完整版本信息），点击直达 GitHub Releases；
+主机列表与所选主机详情对 `clientVersion` 落后的远端主机追加「⬆ 可更新」文本标记。
+不写「设置 → 插件」指引：官方一键更新仅覆盖 npm registry 安装，GitHub/本地安装无入口，
+且第三方插件无法直达宿主设置分区（launcher 座位官方占用，`openSettings()` 无分区参数）。
+
+客户端 statusFeed 订阅由「弹窗打开时」改为挂载即生效：此前侧栏入口只在挂载时拉一次
+status，启动后的 registry 结果推送到不了按钮，直至打开弹窗才重放最新状态。
+
+本轮验证：Plugin check/build（bundle 字节复现）、DSH bundle 校验、67 文件 / 469 tests、
+checker 注入 fetch 冒烟与 compareVersions 语义 15 项（scratch，未提交）通过；以临时
+0.5.90 演示构建经 tarball 安装到真实 Desktop profile，人工确认启动数秒内入口自动出现
+更新态、弹窗 footer 链接与跳转正常。未做跨设备回归验收。
 ## Remote popup portals (2026-11-01, Issue #222)
 
 Workspace、连接线路、Host reference 和旧模式切换面板复用宿主 ReactDOM Portal，
