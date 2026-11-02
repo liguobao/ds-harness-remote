@@ -250,6 +250,11 @@ export class AndroidRemoteConnection {
     )
   }
 
+  async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
+    if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
+    return this.core.rpc<T>(method, params, signal)
+  }
+
   /** Optional CodeX business client; available only when the Host advertises both domain capabilities. */
   requireCodex(): CodexRemoteClient {
     if (this.codex === undefined || !this.codexAvailable) throw new Error(strings.runtime.codexUnavailable)
