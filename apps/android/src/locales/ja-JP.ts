@@ -439,9 +439,12 @@ const jaJP = {
   },
   messageActions: {
     quote: "引用", quoted: "引用済み", copy: "回答をコピーする", copied: "コピーされました", good: "良い回答", bad: "良くない回答", branch: "新しいチャットで分岐する",
-    unavailable: "このホストまたはメッセージはこのアクションをサポートしていません", failed: "アクションが完了していません", feedbackSaved: "ホストに保存されたフィードバック",
-    usageUnavailable: "使用不可", timeUnavailable: "利用できない時間", usage: "実際の使用状況", input: "入力", output: "出力",
+    askAgent: 'エージェントに質問', selectAll: 'すべて選択',
+    unavailable: "ホストまたはメッセージがこの操作をサポートしていません", failed: "操作が完了しませんでした", feedbackSaved: "フィードバックがホストに保存されました",
+    usageUnavailable: "使用量は利用できません", timeUnavailable: "時間は利用できません", usage: "使用量", input: "入力", output: "出力",
     cacheRead: "キャッシュ読み取り", cacheWrite: "キャッシュ書き込み", reasoning: "推論", total: "合計",
+    turnUsageTitle: '本ターンの使用量', providerModel: 'プロバイダー / モデル', uncachedInput: '未キャッシュ入力',
+    quoteSelectedSnippet: 'テキストを選択して引用', copySelectedSnippet: '選択したテキストをコピー',
   },
   sessionActivity: {
     relatedFiles: "関連ファイル",

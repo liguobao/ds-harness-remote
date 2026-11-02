@@ -5,17 +5,23 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
+  Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
+import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
+import { IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -272,6 +278,20 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
+/**
+ * In-place free text selection on assistant prose (Figure 2 / IMG_1488).
+ * Allows the user to freely select any snippet using native handles.
+ * When text is selected, floating callout menu [询问智能体] [拷贝] appears
+ * right above the selection.
+ */
+function AssistantMessageCallout({ item }: { item: ChatMessage }) {
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View style={styles.assistantProseWrap}>
+      <NativeMarkdown text={item.text} />
+    </View>
+  )
+}
 
 function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
   const { colors } = useTheme()
@@ -290,9 +310,7 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
         {showReasoning && <ReasoningDisclosure item={item} />}
         {showImages && <ChatImages images={item.images!} />}
         {showText && (
-          <View style={styles.assistantText}>
-            <NativeMarkdown text={item.text} />
-          </View>
+          <AssistantMessageCallout item={item} />
         )}
         {showStreaming && (
           <View style={styles.assistantText}>

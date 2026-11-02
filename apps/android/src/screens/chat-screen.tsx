@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import { ArrowDown, ArrowLeft, FileText, Layers, ListTree, Menu, MessageSquare, RefreshCw, Users, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -5,10 +6,12 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  DeviceEventEmitter,
   FlatList,
   Image,
   Keyboard,
   Modal,
+  NativeModules,
   PanResponder,
   Pressable,
   ScrollView,
@@ -181,7 +184,29 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       composerInputRef.current?.focus()
     }
     lastQuoteCountRef.current = quotes.length
-  }, [quotes.length])
+  }, [quotes.length, composerInputRef])
+
+  useEffect(() => {
+    if (NativeModules.DshProcessText?.getInitialText) {
+      NativeModules.DshProcessText.getInitialText().then((text: string | null) => {
+        if (text && text.trim().length > 0) {
+          setQuotes(current => [...current, text.trim()])
+          composerInputRef.current?.focus()
+        }
+      }).catch(() => {})
+    }
+
+    const sub = DeviceEventEmitter.addListener('onProcessText', (text: string) => {
+      if (text && text.trim().length > 0) {
+        setQuotes(current => [...current, text.trim()])
+        composerInputRef.current?.focus()
+      }
+    })
+
+    return () => {
+      sub.remove()
+    }
+  }, [setQuotes, composerInputRef])
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
   const sessionGenerationRef = useRef(0)
   useLayoutEffect(() => {
@@ -757,22 +782,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         {connected && (session.backend === undefined || session.backend === 'harness') && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
-        {quotes.length > 0 && (
-          <View style={styles.quoteTray} accessibilityLabel={strings.chat.quoteTrayLabel}>
-            {quotes.map((quoteText, index) => (
-              <QuotePreview
-                key={`composer-quote-${index}`}
-                text={quoteText}
-                removal={{
-                  label: strings.chat.removeQuote,
-                  onRemove: () => setQuotes(current => current.filter((_, i) => i !== index)),
-                }}
-                style={styles.composerQuoteItem}
-              />
-            ))}
-          </View>
-        )}
-
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
             {images.map((image, index) => (
@@ -814,6 +823,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         <ChatComposer
           backend={session.backend} draft={draft} input={mentionInput}
+          quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
           replyActive={replyActive} stopping={stopping} compactRunning={compactRunning}
           hasComposerContent={hasComposerContent} connected={connected}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
@@ -832,6 +842,14 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         visible={plusMenuOpen} onClose={closePlusMenu}
         canAttachImages={canAttachImages} attachmentPicking={attachmentPicking}
         takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
+        onQuoteClipboard={() => {
+          void Clipboard.getStringAsync().then(text => {
+            if (text && text.trim().length > 0) {
+              setQuotes(current => [...current, text.trim()])
+              composerInputRef.current?.focus()
+            }
+          }).catch(() => {})
+        }}
         workspaceLabel={workspaceLabel} modeLabel={modeLabel}
         supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}
         toolsAvailable={connected && session.backend !== 'claude' && session.backend !== 'hermes'}
