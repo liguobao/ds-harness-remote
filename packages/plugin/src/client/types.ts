@@ -48,6 +48,12 @@ export interface RemoteStatus {
     workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
   }
   network?: RemoteNetworkDetails
+  /** npm dist-tags lookup result; present after the plugin's first successful registry check. */
+  update?: {
+    currentVersion: string
+    latestVersion: string
+    checkedAt: number
+  }
   hostAuthorizationAvailable: boolean
   host?: {
     deviceId?: string
