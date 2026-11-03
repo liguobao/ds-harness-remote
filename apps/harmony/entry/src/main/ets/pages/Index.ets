@@ -1097,39 +1097,6 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        Text(this.permissionLabel())
-          .fontSize(10)
-          .fontColor(this.pal().text2)
-          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(11)
-          .border({ width: 1, color: this.pal().border })
-          .onClick(() => {
-            ActionSheet.show({
-              title: '会话权限',
-              message: '决定这个会话里工具调用与命令执行的放行方式',
-              sheets: [
-                {
-                  title: '只读',
-                  action: () => {
-                    this.runtime.selectPermission('read-only');
-                  }
-                },
-                {
-                  title: '工作区可写',
-                  action: () => {
-                    this.runtime.selectPermission('workspace-write');
-                  }
-                },
-                {
-                  title: '完全权限',
-                  action: () => {
-                    this.runtime.selectPermission('danger-full-access');
-                  }
-                }
-              ]
-            });
-          })
         Text(this.currentModelLabel.length > 0 ? this.currentModelLabel : '模型')
           .fontSize(10)
           .fontColor(this.pal().text2)
@@ -1144,6 +1111,17 @@ struct Index {
             this.runtime.refreshModelCatalog();
             this.showModelPicker = true;
           })
+          .gesture(LongPressGesture().onAction(() => {
+            ActionSheet.show({
+              title: '会话权限',
+              message: '决定这个会话里工具调用与命令执行的放行方式',
+              sheets: [
+                { title: '只读', action: () => { this.runtime.selectPermission('read-only'); } },
+                { title: '工作区可写', action: () => { this.runtime.selectPermission('workspace-write'); } },
+                { title: '完全权限', action: () => { this.runtime.selectPermission('danger-full-access'); } }
+              ]
+            });
+          }))
         Text('＋')
           .fontSize(22)
           .fontWeight(FontWeight.Medium)
@@ -1279,24 +1257,9 @@ struct Index {
         .width('100%')
         .padding({ top: 4, bottom: 2 })
       }
-      Row() {
-        Text(this.runtime.steerMode ? '插话 · 立刻打断' : '排队 · 本轮之后')
-          .fontSize(11)
-          .fontColor(this.runtime.steerMode ? '#22D3EE' : this.pal().text3)
-          .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-          .backgroundColor(this.runtime.steerMode ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
-          .borderRadius(10)
-          .border({ width: 1,
-            color: this.runtime.steerMode ? 'rgba(34,211,238,0.45)' : this.pal().border })
-          .onClick(() => {
-            this.runtime.setSteerMode(!this.runtime.steerMode);
-          })
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 2, bottom: 0 })
-      .justifyContent(FlexAlign.Start)
       Row({ space: 10 }) {
-        TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…' : '发送消息…' })
+        TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…'
+              : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…') })
           .layoutWeight(1)
           .height(46)
           .backgroundColor(this.pal().inputBg)
@@ -1345,6 +1308,26 @@ struct Index {
           .onClick(() => {
             this.sendTap();
           })
+          .gesture(LongPressGesture().onAction(() => {
+            ActionSheet.show({
+              title: '发送方式',
+              message: this.runtime.steerMode ? '当前：插话（立刻打断当前轮）' : '当前：排队（本轮结束后再发）',
+              sheets: [
+                {
+                  title: '排队发送',
+                  action: () => {
+                    this.runtime.setSteerMode(false);
+                  }
+                },
+                {
+                  title: '插话打断',
+                  action: () => {
+                    this.runtime.setSteerMode(true);
+                  }
+                }
+              ]
+            });
+          }))
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 8, bottom: 10 })
