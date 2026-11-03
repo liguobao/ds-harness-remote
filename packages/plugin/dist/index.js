@@ -58030,7 +58030,7 @@ function acpImageContent(image, attachmentId) {
   return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions2 }, mediaType: image.mimeType, data: image.data };
 }
 function acpImageLimits(backend) {
-  return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
+  return backend === "antigravity" || backend === "hermes" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
 }
 
 // src/acp/virtual-catalog.ts
@@ -59456,7 +59456,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     let images;
     try {
       images = array2(request.content).filter((part) => record2(part).type === "image").map(parseAcpImage);
-      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" || array2(request.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
+      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" && this.backend !== "hermes" || array2(request.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
     } catch {
       return failure2("attachment-error", "Invalid or unsupported image attachment.");
     }
@@ -59526,10 +59526,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const sessionId = extractSessionId(request);
     const attachmentId = string4(request.attachmentId);
     const session2 = this.ensureSessionRegistered(sessionId);
-    if (this.backend !== "antigravity" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this AGY Session.");
+    if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
     const cached2 = this.imageAttachments.get(attachmentId);
-    return cached2?.sessionId === sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The AGY image is unavailable or expired.");
+    return cached2?.sessionId === sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
   }
   async hydrateSession(session2) {
     if (this.backend === "cursor" || session2.blank || session2.events.length > 0) return;
@@ -84430,7 +84430,7 @@ var AcpRemoteGateway = class {
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity" && requested !== "hermes") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
@@ -85094,7 +85094,7 @@ var AcpRemoteGateway = class {
       authMethods: [],
       capabilities: {
         loadSession: true,
-        promptTypes: actualBackend === "antigravity" ? ["text", "image"] : ["text"],
+        promptTypes: actualBackend === "antigravity" || actualBackend === "hermes" ? ["text", "image"] : ["text"],
         methods: [...ACP_METHOD_ALLOWLIST]
       }
     };

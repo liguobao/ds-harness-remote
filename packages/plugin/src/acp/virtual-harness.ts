@@ -458,7 +458,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     let images: AcpImage[]
     try {
       images = array(request.content).filter(part => record(part).type === 'image').map(parseAcpImage)
-      if (images.length > 4 || (images.length > 0 && this.backend !== 'antigravity') || array(request.content).some(part => !['text', 'image'].includes(String(record(part).type)))) throw new Error('Unsupported ACP content.')
+      if (images.length > 4 || (images.length > 0 && this.backend !== 'antigravity' && this.backend !== 'hermes') || array(request.content).some(part => !['text', 'image'].includes(String(record(part).type)))) throw new Error('Unsupported ACP content.')
     } catch { return failure('attachment-error', 'Invalid or unsupported image attachment.') }
     if (text === undefined && images.length === 0) return failure('attachment-error', 'A prompt or image is required.')
     const imageBlocks = images.map(image => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.slice(6)}`))
@@ -532,10 +532,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const sessionId = extractSessionId(request)
     const attachmentId = string(request.attachmentId)
     const session = this.ensureSessionRegistered(sessionId)
-    if (this.backend !== 'antigravity' || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this AGY Session.')
+    if ((this.backend !== 'antigravity' && this.backend !== 'hermes') || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this Session.')
     await this.hydrateSession(session)
     const cached = this.imageAttachments.get(attachmentId)
-    return cached?.sessionId === sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure('attachment-error', 'The AGY image is unavailable or expired.')
+    return cached?.sessionId === sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure('attachment-error', 'The image attachment is unavailable or expired.')
   }
 
   private async hydrateSession(session: AcpSessionState): Promise<void> {
