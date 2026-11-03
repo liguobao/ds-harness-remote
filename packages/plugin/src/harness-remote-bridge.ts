@@ -280,24 +280,24 @@ export class HarnessRemoteBridge {
         const checked = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
         nativePayload = checked.payload
         heldHandles.push(...checked.heldHandles)
-        if ((params.endpoint === 'workspaceFiles/read' || params.endpoint === 'workspaceFiles/readAll') && Number(checked.stat.size) > MAX_READ_BYTES) {
-          throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+        if (!checked.unverified && checked.canonical && checked.handle && checked.stat) {
+          if ((params.endpoint === 'workspaceFiles/read' || params.endpoint === 'workspaceFiles/readAll') && Number(checked.stat.size) > MAX_READ_BYTES) {
+            throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+          }
+          verifiedFile = { canonical: checked.canonical, handle: checked.handle, stat: checked.stat }
         }
-        verifiedFile = { canonical: checked.canonical, handle: checked.handle, stat: checked.stat }
       }
       if (verifiedFile !== undefined) {
-        if (params.endpoint === 'workspaceFiles/readBytes') {
-          const preDispatchStat = await lstat(verifiedFile.canonical)
-          if (preDispatchStat.isSymbolicLink() || preDispatchStat.ino !== verifiedFile.stat.ino || preDispatchStat.dev !== verifiedFile.stat.dev || preDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
-            throw new RpcError('WORKSPACE_PATH_DENIED', 'The target path was replaced before gateway dispatch.')
-          }
-          const nativeResult = await this.gateway.dispatch(params.endpoint, nativePayload, signal)
-          const postDispatchStat = await lstat(verifiedFile.canonical)
-          if (postDispatchStat.isSymbolicLink() || postDispatchStat.ino !== verifiedFile.stat.ino || postDispatchStat.dev !== verifiedFile.stat.dev || postDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
-            throw new RpcError('WORKSPACE_PATH_DENIED', 'The target path was replaced during gateway dispatch.')
-          }
-          if (!nativeResult.ok) throw new RpcError(nativeResult.error.code, nativeResult.error.message)
+        const preDispatchStat = await lstat(verifiedFile.canonical)
+        if (preDispatchStat.isSymbolicLink() || preDispatchStat.ino !== verifiedFile.stat.ino || preDispatchStat.dev !== verifiedFile.stat.dev || preDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The target path was replaced before gateway dispatch.')
         }
+        const nativeResult = await this.gateway.dispatch(params.endpoint, nativePayload, signal)
+        const postDispatchStat = await lstat(verifiedFile.canonical)
+        if (postDispatchStat.isSymbolicLink() || postDispatchStat.ino !== verifiedFile.stat.ino || postDispatchStat.dev !== verifiedFile.stat.dev || postDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The target path was replaced during gateway dispatch.')
+        }
+        if (!nativeResult.ok) throw new RpcError(nativeResult.error.code, nativeResult.error.message)
         const verifiedResult = await this.readVerifiedWorkspaceFile(
           params.endpoint,
           nativePayload,
@@ -630,7 +630,15 @@ export class HarnessRemoteBridge {
     endpoint: string,
     payload: unknown,
     signal: AbortSignal,
-  ): Promise<{ payload: unknown; root: string; handle: FileHandle; canonical: string; stat: Awaited<ReturnType<FileHandle['stat']>>; heldHandles: FileHandle[] }> {
+  ): Promise<{
+    payload: unknown
+    unverified?: boolean
+    root?: string
+    handle?: FileHandle
+    canonical?: string
+    stat?: Awaited<ReturnType<FileHandle['stat']>>
+    heldHandles: FileHandle[]
+  }> {
     const rootPayload = isRecord(payload) ? payload : {}
     const args = requestArgs(payload)
     const sessionId = typeof args.workspaceFileScopeId === 'string'
@@ -643,8 +651,17 @@ export class HarnessRemoteBridge {
     if (sessionId === undefined) {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
     }
-    const root = await this.resolveWorkspaceRootForSession(sessionId, signal)
     const path = typeof args.path === 'string' ? args.path : '.'
+    if (path.split(/[/\\]/).some(segment => segment === '..')) {
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    }
+    const root = await this.resolveWorkspaceRootForSession(sessionId, signal)
+    if (!root) {
+      if (isAbsolute(path)) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      return { payload, unverified: true, heldHandles: [] }
+    }
     const checked = await this.openPinnedWorkspaceFile(root, path)
     try {
       if (typeof args.baseFile === 'string') {
@@ -780,11 +797,12 @@ export class HarnessRemoteBridge {
     }
   }
 
-  private async resolveWorkspaceRootForSession(sessionId: string, signal: AbortSignal): Promise<string> {
+  private async resolveWorkspaceRootForSession(sessionId: string, signal: AbortSignal): Promise<string | undefined> {
     signal.throwIfAborted()
-    const cwd = this.resolveWorkspaceRoot !== undefined
-      ? await this.resolveWorkspaceRoot(sessionId, signal)
-      : await this.defaultResolveWorkspaceRoot(sessionId, signal)
+    if (this.resolveWorkspaceRoot === undefined) {
+      return undefined
+    }
+    const cwd = await this.resolveWorkspaceRoot(sessionId, signal)
     if (!cwd) {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
     }
@@ -795,21 +813,6 @@ export class HarnessRemoteBridge {
       return root
     } catch {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
-    }
-  }
-
-  private async defaultResolveWorkspaceRoot(sessionId: string, signal: AbortSignal): Promise<string | undefined> {
-    signal.throwIfAborted()
-    try {
-      const result = await this.gateway.dispatch('session/list', { args: { _request: {} } }, signal)
-      signal.throwIfAborted()
-      if (!result.ok) return undefined
-      const items = Array.isArray(result.value) ? result.value : isRecord(result.value) && Array.isArray(result.value.items) ? result.value.items : undefined
-      if (!items) return undefined
-      const session = items.find((item: unknown) => isRecord(item) && (item.sessionId === sessionId || item.id === sessionId))
-      return isRecord(session) && typeof session.cwd === 'string' ? session.cwd : undefined
-    } catch {
-      return undefined
     }
   }
 

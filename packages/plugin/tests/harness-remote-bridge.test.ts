@@ -730,15 +730,13 @@ describe('HarnessRemoteBridge', () => {
         return { ok: true as const, value: { text, absolutePath: full } }
       })
       const bridge = new HarnessRemoteBridge(
-        gateway({
-          dispatch: async (method, payload, signal) => {
-            if (method === 'session/list') {
-              return { ok: true as const, value: { items: [{ sessionId: 'session-1', cwd: root }] } }
-            }
-            return dispatch(method, payload, signal)
-          },
-        }),
+        gateway({ dispatch }),
         vi.fn(async () => undefined),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId) => (sessionId === 'missing-session' ? undefined : root),
       )
 
       // 1. 正常读取工作区内文件（相对路径、绝对路径、合法的双点前缀文件名）
