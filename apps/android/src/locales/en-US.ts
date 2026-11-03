@@ -273,6 +273,7 @@ const enUS = {
     showMoreSessions: (count: number) => `Show ${count} more sessions`,
     groupBy: 'Group by',
     groupByWorkspace: 'WorkSpace',
+    groupByWorkspaceTree: 'Workspace Tree',
     groupByList: 'In one list',
     orderBy: 'Order by',
     orderManual: 'Manual',

@@ -49,6 +49,7 @@ import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { browseStatus } from '../lib/backend-groups'
 import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup, saveWorkspaceBackend } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
+import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
 
 const SESSION_PAGE_SIZE = 3
 const DRAWER_WIDTH_RATIO = 0.85
@@ -70,6 +71,17 @@ function formatRelativeTime(timestamp?: number | string): string {
   if (hours < 24) return `${hours}h`
   const days = Math.floor(hours / 24)
   return `${days}d`
+}
+
+interface DrawerSection {
+  id: string
+  title: string
+  total: number
+  expanded: boolean
+  data: RemoteSession[]
+  depth?: number
+  workspaceId?: string
+  hasMoreFooter?: boolean
 }
 
 interface HarnessOption {
@@ -254,8 +266,20 @@ export function HostSessionsDrawer({
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showConfigModal, setShowConfigModal] = useState(false)
-  const [groupBy, setGroupBy] = useState<'workspace' | 'list'>('workspace')
+  const [groupBy, setGroupBy] = useState<'workspace' | 'workspace-tree' | 'list'>('workspace')
   const [orderBy, setOrderBy] = useState<'manual' | 'updated'>('updated')
+  const [manualOrders, setManualOrders] = useState<Record<string, string[]>>({})
+  const [dragState, setDragState] = useState<{
+    sessionId: string
+    sectionId: string
+    accountKey: string
+    fromIndex: number
+    overIndex: number
+    isPinned: boolean
+  } | null>(null)
+  const touchStartY = useRef(0)
+  const dragActiveRef = useRef(false)
+  const justDraggedRef = useRef(false)
   const [filterMode, setFilterMode] = useState<'hideArchived' | 'all' | 'archivedOnly'>('hideArchived')
   const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>({})
   const [loadedDeviceId, setLoadedDeviceId] = useState<string>()
@@ -425,7 +449,7 @@ export function HostSessionsDrawer({
     return list
   }, [sessions, selected, backend, archivedIds, filterMode, searchQuery, orderBy])
 
-  const sections = useMemo(() => {
+  const sections = useMemo<DrawerSection[]>(() => {
     const partitionPinned = (items: RemoteSession[]) => {
       const pinned: RemoteSession[] = []
       const ordinary: RemoteSession[] = []
@@ -441,8 +465,12 @@ export function HostSessionsDrawer({
     }
 
     if (groupBy === 'list') {
-      const ordered = partitionPinned(filteredSessions)
-      return [{ id: 'all', title: strings.sessions.allSessions, data: ordered, total: ordered.length, expanded: true }]
+      let ordered = filteredSessions
+      if (orderBy === 'manual') {
+        ordered = applyManualOrder(filteredSessions, manualOrders['all'])
+      }
+      const partitioned = partitionPinned(ordered)
+      return [{ id: 'all', title: strings.sessions.allSessions, data: partitioned, total: partitioned.length, expanded: true, depth: 0 }]
     }
     const recentOrder = new Map(recentIds.map((id, index) => [id, index]))
     if (selected) recentOrder.set(selected.sessionId, recentIds.length)
@@ -454,27 +482,53 @@ export function HostSessionsDrawer({
     )
     const recentExpanded = expandedWorkspaces[`recent:${backend}`] ?? true
     const recentSections = recent.length ? [{ id: `recent:${backend}`, title: strings.comfort.recent,
-      data: recentExpanded ? recent : [], total: recent.length, expanded: recentExpanded }] : []
+      data: recentExpanded ? recent : [], total: recent.length, expanded: recentExpanded, depth: 0 }] : []
     const wsList: Array<WorkspaceView | { workspaceId: string; title: string; path: string; sessionIds: string[] }> =
       backendWorkspaces.length > 0 ? backendWorkspaces : [{ workspaceId: 'default', title: 'Default', path: '', sessionIds: [] }]
-    return [...recentSections, ...wsList.map(ws => {
-      const isDefault = ws.workspaceId === 'default'
-      const wsSessions = partitionPinned(filteredSessions.filter(s =>
-        isDefault ? !backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId)) : ws.sessionIds.includes(s.sessionId)
-      ))
-      const groupId = `workspace:${backend}:${ws.workspaceId}`
-      const isExpanded = expandedWorkspaces[groupId] ?? true
-      const limit = visibleCounts[groupId] ?? SESSION_PAGE_SIZE
-      const title = ws.title || ws.path || ws.workspaceId
-      return {
-        id: groupId,
-        title,
-        total: wsSessions.length,
-        expanded: isExpanded,
-        data: isExpanded ? wsSessions.slice(0, limit) : [],
-      }
-    })]
-  }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds])
+
+    if (groupBy === 'workspace') {
+      return [...recentSections, ...wsList.map(ws => {
+        const isDefault = ws.workspaceId === 'default'
+        let wsSessions = filteredSessions.filter(s =>
+          isDefault ? !backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId)) : ws.sessionIds.includes(s.sessionId)
+        )
+        const groupId = `workspace:${backend}:${ws.workspaceId}`
+        if (orderBy === 'manual') {
+          wsSessions = applyManualOrder(wsSessions, manualOrders[groupId])
+        }
+        const partitioned = partitionPinned(wsSessions)
+        const isExpanded = expandedWorkspaces[groupId] ?? true
+        const limit = visibleCounts[groupId] ?? SESSION_PAGE_SIZE
+        const title = ws.title || ws.path || ws.workspaceId
+        return {
+          id: groupId,
+          title,
+          total: partitioned.length,
+          expanded: isExpanded,
+          data: isExpanded ? partitioned.slice(0, limit) : [],
+          depth: 0,
+          workspaceId: ws.workspaceId,
+        }
+      })]
+    }
+
+    // groupBy === 'workspace-tree'
+    const treeSections = buildTreeSections({
+      backend,
+      wsList,
+      filteredSessions,
+      backendWorkspaces,
+      expandedWorkspaces,
+      visibleCounts,
+      manualOrders,
+      orderBy,
+      searchQuery,
+      partitionPinned,
+      pageSize: SESSION_PAGE_SIZE,
+    })
+
+    return [...recentSections, ...treeSections]
+  }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds, orderBy, manualOrders, searchQuery])
 
   // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
@@ -576,6 +630,10 @@ export function HostSessionsDrawer({
       <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspace}</Text>
         {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
+      </Pressable>
+      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace-tree'); closeConfig() }}>
+        <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspaceTree}</Text>
+        {groupBy === 'workspace-tree' && <Check size={14} color={colors.ink} />}
       </Pressable>
       <Pressable style={styles.modalItem} onPress={() => { setGroupBy('list'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByList}</Text>
@@ -764,7 +822,8 @@ export function HostSessionsDrawer({
 
       {groupStorageError && <Text accessibilityRole="alert" style={{ color: colors.muted, paddingHorizontal: spacing.md }}>{groupStorageError}</Text>}
       {/* 会话树状列表 */}
-      <SectionList
+      <SectionList<RemoteSession, DrawerSection>
+        scrollEnabled={dragState === null}
         sections={groupsReady ? sections : []}
         ListEmptyComponent={groupsReady ? null : <ActivityIndicator color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
         keyExtractor={item => item.sessionId}
@@ -772,13 +831,18 @@ export function HostSessionsDrawer({
         contentContainerStyle={styles.listContainer}
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => {
-          if (groupBy === 'list') return null
+          if (groupBy === 'list' || !section.title) return null
           const isExp = section.expanded
+          const depth = section.depth ?? 0
           return (
             <Pressable
               accessibilityRole="button"
               onPress={() => toggleWorkspace(section.id)}
-              style={({ pressed }) => [styles.workspaceRow, pressed && styles.pressedBg]}
+              style={({ pressed }) => [
+                styles.workspaceRow,
+                pressed && styles.pressedBg,
+                depth > 0 && { paddingLeft: spacing.md + depth * 14 },
+              ]}
             >
               <View style={styles.workspaceRowLeft}>
                 {isExp ? <FolderOpen size={18} color={colors.muted} strokeWidth={1.8} /> : <Folder size={18} color={colors.muted} strokeWidth={1.8} />}
@@ -791,24 +855,29 @@ export function HostSessionsDrawer({
           )
         }}
         renderSectionFooter={({ section }) => {
-          if (groupBy === 'list' || !section.expanded || section.data.length >= section.total) return null
+          if (groupBy === 'list' || !section.expanded || section.hasMoreFooter === false || section.data.length >= section.total) return null
           const remaining = section.total - section.data.length
+          const countKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
+          const depth = section.depth ?? 0
           return (
             <Pressable
               accessibilityRole="button"
               onPress={() =>
                 setVisibleCounts(c => ({
                   ...c,
-                  [section.id]: (c[section.id] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE,
+                  [countKey]: (c[countKey] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE,
                 }))
               }
-              style={styles.showMoreRow}
+              style={[
+                styles.showMoreRow,
+                depth > 0 && { paddingLeft: spacing.lg + spacing.md + depth * 14 },
+              ]}
             >
               <Text style={styles.showMoreText}>{strings.sessions.showMoreSessions(remaining)}</Text>
             </Pressable>
           )
         }}
-        renderItem={({ item }) => {
+        renderItem={({ item, section, index }) => {
           const isSelected = item.sessionId === selected?.sessionId
           const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
           const isHarness = (item.backend ?? 'harness') === 'harness'
@@ -819,6 +888,12 @@ export function HostSessionsDrawer({
           const accessibilityLabel = isPinned
             ? `${displayTitle}, ${strings.sessions.pinned}`
             : displayTitle
+          const depth = section.depth ?? 0
+          const accountKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
+          const isDragging = dragState?.sessionId === item.sessionId && dragState.sectionId === section.id
+          const isDragTarget = dragState !== null && dragState.sectionId === section.id && dragState.overIndex === index && !isDragging && isPinned === dragState.isPinned
+          const dropAbove = isDragTarget && dragState.fromIndex > index
+          const dropBelow = isDragTarget && dragState.fromIndex < index
 
           return (
             <Pressable
@@ -826,17 +901,98 @@ export function HostSessionsDrawer({
               accessibilityLabel={accessibilityLabel}
               accessibilityState={{ selected: isSelected }}
               onPress={() => {
+                if (justDraggedRef.current || dragState !== null) return
                 if (isSelected) closeDrawer()
                 else void onSelect(item)
               }}
               onLongPress={() => {
+                if (searchQuery.trim() || section.id.startsWith('recent:')) {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+                  setMenuSession(item)
+                  return
+                }
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                setMenuSession(item)
+                setDragState({
+                  sessionId: item.sessionId,
+                  sectionId: section.id,
+                  accountKey,
+                  fromIndex: index,
+                  overIndex: index,
+                  isPinned,
+                })
+                dragActiveRef.current = true
+              }}
+              delayLongPress={300}
+              onTouchStart={(e) => {
+                touchStartY.current = e.nativeEvent.pageY
+              }}
+              onTouchMove={(e) => {
+                if (!dragActiveRef.current || !dragState || dragState.sessionId !== item.sessionId) return
+                const currentY = e.nativeEvent.pageY
+                const dy = currentY - touchStartY.current
+                const rowHeight = 46
+                const deltaSlots = Math.round(dy / rowHeight)
+                const pinnedCount = section.data.filter(s => {
+                  const isH = (s.backend ?? 'harness') === 'harness'
+                  return isH && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
+                }).length
+                const minSlot = dragState.isPinned ? 0 : pinnedCount
+                const maxSlot = dragState.isPinned ? Math.max(0, pinnedCount - 1) : Math.max(minSlot, section.data.length - 1)
+                const newIndex = Math.max(minSlot, Math.min(maxSlot, dragState.fromIndex + deltaSlots))
+                if (newIndex !== dragState.overIndex) {
+                  setDragState(curr => curr ? { ...curr, overIndex: newIndex } : null)
+                }
+              }}
+              onTouchEnd={() => {
+                if (dragActiveRef.current && dragState && dragState.sessionId === item.sessionId) {
+                  justDraggedRef.current = true
+                  setTimeout(() => { justDraggedRef.current = false }, 250)
+                  const activeDrag = dragState
+                  dragActiveRef.current = false
+                  setDragState(null)
+                  const { fromIndex, overIndex, accountKey: currentAccountKey } = activeDrag
+                  if (fromIndex !== overIndex) {
+                    const targetSession = section.data[overIndex]
+                    const targetIsPinned = targetSession && (targetSession.backend ?? 'harness') === 'harness' && pinnedSessionIds.includes(targetSession.sessionId) && !archivedIds.includes(targetSession.sessionId)
+                    if (targetSession && targetIsPinned === isPinned) {
+                      const allGroupSessions = sessions.filter(s => {
+                        if ((s.backend ?? 'harness') !== backend) return false
+                        if (groupBy === 'list') return true
+                        const isDefault = section.workspaceId === 'default'
+                        return isDefault
+                          ? !backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId))
+                          : section.workspaceId ? backendWorkspaces.find(w => w.workspaceId === section.workspaceId)?.sessionIds.includes(s.sessionId) : false
+                      })
+                      if (orderBy === 'updated') {
+                        allGroupSessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+                      }
+                      const baselineSessions = orderBy === 'manual'
+                        ? applyManualOrder(allGroupSessions, manualOrders[currentAccountKey])
+                        : allGroupSessions
+                      const fullIds = baselineSessions.map(s => s.sessionId)
+                      const direction = fromIndex < overIndex ? 'after' : 'before'
+                      const next = reorderSessionIds(fullIds, item.sessionId, targetSession.sessionId, direction)
+                      setManualOrders(prev => ({ ...prev, [currentAccountKey]: next }))
+                      if (orderBy === 'updated') {
+                        setOrderBy('manual')
+                      }
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+                    }
+                  }
+                }
+              }}
+              onTouchCancel={() => {
+                dragActiveRef.current = false
+                setDragState(null)
               }}
               style={({ pressed }) => [
                 styles.sessionRow,
+                depth > 0 && { paddingLeft: spacing.lg + spacing.xs + depth * 14 },
                 isSelected && styles.sessionRowSelected,
                 pressed && styles.pressedBg,
+                isDragging && styles.sessionRowDragging,
+                dropAbove && styles.dropTargetAbove,
+                dropBelow && styles.dropTargetBelow,
               ]}
             >
               <View style={styles.statusIndicatorSlot}>
@@ -1328,6 +1484,21 @@ const createStyles = (colors: ThemeColors) =>
       marginHorizontal: spacing.xs,
     },
     sessionRowSelected: { backgroundColor: colors.surfaceStrong },
+    sessionRowDragging: {
+      backgroundColor: colors.surfaceStrong,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      opacity: 0.9,
+    },
+    dropTargetAbove: {
+      borderTopWidth: 2,
+      borderTopColor: colors.primary,
+    },
+    dropTargetBelow: {
+      borderBottomWidth: 2,
+      borderBottomColor: colors.primary,
+    },
     statusIndicatorSlot: { width: 14, alignItems: 'flex-start', justifyContent: 'center' },
     runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
     sessionText: { ...type.body, fontSize: 16, color: colors.ink, flex: 1, marginRight: spacing.xs },

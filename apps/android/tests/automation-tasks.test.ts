@@ -14,6 +14,7 @@ describe('Automation Tasks and Sidebar i18n', () => {
       'showMoreSessions',
       'groupBy',
       'groupByWorkspace',
+      'groupByWorkspaceTree',
       'groupByList',
       'orderBy',
       'orderManual',
