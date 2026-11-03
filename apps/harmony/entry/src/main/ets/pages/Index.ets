@@ -157,6 +157,7 @@ struct Index {
     this.generating = this.runtime.generating;
     this.currentSessionId = this.runtime.currentSessionId;
     this.currentSessionTitle = this.runtime.currentSessionTitle;
+    this.infoMsg = '';
     this.contextPercent = this.runtime.contextPercent;
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
@@ -620,6 +621,14 @@ struct Index {
           .height(24)
           .color('#22D3EE')
       }
+      if (this.infoMsg.length > 0) {
+        Text(this.infoMsg)
+          .fontSize(12)
+          .fontColor('#34D399')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 6, bottom: 2, left: 16, right: 16 })
+      }
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg)
           .fontSize(13)
@@ -1048,7 +1057,7 @@ struct Index {
                 .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: 220 })
+                .constraintSize({ maxWidth: 150 })
                 .onClick(() => {
                   if (!this.generating && this.currentSessionId.length > 0) {
                     this.sessionTitleInput = this.currentSessionTitle;
@@ -1106,7 +1115,7 @@ struct Index {
           .fontColor(this.pal().text2)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .constraintSize({ maxWidth: 78 })
+          .constraintSize({ maxWidth: 64 })
           .padding({ left: 9, right: 9, top: 5, bottom: 5 })
           .backgroundColor(this.pal().chip)
           .borderRadius(11)

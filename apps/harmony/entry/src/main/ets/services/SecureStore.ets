@@ -239,6 +239,12 @@ export class SecureStore {
     if (stored !== undefined && isCanonicalDeviceId(stored.deviceId)) {
       return stored;
     }
+    // 安全存储读不出来 ≠ 没有身份。若本地仍留有身份记录却拿不到私钥，
+    // 直接生成新身份会把设备变成「新设备」：服务器侧凭据、Host 固定记录全部失效。
+    // 这种情况宁可报错让用户重试，也不静默轮换身份。
+    if (stored === undefined && this.getSync(KEY_IDENTITY, '').length > 0) {
+      throw new Error('设备身份读取失败（系统安全存储不可用）。为避免设备身份被轮换，已中止；请解锁设备后重试。');
+    }
     if (stored !== undefined) {
       // Older builds generated 32 raw hex characters, which the Server rejects: a device id
       // must be a UUIDv7 or a ULID. Such an identity can never register, so start clean.

@@ -392,12 +392,23 @@ export class AppRuntime {
       return;
     } catch (error) {
       logError('connect failed: ' + errorMessage(error));
-      if (!this.connectCancelled) {
+      const autoRetry: boolean = !this.connectCancelled && deviceId === this.lastDeviceId
+        && this.reconnectAttempt > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
+      if (!this.connectCancelled && !autoRetry) {
         this.errorMsg = errorMessage(error);
       }
       this.teardownConnection();
       if (this.phase !== PHASE_DEVICES) {
         this.phase = PHASE_DEVICES;
+      }
+      if (autoRetry) {
+        // 自动重连期间的单次失败不打断退避序列，继续按下一档重试。
+        const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
+        const delay: number = AppRuntime.RECONNECT_DELAYS_MS[index];
+        this.reconnectAttempt += 1;
+        this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '
+          + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+        this.scheduleReconnect(deviceId, delay);
       }
     }
     this.notify();
@@ -511,6 +522,22 @@ export class AppRuntime {
     try {
       const result: Record<string, Object> | undefined = await harness.commandsExecute(sessionId, line);
       const text: string = result !== undefined ? jsonStr(result, 'text', '') : '';
+      if (text.length === 0) {
+        // 有些命令（如 /permission）只产生副作用、没有文字回执。
+        // 不能静默吞掉输入，否则用户会以为消息丢了。
+        const note: ChatItem = new ChatItem();
+        note.id = `cmd:${randomId()}`;
+        note.kind = 'assistant';
+        note.role = 'assistant';
+        note.text = '已执行 ' + line.split(' ')[0];
+        note.sessionId = sessionId;
+        note.timestamp = Date.now();
+        const noted: ChatItem[] = this.messages.slice();
+        noted.push(note);
+        this.messages = noted;
+        this.notify();
+        return true;
+      }
       if (text.length > 0) {
         const item: ChatItem = new ChatItem();
         item.id = `cmd:${randomId()}`;
@@ -694,13 +721,13 @@ export class AppRuntime {
       return;
     }
     try {
+      // 主机返回 { asOfSeq, values }；上下文占用在 values 里，键名随版本可能不同，
+      // 因此这里按「任何带 percent 的对象」扫描，取第一个有效值。
       const raw: Record<string, Object> = await harness.sessionProjections(sessionId);
-      const context: Record<string, Object> | undefined = asRecord(raw['context']);
-      if (context !== undefined) {
-        const percent: number = jsonNum(context, 'percent', 0);
-        this.contextPercent = percent > 0 ? percent : 0;
-        this.notify();
-      }
+      const values: Record<string, Object> | undefined = asRecord(raw['values']);
+      const percent: number = values !== undefined ? findPercent(values) : findPercent(raw);
+      this.contextPercent = percent > 0 ? percent : 0;
+      this.notify();
     } catch (error) {
       // 投影是锦上添花，失败不打扰用户。
       logWarn('projections unavailable: ' + errorMessage(error));
@@ -1666,6 +1693,27 @@ export function getAppRuntime(): AppRuntime {
     runtimeInstance = new AppRuntime();
   }
   return runtimeInstance;
+}
+
+/** 在投影值里找上下文占用百分比；找不到返回 0。 */
+function findPercent(source: Record<string, Object>): number {
+  for (const key of Object.keys(source)) {
+    const value: Object | undefined = source[key];
+    const record: Record<string, Object> | undefined = asRecord(value);
+    if (record === undefined) {
+      continue;
+    }
+    const percent: number = jsonNum(record, 'percent', 0);
+    if (percent > 0) {
+      return percent;
+    }
+    const used: number = jsonNum(record, 'usedTokens', 0);
+    const limit: number = jsonNum(record, 'contextWindow', 0);
+    if (used > 0 && limit > 0) {
+      return Math.round((used / limit) * 100);
+    }
+  }
+  return 0;
 }
 
 /** 一个可选的模型（provider + model）。 */

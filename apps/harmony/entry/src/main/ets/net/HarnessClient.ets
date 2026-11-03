@@ -251,19 +251,19 @@ export class HarnessAlphaClient {
     const root: Record<string, Object> | undefined = asRecord(value);
     const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
     const sessions: HarnessRemoteSession[] = [];
+    let skipped: number = 0;
     if (items !== undefined) {
       for (const item of items) {
-        const record: Record<string, Object> | undefined = asRecord(item);
-        if (record === undefined) {
-          continue;
-        }
-        const normalized: HarnessRemoteSession | undefined = normalizeSession(record);
+        const normalized: HarnessRemoteSession | undefined = normalizeSearchItem(item);
         if (normalized !== undefined) {
           sessions.push(normalized);
+        } else {
+          skipped++;
         }
       }
     }
-    logInfo('session/search -> ' + sessions.length + ' item(s)');
+    // 搜索结果的字段形状随主机版本变化，记录跳过数量便于排查「搜不到」。
+    logInfo('session/search -> ' + sessions.length + ' item(s), skipped=' + skipped);
     return sessions;
   }
 
@@ -724,6 +724,42 @@ function withTimeout(work: Promise<Object>, budgetMs: number): Promise<Object> {
       reject(error);
     });
   });
+}
+
+/**
+ * 搜索结果可能有两种形状：
+ *   { sessionId, updatedAt, running, blank, ... }  或  { session: {...}, snippet }
+ * 这里都接受，避免主版本差异导致「搜索永远为空」。
+ */
+function normalizeSearchItem(value: Object): HarnessRemoteSession | undefined {
+  const root: Record<string, Object> | undefined = asRecord(value);
+  if (root === undefined) {
+    return undefined;
+  }
+  const direct: HarnessRemoteSession | undefined = normalizeSession(root);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const nested: Record<string, Object> | undefined = asRecord(root['session']);
+  if (nested !== undefined) {
+    const inner: HarnessRemoteSession | undefined = normalizeSession(nested);
+    if (inner !== undefined) {
+      return inner;
+    }
+  }
+  // 最后兜底：只要有 id 就当成一条可打开的会话，缺省字段按「未知」处理。
+  const id: string = jsonStr(root, 'sessionId', jsonStr(root, 'id',
+    nested !== undefined ? jsonStr(nested, 'sessionId', jsonStr(nested, 'id', '')) : ''));
+  if (id.length === 0) {
+    return undefined;
+  }
+  const session: HarnessRemoteSession = new HarnessRemoteSession();
+  session.sessionId = id;
+  session.title = jsonStr(root, 'title', nested !== undefined ? jsonStr(nested, 'title', '') : '');
+  session.cwd = jsonStr(root, 'cwd', nested !== undefined ? jsonStr(nested, 'cwd', '') : '');
+  const updated: Object | undefined = root['updatedAt'];
+  session.updatedAt = typeof updated === 'number' ? (updated >= 1e12 ? updated : updated * 1000) : 0;
+  return session;
 }
 
 function normalizeSession(value: Object): HarnessRemoteSession | undefined {
