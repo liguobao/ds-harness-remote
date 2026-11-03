@@ -311,6 +311,10 @@ function AppNavigator() {
         reset({ name: 'devices' })
         return true
       }
+      if (current.name === 'workspaces' && current.source === 'chat') {
+        reset({ name: 'devices' })
+        return true
+      }
       pop()
       return true
     })
@@ -433,7 +437,18 @@ function AppNavigator() {
           if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId, source: 'workspaces' })
         }}
       />}
-      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey, source: 'chat' })} />}
+      {route.name === 'chat' && <ChatScreen
+        onBack={pop}
+        onOpenDevices={() => reset({ name: 'devices' })}
+        onOpenWorkspaces={focusWorkspaceKey => {
+          const previousRoute = routes[routes.length - 2]
+          if (focusWorkspaceKey === undefined && previousRoute?.name === 'workspaces') {
+            pop()
+            return
+          }
+          push({ name: 'workspaces', focusWorkspaceKey, source: 'chat' })
+        }}
+      />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
