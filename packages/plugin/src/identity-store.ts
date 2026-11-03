@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
@@ -75,18 +75,37 @@ export class IdentityStore {
     await chmod(this.directory, 0o700)
     const devicePath = join(this.directory, 'device.json')
     const keyPath = join(this.directory, 'device.key')
-    const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
-    if (hasDevice !== hasKey) {
-      throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
-    }
+    // Creation writes two files that must agree. Without a cross-process lock a
+    // Desktop restart overlapping the previous Host reaches the "create" branch
+    // twice; each writes its own key pair and the directory ends up holding one
+    // process's device.json beside another's device.key. That mismatch fails
+    // closed forever — every later start throws before registering the control
+    // route — so serialize the whole read-create-verify cycle.
+    const release = await acquireIdentityLock(this.directory)
+    try {
+      await removeStaleTemporaries(this.directory)
+      const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
+      if (hasDevice !== hasKey) {
+        throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
+      }
 
-    if (!hasDevice) {
-      const keys = generateKeyPair()
-      const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
-      await atomicJsonWrite(devicePath, record, 0o600)
-      await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
-    }
+      if (!hasDevice) {
+        const keys = generateKeyPair()
+        const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
+        // Write the key first: a crash between the two leaves device.key alone,
+        // which the incomplete-pair guard above reports explicitly, instead of
+        // leaving a device.json whose published public key has no private half.
+        await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
+        await atomicJsonWrite(devicePath, record, 0o600)
+      }
 
+      return await this.readIdentity(devicePath, keyPath, deviceName)
+    } finally {
+      await release()
+    }
+  }
+
+  private async readIdentity(devicePath: string, keyPath: string, deviceName: string): Promise<HostIdentity> {
     await assertPrivateMode(keyPath)
     try {
       let record = identitySchema.parse(JSON.parse(await readFile(devicePath, 'utf8')))
@@ -224,4 +243,83 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'invalid identity data'
+}
+
+/**
+ * Serialize identity creation across processes sharing one `~/.dsh`.
+ *
+ * A `wx`-created lock file is the whole mechanism: the first process to create
+ * it wins, everyone else retries. The lock records pid and creation time so a
+ * lock left behind by a crash can be reclaimed once it is old enough, and so a
+ * same-process re-entry (HMR reload) never deadlocks on itself.
+ */
+const LOCK_FILE_NAME = 'device.lock'
+const LOCK_TIMEOUT_MS = 15_000
+const LOCK_STALE_MS = 60_000
+const LOCK_RETRY_MS = 25
+
+async function acquireIdentityLock(directory: string): Promise<() => Promise<void>> {
+  const lockPath = join(directory, LOCK_FILE_NAME)
+  const deadline = Date.now() + LOCK_TIMEOUT_MS
+  for (;;) {
+    try {
+      const handle = await open(lockPath, 'wx', 0o600)
+      await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }))
+      await handle.close()
+      let released = false
+      return async () => {
+        if (released) return
+        released = true
+        await unlink(lockPath).catch(() => undefined)
+      }
+    } catch (error: unknown) {
+      if (!isNodeError(error) || error.code !== 'EEXIST') throw error
+      if (await reclaimStaleLock(lockPath)) continue
+      if (Date.now() >= deadline) {
+        throw new IdentityInvalidError('device identity is locked by another process; stop other DSH instances and retry')
+      }
+      await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS))
+    }
+  }
+}
+
+/** Remove a lock whose owner is gone or has held it past the staleness bound. */
+async function reclaimStaleLock(lockPath: string): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown; at?: unknown }
+    const heldSince = typeof owner.at === 'number' ? Date.now() - owner.at : Number.POSITIVE_INFINITY
+    const ownerPid = typeof owner.pid === 'number' ? owner.pid : undefined
+    // A holder past the bound, or one whose process no longer exists, is debris.
+    if (heldSince < LOCK_STALE_MS && ownerPid !== undefined && isProcessAlive(ownerPid)) return false
+    await unlink(lockPath)
+    return true
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') return true
+    // An unreadable lock is treated as debris from a crash.
+    await unlink(lockPath).catch(() => undefined)
+    return true
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error: unknown) {
+    return isNodeError(error) && error.code === 'EPERM'
+  }
+}
+
+/** Drop temp files a previous interrupted write left beside the identity pair. */
+async function removeStaleTemporaries(directory: string): Promise<void> {
+  let entries: string[]
+  try {
+    entries = await readdir(directory)
+  } catch {
+    return
+  }
+  await Promise.all(entries
+    .filter(name => name.startsWith('device.json.') || name.startsWith('device.key.'))
+    .filter(name => name.endsWith('.tmp'))
+    .map(name => unlink(join(directory, name)).catch(() => undefined)))
 }

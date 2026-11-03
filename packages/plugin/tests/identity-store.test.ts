@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -56,6 +56,49 @@ describe('IdentityStore', () => {
     expect(firstHost).not.toBe(firstClient)
     expect(firstHost).not.toBe(secondHost)
     expect(serverStorageDirectory(root, 'https://one.example.com/', 'host')).toBe(firstHost)
+  })
+
+  it('serializes concurrent first-time creation onto one key pair', async () => {
+    const directory = await temporaryDirectory()
+    // Two Stores over one directory model the real incident: a Desktop restart
+    // overlapping the previous Host process, both reaching the "create" branch.
+    const stores = Array.from({ length: 6 }, () => new IdentityStore({ directory }))
+    const created = await Promise.all(stores.map(store => store.loadOrCreate('Workstation')))
+    const [first] = created
+    for (const identity of created) {
+      expect(identity).toMatchObject({ deviceId: first!.deviceId, publicKey: first!.publicKey, privateKey: first!.privateKey })
+    }
+    // The pair left on disk must still be self-consistent.
+    const reloaded = await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    expect(reloaded.publicKey).toBe(first!.publicKey)
+    expect(reloaded.privateKey).toBe(first!.privateKey)
+  })
+
+  it('reports a mismatched key pair instead of silently minting a new identity', async () => {
+    const directory = await temporaryDirectory()
+    const original = await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    // Reproduce the incident's residue: overwrite the private key with an
+    // unrelated one so the public key in device.json no longer matches.
+    const other = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Other')
+    await writeFile(join(directory, 'device.key'), `${other.privateKey}\n`)
+
+    // Repair stays an explicit operator action: a silent rebuild would drop the
+    // pinned peer trust and re-register the device without the user knowing.
+    await expect(new IdentityStore({ directory }).loadOrCreate('Workstation'))
+      .rejects.toThrow(/public and private keys do not match/)
+    // The original record is left intact so the operator can still back it up.
+    expect(JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')).publicKey).toBe(original.publicKey)
+  })
+
+  it('clears temporary files left behind by an interrupted write', async () => {
+    const directory = await temporaryDirectory()
+    await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    const residue = join(directory, 'device.key.57692.01a1a04a-7ced-7ffe-b382-e5a2e689f6ad.tmp')
+    await writeFile(residue, 'stale\n')
+
+    await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    const remaining = (await readdir(directory)).filter(name => name.endsWith('.tmp'))
+    expect(remaining).toEqual([])
   })
 })
 
