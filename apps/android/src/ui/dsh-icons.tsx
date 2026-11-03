@@ -254,6 +254,21 @@ export const IconChecklistOutline = memo(function IconChecklistOutline({
   )
 })
 
+/** Background Job outline icon (terminal / command execution) */
+export const IconJobOutline = memo(function IconJobOutline({
+  size = 14,
+  color = '#6E7681',
+  strokeWidth = 1.3,
+}: { size?: number; color?: string; strokeWidth?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Rect x="2" y="2" width="12" height="12" rx="2.5" stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M5 5.5L7.5 8L5 10.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M8.5 10.5H11" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  )
+})
+
 /** Official DSH IconBranchOutlineRegular from TurnActions / MessageActions */
 export const IconBranchOutline = memo(function IconBranchOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
   return (

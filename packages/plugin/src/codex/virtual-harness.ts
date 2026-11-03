@@ -289,6 +289,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'host/listDirectory': return business(await this.listDirectory(requestArg(args), signal))
         case 'directoryPicker/list': return business(await this.listDirectory(requestArg(args), signal))
         case 'skills/list': return business(success({ items: [] }))
+        case 'job/kill': return this.hostCarrier === undefined ? business(success({ outcome: 'already-finished' })) : await this.hostCarrier.dispatch(endpoint, payload, signal)
         case 'commands/list': return ok(this.commandList(args))
         case 'commands/execute': return ok(await this.executeCommand(args, signal))
         default: return this.hostCarrier === undefined

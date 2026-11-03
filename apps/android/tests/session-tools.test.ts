@@ -96,6 +96,18 @@ describe('native session tools', () => {
     expect(outcome).toEqual({ kind: 'success', text: 'exported to zip' })
     expect(rpc).toHaveBeenCalledWith('harness.remote.call', { endpoint: 'commands/execute', payload: { args: { agentId: 's1', line: '/export', submittedAttachments: [] } } }, expect.any(AbortSignal), undefined)
   })
+
+  it('forwards job observation with offset and stops jobs via job.kill', async () => {
+    const { tools, rpc } = setup({ outcome: 'requested' })
+    const killOutcome = await tools.killJob('s1', 'job-123')
+    expect(killOutcome).toEqual({ outcome: 'requested' })
+    expect(rpc).toHaveBeenCalledWith(
+      'harness.remote.call',
+      { endpoint: 'job/kill', payload: { args: { request: { sessionId: 's1', jobId: 'job-123' } } } },
+      expect.any(AbortSignal),
+      undefined,
+    )
+  })
 })
 
 describe('permission projection versions', () => {
