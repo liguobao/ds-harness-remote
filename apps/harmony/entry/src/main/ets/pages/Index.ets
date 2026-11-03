@@ -5,6 +5,7 @@ import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHA
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
+import { HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
@@ -50,6 +51,11 @@ struct Index {
   @State showModelPicker: boolean = false;
   @State modelOptions: ModelOption[] = [];
   @State currentModelLabel: string = '';
+  /** 工作区选择。 */
+  @State workspaces: HarnessWorkspace[] = [];
+  @State selectedWorkspaceId: string = '';
+  /** 待选推理等级的模型（null 表示未进入等级选择）。 */
+  @State pendingModel: ModelOption | undefined = undefined;
 
   @State serverInput: string = '';
   @State emailInput: string = '';
@@ -162,6 +168,8 @@ struct Index {
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
     this.currentModelLabel = this.runtime.currentModelLabel;
+    this.workspaces = this.runtime.workspaces;
+    this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
@@ -1146,6 +1154,7 @@ struct Index {
             .margin({ left: 2 })
             .onClick(() => {
               this.showSessions = true;
+              this.runtime.loadWorkspaces();
             })
         }
       }
@@ -1395,6 +1404,46 @@ struct Index {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+      if (this.workspaces.length > 0) {
+        Scroll() {
+          Row({ space: 8 }) {
+            Text('跟随当前会话')
+              .fontSize(11)
+              .fontColor(this.selectedWorkspaceId.length === 0 ? '#22D3EE' : this.pal().text3)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .backgroundColor(this.selectedWorkspaceId.length === 0
+                ? 'rgba(34,211,238,0.12)' : this.pal().inputBg)
+              .borderRadius(9)
+              .border({ width: 1, color: this.selectedWorkspaceId.length === 0
+                ? 'rgba(34,211,238,0.45)' : this.pal().border })
+              .onClick(() => {
+                this.runtime.setSelectedWorkspace('');
+              })
+            ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
+              Text(workspace.title.length > 0 ? workspace.title : workspace.path)
+                .fontSize(11)
+                .maxLines(1)
+                .constraintSize({ maxWidth: 140 })
+                .fontColor(this.selectedWorkspaceId === workspace.workspaceId
+                  ? '#22D3EE' : this.pal().text3)
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .backgroundColor(this.selectedWorkspaceId === workspace.workspaceId
+                  ? 'rgba(34,211,238,0.12)' : this.pal().inputBg)
+                .borderRadius(9)
+                .border({ width: 1, color: this.selectedWorkspaceId === workspace.workspaceId
+                  ? 'rgba(34,211,238,0.45)' : this.pal().border })
+                .onClick(() => {
+                  this.runtime.setSelectedWorkspace(workspace.workspaceId);
+                })
+            }, (workspace: HarnessWorkspace) => workspace.workspaceId)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .padding({ top: 2, bottom: 6 })
+      }
       Column()
         .width('100%')
         .height(0.5)
@@ -1491,6 +1540,51 @@ struct Index {
         }
         .width('100%')
         .padding({ left: 18, right: 18, top: 16, bottom: 10 })
+        if (this.pendingModel !== undefined) {
+          Column({ space: 6 }) {
+            Text('选择 ' + this.pendingModel!.name + ' 的推理等级')
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+              .width('100%')
+              .padding({ left: 18, right: 18 })
+            Scroll() {
+              Row({ space: 8 }) {
+                Text('默认')
+                  .fontSize(11)
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.pal().inputBg)
+                  .borderRadius(9)
+                  .border({ width: 1, color: this.pal().border })
+                  .onClick(() => {
+                    this.runtime.selectModel(this.pendingModel!.provider,
+                      this.pendingModel!.model, '');
+                    this.pendingModel = undefined;
+                    this.showModelPicker = false;
+                  })
+                ForEach(this.pendingModel!.efforts, (effort: string) => {
+                  Text(effort)
+                    .fontSize(11)
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor('rgba(34,211,238,0.10)')
+                    .borderRadius(9)
+                    .border({ width: 1, color: 'rgba(34,211,238,0.35)' })
+                    .onClick(() => {
+                      this.runtime.selectModel(this.pendingModel!.provider,
+                        this.pendingModel!.model, effort);
+                      this.pendingModel = undefined;
+                      this.showModelPicker = false;
+                    })
+                }, (effort: string) => effort)
+              }
+              .padding({ left: 18, right: 18 })
+            }
+            .scrollable(ScrollDirection.Horizontal)
+            .scrollBar(BarState.Off)
+            .width('100%')
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 8 })
+        }
         if (this.modelOptions.length === 0) {
           Text('模型目录为空：请确认主机已配置模型服务商')
             .fontSize(13)
@@ -1526,6 +1620,10 @@ struct Index {
                 .borderRadius(12)
                 .border({ width: 1, color: this.pal().border })
                 .onClick(() => {
+                  if (option.efforts.length > 0) {
+                    this.pendingModel = option;
+                    return;
+                  }
                   this.runtime.selectModel(option.provider, option.model, '');
                   this.showModelPicker = false;
                 })

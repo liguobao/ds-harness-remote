@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "material": {
+          "storePassword": "000000206B408920AB1674C704031BBD7BA363F7B48D0F81F9D56C1FB4833B8096144F3BA9489EC85E2659559476E9BA",
+          "certpath": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "000000206B408920AB1674C704031BBD7BA363F7B48D0F81F9D56C1FB4833B8096144F3BA9489EC85E2659559476E9BA",
+          "profile": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.p12"
+        },
+        "type": "HarmonyOS"
+      }
+    ],
     "products": [
       {
         "name": "default",
@@ -12,7 +26,8 @@
             "caseSensitiveCheck": true,
             "useNormalizedOHMUrl": true
           }
-        }
+        },
+        "signingConfig": "default"
       }
     ],
     "buildModeSet": [

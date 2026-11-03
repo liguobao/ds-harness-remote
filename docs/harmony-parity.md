@@ -21,6 +21,8 @@
 | 模型选择 | 聊天顶栏模型胶囊 | 顶栏模型胶囊 → 底部选择面板；目录来自主机 | `session/modelCatalog`、`session/selectModel` |
 | 权限预设 | `/permission` 弹窗 | 顶栏权限胶囊 → 选择「只读 / 可写 / 完全」 | `session/selectPermission` |
 | 从某条消息分叉 | 消息长按 › 从这里分叉 | 聊天气泡长按 → 确认分叉 | `session/fork` |
+| 模型推理等级 | `/model` 里的推理等级 | 模型面板内联等级条（默认 / low / medium / high…） | `session/selectModel` 的 `reasoningEffort` |
+| 工作区选择 | 新会话页选择工作目录 | 会话面板顶部工作区胶囊，新建会话落在所选工作区 | `workspace/list` + `session/create { workspaceId }` |
 
 ## 二、可实现但尚未做（主机已支持）
 
@@ -28,12 +30,12 @@
 
 | 优先级 | 能力 | endpoint | 说明 |
 |---|---|---|---|
-| P1 | 模型推理等级选择 | `session/selectModel` 的 `reasoningEffort` | 模型已可选，推理等级（low/medium/high）待做 |
+| P2 | 工作区文件浏览 | `host/listDirectory`、`session/openWorkspacePath` | 只读浏览可先做 |
+| P2 | 技能清单 | `skills/list` | **实测 native 主机返回空** `{items: []}`，属主机缺口 |
 
 | P1 | 排队消息管理 | `session/updateQueue` | 需要主机把排队项回显到 projections |
 | P1 | 附件与图片 | `session/attachment` | 需要先做附件上传通道（当前协议未暴露 fileUploads 的远程入口） |
-| P2 | 工作区文件浏览 | `host/listDirectory`、`session/openWorkspacePath` | 只读浏览可先做 |
-| P2 | 技能清单 | `skills/list` | 只读列表 + 插入 `/技能名` |
+
 | P2 | 工作区管理 | `workspace/create|delete|rename|list` | 多工作区切换 |
 
 ## 三、受主机能力限制（需要先动 Host 插件）

@@ -3,6 +3,15 @@ import { logInfo, logWarn, logError } from '../util/Log';
 import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
 import { jsonStr, asRecord, asArray, asBool } from '../protocol/Types';
 
+/** 一个 Host 工作区（`workspace/list` item）。 */
+export class HarnessWorkspace {
+  workspaceId: string = '';
+  path: string = '';
+  title: string = '';
+  sessionIds: string[] = [];
+  updatedAt: number = 0;
+}
+
 /** One remote Harness session row (`session/list` item). */
 export class HarnessRemoteSession {
   sessionId: string = '';
@@ -140,9 +149,15 @@ export class HarnessAlphaClient {
     return sessions;
   }
 
-  async sessionCreate(cwd: string): Promise<string> {
+  /**
+   * 新建会话。workspaceId 与 cwd 互斥（Host 侧会拒绝同时传）；
+   * 指定 workspaceId 时由 Host 决定路径。
+   */
+  async sessionCreate(cwd: string, workspaceId: string = ''): Promise<string> {
     const request: Record<string, Object> = {};
-    if (cwd.length > 0) {
+    if (workspaceId.length > 0) {
+      request['workspaceId'] = workspaceId;
+    } else if (cwd.length > 0) {
       request['cwd'] = cwd;
     }
     const args: Record<string, Object> = { 'request': request };
@@ -191,6 +206,35 @@ export class HarnessAlphaClient {
     const request: Record<string, Object> = { 'sessionId': sessionId };
     const args: Record<string, Object> = { 'request': request };
     await this.callValue('session/cancel', args);
+  }
+
+  /** 列出 Host 上的工作区。 */
+  async workspaceList(): Promise<HarnessWorkspace[]> {
+    const request: Record<string, Object> = {};
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/list', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const out: HarnessWorkspace[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const workspace: HarnessWorkspace = new HarnessWorkspace();
+        workspace.workspaceId = jsonStr(record, 'workspaceId', '');
+        workspace.path = jsonStr(record, 'path', '');
+        workspace.title = jsonStr(record, 'title', '');
+        const updated: Object | undefined = record['updatedAt'];
+        workspace.updatedAt = typeof updated === 'number' ? updated : 0;
+        if (workspace.workspaceId.length > 0) {
+          out.push(workspace);
+        }
+      }
+    }
+    logInfo('workspace/list -> ' + out.length + ' item(s)');
+    return out;
   }
 
   /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */

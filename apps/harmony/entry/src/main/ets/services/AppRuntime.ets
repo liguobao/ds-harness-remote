@@ -7,7 +7,7 @@ import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  HarnessSessionEvent, HistoryPage } from '../net/HarnessClient';
+  HarnessSessionEvent, HarnessWorkspace, HistoryPage } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -113,6 +113,10 @@ export class AppRuntime {
   contextPercent: number = 0;
   /** 当前会话的权限预设；空表示未从主机读到。 */
   permissionPreset: string = '';
+  /** Host 上的工作区列表。 */
+  workspaces: HarnessWorkspace[] = [];
+  /** 新建会话时使用的工作区；空表示沿用当前会话的 cwd。 */
+  selectedWorkspaceId: string = '';
   /** 可选模型列表（来自主机模型目录）。 */
   modelOptions: ModelOption[] = [];
   /** 当前模型展示名；空表示未知。 */
@@ -389,6 +393,7 @@ export class AppRuntime {
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
+      this.loadWorkspaces().catch(() => undefined);
       return;
     } catch (error) {
       logError('connect failed: ' + errorMessage(error));
@@ -464,8 +469,10 @@ export class AppRuntime {
       // 空 cwd 会让主机把会话建到用户主目录（不是工程工作区），agent 起不来，
       // 表现就是「消息发出去了但永远没回复，切回来还消失」。
       const cwd: string = this.resolveNewSessionCwd();
-      logInfo('session/create cwd=' + (cwd.length > 0 ? cwd : '(empty)'));
-      const sessionId: string = await harness.sessionCreate(cwd);
+      const workspaceId: string = this.selectedWorkspaceId;
+      logInfo('session/create workspace=' + (workspaceId.length > 0 ? workspaceId : '(cwd)')
+        + ' cwd=' + (cwd.length > 0 ? cwd : '(empty)'));
+      const sessionId: string = await harness.sessionCreate(cwd, workspaceId);
       logInfo('session/create -> ' + sessionId);
       this.currentSessionId = sessionId;
       this.currentSessionTitle = '新会话';
@@ -557,6 +564,26 @@ export class AppRuntime {
       logInfo('slash command not handled, falling back to prompt: ' + line.split(' ')[0]);
       return false;
     }
+  }
+
+  /** 载入 Host 工作区列表。 */
+  async loadWorkspaces(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      return;
+    }
+    try {
+      this.workspaces = await harness.workspaceList();
+      this.notify();
+    } catch (error) {
+      logWarn('workspace/list unavailable: ' + errorMessage(error));
+    }
+  }
+
+  /** 选择新建会话使用的工作区；空字符串表示跟随当前会话。 */
+  setSelectedWorkspace(workspaceId: string): void {
+    this.selectedWorkspaceId = workspaceId;
+    this.notify();
   }
 
   /** 载入斜杠命令清单；主机返回空则用内置兜底清单。 */
@@ -766,6 +793,21 @@ export class AppRuntime {
             option.model = jsonStr(model, 'id', '');
             option.name = jsonStr(model, 'name', option.model);
             option.description = jsonStr(model, 'description', '');
+            const reasoning: Record<string, Object> | undefined = asRecord(model['reasoning']);
+            if (reasoning !== undefined) {
+              const efforts: Object[] | undefined = asArray(reasoning['efforts']);
+              if (efforts !== undefined) {
+                for (const effortValue of efforts) {
+                  const effort: Record<string, Object> | undefined = asRecord(effortValue);
+                  if (effort !== undefined) {
+                    const id: string = jsonStr(effort, 'id', '');
+                    if (id.length > 0) {
+                      option.efforts.push(id);
+                    }
+                  }
+                }
+              }
+            }
             if (option.model.length > 0) {
               options.push(option);
             }
@@ -1722,6 +1764,8 @@ export class ModelOption {
   model: string = '';
   name: string = '';
   description: string = '';
+  /** 该模型支持的推理等级 id；空表示不支持。 */
+  efforts: string[] = [];
 }
 
 /** 一条斜杠命令候选。 */
