@@ -751,15 +751,6 @@ export function HostSessionsDrawer({
         <Text style={styles.navItemText}>{strings.automation.nav}</Text>
       </Pressable>
 
-      {backends.length > 1 && <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0, flexShrink: 0, marginTop: spacing.sm }} contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 4, gap: spacing.xxs }}>
-        {backends.map(value => <Pressable key={value} accessibilityRole="tab"
-          accessibilityState={{ selected: backend === value }} onPress={() => setBackend(value)}
-          style={({ pressed }) => [styles.backendTab, backend === value && styles.backendTabActive, pressed && styles.pressedFade]}>
-          <Text style={[styles.backendTabText, backend === value && styles.backendTabTextActive]}>{backendLabel(value)}</Text>
-        </Pressable>)}
-      </ScrollView>}
-
       {/* Workspaces 标题栏与工具栏 */}
       <View ref={toolbarRef} style={styles.workspacesToolbarArea} collapsable={false}>
         <View style={styles.workspacesToolbar}>
@@ -1364,20 +1355,6 @@ export function HostSessionsDrawer({
   )
 }
 
-function backendLabel(value: AgentBackend): string {
-  switch (value) {
-    case 'harness': return strings.workspaces.dsh
-    case 'codex': return strings.workspaces.codex
-    case 'cursor': return strings.workspaces.cursor
-    case 'claude': return strings.workspaces.claude
-    case 'hermes': return strings.workspaces.hermes
-    case 'opencode': return strings.workspaces.opencode
-    case 'pi': return strings.workspaces.pi
-    case 'antigravity': return strings.workspaces.antigravity
-    default: return value
-  }
-}
-
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     overlayContainer: { flex: 1 },
@@ -1422,16 +1399,6 @@ const createStyles = (colors: ThemeColors) =>
       marginHorizontal: spacing.xs,
       borderRadius: radius.lg,
     },
-    backendTab: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: spacing.md,
-      height: 36,
-      borderRadius: radius.pill,
-    },
-    backendTabActive: { backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
-    backendTabText: { ...type.small, fontSize: 15, color: colors.muted },
-    backendTabTextActive: { color: colors.ink, fontWeight: '600' },
     navItemText: { ...type.body, fontSize: 17, color: colors.ink },
 
     workspacesToolbarArea: { position: 'relative' },
