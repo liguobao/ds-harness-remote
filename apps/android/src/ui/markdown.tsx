@@ -10,6 +10,7 @@ import { radius, spacing, typeForDensity } from './theme'
 import type { TypographyDensity } from './theme'
 import { installMath } from './markdown-math'
 import { MathFormula } from './math-formula'
+import { MermaidBlock } from './mermaid/mermaid-block'
 import { useTheme } from './theme-context'
 import type { ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
@@ -280,6 +281,7 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
   }
   if (token.type === 'fence' || token.type === 'code_block') {
     const lang = token.type === 'fence' ? token.info.trim().split(/\s+/u)[0] : undefined
+    if (lang?.toLowerCase() === 'mermaid') return <MermaidBlock key={key} code={token.content} />
     return <CodeBlockView key={key} code={token.content} language={lang} />
   }
   if (token.type === 'blockquote_open') {
