@@ -15,3 +15,5 @@
 *.hap
 /release/
 .DS_Store
+.crypto-bundle.mjs
+.crypto-entry.ts

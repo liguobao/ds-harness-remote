@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       android: ${{ steps.detect.outputs.android }}
+      harmony: ${{ steps.detect.outputs.harmony }}
     steps:
       - name: Detect Android changes
         id: detect
@@ -55,6 +56,18 @@ jobs:
           done <<< "$files"
 
           echo "android=$android" >> "$GITHUB_OUTPUT"
+
+          harmony=false
+          while IFS= read -r file_path; do
+            case "$file_path" in
+              .github/workflows/ci.yml|.github/workflows/harmony*.yml|apps/harmony/*|fixtures/crypto/*|packages/crypto/*|packages/protocol/*|pnpm-workspace.yaml)
+                harmony=true
+                break
+                ;;
+            esac
+          done <<< "$files"
+
+          echo "harmony=$harmony" >> "$GITHUB_OUTPUT"
 
   quality:
     name: Check, test, and build
@@ -93,6 +106,13 @@ jobs:
 
       - name: Run tests
         run: pnpm -r test
+
+      # The HarmonyOS client cannot be built on a GitHub-hosted runner (no HarmonyOS SDK),
+      # but its hand-written Noise IK implementation is plain TypeScript and can be verified
+      # against the repository's golden vectors here. See .github/workflows/harmony-hap.yml
+      # for the signed HAP build that runs on a self-hosted runner.
+      - name: Run HarmonyOS client crypto conformance
+        run: pnpm exec vitest run apps/harmony/tests/crypto.test.ts
 
       # Android prebuild recompiles shared packages. Serialize workspace builds
       # so Plugin bundling cannot read dist files while tsc rewrites them.

@@ -1,0 +1,83 @@
+# Build the signed HarmonyOS HAP for apps/harmony.
+#
+# GitHub-hosted Ubuntu runners do not ship the HarmonyOS SDK (DevEco / hvigor / ohpm),
+# so this workflow targets a self-hosted runner that has the SDK installed. Register one
+# with the label set below (see apps/harmony/README.md for the exact prerequisites).
+#
+# Signing material is injected from repository secrets at build time and is never committed:
+#   HARMONY_SIGNING_STORE_B64, HARMONY_SIGNING_STORE_PASSWORD, HARMONY_SIGNING_KEY_ALIAS,
+#   HARMONY_SIGNING_KEY_PASSWORD, HARMONY_SIGNING_CERT_B64, HARMONY_SIGNING_PROFILE_B64
+name: HarmonyOS HAP
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: Build mode
+        type: choice
+        options: [release, debug]
+        default: release
+  push:
+    tags:
+      - 'harmony-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  hap:
+    name: Build signed HAP
+    runs-on: [self-hosted, harmonyos]
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/harmony
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify the HarmonyOS toolchain is available
+        run: |
+          if ! command -v hvigorw >/dev/null 2>&1; then
+            echo "::error::hvigorw not found. This job needs a self-hosted runner with the HarmonyOS SDK."
+            exit 1
+          fi
+          hvigorw --version
+          node --version
+
+      - name: Inject signing material from secrets
+        env:
+          HARMONY_SIGNING_STORE_B64: ${{ secrets.HARMONY_SIGNING_STORE_B64 }}
+          HARMONY_SIGNING_STORE_PASSWORD: ${{ secrets.HARMONY_SIGNING_STORE_PASSWORD }}
+          HARMONY_SIGNING_KEY_ALIAS: ${{ secrets.HARMONY_SIGNING_KEY_ALIAS }}
+          HARMONY_SIGNING_KEY_PASSWORD: ${{ secrets.HARMONY_SIGNING_KEY_PASSWORD }}
+          HARMONY_SIGNING_CERT_B64: ${{ secrets.HARMONY_SIGNING_CERT_B64 }}
+          HARMONY_SIGNING_PROFILE_B64: ${{ secrets.HARMONY_SIGNING_PROFILE_B64 }}
+        run: |
+          set +e
+          node scripts/inject-signing.mjs
+          code=$?
+          set -e
+          if [[ $code -eq 2 ]]; then
+            echo "::warning::Signing secrets are absent; the produced HAP will be unsigned and not installable."
+          elif [[ $code -ne 0 ]]; then
+            exit $code
+          fi
+
+      - name: Build HAP
+        run: |
+          mode="${{ github.event.inputs.build_mode || 'release' }}"
+          hvigorw --no-daemon assembleHap -p product=default -p buildMode="$mode"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find entry/build -name '*.hap' -print -exec cp {} artifacts/ \;
+          ls -la artifacts
+
+      - name: Upload HAP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-hap
+          path: apps/harmony/artifacts/*.hap
+          if-no-files-found: error

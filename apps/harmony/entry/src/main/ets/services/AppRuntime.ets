@@ -13,6 +13,11 @@ import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../pr
 import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
 
+// 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
+const INITIAL_HISTORY_COUNT: number = 30;
+// 最近看过的会话历史在内存里留几份，切回去可以立刻显示
+const HISTORY_CACHE_LIMIT: number = 8;
+
 export const PHASE_BOOT: string = 'boot';
 export const PHASE_SETUP: string = 'setup';
 export const PHASE_DEVICES: string = 'devices';
@@ -71,6 +76,9 @@ export class AppRuntime {
   private core: RemoteClientCore | undefined = undefined;
   private harness: HarnessAlphaClient | undefined = undefined;
   private unsubscribeClose: (() => void) | undefined = undefined;
+  /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
+  private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
+  private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
   private refreshTimer: number = -1;
   /** In-flight credential renewal. The Server rotates the refresh token on every call and
    *  invalidates every token of this device when a spent one is presented again, so two
@@ -86,11 +94,27 @@ export class AppRuntime {
   private qrBaseUrl: string = '';
   private qrDeadline: number = 0;
   private qrTimer: number = -1;
+  /** 最近一次成功连接的主机，断线自动重连时复用。 */
+  private lastDeviceId: string = '';
+  private reconnectAttempt: number = 0;
+  private reconnectTimer: number = -1;
 
   phase: string = PHASE_BOOT;
   busy: boolean = false;
   busyAction: string = '';
   errorMsg: string = '';
+  /** true = 发送走 steer（插话打断当前轮），false = 排队到本轮之后。 */
+  steerMode: boolean = false;
+  /** 会话搜索结果；null 表示未在搜索。 */
+  searchResults: HarnessRemoteSession[] | undefined = undefined;
+  /** 当前会话的上下文占用百分比（0 表示未知）。 */
+  contextPercent: number = 0;
+  /** 斜杠命令候选（主机清单 + 内置兜底）。 */
+  slashCommands: SlashCommand[] = [];
+  /** 模型目录的原始结构，交给 UI 按需解析。 */
+  modelCatalogRaw: Record<string, Object> = {};
+  /** 自动重连状态文案；空字符串表示没有正在进行的重连。 */
+  reconnectStatus: string = '';
   serverUrl: string = '';
   email: string = '';
   devices: RemoteHostDevice[] = [];
@@ -100,6 +124,11 @@ export class AppRuntime {
   messages: ChatItem[] = [];
   generating: boolean = false;
   currentSessionId: string = '';
+  /** 会话历史本地缓存（按最近使用淘汰），用于切换会话时立刻出内容 */
+  private historyCache: Map<string, ChatItem[]> = new Map<string, ChatItem[]>();
+  private historyOrder: string[] = [];
+  /** 最近一次见到的真实工作区路径；新建会话时用它，避免传空 cwd */
+  private lastSessionCwd: string = '';
   currentSessionTitle: string = '';
   connectedHostName: string = '';
   connectedDeviceId: string = '';
@@ -285,6 +314,7 @@ export class AppRuntime {
       return;
     }
     this.connectCancelled = false;
+    this.lastDeviceId = deviceId;
     this.phase = PHASE_CONNECTING;
     this.errorMsg = '';
     this.notify();
@@ -344,6 +374,9 @@ export class AppRuntime {
       this.connectedHostName = host.name.length > 0 ? host.name : '远程主机';
       this.connectedDeviceId = host.deviceId;
       logInfo('connected to host ' + host.deviceId);
+      this.reconnectAttempt = 0;
+      this.reconnectStatus = '';
+      this.clearReconnectTimer();
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
@@ -376,6 +409,9 @@ export class AppRuntime {
       return;
     }
     this.teardownConnection();
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.reconnectStatus = '';
     this.phase = PHASE_DEVICES;
     this.errorMsg = '';
     this.notify();
@@ -405,15 +441,21 @@ export class AppRuntime {
     this.errorMsg = '';
     this.notify();
     try {
-      const sessionId: string = await harness.sessionCreate('');
+      // 空 cwd 会让主机把会话建到用户主目录（不是工程工作区），agent 起不来，
+      // 表现就是「消息发出去了但永远没回复，切回来还消失」。
+      const cwd: string = this.resolveNewSessionCwd();
+      logInfo('session/create cwd=' + (cwd.length > 0 ? cwd : '(empty)'));
+      const sessionId: string = await harness.sessionCreate(cwd);
+      logInfo('session/create -> ' + sessionId);
       this.currentSessionId = sessionId;
       this.currentSessionTitle = '新会话';
       this.messages = [];
       this.generating = false;
       this.notify();
-      const page: HistoryPage = await harness.sessionHistory(sessionId, -1, 60);
+      const page: HistoryPage = await harness.sessionHistory(sessionId, -1, INITIAL_HISTORY_COUNT);
       if (this.currentSessionId === sessionId) {
         this.messages = foldHistory(page.entries);
+        this.rememberHistory(sessionId, this.messages);
         this.notify();
       }
       this.refreshSessionsSoon();
@@ -451,6 +493,258 @@ export class AppRuntime {
     this.notify();
   }
 
+  /**
+   * 尝试把一行斜杠命令交给主机执行。
+   * 返回 true 表示已被命令通道消费；false 表示应回退成普通 prompt。
+   */
+  private async trySlashCommand(harness: HarnessAlphaClient, sessionId: string,
+    line: string): Promise<boolean> {
+    try {
+      const result: Record<string, Object> | undefined = await harness.commandsExecute(sessionId, line);
+      const text: string = result !== undefined ? jsonStr(result, 'text', '') : '';
+      if (text.length > 0) {
+        const item: ChatItem = new ChatItem();
+        item.id = `cmd:${randomId()}`;
+        item.kind = 'assistant';
+        item.role = 'assistant';
+        item.text = text;
+        item.sessionId = sessionId;
+        item.timestamp = Date.now();
+        const next: ChatItem[] = this.messages.slice();
+        next.push(item);
+        this.messages = next;
+        this.notify();
+      }
+      return true;
+    } catch (error) {
+      // 主机不认识这条命令（或该后端未实现）时静默回退成普通消息。
+      logInfo('slash command not handled, falling back to prompt: ' + line.split(' ')[0]);
+      return false;
+    }
+  }
+
+  /** 载入斜杠命令清单；主机返回空则用内置兜底清单。 */
+  async loadSlashCommands(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    const collected: SlashCommand[] = [];
+    if (harness !== undefined) {
+      try {
+        const items: Record<string, Object>[] = await harness.commandsList(sessionId);
+        for (const item of items) {
+          const name: string = jsonStr(item, 'name', '');
+          const command: string = name.length > 0 ? name : jsonStr(item, 'command', '');
+          if (command.length === 0) {
+            continue;
+          }
+          const entry: SlashCommand = new SlashCommand();
+          entry.name = command.startsWith('/') ? command : '/' + command;
+          entry.description = jsonStr(item, 'description', jsonStr(item, 'title', ''));
+          collected.push(entry);
+        }
+      } catch (error) {
+        logWarn('commands/list unavailable: ' + errorMessage(error));
+      }
+    }
+    if (collected.length === 0) {
+      collected.push(...builtinSlashCommands());
+    }
+    this.slashCommands = collected;
+    this.notify();
+  }
+
+  /** 切换「排队 / 插话」发送模式。 */
+  setSteerMode(enabled: boolean): void {
+    this.steerMode = enabled;
+    this.notify();
+  }
+
+  /** 中断当前轮。 */
+  async stopGeneration(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await harness.sessionCancel(sessionId);
+      this.generating = false;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 重命名当前会话。 */
+  async renameCurrentSession(title: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    const trimmed: string = title.trim();
+    if (harness === undefined || sessionId.length === 0 || trimmed.length === 0) {
+      return;
+    }
+    try {
+      await harness.sessionRename(sessionId, trimmed);
+      this.currentSessionTitle = trimmed;
+      const next: HarnessRemoteSession[] = this.sessions.slice();
+      for (const session of next) {
+        if (session.sessionId === sessionId) {
+          session.title = trimmed;
+        }
+      }
+      this.sessions = next;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 归档指定会话（会话列表长按触发）。 */
+  async archiveSession(sessionId: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await harness.sessionArchive(sessionId);
+      const next: HarnessRemoteSession[] = [];
+      for (const session of this.sessions) {
+        if (session.sessionId !== sessionId) {
+          next.push(session);
+        }
+      }
+      this.sessions = next;
+      if (this.currentSessionId === sessionId) {
+        this.currentSessionId = '';
+        this.currentSessionTitle = '';
+        this.messages = [];
+      }
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 归档当前会话并回到会话列表。 */
+  async archiveCurrentSession(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await harness.sessionArchive(sessionId);
+      const next: HarnessRemoteSession[] = [];
+      for (const session of this.sessions) {
+        if (session.sessionId !== sessionId) {
+          next.push(session);
+        }
+      }
+      this.sessions = next;
+      this.currentSessionId = '';
+      this.currentSessionTitle = '';
+      this.messages = [];
+      this.notify();
+      await this.refreshSessionsSoon();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 全文搜索会话；空字符串表示退出搜索。 */
+  async searchSessions(query: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const trimmed: string = query.trim();
+    if (trimmed.length === 0) {
+      this.searchResults = undefined;
+      this.notify();
+      return;
+    }
+    if (harness === undefined) {
+      return;
+    }
+    try {
+      const found: HarnessRemoteSession[] = await harness.sessionSearch(trimmed);
+      this.searchResults = found;
+    } catch (error) {
+      this.searchResults = [];
+      this.errorMsg = errorMessage(error);
+    }
+    this.notify();
+  }
+
+  /** 读取当前会话的上下文占用与用量。 */
+  async refreshProjections(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      const raw: Record<string, Object> = await harness.sessionProjections(sessionId);
+      const context: Record<string, Object> | undefined = asRecord(raw['context']);
+      if (context !== undefined) {
+        const percent: number = jsonNum(context, 'percent', 0);
+        this.contextPercent = percent > 0 ? percent : 0;
+        this.notify();
+      }
+    } catch (error) {
+      // 投影是锦上添花，失败不打扰用户。
+      logWarn('projections unavailable: ' + errorMessage(error));
+    }
+  }
+
+  /** 拉取模型目录。 */
+  async refreshModelCatalog(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      return;
+    }
+    try {
+      this.modelCatalogRaw = await harness.modelCatalog();
+      this.notify();
+    } catch (error) {
+      logWarn('model catalog unavailable: ' + errorMessage(error));
+    }
+  }
+
+  /** 切换当前会话的模型。 */
+  async selectModel(provider: string, model: string, reasoningEffort: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await harness.selectModel(sessionId, provider, model, reasoningEffort);
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 从当前会话的某条消息处分叉出新会话并切过去。 */
+  async forkCurrentSession(atSeq: number): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      const forkedId: string = await harness.sessionFork(sessionId, atSeq);
+      await this.refreshSessionsSoon();
+      await this.openSession(forkedId);
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
   async sendPrompt(text: string): Promise<void> {
     const trimmed: string = text.trim();
     if (trimmed.length === 0) {
@@ -473,11 +767,18 @@ export class AppRuntime {
     const next: ChatItem[] = this.messages.slice();
     next.push(item);
     this.messages = next;
+    // 以 / 开头且未生成中的单行输入，先按斜杠命令交给主机执行。
+    if (trimmed.startsWith('/') && !trimmed.includes('\n') && !this.generating) {
+      const handled: boolean = await this.trySlashCommand(harness, sessionId, trimmed);
+      if (handled) {
+        return;
+      }
+    }
     this.generating = true;
     this.errorMsg = '';
     this.notify();
     try {
-      await harness.sessionPrompt(sessionId, trimmed, requestId);
+      await harness.sessionPrompt(sessionId, trimmed, requestId, this.steerMode ? 'steer' : 'queue');
     } catch (error) {
       this.errorMsg = errorMessage(error);
       this.generating = false;
@@ -1046,18 +1347,67 @@ export class AppRuntime {
     return harness;
   }
 
+  /** 新建会话必须带一个真实工作区：当前会话 → 最近会话 → 上次记住的。 */
+  private resolveNewSessionCwd(): string {
+    const current: string = this.currentSessionId;
+    if (current.length > 0) {
+      for (const session of this.sessions) {
+        if (session.sessionId === current && session.cwd.length > 0) {
+          this.lastSessionCwd = session.cwd;
+          return session.cwd;
+        }
+      }
+    }
+    for (const session of this.sessions) {
+      if (session.cwd.length > 0) {
+        this.lastSessionCwd = session.cwd;
+        return session.cwd;
+      }
+    }
+    return this.lastSessionCwd;
+  }
+
+  /** 记住一个会话的最新历史，按最近使用淘汰最旧的几份。 */
+  private rememberHistory(sessionId: string, items: ChatItem[]): void {
+    if (sessionId.length === 0) {
+      return;
+    }
+    this.historyCache.set(sessionId, items.slice());
+    const at: number = this.historyOrder.indexOf(sessionId);
+    if (at >= 0) {
+      this.historyOrder.splice(at, 1);
+    }
+    this.historyOrder.push(sessionId);
+    while (this.historyOrder.length > HISTORY_CACHE_LIMIT) {
+      const evicted: string | undefined = this.historyOrder.shift();
+      if (evicted !== undefined) {
+        this.historyCache.delete(evicted);
+      }
+    }
+  }
+
   private async openSessionInternal(harness: HarnessAlphaClient, sessionId: string,
     title: string): Promise<void> {
     this.currentSessionId = sessionId;
     this.currentSessionTitle = title;
-    this.messages = [];
+    // 记住这个会话的工作区，下一次新建会话直接复用
+    for (const session of this.sessions) {
+      if (session.sessionId === sessionId && session.cwd.length > 0) {
+        this.lastSessionCwd = session.cwd;
+        break;
+      }
+    }
+    // 切回看过的会话先用缓存立刻出内容，再向主机同步（原来每次先清空再等中继回放）
+    const cached: ChatItem[] | undefined = this.historyCache.get(sessionId);
     this.generating = false;
+    this.messages = cached !== undefined ? cached.slice() : [];
     this.notify();
-    const page: HistoryPage = await harness.sessionHistory(sessionId, -1, 60);
+    const page: HistoryPage = await harness.sessionHistory(sessionId, -1, INITIAL_HISTORY_COUNT);
     if (this.currentSessionId !== sessionId) {
       return;
     }
     this.messages = foldHistory(page.entries);
+    this.rememberHistory(sessionId, this.messages);
     let turnOpen: boolean = false;
     for (const entry of page.entries) {
       if (entry.event.type === 'turn/start') {
@@ -1077,6 +1427,7 @@ export class AppRuntime {
     }
     this.generating = running;
     this.notify();
+    this.refreshProjections().catch(() => undefined);
   }
 
   private teardownConnection(): void {
@@ -1112,9 +1463,68 @@ export class AppRuntime {
       return;
     }
     this.teardownConnection();
+    const target: string = this.lastDeviceId;
+    if (target.length > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS) {
+      const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
+      const delay: number = AppRuntime.RECONNECT_DELAYS_MS[index];
+      this.reconnectAttempt += 1;
+      this.phase = PHASE_DEVICES;
+      this.errorMsg = '';
+      this.reconnectStatus = '与主机的连接已断开，' + Math.round(delay / 1000)
+        + ' 秒后自动重连（第 ' + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+      this.notify();
+      this.scheduleReconnect(target, delay);
+      return;
+    }
     this.phase = PHASE_DEVICES;
-    this.errorMsg = '与主机的连接已断开';
+    this.reconnectStatus = '';
+    this.errorMsg = this.reconnectAttempt > 0
+      ? '多次重连未成功，请检查网络或稍后手动连接'
+      : '与主机的连接已断开';
+    this.reconnectAttempt = 0;
     this.notify();
+  }
+
+  private scheduleReconnect(deviceId: string, delay: number): void {
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = -1;
+      if (this.phase !== PHASE_DEVICES || this.connectCancelled) {
+        return;
+      }
+      this.connectDevice(deviceId).catch((error: Error) => {
+        logWarn('reconnect attempt failed: ' + errorMessage(error));
+      });
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== -1) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = -1;
+    }
+  }
+
+  /** 用户主动取消自动重连（例如要切换到另一台主机）。 */
+  cancelReconnect(): void {
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.reconnectStatus = '';
+    this.notify();
+  }
+
+  /** 清除某台主机的公钥固定记录，下次连接重新走 TOFU。 */
+  async forgetHostPin(hostDeviceId: string): Promise<void> {
+    await this.store.forgetHostPin(hostDeviceId);
+    this.errorMsg = '';
+    this.reconnectStatus = '';
+    this.notify();
+  }
+
+  /** 该主机是否已有本地固定公钥（用于 UI 决定是否显示「忘记」入口）。 */
+  hasHostPin(hostDeviceId: string): boolean {
+    const pins: Record<string, string> = this.store.loadHostPins();
+    return pins[hostDeviceId] !== undefined;
   }
 
   private handleFrame(frame: HarnessClientFrame): void {
@@ -1176,6 +1586,8 @@ export class AppRuntime {
       this.generating = true;
     } else if (event.type === 'turn/end') {
       this.generating = false;
+      // 一轮结束后刷新上下文占用（不阻塞 UI）。
+      this.refreshProjections().catch(() => undefined);
     }
     this.notify();
   }
@@ -1188,6 +1600,26 @@ export function getAppRuntime(): AppRuntime {
     runtimeInstance = new AppRuntime();
   }
   return runtimeInstance;
+}
+
+/** 一条斜杠命令候选。 */
+export class SlashCommand {
+  name: string = '';
+  description: string = '';
+}
+
+/** 主机没有给清单时的内置候选（按 DSH 官方命令集）。 */
+function builtinSlashCommands(): SlashCommand[] {
+  const names: string[] = ['compact', 'permission', 'model', 'plan', 'goal', 'feedback', 'export'];
+  const labels: string[] = ['压缩上下文', '切换权限预设', '选择模型', '计划模式', '长期目标', '反馈', '导出会话日志'];
+  const out: SlashCommand[] = [];
+  for (let i = 0; i < names.length; i++) {
+    const entry: SlashCommand = new SlashCommand();
+    entry.name = '/' + names[i];
+    entry.description = labels[i];
+    out.push(entry);
+  }
+  return out;
 }
 
 export function errorMessage(error: Object): string {

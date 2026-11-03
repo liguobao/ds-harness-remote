@@ -171,8 +171,22 @@ export class RelayTransport {
     }
   }
 
+  /** 只从控制帧里取出 type 字段用于日志，其余内容一律不外泄。 */
+  private frameTypeOfSafe(text: string): string {
+    try {
+      const parsed: Object = JSON.parse(text) as Object;
+      const rec: Record<string, Object> = parsed as Record<string, Object>;
+      const t: Object | undefined = rec['type'];
+      return typeof t === 'string' ? t as string : '?';
+    } catch (e) {
+      return '?';
+    }
+  }
+
   private handleControlText(text: string): void {
-    logInfo('ctl frame ' + (text.length > 160 ? text.substring(0, 160) : text));
+    // 安全：控制帧里可能带 accessToken（hello 帧），禁止整帧落日志。
+    // 只记录类型与长度——不依赖字段顺序，加字段也不会泄露。
+    logInfo('ctl frame len=' + text.length + ' type=' + this.frameTypeOfSafe(text));
     try {
       const frame = parseFrame(text);
       if (frame.type === 'hello.ack') {

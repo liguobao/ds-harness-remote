@@ -2,7 +2,7 @@ import { UIContext, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHASE_CHAT,
-  PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, getAppRuntime } from '../services/AppRuntime';
+  PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, SlashCommand, getAppRuntime } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
@@ -33,6 +33,17 @@ struct Index {
   @State deviceAliases: Record<string, string> = {};
   @State renamingDeviceId: string = '';
   @State renameInput: string = '';
+  /** 会话重命名编辑态。 */
+  @State renamingSession: boolean = false;
+  @State sessionTitleInput: string = '';
+  /** 会话搜索。 */
+  @State sessionSearchInput: string = '';
+  @State sessionSearchResults: HarnessRemoteSession[] = [];
+  @State sessionSearchActive: boolean = false;
+  /** 上下文占用百分比，0 表示未知。 */
+  @State contextPercent: number = 0;
+  /** 斜杠命令候选。 */
+  @State slashCommands: SlashCommand[] = [];
 
   @State serverInput: string = '';
   @State emailInput: string = '';
@@ -140,6 +151,12 @@ struct Index {
     this.generating = this.runtime.generating;
     this.currentSessionId = this.runtime.currentSessionId;
     this.currentSessionTitle = this.runtime.currentSessionTitle;
+    this.contextPercent = this.runtime.contextPercent;
+    this.slashCommands = this.runtime.slashCommands;
+    if (this.sessionSearchActive) {
+      const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
+      this.sessionSearchResults = found !== undefined ? found : [];
+    }
     this.connectedHostName = this.runtime.connectedHostName;
     this.connectedDeviceId = this.runtime.connectedDeviceId;
     this.deviceAliases = this.runtime.deviceAliases;
@@ -945,12 +962,53 @@ struct Index {
               .height(5)
               .borderRadius(2.5)
               .backgroundColor(this.generating ? '#22D3EE' : '#34D399')
-            Text(this.generating ? '正在生成…' : this.currentSessionTitle)
-              .fontSize(12)
-              .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .constraintSize({ maxWidth: 220 })
+            if (this.renamingSession) {
+              TextInput({ text: this.sessionTitleInput, placeholder: '会话名称' })
+                .height(30)
+                .fontSize(12)
+                .backgroundColor(this.pal().inputBg)
+                .fontColor(this.pal().text)
+                .borderRadius(8)
+                .border({ width: 1, color: this.pal().borderStrong })
+                .padding({ left: 8, right: 8 })
+                .constraintSize({ maxWidth: 200 })
+                .onChange((value: string) => {
+                  this.sessionTitleInput = value;
+                })
+                .onSubmit(() => {
+                  this.runtime.renameCurrentSession(this.sessionTitleInput);
+                  this.renamingSession = false;
+                })
+              Text('✓')
+                .fontSize(14)
+                .fontColor('#34D399')
+                .padding({ left: 4, right: 4 })
+                .onClick(() => {
+                  this.runtime.renameCurrentSession(this.sessionTitleInput);
+                  this.renamingSession = false;
+                })
+            } else {
+              Text(this.generating ? '正在生成…' : this.currentSessionTitle)
+                .fontSize(12)
+                .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: 220 })
+                .onClick(() => {
+                  if (!this.generating && this.currentSessionId.length > 0) {
+                    this.sessionTitleInput = this.currentSessionTitle;
+                    this.renamingSession = true;
+                  }
+                })
+              if (this.contextPercent > 0) {
+                Text(this.contextPercent + '%')
+                  .fontSize(10)
+                  .fontColor(this.contextPercent >= 80 ? '#F85749' : this.pal().text3)
+                  .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+                  .backgroundColor(this.pal().inputBg)
+                  .borderRadius(6)
+              }
+            }
           }
         }
         .layoutWeight(1)
@@ -1058,8 +1116,55 @@ struct Index {
         .padding({ left: 16, right: 16, top: 4, bottom: 2 })
         .justifyContent(FlexAlign.Start)
       }
+      if (this.promptInput.startsWith('/') && this.slashCommands.length > 0) {
+        Scroll() {
+          Row({ space: 8 }) {
+            ForEach(this.slashCommands, (command: SlashCommand) => {
+              Row({ space: 6 }) {
+                Text(command.name)
+                  .fontSize(12)
+                  .fontColor('#22D3EE')
+                if (command.description.length > 0) {
+                  Text(command.description)
+                    .fontSize(11)
+                    .fontColor(this.pal().text3)
+                    .maxLines(1)
+                }
+              }
+              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(9)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.promptInput = command.name + ' ';
+              })
+            }, (command: SlashCommand) => command.name)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .padding({ top: 4, bottom: 2 })
+      }
+      Row() {
+        Text(this.runtime.steerMode ? '插话 · 立刻打断' : '排队 · 本轮之后')
+          .fontSize(11)
+          .fontColor(this.runtime.steerMode ? '#22D3EE' : this.pal().text3)
+          .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+          .backgroundColor(this.runtime.steerMode ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
+          .borderRadius(10)
+          .border({ width: 1,
+            color: this.runtime.steerMode ? 'rgba(34,211,238,0.45)' : this.pal().border })
+          .onClick(() => {
+            this.runtime.setSteerMode(!this.runtime.steerMode);
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 2, bottom: 0 })
+      .justifyContent(FlexAlign.Start)
       Row({ space: 10 }) {
-        TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成回复…' : '发送消息…' })
+        TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…' : '发送消息…' })
           .layoutWeight(1)
           .height(46)
           .backgroundColor(this.pal().inputBg)
@@ -1070,9 +1175,13 @@ struct Index {
           .borderRadius(23)
           .border({ width: 1, color: this.pal().borderStrong })
           .padding({ left: 18, right: 18 })
-          .enabled(!this.generating)
+          // 生成中保持可输入：否则「插话」无从谈起。
+          .enabled(true)
           .onChange((value: string) => {
             this.promptInput = value;
+            if (value === '/' && this.slashCommands.length === 0) {
+              this.runtime.loadSlashCommands();
+            }
           })
           .onSubmit(() => {
             this.sendTap();
@@ -1088,23 +1197,22 @@ struct Index {
             .borderRadius(23)
             .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
             .onClick(() => {
-              this.runtime.cancel();
-            })
-        } else {
-          Text('↑')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-            .width(46)
-            .height(46)
-            .textAlign(TextAlign.Center)
-            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
-            .borderRadius(23)
-            .shadow({ radius: 12, color: 'rgba(77,107,254,0.4)', offsetX: 0, offsetY: 3 })
-            .onClick(() => {
-              this.sendTap();
+              this.runtime.stopGeneration();
             })
         }
+        Text('↑')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+          .width(46)
+          .height(46)
+          .textAlign(TextAlign.Center)
+          .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+          .borderRadius(23)
+          .shadow({ radius: 12, color: 'rgba(77,107,254,0.4)', offsetX: 0, offsetY: 3 })
+          .onClick(() => {
+            this.sendTap();
+          })
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 8, bottom: 10 })
@@ -1142,12 +1250,46 @@ struct Index {
       }
       .width('100%')
       .padding({ left: 18, right: 18, top: 16, bottom: 12 })
+      Row({ space: 8 }) {
+        TextInput({ text: this.sessionSearchInput, placeholder: '搜索会话…' })
+          .layoutWeight(1)
+          .height(36)
+          .fontSize(13)
+          .backgroundColor(this.pal().inputBg)
+          .fontColor(this.pal().text)
+          .placeholderColor(this.pal().text3)
+          .borderRadius(10)
+          .border({ width: 1, color: this.pal().border })
+          .padding({ left: 12, right: 12 })
+          .onChange((value: string) => {
+            this.sessionSearchInput = value;
+            this.sessionSearchActive = value.trim().length > 0;
+            this.runtime.searchSessions(value);
+          })
+        if (this.sessionSearchActive) {
+          Text('清除')
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(9)
+            .border({ width: 1, color: this.pal().border })
+            .onClick(() => {
+              this.sessionSearchInput = '';
+              this.sessionSearchActive = false;
+              this.sessionSearchResults = [];
+              this.runtime.searchSessions('');
+            })
+        }
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
       Column()
         .width('100%')
         .height(0.5)
         .backgroundColor(this.pal().border)
       List({ space: 8 }) {
-        ForEach(this.sessions, (session: HarnessRemoteSession) => {
+        ForEach(this.sessionSearchActive ? this.sessionSearchResults : this.sessions, (session: HarnessRemoteSession) => {
           ListItem() {
             Row({ space: 10 }) {
               Column()
@@ -1195,6 +1337,9 @@ struct Index {
               this.showSessions = false;
               this.runtime.openSession(session.sessionId);
             })
+            .gesture(LongPressGesture().onAction(() => {
+              this.runtime.archiveSession(session.sessionId);
+            }))
           }
         }, (session: HarnessRemoteSession) => session.sessionId)
       }

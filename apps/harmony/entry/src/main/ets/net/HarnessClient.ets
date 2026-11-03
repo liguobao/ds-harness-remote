@@ -1,5 +1,5 @@
 import { RemoteClientCore } from './RemoteClientCore';
-import { logInfo, logWarn } from '../util/Log';
+import { logInfo, logWarn, logError } from '../util/Log';
 import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
 import { jsonStr, asRecord, asArray, asBool } from '../protocol/Types';
 
@@ -135,7 +135,8 @@ export class HarnessAlphaClient {
       }
     }
     logInfo('session/list -> ' + sessions.length + ' item(s)');
-    for (const s0 of sessions) { logInfo('  session ' + s0.sessionId + ' blank=' + s0.blank + ' title=' + s0.title); }
+    // 安全：会话标题通常来自用户第一句 prompt，按 protocol §25 不变量 12 不得进日志
+    for (const s0 of sessions) { logInfo('  session ' + s0.sessionId + ' blank=' + s0.blank); }
     return sessions;
   }
 
@@ -155,23 +156,165 @@ export class HarnessAlphaClient {
     return sessionId;
   }
 
-  async sessionPrompt(sessionId: string, text: string, requestId: string): Promise<void> {
+  /**
+   * Send one prompt.
+   * mode='queue' 排在本轮之后，mode='steer' 立刻插话打断当前轮的下一步行动。
+   */
+  async sessionPrompt(sessionId: string, text: string, requestId: string,
+    mode: string = 'queue'): Promise<void> {
     const block: Record<string, Object> = { 'type': 'text', 'text': text };
     const content: Object[] = [block];
     const request: Record<string, Object> = {
       'requestId': requestId,
       'sessionId': sessionId,
-      'mode': 'queue',
+      'mode': mode,
       'content': content
     };
     const args: Record<string, Object> = { 'request': request };
-    await this.callValue('session/prompt', args);
+    logInfo('session/prompt -> ' + sessionId + ' len=' + text.length + ' mode=' + mode + ' req=' + requestId);
+    try {
+      await this.callValue('session/prompt', args);
+      logInfo('session/prompt ok -> ' + sessionId);
+    } catch (error) {
+      // ArkTS 不允许 throw 任意类型（arkts-limited-throw），统一归一成 RemoteGatewayError
+      if (error instanceof RemoteGatewayError) {
+        logError('session/prompt failed: ' + error.code + ' ' + error.message);
+        throw error;
+      }
+      const detail: string = error instanceof Error ? error.message : String(error);
+      logError('session/prompt failed: ' + detail);
+      throw new RemoteGatewayError('PROMPT_FAILED', detail);
+    }
   }
 
   async sessionCancel(sessionId: string): Promise<void> {
     const request: Record<string, Object> = { 'sessionId': sessionId };
     const args: Record<string, Object> = { 'request': request };
     await this.callValue('session/cancel', args);
+  }
+
+  /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */
+  async commandsList(sessionId: string): Promise<Record<string, Object>[]> {
+    const request: Record<string, Object> = {};
+    if (sessionId.length > 0) {
+      request['sessionId'] = sessionId;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('commands/list', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const out: Record<string, Object>[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record !== undefined) {
+          out.push(record);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 执行一条斜杠命令。
+   * 主机不识别时返回 undefined，调用方应回退成普通 prompt 发送。
+   */
+  async commandsExecute(sessionId: string, line: string): Promise<Record<string, Object> | undefined> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'line': line };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('commands/execute', args);
+    logInfo('commands/execute ok: ' + line.split(' ')[0]);
+    return asRecord(value);
+  }
+
+  /** 重命名会话。 */
+  async sessionRename(sessionId: string, title: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'title': title };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/rename', args);
+    logInfo('session/rename ok -> ' + sessionId);
+  }
+
+  /** 归档会话，让它从活跃列表里消失。 */
+  async sessionArchive(sessionId: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('workspace/archiveSession', args);
+    logInfo('session/archive ok -> ' + sessionId);
+  }
+
+  /** 全文搜索会话（标题与消息正文）。 */
+  async sessionSearch(query: string): Promise<HarnessRemoteSession[]> {
+    const request: Record<string, Object> = { 'query': query };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/search', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const sessions: HarnessRemoteSession[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const normalized: HarnessRemoteSession | undefined = normalizeSession(record);
+        if (normalized !== undefined) {
+          sessions.push(normalized);
+        }
+      }
+    }
+    logInfo('session/search -> ' + sessions.length + ' item(s)');
+    return sessions;
+  }
+
+  /** 会话的用量与上下文占用等投影值（主机侧观察，不会激活 Agent）。 */
+  async sessionProjections(sessionId: string): Promise<Record<string, Object>> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/projections', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? root : {};
+  }
+
+  /** 可用模型目录（含每个模型的推理等级选项）。 */
+  async modelCatalog(): Promise<Record<string, Object>> {
+    const request: Record<string, Object> = {};
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/modelCatalog', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? root : {};
+  }
+
+  /** 为当前会话切换模型。 */
+  async selectModel(sessionId: string, provider: string, model: string,
+    reasoningEffort: string): Promise<void> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'provider': provider,
+      'model': model
+    };
+    if (reasoningEffort.length > 0) {
+      request['reasoningEffort'] = reasoningEffort;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/selectModel', args);
+    logInfo('session/selectModel ok -> ' + provider + '/' + model);
+  }
+
+  /** 从某个消息序号分叉出一个新会话。 */
+  async sessionFork(sessionId: string, atSeq: number): Promise<string> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    if (atSeq >= 0) {
+      request['atSeq'] = atSeq;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/fork', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const forkedId: string = root !== undefined ? jsonStr(root, 'sessionId', '') : '';
+    if (forkedId.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid fork result.');
+    }
+    return forkedId;
   }
 
   /** Page older history through `session/page` (needs a live follow cursor). */

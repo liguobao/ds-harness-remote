@@ -1,5 +1,7 @@
-import abilityTest from './Ability.test'
+import cryptoTest from './Crypto.test'
+import secureStoreTest from './SecureStore.test'
 
 export default function testsuite() {
-  abilityTest()
+  cryptoTest()
+  secureStoreTest()
 }
