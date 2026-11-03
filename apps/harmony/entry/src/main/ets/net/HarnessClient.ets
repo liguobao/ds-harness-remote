@@ -3,6 +3,14 @@ import { logInfo, logWarn, logError } from '../util/Log';
 import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
 import { jsonStr, asRecord, asArray, asBool } from '../protocol/Types';
 
+/** 目录项（`host/listDirectory`）。 */
+export class DirectoryEntry {
+  name: string = '';
+  path: string = '';
+  isDirectory: boolean = false;
+  size: number = 0;
+}
+
 /** 一个 Host 工作区（`workspace/list` item）。 */
 export class HarnessWorkspace {
   workspaceId: string = '';
@@ -206,6 +214,71 @@ export class HarnessAlphaClient {
     const request: Record<string, Object> = { 'sessionId': sessionId };
     const args: Record<string, Object> = { 'request': request };
     await this.callValue('session/cancel', args);
+  }
+
+  /** 列目录；兼容 entries/items 与 isDirectory/type 两种字段形状。 */
+  async listDirectory(path: string): Promise<DirectoryEntry[]> {
+    const request: Record<string, Object> = { 'path': path };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('host/listDirectory', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    let items: Object[] | undefined = root !== undefined ? asArray(root['entries']) : undefined;
+    if (items === undefined && root !== undefined) {
+      items = asArray(root['items']);
+    }
+    const out: DirectoryEntry[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const entry: DirectoryEntry = new DirectoryEntry();
+        entry.name = jsonStr(record, 'name', '');
+        entry.path = jsonStr(record, 'path', '');
+        const isDir: Object | undefined = record['isDirectory'];
+        if (typeof isDir === 'boolean') {
+          entry.isDirectory = isDir as boolean;
+        } else {
+          entry.isDirectory = jsonStr(record, 'type', '') === 'directory';
+        }
+        const size: Object | undefined = record['size'];
+        entry.size = typeof size === 'number' ? size as number : 0;
+        if (entry.name.length > 0) {
+          out.push(entry);
+        }
+      }
+    }
+    logInfo('listDirectory -> ' + out.length + ' item(s)');
+    return out;
+  }
+
+  /** 新建工作区（Host 侧创建目录并登记）。 */
+  async workspaceCreate(path: string, title: string): Promise<string> {
+    const request: Record<string, Object> = { 'path': path };
+    if (title.length > 0) {
+      request['title'] = title;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/create', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? jsonStr(root, 'workspaceId', '') : '';
+  }
+
+  /** 工作区重命名。 */
+  async workspaceRename(workspaceId: string, title: string): Promise<void> {
+    const request: Record<string, Object> = { 'workspaceId': workspaceId, 'title': title };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('workspace/rename', args);
+    logInfo('workspace/rename ok');
+  }
+
+  /** 删除工作区（不删除磁盘目录，Host 侧只摘除登记）。 */
+  async workspaceDelete(workspaceId: string): Promise<void> {
+    const request: Record<string, Object> = { 'workspaceId': workspaceId };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('workspace/delete', args);
+    logInfo('workspace/delete ok');
   }
 
   /** 列出 Host 上的工作区。 */

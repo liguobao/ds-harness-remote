@@ -7,7 +7,7 @@ import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  HarnessSessionEvent, HarnessWorkspace, HistoryPage } from '../net/HarnessClient';
+  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HistoryPage } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -113,6 +113,9 @@ export class AppRuntime {
   contextPercent: number = 0;
   /** 当前会话的权限预设；空表示未从主机读到。 */
   permissionPreset: string = '';
+  /** 文件浏览：当前目录路径与条目。 */
+  browsePath: string = '';
+  directoryEntries: DirectoryEntry[] = [];
   /** Host 上的工作区列表。 */
   workspaces: HarnessWorkspace[] = [];
   /** 新建会话时使用的工作区；空表示沿用当前会话的 cwd。 */
@@ -577,6 +580,102 @@ export class AppRuntime {
       this.notify();
     } catch (error) {
       logWarn('workspace/list unavailable: ' + errorMessage(error));
+    }
+  }
+
+  /** 打开工作区根目录。 */
+  async openWorkspace(workspaceId: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      return;
+    }
+    let path: string = '';
+    for (const workspace of this.workspaces) {
+      if (workspace.workspaceId === workspaceId) {
+        path = workspace.path;
+        break;
+      }
+    }
+    if (path.length === 0) {
+      return;
+    }
+    await this.browseDirectory(path);
+  }
+
+  /** 列出某个目录的内容。 */
+  async browseDirectory(path: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || path.length === 0) {
+      return;
+    }
+    try {
+      this.directoryEntries = await harness.listDirectory(path);
+      this.browsePath = path;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 返回上一级目录。 */
+  async browseUp(): Promise<void> {
+    const current: string = this.browsePath;
+    if (current.length === 0) {
+      return;
+    }
+    const cut: number = current.lastIndexOf('/');
+    if (cut <= 0) {
+      return;
+    }
+    await this.browseDirectory(current.substring(0, cut));
+  }
+
+  /** 新建工作区并刷新列表。 */
+  async createWorkspace(path: string, title: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || path.trim().length === 0) {
+      return;
+    }
+    try {
+      await harness.workspaceCreate(path.trim(), title.trim());
+      await this.loadWorkspaces();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 工作区重命名。 */
+  async renameWorkspace(workspaceId: string, title: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || title.trim().length === 0) {
+      return;
+    }
+    try {
+      await harness.workspaceRename(workspaceId, title.trim());
+      await this.loadWorkspaces();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 删除工作区。 */
+  async deleteWorkspace(workspaceId: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || workspaceId.length === 0) {
+      return;
+    }
+    try {
+      await harness.workspaceDelete(workspaceId);
+      if (this.selectedWorkspaceId === workspaceId) {
+        this.selectedWorkspaceId = '';
+      }
+      await this.loadWorkspaces();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
     }
   }
 
