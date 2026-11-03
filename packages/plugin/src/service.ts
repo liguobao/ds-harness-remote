@@ -108,6 +108,12 @@ export class HostPluginRuntime {
               this.codexWorkspaceState,
               this.terminalSpawner,
             ),
+            workspaceUploadRootResolver(
+              peerGateway,
+              () => harnessSessionGeneration(this.harnessVersion) === 'v3',
+              threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+              sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
+            ),
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(
