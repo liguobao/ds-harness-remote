@@ -5,7 +5,7 @@ import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHA
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
-import { HarnessWorkspace } from '../net/HarnessClient';
+import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
@@ -56,6 +56,13 @@ struct Index {
   @State selectedWorkspaceId: string = '';
   /** 待选推理等级的模型（null 表示未进入等级选择）。 */
   @State pendingModel: ModelOption | undefined = undefined;
+  /** 文件浏览面板。 */
+  @State showBrowser: boolean = false;
+  @State browsePath: string = '';
+  @State directoryEntries: DirectoryEntry[] = [];
+  /** 工作区改名。 */
+  @State editingWorkspaceId: string = '';
+  @State workspaceTitleInput: string = '';
 
   @State serverInput: string = '';
   @State emailInput: string = '';
@@ -170,6 +177,8 @@ struct Index {
     this.currentModelLabel = this.runtime.currentModelLabel;
     this.workspaces = this.runtime.workspaces;
     this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
+    this.browsePath = this.runtime.browsePath;
+    this.directoryEntries = this.runtime.directoryEntries;
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
@@ -395,6 +404,9 @@ struct Index {
       }
       if (this.showModelPicker) {
         this.ModelPickerOverlay()
+      }
+      if (this.showBrowser) {
+        this.FileBrowserOverlay()
       }
     }
     .width('100%')
@@ -1404,6 +1416,31 @@ struct Index {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+      if (this.editingWorkspaceId.length > 0) {
+        Row({ space: 8 }) {
+          TextInput({ text: this.workspaceTitleInput, placeholder: '工作区名称' })
+            .layoutWeight(1)
+            .height(34)
+            .fontSize(12)
+            .backgroundColor(this.pal().inputBg)
+            .fontColor(this.pal().text)
+            .borderRadius(9)
+            .border({ width: 1, color: this.pal().border })
+            .onChange((value: string) => {
+              this.workspaceTitleInput = value;
+            })
+          Text('✓')
+            .fontSize(14)
+            .fontColor('#34D399')
+            .padding({ left: 8, right: 8 })
+            .onClick(() => {
+              this.runtime.renameWorkspace(this.editingWorkspaceId, this.workspaceTitleInput);
+              this.editingWorkspaceId = '';
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 2, bottom: 6 })
+      }
       if (this.workspaces.length > 0) {
         Scroll() {
           Row({ space: 8 }) {
@@ -1435,6 +1472,34 @@ struct Index {
                 .onClick(() => {
                   this.runtime.setSelectedWorkspace(workspace.workspaceId);
                 })
+                .gesture(LongPressGesture().onAction(() => {
+                  ActionSheet.show({
+                    title: workspace.title.length > 0 ? workspace.title : workspace.path,
+                    message: workspace.path,
+                    sheets: [
+                      {
+                        title: '浏览文件',
+                        action: () => {
+                          this.showBrowser = true;
+                          this.runtime.openWorkspace(workspace.workspaceId);
+                        }
+                      },
+                      {
+                        title: '重命名',
+                        action: () => {
+                          this.editingWorkspaceId = workspace.workspaceId;
+                          this.workspaceTitleInput = workspace.title;
+                        }
+                      },
+                      {
+                        title: '删除工作区',
+                        action: () => {
+                          this.runtime.deleteWorkspace(workspace.workspaceId);
+                        }
+                      }
+                    ]
+                  });
+                }))
             }, (workspace: HarnessWorkspace) => workspace.workspaceId)
           }
           .padding({ left: 16, right: 16 })
@@ -1507,6 +1572,86 @@ struct Index {
       .width('100%')
       .padding({ left: 12, right: 12, top: 10 })
       .scrollBar(BarState.Off)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 文件浏览：只读列目录，点目录进入、点 .. 返回上级。 */
+  @Builder
+  FileBrowserOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showBrowser = false;
+        })
+      Column() {
+        Row({ space: 10 }) {
+          Text('↑ 上级')
+            .fontSize(12)
+            .fontColor(this.pal().text2)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(9)
+            .onClick(() => {
+              this.runtime.browseUp();
+            })
+          Text(this.browsePath)
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text('关闭')
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.showBrowser = false;
+            })
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 14, bottom: 8 })
+        List({ space: 4 }) {
+          ForEach(this.directoryEntries, (entry: DirectoryEntry) => {
+            ListItem() {
+              Row({ space: 10 }) {
+                Text(entry.isDirectory ? '📁' : '📄')
+                  .fontSize(14)
+                Text(entry.name)
+                  .fontSize(13)
+                  .fontColor(this.pal().text)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (!entry.isDirectory && entry.size > 0) {
+                  Text(Math.round(entry.size / 1024) + ' KB')
+                    .fontSize(10)
+                    .fontColor(this.pal().text3)
+                }
+              }
+              .width('100%')
+              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .onClick(() => {
+                if (entry.isDirectory) {
+                  this.runtime.browseDirectory(entry.path.length > 0 ? entry.path : (this.browsePath + '/' + entry.name));
+                }
+              })
+            }
+          }, (entry: DirectoryEntry) => entry.path.length > 0 ? entry.path : entry.name)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: '70%' })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
     }
     .width('100%')
     .height('100%')
