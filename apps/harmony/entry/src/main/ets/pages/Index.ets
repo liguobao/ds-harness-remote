@@ -2,7 +2,8 @@ import { UIContext, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHASE_CHAT,
-  PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, SlashCommand, getAppRuntime } from '../services/AppRuntime';
+  PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
+  getAppRuntime } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
@@ -21,6 +22,7 @@ struct Index {
   @State busy: boolean = false;
   @State busyAction: string = '';
   @State errorMsg: string = '';
+  @State infoMsg: string = '';
   @State devices: RemoteHostDevice[] = [];
   @State sessions: HarnessRemoteSession[] = [];
   @State sessionsLoadFailed: boolean = false;
@@ -44,6 +46,10 @@ struct Index {
   @State contextPercent: number = 0;
   /** 斜杠命令候选。 */
   @State slashCommands: SlashCommand[] = [];
+  /** 模型选择器。 */
+  @State showModelPicker: boolean = false;
+  @State modelOptions: ModelOption[] = [];
+  @State currentModelLabel: string = '';
 
   @State serverInput: string = '';
   @State emailInput: string = '';
@@ -153,6 +159,8 @@ struct Index {
     this.currentSessionTitle = this.runtime.currentSessionTitle;
     this.contextPercent = this.runtime.contextPercent;
     this.slashCommands = this.runtime.slashCommands;
+    this.modelOptions = this.runtime.modelOptions;
+    this.currentModelLabel = this.runtime.currentModelLabel;
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
@@ -360,6 +368,9 @@ struct Index {
       .height('100%')
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
+      }
+      if (this.showModelPicker) {
+        this.ModelPickerOverlay()
       }
     }
     .width('100%')
@@ -850,6 +861,35 @@ struct Index {
           .onClick(() => {
             this.beginRename(device);
           })
+        if (this.runtime.hasHostPin(device.deviceId)) {
+          Text('🔑')
+            .fontSize(12)
+            .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(13)
+            .border({ width: 1, color: this.pal().borderStrong })
+            .onClick(() => {
+              AlertDialog.show({
+                title: '该主机已固定公钥',
+                message: '主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
+                  + '清除后下次连接将重新信任首次看到的公钥。',
+                primaryButton: {
+                  value: '取消',
+                  action: () => {
+                  }
+                },
+                secondaryButton: {
+                  value: '清除固定记录',
+                  fontColor: '#F85749',
+                  action: () => {
+                    this.runtime.forgetHostPin(device.deviceId);
+                    this.errorMsg = '';
+                    this.infoMsg = '已清除该主机的公钥固定记录';
+                  }
+                }
+              });
+            })
+        }
         if (device.online) {
           Text('连接')
             .fontSize(14)
@@ -1013,6 +1053,20 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
+        Text(this.currentModelLabel.length > 0 ? this.currentModelLabel : '模型')
+          .fontSize(10)
+          .fontColor(this.pal().text2)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .constraintSize({ maxWidth: 78 })
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(11)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.runtime.refreshModelCatalog();
+            this.showModelPicker = true;
+          })
         Text('＋')
           .fontSize(22)
           .fontWeight(FontWeight.Medium)
@@ -1347,6 +1401,91 @@ struct Index {
       .width('100%')
       .padding({ left: 12, right: 12, top: 10 })
       .scrollBar(BarState.Off)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 模型选择器：底部面板形式，点选后立即切换当前会话的模型。 */
+  @Builder
+  ModelPickerOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showModelPicker = false;
+        })
+      Column() {
+        Row() {
+          Text('选择模型')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text('关闭')
+            .fontSize(13)
+            .fontColor(this.pal().text3)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.showModelPicker = false;
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, top: 16, bottom: 10 })
+        if (this.modelOptions.length === 0) {
+          Text('模型目录为空：请确认主机已配置模型服务商')
+            .fontSize(13)
+            .fontColor(this.pal().text3)
+            .padding({ left: 18, right: 18, top: 8, bottom: 24 })
+        } else {
+          List({ space: 6 }) {
+            ForEach(this.modelOptions, (option: ModelOption) => {
+              ListItem() {
+                Row({ space: 10 }) {
+                  Column({ space: 2 }) {
+                    Text(option.name.length > 0 ? option.name : option.model)
+                      .fontSize(14)
+                      .fontColor(this.pal().text)
+                    Text(option.provider + ' · ' + option.model)
+                      .fontSize(11)
+                      .fontColor(this.pal().text3)
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  if (option.model === this.currentModelLabel) {
+                    Text('当前')
+                      .fontSize(11)
+                      .fontColor('#22D3EE')
+                      .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                      .backgroundColor('rgba(34,211,238,0.12)')
+                      .borderRadius(8)
+                  }
+                }
+                .width('100%')
+                .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+                .backgroundColor(this.pal().card)
+                .borderRadius(12)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  this.runtime.selectModel(option.provider, option.model, '');
+                  this.showModelPicker = false;
+                })
+              }
+            }, (option: ModelOption) => option.provider + '/' + option.model)
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .padding({ left: 14, right: 14, bottom: 16 })
+          .scrollBar(BarState.Off)
+        }
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: '62%' })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
     }
     .width('100%')
     .height('100%')

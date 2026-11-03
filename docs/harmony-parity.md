@@ -17,7 +17,8 @@
 | 会话搜索 | 抽屉顶部搜索框 | 会话面板顶部搜索框 | `session/search` |
 | 上下文占用 | 输入条里的上下文小环 | 聊天页副标题右侧百分比胶囊（≥80% 转红） | `session/projections` |
 | 断线自动重连 | AdaptiveTransport 退避恢复 | 指数退避 1/2/4/8/15/30 秒，最多 6 次，UI 显示重连次数 | 客户端内建 |
-| 忘记主机公钥 | 设备详情 › 忘记该主机公钥 | `AppRuntime.forgetHostPin()` 已就绪（UI 入口待接） | 客户端本地 |
+| 忘记主机公钥 | 设备详情 › 忘记该主机公钥 | 设备卡片上的 🔑 入口，二次确认后清除固定记录 | 客户端本地 |
+| 模型选择 | 聊天顶栏模型胶囊 | 顶栏模型胶囊 → 底部选择面板；目录来自主机 | `session/modelCatalog`、`session/selectModel` |
 
 ## 二、可实现但尚未做（主机已支持）
 
@@ -25,8 +26,8 @@
 
 | 优先级 | 能力 | endpoint | 说明 |
 |---|---|---|---|
-| P0 | 模型选择与推理等级 | `session/modelCatalog`、`session/selectModel` | RPC 已封装（`modelCatalog`/`selectModel`），缺 UI 选择器 |
 | P0 | 权限预设切换 | `session/selectPermission` | `/permission` 命令已可走斜杠通道，缺图形入口 |
+| P1 | 模型推理等级选择 | `session/selectModel` 的 `reasoningEffort` | 模型已可选，推理等级（low/medium/high）待做 |
 | P1 | 从某条消息分叉 | `session/fork` | RPC 已封装（`sessionFork`），缺消息长按菜单 |
 | P1 | 排队消息管理 | `session/updateQueue` | 需要主机把排队项回显到 projections |
 | P1 | 附件与图片 | `session/attachment` | 需要先做附件上传通道（当前协议未暴露 fileUploads 的远程入口） |

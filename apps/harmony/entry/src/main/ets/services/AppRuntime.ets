@@ -109,6 +109,11 @@ export class AppRuntime {
   searchResults: HarnessRemoteSession[] | undefined = undefined;
   /** 当前会话的上下文占用百分比（0 表示未知）。 */
   contextPercent: number = 0;
+  /** 可选模型列表（来自主机模型目录）。 */
+  modelOptions: ModelOption[] = [];
+  /** 当前模型展示名；空表示未知。 */
+  currentModelLabel: string = '';
+  modelCatalogLoaded: boolean = false;
   /** 斜杠命令候选（主机清单 + 内置兜底）。 */
   slashCommands: SlashCommand[] = [];
   /** 模型目录的原始结构，交给 UI 按需解析。 */
@@ -698,14 +703,53 @@ export class AppRuntime {
     }
   }
 
-  /** 拉取模型目录。 */
+  /** 拉取模型目录并解析成可选列表。 */
   async refreshModelCatalog(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined) {
       return;
     }
     try {
-      this.modelCatalogRaw = await harness.modelCatalog();
+      const raw: Record<string, Object> = await harness.modelCatalog();
+      this.modelCatalogRaw = raw;
+      const options: ModelOption[] = [];
+      const groups: Object[] | undefined = asArray(raw['groups']);
+      if (groups !== undefined) {
+        for (const groupValue of groups) {
+          const group: Record<string, Object> | undefined = asRecord(groupValue);
+          if (group === undefined) {
+            continue;
+          }
+          const providerId: string = jsonStr(group, 'id', '');
+          const models: Object[] | undefined = asArray(group['models']);
+          if (models === undefined) {
+            continue;
+          }
+          for (const modelValue of models) {
+            const model: Record<string, Object> | undefined = asRecord(modelValue);
+            if (model === undefined) {
+              continue;
+            }
+            const option: ModelOption = new ModelOption();
+            option.provider = providerId;
+            option.model = jsonStr(model, 'id', '');
+            option.name = jsonStr(model, 'name', option.model);
+            option.description = jsonStr(model, 'description', '');
+            if (option.model.length > 0) {
+              options.push(option);
+            }
+          }
+        }
+      }
+      this.modelOptions = options;
+      const fallback: Record<string, Object> | undefined = asRecord(raw['default']);
+      if (fallback !== undefined) {
+        const defaultModel: string = jsonStr(fallback, 'model', '');
+        if (defaultModel.length > 0) {
+          this.currentModelLabel = defaultModel;
+        }
+      }
+      this.modelCatalogLoaded = options.length > 0;
       this.notify();
     } catch (error) {
       logWarn('model catalog unavailable: ' + errorMessage(error));
@@ -721,6 +765,7 @@ export class AppRuntime {
     }
     try {
       await harness.selectModel(sessionId, provider, model, reasoningEffort);
+      this.currentModelLabel = model;
       this.notify();
     } catch (error) {
       this.errorMsg = errorMessage(error);
@@ -1600,6 +1645,14 @@ export function getAppRuntime(): AppRuntime {
     runtimeInstance = new AppRuntime();
   }
   return runtimeInstance;
+}
+
+/** 一个可选的模型（provider + model）。 */
+export class ModelOption {
+  provider: string = '';
+  model: string = '';
+  name: string = '';
+  description: string = '';
 }
 
 /** 一条斜杠命令候选。 */
