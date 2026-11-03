@@ -8,7 +8,7 @@ import type { ChatItem, ToolActivity } from '../types'
 import type { ChatSection } from './message-helpers'
 
 export interface UiArtifact {
-  kind: 'declarative' | 'widget'
+  kind: 'declarative' | 'widget' | 'composition'
   hostId: string
   sessionId: string
   uiId: string
@@ -22,12 +22,37 @@ export interface UiArtifact {
   originSeq: number
 }
 
-const UI_TOOLS = new Set(['ui_render', 'ui_patch', 'ui_render_widget'])
+const UI_TOOLS = new Set(['ui_render', 'ui_patch', 'ui_render_widget', 'ui_compose'])
 const MAX_UI_CHARS = 480_000
+const BLOCK_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const record = (x: unknown): x is Record<string, unknown> =>
   typeof x === 'object' && x !== null && !Array.isArray(x)
 const nonempty = (x: unknown): x is string => typeof x === 'string' && x.length > 0
 const version = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 1
+
+function splitComposeUiId(uiId: string): [string, string] | undefined {
+  const at = uiId.indexOf('#')
+  return at > 0 && at < uiId.length - 1 ? [uiId.slice(0, at), uiId.slice(at + 1)] : undefined
+}
+
+function safeComposition(x: Record<string, unknown>): boolean {
+  if (!Array.isArray(x.blocks) || x.blocks.length === 0 || x.blocks.length > 24) return false
+  const ids = new Set<string>()
+  for (const block of x.blocks) {
+    if (!record(block) || !nonempty(block.id) || !BLOCK_ID.test(block.id) || ids.has(block.id)) return false
+    ids.add(block.id)
+    if (block.type === 'markdown') {
+      if (typeof block.text !== 'string' || block.text.trim().length === 0 || block.text.length > 60_000) return false
+    } else if (block.type === 'catalog') {
+      if (!safeTree(block as Record<string, unknown>)) return false
+    } else if (block.type === 'widget') {
+      if (!nonempty(block.html)) return false
+    } else {
+      return false
+    }
+  }
+  return true
+}
 
 function safeArgs(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'string' || value.length > MAX_UI_CHARS) return undefined
@@ -67,6 +92,7 @@ function toolSeq(tool: ToolActivity): number {
 export function projectUiArtifacts(items: readonly ChatItem[], hostId: string, sessionId: string): UiArtifact[] {
   if (!hostId || !sessionId) return []
   const latest = new Map<string, UiArtifact>()
+  const blockVersions = new Map<string, number>()
 
   const isUiTool = (item: ChatItem): item is ToolActivity =>
     item.kind === 'tool'
@@ -112,6 +138,29 @@ export function projectUiArtifacts(items: readonly ChatItem[], hostId: string, s
         definition: args, title: typeof args.title === 'string' ? args.title : undefined,
         turn: tool.turn, policy, originSeq: seq,
       })
+    } else if (name === 'ui_compose' && safeComposition(args)) {
+      const uiId = tool.id
+      const existing = latest.get(uiId)
+      if (existing) {
+        if (seq < existing.originSeq || existing.turn === undefined) {
+          latest.set(uiId, {
+            ...existing,
+            turn: tool.turn ?? existing.turn,
+            originSeq: Math.min(seq, existing.originSeq),
+          })
+        }
+        continue
+      }
+      latest.set(uiId, {
+        kind: 'composition', hostId, sessionId, uiId, version: 1,
+        definition: args, title: typeof args.title === 'string' ? args.title : undefined,
+        turn: tool.turn, policy, originSeq: seq,
+      })
+      for (const block of (args.blocks as Record<string, unknown>[])) {
+        if (block.type === 'catalog' && typeof block.id === 'string') {
+          blockVersions.set(`${uiId}#${block.id}`, 1)
+        }
+      }
     } else if (name === 'ui_render_widget' && nonempty(args.html)) {
       const uiId = tool.id
       const existing = latest.get(uiId)
@@ -139,6 +188,47 @@ export function projectUiArtifacts(items: readonly ChatItem[], hostId: string, s
         || !version(snapshot.version)
         || snapshot.version !== args.baseVersion + 1
         || !safeTree(snapshot)) {
+        continue
+      }
+
+      const parts = splitComposeUiId(targetUiId)
+      if (parts) {
+        const [compositionId, blockId] = parts
+        const old = latest.get(compositionId)
+        if (old !== undefined && old.kind === 'composition') {
+          const currentBlockVersion = blockVersions.get(targetUiId) ?? 1
+          if (snapshot.version <= currentBlockVersion || args.baseVersion < currentBlockVersion) {
+            continue
+          }
+          const blocks = Array.isArray(old.definition.blocks) ? old.definition.blocks : []
+          const blockIndex = blocks.findIndex(b => record(b) && b.type === 'catalog' && b.id === blockId)
+          if (blockIndex === -1) continue
+
+          const oldBlock = blocks[blockIndex] as Record<string, unknown>
+          const updatedBlock = {
+            ...oldBlock,
+            ...(typeof snapshot.title === 'string' ? { title: snapshot.title } : {}),
+            root: snapshot.root,
+            components: snapshot.components,
+          }
+          const nextBlocks = [...blocks]
+          nextBlocks[blockIndex] = updatedBlock
+          blockVersions.set(targetUiId, snapshot.version)
+
+          latest.set(compositionId, {
+            ...old,
+            version: old.version + 1,
+            definition: {
+              ...old.definition,
+              blocks: nextBlocks,
+            },
+            title: typeof old.definition.title === 'string' ? old.definition.title : old.title,
+            policy: policy ?? old.policy,
+            turn: old.turn,
+            updatedTurn: tool.turn ?? old.updatedTurn,
+            originSeq: old.originSeq,
+          })
+        }
         continue
       }
 

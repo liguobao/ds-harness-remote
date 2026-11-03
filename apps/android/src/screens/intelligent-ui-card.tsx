@@ -15,7 +15,7 @@ import { useTheme } from '../ui/theme-context'
 import { INTELLIGENT_UI_RENDERER_CODE } from '../generated/intelligent-ui-renderer-code'
 
 const MAX_PROMPT = 4000
-const MAX_FRAME_HEIGHT = 2800
+const MAX_FRAME_HEIGHT = 4000
 
 function documentFor(token: string): string {
   // This is a trusted local bootstrap, not Host-supplied markup. Never place
@@ -25,6 +25,8 @@ function documentFor(token: string): string {
     'html,body{padding:0;margin:0;overflow-x:hidden;background:transparent;-webkit-tap-highlight-color:transparent}',
     '.diui-remote-title{display:none!important}',
     '.diui-remote{padding:2px 0 6px;font-size:13px}',
+    '.diui-compose{display:flex;flex-direction:column;gap:10px;padding:2px 0 8px}',
+    '.diui-compose .diui-md{font-size:13px;line-height:1.5}',
     '.diui-table-wrap{-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;overscroll-behavior-x:contain;border-radius:8px}',
     '.diui-table th,.diui-table td{padding:8px 12px;font-size:13px}',
     '.diui-table th{white-space:nowrap;font-weight:600}',
@@ -137,7 +139,10 @@ export function IntelligentUiCard({ artifact, onSendPrompt }: { artifact: UiArti
       return
     }
     if (msg.type === 'resize' && typeof msg.height === 'number' && Number.isFinite(msg.height)) {
-      setHeight(Math.min(MAX_FRAME_HEIGHT, Math.max(100, Math.ceil(msg.height) + 8)))
+      const maxH = typeof current.current.policy?.maxHeight === 'number'
+        ? Math.max(100, Math.min(4000, current.current.policy.maxHeight))
+        : MAX_FRAME_HEIGHT
+      setHeight(Math.min(maxH, Math.max(100, Math.ceil(msg.height) + 8)))
       return
     }
     if (msg.type !== 'prompt' || !Number.isSafeInteger(msg.id) || typeof msg.text !== 'string') return
@@ -220,10 +225,10 @@ export function IntelligentUiCard({ artifact, onSendPrompt }: { artifact: UiArti
             originWhitelist={['*']}
             source={source}
             style={{ height, backgroundColor: 'transparent' }}
-            scrollEnabled={false}
+            scrollEnabled={height >= (typeof artifact.policy?.maxHeight === 'number' ? Math.max(100, Math.min(4000, artifact.policy.maxHeight)) : MAX_FRAME_HEIGHT)}
             nestedScrollEnabled={true}
             javaScriptEnabled
-            domStorageEnabled={false}
+            domStorageEnabled={true}
             javaScriptCanOpenWindowsAutomatically={false}
             setSupportMultipleWindows={false}
             allowFileAccess={false}

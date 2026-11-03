@@ -339,7 +339,7 @@ function applyToolCall(
     : toolResultDetail(view, data)
   const images = state === 'finished' ? messageImages(data, sessionId) : []
   const failed = state === 'finished' && toolResultFailed(data)
-  const uiMeta = state === 'finished' && !failed && ['ui_render', 'ui_patch', 'ui_render_widget'].includes(stringValue(data.name) ?? stringValue(data.toolName) ?? (current.find(item => item.id === id && item.kind === 'tool') as ToolActivity | undefined)?.toolKey ?? '')
+  const uiMeta = state === 'finished' && !failed && ['ui_render', 'ui_patch', 'ui_render_widget', 'ui_compose'].includes(stringValue(data.name) ?? stringValue(data.toolName) ?? (current.find(item => item.id === id && item.kind === 'tool') as ToolActivity | undefined)?.toolKey ?? '')
     ? data.meta : undefined
   const next: ToolActivity = {
     kind: 'tool',
