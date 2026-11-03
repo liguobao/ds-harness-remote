@@ -2070,3 +2070,10 @@ Plugin configuration continues through the existing official `settings` endpoint
 Remote access namespaces remain local-only. Installation, removal, arbitrary
 plugin-manager methods and legacy ApiProxy plugin management remain disallowed.
 This adds no new wire format or capability and requires an updated Host plugin.
+
+
+## Optional WebRTC control recovery (implementation in progress)
+
+The additive `transport.webrtc.resume.v1` contract is specified in
+[WebRTC control recovery](design/webrtc-control-recovery.md). Protocol v1 and
+legacy control lifetimes remain unchanged unless all three parties negotiate it.

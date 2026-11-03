@@ -59,6 +59,7 @@ const testState = vi.hoisted(() => ({
   cores: [] as FakeCore[],
   blockStreamOpen: false,
   capabilities: ['harness.api.v1'] as string[],
+  transportOptions: [] as Array<{ capabilities?: string[] }>,
 }))
 
 vi.mock('@dsh-remote/client-core', async () => {
@@ -75,7 +76,7 @@ vi.mock('@dsh-remote/client-core', async () => {
   }
 })
 
-vi.mock('@dsh-remote/webrtc', () => ({ AdaptiveTransport: class {} }))
+vi.mock('@dsh-remote/webrtc', () => ({ AdaptiveTransport: class { constructor(_url: string, options: { capabilities?: string[] }) { testState.transportOptions.push(options) } } }))
 vi.mock('../src/server-api.js', () => ({
   ServerApi: class { async turnCredentials(): Promise<never[]> { return [] } },
 }))
@@ -103,10 +104,21 @@ const host = {
 describe('RemoteConnection close state', () => {
   const prepareContract1 = () => {
     testState.cores.length = 0
+    testState.transportOptions.length = 0
     testState.blockStreamOpen = false
     testState.capabilities = ['harness.api.v1']
   }
 beforeEach(prepareContract1)
+
+  it('does not advertise control recovery until the VS Code secure transport supports leases', async () => {
+    const connection = new RemoteConnection()
+    await connection.connect('https://remote.example', identity, host, 'access-token', true)
+    expect(testState.transportOptions).toHaveLength(1)
+    expect(testState.transportOptions[0]?.capabilities).toEqual([
+      'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', 'harness.api.v1',
+    ])
+    await connection.close()
+  })
 
   it('disposes closed connections during streaming and initialization', async () => {
     await runScenarios(

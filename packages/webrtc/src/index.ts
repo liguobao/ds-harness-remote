@@ -359,3 +359,5 @@ export class RelayTransport extends BaseTransport {
 export { waitForRelayCapacity } from './websocket-backpressure.js'
 
 export { SerialSend } from './serial-send.js'
+
+export * from './control-lease.js'

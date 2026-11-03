@@ -460,3 +460,12 @@ caddy/nginx（可选）
 7. rate limit、revoke、backpressure 和日志脱敏。
 8. TURN credential 和 Docker Compose。
 9. 根据 [protocol.md](protocol.md) 完成互操作验收。
+
+
+## WebRTC control recovery
+
+Optional `transport.webrtc.resume.v1` preserves authenticated LAN/P2P/TURN
+DataChannels across a temporary control outage using a two-sided, five-minute
+authorization lease. See [the contract and rollout limits](design/webrtc-control-recovery.md).
+This is separate from WebSocket Relay and TURN credential TTL; the relay-only
+self-hosted Server does not enable it. Production/native acceptance is not implied.

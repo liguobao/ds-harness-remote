@@ -1,4 +1,4 @@
-import { waitForRelayCapacity, SerialSend } from '@dsh-remote/webrtc'
+import { waitForRelayCapacity, SerialSend, ControlLease } from '@dsh-remote/webrtc'
 import {
   NoiseIkSession,
   createNoisePrologue,
@@ -7,6 +7,8 @@ import {
 } from '@dsh-remote/crypto'
 import {
   PROTOCOL_VERSION,
+  WEBRTC_RESUME_CAPABILITY,
+  type ConnectionLeaseAck,
   SecureMessageCodec,
   acceptNegotiatedCapabilities,
   createControlFrame,
@@ -63,6 +65,8 @@ type RelayAssignment = Pick<ConnectIncomingPayload, 'relayEndpoint' | 'relayTick
 export type WebSocketFactory = (url: string) => WebSocketLike
 
 interface PendingTunnel {
+  recoveryTicket?: string
+  lease?: ControlLease
   connectionId: string
   membershipId: string
   peer: TrustedPeer
@@ -136,6 +140,7 @@ export class HostServerConnection {
     this.reconnectRequested = false
     this.retryWake?.()
     this.retryWake = undefined
+    for (const tunnel of this.tunnels.values()) this.notifyTunnelClosed(tunnel)
     this.socket?.close(1000, 'plugin stopped')
     await this.running
     await this.dropTunnels()
@@ -198,7 +203,8 @@ export class HostServerConnection {
             this.logger.error('failed to clear revoked Host authorization', { code: errorCode(clearError) })
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code) || !this.config.reconnect.enabled) return
+        if (TERMINAL_AUTH_ERRORS.has(code)) { await this.dropTunnels(); return }
+        if (!this.config.reconnect.enabled) return
       }
       if (this.stopped) return
       if (this.reconnectRequested) {
@@ -222,11 +228,14 @@ export class HostServerConnection {
     if (this.stopped) return
     const offeredCapabilities = this.rtcFactoryProvider === undefined || this.config.forceRelay
       ? ['transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
-      : ['transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+      : [WEBRTC_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+    const recoveryTickets = [...this.tunnels.values()].flatMap(tunnel => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64)
     const socket = this.createWebSocket(websocketUrl(this.api.baseUrl))
     this.socket = socket
     this.controlFrameLimits = {}
     let acknowledged = false
+    let retainOnClose = false
+    let invalidControl = false
     let messageQueue = Promise.resolve()
     await new Promise<void>((resolve, reject) => {
       let settled = false
@@ -237,7 +246,13 @@ export class HostServerConnection {
         clearTimeout(helloTimer)
         this.online = false
         if (this.socket === socket) this.socket = undefined
-        void this.dropTunnels().finally(() => error === undefined ? resolve() : reject(error))
+        const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested
+          && (error === undefined ? retainOnClose : isRetryable(error)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? '')
+          && [...this.tunnels.values()].some(tunnel => tunnel.lease?.canDetach())
+        const cleanup = preserve
+          ? Promise.all([...this.tunnels.values()].filter(tunnel => !tunnel.lease?.canDetach()).map(tunnel => this.dropTunnel(tunnel.connectionId)))
+          : this.dropTunnels()
+        void cleanup.finally(() => error === undefined ? resolve() : reject(error))
       }
       socket.onopen = () => {
         this.sendControl('hello', {
@@ -248,10 +263,13 @@ export class HostServerConnection {
           clientVersion: PLUGIN_VERSION,
           ...(this.harnessVersion === undefined ? {} : { harnessVersion: this.harnessVersion }),
           capabilities: offeredCapabilities,
+          ...(recoveryTickets.length ? { recoveryTickets } : {}),
         })
       }
       socket.onmessage = event => {
+        if (this.socket !== socket) return
         messageQueue = messageQueue.then(async () => {
+          if (this.socket !== socket) return
           const frame = decodeControl(event.data, this.controlFrameLimits)
           this.lastActiveAt = Date.now()
           if (frame.type === 'hello.ack') {
@@ -275,17 +293,20 @@ export class HostServerConnection {
             }
             acknowledged = true
             clearTimeout(helloTimer)
+            if (this.tunnels.size && !this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) await this.dropTunnels()
             this.online = true
             this.terminalError = undefined
             this.logger.info('server control connection online', {
               serverVersion: payload.serverVersion,
               connectionSessionId: shortId(payload.connectionSessionId),
             })
+            for (const tunnel of this.tunnels.values()) tunnel.lease?.tick(true)
             return
           }
           if (!acknowledged) throw new ControlConnectionError('INVALID_MESSAGE', 'Server sent a frame before hello.ack.')
           await this.handleFrame(frame)
         }).catch(error => {
+          invalidControl = true
           const code = errorCode(error)
           this.terminalError = code
           this.logger.error('server control frame failed', {
@@ -299,11 +320,24 @@ export class HostServerConnection {
         if (!acknowledged) finish(new ControlConnectionError('CONNECTION_FAILED', 'Unable to open the Server WebSocket.'))
       }
       socket.onclose = event => {
+        if (this.socket !== socket) return
+        retainOnClose = [1000, 1001, 1006, 1011, 1012, 1013, 4009].includes(event.code)
+          || (event.code === 4001 && ['server shutdown', 'CONNECTION_FAILED'].includes(event.reason))
         const close = async (): Promise<void> => {
           await messageQueue.catch(() => undefined)
           if (this.stopped) { finish(); return }
           if (event.code === 4003) {
             finish(new ControlConnectionError('CONNECTION_REPLACED', 'Another instance connected with this Host identity.'))
+            return
+          }
+          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code)
+            || (event.code === 4002 && event.reason === 'recovery authorization rejected'))) {
+            // A rolled-back Server rejects the additive hello field; a newer
+            // Server rejects invalid recovery tickets with a dedicated code.
+            // Also accept the exact reason from the earlier implementation.
+            // Drop the old sessions, then retry the legacy hello once.
+            await this.dropTunnels()
+            finish(new ControlConnectionError('CREDENTIALS_REFRESHED', 'Retry control without recovery state.'))
             return
           }
           if (event.code === 4002) {
@@ -332,6 +366,11 @@ export class HostServerConnection {
       const nonce = objectValue(frame.payload, 'nonce')
       if (typeof nonce !== 'string') throw new ControlConnectionError('INVALID_MESSAGE', 'Control ping has no nonce.')
       this.sendControl('pong', { nonce })
+      return
+    }
+    if (frame.type === 'connection.lease.ack') {
+      const ack = frame.payload as ConnectionLeaseAck
+      this.tunnels.get(ack.connectionId)?.lease?.acknowledge(ack)
       return
     }
     if (frame.type === 'pong') return
@@ -454,6 +493,7 @@ export class HostServerConnection {
       prologue: createNoisePrologue(payload.connectionId, this.identity.deviceId, peer.deviceId),
     })
     const tunnel: PendingTunnel = {
+      recoveryTicket: this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY) ? payload.recoveryTicket : undefined,
       connectionId: payload.connectionId,
       membershipId: descriptor.membershipId,
       peer,
@@ -516,6 +556,7 @@ export class HostServerConnection {
       ? (ciphertext: Uint8Array) => tunnel.rtc!.send(ciphertext)
       : (ciphertext: Uint8Array) => this.sendRelay(tunnel, ciphertext)
     const channel = new ServerNoiseChannel(tunnel, transmit, () => {
+      tunnel.lease?.stop()
       if (this.tunnels.get(tunnel.connectionId) === tunnel) this.tunnels.delete(tunnel.connectionId)
     }, mode)
     tunnel.channel = channel
@@ -530,6 +571,16 @@ export class HostServerConnection {
       step: 2,
       data: toBase64Url(reply),
     } satisfies SecureHandshakePayload)
+    if (viaWebRtc && tunnel.recoveryTicket) {
+      tunnel.lease = new ControlLease(tunnel.connectionId, tunnel.recoveryTicket, payload => {
+        if (this.online && this.lastActiveAt !== undefined && Date.now() - this.lastActiveAt >= 75_000) {
+          this.socket?.close(1012, 'control heartbeat timeout')
+          throw new Error('Control heartbeat timed out')
+        }
+        this.sendControl('connection.lease.request', payload)
+      }, () => { void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED') })
+      tunnel.lease.start()
+    }
     this.logger.info('authenticated peer channel ready', {
       connectionId: shortId(tunnel.connectionId),
       peerDeviceId: shortId(tunnel.peer.deviceId),
@@ -938,10 +989,16 @@ export class HostServerConnection {
     socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits))
   }
 
+  private notifyTunnelClosed(tunnel: PendingTunnel): void {
+    if (!tunnel.lease || this.socket?.readyState !== 1) return
+    try { this.sendControl('connection.lease.close', { connectionId: tunnel.connectionId }) } catch { /* local cleanup proceeds */ }
+  }
+
   private async dropTunnels(): Promise<void> {
     const tunnels = [...this.tunnels.values()]
     this.tunnels.clear()
     await Promise.all(tunnels.map(async tunnel => {
+      tunnel.lease?.stop()
       if (tunnel.rtc !== undefined) await tunnel.rtc.close()
       tunnel.dataSocket?.close()
       if (tunnel.channel !== undefined) await tunnel.channel.close()
@@ -957,7 +1014,9 @@ export class HostServerConnection {
   ): Promise<void> {
     const tunnel = this.tunnels.get(connectionId)
     if (tunnel === undefined) return
+    this.notifyTunnelClosed(tunnel)
     this.tunnels.delete(connectionId)
+    tunnel.lease?.stop()
     try {
       await tunnel.rtc?.close()
     } catch (error) {
@@ -1043,6 +1102,7 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   }
 
   private async sendNow(message: RemoteMessage): Promise<void> {
+    if (this.tunnel.lease && !this.tunnel.lease.valid()) throw new Error('Control lease expired')
     if (this.closed) throw new Error('secure channel is closed')
     const encoded = encodeMessage(message)
     try {
@@ -1062,6 +1122,7 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   }
 
   receive(counter: number | undefined, ciphertext: Uint8Array): void {
+    if (this.tunnel.lease && !this.tunnel.lease.valid()) return
     if (this.closed) return
     if (counter !== undefined) {
       const expected = Number(this.tunnel.noise.receivingCounter())

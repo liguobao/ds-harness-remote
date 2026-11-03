@@ -277,6 +277,58 @@ describe('AdaptiveTransport capability negotiation', () => {
     await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
   })
 
+  it('retains confirmed WebRTC data while reauthenticating control without creating a new logical connection', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const rtc = stalledRtc()
+    const refresh = vi.fn(async () => 'fresh-access-token')
+    const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, refreshAccessToken: refresh })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', recoveryTicket: 'initial' }))
+      await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+      rtc.channel.readyState = 'open'
+      rtc.channel.onopen?.()
+      await connecting
+      transport.markSecureReady()
+      const request = lastSentPayload(socket, 'connection.lease.request')
+      socket.receive(createControlFrame('connection.lease.ack', { ...request, ticket: 'renewed', leaseMs: 300_000 }))
+      socket.readyState = 3
+      socket.onclose?.({ code: 1012, reason: 'restart' })
+      await transport.connect() // Idempotent while only control is detached.
+      await transport.send(Uint8Array.of(1))
+      expect(closed).not.toHaveBeenCalled()
+      expect(rtc.pc.close).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(FakeWebSocket.latest).not.toBe(socket))
+      const recovered = FakeWebSocket.latest!
+      // The old control heartbeat is stale, but the new socket is still
+      // handshaking. A forced lease tick must not close it.
+      const internals = transport as unknown as { lastControlReceivedAt: number; lease: { tick(force: boolean): void } }
+      internals.lastControlReceivedAt = Date.now() - 80_000
+      internals.lease.tick(true)
+      expect(FakeWebSocket.latest).toBe(recovered)
+      expect(recovered.readyState).toBe(0)
+      recovered.open()
+      expect(lastSentPayload(recovered, 'hello')).toMatchObject({ accessToken: 'fresh-access-token' })
+      recovered.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      const renewal = lastSentPayload(recovered, 'connection.lease.request')
+      expect(renewal).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+      expect(recovered.sent.map(raw => JSON.parse(raw).type)).not.toContain('connect.request')
+      recovered.receive(createControlFrame('connection.lease.ack', { ...renewal, ticket: 'recovered', leaseMs: 300_000 }))
+      // Old-socket callbacks must not close the retained session.
+      socket.onclose?.({ code: 4003, reason: 'stale replacement' })
+      await transport.send(Uint8Array.of(2))
+      expect(rtc.channel.send).toHaveBeenCalledTimes(2)
+      expect(closed).not.toHaveBeenCalled()
+      recovered.receive(createControlFrame('error', { code: 'DEVICE_REVOKED', message: 'revoked', retryable: false }))
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+    } finally { await transport.close() }
+  })
+
   it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
     await runScenarios([
       { code: 4001, reason: 'CONNECTION_FAILED', retryable: true },

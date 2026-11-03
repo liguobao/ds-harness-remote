@@ -46,6 +46,9 @@ const validPayloads: Record<string, unknown> = {
   'signal.answer': { connectionId: 'conn-1', targetDeviceId: 'host-1', sdp: 'v=0...' },
   'signal.ice': { connectionId: 'conn-1', targetDeviceId: 'host-1', candidate: { candidate: 'candidate:1' } },
   'transport.selected': { connectionId: 'conn-1', targetDeviceId: 'host-1', transport: 'relay' },
+  'connection.lease.request': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket' },
+  'connection.lease.ack': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket', leaseMs: 300000 },
+  'connection.lease.close': { connectionId: 'conn-1' },
   'ping': { nonce: 'nonce-1' },
   'pong': { nonce: 'nonce-1' },
   'error': { code: 'ERROR', message: 'Something failed' },
@@ -655,7 +658,7 @@ describe('golden vectors', () => {
       'hello', 'hello.ack', 'connect.request', 'connect.incoming',
       'connect.accepted', 'connect.rejected', 'secure.handshake',
       'relay', 'signal.offer', 'signal.answer', 'signal.ice',
-      'transport.selected', 'ping', 'pong', 'error',
+      'transport.selected', 'connection.lease.request', 'connection.lease.ack', 'connection.lease.close', 'ping', 'pong', 'error',
     ]
     expect([...expected].sort()).toEqual([...Array.from(controlFrameTypes)].sort())
   })

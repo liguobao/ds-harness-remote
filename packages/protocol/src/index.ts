@@ -2,6 +2,8 @@ export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
+export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
+export const WEBRTC_LEASE_MS = 300_000
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
@@ -109,6 +111,9 @@ export const controlFrameTypes = [
   'signal.answer',
   'signal.ice',
   'transport.selected',
+  'connection.lease.request',
+  'connection.lease.ack',
+  'connection.lease.close',
   'ping',
   'pong',
   'error',
@@ -320,6 +325,7 @@ export interface ControlFrameByteLimits {
 }
 
 export interface HelloPayload {
+  recoveryTickets?: string[]
   role: 'host' | 'client'
   deviceId: string
   accessToken: string
@@ -351,6 +357,7 @@ export interface ConnectRequestPayload {
 }
 
 export interface ConnectIncomingPayload {
+  recoveryTicket?: string
   connectionId: string
   clientDeviceId: string
   clientIdentityKey: string
@@ -364,6 +371,7 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
+  recoveryTicket?: string
   connectionId: string
   /** Optional independent Relay data-plane assignment. */
   relayEndpoint?: string
@@ -986,6 +994,7 @@ const MAX_WORKSPACE_TYPE_ENTRIES = MAX_REMOTE_WORKSPACE_TYPE_ENTRIES
 const MAX_PREFERRED_TRANSPORT_ENTRIES = selectedTransports.length
 
 export const helloPayloadSchema = z.object({
+  recoveryTickets: z.array(z.string().min(1).max(4096)).max(64).optional(),
   role: z.enum(['host', 'client']),
   deviceId: z.string().min(1),
   accessToken: z.string().min(1),
@@ -1050,6 +1059,7 @@ export const connectRequestPayloadSchema = z.object({
 })
 
 export const connectIncomingPayloadSchema = z.object({
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   clientDeviceId: z.string().min(1),
   clientIdentityKey: identityKeySchema,
@@ -1064,6 +1074,7 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   relayEndpoint: z.string().url().optional(),
   relayTicket: z.string().min(1).optional(),
@@ -1125,6 +1136,16 @@ export const controlErrorPayloadSchema = z.object({
   connectionId: z.string().min(1).optional(),
 })
 
+export const connectionLeaseRequestSchema = z.object({
+  connectionId: z.string().min(1).max(128),
+  requestId: z.string().min(1).max(128),
+  ticket: z.string().min(1).max(4096),
+})
+export const connectionLeaseAckSchema = connectionLeaseRequestSchema.extend({
+  leaseMs: z.literal(WEBRTC_LEASE_MS),
+})
+export type ConnectionLeaseAck = z.infer<typeof connectionLeaseAckSchema>
+
 const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'hello': helloPayloadSchema,
   'hello.ack': helloAckPayloadSchema,
@@ -1138,6 +1159,9 @@ const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'signal.answer': signalPayloadSchema,
   'signal.ice': signalIcePayloadSchema,
   'transport.selected': transportSelectedPayloadSchema,
+  'connection.lease.request': connectionLeaseRequestSchema,
+  'connection.lease.ack': connectionLeaseAckSchema,
+  'connection.lease.close': z.object({ connectionId: z.string().min(1).max(128) }),
   'ping': pingPongPayloadSchema,
   'pong': pingPongPayloadSchema,
   'error': controlErrorPayloadSchema,

@@ -39,6 +39,8 @@ export class RemoteConnection {
     const createCore = (attempt: TransportAttempt): RemoteClientCore => {
       const transport = new AdaptiveTransport(wsUrl.toString(), {
         role: 'client', deviceId: identity.deviceId, accessToken, targetDeviceId: host.deviceId,
+        // This client has not implemented the authenticated control lease.
+        capabilities: ['transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', 'harness.api.v1'],
         forceRelay: forceRelay || attempt === 'relay',
         preferredTransports: preferredTransportsForAttempt(attempt),
         negotiateTimeoutMs: attempt === 'direct' ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : undefined,
