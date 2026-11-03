@@ -59287,6 +59287,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(await this.listDirectory(requestArg(args), signal));
         case "skills/list":
           return business(success2({ items: [] }));
+        case "job/kill":
+          return this.hostCarrier === void 0 ? business(success2({ outcome: "already-finished" })) : await this.hostCarrier.dispatch(endpoint, payload, signal);
         case "commands/list":
           return business(this.commandList(requestArg(args)));
         case "commands/execute":
@@ -72390,6 +72392,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           return business2(await this.listDirectory(requestArg2(args), signal));
         case "skills/list":
           return business2(success3({ items: [] }));
+        case "job/kill":
+          return this.hostCarrier === void 0 ? business2(success3({ outcome: "already-finished" })) : await this.hostCarrier.dispatch(endpoint, payload, signal);
         case "commands/list":
           return ok2(this.commandList(args));
         case "commands/execute":
@@ -87793,6 +87797,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "goals/resume",
   "job/list",
   "job/follow",
+  "job/kill",
   "llm/discoverModels",
   "llm/listConfigurableProviders",
   "llm/listProviders",

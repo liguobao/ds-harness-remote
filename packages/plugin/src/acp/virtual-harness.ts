@@ -278,6 +278,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'host/listDirectory':
         case 'directoryPicker/list': return business(await this.listDirectory(requestArg(args), signal))
         case 'skills/list': return business(success({ items: [] }))
+        case 'job/kill': return this.hostCarrier === undefined ? business(success({ outcome: 'already-finished' })) : await this.hostCarrier.dispatch(endpoint, payload, signal)
         case 'commands/list': return business(this.commandList(requestArg(args)))
         case 'commands/execute': return business(await this.executeCommand(requestArg(args)))
         default:
