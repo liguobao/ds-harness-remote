@@ -265,7 +265,17 @@ export function createHermesSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'hermes' },
+      values: {
+        backend: 'hermes',
+        imageLimits: {
+          maxImageBytes: 8 * 1024 * 1024,
+          maxImagesPerMessage: 4,
+          maxMessageImageBytes: 32 * 1024 * 1024,
+          maxImagePixels: 40_000_000,
+          maxImageDimension: 8192,
+          mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+        },
+      },
     },
   }
 }
