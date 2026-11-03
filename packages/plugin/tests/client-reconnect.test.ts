@@ -181,9 +181,10 @@ it('reopens a read stream and loads Host history from the recovered carrier', as
     return (opening?.payload as { params?: { streamId?: string } } | undefined)?.params?.streamId ?? ''
   }
   const request = { args: { request: { sessionId: 'existing-host-session' } } }
+  const oldLifetime = new AbortController()
   const signal = new AbortController().signal
   first.responseFor = respond(3)
-  const oldStream = await f.gateway.openWireStream('session/follow', request, signal)
+  const oldStream = await f.gateway.openWireStream('session/follow', request, oldLifetime.signal)
   const oldIterator = oldStream[Symbol.asyncIterator]()
   const oldId = streamId(first)
   expect(oldId).not.toBe('')
@@ -191,12 +192,17 @@ it('reopens a read stream and loads Host history from the recovered carrier', as
     type: 'snapshot', cursor: 3, records: [record(3)], hasMore: false,
   } })
   await expect(oldIterator.next()).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 3 } })
-  const interrupted = expect(oldIterator.next()).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+  const settled = vi.fn()
+  const interrupted = oldIterator.next().catch(error => { settled(); throw error })
+  const released = expect(interrupted).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
 
   first.drop()
-  await interrupted
   await vi.advanceTimersByTimeAsync(100)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1 })
+  expect(settled).not.toHaveBeenCalled()
+  // The native carrier reset cancels its old readers after authentication.
+  oldLifetime.abort()
+  await released
 
   const next = f.remotes[1]!.carrier
   next.responseFor = respond(8)
