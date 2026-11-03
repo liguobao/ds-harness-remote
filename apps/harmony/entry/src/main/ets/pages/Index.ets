@@ -228,6 +228,21 @@ struct Index {
     return this.connectedHostName;
   }
 
+  /** 权限预设的中文短标签。 */
+  private permissionLabel(): string {
+    const preset: string = this.runtime.permissionPreset;
+    if (preset === 'read-only') {
+      return '只读';
+    }
+    if (preset === 'workspace-write') {
+      return '可写';
+    }
+    if (preset === 'danger-full-access') {
+      return '完全';
+    }
+    return '权限';
+  }
+
   private currentSessionInfo(): HarnessRemoteSession | undefined {
     for (const session of this.sessions) {
       if (session.sessionId === this.currentSessionId) {
@@ -1053,6 +1068,39 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
+        Text(this.permissionLabel())
+          .fontSize(10)
+          .fontColor(this.pal().text2)
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(11)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            ActionSheet.show({
+              title: '会话权限',
+              message: '决定这个会话里工具调用与命令执行的放行方式',
+              sheets: [
+                {
+                  title: '只读',
+                  action: () => {
+                    this.runtime.selectPermission('read-only');
+                  }
+                },
+                {
+                  title: '工作区可写',
+                  action: () => {
+                    this.runtime.selectPermission('workspace-write');
+                  }
+                },
+                {
+                  title: '完全权限',
+                  action: () => {
+                    this.runtime.selectPermission('danger-full-access');
+                  }
+                }
+              ]
+            });
+          })
         Text(this.currentModelLabel.length > 0 ? this.currentModelLabel : '模型')
           .fontSize(10)
           .fontColor(this.pal().text2)
@@ -1547,6 +1595,9 @@ struct Index {
         }
         .width('80%')
         .justifyContent(FlexAlign.End)
+        .gesture(LongPressGesture().onAction(() => {
+          this.offerFork(item);
+        }))
       }
       .width('100%')
       .justifyContent(FlexAlign.End)
@@ -1559,6 +1610,28 @@ struct Index {
     } else if (item.kind === 'question') {
       this.QuestionRow(item)
     }
+  }
+
+  /** 长按消息：可从该条消息处分叉出一个新会话。 */
+  private offerFork(item: ChatItem): void {
+    if (item.seq <= 0 || this.runtime.currentSessionId.length === 0) {
+      return;
+    }
+    AlertDialog.show({
+      title: '从这里分叉',
+      message: '将新建一个会话，保留到这条消息为止的上下文，后续对话互不影响。',
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '分叉',
+        action: () => {
+          this.runtime.forkCurrentSession(item.seq);
+        }
+      }
+    });
   }
 
   @Builder

@@ -301,6 +301,14 @@ export class HarnessAlphaClient {
     logInfo('session/selectModel ok -> ' + provider + '/' + model);
   }
 
+  /** 切换当前会话的权限预设（read-only / workspace-write / danger-full-access）。 */
+  async selectPermission(sessionId: string, preset: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'preset': preset };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/selectPermission', args);
+    logInfo('session/selectPermission ok -> ' + preset);
+  }
+
   /** 从某个消息序号分叉出一个新会话。 */
   async sessionFork(sessionId: string, atSeq: number): Promise<string> {
     const request: Record<string, Object> = { 'sessionId': sessionId };

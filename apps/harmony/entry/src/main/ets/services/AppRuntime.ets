@@ -61,6 +61,8 @@ export class ChatItem {
   reason: string = '';
   questions: ChatQuestion[] = [];
   questionOutcome: string = ''; // '' pending | 'answered' | 'queued' | 'cancelled'
+  /** 该消息对应的事件序号，用于「从这里分叉」。 */
+  seq: number = 0;
   rev: number = 0;
 }
 
@@ -109,6 +111,8 @@ export class AppRuntime {
   searchResults: HarnessRemoteSession[] | undefined = undefined;
   /** 当前会话的上下文占用百分比（0 表示未知）。 */
   contextPercent: number = 0;
+  /** 当前会话的权限预设；空表示未从主机读到。 */
+  permissionPreset: string = '';
   /** 可选模型列表（来自主机模型目录）。 */
   modelOptions: ModelOption[] = [];
   /** 当前模型展示名；空表示未知。 */
@@ -753,6 +757,23 @@ export class AppRuntime {
       this.notify();
     } catch (error) {
       logWarn('model catalog unavailable: ' + errorMessage(error));
+    }
+  }
+
+  /** 切换当前会话的权限预设。 */
+  async selectPermission(preset: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await harness.selectPermission(sessionId, preset);
+      this.permissionPreset = preset;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
     }
   }
 
@@ -1816,8 +1837,24 @@ function foldHistory(entries: HarnessHistoryEntry[]): ChatItem[] {
   return items;
 }
 
-/** Apply one native Harness session event to the transcript. */
+/** Apply one native Harness session event to the transcript, stamping its sequence. */
 function applySessionEvent(items: ChatItem[], event: HarnessSessionEvent): ChatItem[] {
+  const next: ChatItem[] = applySessionEventInner(items, event);
+  if (next.length === 0 || event.seq <= 0) {
+    return next;
+  }
+  const last: ChatItem = next[next.length - 1];
+  if (last.seq === event.seq) {
+    return next;
+  }
+  const stamped: ChatItem = cloneItem(last);
+  stamped.seq = event.seq;
+  const out: ChatItem[] = next.slice();
+  out[out.length - 1] = stamped;
+  return out;
+}
+
+function applySessionEventInner(items: ChatItem[], event: HarnessSessionEvent): ChatItem[] {
   const data: Record<string, Object> = event.data;
   if (event.type === 'turn/start' || event.type === 'turn/end') {
     return settleTurn(items);

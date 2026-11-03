@@ -19,6 +19,8 @@
 | 断线自动重连 | AdaptiveTransport 退避恢复 | 指数退避 1/2/4/8/15/30 秒，最多 6 次，UI 显示重连次数 | 客户端内建 |
 | 忘记主机公钥 | 设备详情 › 忘记该主机公钥 | 设备卡片上的 🔑 入口，二次确认后清除固定记录 | 客户端本地 |
 | 模型选择 | 聊天顶栏模型胶囊 | 顶栏模型胶囊 → 底部选择面板；目录来自主机 | `session/modelCatalog`、`session/selectModel` |
+| 权限预设 | `/permission` 弹窗 | 顶栏权限胶囊 → 选择「只读 / 可写 / 完全」 | `session/selectPermission` |
+| 从某条消息分叉 | 消息长按 › 从这里分叉 | 聊天气泡长按 → 确认分叉 | `session/fork` |
 
 ## 二、可实现但尚未做（主机已支持）
 
@@ -26,9 +28,8 @@
 
 | 优先级 | 能力 | endpoint | 说明 |
 |---|---|---|---|
-| P0 | 权限预设切换 | `session/selectPermission` | `/permission` 命令已可走斜杠通道，缺图形入口 |
 | P1 | 模型推理等级选择 | `session/selectModel` 的 `reasoningEffort` | 模型已可选，推理等级（low/medium/high）待做 |
-| P1 | 从某条消息分叉 | `session/fork` | RPC 已封装（`sessionFork`），缺消息长按菜单 |
+
 | P1 | 排队消息管理 | `session/updateQueue` | 需要主机把排队项回显到 projections |
 | P1 | 附件与图片 | `session/attachment` | 需要先做附件上传通道（当前协议未暴露 fileUploads 的远程入口） |
 | P2 | 工作区文件浏览 | `host/listDirectory`、`session/openWorkspacePath` | 只读浏览可先做 |
