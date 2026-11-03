@@ -952,6 +952,12 @@ struct Index {
     .padding({ top: 16, bottom: 16, left: 16, right: 16 })
     .backgroundColor(this.pal().card)
     .borderRadius(18)
+    .onClick(() => {
+      // 对齐 dsh-go：整行可点即连接，不必瞄准右侧按钮。
+      if (device.online && this.renamingDeviceId.length === 0) {
+        this.runtime.connectDevice(device.deviceId);
+      }
+    })
     .border({ width: 1, color: this.pal().border })
     .onClick(() => {
       if (device.online && this.renamingDeviceId !== device.deviceId) {
