@@ -159,7 +159,7 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8",
-    "werift": "0.24.4",
+    "werift": "0.26.0",
     "@types/ws": "^8.18.1",
     "@deepseek-ai/dsh-client-ui-settings-general": "0.2.1-rc.1",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.1",

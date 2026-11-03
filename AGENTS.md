@@ -1,5 +1,19 @@
 # Repository Guide for Agents
 
+## werift 0.26.0 upgrade (2026-11-03, Issue #259)
+
+按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted
+node_modules 双版本），不再需要 `patches/werift@0.24.4.patch`（#245 的止血补丁，随分支基线
+移除）。0.26 的 `StreamTransport` 重写移除了 `end` 后的静默自动重拨（#241 崩溃类的根源），
+改为失败即 terminal，并内置连接超时（`connectTimeoutMs`，bundle 内可见 `connect timed out
+after` 标记）。插件使用的全部 ICE 配置键（`iceUseIpv4`/`iceFilterCandidatePair` 等）在 0.26
+类型中保持不变。回归测试改为 0.26 语义（`werift-turn-transport.test.ts`）：连接拒绝与连接中
+RST 均不产生 unhandled rejection、无重拨代际、`send()` 对调用方 reject；bundle 守卫断言
+0.26 标记存在且旧补丁守卫不存在。验证：plugin 481 tests、四共享包 186 tests、vscode check、
+`NODE_ENV=production` 重建与 `verify-dsh-plugin` 通过；`verify-packed-webrtc.mjs` 在 main
+上因 schemastery 新增 `@standard-schema/spec` 闭包失败（存量问题，未在本轮处理）。
+`orderIceServersForWerift` 的 TURN TCP 优先排序本轮保持不变，待真机验证后再评估。
+
 ## Startup plugin update check (2026-11-02)
 
 启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags
