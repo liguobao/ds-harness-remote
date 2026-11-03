@@ -234,20 +234,24 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
+  artifacts?: UiArtifact[]
+  onSendPrompt?: (text: string) => Promise<boolean>
 }) {
   if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
   if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
+  const hasArtifacts = artifacts !== undefined && artifacts.length > 0
   if (!compact && item.role === 'assistant'
+    && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} />
+  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -301,12 +305,13 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
-function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress }: {
+function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt }: {
   item: ChatMessage
   compact: boolean
   artifacts?: UiArtifact[]
   editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
   onFilePress?: (path: string) => void
+  onSendPrompt?: (text: string) => Promise<boolean>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -333,7 +338,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress }: {
           </View>
         )}
         {artifacts?.map(ui => (
-          <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />
+          <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} onSendPrompt={onSendPrompt} />
         ))}
         {editedFiles?.length && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
         {!item.streaming && (showText || hasArtifacts) && <MessageActions item={item} />}

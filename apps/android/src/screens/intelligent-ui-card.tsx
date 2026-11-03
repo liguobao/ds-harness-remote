@@ -63,7 +63,7 @@ function documentFor(token: string): string {
     + '})();</script></body></html>'
 }
 
-export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
+export function IntelligentUiCard({ artifact, onSendPrompt }: { artifact: UiArtifact; onSendPrompt?: (text: string) => Promise<boolean> }) {
   const { colors, scheme } = useTheme()
   const token = useMemo(() => Crypto.randomUUID(), [artifact.hostId, artifact.sessionId, artifact.uiId])
   const html = useMemo(() => documentFor(token), [token])
@@ -174,15 +174,25 @@ export function IntelligentUiCard({ artifact }: { artifact: UiArtifact }) {
         // until delivery settles, but a second callback cannot send again.
         const now = useAppStore.getState()
         if (!actions.current.submit(ticket)) return
-        void now.sendMessage(text).then(outcome => {
-          if (!mounted.current || !actions.current.isCurrent(ticket)) return
-          reply(id, outcome === 'sent', outcome === 'kept'
-            ? 'Delivery unconfirmed; inspect the session before retrying'
-            : 'Prompt was not accepted')
-        }).catch(e => {
-          if (!mounted.current || !actions.current.isCurrent(ticket)) return
-          reply(id, false, e instanceof Error ? e.message : 'Prompt failed')
-        }).finally(() => { actions.current.finish(ticket) })
+        if (onSendPrompt) {
+          void onSendPrompt(text).then(ok => {
+            if (!mounted.current || !actions.current.isCurrent(ticket)) return
+            reply(id, ok, ok ? undefined : 'Prompt was not accepted')
+          }).catch(e => {
+            if (!mounted.current || !actions.current.isCurrent(ticket)) return
+            reply(id, false, e instanceof Error ? e.message : 'Prompt failed')
+          }).finally(() => { actions.current.finish(ticket) })
+        } else {
+          void now.sendMessage(text).then(outcome => {
+            if (!mounted.current || !actions.current.isCurrent(ticket)) return
+            reply(id, outcome === 'sent', outcome === 'kept'
+              ? 'Delivery unconfirmed; inspect the session before retrying'
+              : 'Prompt was not accepted')
+          }).catch(e => {
+            if (!mounted.current || !actions.current.isCurrent(ticket)) return
+            reply(id, false, e instanceof Error ? e.message : 'Prompt failed')
+          }).finally(() => { actions.current.finish(ticket) })
+        }
       } },
     ], { cancelable: false })
   }
