@@ -191,7 +191,7 @@ Host 启动本机支持ACP 的Agent，通过ds-harness-remote 通道传递 Promp
 - **Pi Agent（实验性）**：在 Host 安装 `@earendil-works/pi-coding-agent` 与 `pi-acp`，配置 Pi 本机模型服务后，Remote 默认自动检测并初始化，ACP 初始化成功才开放工作区；可在 Remote 设置中明确关闭，使用独立 ACP 数据面。工具按 Host 用户权限执行，逐工具确认需要 Pi 扩展，默认不会自动启用。
 - **OpenCode** — 通过 `opencode acp` 接入，支持工作区发现和历史恢复。Host 启动时检查 CLI 支持的参数，兼容带原生监听器与纯 stdio 的 ACP 构建。Desktop/Android 原生会话归档要求认证 loopback API；不提供该接口的版本会明确报告归档不可用。归档状态由 OpenCode 保存，历史保留；暂不提供恢复归档入口。
 - **Claude** — 使用 Host 本机已授权的 `claude-agent-acp`，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、文字消息及审批，暂不开放图片输入与直接 Files/Terminal 访问。
-- **Hermes** — 通过 Hermes Agent 自带的 ACP 服务端（`hermes acp`）接入，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、流式思考与工具输出、文字消息、审批及模型选择，暂不开放图片输入与直接 Files/Terminal 访问。
+- **Hermes** — 通过 Hermes Agent 自带的 ACP 服务端（`hermes acp`）接入，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、流式思考与工具输出、文字与多模态图片消息、审批及模型选择，不开放直接 Files/Terminal 访问。
 
 配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-integration.md)。
 

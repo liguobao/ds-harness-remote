@@ -514,7 +514,7 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | (string & {})
+export type AcpBackend = 'cursor' | 'claude' | 'opencode' | 'pi' | 'hermes' | 'antigravity' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
 export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
 export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }

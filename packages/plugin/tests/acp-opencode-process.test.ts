@@ -268,6 +268,46 @@ describe('OpencodeAcpClient', () => {
     await client.close()
   })
 
+  it('sends session/cancel as a standard JSON-RPC notification without an id', async () => {
+    const fake = fakeProcess()
+    const outbound: Array<Record<string, unknown>> = []
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        if (!line) continue
+        const message = JSON.parse(line) as Record<string, unknown>
+        outbound.push(message)
+        // Only requests (with an id) are answered; a notification must never get a reply.
+        if (message.method === 'initialize') {
+          fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } })}\n`)
+        }
+      }
+    })
+    const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+    const pendingRequests = () => (client as unknown as { pending: Map<unknown, unknown> }).pending.size
+    try {
+      await client.start()
+
+      // A cancel arrives while a prompt is in flight and must not wait for upstream.
+      const prompt = client.call('session/prompt', { sessionId: 'sess_1', prompt: [] })
+      await flush()
+      expect(pendingRequests()).toBe(1)
+
+      await expect(client.call('session/cancel', { sessionId: 'sess_1' })).resolves.toEqual({})
+      expect(outbound.at(-1)).toEqual({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 'sess_1' } })
+      expect(outbound.at(-1)).not.toHaveProperty('id')
+      // Only the in-flight prompt stays pending: no cancel request was registered.
+      expect(pendingRequests()).toBe(1)
+
+      // Cancelling an idle session is likewise fire-and-forget.
+      const promptMessage = outbound.find(message => message.method === 'session/prompt')!
+      fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: promptMessage.id, result: { stopReason: 'cancelled' } })}\n`)
+      await expect(prompt).resolves.toEqual({ stopReason: 'cancelled' })
+      await expect(client.call('session/cancel', { sessionId: 'sess_1' })).resolves.toEqual({})
+      expect(outbound.at(-1)).toEqual({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: 'sess_1' } })
+      expect(pendingRequests()).toBe(0)
+    } finally { await client.close() }
+  })
+
   it('rejects pending calls when process exits unexpectedly', async () => {
     const fake = fakeProcess()
     fake.child.stdin.on('data', chunk => {
