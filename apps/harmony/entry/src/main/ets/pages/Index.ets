@@ -816,6 +816,19 @@ struct Index {
         .backgroundColor(device.online ? 'rgba(52,211,153,0.12)' : this.pal().chip)
         .border({ width: 1, color: device.online ? 'rgba(52,211,153,0.30)' : this.pal().border })
       Column({ space: 4 }) {
+        Row({ space: 5 }) {
+          Column()
+            .width(6)
+            .height(6)
+            .borderRadius(3)
+            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
+          Text(device.online ? '在线' : '离线')
+            .fontSize(11)
+            .fontColor(device.online ? '#34D399' : this.pal().text3)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Start)
+
         if (this.renamingDeviceId === device.deviceId) {
           TextInput({ text: this.renameInput, placeholder: '输入主机名称' })
             .height(34)
