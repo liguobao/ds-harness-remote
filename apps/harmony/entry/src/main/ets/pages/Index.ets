@@ -1847,6 +1847,50 @@ struct Index {
     }
   }
 
+  /** 轻量 Markdown 渲染：代码块、标题、行内代码与粗体标记不再裸露。 */
+  @Builder
+  MarkdownText(text: string, streaming: boolean) {
+    Column({ space: 5 }) {
+      ForEach(markdownLines(streaming ? text + '▍' : text), (line: MdLine, index: number) => {
+        if (line.code) {
+          Text(line.text)
+            .fontSize(12)
+            .fontFamily('monospace')
+            .fontColor(this.pal().text2)
+            .width('100%')
+            .padding(8)
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(6)
+            .wordBreak(WordBreak.BREAK_ALL)
+            .textAlign(TextAlign.Start)
+        } else if (line.bullet) {
+          Row({ space: 6 }) {
+            Text('·')
+              .fontSize(15)
+              .fontColor(this.pal().text3)
+            Text(line.text)
+              .fontSize(15)
+              .fontColor(this.pal().text)
+              .layoutWeight(1)
+              .wordBreak(WordBreak.BREAK_ALL)
+              .textAlign(TextAlign.Start)
+          }
+          .width('100%')
+        } else {
+          Text(line.text)
+            .fontSize(line.heading ? 17 : 15)
+            .fontWeight(line.heading ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(this.pal().text)
+            .width('100%')
+            .wordBreak(WordBreak.BREAK_ALL)
+            .textAlign(TextAlign.Start)
+        }
+      }, (line: MdLine, index: number) => index.toString())
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
   /** 长按消息：可从该条消息处分叉出一个新会话。 */
   private offerFork(item: ChatItem): void {
     if (item.seq <= 0 || this.runtime.currentSessionId.length === 0) {
@@ -1885,10 +1929,7 @@ struct Index {
               .textAlign(TextAlign.Start)
           }
           if (item.text.length > 0) {
-            Text(item.streaming ? `${item.text}▍` : item.text)
-              .fontSize(15)
-              .fontColor(this.pal().text)
-              .textAlign(TextAlign.Start)
+            this.MarkdownText(item.text, item.streaming)
           }
           if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
             Row({ space: 8 }) {
@@ -1950,7 +1991,9 @@ struct Index {
           Text(item.text)
             .fontSize(11)
             .fontColor(this.pal().text2)
+            .fontFamily('monospace')
             .maxLines(6)
+            .wordBreak(WordBreak.BREAK_ALL)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }
@@ -2201,4 +2244,62 @@ function questionOutcomeLabel(outcome: string): string {
     return '已提交';
   }
   return '已取消';
+}
+
+
+/** 一行可直接渲染的 Markdown 内容。 */
+class MdLine {
+  text: string = '';
+  code: boolean = false;
+  heading: boolean = false;
+  bullet: boolean = false;
+}
+
+/** 把 Markdown 拆成可渲染的行，并去掉会裸露的标记符号。 */
+function markdownLines(source: string): MdLine[] {
+  const out: MdLine[] = [];
+  const raw: string[] = source.split(String.fromCharCode(10));
+  let inCode: boolean = false;
+  for (const original of raw) {
+    const line: string = original.trimEnd();
+    if (line.trim().startsWith('```')) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) {
+      if (line.length > 0) {
+        const code: MdLine = new MdLine();
+        code.text = line;
+        code.code = true;
+        out.push(code);
+      }
+      continue;
+    }
+    if (line.trim().length === 0) {
+      continue;
+    }
+    const entry: MdLine = new MdLine();
+    let body: string = line.trim();
+    if (body.startsWith('### ')) {
+      entry.heading = true;
+      body = body.substring(4);
+    } else if (body.startsWith('## ')) {
+      entry.heading = true;
+      body = body.substring(3);
+    } else if (body.startsWith('# ')) {
+      entry.heading = true;
+      body = body.substring(2);
+    } else if (body.startsWith('- ') || body.startsWith('* ')) {
+      entry.bullet = true;
+      body = body.substring(2);
+    }
+    body = body.split('`').join('');
+    body = body.split('**').join('');
+    body = body.split('__').join('');
+    entry.text = body;
+    if (entry.text.length > 0) {
+      out.push(entry);
+    }
+  }
+  return out;
 }
