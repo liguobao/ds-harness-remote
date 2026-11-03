@@ -83006,6 +83006,10 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         this.busy.delete(id6);
       }
     }
+    if (method === "session/cancel") {
+      this.write({ jsonrpc: "2.0", method, params });
+      return {};
+    }
     const result = await this.request(method, params, budget);
     const nativeApi = this.nativeApi;
     if (method === "session/list" && nativeApi && isRecord16(result) && Array.isArray(result.sessions)) {

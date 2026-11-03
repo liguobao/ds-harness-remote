@@ -82,9 +82,10 @@ acp:
 - 历史：由独立进程读取并转换为原生事件，模型来源标记为 `hermes`，不写入 Harness SessionStore。
 - 模型：`session/new`（或 `session/load`）返回的 `models.availableModels` 即 Host 上的 Hermes 模型清单，切换走标准 `session/set_model`。
 - 审批：Hermes 自己的审批策略决定何时请求确认，危险终端操作会通过 `session/request_permission` 交给 Client 单次允许/拒绝。
-- 限制：与 Claude 一样不开放 ACP workspace 文件/终端工具入口，也不接收图片 Prompt。
+- 图片：支持多模态图片 Prompt，图片作为标准 ACP `image` 内容块随文本一起透传至 `hermes acp`，规格与 AGY 一致（PNG / JPEG / WebP / GIF，单张最多 8 MiB、边长不超过 8192、像素不超过 4000 万，每条消息最多 4 张）。与 AGY 不同，Hermes 直接内联 base64，不写 Host tmp 缓存，因此不存在缓存过期问题。
+- 限制：与 Claude 一样不开放 ACP workspace 文件/终端工具入口。
 
-真实验收记录：本机 Host Gateway → `hermes acp` 已完成工作区列举、会话新建、流式回复（`agent_message_chunk`）、工具执行（`terminal` 输出回传）与历史回放。
+真实验收记录：本机 Host Gateway → `hermes acp` 已完成工作区列举、会话新建、流式回复（`agent_message_chunk`）、工具执行（`terminal` 输出回传）与历史回放。图片 Prompt 的透传与附件回读目前由核心测试（adapter 透传、虚拟会话与附件读取）覆盖，尚未在真实 Host Gateway → `hermes acp` 上做图片验收。
 
 ## 启用已有后端
 
@@ -103,10 +104,10 @@ Codex 默认开启，Cursor 默认关闭；AGY 以 Host 配置为准。未就绪
 | OpenCode | `opencode acp` stdio | 工作区/历史、文字、流式回复、中断、模型/effort |
 | AGY | `agy --input-format stream-json --output-format stream-json` adapter | 工作区/历史、文字与受限图片、流式回复、模型选择 |
 | Pi Agent | `pi-acp` stdio（内部启动 `pi --mode rpc`） | 工作区/历史、文字、流式工具、中断、模型/Thinking |
-| Hermes | `hermes acp` stdio（Hermes Agent 自带 ACP 服务端） | 工作区/历史、文字、流式思考与工具、中断、单次审批、模型选择 |
+| Hermes | `hermes acp` stdio（Hermes Agent 自带 ACP 服务端） | 工作区/历史、文字与多模态图片、流式思考与工具、中断、单次审批、模型选择 |
 | Codex | `codex app-server` stdio | Project/Thread、历史、文字/图片、模型/权限、中断与审批 |
 
-AGY 图片每张最多 8 MiB、每次最多 4 张，写入 Host 专用私有 tmp 缓存，保留 24 小时；系统提前清理 tmp 后图片可能不可用。
+图片规格对 AGY 与 Hermes 相同：每张最多 8 MiB、每条消息最多 4 张（合计不超过 32 MiB），支持 PNG / JPEG / WebP / GIF，单边不超过 8192 像素且不超过 4000 万像素。AGY 将图片写入 Host 专用私有 tmp 缓存，保留 24 小时，系统提前清理 tmp 后图片可能不可用；Hermes 以 base64 内联透传，不写 tmp 缓存。
 工具可用性以 Host capability 和会话 scope 为准。最新工具、AGY 加密跨设备链路、Windows、APK/真机与长期稳定性仍有待验证项，见 [TODO](TODO.md)。
 
 ## 实现方式
