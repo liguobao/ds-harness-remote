@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Square } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
@@ -10,8 +10,12 @@ import { markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExterna
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatActivityGroup, ChatItemView } from '../chat/messages'
-import { chatSections } from '../../state/message-helpers'
+import { chatSections, type ChatSection } from '../../state/message-helpers'
 import { processSegments } from '../chat-process'
+import { useSessionUiArtifacts } from '../chat/use-session-ui-artifacts'
+import { IntelligentUiCard } from '../intelligent-ui-card'
+import type { ToolActivity } from '../../types'
+import type { UiArtifact } from '../../state/ui-artifacts'
 import { BotQuestion, BotViewCard } from './cards'
 import { parseBotReplies } from './replies'
 import { BotReplies } from './reply-view'
@@ -22,7 +26,12 @@ import { linkBotMentions, botMentionTarget } from './mentions'
 import { SessionToolsPanel } from '../session-tools-panel'
 
 const EMPTY: ChatItem[] = []
-type BotChatRow = { kind: 'item'; key: string; item: ChatItem } | { kind: 'activity'; key: string; items: ChatItem[]; closed: boolean }
+type BotChatRow =
+  | { kind: 'item'; key: string; item: ChatItem; artifacts?: UiArtifact[] }
+  | { kind: 'activity'; key: string; items: ChatItem[]; closed: boolean }
+  | { kind: 'ui'; key: string; artifact: UiArtifact }
+  | { kind: 'ui-pointer'; key: string; artifact: UiArtifact }
+  | { kind: 'ui-unavailable'; key: string; item: ToolActivity }
 export function BotConversation({ bot, room, state, client, session, busy, active, perform, onSelectBot }: {
   bot?: BotEntry; room?: BotRoom; state: BotState; client: BotRemoteClient; session: RemoteSession
   busy: boolean; active: boolean; perform: BotPerform; onSelectBot: (id: string) => void
@@ -146,9 +155,39 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const view = object(state.views[session.sessionId])
   const approvals = state.approvals.filter(entry => entry.answerable === true && (room ? entry.roomId === room.id : entry.sessionId === session.sessionId))
   const hidden = state.exchangeTurns[session.sessionId]
-  const hiddenTurns = new Set(Array.isArray(hidden) ? hidden.map(String) : [])
-  const visible = messages.filter(item => item.kind === 'approval' || item.kind === 'question'
-    || !(item.turn !== undefined && hiddenTurns.has(item.turn)))
+  const visible = useMemo(() => {
+    const hiddenTurns = new Set(Array.isArray(hidden) ? hidden.map(String) : [])
+    return messages.filter(item => item.kind === 'approval' || item.kind === 'question'
+      || !(item.turn !== undefined && hiddenTurns.has(item.turn)))
+  }, [messages, hidden])
+  const hostId = useAppStore(store => store.selectedDevice?.deviceId)
+  const previousSectionsRef = useRef<readonly ChatSection[]>([])
+  useEffect(() => { previousSectionsRef.current = [] }, [session.sessionId])
+  const visibleSections = useMemo(() => {
+    const next = chatSections(visible, previousSectionsRef.current)
+    previousSectionsRef.current = next
+    return next
+  }, [visible])
+  const { uiBySection, visibleUiIds } = useSessionUiArtifacts({
+    messages: visible,
+    visibleSections,
+    hostId,
+    sessionId: session.sessionId,
+    backend: session.backend,
+  })
+
+  const onSendPrompt = useCallback(async (promptText: string) => {
+    const trimmed = promptText.trim()
+    if (!trimmed || disabled) return false
+    try {
+      const message = botMessageRequest(state, bot?.id ?? room?.id ?? '', trimmed)
+      const result = await perform(message.endpoint, message.payload)
+      return result.ok
+    } catch {
+      return false
+    }
+  }, [disabled, state, bot?.id, room?.id, perform])
+
   const isDisplayTool = (item: ChatItem): boolean => {
     if (item.kind !== 'tool') return false
     if (item.toolKey === 'show_view') return true
@@ -156,7 +195,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (item.state === 'finished') return (parseBotReplies(item.resultDetail?.text)?.length ?? 0) > 0
     return false
   }
-  const rows: BotChatRow[] = chatSections(visible).flatMap((section): BotChatRow[] => {
+  const rows: BotChatRow[] = visibleSections.flatMap((section): BotChatRow[] => {
     if (section.kind === 'item') {
       // Native system context/receipts can arrive without a turn identifier.
       // They still belong in a disclosure rather than the visible chat body.
@@ -165,25 +204,86 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       }
       return [section]
     }
+    const sectionUi = uiBySection.get(section.key)
+    const cards = sectionUi?.cards ?? []
+    const pointers = sectionUi?.pointers ?? []
+    const unavailableUi = section.items.filter((item): item is ToolActivity =>
+      item.kind === 'tool' && item.state === 'finished'
+      && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
+      && !visibleUiIds.has(item.id)
+      && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
+        || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+
     const segments = processSegments(section.items)
+    const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
     const closed = section.items.some(item => item.turnEnd !== undefined) || !selected?.running
-    return segments.flatMap((segment, index): BotChatRow[] => {
-      if (segment.kind === 'response') return [{ kind: 'item', key: segment.key, item: segment.item }]
+
+    const sectionRows: BotChatRow[] = segments.flatMap((segment, index): BotChatRow[] => {
+      if (segment.kind === 'response') {
+        const attachArtifacts = index === lastResponseIndex && cards.length > 0
+        return [{
+          kind: 'item',
+          key: segment.key,
+          item: segment.item,
+          ...(attachArtifacts ? { artifacts: cards } : {}),
+        }]
+      }
       // Cards and group replies stay visible; only intermediate activity folds.
       const result: BotChatRow[] = []
       let pending: ChatItem[] = []
-      const flush = () => { if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending, closed: closed || index < segments.length - 1 }); pending = [] }
+      const flush = () => {
+        if (pending.length) {
+          result.push({
+            kind: 'activity',
+            key: `activity:${pending[0]!.id}`,
+            items: pending,
+            closed: closed || index < segments.length - 1,
+          })
+          pending = []
+        }
+      }
       for (const item of segment.items) {
-        if (isDisplayTool(item) || item.kind === 'approval' || item.kind === 'question') { flush(); result.push({ kind: 'item', key: item.id, item }) }
-        else pending.push(item)
+        if (isDisplayTool(item) || item.kind === 'approval' || item.kind === 'question') {
+          flush()
+          result.push({ kind: 'item', key: item.id, item })
+        } else {
+          pending.push(item)
+        }
       }
       flush()
       return result
     })
+
+    if (lastResponseIndex === -1 && cards.length > 0) {
+      for (const ui of cards) {
+        sectionRows.push({
+          kind: 'ui',
+          key: `ui:${ui.hostId}:${ui.sessionId}:${ui.uiId}`,
+          artifact: ui,
+        })
+      }
+    }
+
+    for (const pointer of pointers) {
+      sectionRows.push({
+        kind: 'ui-pointer',
+        key: `ui-pointer:${pointer.uiId}:${pointer.version}`,
+        artifact: pointer,
+      })
+    }
+    for (const unavail of unavailableUi) {
+      sectionRows.push({
+        kind: 'ui-unavailable',
+        key: `ui-unavailable:${unavail.id}`,
+        item: unavail,
+      })
+    }
+
+    return sectionRows
   })
   const onApproval: Parameters<typeof ChatItemView>[0]['onApproval'] = async (...args) => { if (!disabled) await respondApproval(...args) }
   const onQuestion: Parameters<typeof ChatItemView>[0]['onQuestion'] = async (...args) => { if (!disabled) await respondQuestion(...args) }
-  const render = (item: ChatItem) => {
+  const render = (item: ChatItem, artifacts?: UiArtifact[]) => {
     if (item.kind === 'tool' && item.toolKey === 'show_view') {
       // Settled and display-only views live in tool history; only the current
       // pending view has authority to submit, and is rendered in the footer.
@@ -197,10 +297,28 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       const rows = parseBotReplies(item.resultDetail?.text)
       if (rows !== undefined && rows.length > 0) return <BotReplies rows={rows} />
     }
-    return <ChatItemView item={item} compact={false} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
+    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
   }
   return <MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
-    <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => <View style={{ paddingTop: index > 0 && rows[index - 1]?.kind !== 'activity' ? 8 : 0 }}>{item.kind === 'activity' ? <ChatActivityGroup dense items={item.items} closed={item.closed} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} /> : render(item.item)}</View>}
+    <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => (
+      <View style={{ paddingTop: index > 0 && rows[index - 1]?.kind !== 'activity' ? 8 : 0 }}>
+        {item.kind === 'activity' ? (
+          <ChatActivityGroup dense items={item.items} closed={item.closed} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
+        ) : item.kind === 'ui' ? (
+          <IntelligentUiCard key={item.key} artifact={item.artifact} onSendPrompt={onSendPrompt} />
+        ) : item.kind === 'ui-pointer' ? (
+          <Text key={item.key} style={[styles.muted, { marginTop: 6, fontSize: 13 }]}>
+            {item.artifact.title || 'Interactive UI'} updated to version {item.artifact.version}; see its original card above.
+          </Text>
+        ) : item.kind === 'ui-unavailable' ? (
+          <Text key={item.key} style={[styles.error, { marginTop: 6, fontSize: 13 }]}>
+            Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.
+          </Text>
+        ) : (
+          render(item.item, item.artifacts)
+        )}
+      </View>
+    )}
       contentContainerStyle={styles.conversation} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={followEnd}
       onScrollBeginDrag={() => { scrolling.current = true; atEnd.current = false }}

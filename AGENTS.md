@@ -14,6 +14,29 @@ RST 均不产生 unhandled rejection、无重拨代际、`send()` 对调用方 r
 上因 schemastery 新增 `@standard-schema/spec` 闭包失败（存量问题，未在本轮处理）。
 `orderIceServersForWerift` 的 TURN TCP 优先排序本轮保持不变，待真机验证后再评估。
 
+## Android Mermaid rendering (2026-11-02, Issue #255)
+
+Android 聊天 Markdown 的 ```mermaid 代码块改为图表。`scripts/build-mermaid.mjs` 将固定版本
+`mermaid@12.2.0` 与 `scripts/mermaid-renderer.js` 打包为忽略的 `src/generated/mermaid-html.ts`
+（已加入 `build:renderers`）；App 根部的单例隐藏 WebView 在首次出现 mermaid 块时才创建，
+串行渲染并按「源码 + 主题」缓存（LRU 48），源码稳定 700ms 后才渲染以避开流式中间态。
+页面 CSP 禁网络/worker，屏蔽 console、弹窗与跳转，`securityLevel: 'strict'`、`htmlLabels: false`、
+`look: 'classic'`；源码上限 20K 字符、SVG 上限 1 MiB、单图 20 秒超时，崩溃/超时重建页面。
+
+内联图用 react-native-svg 原生绘制，但其 Android 渲染器遇到无法解析的属性值会抛异常并
+使整个 App 闪退（实测 marker `orient="auto-start-reverse"`、`AlignmentBaseline` 未知值）。
+因此内联 SVG 不得透传 mermaid 输出：渲染页按白名单重建元素与属性，逐值正则校验，计算样式
+写为属性（仅写与父元素不同的值），marker/渐变提升到 `<defs>` 且其子树写完整样式。
+含 `foreignObject` 的图（journey）只走全屏查看：Modal 中 `javaScriptEnabled={false}` 的
+WebView 以 `<img src="data:image/svg+xml">` 显示原始 SVG，支持双指缩放与复制源码。
+图表与分类色板跟随亮/暗主题；7 种语言补齐 `diagram` 文案。不执行插件 JS，不改 Host/协议。
+
+本轮验证：Android check、49 文件 / 447 tests、production Hermes export（bundle 29.6 MB，
+其中 Mermaid 页面约 5.7 MB）与 diff check 通过；浏览器中 16 种图的白名单内联 SVG 均可解析，
+与原图像素差 ≤2.2%。模拟器（Android 15，WebView 124）以临时本地样例页（未提交）人工检查
+flowchart/sequence/class/state/ER/gantt/pie/mindmap/xychart 亮暗两色、journey 全屏与语法错误
+回退。未在真实 Host 会话或真机验证，未测流式过程、TalkBack、大字体与抓包。
+
 ## Startup plugin update check (2026-11-02)
 
 启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags
