@@ -917,8 +917,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         onBack={() => {
           Keyboard.dismiss()
           setSessionsOpen(false)
-          onOpenDevices()
         }}
+        backLabel={strings.chat.backToChat}
         onClose={() => setSessionsOpen(false)}
         onOpenAutomationTasks={() => {
           setSessionsOpen(false)
