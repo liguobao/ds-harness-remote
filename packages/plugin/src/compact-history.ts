@@ -3,7 +3,10 @@ const LIMIT = 512
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const summary = (value: unknown): string => {
   const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
-  return text.length > LIMIT ? text.slice(0, LIMIT) + '\n[Compact history: output omitted]' : text
+  if (text.length <= LIMIT) return text
+  // Back off one code unit rather than keep half of a surrogate pair (an emoji).
+  const end = /[\uD800-\uDBFF]/.test(text[LIMIT - 1]!) ? LIMIT - 1 : LIMIT
+  return text.slice(0, end) + '\n[Compact history: output omitted]'
 }
 
 function toolValue(value: unknown): unknown {

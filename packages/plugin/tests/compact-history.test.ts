@@ -31,6 +31,17 @@ describe('compact history recovery contract', () => {
     expect(hiddenError.data.message.content.at(-1)).toMatchObject({ toolCallId: 'other-tool', isError: true })
   })
 
+  it('never cuts an emoji in half when it shortens a value', () => {
+    // 511 ASCII characters put the 512-code-unit cut between the two halves of the emoji.
+    const value = `${'a'.repeat(511)}${'😀'.repeat(8)}`
+    const result = compactHistory({ type: 'tool/result', data: { output: value, message: { content: [{ type: 'text', text: value }] } } })
+    const expected = `${'a'.repeat(511)}\n[Compact history: output omitted]`
+    expect(result.data.output).toBe(expected)
+    expect(result.data.message.content[0]).toEqual({ type: 'text', text: expected })
+    expect(compactHistory({ type: 'tool/result', data: { output: `${'a'.repeat(510)}${'😀'.repeat(8)}` } }).data.output)
+      .toBe(`${'a'.repeat(510)}😀\n[Compact history: output omitted]`)
+  })
+
   it('isolates authenticated peer modes and restores complete responses when disabled', async () => {
     const source = page(), call = vi.fn(async () => source)
     const domain = { call, detachPeer: vi.fn(async () => undefined) }
