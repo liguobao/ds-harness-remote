@@ -1,6 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import { bundleManager } from '@kit.AbilityKit';
-import { jsonStr, jsonNum, jsonBool, jsonArr } from '../protocol/Types';
+import { jsonStr, jsonNum, jsonBool, jsonArr, asArray, asRecord } from '../protocol/Types';
 import { AccountLoginResult, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, DeviceIdentity } from '../model/Types';
 
 /** Fallback when the bundle info cannot be read; must match AppScope/app.json5. */
@@ -403,6 +403,24 @@ export class RemoteServerApi {
       throw new RemoteApiError('INVALID_MESSAGE', 'The server returned invalid authorized peer data.', 0);
     }
     return peer;
+  }
+
+  /**
+   * 拉取本连接的短期 ICE 配置（STUN/TURN）。
+   * 直连（lan/p2p/turn）的前提就是这个接口能返回 iceServers；返回空数组说明服务端没配 TURN。
+   */
+  async iceServersJson(connectionId: string): Promise<string> {
+    const token = this.requireToken();
+    const text: string = await this.requestText(
+      `/api/v1/turn/credentials?connection_id=${encodeURIComponent(connectionId)}`,
+      'GET', undefined, token);
+    const root: Object = JSON.parse(text) as Object;
+    const record: Record<string, Object> | undefined = asRecord(root);
+    const servers: Object[] | undefined = record !== undefined ? asArray(record['iceServers']) : undefined;
+    if (servers === undefined || servers.length === 0) {
+      return '';
+    }
+    return JSON.stringify({ iceServers: servers });
   }
 
   /** Presence lives behind its own endpoint; the device list does not always carry it. */

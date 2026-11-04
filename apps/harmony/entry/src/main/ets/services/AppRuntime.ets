@@ -2,7 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { SecureStore, StoredServerConfig } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
-import { RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
+import { RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
 import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
@@ -157,6 +157,8 @@ export class AppRuntime {
   languageMode: number = 0;
   /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
   identityBlocked: boolean = false;
+  /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
+  iceServersJson: string = '';
   /** System dark-mode flag, kept fresh by EntryAbility configuration updates. */
   systemDark: boolean = false;
   /** System orientation flag, kept fresh by EntryAbility configuration updates. */
@@ -394,6 +396,9 @@ export class AppRuntime {
       if (this.connectCancelled) {
         return;
       }
+      // ICE 体检：直连（lan/p2p/turn）前提是服务端给本连接下发 iceServers。
+      // 这里只探测并记日志，不改变当前数据面（仍走 relay）。
+      await this.probeIceConfig(relay);
       const gateway: RemoteGateway = new RemoteGateway(core);
       const features: RemoteHostFeatures = await gateway.probeHostFeatures();
       logInfo('host features: sessionFormat=' + features.sessionFormat + ' apiProxy=' + features.apiProxy
@@ -1414,6 +1419,23 @@ export class AppRuntime {
     this.qrId = '';
     this.qrUrl = '';
     this.notify();
+  }
+
+  /** 探测服务端是否给本连接下发 TURN/STUN 配置，供后续 WebRTC 直连使用。 */
+  private async probeIceConfig(relay: RelayTransport): Promise<void> {
+    try {
+      const info: RelayConnectionInfo = relay.connectionInfo();
+      const api: RemoteServerApi = await this.ensureApi();
+      const ice: string = await api.iceServersJson(info.connectionId);
+      if (ice.length === 0) {
+        logInfo('turn/credentials -> empty（服务端未配置 TURN/STUN，直连不可用）');
+        return;
+      }
+      logInfo('turn/credentials -> ' + ice.substring(0, 240));
+      this.iceServersJson = ice;
+    } catch (error) {
+      logWarn('turn/credentials failed: ' + errorMessage(error));
+    }
   }
 
   private async ensureApi(): Promise<RemoteServerApi> {
