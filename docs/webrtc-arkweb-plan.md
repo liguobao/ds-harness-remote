@@ -112,6 +112,25 @@ Client                                    Server                        Host
   3. **隐藏 Web 组件的生命周期**：页面切后台时 Web 可能被挂起，需在前台恢复时重建 RTC
   4. **二进制帧上限**：DC 单帧建议 < 256 KB，超过要分片（对应协议 `maxRelayFrameBytes`）
 
+## 5a. 可行性已实测（2026-11-04 13:44，本机 MatePad Edge）
+
+隐藏 Web 组件 + JS 自检跑通，ArkWeb 具备完整 WebRTC 能力：
+
+```
+[webrtc] bridge loaded
+[webrtc] env {"hasRtcPeer":true,"hasWebkitRtc":true,"hasDc":true,
+              "ua":"… OpenHarmony 7.0 … Chrome/144.0.0.0 … ArkWeb/7.0.0.111"}
+[webrtc] selftest: sdp exchanged      ← offer/answer 都成功
+[webrtc] selftest: dc open            ← DataChannel 打开
+[webrtc] selftest: got "hello-from-webrtc"   ← 数据通道回环收到数据
+```
+
+也就是说**任务 1 已完成**：`RtcBridge.ets` + `resources/rawfile/webrtc-bridge.html` 已落地，
+`javaScriptProxy` 回调链路可用（`window.dshBridge.onLog` → hilog）。
+
+下一步（任务 2/3）：把自检换成真实协商——ICE 配置从 `GET /api/v1/turn/credentials` 取，
+`signal.offer/answer/ice` 走 Control WS，DC 打开后先发 `transport.selected` 再跑 Noise。
+
 ## 6. 本轮（2026-11-04 13:4x）做到哪一步
 
 只完成了**方案与协议核对**，未改代码：时间窗口只到 14:00，且该改动会动到 `SecureTransport`

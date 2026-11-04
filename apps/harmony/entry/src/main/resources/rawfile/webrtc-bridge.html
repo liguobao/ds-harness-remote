@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DSH Remote WebRTC bridge</title>
+  <style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}</style>
+</head>
+<body>
+<script>
+// ============================================================
+// DSH Remote · ArkWeb ↔ WebRTC 桥（自检版）
+// 目的：先证明 ArkWeb 里能 new RTCPeerConnection、能建 DataChannel、
+// 能把事件回传给 ArkTS。真正的信令（signal.offer/answer/ice）由 ArkTS 转发。
+// ============================================================
+(function () {
+  function log(msg) {
+    try { if (window.dshBridge && window.dshBridge.onLog) { window.dshBridge.onLog(String(msg)); } } catch (e) {}
+  }
+
+  function env() {
+    var out = {
+      hasRtcPeer: typeof RTCPeerConnection === 'function',
+      hasWebkitRtc: typeof webkitRTCPeerConnection === 'function',
+      hasDc: typeof RTCDataChannel === 'function',
+      ua: navigator.userAgent
+    };
+    log('env ' + JSON.stringify(out));
+    return out;
+  }
+
+  // 本机自环：两个 PeerConnection 互连，走 host candidate（不依赖服务端）
+  function selfTest() {
+    env();
+    var PC = (typeof RTCPeerConnection === 'function') ? RTCPeerConnection
+           : (typeof webkitRTCPeerConnection === 'function' ? webkitRTCPeerConnection : null);
+    if (!PC) { log('selftest: no RTCPeerConnection'); return; }
+    var a = new PC({ iceServers: [] });
+    var b = new PC({ iceServers: [] });
+    var done = false;
+    a.onicecandidate = function (e) { if (e.candidate) { try { b.addIceCandidate(e.candidate); } catch (err) {} } };
+    b.onicecandidate = function (e) { if (e.candidate) { try { a.addIceCandidate(e.candidate); } catch (err) {} } };
+    b.ondatachannel = function (e) {
+      var rx = e.channel;
+      rx.onmessage = function (m) { log('selftest: got "' + m.data + '"'); done = true; try { rx.close(); a.close(); b.close(); } catch (err) {} };
+    };
+    var dc = a.createDataChannel('dsh', { ordered: true });
+    dc.onopen = function () { log('selftest: dc open'); try { dc.send('hello-from-webrtc'); } catch (err) { log('selftest: send failed ' + err); } };
+    a.createOffer().then(function (offer) {
+      return a.setLocalDescription(offer);
+    }).then(function () {
+      return b.setRemoteDescription(a.localDescription);
+    }).then(function () {
+      return b.createAnswer();
+    }).then(function (answer) {
+      return b.setLocalDescription(answer);
+    }).then(function () {
+      return a.setRemoteDescription(b.localDescription);
+    }).then(function () {
+      log('selftest: sdp exchanged');
+    }).catch(function (err) {
+      log('selftest: failed ' + err);
+    });
+    setTimeout(function () { if (!done) { log('selftest: timeout(6s)'); } }, 6000);
+  }
+
+  window.__dshSelfTest = selfTest;
+  window.addEventListener('load', function () { log('bridge loaded'); });
+})();
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@ import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import { VoiceRecorder } from '../services/VoiceInput';
+import { RtcBridge } from '../services/RtcBridge';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
@@ -20,6 +21,8 @@ import BuildProfile from 'BuildProfile';
 struct Index {
   private runtime: AppRuntime = getAppRuntime();
   private voice: VoiceRecorder = new VoiceRecorder();
+  /** ArkWeb/WebRTC 桥：目前只跑能力自检，数据面仍走 relay。 */
+  private rtc: RtcBridge = new RtcBridge();
   private images: MarkdownImageCache = new MarkdownImageCache();
   @State imageVersion: number = 0;
   private scroller: Scroller = new Scroller();
@@ -692,6 +695,24 @@ struct Index {
       if (this.showSettings) {
         this.SettingsOverlay()
       }
+      // 隐藏的 WebRTC 桥：1x1 透明，仅承载 JS RTCPeerConnection
+      Web({ src: $rawfile('webrtc-bridge.html'), controller: this.rtc.controller })
+        .javaScriptAccess(true)
+        .domStorageAccess(false)
+        .fileAccess(false)
+        .javaScriptProxy({
+          object: this.rtc.proxyObject(),
+          name: 'dshBridge',
+          methodList: ['onLog'],
+          controller: this.rtc.controller
+        })
+        .onPageEnd(() => {
+          this.rtc.startSelfTest();
+        })
+        .width(1)
+        .height(1)
+        .opacity(0)
+        .hitTestBehavior(HitTestMode.None)
     }
     .width('100%')
     .height('100%')
