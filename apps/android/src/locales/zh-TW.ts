@@ -352,6 +352,7 @@ const zhTW = {
     copy: '複製',
   },
   automation: {
+    subtitle: '統一管理對話中的定時提醒',
     title: '自動化任務',
     nav: '自動化任務',
     newAction: '新增',
@@ -361,7 +362,7 @@ const zhTW = {
     filterAll: '全部',
     filterActive: '已啟用',
     filterInactive: '已結束',
-    empty: '尚無自動化任務，在對話中建立的任務會顯示在這裡',
+    empty: '還沒有自動化任務',
     emptyInactive: '沒有已結束的自動化任務',
     noMatches: '沒有相符的自動化任務',
     loading: '正在載入任務…',

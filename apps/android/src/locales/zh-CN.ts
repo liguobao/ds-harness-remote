@@ -352,6 +352,7 @@ const zhCN = {
     copy: '复制',
   },
   automation: {
+    subtitle: '统一管理会话中的定时提醒',
     title: '自动化任务',
     nav: '自动化任务',
     newAction: '新建',
@@ -361,7 +362,7 @@ const zhCN = {
     filterAll: '全部',
     filterActive: '已开启',
     filterInactive: '已结束',
-    empty: '还没有自动化任务，在会话中创建的任务会显示在这里',
+    empty: '还没有自动化任务',
     emptyInactive: '没有已结束的自动化任务',
     noMatches: '没有匹配的自动化任务',
     loading: '正在加载任务…',

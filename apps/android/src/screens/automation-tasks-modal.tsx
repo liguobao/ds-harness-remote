@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -209,6 +210,12 @@ export function AutomationTasksModal({
       })
       .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))
   }, [tasks, search, statusFilter])
+
+  /** Sessions without a human title carry the raw id as their title. */
+  const sessionLabel = (sessionId: string, title?: string | null): string =>
+    title !== undefined && title !== null && title !== '' && !title.startsWith('session-')
+      ? title
+      : sessionId.slice(-8)
 
   const emptyTitle = useMemo(() => {
     if (statusFilter === 'inactive' && search.trim() === '') {
@@ -594,6 +601,7 @@ export function AutomationTasksModal({
                   placeholderTextColor={colors.muted}
                   maxLength={120}
                   style={styles.formInput}
+                  selectionColor={colors.primary}
                 />
               </View>
 
@@ -608,6 +616,7 @@ export function AutomationTasksModal({
                   multiline
                   numberOfLines={4}
                   style={[styles.formInput, styles.formInputMultiline]}
+                  selectionColor={colors.primary}
                 />
               </View>
 
@@ -627,7 +636,7 @@ export function AutomationTasksModal({
                         >
                           <MessageSquare size={13} color={active ? colors.white : colors.muted} />
                           <Text style={[styles.sessionPillText, active && styles.sessionPillTextActive]} numberOfLines={1}>
-                            {s.title || s.sessionId.substring(0, 8)}
+                            {sessionLabel(s.sessionId, s.title)}
                           </Text>
                         </Pressable>
                       )
@@ -844,6 +853,7 @@ export function AutomationTasksModal({
                       placeholder="0 9 * * *"
                       placeholderTextColor={colors.muted}
                       style={styles.formInput}
+                  selectionColor={colors.primary}
                     />
                   </View>
                 )}
@@ -883,26 +893,15 @@ export function AutomationTasksModal({
               <Text style={styles.headerTitle} numberOfLines={1}>
                 {selectedTask.title || strings.automation.detailTitle}
               </Text>
-              <View style={styles.headerRight}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.automation.editTask}
-                  onPress={() => openEditForm(selectedTask)}
-                  hitSlop={8}
-                  style={styles.headerBtn}
-                >
-                  <Edit2 size={18} color={colors.ink} />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.automation.deleteTask}
-                  onPress={handleDelete}
-                  hitSlop={8}
-                  style={styles.headerBtn}
-                >
-                  <Trash2 size={18} color={colors.danger} />
-                </Pressable>
-              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.automation.editTask}
+                onPress={() => openEditForm(selectedTask)}
+                hitSlop={8}
+                style={styles.headerBtn}
+              >
+                <Edit2 size={18} color={colors.ink} />
+              </Pressable>
             </View>
 
             {/* Detail Tabs */}
@@ -1041,7 +1040,7 @@ export function AutomationTasksModal({
                     <View style={styles.linkedSessionRow}>
                       <MessageSquare size={16} color={colors.muted} />
                       <Text style={styles.linkedSessionTitle} numberOfLines={1}>
-                        {linkedSession?.title || selectedTask.sessionId}
+                        {sessionLabel(selectedTask.sessionId, linkedSession?.title)}
                       </Text>
                     </View>
                     <Pressable
@@ -1104,28 +1103,17 @@ export function AutomationTasksModal({
                 <ArrowLeft size={20} color={colors.ink} />
               </Pressable>
               <Text style={styles.headerTitle}>{strings.automation.title}</Text>
-              <View style={styles.headerRight}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.common.refresh}
-                  onPress={() => void loadTasks()}
-                  hitSlop={8}
-                  style={styles.headerBtn}
-                >
-                  <RefreshCw size={17} color={colors.muted} />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.automation.newAction}
-                  onPress={openCreateForm}
-                  hitSlop={8}
-                  style={[styles.headerBtn, styles.newBtn]}
-                >
-                  <Plus size={16} color="#ffffff" />
-                  <Text style={styles.newBtnText}>{strings.automation.newAction}</Text>
-                </Pressable>
-              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.automation.newTask}
+                onPress={openCreateForm}
+                hitSlop={8}
+                style={[styles.headerBtn, styles.headerBtnPrimary]}
+              >
+                <Plus size={20} color={colors.white} />
+              </Pressable>
             </View>
+            <Text style={styles.subtitle}>{strings.automation.subtitle}</Text>
 
             {/* Error Banner if error occurred */}
             {Boolean(error) && (
@@ -1143,31 +1131,6 @@ export function AutomationTasksModal({
                 </Pressable>
               </View>
             )}
-
-            {/* Filter Tabs */}
-            <View style={styles.filterTabsRow}>
-              {(['all', 'active', 'inactive'] as const).map(f => (
-                <Pressable
-                  key={f}
-                  accessibilityRole="button"
-                  onPress={() => setStatusFilter(f)}
-                  style={[styles.filterTab, statusFilter === f && styles.filterTabActive]}
-                >
-                  <Text
-                    style={[
-                      styles.filterTabText,
-                      statusFilter === f && styles.filterTabTextActive,
-                    ]}
-                  >
-                    {f === 'all'
-                      ? strings.automation.filterAll
-                      : f === 'active'
-                        ? strings.automation.filterActive
-                        : strings.automation.filterInactive}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
 
             {/* Search Input */}
             <View style={styles.searchWrapper}>
@@ -1191,6 +1154,32 @@ export function AutomationTasksModal({
               )}
             </View>
 
+            {/* Filter Tabs */}
+            <View style={styles.segmented}>
+              {(['all', 'active', 'inactive'] as const).map(f => (
+                <Pressable
+                  key={f}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: statusFilter === f }}
+                  onPress={() => setStatusFilter(f)}
+                  style={[styles.segment, statusFilter === f && styles.segmentActive]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      statusFilter === f && styles.segmentTextActive,
+                    ]}
+                  >
+                    {f === 'all'
+                      ? strings.automation.filterAll
+                      : f === 'active'
+                        ? strings.automation.filterActive
+                        : strings.automation.filterInactive}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
             {/* Task List or Empty State */}
             {loading && tasks.length === 0 ? (
               <View style={styles.centerContainer}>
@@ -1198,69 +1187,76 @@ export function AutomationTasksModal({
                 <Text style={styles.loadingText}>{strings.automation.loading}</Text>
               </View>
             ) : rows.length === 0 ? (
-              <View style={styles.centerContainer}>
-                <Clock size={48} color={colors.muted} style={styles.emptyIcon} />
+              <ScrollView
+                contentContainerStyle={styles.emptyScroll}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={loading}
+                    onRefresh={() => void loadTasks()}
+                    tintColor={colors.muted}
+                    colors={[colors.primary]}
+                  />
+                }
+              >
+                <Clock size={56} color={colors.subtle} style={styles.emptyIcon} />
                 <Text style={styles.emptyHeading}>{emptyTitle}</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={openCreateForm}
-                  style={({ pressed }) => [styles.emptyActionBtn, pressed && styles.pressedBg]}
-                >
-                  <Plus size={16} color={colors.onInverse} />
-                  <Text style={styles.emptyActionBtnText}>{strings.automation.newTask}</Text>
-                </Pressable>
-              </View>
+              </ScrollView>
             ) : (
-              <ScrollView contentContainerStyle={styles.listContainer}>
-                {rows.map(task => {
-                  const nextRun = formatNextRun(task.scheduledAt)
-                  return (
-                    <Pressable
-                      key={task.id}
-                      accessibilityRole="button"
-                      onPress={() => setSelectedTaskId(task.id)}
-                      style={({ pressed }) => [styles.taskRow, pressed && styles.pressedBg]}
-                    >
-                      <View style={styles.taskIconSlot}>
-                        <Clock size={18} color={task.status === 'active' ? colors.ink : colors.muted} />
-                      </View>
-                      <View style={styles.taskContent}>
-                        <Text style={styles.taskTitle} numberOfLines={1}>
-                          {task.title}
-                        </Text>
-                        <View style={styles.taskMetaRow}>
-                          <View
-                            style={[
-                              styles.smallBadge,
-                              task.status === 'active' ? styles.statusBadgeActive : styles.statusBadgeInactive,
-                            ]}
-                          >
+              <ScrollView
+                contentContainerStyle={styles.listContainer}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={loading}
+                    onRefresh={() => void loadTasks()}
+                    tintColor={colors.muted}
+                    colors={[colors.primary]}
+                  />
+                }
+              >
+                <View style={styles.listCard}>
+                  {rows.map((task, index) => {
+                    const nextRun = formatNextRun(task.scheduledAt)
+                    const active = task.status === 'active'
+                    return (
+                      <Pressable
+                        key={task.id}
+                        accessibilityRole="button"
+                        onPress={() => setSelectedTaskId(task.id)}
+                        style={({ pressed }) => [
+                          styles.taskRow,
+                          index > 0 && styles.taskRowDivided,
+                          pressed && styles.pressedBg,
+                        ]}
+                      >
+                        <View style={styles.taskIconBox}>
+                          <Clock size={17} color={active ? colors.primary : colors.muted} />
+                        </View>
+                        <View style={styles.taskContent}>
+                          <View style={styles.taskTitleRow}>
+                            <Text style={styles.taskTitle} numberOfLines={1}>
+                              {task.title}
+                            </Text>
                             <Text
                               style={[
-                                styles.smallBadgeText,
-                                task.status === 'active' ? styles.statusTextActive : styles.statusTextInactive,
+                                styles.taskBadge,
+                                active ? styles.taskBadgeActive : styles.taskBadgeInactive,
                               ]}
                             >
-                              {task.status === 'active'
+                              {active
                                 ? strings.automation.statusActive
                                 : strings.automation.statusInactive}
                             </Text>
                           </View>
                           <Text style={styles.taskMetaText} numberOfLines={1}>
                             {formatFrequency(task)}
+                            {active ? ` · ${nextRun.absolute} ${nextRun.relative}` : ''}
                           </Text>
-                          {task.status === 'active' && (
-                            <Text style={styles.taskMetaNext} numberOfLines={1}>
-                              {strings.automation.nextPrefix}
-                              {nextRun.absolute} {nextRun.relative}
-                            </Text>
-                          )}
                         </View>
-                      </View>
-                      <ChevronRight size={16} color={colors.muted} />
-                    </Pressable>
-                  )
-                })}
+                        <ChevronRight size={16} color={colors.subtle} />
+                      </Pressable>
+                    )
+                  })}
+                </View>
               </ScrollView>
             )}
           </View>
@@ -1319,56 +1315,103 @@ function createStyles(colors: ThemeColors) {
       gap: 4,
     },
     newBtnText: { ...type.smallStrong, color: colors.white },
-    filterTabsRow: {
-      flexDirection: 'row',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      gap: spacing.xs,
+    subtitle: {
+      ...type.caption,
+      color: colors.muted,
+      textAlign: 'center',
+      paddingHorizontal: spacing.lg,
+      marginTop: -spacing.xxs,
+      marginBottom: spacing.sm,
     },
-    filterTab: {
-      paddingHorizontal: spacing.md,
-      height: 36,
+    headerBtnPrimary: {
+      backgroundColor: colors.primary,
+    },
+    segmented: {
+      flexDirection: 'row',
+      marginHorizontal: spacing.md,
+      marginTop: spacing.sm,
+      marginBottom: spacing.sm,
+      padding: 3,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+    },
+    segment: {
+      flex: 1,
+      height: 34,
+      alignItems: 'center',
       justifyContent: 'center',
       borderRadius: radius.pill,
-      backgroundColor: 'transparent',
     },
-    filterTabActive: {
-      backgroundColor: colors.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+    segmentActive: {
+      backgroundColor: colors.card,
       ...floatingShadow(colors),
     },
-    filterTabText: { ...type.small, fontSize: 15, color: colors.muted },
-    filterTabTextActive: { color: colors.ink, fontWeight: '600' },
+    segmentText: { ...type.small, fontSize: 14, color: colors.muted, fontWeight: '600' },
+    segmentTextActive: { color: colors.ink, fontWeight: '600' },
+    emptyScroll: {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xxl,
+    },
     searchWrapper: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.grouped,
       marginHorizontal: spacing.md,
-      marginBottom: spacing.sm,
+      marginTop: spacing.sm,
+      marginBottom: spacing.xs,
       paddingHorizontal: spacing.md,
       borderRadius: radius.pill,
       height: 46,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
     },
     searchIcon: { marginRight: spacing.xs },
     searchInput: { flex: 1, ...type.body, color: colors.ink, paddingVertical: 0 },
-    listContainer: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
+    listContainer: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xxl },
+    listCard: {
+      backgroundColor: colors.card,
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      overflow: 'hidden',
+    },
     taskRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.separator,
       gap: spacing.sm,
     },
-    taskIconSlot: { width: 24, alignItems: 'center', justifyContent: 'center' },
+    taskRowDivided: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
+    taskIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primarySoft,
+    },
     taskContent: { flex: 1 },
-    taskTitle: { ...type.bodyStrong, color: colors.ink, marginBottom: 2 },
-    taskMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-    taskMetaText: { ...type.caption, color: colors.muted },
-    taskMetaNext: { ...type.caption, color: colors.muted },
-    smallBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.pill },
-    smallBadgeText: { ...type.caption, fontWeight: '600' },
+    taskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    taskTitle: { ...type.bodyStrong, color: colors.ink, flexShrink: 1 },
+    taskBadge: {
+      ...type.caption,
+      fontSize: 11,
+      fontWeight: '600',
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      overflow: 'hidden',
+    },
+    taskBadgeActive: { color: colors.success, backgroundColor: colors.successSoft },
+    taskBadgeInactive: { color: colors.muted, backgroundColor: colors.surfaceStrong },
+    taskMetaText: { ...type.caption, color: colors.muted, marginTop: 2 },
     statusBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill },
     statusBadgeText: { ...type.caption, fontWeight: '600' },
     statusBadgeActive: { backgroundColor: colors.successSoft },
@@ -1542,10 +1585,12 @@ function createStyles(colors: ThemeColors) {
       marginBottom: spacing.xs,
     },
     formInput: {
-      backgroundColor: colors.grouped,
+      backgroundColor: colors.background,
       borderRadius: radius.lg,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
       ...type.body,
       color: colors.ink,
     },
@@ -1560,6 +1605,7 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
+      maxWidth: 240,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
       borderRadius: radius.pill,

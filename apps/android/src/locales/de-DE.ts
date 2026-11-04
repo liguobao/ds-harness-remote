@@ -354,6 +354,7 @@ const deDE = {
     copy: 'Kopieren',
   },
   automation: {
+    subtitle: 'Geplante Erinnerungen aus deinen Sitzungen verwalten',
     title: 'Automatisierungsaufgaben',
     nav: 'Automatisierungsaufgaben',
     newAction: 'Neu',
@@ -363,7 +364,7 @@ const deDE = {
     filterAll: 'Alle',
     filterActive: 'Aktiviert',
     filterInactive: 'Inaktiv',
-    empty: 'Noch keine Aufgaben. In Sitzungen erstellte Aufgaben erscheinen hier.',
+    empty: 'Noch keine geplanten Aufgaben',
     emptyInactive: 'Keine inaktiven Automatisierungsaufgaben',
     noMatches: 'Keine passenden Aufgaben',
     loading: 'Aufgaben werden geladen…',

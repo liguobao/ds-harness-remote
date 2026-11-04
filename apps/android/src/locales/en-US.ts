@@ -354,6 +354,7 @@ const enUS = {
     copy: 'Copy',
   },
   automation: {
+    subtitle: 'Manage scheduled reminders across your sessions',
     title: 'Automation tasks',
     nav: 'Automation tasks',
     newAction: 'New',
@@ -363,7 +364,7 @@ const enUS = {
     filterAll: 'All',
     filterActive: 'Enabled',
     filterInactive: 'Inactive',
-    empty: 'No tasks yet. Tasks created in your sessions appear here.',
+    empty: 'No scheduled tasks yet',
     emptyInactive: 'No inactive automation tasks',
     noMatches: 'No matching tasks',
     loading: 'Loading tasks…',

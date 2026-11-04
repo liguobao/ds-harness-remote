@@ -354,6 +354,7 @@ const jaJP = {
     copy: 'コピー',
   },
   automation: {
+    subtitle: 'セッションの定期リマインダーを管理する',
     title: '自動化タスク',
     nav: '自動化タスク',
     newAction: '新規作成',
@@ -363,7 +364,7 @@ const jaJP = {
     filterAll: 'すべて',
     filterActive: '有効',
     filterInactive: '終了',
-    empty: '自動化タスクはまだありません。会話で作成されたタスクがここに表示されます。',
+    empty: 'スケジュールタスクはまだありません',
     emptyInactive: '終了した自動化タスクはありません',
     noMatches: '一致する自動化タスクはありません',
     loading: 'タスクを読み込み中…',

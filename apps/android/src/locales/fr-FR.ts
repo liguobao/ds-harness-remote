@@ -354,6 +354,7 @@ const frFR = {
     copy: 'Copier',
   },
   automation: {
+    subtitle: 'Gérez les rappels programmés de vos sessions',
     title: "Tâches d'automatisation",
     nav: "Tâches d'automatisation",
     newAction: 'Nouveau',
@@ -363,7 +364,7 @@ const frFR = {
     filterAll: 'Tout',
     filterActive: 'Activé',
     filterInactive: 'Inactif',
-    empty: 'Pas encore de tâches. Les tâches créées dans vos sessions apparaîtront ici.',
+    empty: 'Aucune tâche planifiée pour le moment',
     emptyInactive: "Aucune tâche d'automatisation inactive",
     noMatches: 'Aucune tâche correspondante',
     loading: 'Chargement des tâches…',

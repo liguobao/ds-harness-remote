@@ -354,6 +354,7 @@ const esES = {
     copy: 'Copiar',
   },
   automation: {
+    subtitle: 'Gestiona los recordatorios programados de tus sesiones',
     title: 'Tareas de automatización',
     nav: 'Tareas de automatización',
     newAction: 'Nueva',
@@ -363,7 +364,7 @@ const esES = {
     filterAll: 'Todas',
     filterActive: 'Activadas',
     filterInactive: 'Inactivas',
-    empty: 'Aún no hay tareas. Las tareas creadas en tus sesiones aparecerán aquí.',
+    empty: 'Aún no hay tareas programadas',
     emptyInactive: 'No hay tareas inactivas',
     noMatches: 'No se encontraron tareas coincidentes',
     loading: 'Cargando tareas…',
