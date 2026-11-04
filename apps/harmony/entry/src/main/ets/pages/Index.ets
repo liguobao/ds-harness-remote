@@ -510,22 +510,22 @@ struct Index {
   /** 设备卡第三行：在线状态用绿点表达，这里只补「最近活动」，避免「在线」重复两遍。 */
   private hostSeenLabel(device: RemoteHostDevice): string {
     if (device.online) {
-      return this.tr('此刻在线');
+      return this.tr('在线');
     }
     if (device.lastSeenAt <= 0) {
-      return this.tr('离线 · 无活动记录');
+      return this.tr('离线');
     }
     const diff: number = Date.now() - device.lastSeenAt;
     if (diff < 60000) {
-      return this.tr('离线 · 刚刚还在');
+      return this.tr('离线');
     }
     if (diff < 3600000) {
-      return this.en() ? `offline · ${Math.round(diff / 60000)} min ago` : `离线 · ${Math.round(diff / 60000)} 分钟前`;
+      return this.en() ? `offline ${Math.round(diff / 60000)}m` : `离线 ${Math.round(diff / 60000)} 分钟`;
     }
     if (diff < 86400000) {
-      return this.en() ? `offline · ${Math.round(diff / 3600000)} h ago` : `离线 · ${Math.round(diff / 3600000)} 小时前`;
+      return this.en() ? `offline ${Math.round(diff / 3600000)}h` : `离线 ${Math.round(diff / 3600000)} 小时`;
     }
-    return this.en() ? `offline · ${Math.round(diff / 86400000)} d ago` : `离线 · ${Math.round(diff / 86400000)} 天前`;
+    return this.en() ? `offline ${Math.round(diff / 86400000)}d` : `离线 ${Math.round(diff / 86400000)} 天`;
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
@@ -1249,22 +1249,17 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        Column({ space: 2 }) {
-          Text(this.hostCountLabel())
-            .fontSize(12)
-            .fontColor(this.pal().text2)
-          Text(this.onlineCountLabel())
-            .fontSize(10)
-            .fontColor(this.pal().text3)
-        }
-        .alignItems(HorizontalAlign.End)
+        Text(this.hostCountLabel() + ' · ' + this.onlineCountLabel())
+          .fontSize(12)
+          .fontColor(this.pal().text2)
+          .maxLines(1)
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 10, bottom: 12 })
     }
     .width('100%')
     .height('100%')
-    .constraintSize({ maxWidth: 880 })
+    .constraintSize({ maxWidth: 760 })
   }
 
   @Builder
@@ -1284,19 +1279,6 @@ struct Index {
         .backgroundColor(device.online ? 'rgba(52,211,153,0.12)' : this.pal().chip)
         .border({ width: 1, color: device.online ? 'rgba(52,211,153,0.30)' : this.pal().border })
       Column({ space: 4 }) {
-        Row({ space: 5 }) {
-          Column()
-            .width(6)
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          Text(device.online ? this.tr('在线') : this.tr('离线'))
-            .fontSize(11)
-            .fontColor(device.online ? '#34D399' : this.pal().text3)
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Start)
-
         if (this.renamingDeviceId === device.deviceId) {
           TextInput({ text: this.renameInput, placeholder: this.tr('输入主机名称') })
             .height(34)
@@ -1340,27 +1322,11 @@ struct Index {
               }
             })
         }
-        Row({ space: 6 }) {
-          Column()
-            .width(6)
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          Column({ space: 2 }) {
-            Text(this.hostSubtitle(device))
-              .fontSize(12)
-              .fontColor(this.pal().text2)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.hostSeenLabel(device))
-              .fontSize(10)
-              .fontColor(this.pal().text3)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-        }
+        Text(this.hostSubtitle(device))
+          .fontSize(11)
+          .fontColor(this.pal().text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -1387,6 +1353,20 @@ struct Index {
             })
         }
       } else {
+        Row({ space: 5 }) {
+          Column()
+            .width(6)
+            .height(6)
+            .borderRadius(3)
+            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
+          Text(this.hostSeenLabel(device))
+            .fontSize(11)
+            .fontColor(device.online ? '#34D399' : this.pal().text3)
+            .maxLines(1)
+        }
+        .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+        .backgroundColor(device.online ? 'rgba(52,211,153,0.12)' : this.pal().chip)
+        .borderRadius(12)
         Text(this.tr('改名'))
           .fontSize(11)
           .fontColor(this.pal().text2)
@@ -2477,7 +2457,7 @@ struct Index {
             .fontWeight(line.heading ? FontWeight.Bold : FontWeight.Normal)
             .fontColor(this.pal().text)
             .width('100%')
-            .wordBreak(WordBreak.BREAK_ALL)
+            .wordBreak(WordBreak.NORMAL)
             .textAlign(TextAlign.Start)
         }
       }, (line: MdLine, index: number) => index.toString())
@@ -2733,6 +2713,7 @@ struct Index {
         .alignItems(HorizontalAlign.Start)
       }
       .width('88%')
+      .constraintSize({ maxWidth: 780 })
       .justifyContent(FlexAlign.Start)
     }
     .width('100%')
@@ -2822,7 +2803,7 @@ struct Index {
             .fontSize(11)
             .fontColor(this.pal().text2)
             .fontFamily('monospace')
-            .maxLines(6)
+            .maxLines(2)
             .wordBreak(WordBreak.BREAK_ALL)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -2831,10 +2812,9 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .padding({ top: 10, bottom: 10, left: 12, right: 12 })
-    .backgroundColor(this.pal().card)
-    .borderRadius(14)
-    .border({ width: 1, color: this.pal().border })
+    .padding({ top: 8, bottom: 8, left: 12, right: 12 })
+    .backgroundColor(this.pal().inputBg)
+    .borderRadius(10)
   }
 
   @Builder
