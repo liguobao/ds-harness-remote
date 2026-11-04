@@ -244,6 +244,11 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations?: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpInstallResult?: {
+    backend: string
+    action: 'configured' | 'installed' | 'download_required'
+    downloadUrl?: string
+  }
 }
 
 export interface PluginAssociation {
