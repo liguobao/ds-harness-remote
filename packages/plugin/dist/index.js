@@ -56279,6 +56279,7 @@ function parseWireJson(input4) {
 
 // ../protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
+var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
 var PROTOCOL_VERSION = 1;
 var MAX_CONTROL_FRAME_BYTES = 64 * 1024;
@@ -56636,6 +56637,7 @@ var connectRequestPayloadSchema = external_exports.object({
   preferredTransports: external_exports.array(external_exports.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(external_exports.array(transportEnum))
 });
 var connectIncomingPayloadSchema = external_exports.object({
+  relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
   clientDeviceId: external_exports.string().min(1),
@@ -56648,6 +56650,7 @@ var connectIncomingPayloadSchema = external_exports.object({
   relayEpoch: external_exports.number().int().nonnegative().optional()
 });
 var connectAcceptedPayloadSchema = external_exports.object({
+  relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
   relayEndpoint: external_exports.string().url().optional(),
@@ -61106,7 +61109,7 @@ var ControlLease = class {
 };
 
 // ../webrtc/dist/adaptive-transport.js
-var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
+var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
   url;
@@ -61138,6 +61141,7 @@ var AdaptiveTransport = class extends BaseTransport {
   relayAssignment;
   dataReady = false;
   recoveryTicket;
+  relayRecoveryTicket;
   lease;
   recoveryTimer;
   recoveryOpeningTimer;
@@ -61270,7 +61274,7 @@ var AdaptiveTransport = class extends BaseTransport {
   }
   getStats() {
     const webrtcConnected = this.dataMode === "webrtc" && this.rtc?.getStats().connected === true;
-    const relayConnected = this.dataMode === "relay" && this.socket?.readyState === WebSocket.OPEN && this.connectionId !== void 0;
+    const relayConnected = this.dataMode === "relay" && (this.dataSocket?.readyState === WebSocket.OPEN && this.dataReady || this.socket?.readyState === WebSocket.OPEN) && this.connectionId !== void 0;
     const connected = webrtcConnected || relayConnected;
     let mode2 = "Disconnected";
     if (this.selected === "relay")
@@ -61310,7 +61314,7 @@ var AdaptiveTransport = class extends BaseTransport {
           this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs;
         }
         if (this.lease) {
-          if (!this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
+          if (!this.negotiatedCapabilities.includes(this.dataMode === "webrtc" ? WEBRTC_RESUME_CAPABILITY : RELAY_RESUME_CAPABILITY))
             throw new Error("Server no longer supports control recovery");
           clearTimeout(this.recoveryOpeningTimer);
           this.recoveryAttempt = 0;
@@ -61333,6 +61337,8 @@ var AdaptiveTransport = class extends BaseTransport {
         this.connectionId = payload.connectionId;
         if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
           this.recoveryTicket = payload.recoveryTicket;
+        if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY))
+          this.relayRecoveryTicket = payload.relayRecoveryTicket;
         const assignment = payload;
         if (typeof assignment.relayEndpoint === "string" && typeof assignment.relayTicket === "string") {
           this.relayAssignment = assignment;
@@ -61533,9 +61539,10 @@ var AdaptiveTransport = class extends BaseTransport {
     return { transport: rtc.selectedTransport() ?? "p2p", relayUrl: rtc.selectedRelayUrl() };
   }
   markSecureReady() {
-    if (!this.recoveryTicket || !this.connectionId || this.dataMode !== "webrtc" || this.lease)
+    const ticket = this.dataMode === "webrtc" ? this.recoveryTicket : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN ? this.relayRecoveryTicket : void 0;
+    if (!ticket || !this.connectionId || this.lease)
       return;
-    this.lease = new ControlLease(this.connectionId, this.recoveryTicket, (payload) => {
+    this.lease = new ControlLease(this.connectionId, ticket, (payload) => {
       if (this.controlReady && this.lastControlReceivedAt !== void 0 && Date.now() - this.lastControlReceivedAt >= 75e3) {
         this.controlLost(new Error("Control heartbeat timed out"), { reason: "control-error" });
         throw new Error("Control heartbeat timed out");
@@ -61545,7 +61552,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.lease.start();
   }
   controlLost(error62, diagnostic) {
-    if (error62.retryable === false || !this.lease?.canDetach() || this.dataMode !== "webrtc" || !this.rtc?.getStats().connected) {
+    if (error62.retryable === false || !this.lease?.canDetach() || !(this.dataMode === "webrtc" ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
       this.failConnection(error62, diagnostic);
       return;
     }
@@ -61777,6 +61784,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.lease?.stop();
     this.lease = void 0;
     this.recoveryTicket = void 0;
+    this.relayRecoveryTicket = void 0;
     clearTimeout(this.recoveryTimer);
     clearTimeout(this.recoveryOpeningTimer);
     this.recoveryTimer = void 0;
@@ -86961,6 +86969,9 @@ var HostServerConnection = class {
           ...error62 instanceof ServerApiError && error62.status !== void 0 ? { status: error62.status } : {},
           ...error62 instanceof ServerApiError && error62.reason !== void 0 ? { reason: error62.reason } : {}
         });
+        if (code === "UNSUPPORTED_VERSION") {
+          this.logger.warn("Server does not support the Remote protocol version; automatic reconnect is paused.");
+        }
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Run /remote login or authorize this Host again in Remote settings.");
         }
@@ -86971,7 +86982,7 @@ var HostServerConnection = class {
             this.logger.error("failed to clear revoked Host authorization", { code: errorCode4(clearError) });
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code)) {
+        if (TERMINAL_AUTH_ERRORS.has(code) || code === "UNSUPPORTED_VERSION") {
           await this.dropTunnels();
           return;
         }
@@ -86996,7 +87007,7 @@ var HostServerConnection = class {
   async connectOnce() {
     const credentials = await this.api.authenticate(this.identity);
     if (this.stopped) return;
-    const offeredCapabilities = this.rtcFactoryProvider === void 0 || this.config.forceRelay ? ["transport.relay", "transport.relay.attach", ...this.hostCapabilities()] : [WEBRTC_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", ...this.hostCapabilities()];
+    const offeredCapabilities = this.rtcFactoryProvider === void 0 || this.config.forceRelay ? [RELAY_RESUME_CAPABILITY, "transport.relay", "transport.relay.attach", ...this.hostCapabilities()] : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", ...this.hostCapabilities()];
     const recoveryTickets = [...this.tunnels.values()].flatMap((tunnel) => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64);
     const socket = this.createWebSocket(websocketUrl2(this.api.baseUrl));
     this.socket = socket;
@@ -87053,7 +87064,10 @@ var HostServerConnection = class {
             }
             acknowledged = true;
             clearTimeout(helloTimer);
-            if (this.tunnels.size && !this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) await this.dropTunnels();
+            for (const tunnel of [...this.tunnels.values()]) {
+              const required2 = tunnel.transport === "relay" ? RELAY_RESUME_CAPABILITY : WEBRTC_RESUME_CAPABILITY;
+              if (tunnel.lease && !this.negotiatedCapabilities.includes(required2)) await this.dropTunnel(tunnel.connectionId);
+            }
             this.online = true;
             this.terminalError = void 0;
             this.logger.info("server control connection online", {
@@ -87114,6 +87128,10 @@ var HostServerConnection = class {
           }
           if (event.code === 4004) {
             finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
+            return;
+          }
+          if (event.code === 4011) {
+            finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
             return;
           }
           if (acknowledged) this.terminalError = closeCode(event.code);
@@ -87240,6 +87258,7 @@ var HostServerConnection = class {
     });
     const tunnel = {
       recoveryTicket: this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY) ? payload.recoveryTicket : void 0,
+      relayRecoveryTicket: this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY) ? payload.relayRecoveryTicket : void 0,
       connectionId: payload.connectionId,
       membershipId: descriptor.membershipId,
       peer,
@@ -87281,9 +87300,22 @@ var HostServerConnection = class {
     if (!viaWebRtc && tunnel.transport === "negotiating") tunnel.transport = "relay";
     const mode2 = viaWebRtc ? tunnel.transportMode ?? (tunnel.transport === "turn" ? "TURN" : tunnel.transport === "lan" ? "LAN" : "P2P") : "Relay";
     const transmit = viaWebRtc ? (ciphertext) => tunnel.rtc.send(ciphertext) : (ciphertext) => this.sendRelay(tunnel, ciphertext);
-    const channel = new ServerNoiseChannel(tunnel, transmit, () => {
+    const channel = new ServerNoiseChannel(tunnel, transmit, async () => {
+      if (this.tunnels.get(tunnel.connectionId) !== tunnel) return;
+      this.notifyTunnelClosed(tunnel);
+      this.tunnels.delete(tunnel.connectionId);
       tunnel.lease?.stop();
-      if (this.tunnels.get(tunnel.connectionId) === tunnel) this.tunnels.delete(tunnel.connectionId);
+      try {
+        await tunnel.rtc?.close();
+      } catch (error62) {
+        this.logger.warn("remote connection RTC cleanup failed", {
+          connectionId: shortId3(tunnel.connectionId),
+          reason: diagnosticReason3(error62)
+        });
+      }
+      tunnel.dataSocket?.close();
+      tunnel.dataSocket = void 0;
+      tunnel.dataReady = false;
     }, mode2);
     tunnel.channel = channel;
     await this.connections.accept(channel);
@@ -87293,8 +87325,9 @@ var HostServerConnection = class {
       step: 2,
       data: toBase64Url2(reply)
     });
-    if (viaWebRtc && tunnel.recoveryTicket) {
-      tunnel.lease = new ControlLease(tunnel.connectionId, tunnel.recoveryTicket, (payload2) => {
+    const leaseTicket = viaWebRtc ? tunnel.recoveryTicket : tunnel.transport === "relay" && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : void 0;
+    if (leaseTicket) {
+      tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, (payload2) => {
         if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= 75e3) {
           this.socket?.close(1012, "control heartbeat timeout");
           throw new Error("Control heartbeat timed out");
@@ -87812,7 +87845,7 @@ var ServerNoiseChannel = class {
     this.incoming.reset();
     this.outgoing.reset();
     this.tunnel.noise.destroy();
-    this.onClose();
+    await this.onClose();
   }
 };
 var ControlConnectionError = class extends Error {
@@ -87936,7 +87969,7 @@ function errorCode4(error62) {
   return error62 instanceof ServerApiError || error62 instanceof ControlConnectionError ? error62.code : "CONNECTION_FAILED";
 }
 function isRetryable(error62) {
-  return !TERMINAL_AUTH_ERRORS.has(errorCode4(error62)) && (!(error62 instanceof ServerApiError) || error62.retryable);
+  return errorCode4(error62) !== "UNSUPPORTED_VERSION" && !TERMINAL_AUTH_ERRORS.has(errorCode4(error62)) && (!(error62 instanceof ServerApiError) || error62.retryable);
 }
 function closeCode(code) {
   if (code === 4002) return "AUTH_INVALID";

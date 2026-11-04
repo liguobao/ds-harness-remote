@@ -3,6 +3,7 @@ import { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
+export const RELAY_RESUME_CAPABILITY = 'transport.relay.resume.v1'
 export const WEBRTC_LEASE_MS = 300_000
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
@@ -357,6 +358,7 @@ export interface ConnectRequestPayload {
 }
 
 export interface ConnectIncomingPayload {
+  relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
   clientDeviceId: string
@@ -371,6 +373,7 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
+  relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
   /** Optional independent Relay data-plane assignment. */
@@ -1059,6 +1062,7 @@ export const connectRequestPayloadSchema = z.object({
 })
 
 export const connectIncomingPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   clientDeviceId: z.string().min(1),
@@ -1074,6 +1078,7 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   relayEndpoint: z.string().url().optional(),

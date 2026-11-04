@@ -8,6 +8,7 @@ import {
 import {
   PROTOCOL_VERSION,
   WEBRTC_RESUME_CAPABILITY,
+  RELAY_RESUME_CAPABILITY,
   type ConnectionLeaseAck,
   SecureMessageCodec,
   acceptNegotiatedCapabilities,
@@ -66,6 +67,7 @@ export type WebSocketFactory = (url: string) => WebSocketLike
 
 interface PendingTunnel {
   recoveryTicket?: string
+  relayRecoveryTicket?: string
   lease?: ControlLease
   connectionId: string
   membershipId: string
@@ -189,6 +191,9 @@ export class HostServerConnection {
           ...(error instanceof ServerApiError && error.status !== undefined ? { status: error.status } : {}),
           ...(error instanceof ServerApiError && error.reason !== undefined ? { reason: error.reason } : {}),
         })
+        if (code === 'UNSUPPORTED_VERSION') {
+          this.logger.warn('Server does not support the Remote protocol version; automatic reconnect is paused.')
+        }
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === 'CONNECTION_REPLACED'
             ? 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused.'
@@ -203,7 +208,7 @@ export class HostServerConnection {
             this.logger.error('failed to clear revoked Host authorization', { code: errorCode(clearError) })
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code)) { await this.dropTunnels(); return }
+        if (TERMINAL_AUTH_ERRORS.has(code) || code === 'UNSUPPORTED_VERSION') { await this.dropTunnels(); return }
         if (!this.config.reconnect.enabled) return
       }
       if (this.stopped) return
@@ -227,8 +232,8 @@ export class HostServerConnection {
     const credentials = await this.api.authenticate(this.identity)
     if (this.stopped) return
     const offeredCapabilities = this.rtcFactoryProvider === undefined || this.config.forceRelay
-      ? ['transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
-      : [WEBRTC_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+      ? [RELAY_RESUME_CAPABILITY, 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+      : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
     const recoveryTickets = [...this.tunnels.values()].flatMap(tunnel => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64)
     const socket = this.createWebSocket(websocketUrl(this.api.baseUrl))
     this.socket = socket
@@ -293,7 +298,10 @@ export class HostServerConnection {
             }
             acknowledged = true
             clearTimeout(helloTimer)
-            if (this.tunnels.size && !this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) await this.dropTunnels()
+            for (const tunnel of [...this.tunnels.values()]) {
+              const required = tunnel.transport === 'relay' ? RELAY_RESUME_CAPABILITY : WEBRTC_RESUME_CAPABILITY
+              if (tunnel.lease && !this.negotiatedCapabilities.includes(required)) await this.dropTunnel(tunnel.connectionId)
+            }
             this.online = true
             this.terminalError = undefined
             this.logger.info('server control connection online', {
@@ -353,6 +361,7 @@ export class HostServerConnection {
             return
           }
           if (event.code === 4004) { finish(new ControlConnectionError('DEVICE_REVOKED', 'The Server revoked this Host device.')); return }
+          if (event.code === 4011) { finish(new ControlConnectionError('UNSUPPORTED_VERSION', 'The Server does not support the Remote protocol version.')); return }
           if (acknowledged) this.terminalError = closeCode(event.code)
           finish(acknowledged ? undefined : new ControlConnectionError(closeCode(event.code), event.reason || 'Server control connection closed.'))
         }
@@ -494,6 +503,7 @@ export class HostServerConnection {
     })
     const tunnel: PendingTunnel = {
       recoveryTicket: this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY) ? payload.recoveryTicket : undefined,
+      relayRecoveryTicket: this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY) ? payload.relayRecoveryTicket : undefined,
       connectionId: payload.connectionId,
       membershipId: descriptor.membershipId,
       peer,
@@ -555,9 +565,24 @@ export class HostServerConnection {
     const transmit = viaWebRtc
       ? (ciphertext: Uint8Array) => tunnel.rtc!.send(ciphertext)
       : (ciphertext: Uint8Array) => this.sendRelay(tunnel, ciphertext)
-    const channel = new ServerNoiseChannel(tunnel, transmit, () => {
+    const channel = new ServerNoiseChannel(tunnel, transmit, async () => {
+      // The connection controller may close the channel directly. If it still
+      // owns this tunnel, clean up its transport without re-entering the
+      // controller's closeConnection path.
+      if (this.tunnels.get(tunnel.connectionId) !== tunnel) return
+      this.notifyTunnelClosed(tunnel)
+      this.tunnels.delete(tunnel.connectionId)
       tunnel.lease?.stop()
-      if (this.tunnels.get(tunnel.connectionId) === tunnel) this.tunnels.delete(tunnel.connectionId)
+      try {
+        await tunnel.rtc?.close()
+      } catch (error) {
+        this.logger.warn('remote connection RTC cleanup failed', {
+          connectionId: shortId(tunnel.connectionId), reason: diagnosticReason(error),
+        })
+      }
+      tunnel.dataSocket?.close()
+      tunnel.dataSocket = undefined
+      tunnel.dataReady = false
     }, mode)
     tunnel.channel = channel
     await this.connections.accept(channel)
@@ -571,8 +596,10 @@ export class HostServerConnection {
       step: 2,
       data: toBase64Url(reply),
     } satisfies SecureHandshakePayload)
-    if (viaWebRtc && tunnel.recoveryTicket) {
-      tunnel.lease = new ControlLease(tunnel.connectionId, tunnel.recoveryTicket, payload => {
+    const leaseTicket = viaWebRtc ? tunnel.recoveryTicket
+      : tunnel.transport === 'relay' && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : undefined
+    if (leaseTicket) {
+      tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, payload => {
         if (this.online && this.lastActiveAt !== undefined && Date.now() - this.lastActiveAt >= 75_000) {
           this.socket?.close(1012, 'control heartbeat timeout')
           throw new Error('Control heartbeat timed out')
@@ -1082,7 +1109,7 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   constructor(
     private readonly tunnel: PendingTunnel,
     private readonly transmit: (ciphertext: Uint8Array) => Promise<void>,
-    private readonly onClose: () => void,
+    private readonly onClose: () => Promise<void>,
     mode: 'LAN' | 'P2P' | 'TURN' | 'Relay',
   ) {
     this.mode = mode
@@ -1143,7 +1170,7 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     this.incoming.reset()
     this.outgoing.reset()
     this.tunnel.noise.destroy()
-    this.onClose()
+    await this.onClose()
   }
 }
 
@@ -1275,7 +1302,7 @@ function rtcDiagnostics(rtc: RtcDataChannelTransport): RtcConnectionDiagnostics 
   }
 }
 function errorCode(error: unknown): string { return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : 'CONNECTION_FAILED' }
-function isRetryable(error: unknown): boolean { return !TERMINAL_AUTH_ERRORS.has(errorCode(error)) && (!(error instanceof ServerApiError) || error.retryable) }
+function isRetryable(error: unknown): boolean { return errorCode(error) !== 'UNSUPPORTED_VERSION' && !TERMINAL_AUTH_ERRORS.has(errorCode(error)) && (!(error instanceof ServerApiError) || error.retryable) }
 function closeCode(code: number): string {
   if (code === 4002) return 'AUTH_INVALID'
   if (code === 4003) return 'CONNECTION_REPLACED'

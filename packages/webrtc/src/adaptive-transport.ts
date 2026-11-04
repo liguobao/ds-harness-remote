@@ -3,6 +3,7 @@ import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
   PROTOCOL_VERSION,
   WEBRTC_RESUME_CAPABILITY,
+  RELAY_RESUME_CAPABILITY,
   type ConnectionLeaseAck,
   acceptNegotiatedCapabilities,
   createControlFrame,
@@ -76,7 +77,7 @@ export interface AdaptiveConnectionDetails {
   webRtc?: RtcConnectionDetails
 }
 
-const DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', 'harness.api.v1']
+const DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', 'harness.api.v1']
 const DEFAULT_PREFERRED_TRANSPORTS = ['lan', 'p2p', 'turn', 'relay'] as const
 
 /**
@@ -117,6 +118,7 @@ export class AdaptiveTransport extends BaseTransport {
   private relayAssignment?: RelayAssignment
   private dataReady = false
   private recoveryTicket?: string
+  private relayRecoveryTicket?: string
   private lease?: ControlLease
   private recoveryTimer?: ReturnType<typeof setTimeout>
   private recoveryOpeningTimer?: ReturnType<typeof setTimeout>
@@ -253,7 +255,7 @@ export class AdaptiveTransport extends BaseTransport {
   getStats(): TransportStats {
     const webrtcConnected = this.dataMode === 'webrtc' && this.rtc?.getStats().connected === true
     const relayConnected = this.dataMode === 'relay'
-      && this.socket?.readyState === WebSocket.OPEN
+      && (this.dataSocket?.readyState === WebSocket.OPEN && this.dataReady || this.socket?.readyState === WebSocket.OPEN)
       && this.connectionId !== undefined
     const connected = webrtcConnected || relayConnected
     let mode: TransportStats['mode'] = 'Disconnected'
@@ -292,7 +294,7 @@ export class AdaptiveTransport extends BaseTransport {
           this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs
         }
         if (this.lease) {
-          if (!this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) throw new Error('Server no longer supports control recovery')
+          if (!this.negotiatedCapabilities.includes(this.dataMode === 'webrtc' ? WEBRTC_RESUME_CAPABILITY : RELAY_RESUME_CAPABILITY)) throw new Error('Server no longer supports control recovery')
           clearTimeout(this.recoveryOpeningTimer)
           this.recoveryAttempt = 0
           this.lease.tick(true)
@@ -312,6 +314,7 @@ export class AdaptiveTransport extends BaseTransport {
         }
         this.connectionId = payload.connectionId
         if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) this.recoveryTicket = payload.recoveryTicket
+        if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY)) this.relayRecoveryTicket = payload.relayRecoveryTicket
         const assignment = payload as RelayAssignment
         if (typeof assignment.relayEndpoint === 'string' && typeof assignment.relayTicket === 'string') {
           this.relayAssignment = assignment
@@ -511,8 +514,9 @@ export class AdaptiveTransport extends BaseTransport {
   }
 
   markSecureReady(): void {
-    if (!this.recoveryTicket || !this.connectionId || this.dataMode !== 'webrtc' || this.lease) return
-    this.lease = new ControlLease(this.connectionId, this.recoveryTicket, payload => {
+    const ticket = this.dataMode === 'webrtc' ? this.recoveryTicket : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN ? this.relayRecoveryTicket : undefined
+    if (!ticket || !this.connectionId || this.lease) return
+    this.lease = new ControlLease(this.connectionId, ticket, payload => {
       if (this.controlReady && this.lastControlReceivedAt !== undefined && Date.now() - this.lastControlReceivedAt >= 75_000) {
         this.controlLost(new Error('Control heartbeat timed out'), { reason: 'control-error' })
         throw new Error('Control heartbeat timed out')
@@ -524,7 +528,7 @@ export class AdaptiveTransport extends BaseTransport {
 
   private controlLost(error: Error, diagnostic: AdaptiveDisconnectDiagnostic): void {
     if ((error as Error & { retryable?: boolean }).retryable === false || !this.lease?.canDetach()
-      || this.dataMode !== 'webrtc' || !this.rtc?.getStats().connected) {
+      || !(this.dataMode === 'webrtc' ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
       this.failConnection(error, diagnostic)
       return
     }
@@ -739,6 +743,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.lease?.stop()
     this.lease = undefined
     this.recoveryTicket = undefined
+    this.relayRecoveryTicket = undefined
     clearTimeout(this.recoveryTimer)
     clearTimeout(this.recoveryOpeningTimer)
     this.recoveryTimer = undefined
