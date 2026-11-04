@@ -2,7 +2,6 @@ import { Camera, ChevronRight, FileText, Folder, Images, Layers, ShieldAlert, Te
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { IconButton } from '../../ui/components'
-import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ModalSurface, usePickerListMaxHeight } from './modal'
@@ -16,7 +15,6 @@ type Props = {
   takePhoto: () => Promise<void>
   pickImages: () => Promise<void>
   pickFiles: () => Promise<void>
-  onQuoteClipboard?: () => void
   workspaceLabel: string
   modeLabel: string
   supportsModeSelection: boolean
@@ -33,7 +31,7 @@ type Props = {
 }
 
 export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPicking,
-  takePhoto, pickImages, pickFiles, onQuoteClipboard, workspaceLabel, modeLabel, supportsModeSelection,
+  takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
   permissionDisabled, permissionLabel, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions }: Props) {
   const { colors } = useTheme()
@@ -86,17 +84,6 @@ export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPi
               <FileText size={22} color={colors.primary} />
               <Text style={styles.plusCardText}>{strings.chat.files}</Text>
             </Pressable>
-            {onQuoteClipboard && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.messageActions.quote ?? '引用'}
-                onPress={() => { onClose(); onQuoteClipboard() }}
-                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed]}
-              >
-                <QuoteMarkIcon size={22} color={colors.primary} />
-                <Text style={styles.plusCardText}>{strings.messageActions.quote ?? '引用'}</Text>
-              </Pressable>
-            )}
           </View>
           <Pressable
             accessibilityRole="button"

@@ -35,7 +35,7 @@ import type {
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
-import { parseMessageQuotes, QuotePreview } from '../../ui/quote-preview'
+import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
 import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -353,10 +353,23 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     return <View style={styles.userBlock}>
       <View style={styles.userBubble}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
-        {quotes.map((quoteText, index) => (
-          <QuotePreview key={`quote:${index}`} text={quoteText} style={styles.messageQuotePreview} />
-        ))}
-        {hasVisibleMessageText(body) && <NativeMarkdown text={body} />}
+        {quotes.length > 0 ? (
+          <View style={styles.userMessageInlineWrap}>
+            {quotes.map((quoteText, index) => (
+              <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
+                <QuoteMarkIcon size={14} color={colors.primary} />
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 200 }]}>
+                  “{formatQuoteDraftSnippet(quoteText, 16)}”
+                </Text>
+              </View>
+            ))}
+            {hasVisibleMessageText(body) && (
+              <Text selectable style={styles.userMessageInlineText}>{body}</Text>
+            )}
+          </View>
+        ) : (
+          hasVisibleMessageText(body) && <NativeMarkdown text={body} />
+        )}
       </View>
       {item.sendState === 'canceled'
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>

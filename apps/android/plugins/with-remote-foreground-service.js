@@ -79,9 +79,7 @@ function withRemoteForegroundService(config) {
 
   config = withMainActivity(config, config => {
     const onActionModeSnippet = `
-  override fun onActionModeStarted(mode: android.view.ActionMode?) {
-    super.onActionModeStarted(mode)
-    val menu = mode?.menu ?: return
+  private fun reorderActionModeMenu(menu: android.view.Menu) {
     try {
       var askAgentItem: android.view.MenuItem? = null
       var copyItem: android.view.MenuItem? = null
@@ -139,11 +137,54 @@ function withRemoteForegroundService(config) {
       }
     } catch (_: Throwable) {}
   }
+
+  override fun onActionModeStarted(mode: android.view.ActionMode?) {
+    super.onActionModeStarted(mode)
+    mode?.menu?.let { reorderActionModeMenu(it) }
+  }
+
+  override fun onWindowStartingActionMode(callback: android.view.ActionMode.Callback?, type: Int): android.view.ActionMode? {
+    if (callback != null && type == android.view.ActionMode.TYPE_FLOATING) {
+      val wrappedCallback = object : android.view.ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+          return callback.onCreateActionMode(mode, menu)
+        }
+        override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+          val result = callback.onPrepareActionMode(mode, menu)
+          if (menu != null) {
+            reorderActionModeMenu(menu)
+          }
+          return result
+        }
+        override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?): Boolean {
+          return callback.onActionItemClicked(mode, item)
+        }
+        override fun onDestroyActionMode(mode: android.view.ActionMode?) {
+          callback.onDestroyActionMode(mode)
+        }
+        override fun onGetContentRect(mode: android.view.ActionMode?, view: android.view.View?, outRect: android.graphics.Rect?) {
+          if (callback is android.view.ActionMode.Callback2) {
+            callback.onGetContentRect(mode, view, outRect)
+          }
+        }
+      }
+      return super.onWindowStartingActionMode(wrappedCallback, type)
+    }
+    return super.onWindowStartingActionMode(callback, type)
+  }
 `
-    if (!config.modResults.contents.includes('override fun onActionModeStarted')) {
-      const lastBrace = config.modResults.contents.lastIndexOf('}')
-      if (lastBrace > 0) {
-        config.modResults.contents = config.modResults.contents.slice(0, lastBrace) + onActionModeSnippet + '\n}\n'
+    if (!config.modResults.contents.includes('onWindowStartingActionMode')) {
+      if (config.modResults.contents.includes('override fun onActionModeStarted')) {
+        const startIdx = config.modResults.contents.indexOf('override fun onActionModeStarted')
+        const lastBrace = config.modResults.contents.lastIndexOf('}')
+        if (startIdx > 0 && lastBrace > startIdx) {
+          config.modResults.contents = config.modResults.contents.slice(0, startIdx) + onActionModeSnippet + '\n}\n'
+        }
+      } else {
+        const lastBrace = config.modResults.contents.lastIndexOf('}')
+        if (lastBrace > 0) {
+          config.modResults.contents = config.modResults.contents.slice(0, lastBrace) + onActionModeSnippet + '\n}\n'
+        }
       }
     }
     return config

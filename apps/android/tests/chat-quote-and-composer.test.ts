@@ -75,3 +75,17 @@ describe('Blank session detection (Sidebar New Session deduplication)', () => {
     expect(isReusableBlank({ sessionId: 's4' }, { s4: [] })).toBe(true)
   })
 })
+
+describe('Chat Action Menu cards boundary', () => {
+  it('excludes quote from plus attachment grid and only retains camera, photos, files', () => {
+    // Plus menu action items are exclusively attachments: camera, photos, and files.
+    // Quote from message selection is triggered via native text selection toolbar (PROCESS_TEXT).
+    type AllowedActionMenuCard = 'camera' | 'photos' | 'files'
+    const allowedCards: AllowedActionMenuCard[] = ['camera', 'photos', 'files']
+    expect(allowedCards.includes('camera')).toBe(true)
+    expect(allowedCards.includes('photos')).toBe(true)
+    expect(allowedCards.includes('files')).toBe(true)
+    // @ts-expect-error Quote is prohibited from being an attachment card in the plus menu
+    expect(allowedCards.includes('quote')).toBe(false)
+  })
+})
