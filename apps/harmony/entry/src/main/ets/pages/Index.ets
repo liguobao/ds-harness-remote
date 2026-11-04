@@ -9,6 +9,7 @@ import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
+import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import BuildProfile from 'BuildProfile';
 
 @Entry
@@ -81,7 +82,9 @@ struct Index {
   @State namePreviewId: string = '';
   @State headerNamePopup: boolean = false;
   @State themeMode: number = 0;
+  @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
+  @State showSettings: boolean = false;
   /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
   @State expandedRuns: string[] = [];
   private windowChromeDark: boolean = false;
@@ -191,6 +194,7 @@ struct Index {
     this.accountEmail = this.runtime.email;
     this.accountServer = this.runtime.serverUrl;
     this.themeMode = this.runtime.themeMode;
+    this.languageMode = this.runtime.languageMode;
     this.isDarkUi = this.runtime.isDark();
     this.isLandscape = this.runtime.systemLandscape;
     this.syncWindowChrome();
@@ -327,20 +331,51 @@ struct Index {
     return this.isDarkUi ? darkPalette() : lightPalette();
   }
 
-  private themeLabel(mode: number): string {
-    if (mode === 1) {
-      return '浅色';
-    }
-    if (mode === 2) {
-      return '深色';
-    }
-    return '跟随系统';
+  /** 读一下 languageMode 再取文案：让 Text 节点依赖到状态，切语言时才会重算。 */
+  private tr(key: string): string {
+    const mode: number = this.languageMode;
+    return t(key);
   }
 
-  private cycleTheme(): void {
-    const next: number = this.themeMode === 0 ? 1 : (this.themeMode === 1 ? 2 : 0);
-    this.runtime.setThemeMode(next);
-    promptAction.showToast({ message: `主题：${this.themeLabel(next)}` });
+  /** 同上，用于「按语言换单位」的拼接文案。 */
+  private en(): boolean {
+    const mode: number = this.languageMode;
+    return english();
+  }
+
+  /** 设备页底部统计：英文环境换单位，避免模板里嵌死「台 / 在线」。 */
+  private hostCountLabel(): string {
+    return this.en() ? `${this.devices.length} hosts` : `${this.devices.length} 台主机`;
+  }
+
+  private onlineCountLabel(): string {
+    return this.en() ? `${this.onlineDeviceCount()} online` : `${this.onlineDeviceCount()} 在线`;
+  }
+
+  private themeLabel(mode: number): string {
+    if (mode === 1) {
+      return this.tr('浅色');
+    }
+    if (mode === 2) {
+      return this.tr('深色');
+    }
+    return this.tr('跟随系统');
+  }
+
+  private themeChoices(): ThemeChoice[] {
+    return [
+      new ThemeChoice(LANG_SYSTEM, '跟随系统', '跟着系统的深浅色走'),
+      new ThemeChoice(1, '浅色', '始终使用浅色界面'),
+      new ThemeChoice(2, '深色', '始终使用深色界面')
+    ];
+  }
+
+  private languageChoices(): ThemeChoice[] {
+    return [
+      new ThemeChoice(LANG_SYSTEM, '跟随系统', '跟着系统语言走'),
+      new ThemeChoice(LANG_ZH, '中文', '始终使用中文界面'),
+      new ThemeChoice(LANG_EN, 'English', '始终使用英文界面')
+    ];
   }
 
   /** 连续工具调用折叠：同段 ≥2 条收成一行「N 步」，点开再逐条看。 */
@@ -445,12 +480,12 @@ struct Index {
 
   /** 设备卡第二行：平台 + 主机版本（Host 没上报版本时只显示平台）。 */
   private hostSubtitle(device: RemoteHostDevice): string {
-    const head: string = device.platform.length > 0 ? device.platform : '远程主机';
+    const head: string = device.platform.length > 0 ? device.platform : this.tr('远程主机');
     if (device.harnessVersion.length > 0) {
-      return `${head} · 主机 ${device.harnessVersion}`;
+      return `${head} · ${this.tr('主机')} ${device.harnessVersion}`;
     }
     if (device.clientVersion.length > 0) {
-      return `${head} · 插件 ${device.clientVersion}`;
+      return `${head} · ${this.tr('插件')} ${device.clientVersion}`;
     }
     return head;
   }
@@ -458,22 +493,22 @@ struct Index {
   /** 设备卡第三行：在线状态用绿点表达，这里只补「最近活动」，避免「在线」重复两遍。 */
   private hostSeenLabel(device: RemoteHostDevice): string {
     if (device.online) {
-      return '此刻在线';
+      return this.tr('此刻在线');
     }
     if (device.lastSeenAt <= 0) {
-      return '离线 · 无活动记录';
+      return this.tr('离线 · 无活动记录');
     }
     const diff: number = Date.now() - device.lastSeenAt;
     if (diff < 60000) {
-      return '离线 · 刚刚还在';
+      return this.tr('离线 · 刚刚还在');
     }
     if (diff < 3600000) {
-      return `离线 · ${Math.round(diff / 60000)} 分钟前`;
+      return this.en() ? `offline · ${Math.round(diff / 60000)} min ago` : `离线 · ${Math.round(diff / 60000)} 分钟前`;
     }
     if (diff < 86400000) {
-      return `离线 · ${Math.round(diff / 3600000)} 小时前`;
+      return this.en() ? `offline · ${Math.round(diff / 3600000)} h ago` : `离线 · ${Math.round(diff / 3600000)} 小时前`;
     }
-    return `离线 · ${Math.round(diff / 86400000)} 天前`;
+    return this.en() ? `offline · ${Math.round(diff / 86400000)} d ago` : `离线 · ${Math.round(diff / 86400000)} 天前`;
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
@@ -528,6 +563,19 @@ struct Index {
   }
 
   build() {
+    // 整个界面按语言重建一次：ArkUI 对 @Builder 子树的文案节点不会因为模块级文案表
+    // 变化而重算，用 ForEach 的 key 换语言时强制重建，比给每个 Text 打状态依赖可靠。
+    Column() {
+      ForEach([this.languageMode], (lang: number) => {
+        this.RootStack()
+      }, (lang: number) => `ui-${lang}`)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  RootStack() {
     Stack() {
       Column()
         .width('100%')
@@ -572,6 +620,9 @@ struct Index {
       if (this.showBrowser) {
         this.FileBrowserOverlay()
       }
+      if (this.showSettings) {
+        this.SettingsOverlay()
+      }
     }
     .width('100%')
     .height('100%')
@@ -582,9 +633,113 @@ struct Index {
     })
   }
 
+  /** 设置面板：主题做成可选列表，不再靠一颗按钮循环切。 */
   @Builder
-  LogoChip() {
-    Column() {
+  SettingsOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showSettings = false;
+        })
+      Column({ space: 14 }) {
+        Row() {
+          Text('设置')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text('完成')
+            .fontSize(13)
+            .fontColor('#22D3EE')
+            .padding({ left: 12, right: 4, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.showSettings = false;
+            })
+        }
+        .width('100%')
+        Column({ space: 8 }) {
+          Text(this.tr('外观'))
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          ForEach(this.themeChoices(), (choice: ThemeChoice) => {
+            Row({ space: 10 }) {
+              Column({ space: 2 }) {
+                Text(t(choice.label))
+                  .fontSize(15)
+                  .fontColor(this.pal().text)
+                Text(t(choice.hint))
+                  .fontSize(11)
+                  .fontColor(this.pal().text3)
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              Text(this.themeMode === choice.value ? '✓' : '')
+                .fontSize(15)
+                .fontColor('#22D3EE')
+            }
+            .width('100%')
+            .padding({ top: 11, bottom: 11, left: 14, right: 14 })
+            .backgroundColor(this.themeMode === choice.value ? this.pal().chip : this.pal().card)
+            .borderRadius(14)
+            .border({ width: 1, color: this.themeMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
+            .onClick(() => {
+              this.runtime.setThemeMode(choice.value);
+            })
+          }, (choice: ThemeChoice) => `theme-${choice.value}-${this.languageMode}`)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        Column({ space: 8 }) {
+          Text(this.tr('语言'))
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          ForEach(this.languageChoices(), (choice: ThemeChoice) => {
+            Row({ space: 10 }) {
+              Column({ space: 2 }) {
+                Text(t(choice.label))
+                  .fontSize(15)
+                  .fontColor(this.pal().text)
+                Text(t(choice.hint))
+                  .fontSize(11)
+                  .fontColor(this.pal().text3)
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              Text(this.languageMode === choice.value ? '✓' : '')
+                .fontSize(15)
+                .fontColor('#22D3EE')
+            }
+            .width('100%')
+            .padding({ top: 11, bottom: 11, left: 14, right: 14 })
+            .backgroundColor(this.languageMode === choice.value ? this.pal().chip : this.pal().card)
+            .borderRadius(14)
+            .border({ width: 1,
+              color: this.languageMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
+            .onClick(() => {
+              this.runtime.setLanguageMode(choice.value);
+            })
+          }, (choice: ThemeChoice) => `lang-${choice.value}-${this.languageMode}`)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 18, bottom: 26 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  LogoChip() {    Column() {
       Text('DS')
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
@@ -615,7 +770,7 @@ struct Index {
         .width(36)
         .height(36)
         .color('#22D3EE')
-      Text('正在初始化…')
+      Text(this.tr('正在初始化…'))
         .fontSize(13)
         .fontColor(this.pal().text2)
         .letterSpacing(1)
@@ -638,12 +793,12 @@ struct Index {
           .fontColor(this.pal().text)
           .letterSpacing(6)
           .textShadow({ radius: 18, color: 'rgba(77,107,254,0.6)' })
-        Text('连接你的 DEEPSEEK HARNESS 主机')
+        Text(this.tr('连接你的 DEEPSEEK HARNESS 主机'))
           .fontSize(12)
           .fontColor(this.pal().text2)
           .letterSpacing(1)
       }
-      TextInput({ text: this.serverInput, placeholder: '服务器地址（https://…）' })
+      TextInput({ text: this.serverInput, placeholder: this.tr('服务器地址（https://…）') })
         .height(48)
         .backgroundColor(this.pal().chip)
         .fontColor(this.pal().text)
@@ -655,7 +810,7 @@ struct Index {
         .onChange((value: string) => {
           this.serverInput = value;
         })
-      TextInput({ text: this.emailInput, placeholder: '邮箱' })
+      TextInput({ text: this.emailInput, placeholder: this.tr('邮箱') })
         .height(48)
         .backgroundColor(this.pal().chip)
         .fontColor(this.pal().text)
@@ -667,7 +822,7 @@ struct Index {
         .onChange((value: string) => {
           this.emailInput = value;
         })
-      TextInput({ text: this.passwordInput, placeholder: '密码' })
+      TextInput({ text: this.passwordInput, placeholder: this.tr('密码') })
         .type(InputType.Password)
         .height(48)
         .backgroundColor(this.pal().chip)
@@ -683,7 +838,7 @@ struct Index {
         .onSubmit(() => {
           this.runtime.login(this.serverInput, this.emailInput, this.passwordInput);
         })
-      Button('登录')
+      Button(this.tr('登录'))
         .width('100%')
         .height(50)
         .backgroundColor(Color.Transparent)
@@ -699,7 +854,7 @@ struct Index {
         })
       if (this.providers.length > 0) {
         Column({ space: 8 }) {
-          Text('扫码 / 浏览器授权登录（选账号对应的提供商）')
+          Text(this.tr('扫码 / 浏览器授权登录（选账号对应的提供商）'))
             .fontSize(12)
             .fontColor(this.pal().text2)
           Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Center }) {
@@ -722,7 +877,7 @@ struct Index {
         }
         .width('100%')
       } else {
-        Button('扫码 / 浏览器授权登录')
+        Button(this.tr('扫码 / 浏览器授权登录'))
           .width('100%')
           .height(44)
           .backgroundColor(this.pal().chip)
@@ -738,7 +893,7 @@ struct Index {
       }
       if (this.qrUrl.length > 0) {
         Column({ space: 10 }) {
-          Text('用已登录同一账号的浏览器扫码或点按钮授权')
+          Text(this.tr('用已登录同一账号的浏览器扫码或点按钮授权'))
             .fontSize(12)
             .fontColor(this.pal().text2)
             .textAlign(TextAlign.Center)
@@ -748,7 +903,7 @@ struct Index {
             .color('#0B0F19')
             .backgroundColor('#FFFFFF')
             .borderRadius(12)
-          Button('在浏览器中打开授权页')
+          Button(this.tr('在浏览器中打开授权页'))
             .width('100%')
             .height(40)
             .backgroundColor(Color.Transparent)
@@ -766,7 +921,7 @@ struct Index {
             .textAlign(TextAlign.Center)
             .wordBreak(WordBreak.BREAK_ALL)
             .width('100%')
-          Button('复制授权链接')
+          Button(this.tr('复制授权链接'))
             .height(30)
             .fontSize(12)
             .fontColor(this.pal().text2)
@@ -780,11 +935,11 @@ struct Index {
               .width(18)
               .height(18)
               .color('#22D3EE')
-            Text('等待浏览器授权…')
+            Text(this.tr('等待浏览器授权…'))
               .fontSize(12)
               .fontColor(this.pal().text2)
           }
-          Button('取消')
+          Button(this.tr('取消'))
             .height(32)
             .fontSize(12)
             .backgroundColor(this.pal().chip)
@@ -819,10 +974,21 @@ struct Index {
           .fontColor('#F85749')
           .textAlign(TextAlign.Center)
       }
-      Text(this.buildTag())
-        .fontSize(10)
-        .fontColor(this.pal().text3)
-        .margin({ top: 4 })
+      Row({ space: 10 }) {
+        Text(this.buildTag())
+          .fontSize(10)
+          .fontColor(this.pal().text3)
+        Text(this.tr('设置'))
+          .fontSize(10)
+          .fontColor('#22D3EE')
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(9)
+          .onClick(() => {
+            this.showSettings = true;
+          })
+      }
+      .margin({ top: 4 })
       }
       .padding(24)
       .width('100%')
@@ -841,7 +1007,7 @@ struct Index {
     Column() {
       Row({ space: 10 }) {
         Column({ space: 6 }) {
-          Text('远程主机')
+          Text(this.tr('远程主机'))
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
@@ -865,7 +1031,7 @@ struct Index {
           .borderRadius(16)
           .border({ width: 1, color: this.pal().border })
           .onClick(() => {
-            this.cycleTheme();
+            this.showSettings = true;
           })
         Button({ type: ButtonType.Circle }) {
           Image($r('app.media.ic_refresh'))
@@ -901,7 +1067,7 @@ struct Index {
             .width(18)
             .height(18)
             .color('#22D3EE')
-          Text('正在刷新设备…')
+          Text(this.tr('正在刷新设备…'))
             .fontSize(13)
             .fontColor(this.pal().text2)
         }
@@ -918,14 +1084,14 @@ struct Index {
           ListItem() {
             this.DeviceCard(device)
           }
-        }, (device: RemoteHostDevice) => device.deviceId)
+        }, (device: RemoteHostDevice) => `${device.deviceId}#${this.languageMode}`)
       }
       .layoutWeight(1)
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
       if (this.devices.length === 0 && !this.busy) {
-        Text('暂无远程主机，请先在服务器上注册主机设备')
+        Text(this.tr('暂无远程主机，请先在服务器上注册主机设备'))
           .fontSize(13)
           .fontColor(this.pal().text3)
           .padding(24)
@@ -951,10 +1117,10 @@ struct Index {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         Column({ space: 2 }) {
-          Text(`${this.devices.length} 台主机`)
+          Text(this.hostCountLabel())
             .fontSize(12)
             .fontColor(this.pal().text2)
-          Text(`${this.onlineDeviceCount()} 在线`)
+          Text(this.onlineCountLabel())
             .fontSize(10)
             .fontColor(this.pal().text3)
         }
@@ -991,7 +1157,7 @@ struct Index {
             .height(6)
             .borderRadius(3)
             .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          Text(device.online ? '在线' : '离线')
+          Text(device.online ? this.tr('在线') : this.tr('离线'))
             .fontSize(11)
             .fontColor(device.online ? '#34D399' : this.pal().text3)
         }
@@ -999,7 +1165,7 @@ struct Index {
         .justifyContent(FlexAlign.Start)
 
         if (this.renamingDeviceId === device.deviceId) {
-          TextInput({ text: this.renameInput, placeholder: '输入主机名称' })
+          TextInput({ text: this.renameInput, placeholder: this.tr('输入主机名称') })
             .height(34)
             .fontSize(14)
             .fontColor(this.pal().text)
@@ -1062,7 +1228,7 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
       if (this.renamingDeviceId === device.deviceId) {
         Row({ space: 8 }) {
-          Text('取消')
+          Text(this.tr('取消'))
             .fontSize(12)
             .fontColor(this.pal().text2)
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
@@ -1072,7 +1238,7 @@ struct Index {
             .onClick(() => {
               this.cancelRename();
             })
-          Text('确定')
+          Text(this.tr('确定'))
             .fontSize(12)
             .fontColor('#FFFFFF')
             .padding({ left: 14, right: 14, top: 6, bottom: 6 })
@@ -1083,7 +1249,7 @@ struct Index {
             })
         }
       } else {
-        Text('改名')
+        Text(this.tr('改名'))
           .fontSize(11)
           .fontColor(this.pal().text2)
           .padding({ left: 10, right: 10, top: 5, bottom: 5 })
@@ -1102,28 +1268,28 @@ struct Index {
             .border({ width: 1, color: this.pal().borderStrong })
             .onClick(() => {
               AlertDialog.show({
-                title: '该主机已固定公钥',
-                message: '主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
-                  + '清除后下次连接将重新信任首次看到的公钥。',
+                title: this.tr('该主机已固定公钥'),
+                message: this.tr('主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
+                  + '清除后下次连接将重新信任首次看到的公钥。'),
                 primaryButton: {
-                  value: '取消',
+                  value: this.tr('取消'),
                   action: () => {
                   }
                 },
                 secondaryButton: {
-                  value: '清除固定记录',
+                  value: this.tr('清除固定记录'),
                   fontColor: '#F85749',
                   action: () => {
                     this.runtime.forgetHostPin(device.deviceId);
                     this.errorMsg = '';
-                    this.infoMsg = '已清除该主机的公钥固定记录';
+                    this.infoMsg = this.tr('已清除该主机的公钥固定记录');
                   }
                 }
               });
             })
         }
         if (device.online) {
-          Text('连接')
+          Text(this.tr('连接'))
             .fontSize(14)
             .fontColor('#FFFFFF')
             .padding({ left: 20, right: 20, top: 9, bottom: 9 })
@@ -1163,7 +1329,7 @@ struct Index {
         .width(40)
         .height(40)
         .color('#22D3EE')
-      Text('正在建立安全连接…')
+      Text(this.tr('正在建立安全连接…'))
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.pal().text)
@@ -1398,7 +1564,7 @@ struct Index {
           ListItem() {
             this.MessageRow(item)
           }
-        }, (item: ChatItem) => `${item.id}#${item.rev}`)
+        }, (item: ChatItem) => `${item.id}#${item.rev}#${this.languageMode}`)
       }
       .layoutWeight(1)
       .width('100%')
@@ -1677,7 +1843,7 @@ struct Index {
                     ]
                   });
                 }))
-            }, (workspace: HarnessWorkspace) => workspace.workspaceId)
+            }, (workspace: HarnessWorkspace) => `${workspace.workspaceId}#${this.languageMode}`)
           }
           .padding({ left: 16, right: 16 })
         }
@@ -1743,7 +1909,7 @@ struct Index {
               this.runtime.archiveSession(session.sessionId);
             }))
           }
-        }, (session: HarnessRemoteSession) => session.sessionId)
+        }, (session: HarnessRemoteSession) => `${session.sessionId}#${this.languageMode}`)
       }
       .layoutWeight(1)
       .width('100%')
@@ -2489,6 +2655,19 @@ function questionOutcomeLabel(outcome: string): string {
   return '已取消';
 }
 
+
+/** 设置面板里的一项主题选择。 */
+class ThemeChoice {
+  value: number = 0;
+  label: string = '';
+  hint: string = '';
+
+  constructor(value: number, label: string, hint: string) {
+    this.value = value;
+    this.label = label;
+    this.hint = hint;
+  }
+}
 
 /** 一行可直接渲染的 Markdown 内容。 */
 class MdLine {

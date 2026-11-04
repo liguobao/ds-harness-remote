@@ -12,6 +12,7 @@ import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, Acco
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
+import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -152,6 +153,8 @@ export class AppRuntime {
   deviceAliases: Record<string, string> = {};
   /** Theme preference: 0 = follow system, 1 = light, 2 = dark. */
   themeMode: number = 0;
+  /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
+  languageMode: number = 0;
   /** System dark-mode flag, kept fresh by EntryAbility configuration updates. */
   systemDark: boolean = false;
   /** System orientation flag, kept fresh by EntryAbility configuration updates. */
@@ -178,6 +181,22 @@ export class AppRuntime {
       logError('save themeMode failed: ' + errorMessage(error));
     });
     this.notify();
+  }
+
+  /** Persist and apply a new language preference (the UI re-renders through notify). */
+  setLanguageMode(mode: number): void {
+    this.languageMode = mode;
+    this.applyLanguage();
+    const saving: Promise<void> = this.store.saveLanguageMode(mode);
+    saving.catch((error: Error) => {
+      logError('save languageMode failed: ' + errorMessage(error));
+    });
+    this.notify();
+  }
+
+  /** Push the effective language into the module-level translator. */
+  applyLanguage(): void {
+    setEnglish(resolveEnglish(this.languageMode, systemEnglish()));
   }
 
   /** Called by EntryAbility when the system dark mode changes. */
@@ -249,6 +268,8 @@ export class AppRuntime {
       this.credentials = await this.store.loadCredentials();
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
+      this.languageMode = this.store.loadLanguageMode();
+      this.applyLanguage();
     } catch (error) {
       this.errorMsg = errorMessage(error);
       this.phase = PHASE_SETUP;

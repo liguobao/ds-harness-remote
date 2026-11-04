@@ -74,6 +74,9 @@ export default class EntryAbility extends UIAbility {
     const runtime = getAppRuntime();
     runtime.setSystemDark(newConfig.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     runtime.setSystemLandscape(newConfig.direction === ConfigurationConstant.Direction.DIRECTION_HORIZONTAL);
+    // 语言跟随系统时，系统切语言要重新算一次有效语言，并让界面重建。
+    runtime.applyLanguage();
+    runtime.notify();
     this.applyWindowTheme();
   }
 

@@ -13,6 +13,7 @@ const KEY_IDENTITY = 'dshremote.identity.v1';
 const KEY_CREDENTIALS = 'dshremote.credentials.v1';
 const KEY_DEVICE_ALIASES = 'dshremote.deviceAliases.v1';
 const KEY_THEME_MODE = 'dshremote.themeMode.v1';
+const KEY_LANGUAGE_MODE = 'dshremote.languageMode.v1';
 const KEY_HOST_PINS = 'dshremote.hostPins.v1';
 
 // Secrets never live in the plaintext KV. They go to the system Asset Store, which is
@@ -302,6 +303,20 @@ export class SecureStore {
 
   async saveThemeMode(mode: number): Promise<void> {
     await this.putSync(KEY_THEME_MODE, `${mode}`);
+  }
+
+  /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
+  loadLanguageMode(): number {
+    const raw: string = this.getSync(KEY_LANGUAGE_MODE, '0');
+    const parsed: number = Number.parseInt(raw);
+    if (parsed === 1 || parsed === 2) {
+      return parsed;
+    }
+    return 0;
+  }
+
+  async saveLanguageMode(mode: number): Promise<void> {
+    await this.putSync(KEY_LANGUAGE_MODE, `${mode}`);
   }
 
   /** Locally pinned Host identity keys (protocol §2 / §12.1), keyed by Host deviceId.
