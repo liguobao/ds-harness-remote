@@ -360,6 +360,19 @@ struct Index {
     return english();
   }
 
+  /** 会话列表分组：新会话不再一个个孤立，按 今天/昨天/更早 归堆。 */
+  private sessionGroupGap(index: number): string {
+    const list: HarnessRemoteSession[] = this.sessionSearchActive ? this.sessionSearchResults : this.sessions;
+    if (index < 0 || index >= list.length) {
+      return '';
+    }
+    const label: string = sessionGroupLabel(list[index].updatedAt);
+    if (index === 0) {
+      return label;
+    }
+    return sessionGroupLabel(list[index - 1].updatedAt) === label ? '' : label;
+  }
+
   /** 设备页底部统计：英文环境换单位，避免模板里嵌死「台 / 在线」。 */
   private hostCountLabel(): string {
     return this.en() ? `${this.devices.length} hosts` : `${this.devices.length} 台主机`;
@@ -427,7 +440,55 @@ struct Index {
       }
       index = end;
     }
-    return rows;
+    return this.mergeAssistantRows(rows);
+  }
+
+  /**
+   * 连续多段助手文本合并成一个气泡：模型经常把一段话拆成多条消息发出，
+   * 不合并的话屏幕上会堆一串宽度不一的小气泡，看着很碎。
+   */
+  private mergeAssistantRows(rows: ChatItem[]): ChatItem[] {
+    const out: ChatItem[] = [];
+    let buffer: ChatItem | undefined = undefined;
+    for (const row of rows) {
+      if (row.kind !== 'assistant') {
+        if (buffer !== undefined) {
+          out.push(buffer);
+          buffer = undefined;
+        }
+        out.push(row);
+        continue;
+      }
+      const current: ChatItem | undefined = buffer;
+      if (current === undefined) {
+        const merged: ChatItem = new ChatItem();
+        merged.id = row.id;
+        merged.kind = 'assistant';
+        merged.role = row.role;
+        merged.text = row.text;
+        merged.reasoning = row.reasoning;
+        merged.streaming = row.streaming;
+        merged.sessionId = row.sessionId;
+        merged.timestamp = row.timestamp;
+        merged.seq = row.seq;
+        merged.rev = row.rev;
+        buffer = merged;
+        continue;
+      }
+      if (row.text.length > 0) {
+        current.text = current.text.length > 0 ? `${current.text}\n\n${row.text}` : row.text;
+      }
+      if (row.reasoning.length > 0) {
+        current.reasoning = current.reasoning.length > 0
+          ? `${current.reasoning}\n${row.reasoning}` : row.reasoning;
+      }
+      current.streaming = row.streaming;
+      current.rev = current.rev + 1;
+    }
+    if (buffer !== undefined) {
+      out.push(buffer);
+    }
+    return out;
   }
 
   private toolRunItem(source: ChatItem[], start: number, end: number, expanded: boolean): ChatItem {
@@ -1576,31 +1637,31 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        Text(this.currentModelLabel.length > 0 ? this.currentModelLabel : '模型')
-          .fontSize(10)
+        Text('⋯')
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
           .fontColor(this.pal().text2)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .constraintSize({ maxWidth: 64 })
-          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(11)
-          .border({ width: 1, color: this.pal().border })
+          .width(38)
+          .height(38)
+          .textAlign(TextAlign.Center)
           .onClick(() => {
-            this.runtime.refreshModelCatalog();
-            this.showModelPicker = true;
-          })
-          .gesture(LongPressGesture().onAction(() => {
             ActionSheet.show({
-              title: '会话权限',
-              message: '决定这个会话里工具调用与命令执行的放行方式',
+              title: '会话信息',
+              message: `模型 ${this.currentModelLabel.length > 0 ? this.currentModelLabel : '未选择'} · 上下文 ${this.contextPercent}%`,
               sheets: [
-                { title: '只读', action: () => { this.runtime.selectPermission('read-only'); } },
-                { title: '工作区可写', action: () => { this.runtime.selectPermission('workspace-write'); } },
-                { title: '完全权限', action: () => { this.runtime.selectPermission('danger-full-access'); } }
+                {
+                  title: '切换模型',
+                  action: () => {
+                    this.runtime.refreshModelCatalog();
+                    this.showModelPicker = true;
+                  }
+                },
+                { title: '权限：只读', action: () => { this.runtime.selectPermission('read-only'); } },
+                { title: '权限：工作区可写', action: () => { this.runtime.selectPermission('workspace-write'); } },
+                { title: '权限：完全权限', action: () => { this.runtime.selectPermission('danger-full-access'); } }
               ]
             });
-          }))
+          })
         Text('＋')
           .fontSize(22)
           .fontWeight(FontWeight.Medium)
@@ -2068,8 +2129,17 @@ struct Index {
         .height(0.5)
         .backgroundColor(this.pal().border)
       List({ space: 8 }) {
-        ForEach(this.sessionSearchActive ? this.sessionSearchResults : this.sessions, (session: HarnessRemoteSession) => {
+        ForEach(this.sessionSearchActive ? this.sessionSearchResults : this.sessions,
+          (session: HarnessRemoteSession, index: number) => {
           ListItem() {
+            Column() {
+            if (this.sessionGroupGap(index).length > 0) {
+              Text(this.tr(this.sessionGroupGap(index)))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .padding({ left: 4, top: index === 0 ? 0 : 10, bottom: 4 })
+            }
             Row({ space: 10 }) {
               Column()
                 .width(3)
@@ -2119,6 +2189,9 @@ struct Index {
             .gesture(LongPressGesture().onAction(() => {
               this.runtime.archiveSession(session.sessionId);
             }))
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
           }
         }, (session: HarnessRemoteSession) => `${session.sessionId}#${this.languageMode}`)
       }
@@ -2707,9 +2780,8 @@ struct Index {
           }
         }
         .padding({ top: 10, bottom: 10, left: 14, right: 14 })
-        .backgroundColor(this.pal().card)
-        .borderRadius({ topLeft: 6, topRight: 18, bottomLeft: 18, bottomRight: 18 })
-        .border({ width: 1, color: this.pal().border })
+        .backgroundColor(this.pal().inputBg)
+        .borderRadius(16)
         .alignItems(HorizontalAlign.Start)
       }
       .width('88%')
@@ -3011,6 +3083,23 @@ function formatSessionTitle(session: HarnessRemoteSession): string {
     return '新会话';
   }
   return `会话 ${session.sessionId.substring(0, 8)}`;
+}
+
+/** 今天 / 昨天 / 更早 —— 会话列表分组用。 */
+function sessionGroupLabel(updatedAt: number): string {
+  if (updatedAt <= 0) {
+    return '更早';
+  }
+  const now: Date = new Date();
+  const then: Date = new Date(updatedAt);
+  const startOfToday: number = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (updatedAt >= startOfToday) {
+    return '今天';
+  }
+  if (updatedAt >= startOfToday - 86400000) {
+    return '昨天';
+  }
+  return '更早';
 }
 
 function formatSessionTime(updatedAt: number): string {
