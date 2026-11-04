@@ -1845,6 +1845,8 @@ struct Index {
         this.trackDockMouse(event);
       })
       .borderRadius(30)
+      // 把光斑裁在玻璃里面，否则径向渐会漫到坞外面
+      .clip(true)
       .border({ width: 1,
         color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(31,45,90,0.10)' })
       .shadow({
