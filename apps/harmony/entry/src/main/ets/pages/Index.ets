@@ -82,6 +82,8 @@ struct Index {
   @State headerNamePopup: boolean = false;
   @State themeMode: number = 0;
   @State isDarkUi: boolean = false;
+  /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
+  @State expandedRuns: string[] = [];
   private windowChromeDark: boolean = false;
   private chromeApplied: boolean = false;
 
@@ -339,6 +341,168 @@ struct Index {
     const next: number = this.themeMode === 0 ? 1 : (this.themeMode === 1 ? 2 : 0);
     this.runtime.setThemeMode(next);
     promptAction.showToast({ message: `主题：${this.themeLabel(next)}` });
+  }
+
+  /** 连续工具调用折叠：同段 ≥2 条收成一行「N 步」，点开再逐条看。 */
+  private chatRows(): ChatItem[] {
+    const source: ChatItem[] = this.messages;
+    const rows: ChatItem[] = [];
+    let index: number = 0;
+    while (index < source.length) {
+      const item: ChatItem = source[index];
+      if (item.kind !== 'tool') {
+        rows.push(item);
+        index += 1;
+        continue;
+      }
+      let end: number = index;
+      while (end < source.length && source[end].kind === 'tool') {
+        end += 1;
+      }
+      const count: number = end - index;
+      if (count < 2) {
+        rows.push(item);
+        index = end;
+        continue;
+      }
+      const head: ChatItem = source[index];
+      const expanded: boolean = this.isRunExpanded(head.id);
+      rows.push(this.toolRunItem(source, index, end, expanded));
+      if (expanded) {
+        for (let cursor: number = index; cursor < end; cursor += 1) {
+          rows.push(source[cursor]);
+        }
+      }
+      index = end;
+    }
+    return rows;
+  }
+
+  private toolRunItem(source: ChatItem[], start: number, end: number, expanded: boolean): ChatItem {
+    const head: ChatItem = source[start];
+    const row: ChatItem = new ChatItem();
+    row.id = `run:${head.id}`;
+    row.kind = 'toolrun';
+    row.requestRpcId = head.id;
+    row.sessionId = head.sessionId;
+    row.timestamp = head.timestamp;
+    row.rev = expanded ? 1 : 0;
+    row.toolName = head.toolName;
+    row.text = `${end - start} 步 · ${expanded ? '收起' : '展开'}`;
+    row.summary = this.toolRunDetail(source, start, end);
+    let running: boolean = false;
+    let failed: boolean = false;
+    for (let cursor: number = start; cursor < end; cursor += 1) {
+      const state: string = source[cursor].toolState;
+      if (state === 'running') {
+        running = true;
+      } else if (state === 'failed') {
+        failed = true;
+      }
+    }
+    row.toolState = running ? 'running' : (failed ? 'failed' : 'finished');
+    return row;
+  }
+
+  private toolRunDetail(source: ChatItem[], start: number, end: number): string {
+    const names: string[] = [];
+    for (let cursor: number = start; cursor < end; cursor += 1) {
+      const name: string = source[cursor].toolName;
+      if (name.length > 0 && !names.includes(name)) {
+        names.push(name);
+      }
+    }
+    if (names.length === 0) {
+      return '';
+    }
+    const shown: string[] = names.length > 3 ? names.slice(0, 3) : names;
+    let detail: string = shown.join(' → ');
+    if (names.length > 3) {
+      detail = `${detail} → …`;
+    }
+    return detail;
+  }
+
+  private isRunExpanded(headId: string): boolean {
+    return this.expandedRuns.includes(headId);
+  }
+
+  private toggleRun(headId: string): void {
+    const next: string[] = [];
+    let removed: boolean = false;
+    for (const key of this.expandedRuns) {
+      if (key === headId) {
+        removed = true;
+      } else {
+        next.push(key);
+      }
+    }
+    if (!removed) {
+      next.push(headId);
+    }
+    this.expandedRuns = next;
+  }
+
+  /** 设备卡第二行：平台 + 主机版本（Host 没上报版本时只显示平台）。 */
+  private hostSubtitle(device: RemoteHostDevice): string {
+    const head: string = device.platform.length > 0 ? device.platform : '远程主机';
+    if (device.harnessVersion.length > 0) {
+      return `${head} · 主机 ${device.harnessVersion}`;
+    }
+    if (device.clientVersion.length > 0) {
+      return `${head} · 插件 ${device.clientVersion}`;
+    }
+    return head;
+  }
+
+  /** 设备卡第三行：在线状态用绿点表达，这里只补「最近活动」，避免「在线」重复两遍。 */
+  private hostSeenLabel(device: RemoteHostDevice): string {
+    if (device.online) {
+      return '此刻在线';
+    }
+    if (device.lastSeenAt <= 0) {
+      return '离线 · 无活动记录';
+    }
+    const diff: number = Date.now() - device.lastSeenAt;
+    if (diff < 60000) {
+      return '离线 · 刚刚还在';
+    }
+    if (diff < 3600000) {
+      return `离线 · ${Math.round(diff / 60000)} 分钟前`;
+    }
+    if (diff < 86400000) {
+      return `离线 · ${Math.round(diff / 3600000)} 小时前`;
+    }
+    return `离线 · ${Math.round(diff / 86400000)} 天前`;
+  }
+
+  /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
+  private devicesMenu(): MenuElement[] {
+    const items: MenuElement[] = [
+      {
+        value: '退出登录',
+        action: () => {
+          AlertDialog.show({
+            title: '退出登录',
+            message: '将清除本机保存的主机凭据，需要重新绑定才能连接。',
+            autoCancel: true,
+            primaryButton: {
+              value: '取消',
+              action: () => {
+              }
+            },
+            secondaryButton: {
+              value: '退出',
+              fontColor: '#F85749',
+              action: () => {
+                this.runtime.logout();
+              }
+            }
+          });
+        }
+      }
+    ];
+    return items;
   }
 
   /** Keep the window background and system bars in sync with the active theme. */
@@ -703,26 +867,31 @@ struct Index {
           .onClick(() => {
             this.cycleTheme();
           })
-        Button('刷新')
-          .height(32)
-          .fontSize(13)
-          .backgroundColor(this.pal().chip)
-          .fontColor(this.pal().text2)
-          .borderRadius(16)
-          .border({ width: 1, color: this.pal().borderStrong })
-          .onClick(() => {
-            this.runtime.refreshDevices();
-          })
-        Button('退出')
-          .height(32)
-          .fontSize(13)
-          .backgroundColor(this.pal().chip)
-          .fontColor(this.pal().text2)
-          .borderRadius(16)
-          .border({ width: 1, color: this.pal().borderStrong })
-          .onClick(() => {
-            this.runtime.logout();
-          })
+        Button({ type: ButtonType.Circle }) {
+          Image($r('app.media.ic_refresh'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text2)
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor(this.pal().chip)
+        .border({ width: 1, color: this.pal().borderStrong })
+        .enabled(!this.busy)
+        .onClick(() => {
+          this.runtime.refreshDevices();
+        })
+        Button({ type: ButtonType.Circle }) {
+          Image($r('app.media.ic_more'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text2)
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor(this.pal().chip)
+        .border({ width: 1, color: this.pal().borderStrong })
+        .bindMenu(this.devicesMenu())
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 16, bottom: 12 })
@@ -878,9 +1047,15 @@ struct Index {
             .height(6)
             .borderRadius(3)
             .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          Text(`${device.platform} · ${device.online ? '在线' : '离线'}`)
-            .fontSize(12)
-            .fontColor(this.pal().text2)
+          Column({ space: 2 }) {
+            Text(this.hostSubtitle(device))
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+            Text(this.hostSeenLabel(device))
+              .fontSize(10)
+              .fontColor(this.pal().text3)
+          }
+          .alignItems(HorizontalAlign.Start)
         }
       }
       .layoutWeight(1)
@@ -1219,7 +1394,7 @@ struct Index {
             .padding({ top: 40 })
           }
         }
-        ForEach(this.messages, (item: ChatItem) => {
+        ForEach(this.chatRows(), (item: ChatItem) => {
           ListItem() {
             this.MessageRow(item)
           }
@@ -1859,6 +2034,8 @@ struct Index {
       this.AssistantRow(item)
     } else if (item.kind === 'tool') {
       this.ToolRow(item)
+    } else if (item.kind === 'toolrun') {
+      this.ToolRunRow(item)
     } else if (item.kind === 'approval') {
       this.ApprovalRow(item)
     } else if (item.kind === 'question') {
@@ -1973,6 +2150,53 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 折叠后的连续工具调用：一行「N 步 · 展开」，点一下逐条摊开。 */
+  @Builder
+  ToolRunRow(item: ChatItem) {
+    Row({ space: 10 }) {
+      if (item.toolState === 'running') {
+        LoadingProgress()
+          .width(14)
+          .height(14)
+          .color('#22D3EE')
+      } else if (item.toolState === 'failed') {
+        Text('✕')
+          .fontSize(12)
+          .fontColor('#F85749')
+      } else {
+        Text('✓')
+          .fontSize(12)
+          .fontColor('#34D399')
+      }
+      Column({ space: 2 }) {
+        Text(item.text)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.pal().text2)
+        if (item.summary.length > 0) {
+          Text(item.summary)
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Text(item.rev === 1 ? '收起' : '展开')
+        .fontSize(11)
+        .fontColor('#22D3EE')
+    }
+    .width('100%')
+    .padding({ top: 9, bottom: 9, left: 12, right: 12 })
+    .backgroundColor(this.pal().card)
+    .borderRadius(12)
+    .border({ width: 1, color: this.pal().border })
+    .onClick(() => {
+      this.toggleRun(item.requestRpcId);
+    })
   }
 
   @Builder
