@@ -75,6 +75,18 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     assistantText: { paddingHorizontal: 0 },
     userBlock: { alignSelf: 'flex-end', maxWidth: '88%', marginVertical: isCompact ? 4 : spacing.sm },
     userBubble: { backgroundColor: colors.primarySoft, borderRadius: isCompact ? radius.lg : radius.xl, paddingHorizontal: isCompact ? 12 : spacing.md, paddingVertical: isCompact ? 6 : spacing.xs },
+    userMessageInlineWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 4,
+    },
+    userMessageInlineText: {
+      ...t.body,
+      fontSize: 15,
+      color: colors.ink,
+      lineHeight: 22,
+    },
     avatar: { width: isCompact ? 28 : 32, height: isCompact ? 28 : 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
     avatarUser: { backgroundColor: colors.primary },
     avatarAssistant: { backgroundColor: colors.primarySoft },

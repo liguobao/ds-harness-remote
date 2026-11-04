@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import { ArrowDown, ArrowLeft, FileText, Layers, ListTree, Menu, MessageSquare, RefreshCw, Users, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -856,14 +855,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         visible={plusMenuOpen} onClose={closePlusMenu}
         canAttachImages={canAttachImages} attachmentPicking={attachmentPicking}
         takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
-        onQuoteClipboard={() => {
-          void Clipboard.getStringAsync().then(text => {
-            if (text && text.trim().length > 0) {
-              setQuotes(current => [...current, text.trim()])
-              composerInputRef.current?.focus()
-            }
-          }).catch(() => {})
-        }}
         workspaceLabel={workspaceLabel} modeLabel={modeLabel}
         supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}
         toolsAvailable={connected && session.backend !== 'claude' && session.backend !== 'hermes'}
