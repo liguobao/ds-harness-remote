@@ -11,6 +11,8 @@ import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import { VoiceRecorder } from '../services/VoiceInput';
+import { image } from '@kit.ImageKit';
+import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
 
 @Entry
@@ -18,6 +20,8 @@ import BuildProfile from 'BuildProfile';
 struct Index {
   private runtime: AppRuntime = getAppRuntime();
   private voice: VoiceRecorder = new VoiceRecorder();
+  private images: MarkdownImageCache = new MarkdownImageCache();
+  @State imageVersion: number = 0;
   private scroller: Scroller = new Scroller();
   private fieldsPrefilled: boolean = false;
   private mainWindow: window.Window | undefined = undefined;
@@ -2360,7 +2364,9 @@ struct Index {
   MarkdownText(text: string, streaming: boolean) {
     Column({ space: 5 }) {
       ForEach(markdownLines(streaming ? text + '▍' : text), (line: MdLine, index: number) => {
-        if (line.code) {
+        if (line.imageSrc.length > 0) {
+          this.MdImage(line)
+        } else if (line.code) {
           Text(line.text)
             .fontSize(12)
             .fontFamily('monospace')
@@ -2397,6 +2403,105 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 消息里的图片：远端链接直接交给 Image，主机本地路径走 workspaceFiles/readBytes。 */
+  @Builder
+  MdImage(line: MdLine) {
+    Column({ space: 4 }) {
+      if (isRemoteImage(line.imageSrc)) {
+        Image(line.imageSrc)
+          .width('100%')
+          .constraintSize({ maxHeight: 420 })
+          .objectFit(ImageFit.Contain)
+          .borderRadius(10)
+          .border({ width: 1, color: this.pal().border })
+      } else if (this.images.has(line.imageSrc)) {
+        Image(this.images.pixel(line.imageSrc))
+          .width('100%')
+          .constraintSize({ maxHeight: 420 })
+          .objectFit(ImageFit.Contain)
+          .borderRadius(10)
+          .border({ width: 1, color: this.pal().border })
+      } else if (this.images.errorOf(line.imageSrc).length > 0) {
+        Row({ space: 8 }) {
+          Text('🖼')
+            .fontSize(13)
+          Column({ space: 2 }) {
+            Text(t('图片加载失败'))
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+            Text(line.imageSrc)
+              .fontSize(10)
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Text(t('重试'))
+            .fontSize(11)
+            .fontColor('#22D3EE')
+            .onClick(() => {
+              this.images.forget(line.imageSrc);
+              this.loadMdImage(line.imageSrc);
+            })
+        }
+        .width('100%')
+        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .backgroundColor(this.pal().chip)
+        .borderRadius(10)
+      } else {
+        Row({ space: 8 }) {
+          LoadingProgress()
+            .width(14)
+            .height(14)
+            .color('#22D3EE')
+          Text(t('图片加载中…'))
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+        }
+        .width('100%')
+        .padding(10)
+        .backgroundColor(this.pal().chip)
+        .borderRadius(10)
+      }
+      if (line.imageAlt.length > 0) {
+        Text(line.imageAlt)
+          .fontSize(10)
+          .fontColor(this.pal().text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .onAppear(() => {
+      this.loadMdImage(line.imageSrc);
+    })
+  }
+
+  /** 懒加载：只对主机本地路径发请求，远端链接由 Image 自己拉。 */
+  private loadMdImage(src: string): void {
+    if (src.length === 0 || isRemoteImage(src)) {
+      return;
+    }
+    if (this.images.has(src) || this.images.isPending(src)) {
+      return;
+    }
+    this.images.markPending(src);
+    this.runtime.readImageBase64(src).then((base64: string) => {
+      if (base64.length === 0) {
+        throw new Error('empty');
+      }
+      return decodeBase64Image(base64);
+    }).then((pixel: PixelMap) => {
+      this.images.put(src, pixel);
+      this.imageVersion = this.imageVersion + 1;
+    }).catch((error: Error) => {
+      this.images.fail(src, errorMessage(error));
+      this.imageVersion = this.imageVersion + 1;
+    });
   }
 
   /** 长按消息：可从该条消息处分叉出一个新会话。 */
@@ -2802,6 +2907,67 @@ function questionOutcomeLabel(outcome: string): string {
 }
 
 
+/** 消息图片的小缓存：按 src 存解码好的 PixelMap，失败也记下来避免反复请求。 */
+class MarkdownImageCache {
+  private pixels: Map<string, PixelMap> = new Map<string, PixelMap>();
+  private failures: Map<string, string> = new Map<string, string>();
+  private pending: Map<string, boolean> = new Map<string, boolean>();
+
+  has(key: string): boolean {
+    return this.pixels.has(key);
+  }
+
+  /** 调用方先用 has() 判过；这里取不到就是逻辑错误，直接抛出去暴露。 */
+  pixel(key: string): PixelMap {
+    const hit: PixelMap | undefined = this.pixels.get(key);
+    if (hit === undefined) {
+      throw new Error('image not cached: ' + key);
+    }
+    return hit;
+  }
+
+  errorOf(key: string): string {
+    const hit: string | undefined = this.failures.get(key);
+    return hit === undefined ? '' : hit;
+  }
+
+  isPending(key: string): boolean {
+    return this.pending.has(key);
+  }
+
+  markPending(key: string): void {
+    this.pending.set(key, true);
+  }
+
+  put(key: string, pixel: PixelMap): void {
+    this.pending.delete(key);
+    this.failures.delete(key);
+    this.pixels.set(key, pixel);
+  }
+
+  fail(key: string, reason: string): void {
+    this.pending.delete(key);
+    this.failures.set(key, reason);
+  }
+
+  forget(key: string): void {
+    this.pending.delete(key);
+    this.failures.delete(key);
+    this.pixels.delete(key);
+  }
+}
+
+function isRemoteImage(src: string): boolean {
+  return src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:');
+}
+
+/** base64 → PixelMap；主机 readBytes 给的是标准 base64。 */
+function decodeBase64Image(base64: string): Promise<PixelMap> {
+  const bytes: Uint8Array = new util.Base64Helper().decodeSync(base64);
+  const source: image.ImageSource = image.createImageSource(bytes.buffer as ArrayBuffer);
+  return source.createPixelMap();
+}
+
 /** 设置面板里的一项主题选择。 */
 class ThemeChoice {
   value: number = 0;
@@ -2821,6 +2987,61 @@ class MdLine {
   code: boolean = false;
   heading: boolean = false;
   bullet: boolean = false;
+  /** 非空表示这一行是图片，值是 markdown 里的 src。 */
+  imageSrc: string = '';
+  imageAlt: string = '';
+}
+
+/** 一行里切出来的片段：要么是文字，要么是一张图。 */
+class MdSegment {
+  text: string = '';
+  imageSrc: string = '';
+  imageAlt: string = '';
+  isImage: boolean = false;
+}
+
+/** 把一行里的 ![](src) 逐个切出来，其余当文字。 */
+function splitMdImages(body: string): MdSegment[] {
+  const out: MdSegment[] = [];
+  let cursor: number = 0;
+  while (cursor < body.length) {
+    const start: number = body.indexOf('![', cursor);
+    if (start < 0) {
+      break;
+    }
+    const labelEnd: number = body.indexOf('](', start + 2);
+    if (labelEnd < 0) {
+      break;
+    }
+    const urlEnd: number = body.indexOf(')', labelEnd + 2);
+    if (urlEnd < 0) {
+      break;
+    }
+    const src: string = body.substring(labelEnd + 2, urlEnd).trim();
+    if (src.length === 0) {
+      cursor = urlEnd + 1;
+      continue;
+    }
+    const before: string = body.substring(cursor, start).trim();
+    if (before.length > 0) {
+      const textSeg: MdSegment = new MdSegment();
+      textSeg.text = before;
+      out.push(textSeg);
+    }
+    const imageSeg: MdSegment = new MdSegment();
+    imageSeg.isImage = true;
+    imageSeg.imageSrc = src;
+    imageSeg.imageAlt = body.substring(start + 2, labelEnd).trim();
+    out.push(imageSeg);
+    cursor = urlEnd + 1;
+  }
+  const rest: string = body.substring(cursor).trim();
+  if (rest.length > 0) {
+    const textSeg: MdSegment = new MdSegment();
+    textSeg.text = rest;
+    out.push(textSeg);
+  }
+  return out;
 }
 
 /** 把 Markdown 拆成可渲染的行，并去掉会裸露的标记符号。 */
@@ -2864,9 +3085,26 @@ function markdownLines(source: string): MdLine[] {
     body = body.split('`').join('');
     body = body.split('**').join('');
     body = body.split('__').join('');
-    entry.text = body;
-    if (entry.text.length > 0) {
-      out.push(entry);
+    // 图片单独出行：文字段沿用当前标记（标题/列表），图片段单独成行
+    const segments: MdSegment[] = splitMdImages(body);
+    if (segments.length === 0) {
+      continue;
+    }
+    for (const segment of segments) {
+      if (segment.isImage) {
+        const imageLine: MdLine = new MdLine();
+        imageLine.imageSrc = segment.imageSrc;
+        imageLine.imageAlt = segment.imageAlt;
+        out.push(imageLine);
+        continue;
+      }
+      const textLine: MdLine = new MdLine();
+      textLine.heading = entry.heading;
+      textLine.bullet = entry.bullet;
+      textLine.text = segment.text;
+      if (textLine.text.length > 0) {
+        out.push(textLine);
+      }
     }
   }
   return out;

@@ -478,6 +478,16 @@ export class AppRuntime {
     this.notify();
   }
 
+  /** 取主机上一张图片的 base64（消息里的本地图片路径）。 */
+  async readImageBase64(path: string): Promise<string> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      throw new Error('尚未连接主机');
+    }
+    const sessionId: string = this.currentSessionId;
+    return harness.readFileBase64(sessionId, path);
+  }
+
   /** 把一段录音（WAV base64）交给主机转写，返回文本；未连接或失败时抛错。 */
   async transcribeVoice(audioBase64: string): Promise<string> {
     const harness: HarnessAlphaClient | undefined = this.harness;

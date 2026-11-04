@@ -344,6 +344,24 @@ export class HarnessAlphaClient {
     return asRecord(value);
   }
 
+  /**
+   * 读主机上的图片字节（base64）。路径可以是绝对路径，也可以是相对工作区根目录的路径；
+   * 主机侧 workspaceFiles/readBytes 允许读工作区外的文件，所以 /tmp 这类也能取。
+   */
+  async readFileBase64(sessionId: string, path: string): Promise<string> {
+    const options: Record<string, Object> = {};
+    const args: Record<string, Object> = {
+      'workspaceFileScopeId': sessionId,
+      'path': path,
+      'options': options
+    };
+    const value: Object = await this.callValue('workspaceFiles/readBytes', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const data: string = root !== undefined ? jsonStr(root, 'data', '') : '';
+    logInfo('workspaceFiles/readBytes -> ' + path + ' base64=' + data.length);
+    return data;
+  }
+
   /** 语音转文字：把手里的 WAV（base64）交给主机上的语音提供商。 */
   async speechTranscribe(audioBase64: string, language: string): Promise<string> {
     const request: Record<string, Object> = { 'audioBase64': audioBase64 };
