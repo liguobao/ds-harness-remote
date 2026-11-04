@@ -1,3 +1,11 @@
+## Unreleased
+
+- Preserve other plugins named `dsh-remote` when Remote starts. Only the owned
+  `@dsh-remote/plugin` legacy name is disabled automatically. If an older local
+  installation used the bare name, check its origin before disabling it manually.
+- Remote 启动时不再自动禁用同名的第三方 `dsh-remote` 插件；只自动迁移自有的
+  `@dsh-remote/plugin` 旧名。若旧的本地安装使用裸名，请确认其来源后再手动禁用。
+
 ## 0.6.2 — 2026-11-03
 
 Android build 70.

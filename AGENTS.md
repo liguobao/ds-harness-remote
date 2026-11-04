@@ -1,5 +1,20 @@
 # Repository Guide for Agents
 
+## Legacy loader ownership (2026-11-04, Issue #244)
+
+启动迁移仅自动禁用项目自有的 `@dsh-remote/plugin` 旧名；不再按裸名 `dsh-remote`
+禁用条目，该 npm 包属于另一发布者。旧本地别名没有可确认的来源时保持用户状态，
+由用户核对后手动禁用。新增一条生命周期契约验证跨插件写入边界，以及自身、已禁用
+条目和无关插件的状态保持，不新增 UI 或配置布局断言。
+
+Windows Node 22.23.4 / pnpm 9.15.4：五个 packages 构建、Plugin check 和 8 条生命周期
+测试通过；Host 发布 bundle 仅一行变化，Client bundle 无变化。Node 24.11.1 下四个
+共享包 193 tests 通过；Plugin 全套 482 pass / 8 fail，另有一个依赖加载错误。
+同环境原始基线加新测试为 481 pass / 9 fail，失败名称的唯一差异即本条回归；
+`verify-dsh-plugin.mjs` 的根 TUI patch 断言在原始基线也失败。冻结安装因 lockfile
+缺失依赖记录失败，验证时只在本地修复安装并在安装后恢复原 lockfile 字节，不提交
+依赖变化。未做真实 DSH profile、Desktop/Android 或跨设备验收。
+
 ## werift 0.26.0 upgrade (2026-11-03, Issue #259)
 
 按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted
