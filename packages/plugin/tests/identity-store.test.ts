@@ -90,6 +90,33 @@ describe('IdentityStore', () => {
     expect(JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')).publicKey).toBe(original.publicKey)
   })
 
+  it('keeps recovery material when the stored pair does not verify', async () => {
+    const directory = await temporaryDirectory()
+    const original = await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    const other = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Other')
+    const residue = join(directory, 'device.key.57692.01a1a04a-7ced-7ffe-b382-e5a2e689f6ad.tmp')
+    await writeFile(residue, `${original.privateKey}\n`)
+    await writeFile(join(directory, 'device.key'), `${other.privateKey}\n`)
+
+    await expect(new IdentityStore({ directory }).loadOrCreate('Workstation'))
+      .rejects.toThrow(/public and private keys do not match/)
+    // That temp is the only private key still matching device.json (#276), so a
+    // failed verification must not delete it the way a successful one does.
+    await expect(readFile(residue, 'utf8')).resolves.toContain(original.privateKey)
+  })
+
+  it('resets onto a fresh identity without leaving lock artifacts behind', async () => {
+    const directory = await temporaryDirectory()
+    const first = await new IdentityStore({ directory }).loadOrCreate('Workstation')
+    const second = await new IdentityStore({ directory }).reset('Workstation')
+
+    expect(second.deviceId).not.toBe(first.deviceId)
+    expect((await readdir(directory)).sort()).toEqual(['device.json', 'device.key', 'trusted-peers.json'])
+    await expect(new IdentityStore({ directory }).loadOrCreate('Workstation')).resolves.toMatchObject({
+      deviceId: second.deviceId, publicKey: second.publicKey,
+    })
+  })
+
   it('clears temporary files left behind by an interrupted write', async () => {
     const directory = await temporaryDirectory()
     await new IdentityStore({ directory }).loadOrCreate('Workstation')

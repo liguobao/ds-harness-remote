@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
@@ -71,38 +71,40 @@ export class IdentityStore {
   }
 
   async loadOrCreate(deviceName: string): Promise<HostIdentity> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    await chmod(this.directory, 0o700)
-    const devicePath = join(this.directory, 'device.json')
-    const keyPath = join(this.directory, 'device.key')
+    await ensureDirectory(this.directory)
     // Creation writes two files that must agree. Without a cross-process lock a
     // Desktop restart overlapping the previous Host reaches the "create" branch
     // twice; each writes its own key pair and the directory ends up holding one
     // process's device.json beside another's device.key. That mismatch fails
     // closed forever — every later start throws before registering the control
     // route — so serialize the whole read-create-verify cycle.
-    const release = await acquireIdentityLock(this.directory)
-    try {
-      await removeStaleTemporaries(this.directory)
-      const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
-      if (hasDevice !== hasKey) {
-        throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
-      }
+    return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName))
+  }
 
-      if (!hasDevice) {
-        const keys = generateKeyPair()
-        const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
-        // Write the key first: a crash between the two leaves device.key alone,
-        // which the incomplete-pair guard above reports explicitly, instead of
-        // leaving a device.json whose published public key has no private half.
-        await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
-        await atomicJsonWrite(devicePath, record, 0o600)
-      }
-
-      return await this.readIdentity(devicePath, keyPath, deviceName)
-    } finally {
-      await release()
+  private async loadOrCreateLocked(deviceName: string): Promise<HostIdentity> {
+    const devicePath = join(this.directory, 'device.json')
+    const keyPath = join(this.directory, 'device.key')
+    const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
+    if (hasDevice !== hasKey) {
+      throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
     }
+
+    if (!hasDevice) {
+      const keys = generateKeyPair()
+      const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
+      // Write the key first: a crash between the two leaves device.key alone,
+      // which the incomplete-pair guard above reports explicitly, instead of
+      // leaving a device.json whose published public key has no private half.
+      await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
+      await atomicJsonWrite(devicePath, record, 0o600)
+    }
+
+    const identity = await this.readIdentity(devicePath, keyPath, deviceName)
+    // Only a verified pair makes the leftovers dead weight. In the #276 residue
+    // the surviving device.key.*.tmp is the only private key that still matches
+    // device.json, so a failed verification keeps it for manual recovery.
+    await removeStaleTemporaries(this.directory)
+    return identity
   }
 
   private async readIdentity(devicePath: string, keyPath: string, deviceName: string): Promise<HostIdentity> {
@@ -132,11 +134,20 @@ export class IdentityStore {
     return this.identity
   }
 
+  /**
+   * Replace the identity. Runs in the same lock domain as creation, so a reset
+   * can never interleave with another process's read-create-verify. The lock
+   * file lives outside `removeIdentityRecords`, so resetting cannot delete a
+   * lock another process holds — and cannot leave itself unprotected either.
+   */
   async reset(deviceName: string): Promise<HostIdentity> {
-    await rm(this.directory, { recursive: true, force: true })
-    this.identity = undefined
-    this.peers.clear()
-    return this.loadOrCreate(deviceName)
+    await ensureDirectory(this.directory)
+    return withIdentityLock(this.directory, async () => {
+      this.identity = undefined
+      this.peers.clear()
+      await removeIdentityRecords(this.directory)
+      return this.loadOrCreateLocked(deviceName)
+    })
   }
 
   listTrustedPeers(): TrustedPeer[] {
@@ -246,68 +257,142 @@ function safeErrorMessage(error: unknown): string {
 }
 
 /**
- * Serialize identity creation across processes sharing one `~/.dsh`.
+ * Serialize every read-create-verify cycle that touches `directory`.
  *
- * A `wx`-created lock file is the whole mechanism: the first process to create
- * it wins, everyone else retries. The lock records pid and creation time so a
- * lock left behind by a crash can be reclaimed once it is old enough, and so a
- * same-process re-entry (HMR reload) never deadlocks on itself.
+ * The lock is a `wx`-created `device.lock` holding the owner's pid. It is
+ * removed by exactly two parties: its owner, once the operation finished, and a
+ * contender that proved the recorded process no longer exists. Those are the
+ * only two cases in which no live owner can be mid-operation, which is what
+ * makes both removals safe:
+ *
+ * - Age is never evidence of abandonment. A holder suspended for minutes is
+ *   still the holder, and letting a successor take over would hand the
+ *   critical section to two processes at once — the failure this lock exists to
+ *   prevent. A holder that resumes therefore still owns its lock and can only
+ *   ever remove its own.
+ * - A lock whose record cannot be read yet (the file is created before its
+ *   pid lands) is treated as held, never reclaimed: deleting it would admit a
+ *   second creator while the first is still running.
+ * - Takeover is arbitrated through a claim file named after the dead record, so
+ *   two contenders cannot both reclaim, and the claimant re-reads the lock
+ *   under the claim to confirm it is still the record whose owner it proved
+ *   gone. A lock acquired after a takeover has a different record, hence a
+ *   different claim name, so it can never be the one a stale claim removes.
  */
 const LOCK_FILE_NAME = 'device.lock'
 const LOCK_TIMEOUT_MS = 15_000
-const LOCK_STALE_MS = 60_000
-const LOCK_RETRY_MS = 25
+const LOCK_RETRY_INITIAL_MS = 20
+const LOCK_RETRY_MAX_MS = 200
 
-async function acquireIdentityLock(directory: string): Promise<() => Promise<void>> {
+async function withIdentityLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
   const lockPath = join(directory, LOCK_FILE_NAME)
   const deadline = Date.now() + LOCK_TIMEOUT_MS
+  let delay = LOCK_RETRY_INITIAL_MS
   for (;;) {
     try {
-      const handle = await open(lockPath, 'wx', 0o600)
-      await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }))
-      await handle.close()
-      let released = false
-      return async () => {
-        if (released) return
-        released = true
-        await unlink(lockPath).catch(() => undefined)
-      }
+      // One call, so the window in which a contender can read the path without
+      // its record is the only unprotected state — and that state is waited on.
+      await writeFile(lockPath, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      break
     } catch (error: unknown) {
-      if (!isNodeError(error) || error.code !== 'EEXIST') throw error
-      if (await reclaimStaleLock(lockPath)) continue
-      if (Date.now() >= deadline) {
-        throw new IdentityInvalidError('device identity is locked by another process; stop other DSH instances and retry')
-      }
-      await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS))
+      if (!(await isLockContention(error, lockPath))) throw error
+      if (await takeOverLockOfExitedOwner(lockPath)) continue
     }
+    if (Date.now() >= deadline) {
+      throw new IdentityInvalidError('device identity is locked by another process; stop other DSH instances and retry')
+    }
+    await new Promise(resolve => setTimeout(resolve, delay))
+    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS)
   }
-}
-
-/** Remove a lock whose owner is gone or has held it past the staleness bound. */
-async function reclaimStaleLock(lockPath: string): Promise<boolean> {
   try {
-    const owner = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown; at?: unknown }
-    const heldSince = typeof owner.at === 'number' ? Date.now() - owner.at : Number.POSITIVE_INFINITY
-    const ownerPid = typeof owner.pid === 'number' ? owner.pid : undefined
-    // A holder past the bound, or one whose process no longer exists, is debris.
-    if (heldSince < LOCK_STALE_MS && ownerPid !== undefined && isProcessAlive(ownerPid)) return false
-    await unlink(lockPath)
-    return true
-  } catch (error: unknown) {
-    if (isNodeError(error) && error.code === 'ENOENT') return true
-    // An unreadable lock is treated as debris from a crash.
-    await unlink(lockPath).catch(() => undefined)
-    return true
+    return await operation()
+  } finally {
+    // Safe by the invariant above: no contender reclaims a lock whose owner is
+    // still running, so this path still names our own lock.
+    await rm(lockPath, { force: true })
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+/** Whether an exclusive create failed because the lock already exists. */
+async function isLockContention(error: unknown, lockPath: string): Promise<boolean> {
+  if (!isNodeError(error)) return false
+  if (error.code === 'EEXIST') return true
+  // Windows reports a held exclusive create as EPERM; confirm by looking.
+  if (error.code !== 'EPERM' || process.platform !== 'win32') return false
+  return exists(lockPath)
+}
+
+/**
+ * Remove a lock whose recorded owner is proven gone, and report whether this
+ * call did it. An unreadable or malformed record is not proof of anything and
+ * is left alone for its owner or an operator to resolve.
+ */
+async function takeOverLockOfExitedOwner(lockPath: string): Promise<boolean> {
+  const record = await readLockRecord(lockPath)
+  if (record === undefined || !ownerExited(record)) return false
+  const claimPath = `${lockPath}.takeover-${createHash('sha256').update(record).digest('hex').slice(0, 16)}`
+  try {
+    await writeFile(claimPath, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+  } catch (error: unknown) {
+    // Another contender is reclaiming this same record; it removes the lock.
+    if (await isLockContention(error, claimPath)) return false
+    throw error
+  }
+  try {
+    if (await readLockRecord(lockPath) !== record || !ownerExited(record)) return false
+    await rm(lockPath, { force: true })
+    return true
+  } finally {
+    await rm(claimPath, { force: true }).catch(() => undefined)
+  }
+}
+
+async function readLockRecord(lockPath: string): Promise<string | undefined> {
+  try {
+    return await readFile(lockPath, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether the owner a `<pid>\n` record names is proven gone. */
+function ownerExited(record: string): boolean {
+  if (!/^\d+\n$/.test(record)) return false
+  const pid = Number(record.trim())
+  if (pid === 0 || pid > 2147483647) return false
+  // Our own pid means re-entry from the same process (a second store, an HMR
+  // reload). Waiting is correct: the operation does finish and release.
+  if (pid === process.pid) return false
   try {
     process.kill(pid, 0)
-    return true
+    return false
   } catch (error: unknown) {
-    return isNodeError(error) && error.code === 'EPERM'
+    // ESRCH proves the process is gone; EPERM means it exists under another
+    // user and must be treated as a live owner.
+    return isNodeError(error) && error.code === 'ESRCH'
   }
+}
+
+async function ensureDirectory(directory: string): Promise<void> {
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await chmod(directory, 0o700)
+}
+
+/** Drop every identity record, leaving the lock files in place. */
+async function removeIdentityRecords(directory: string): Promise<void> {
+  let entries: string[]
+  try {
+    entries = await readdir(directory)
+  } catch {
+    return
+  }
+  await Promise.all(entries
+    .filter(name => !isLockArtifact(name))
+    .map(name => rm(join(directory, name), { recursive: true, force: true })))
+}
+
+function isLockArtifact(name: string): boolean {
+  return name === LOCK_FILE_NAME || name.startsWith(`${LOCK_FILE_NAME}.takeover-`)
 }
 
 /** Drop temp files a previous interrupted write left beside the identity pair. */

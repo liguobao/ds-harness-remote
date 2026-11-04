@@ -75339,7 +75339,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error62) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open7 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open6 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -75348,7 +75348,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open7,
+      open: open6,
       failure: (error62) => this.failure(error62),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -75375,12 +75375,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open7 = this.originalOpen;
-      const rc1 = usesRc1Arity(open7);
+      const open6 = this.originalOpen;
+      const rc1 = usesRc1Arity(open6);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open7, this.runtime, callArgs) : open7.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open6, this.runtime, callArgs) : open6.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -75464,8 +75464,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open7) {
-  return open7.length >= 5;
+function usesRc1Arity(open6) {
+  return open6.length >= 5;
 }
 function endedUplink() {
   return {
@@ -75481,9 +75481,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open7 = runtime.openWireStream;
-  if (open7 !== void 0) {
-    return usesRc1Arity(open7) ? (endpoint, payload, signal, uplink, peer) => open7.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open7.call(runtime, endpoint, payload, signal);
+  const open6 = runtime.openWireStream;
+  if (open6 !== void 0) {
+    return usesRc1Arity(open6) ? (endpoint, payload, signal, uplink, peer) => open6.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open6.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -77442,7 +77442,7 @@ import { execFileSync } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir3, open as open4, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -77477,28 +77477,26 @@ var IdentityStore = class {
     this.directory = options.directory ?? join5(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
-    await mkdir3(this.directory, { recursive: true, mode: 448 });
-    await chmod2(this.directory, 448);
+    await ensureDirectory(this.directory);
+    return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
+  }
+  async loadOrCreateLocked(deviceName) {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
-    const release = await acquireIdentityLock(this.directory);
-    try {
-      await removeStaleTemporaries(this.directory);
-      const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
-      if (hasDevice !== hasKey) {
-        throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
-      }
-      if (!hasDevice) {
-        const keys = generateKeyPair();
-        const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-        await atomicTextWrite(keyPath, `${keys.privateKey}
-`, 384);
-        await atomicJsonWrite(devicePath, record11, 384);
-      }
-      return await this.readIdentity(devicePath, keyPath, deviceName);
-    } finally {
-      await release();
+    const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    if (hasDevice !== hasKey) {
+      throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
     }
+    if (!hasDevice) {
+      const keys = generateKeyPair();
+      const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+      await atomicTextWrite(keyPath, `${keys.privateKey}
+`, 384);
+      await atomicJsonWrite(devicePath, record11, 384);
+    }
+    const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    await removeStaleTemporaries(this.directory);
+    return identity3;
   }
   async readIdentity(devicePath, keyPath, deviceName) {
     await assertPrivateMode2(keyPath);
@@ -77525,11 +77523,20 @@ var IdentityStore = class {
     if (this.identity === void 0) throw new Error("identity store has not been loaded");
     return this.identity;
   }
+  /**
+   * Replace the identity. Runs in the same lock domain as creation, so a reset
+   * can never interleave with another process's read-create-verify. The lock
+   * file lives outside `removeIdentityRecords`, so resetting cannot delete a
+   * lock another process holds — and cannot leave itself unprotected either.
+   */
   async reset(deviceName) {
-    await rm3(this.directory, { recursive: true, force: true });
-    this.identity = void 0;
-    this.peers.clear();
-    return this.loadOrCreate(deviceName);
+    await ensureDirectory(this.directory);
+    return withIdentityLock(this.directory, async () => {
+      this.identity = void 0;
+      this.peers.clear();
+      await removeIdentityRecords(this.directory);
+      return this.loadOrCreateLocked(deviceName);
+    });
   }
   listTrustedPeers() {
     return [...this.peers.values()].map((peer) => ({ ...peer }));
@@ -77625,53 +77632,92 @@ function safeErrorMessage(error62) {
 }
 var LOCK_FILE_NAME = "device.lock";
 var LOCK_TIMEOUT_MS = 15e3;
-var LOCK_STALE_MS = 6e4;
-var LOCK_RETRY_MS = 25;
-async function acquireIdentityLock(directory) {
+var LOCK_RETRY_INITIAL_MS = 20;
+var LOCK_RETRY_MAX_MS = 200;
+async function withIdentityLock(directory, operation) {
   const lockPath = join5(directory, LOCK_FILE_NAME);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let delay = LOCK_RETRY_INITIAL_MS;
   for (; ; ) {
     try {
-      const handle = await open4(lockPath, "wx", 384);
-      await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
-      await handle.close();
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await unlink(lockPath).catch(() => void 0);
-      };
+      await writeFile2(lockPath, `${process.pid}
+`, { encoding: "utf8", mode: 384, flag: "wx" });
+      break;
     } catch (error62) {
-      if (!isNodeError(error62) || error62.code !== "EEXIST") throw error62;
-      if (await reclaimStaleLock(lockPath)) continue;
-      if (Date.now() >= deadline) {
-        throw new IdentityInvalidError("device identity is locked by another process; stop other DSH instances and retry");
-      }
-      await new Promise((resolve6) => setTimeout(resolve6, LOCK_RETRY_MS));
+      if (!await isLockContention(error62, lockPath)) throw error62;
+      if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
+    if (Date.now() >= deadline) {
+      throw new IdentityInvalidError("device identity is locked by another process; stop other DSH instances and retry");
+    }
+    await new Promise((resolve6) => setTimeout(resolve6, delay));
+    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
   }
-}
-async function reclaimStaleLock(lockPath) {
   try {
-    const owner = JSON.parse(await readFile3(lockPath, "utf8"));
-    const heldSince = typeof owner.at === "number" ? Date.now() - owner.at : Number.POSITIVE_INFINITY;
-    const ownerPid = typeof owner.pid === "number" ? owner.pid : void 0;
-    if (heldSince < LOCK_STALE_MS && ownerPid !== void 0 && isProcessAlive(ownerPid)) return false;
-    await unlink(lockPath);
-    return true;
-  } catch (error62) {
-    if (isNodeError(error62) && error62.code === "ENOENT") return true;
-    await unlink(lockPath).catch(() => void 0);
-    return true;
+    return await operation();
+  } finally {
+    await rm3(lockPath, { force: true });
   }
 }
-function isProcessAlive(pid) {
+async function isLockContention(error62, lockPath) {
+  if (!isNodeError(error62)) return false;
+  if (error62.code === "EEXIST") return true;
+  if (error62.code !== "EPERM" || process.platform !== "win32") return false;
+  return exists2(lockPath);
+}
+async function takeOverLockOfExitedOwner(lockPath) {
+  const record11 = await readLockRecord(lockPath);
+  if (record11 === void 0 || !ownerExited(record11)) return false;
+  const claimPath = `${lockPath}.takeover-${createHash5("sha256").update(record11).digest("hex").slice(0, 16)}`;
+  try {
+    await writeFile2(claimPath, `${process.pid}
+`, { encoding: "utf8", mode: 384, flag: "wx" });
+  } catch (error62) {
+    if (await isLockContention(error62, claimPath)) return false;
+    throw error62;
+  }
+  try {
+    if (await readLockRecord(lockPath) !== record11 || !ownerExited(record11)) return false;
+    await rm3(lockPath, { force: true });
+    return true;
+  } finally {
+    await rm3(claimPath, { force: true }).catch(() => void 0);
+  }
+}
+async function readLockRecord(lockPath) {
+  try {
+    return await readFile3(lockPath, "utf8");
+  } catch {
+    return void 0;
+  }
+}
+function ownerExited(record11) {
+  if (!/^\d+\n$/.test(record11)) return false;
+  const pid = Number(record11.trim());
+  if (pid === 0 || pid > 2147483647) return false;
+  if (pid === process.pid) return false;
   try {
     process.kill(pid, 0);
-    return true;
+    return false;
   } catch (error62) {
-    return isNodeError(error62) && error62.code === "EPERM";
+    return isNodeError(error62) && error62.code === "ESRCH";
   }
+}
+async function ensureDirectory(directory) {
+  await mkdir3(directory, { recursive: true, mode: 448 });
+  await chmod2(directory, 448);
+}
+async function removeIdentityRecords(directory) {
+  let entries;
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(entries.filter((name2) => !isLockArtifact(name2)).map((name2) => rm3(join5(directory, name2), { recursive: true, force: true })));
+}
+function isLockArtifact(name2) {
+  return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
 }
 async function removeStaleTemporaries(directory) {
   let entries;
@@ -80676,7 +80722,7 @@ var IsolatedAcpClient = class {
 };
 
 // src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir3, open as open5, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/remote-terminal-controller.ts
@@ -81375,7 +81421,7 @@ var WorkspaceBridge = class {
       if (info.size > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       const offset = readOffset(args);
       const limit = readLimit(args);
-      const file2 = await open5(target3, "r");
+      const file2 = await open4(target3, "r");
       let bytes;
       try {
         const buffer3 = Buffer.allocUnsafe(info.size + 1);
@@ -85902,7 +85948,7 @@ function redact(value, key = "") {
 // src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants5 } from "node:fs";
-import { link, lstat as lstat2, open as open6, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join13 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -85983,7 +86029,7 @@ var WorkspaceUploadHost = class {
     const directory = await stat6(root);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const temp = join13(root, `.dsh-upload-${randomUUID16()}.part`);
-    const handle = await open6(temp, constants5.O_CREAT | constants5.O_EXCL | constants5.O_RDWR | (constants5.O_NOFOLLOW ?? 0), 384);
+    const handle = await open5(temp, constants5.O_CREAT | constants5.O_EXCL | constants5.O_RDWR | (constants5.O_NOFOLLOW ?? 0), 384);
     const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
