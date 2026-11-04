@@ -11,9 +11,20 @@ export class RelayTransportOptions {
   capabilities: string[] = ['transport.relay', 'transport.relay.attach'];
   preferredTransports: string[] = ['relay'];
   /** 整个控制握手（含中继 attach 重试）的预算，必须大于重试间隔之和。 */
-  handshakeTimeoutMs: number = 45000;
-  /** 中继容量会抖动（4008 relay capacity reached），attach 失败时按这个间隔重试。 */
-  attachRetryDelaysMs: number[] = [1500, 3000, 6000, 12000, 20000];
+  handshakeTimeoutMs: number = 20000;
+  /** 中继容量会抖一下，快速补两次就够了；真被拒就别让用户干等。 */
+  attachRetryDelaysMs: number[] = [1200, 2500];
+}
+
+/** 把中继的关闭码翻译成一句人话，原始 code/reason 仍然带着，方便报障。 */
+export function describeAttachFailure(code: number, reason: string): string {
+  if (code === 4008) {
+    return '中继当前没有可用容量（4008 ' + reason + '），请稍后重试或让主机侧重启中继';
+  }
+  if (code === 4001 || code === 4003) {
+    return '中继拒绝了这次连接（' + code + ' ' + reason + '），票据可能已失效，重试即可';
+  }
+  return '中继连接失败（' + code + ' ' + reason + '）';
 }
 
 export class RelayConnectionInfo {
@@ -393,8 +404,7 @@ export class RelayTransport {
         logWarn('relay data socket closed code=' + value.code + ' reason=' + value.reason
           + ' ready=' + this.dataReady);
         if (!this.dataReady) {
-          reject(new Error('Relay data socket closed before attach code=' + value.code
-            + ' reason=' + value.reason));
+          reject(new Error(describeAttachFailure(value.code, value.reason)));
         } else {
           this.fail(new Error('Relay data socket closed'));
         }
