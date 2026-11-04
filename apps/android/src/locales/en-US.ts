@@ -354,6 +354,11 @@ const enUS = {
     copy: 'Copy',
   },
   automation: {
+    formCustomTime: 'Custom HH:mm',
+    formSessionHint: 'The chosen session receives a new instruction on every run.',
+    formNextRuns: 'Next runs',
+    formLocalTime: 'local time',
+    saveTask: 'Save schedule',
     subtitle: 'Manage scheduled reminders across your sessions',
     title: 'Automation tasks',
     nav: 'Automation tasks',

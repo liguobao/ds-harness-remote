@@ -217,6 +217,49 @@ export function AutomationTasksModal({
       ? title
       : sessionId.slice(-8)
 
+  const currentKindLabel = useMemo(() => {
+    if (formKind === 'every') return strings.automation.timingEvery
+    if (formKind === 'weekly') return strings.automation.timingWeekly
+    if (formKind === 'at') return strings.automation.timingOnce
+    if (formKind === 'cron') return 'Cron'
+    return strings.automation.timingDaily
+  }, [formKind, strings])
+
+  /** Preview of the next three local runs for the rule being edited. */
+  const nextRunsLabel = useMemo(() => {
+    const stamps: Date[] = []
+    const hours = Number(formTime.split(':')[0])
+    const minutes = Number(formTime.split(':')[1])
+    const base = new Date()
+    const pushAt = (at: Date): void => {
+      stamps.push(at)
+    }
+    if (formKind === 'every') {
+      for (let i = 1; i <= 3; i += 1) pushAt(new Date(base.getTime() + i * (formIntervalMinutes ?? 60) * 60_000))
+    } else if (formKind === 'at') {
+      pushAt(new Date(base.getTime() + (formDelayMinutes ?? 15) * 60_000))
+    } else if (formKind === 'cron') {
+      return formCronExpression || '—'
+    } else {
+      for (let day = 0; day < 14 && stamps.length < 3; day += 1) {
+        const candidate = new Date(base)
+        candidate.setDate(base.getDate() + day)
+        candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
+        if (candidate.getTime() <= base.getTime()) continue
+        const weekday = candidate.getDay() === 0 ? 7 : candidate.getDay()
+        if (formKind === 'weekly' && !formWeekdays.includes(weekday)) continue
+        pushAt(candidate)
+      }
+    }
+    if (stamps.length === 0) return '—'
+    return stamps
+      .map(
+        at =>
+          `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`,
+      )
+      .join(' · ')
+  }, [formKind, formTime, formWeekdays, formIntervalMinutes, formDelayMinutes, formCronExpression])
+
   const emptyTitle = useMemo(() => {
     if (statusFilter === 'inactive' && search.trim() === '') {
       return strings.automation.emptyInactive
@@ -558,7 +601,7 @@ export function AutomationTasksModal({
         ) : formMode !== null ? (
           /* Create / Edit Form View */
           <View style={styles.flex}>
-            <View style={styles.header}>
+            <View style={styles.formHeader}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.common.cancel}
@@ -567,87 +610,75 @@ export function AutomationTasksModal({
                   setFormMode(null)
                 }}
                 hitSlop={8}
-                style={styles.headerBtn}
+                style={[styles.headerBtn, styles.formBackBtn]}
               >
                 <ArrowLeft size={20} color={colors.ink} />
               </Pressable>
-              <Text style={styles.headerTitle}>
-                {formMode === 'create' ? strings.automation.newTask : strings.automation.editTask}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.workspaces.saveName}
-                onPress={handleSaveForm}
-                disabled={submitting}
-                hitSlop={8}
-                style={[styles.headerBtn, styles.saveHeaderBtn]}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color={colors.white} />
-                ) : (
-                  <Check size={18} color={colors.white} />
-                )}
-              </Pressable>
+              <View style={styles.formHeaderText}>
+                <Text style={styles.formEyebrow}>{strings.automation.title}</Text>
+                <Text style={styles.formTitleLeft} numberOfLines={1}>
+                  {formMode === 'create' ? strings.automation.newTask : strings.automation.editTask}
+                </Text>
+              </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.formContainer} keyboardShouldPersistTaps="handled">
-              {/* Task Name */}
+              {/* Definition card: name, instruction */}
               <View style={styles.formCard}>
-                <Text style={styles.formLabel}>{strings.automation.formTitle}</Text>
                 <TextInput
                   value={formTitle}
                   onChangeText={setFormTitle}
                   placeholder={strings.automation.name}
                   placeholderTextColor={colors.muted}
                   maxLength={120}
-                  style={styles.formInput}
+                  style={styles.titleInput}
                   selectionColor={colors.primary}
                 />
-              </View>
-
-              {/* Task Instruction / Prompt */}
-              <View style={styles.formCard}>
-                <Text style={styles.formLabel}>{strings.automation.formPrompt}</Text>
+                <View style={styles.cardDivider} />
                 <TextInput
                   value={formPrompt}
                   onChangeText={setFormPrompt}
                   placeholder={strings.automation.instruction}
                   placeholderTextColor={colors.muted}
                   multiline
-                  numberOfLines={4}
-                  style={[styles.formInput, styles.formInputMultiline]}
+                  style={styles.promptInput}
                   selectionColor={colors.primary}
                 />
+                {formMode === 'create' && availableSessions.length > 0 && (
+                  <>
+                    <View style={styles.cardDivider} />
+                    <Text style={styles.formLabel}>{strings.automation.formTargetSession}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillScroll}>
+                      {availableSessions.map(s => {
+                        const active = formTargetSessionId === s.sessionId
+                        return (
+                          <Pressable
+                            key={s.sessionId}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                            onPress={() => setFormTargetSessionId(s.sessionId)}
+                            style={[styles.sessionPill, active && styles.sessionPillActive]}
+                          >
+                            <MessageSquare size={13} color={active ? colors.white : colors.muted} />
+                            <Text style={[styles.sessionPillText, active && styles.sessionPillTextActive]} numberOfLines={1}>
+                              {sessionLabel(s.sessionId, s.title)}
+                            </Text>
+                          </Pressable>
+                        )
+                      })}
+                    </ScrollView>
+                    <Text style={styles.formHelper}>{strings.automation.formSessionHint}</Text>
+                  </>
+                )}
               </View>
 
-              {/* Target Session (Create mode only) */}
-              {formMode === 'create' && availableSessions.length > 0 && (
-                <View style={styles.formCard}>
-                  <Text style={styles.formLabel}>{strings.automation.formTargetSession}</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillScroll}>
-                    {availableSessions.map(s => {
-                      const active = formTargetSessionId === s.sessionId
-                      return (
-                        <Pressable
-                          key={s.sessionId}
-                          accessibilityRole="button"
-                          onPress={() => setFormTargetSessionId(s.sessionId)}
-                          style={[styles.sessionPill, active && styles.sessionPillActive]}
-                        >
-                          <MessageSquare size={13} color={active ? colors.white : colors.muted} />
-                          <Text style={[styles.sessionPillText, active && styles.sessionPillTextActive]} numberOfLines={1}>
-                            {sessionLabel(s.sessionId, s.title)}
-                          </Text>
-                        </Pressable>
-                      )
-                    })}
-                  </ScrollView>
-                </View>
-              )}
 
               {/* Timing Kind Selector */}
               <View style={styles.formCard}>
-                <Text style={styles.formLabel}>{strings.automation.formFrequency}</Text>
+                <View style={styles.paramRow}>
+                  <Text style={styles.paramLabel}>{strings.automation.formFrequency}</Text>
+                  <Text style={styles.paramValue}>{currentKindLabel}</Text>
+                </View>
                 <View style={styles.kindSelectorRow}>
                   <View style={styles.kindRow}>
                     {([
@@ -696,9 +727,23 @@ export function AutomationTasksModal({
                 {/* Timing Options */}
                 {formKind === 'daily' && (
                   <View style={styles.timingDetailBox}>
-                    <Text style={styles.fieldSubLabel}>{strings.automation.formTime} (HH:mm)</Text>
+                    <View style={styles.paramRow}>
+                      <Text style={styles.fieldSubLabel}>{strings.automation.formTime}</Text>
+                      <TextInput
+                        value={formTime}
+                        onChangeText={t => {
+                          setTimingDirty(true)
+                          setFormTime(t)
+                        }}
+                        placeholder="09:00"
+                        placeholderTextColor={colors.muted}
+                        maxLength={5}
+                        style={styles.timeInlineInput}
+                        selectionColor={colors.primary}
+                      />
+                    </View>
                     <View style={styles.presetTimeRow}>
-                      {['08:00', '09:00', '12:00', '18:00', '21:00'].map(t => (
+                      {['08:00', '09:00', '12:00', '18:00'].map(t => (
                         <Pressable
                           key={t}
                           accessibilityRole="button"
@@ -712,17 +757,6 @@ export function AutomationTasksModal({
                         </Pressable>
                       ))}
                     </View>
-                    <TextInput
-                      value={formTime}
-                      onChangeText={t => {
-                        setTimingDirty(true)
-                        setFormTime(t)
-                      }}
-                      placeholder="09:00"
-                      placeholderTextColor={colors.muted}
-                      maxLength={5}
-                      style={styles.timeInput}
-                    />
                   </View>
                 )}
 
@@ -857,24 +891,40 @@ export function AutomationTasksModal({
                     />
                   </View>
                 )}
+                <View style={styles.cardDivider} />
+                <View style={styles.nextRunsRow}>
+                  <Text style={styles.paramLabel}>{strings.automation.formNextRuns}</Text>
+                  <Text style={styles.nextRunsValue} numberOfLines={2}>{nextRunsLabel}</Text>
+                  <Text style={styles.nextRunsHint}>{strings.automation.formLocalTime}</Text>
+                </View>
               </View>
+            </ScrollView>
 
-              {/* Submit Button */}
+            {/* Fixed action bar */}
+            <View style={styles.formFooter}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  formTokenRef.current++
+                  setFormMode(null)
+                }}
+                style={({ pressed }) => [styles.footerCancelBtn, pressed && styles.pressedBg]}
+              >
+                <Text style={styles.footerCancelText}>{strings.common.cancel}</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 onPress={handleSaveForm}
                 disabled={submitting}
-                style={({ pressed }) => [styles.submitFormBtn, pressed && styles.pressedBg]}
+                style={({ pressed }) => [styles.footerSaveBtn, pressed && styles.pressedBg]}
               >
                 {submitting ? (
                   <ActivityIndicator size="small" color={colors.white} />
                 ) : (
-                  <Text style={styles.submitFormBtnText}>
-                    {formMode === 'create' ? strings.automation.newAction : strings.workspaces.saveName}
-                  </Text>
+                  <Text style={styles.footerSaveText}>{strings.automation.saveTask}</Text>
                 )}
               </Pressable>
-            </ScrollView>
+            </View>
           </View>
         ) : selectedTask !== undefined ? (
           /* Detail view */
@@ -1596,7 +1646,124 @@ function createStyles(colors: ThemeColors) {
     errorRetryBtnText: { ...type.caption, color: colors.white, fontWeight: '600' },
     formContainer: {
       padding: spacing.md,
-      paddingBottom: spacing.xxl,
+      paddingBottom: spacing.xxl + 160,
+    },
+    formHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+    },
+    formBackBtn: {
+      alignSelf: 'flex-start',
+    },
+    formHeaderText: { flex: 1 },
+    formEyebrow: {
+      ...type.caption,
+      color: colors.muted,
+      marginBottom: 2,
+    },
+    formTitleLeft: {
+      fontSize: 22,
+      lineHeight: 28,
+      fontWeight: '700',
+      color: colors.ink,
+      includeFontPadding: false,
+    },
+    titleInput: {
+      ...type.bodyStrong,
+      fontSize: 20,
+      lineHeight: 26,
+      color: colors.ink,
+      paddingVertical: spacing.xs,
+    },
+    promptInput: {
+      ...type.body,
+      color: colors.ink,
+      minHeight: 96,
+      textAlignVertical: 'top',
+      paddingTop: spacing.sm,
+    },
+    cardDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.separator,
+      marginVertical: spacing.sm,
+    },
+    paramRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    paramLabel: {
+      ...type.bodyStrong,
+      color: colors.ink,
+    },
+    paramValue: {
+      ...type.body,
+      color: colors.muted,
+    },
+    formHelper: {
+      ...type.caption,
+      color: colors.muted,
+      marginTop: spacing.xs,
+    },
+    nextRunsRow: {
+      gap: 2,
+    },
+    nextRunsHint: {
+      ...type.caption,
+      color: colors.muted,
+    },
+    nextRunsValue: {
+      ...type.body,
+      color: colors.ink,
+    },
+    timeInlineInput: {
+      ...type.bodyStrong,
+      color: colors.primary,
+      minWidth: 72,
+      textAlign: 'right',
+      paddingVertical: 0,
+    },
+    formFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+      backgroundColor: colors.background,
+      ...floatingShadow(colors),
+    },
+    footerCancelBtn: {
+      height: 46,
+      paddingHorizontal: spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+    },
+    footerCancelText: {
+      ...type.bodyStrong,
+      color: colors.ink,
+    },
+    footerSaveBtn: {
+      height: 46,
+      paddingHorizontal: spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: colors.primary,
+    },
+    footerSaveText: {
+      ...type.bodyStrong,
+      color: colors.white,
     },
     formCard: {
       backgroundColor: colors.card,
@@ -1626,6 +1793,7 @@ function createStyles(colors: ThemeColors) {
       textAlignVertical: 'top',
     },
     pillScroll: {
+      paddingRight: spacing.md,
       marginTop: spacing.xs,
     },
     sessionPill: {

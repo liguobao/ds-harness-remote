@@ -352,6 +352,11 @@ const zhTW = {
     copy: '複製',
   },
   automation: {
+    formCustomTime: '自訂 HH:mm',
+    formSessionHint: '所選對話會在每次觸發時收到一條新指令。',
+    formNextRuns: '接下來的執行',
+    formLocalTime: '本機時間',
+    saveTask: '儲存定時任務',
     subtitle: '統一管理對話中的定時提醒',
     title: '自動化任務',
     nav: '自動化任務',

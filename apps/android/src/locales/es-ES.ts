@@ -354,6 +354,11 @@ const esES = {
     copy: 'Copiar',
   },
   automation: {
+    formCustomTime: 'Personalizado HH:mm',
+    formSessionHint: 'La sesión elegida recibe una instrucción nueva en cada ejecución.',
+    formNextRuns: 'Próximas ejecuciones',
+    formLocalTime: 'hora local',
+    saveTask: 'Guardar programación',
     subtitle: 'Gestiona los recordatorios programados de tus sesiones',
     title: 'Tareas de automatización',
     nav: 'Tareas de automatización',

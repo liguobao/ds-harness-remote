@@ -352,6 +352,11 @@ const zhCN = {
     copy: '复制',
   },
   automation: {
+    formCustomTime: '自定义 HH:mm',
+    formSessionHint: '所选会话会在每次触发时收到一条新指令。',
+    formNextRuns: '接下来的运行',
+    formLocalTime: '本地时间',
+    saveTask: '保存定时任务',
     subtitle: '统一管理会话中的定时提醒',
     title: '自动化任务',
     nav: '自动化任务',

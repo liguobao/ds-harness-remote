@@ -354,6 +354,11 @@ const jaJP = {
     copy: 'コピー',
   },
   automation: {
+    formCustomTime: 'カスタム HH:mm',
+    formSessionHint: '選択したセッションに実行のたびに新しい指示が届きます。',
+    formNextRuns: '次回以降の実行',
+    formLocalTime: 'ローカル時刻',
+    saveTask: 'スケジュールを保存',
     subtitle: 'セッションの定期リマインダーを管理する',
     title: '自動化タスク',
     nav: '自動化タスク',

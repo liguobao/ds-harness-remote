@@ -354,6 +354,11 @@ const frFR = {
     copy: 'Copier',
   },
   automation: {
+    formCustomTime: 'Personnalisé HH:mm',
+    formSessionHint: 'La session choisie reçoit une nouvelle instruction à chaque exécution.',
+    formNextRuns: 'Prochaines exécutions',
+    formLocalTime: 'heure locale',
+    saveTask: 'Enregistrer la planification',
     subtitle: 'Gérez les rappels programmés de vos sessions',
     title: "Tâches d'automatisation",
     nav: "Tâches d'automatisation",

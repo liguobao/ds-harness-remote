@@ -354,6 +354,11 @@ const deDE = {
     copy: 'Kopieren',
   },
   automation: {
+    formCustomTime: 'Eigene HH:mm',
+    formSessionHint: 'Die gewählte Sitzung erhält bei jedem Lauf eine neue Anweisung.',
+    formNextRuns: 'Nächste Läufe',
+    formLocalTime: 'lokale Zeit',
+    saveTask: 'Zeitplan speichern',
     subtitle: 'Geplante Erinnerungen aus deinen Sitzungen verwalten',
     title: 'Automatisierungsaufgaben',
     nav: 'Automatisierungsaufgaben',
