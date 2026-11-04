@@ -354,6 +354,7 @@ const jaJP = {
     copy: 'コピー',
   },
   automation: {
+    triggerNowHint: '保存直後に 1 回実行します',
     model: 'モデル',
     project: 'プロジェクト',
     presetDaily: '毎日',
@@ -364,7 +365,7 @@ const jaJP = {
     presetMinutely: '毎分',
     presetOnce: '1 回だけ',
     sendTo: '送信先',
-    sendToNew: '毎回新しい会話',
+    sendToNew: '新しい専用の会話',
     sendToFixed: '固定の会話',
     sendToExisting: '既存の会話',
     trigger: 'トリガー',

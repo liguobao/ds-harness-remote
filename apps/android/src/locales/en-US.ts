@@ -354,6 +354,7 @@ const enUS = {
     copy: 'Copy',
   },
   automation: {
+    triggerNowHint: 'Runs once right after saving',
     model: 'Model',
     project: 'Project',
     presetDaily: 'Every day',
@@ -364,7 +365,7 @@ const enUS = {
     presetMinutely: 'Every minute',
     presetOnce: 'Once',
     sendTo: 'Send to',
-    sendToNew: 'New conversation each run',
+    sendToNew: 'New dedicated conversation',
     sendToFixed: 'Fixed conversation',
     sendToExisting: 'Existing conversation',
     trigger: 'Trigger',

@@ -248,10 +248,7 @@ export function AutomationTasksModal({
   const currentModelLabel =
     formModel !== '' ? formModel : sessionModels?.current.model ?? modelOptions[0]?.name ?? '—'
   const pickedWorkspace = workspaces.find(workspace => workspace.workspaceId === formWorkspaceId)
-  const targetSessionId =
-    formTargetMode === 'existing'
-      ? formTargetSessionId
-      : selectedSession?.sessionId ?? ''
+  const targetSessionId = formTargetSessionId
   const sendToLabel =
     formTargetMode === 'new'
       ? strings.automation.sendToNew
@@ -423,10 +420,11 @@ export function AutomationTasksModal({
     } else if (formPreset === 'once') {
       stamps.push(new Date(base.getTime() + (formDelayMinutes ?? 15) * 60_000))
     } else if (formPreset === 'monthly') {
-      for (let i = 1; i <= 3; i += 1) {
+      for (let i = 0; i <= 3 && stamps.length < 3; i += 1) {
         const candidate = new Date(base)
         candidate.setMonth(base.getMonth() + i, 1)
         candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
+        if (candidate.getTime() <= base.getTime()) continue
         stamps.push(candidate)
       }
     } else {
@@ -452,6 +450,9 @@ export function AutomationTasksModal({
       .join(' · ')
   }, [formPreset, formTime, formWeekdays, formDelayMinutes])
 
+  const nextRunsText =
+    formTriggerMode === 'now' ? strings.automation.triggerNowHint : nextRunsLabel
+
   const emptyTitle = useMemo(() => {
     if (statusFilter === 'inactive' && search.trim() === '') {
       return strings.automation.emptyInactive
@@ -472,6 +473,12 @@ export function AutomationTasksModal({
     setFormTargetSessionId(defaultSid)
     setFormKind('daily')
     setFormPreset('daily')
+    setFormTargetMode('current')
+    setFormTriggerMode('scheduled')
+    setFormModel('')
+    setFormWorkspaceId('')
+    setExpandedRow(null)
+    setPickerAnchor(null)
     setFormTime('09:00')
     setFormTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai')
     setFormIntervalMinutes(60)
@@ -497,7 +504,12 @@ export function AutomationTasksModal({
     setFormTitle(task.title || '')
     setFormPrompt(task.prompt || '')
     setFormTargetSessionId(task.sessionId)
+    setFormTargetMode('existing')
     setFormTimeZone(tz)
+    setFormTargetMode('existing')
+    setFormTriggerMode('scheduled')
+    setExpandedRow(null)
+    setPickerAnchor(null)
     setTimingDirty(false)
 
     if (task.kind === 'daily') {
@@ -517,9 +529,14 @@ export function AutomationTasksModal({
       setFormTime((task.time || '09:00').substring(0, 5))
       setFormWeekdays(days)
     } else if (task.kind === 'cron') {
+      const expression = task.expression || '0 9 1 * *'
       setFormKind('cron')
       setFormPreset('monthly')
-      setFormCronExpression(task.expression || '0 9 1 * *')
+      setFormCronExpression(expression)
+      const match = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(expression.trim())
+      if (match !== null) {
+        setFormTime(`${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`)
+      }
     } else {
       setFormKind('at')
       setFormPreset('once')
@@ -589,10 +606,13 @@ export function AutomationTasksModal({
             weekdays: formWeekdays.length > 0 ? formWeekdays : [1, 2, 3, 4, 5],
           }
         } else if (formPreset === 'monthly') {
+          const parsed = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(formCronExpression.trim())
           const [monthHour, monthMinute] = formTime.split(':')
-          req.cron = { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz }
+          req.cron = parsed === null
+            ? { expression: formCronExpression.trim(), time_zone: tz }
+            : { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz }
         } else if (formPreset === 'hourly') {
-          req.every_seconds = 3600
+          req.every_seconds = Math.max(60, (formIntervalMinutes || 60) * 60)
         } else if (formPreset === 'minutely') {
           req.every_seconds = 60
         } else {
@@ -624,10 +644,20 @@ export function AutomationTasksModal({
               },
             }
           } else if (formPreset === 'monthly') {
+            const parsed = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(formCronExpression.trim())
             const [monthHour, monthMinute] = formTime.split(':')
-            change = { kind: 'cron', cron: { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz } }
+            change = {
+              kind: 'cron',
+              cron: {
+                expression: parsed === null ? formCronExpression.trim() : `${Number(monthMinute)} ${Number(monthHour)} 1 * *`,
+                time_zone: tz,
+              },
+            }
           } else if (formPreset === 'hourly' || formPreset === 'minutely') {
-            change = { kind: 'every', every_seconds: formPreset === 'hourly' ? 3600 : 60 }
+            change = {
+              kind: 'every',
+              every_seconds: formPreset === 'hourly' ? Math.max(60, (formIntervalMinutes || 60) * 60) : 60,
+            }
           } else {
             const targetInstant = new Date(Date.now() + formDelayMinutes * 60000).toISOString()
             change = { kind: 'at', at: targetInstant }
@@ -936,7 +966,8 @@ export function AutomationTasksModal({
                   </View>
                 )}
 
-                <View style={styles.cardDivider} />
+                {formMode === 'create' && <View style={styles.cardDivider} />}
+                {formMode === 'create' && (
                 <View style={styles.paramRow}>
                   <Text style={styles.rowLabel}>{strings.automation.trigger}</Text>
                   <View style={styles.triggerSegment}>
@@ -959,6 +990,7 @@ export function AutomationTasksModal({
                     })}
                   </View>
                 </View>
+                )}
 
                 {formTriggerMode === 'scheduled' && (
                   <>
@@ -1046,7 +1078,7 @@ export function AutomationTasksModal({
                     <View style={styles.nextBlock}>
                       <View style={styles.nextHead}>
                         <Text style={styles.rowLabel}>{strings.automation.formNextRuns}</Text>
-                        <Text style={styles.nextValue} numberOfLines={2}>{nextRunsLabel}</Text>
+                        <Text style={styles.nextValue} numberOfLines={2}>{nextRunsText}</Text>
                       </View>
                       <Text style={styles.nextHint}>{strings.automation.formLocalTime}</Text>
                     </View>

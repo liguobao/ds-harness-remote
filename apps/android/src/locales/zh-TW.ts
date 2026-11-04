@@ -352,6 +352,7 @@ const zhTW = {
     copy: '複製',
   },
   automation: {
+    triggerNowHint: '儲存後立即執行一次',
     model: '模型',
     project: '專案',
     presetDaily: '每天',
@@ -362,7 +363,7 @@ const zhTW = {
     presetMinutely: '每分鐘',
     presetOnce: '只執行一次',
     sendTo: '傳送到',
-    sendToNew: '每次新建對話',
+    sendToNew: '新建專用對話',
     sendToFixed: '固定對話',
     sendToExisting: '已有對話',
     trigger: '觸發',

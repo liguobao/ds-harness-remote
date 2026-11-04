@@ -352,6 +352,7 @@ const zhCN = {
     copy: '复制',
   },
   automation: {
+    triggerNowHint: '保存后立即执行一次',
     model: '模型',
     project: '项目',
     presetDaily: '每天',
@@ -362,7 +363,7 @@ const zhCN = {
     presetMinutely: '每分钟',
     presetOnce: '只执行一次',
     sendTo: '发送到',
-    sendToNew: '每次新建对话',
+    sendToNew: '新建专用对话',
     sendToFixed: '固定对话',
     sendToExisting: '已有对话',
     trigger: '触发',

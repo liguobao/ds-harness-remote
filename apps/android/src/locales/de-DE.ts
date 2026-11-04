@@ -354,6 +354,7 @@ const deDE = {
     copy: 'Kopieren',
   },
   automation: {
+    triggerNowHint: 'Läuft einmal direkt nach dem Speichern',
     model: 'Modell',
     project: 'Projekt',
     presetDaily: 'Jeden Tag',
@@ -364,7 +365,7 @@ const deDE = {
     presetMinutely: 'Jede Minute',
     presetOnce: 'Einmal',
     sendTo: 'Senden an',
-    sendToNew: 'Jedes Mal neue Unterhaltung',
+    sendToNew: 'Neue eigene Unterhaltung',
     sendToFixed: 'Feste Unterhaltung',
     sendToExisting: 'Bestehende Unterhaltung',
     trigger: 'Auslöser',

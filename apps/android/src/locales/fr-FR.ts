@@ -354,6 +354,7 @@ const frFR = {
     copy: 'Copier',
   },
   automation: {
+    triggerNowHint: 'S’exécute une fois après l’enregistrement',
     model: 'Modèle',
     project: 'Projet',
     presetDaily: 'Chaque jour',
@@ -364,7 +365,7 @@ const frFR = {
     presetMinutely: 'Chaque minute',
     presetOnce: 'Une fois',
     sendTo: 'Envoyer vers',
-    sendToNew: 'Nouvelle conversation à chaque fois',
+    sendToNew: 'Nouvelle conversation dédiée',
     sendToFixed: 'Conversation fixe',
     sendToExisting: 'Conversation existante',
     trigger: 'Déclencheur',

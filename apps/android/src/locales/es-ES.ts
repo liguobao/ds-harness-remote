@@ -354,6 +354,7 @@ const esES = {
     copy: 'Copiar',
   },
   automation: {
+    triggerNowHint: 'Se ejecuta una vez al guardar',
     model: 'Modelo',
     project: 'Proyecto',
     presetDaily: 'Cada día',
@@ -364,7 +365,7 @@ const esES = {
     presetMinutely: 'Cada minuto',
     presetOnce: 'Una vez',
     sendTo: 'Enviar a',
-    sendToNew: 'Nueva conversación cada vez',
+    sendToNew: 'Nueva conversación dedicada',
     sendToFixed: 'Conversación fija',
     sendToExisting: 'Conversación existente',
     trigger: 'Disparador',
