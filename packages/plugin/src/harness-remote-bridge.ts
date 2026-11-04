@@ -1,7 +1,7 @@
 import { compactHistory } from './compact-history.js'
 import { randomUUID } from 'node:crypto'
 import { lstat, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
 import type {
   HarnessApiTransferChunkParams,
@@ -607,19 +607,59 @@ export class HarnessRemoteBridge {
     if (sessionId === undefined) {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
     }
-    const path = typeof args.path === 'string' ? args.path : '.'
-    const pathSegments = process.platform === 'win32' ? path.split(/[/\\]/) : path.split('/')
-    if (pathSegments.some(segment => segment === '..')) {
-      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
-    }
     const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal)
     if (!sessionWorkspace) {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
     }
-    const safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint)
+
+    const options = isRecord(args.options) ? args.options : undefined
+    const rawBaseFile = endpoint === 'workspaceFiles/readBytes'
+      ? (typeof options?.baseFile === 'string' ? options.baseFile : (typeof args.baseFile === 'string' ? args.baseFile : undefined))
+      : undefined
+
+    if (endpoint === 'workspaceFiles/readBytes') {
+      if (options !== undefined && 'baseFile' in options && options.baseFile !== undefined && typeof options.baseFile !== 'string') {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      if ('baseFile' in args && args.baseFile !== undefined && typeof args.baseFile !== 'string') {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+    }
+
+    let safeRel: string
+    if (rawBaseFile !== undefined) {
+      const path = typeof args.path === 'string' ? args.path : ''
+      const relative = path.replaceAll('\\', '/')
+      if (relative.length === 0 || relative.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.includes(' ')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      const baseSegments = process.platform === 'win32' ? rawBaseFile.replaceAll('\\', '/').split('/') : rawBaseFile.split('/')
+      if (baseSegments.some(segment => segment === '..')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint)
+      const baseCandidate = resolve(sessionWorkspace.root, safeBaseRel)
+      const baseDir = dirname(baseCandidate)
+      const targetCandidate = resolve(baseDir, path)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint)
+    } else {
+      const path = typeof args.path === 'string' ? args.path : '.'
+      const pathSegments = process.platform === 'win32' ? path.replaceAll('\\', '/').split('/') : path.split('/')
+      if (pathSegments.some(segment => segment === '..')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint)
+    }
+
     let finalArgs: Record<string, unknown> = isRecord(rootPayload.args)
       ? { ...rootPayload.args, path: safeRel }
       : { ...rootPayload, path: safeRel }
+
+    if (isRecord(finalArgs.options)) {
+      const { baseFile: _baseFile, ...restOptions } = finalArgs.options
+      finalArgs.options = restOptions
+    }
+    delete finalArgs.baseFile
     if (endpoint === 'workspaceFiles/readBytes') {
       const range = byteOrLineRange(finalArgs)
       const offset = typeof range.offset === 'number' && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0
@@ -730,7 +770,7 @@ export class HarnessRemoteBridge {
         throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
       }
 
-      if ((endpoint === 'workspaceFiles/read' || endpoint === 'workspaceFiles/readAll') && Number(info.size) > MAX_READ_BYTES) {
+      if (endpoint === 'workspaceFiles/readAll' && Number(info.size) > MAX_READ_BYTES) {
         throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
       }
 

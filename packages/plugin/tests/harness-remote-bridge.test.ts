@@ -665,6 +665,9 @@ describe('HarnessRemoteBridge', () => {
       const symlinkDirOutside = join(root, 'symlink-dir')
       const bigFile = join(root, 'big.bin')
       const growFile = join(root, 'grow.txt')
+      const passwdFile = join(root, 'passwd')
+      const siblingFile = join(subDir, 'sibling.txt')
+      const outsideHostnameFile = join(outside, 'hostname')
 
       await writeFile(insideFile, 'inside content')
       await writeFile(doubleDotFile, 'double dot content')
@@ -672,6 +675,9 @@ describe('HarnessRemoteBridge', () => {
       await mkdir(subDir)
       await writeFile(nestedFile, 'nested content')
       await writeFile(outsideFile, 'secret outside')
+      await writeFile(passwdFile, 'root passwd file in workspace')
+      await writeFile(siblingFile, 'sibling content in sub')
+      await writeFile(outsideHostnameFile, 'outside hostname')
       await symlink(outsideFile, symlinkOutside, 'file')
       await symlink(outside, symlinkDirOutside, process.platform === 'win32' ? 'junction' : 'dir')
 
@@ -718,6 +724,19 @@ describe('HarnessRemoteBridge', () => {
           }
         }
         if (p === 'big.bin') {
+          if (method === 'workspaceFiles/read') {
+            return {
+              ok: true as const,
+              value: {
+                absolutePath: full,
+                bytes: 5 * 1024 * 1024,
+                text: 'first page lines of big file',
+                offset: 1,
+                lines: 1,
+                eof: false,
+              },
+            }
+          }
           return { ok: true as const, value: { absolutePath: full, bytes: 5 * 1024 * 1024 } }
         }
         const text = await readFile(full, 'utf8').catch(() => 'inside content')
@@ -1065,21 +1084,194 @@ describe('HarnessRemoteBridge', () => {
           },
         },
         {
-          name: 'rejects files exceeding MAX_READ_BYTES on read and readAll',
+          name: 'rejects files exceeding MAX_READ_BYTES on readAll',
           run: async () => {
-            await expect(
-              bridge.call({
-                endpoint: 'workspaceFiles/read',
-                payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
-              }),
-            ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
-
             await expect(
               bridge.call({
                 endpoint: 'workspaceFiles/readAll',
                 payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
               }),
             ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
+          },
+        },
+        {
+          name: 'supports paginated reading on large files (> 4MB) via read',
+          run: async () => {
+            const pageResult = await bridge.call({
+              endpoint: 'workspaceFiles/read',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 1, limit: 10 } } },
+            })
+            expect(pageResult).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: bigFile,
+                bytes: 5 * 1024 * 1024,
+                text: 'first page lines of big file',
+              },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/read',
+              expect.objectContaining({
+                args: expect.objectContaining({ path: 'big.bin' }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'resolves readBytes target relative to baseFile in sub-directory',
+          run: async () => {
+            dispatch.mockClear()
+            const result = await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: 'sibling.txt',
+                  options: { baseFile: 'sub/nested.txt' },
+                },
+              },
+            })
+            expect(result).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: siblingFile,
+                data: Buffer.from('sibling content in sub').toString('base64'),
+              },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({ path: 'sub/sibling.txt' }),
+              }),
+              expect.any(AbortSignal),
+            )
+            const dispatchedArgs = (dispatch.mock.calls[0][1] as any)?.args
+            expect(dispatchedArgs.options?.baseFile).toBeUndefined()
+            expect(dispatchedArgs.baseFile).toBeUndefined()
+          },
+        },
+        {
+          name: 'resolves readBytes relative traversal (../inside.txt) using baseFile directory',
+          run: async () => {
+            dispatch.mockClear()
+            const result = await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: '../inside.txt',
+                  options: { baseFile: 'sub/nested.txt' },
+                },
+              },
+            })
+            expect(result).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: insideFile,
+                data: Buffer.from('inside content').toString('base64'),
+              },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({ path: 'inside.txt' }),
+              }),
+              expect.any(AbortSignal),
+            )
+            const dispatchedArgs = (dispatch.mock.calls[0][1] as any)?.args
+            expect(dispatchedArgs.options?.baseFile).toBeUndefined()
+            expect(dispatchedArgs.baseFile).toBeUndefined()
+          },
+        },
+        {
+          name: 'rejects readBytes when baseFile is outside workspace (preventing target redirect)',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: {
+                  args: {
+                    workspaceFileScopeId: 'session-1',
+                    path: 'passwd',
+                    options: { baseFile: outsideHostnameFile },
+                  },
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'rejects readBytes when relative path escapes workspace via baseFile traversal',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: {
+                  args: {
+                    workspaceFileScopeId: 'session-1',
+                    path: '../../secret.txt',
+                    options: { baseFile: 'sub/nested.txt' },
+                  },
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'rejects readBytes when path is not relative when baseFile is provided',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: {
+                  args: {
+                    workspaceFileScopeId: 'session-1',
+                    path: '/secret.txt',
+                    options: { baseFile: 'sub/nested.txt' },
+                  },
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: {
+                  args: {
+                    workspaceFileScopeId: 'session-1',
+                    path: 'file:///secret.txt',
+                    options: { baseFile: 'sub/nested.txt' },
+                  },
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'rejects readBytes when baseFile contains parent traversal segments (..)',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: {
+                  args: {
+                    workspaceFileScopeId: 'session-1',
+                    path: 'nested.txt',
+                    options: { baseFile: '../secret.txt' },
+                  },
+                },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
           },
         },
         {
