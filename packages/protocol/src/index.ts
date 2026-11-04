@@ -5,6 +5,9 @@ import { z } from 'zod'
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
 export const RELAY_RESUME_CAPABILITY = 'transport.relay.resume.v1'
 export const WEBRTC_LEASE_MS = 300_000
+/** WebSocket close code used when a Server is shutting down for restart. */
+export const SERVER_SHUTDOWN_CLOSE_CODE = 4009
+export const SERVER_SHUTDOWN_CLOSE_REASON = 'server shutdown'
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
-import { createControlFrame, decodeControlFrame, MAX_CONTROL_FRAME_BYTES, MAX_RELAY_FRAME_BYTES, type ControlFrame, type HelloPayload, type ConnectRequestPayload, type SecureHandshakePayload, type RelayPayload, type TransportSelectedPayload } from '@dsh-remote/protocol'
+import { createControlFrame, decodeControlFrame, MAX_CONTROL_FRAME_BYTES, MAX_RELAY_FRAME_BYTES, SERVER_SHUTDOWN_CLOSE_CODE, SERVER_SHUTDOWN_CLOSE_REASON, type ControlFrame, type HelloPayload, type ConnectRequestPayload, type SecureHandshakePayload, type RelayPayload, type TransportSelectedPayload } from '@dsh-remote/protocol'
 import { ApiError, Store } from './store.js'
 
 type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string }
@@ -161,5 +161,17 @@ export class Gateway {
     } else throw new ApiError('INVALID_MESSAGE')
     this.send(other, frame)
   }
-  close(): void { clearInterval(this.heartbeat); for (const ws of this.wss.clients) ws.terminate(); this.wss.close() }
+  close(): void {
+    clearInterval(this.heartbeat)
+    for (const ws of this.wss.clients) {
+      // Give resumable clients an explicit, unambiguous shutdown signal. A
+      // process restart is different from heartbeat failure (4001) and from
+      // replacement/authentication failures, so clients can retain only the
+      // bounded lease-backed session state.
+      if (ws.readyState === WebSocket.OPEN) ws.close(SERVER_SHUTDOWN_CLOSE_CODE, SERVER_SHUTDOWN_CLOSE_REASON)
+      else ws.terminate()
+      setTimeout(() => { if (ws.readyState !== WebSocket.CLOSED) ws.terminate() }, 1000).unref()
+    }
+    this.wss.close()
+  }
 }

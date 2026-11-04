@@ -1757,6 +1757,11 @@ Control ping/pong 的 nonce 可用于估计 Server RTT。
 授权与加密握手；不能重放业务请求。`4001` 也用于授权失败，因此不能仅按 close code
 重试；未知 reason 与 `4003`（连接被替换）仍须停止自动恢复。
 
+Server 进程主动重启或优雅关闭时，开源自部署 Server 会发送 WebSocket close `4009` /
+`server shutdown`。该精确组合表示控制面暂时不可用；支持 lease 的新 Client/Host 可以在
+租约有效期内保留已认证的数据连接并后台恢复控制面。`4009` 的其他 reason 不属于该语义，
+不得据此恢复连接。
+
 Control ping：
 
 ```json

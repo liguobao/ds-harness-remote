@@ -1,3 +1,4 @@
+import { createServerNotice } from './server-notice.js'
 import QRCode from 'qrcode'
 import type { LocalizedMessage, Translate } from '../client-locale.js'
 import type { OAuthProviderInfo } from '../server-api.js'
@@ -29,6 +30,7 @@ const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sid
 ]
 
 export function createRemotePluginOptions(React: ClientReact) {
+  const ServerNotice = createServerNotice(React)
   function RemotePluginOptions(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
@@ -39,6 +41,9 @@ export function createRemotePluginOptions(React: ClientReact) {
     view?: 'summary' | 'page'
   }): unknown {
     const { t } = props
+    const modeStatus = React.useSyncExternalStore(
+      props.statusFeed.subscribe, props.statusFeed.getSnapshot, props.statusFeed.getSnapshot,
+    )
     const [open, setOpen] = React.useState(props.view === 'page')
     const [serverUrl, setServerUrl] = React.useState('')
     const [remoteToolsBusy, setRemoteToolsBusy] = React.useState(false)
@@ -117,7 +122,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     }
 
     React.useEffect(() => {
-      void load().catch(reason => setError(messageOf(reason)))
+      void load().catch(reason => setError(messageOf(reason, t)))
     }, [])
 
     React.useEffect(() => {
@@ -170,7 +175,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         if (!active || run !== providerRequestRun.current) return
         setProvidersFailed(true)
         setLoginMethod('password')
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       }).finally(() => {
         if (active && run === providerRequestRun.current) setProvidersLoading(false)
       })
@@ -202,7 +207,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         .catch(reason => {
           if (!active || run !== qrFlowRun.current) return
           setQrFailed(true)
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         })
         .finally(() => {
           if (active && run === qrFlowRun.current) setQrBusy(false)
@@ -240,7 +245,7 @@ export function createRemotePluginOptions(React: ClientReact) {
             setQrBusy(false)
           }
         }).catch(reason => {
-          if (active && !settled && run === qrFlowRun.current) setError(messageOf(reason))
+          if (active && !settled && run === qrFlowRun.current) setError(messageOf(reason, t))
         }).finally(() => {
           polling = false
         })
@@ -270,7 +275,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         })
         .catch(reason => {
           if (!active) return
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         })
       return () => {
         active = false
@@ -293,7 +298,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setLoginPassword('')
         setNotice({ key: 'authorizationComplete' })
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setBusy(false)
       }
@@ -324,7 +329,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setSignInOpen(false)
         setNotice({ key: 'signedOut' })
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setBusy(false)
       }
@@ -339,7 +344,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setHostStatus(status.host)
         setNotice({ key: 'reconnectStarted' })
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setReconnectBusy(false)
       }
@@ -353,7 +358,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         const status = await props.control<RemoteStatus>('host.authorization.set', { enabled })
         setHostStatus(status.host)
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setBusy(false)
       }
@@ -371,7 +376,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setNotice({ key: 'terminalSaved' })
       } catch (reason) {
         setTerminalEnabled(previous)
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setTerminalBusy(false)
       }
@@ -390,7 +395,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setNotice({ key: 'sidebarEntrySaved' })
       } catch (reason) {
         setSidebarEntry(previous)
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setSidebarEntryBusy(false)
       }
@@ -405,7 +410,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         applyView(view)
         setNotice({ key: 'remoteToolsSaved' })
       }
-      catch (reason) { setRemoteToolsEnabled(!enabled); setError(messageOf(reason)) }
+      catch (reason) { setRemoteToolsEnabled(!enabled); setError(messageOf(reason, t)) }
       finally { setRemoteToolsBusy(false) }
     }
 
@@ -425,7 +430,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setNotice({ key: available ? 'acpAvailable' : 'acpUnavailable' })
         setTimeout(() => setAcpCheckResults(current => ({ ...current, [backend]: undefined })), 5_000)
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setAcpChecking(current => ({ ...current, [backend]: false }))
       }
@@ -438,7 +443,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         const view = await props.control<PluginSettingsView>('settings.acp.remove', { id: backend })
         applyView(view)
       } catch (reason) {
-        setError(messageOf(reason))
+        setError(messageOf(reason, t))
       } finally {
         setBusy(false)
       }
@@ -506,7 +511,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
         React.createElement('input', {
           type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled && acpAvailability[item.id] === true, 'aria-label': item.id, disabled: busy || !writable || acpChecking[item.id] === true || acpAvailability[item.id] !== true,
-          onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason)))
+          onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason, t)))
         }))),
         ))
 
@@ -629,7 +634,16 @@ export function createRemotePluginOptions(React: ClientReact) {
             React.createElement('span', null, t('pluginDescription'))),
           association === undefined ? null : React.createElement('span', {
             className: `dshRemotePluginCardStatus${connectionStatusClass(hostStatus)}`,
-          }, hostStatus === undefined ? t('associated') : connectionStatusLabel(hostStatus, t)),
+          }, hostStatus?.authorized && !hostStatus.accountRequired && !hostStatus.online
+            && (hostStatus.error !== undefined || hostStatus.lastActiveAt !== undefined)
+            ? React.createElement(ServerNotice, {
+              offline: true,
+              linked: (hostStatus.connectedClients?.length ?? 0) > 0,
+              expiresAt: hostStatus.recoveryExpiresAt, t,
+            })
+            : modeStatus?.mode === 'remote'
+              ? t('remoteTarget', { name: modeStatus.target?.name ?? t('host') })
+              : t('local')),
           React.createElement('span', { className: 'dshRemotePluginCardChevron', 'aria-hidden': true }, '⌄'))),
       !open ? null : React.createElement('div', { className: 'dshRemotePluginCardBody' },
         !loaded
@@ -684,7 +698,12 @@ export function createRemotePluginOptions(React: ClientReact) {
                   disabled: reconnectBusy || hostStatus?.configured === false,
                   onClick: () => void reconnectHost(),
                 }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))),
-              hostStatus?.error === undefined || hostStatus.online
+              hostStatus?.authorized && !hostStatus.accountRequired ? React.createElement(ServerNotice, {
+                offline: !hostStatus.online && hostStatus.reconnecting,
+                linked: (hostStatus.connectedClients?.length ?? 0) > 0,
+                expiresAt: hostStatus.recoveryExpiresAt, t,
+              }) : null,
+              hostStatus?.error === undefined || hostStatus.online || (hostStatus.reconnecting && hostStatus.error === 'CONNECTION_FAILED')
                 ? null
                 : React.createElement('p', { className: 'dshRemoteConnectionIssue', role: 'status' }, connectionErrorMessage(hostStatus.error, t)),
               !writable ? React.createElement('p', { className: 'dshRemoteError' }, t('readOnly')) : null,

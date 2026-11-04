@@ -61067,6 +61067,11 @@ var ControlLease = class {
     }
     return true;
   }
+  remainingMs() {
+    if (!this.confirmed || this.stopped || !this.deadline)
+      return void 0;
+    return Math.max(0, Math.min(this.deadline.mono - performance.now(), this.deadline.wall - Date.now()));
+  }
   canDetach() {
     return this.confirmed && this.valid();
   }
@@ -61240,12 +61245,14 @@ var AdaptiveTransport = class extends BaseTransport {
     };
   }
   async connectionDetails() {
+    const remainingMs = this.lease?.remainingMs();
     return {
       ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
       ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
       ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
       ...this.lastControlReceivedAt === void 0 ? {} : { lastControlReceivedAt: this.lastControlReceivedAt },
       ...this.lastControlSentAt === void 0 ? {} : { lastControlSentAt: this.lastControlSentAt },
+      recoveryExpiresAt: remainingMs === void 0 ? void 0 : Date.now() + remainingMs,
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
@@ -61827,7 +61834,7 @@ var AdaptiveTransport = class extends BaseTransport {
   }
 };
 function adaptiveControlCloseError(event) {
-  const heartbeatTimeout = event.code === 4001 && (event.reason === "CONNECTION_FAILED" || event.reason === "server shutdown") || event.code === 4009;
+  const heartbeatTimeout = event.code === 4001 && event.reason === "CONNECTION_FAILED" || event.code === 4009 && event.reason === "server shutdown";
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
@@ -86925,6 +86932,13 @@ var HostServerConnection = class {
   isOnline() {
     return this.online;
   }
+  recoveryExpiresAt() {
+    const remaining = [...this.tunnels.values()].flatMap((tunnel) => {
+      const ms = tunnel.lease?.remainingMs();
+      return ms === void 0 ? [] : [ms];
+    });
+    return remaining.length ? Date.now() + Math.min(...remaining) : void 0;
+  }
   lastError() {
     return this.terminalError;
   }
@@ -87095,7 +87109,7 @@ var HostServerConnection = class {
       };
       socket.onclose = (event) => {
         if (this.socket !== socket) return;
-        retainOnClose = [1e3, 1001, 1006, 1011, 1012, 1013, 4009].includes(event.code) || event.code === 4001 && ["server shutdown", "CONNECTION_FAILED"].includes(event.reason);
+        retainOnClose = [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code) || event.code === 4009 && event.reason === "server shutdown" || event.code === 4001 && ["server shutdown", "CONNECTION_FAILED"].includes(event.reason);
         const close = async () => {
           await messageQueue.catch(() => void 0);
           if (this.stopped) {
@@ -89094,6 +89108,7 @@ var HostPluginRuntime = class {
       configured: this.serverApi !== void 0,
       online: this.serverConnection?.isOnline() ?? false,
       reconnecting: this.serverConnection?.isReconnecting() ?? false,
+      recoveryExpiresAt: this.serverConnection?.recoveryExpiresAt(),
       ...this.serverConnection?.lastActivity() === void 0 ? {} : { lastActiveAt: this.serverConnection.lastActivity() },
       ...error62 === void 0 ? {} : { error: error62 },
       ...authorization?.account === void 0 ? {} : { account: authorization.account },

@@ -1849,6 +1849,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
     preferredTransports: "Attempt order",
     controlChannel: "Control channel",
     controlAddress: "Control address",
+    serverUnavailableError: "Service unavailable. Please try again later.",
+    connectionHoldCountdown: "Connection expires in {seconds}s",
+    serverUnavailableCountdown: "Service unavailable \xB7 Connection expires in {seconds}s",
+    unavailable: "Unavailable",
+    serverUnavailableShort: "Service unavailable",
+    serverUnavailable: "Server unavailable. Reconnecting.",
+    serverUnavailableConnected: "Server unavailable. Device link active. Reconnecting.",
+    serverLeaseExpiring: "Connection expires in {seconds}s.",
+    serverRestored: "Server restored.",
+    serverLinkDisconnected: "Connection lost.",
     controlStateConnecting: "Connecting",
     controlStateOpen: "Connected",
     controlStateClosing: "Closing",
@@ -1876,7 +1886,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClientDescription: "Connect once. Available anytime.",
     startSignIn: "Start sign-in",
     allowControlCurrentDevice: "Allow control of this device",
-    allowControlDevice: "Allow control of device",
+    allowControlDevice: "Allow control of this device",
     connectedClientCount: "{count} connected",
     checkAcp: "Check backend",
     checkingAcp: "Checking ACP\u2026",
@@ -2139,6 +2149,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
     preferredTransports: "\u5C1D\u8BD5\u987A\u5E8F",
     controlChannel: "\u63A7\u5236\u901A\u9053",
     controlAddress: "\u63A7\u5236\u5730\u5740",
+    serverUnavailableError: "\u670D\u52A1\u6682\u4E0D\u53EF\u7528\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002",
+    connectionHoldCountdown: "\u8FDE\u63A5\u5269\u4F59 {seconds} \u79D2",
+    serverUnavailableCountdown: "\u670D\u52A1\u4E0D\u53EF\u7528 \xB7 \u8FDE\u63A5\u5269\u4F59 {seconds} \u79D2",
+    unavailable: "\u4E0D\u53EF\u7528",
+    serverUnavailableShort: "\u670D\u52A1\u4E0D\u53EF\u7528",
+    serverUnavailable: "Server \u6682\u4E0D\u53EF\u7528\uFF0C\u6B63\u5728\u91CD\u8FDE\u3002",
+    serverUnavailableConnected: "Server \u6682\u4E0D\u53EF\u7528\uFF0C\u8BBE\u5907\u901A\u4FE1\u6B63\u5E38\uFF0C\u6B63\u5728\u91CD\u8FDE\u3002",
+    serverLeaseExpiring: "\u8FDE\u63A5\u5C06\u5728 {seconds} \u79D2\u540E\u5931\u6548\u3002",
+    serverRestored: "Server \u5DF2\u6062\u590D\u3002",
+    serverLinkDisconnected: "\u8FDE\u63A5\u5DF2\u65AD\u5F00\u3002",
     controlStateConnecting: "\u8FDE\u63A5\u4E2D",
     controlStateOpen: "\u5DF2\u8FDE\u63A5",
     controlStateClosing: "\u6B63\u5728\u5173\u95ED",
@@ -2165,8 +2185,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signInClient: "DS Harness Remote\uFF1A",
     signInClientDescription: "\u4E00\u6B21\u8FDE\u63A5\uFF0C\u968F\u65F6\u53EF\u7528\u3002",
     startSignIn: "\u5F00\u59CB\u767B\u5F55",
-    allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u5F53\u524D\u8BBE\u5907",
-    allowControlDevice: "\u5141\u8BB8\u63A7\u5236\u8BBE\u5907",
+    allowControlCurrentDevice: "\u5141\u8BB8\u63A7\u5236\u672C\u673A",
+    allowControlDevice: "\u5141\u8BB8\u63A7\u5236\u672C\u673A",
     connectedClientCount: "{count} \u53F0\u5DF2\u8FDE\u63A5",
     checkAcp: "\u68C0\u6D4B\u540E\u7AEF",
     checkingAcp: "\u6B63\u5728\u68C0\u6D4B ACP\u2026",
@@ -2213,6 +2233,33 @@ Minimum version required to store current data is: ` + bestVersion + `.
     hermesVirtualWorkspace: "Hermes \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
   };
+
+  // src/client/server-notice.ts
+  function createServerNotice(React) {
+    return function(props) {
+      let { offline, linked, expiresAt, t } = props, wasOffline = React.useRef(!1), hadLink = React.useRef(linked), [restored, setRestored] = React.useState(!1), [now, setNow] = React.useState(Date.now());
+      React.useEffect(() => {
+        if (linked && (hadLink.current = !0), offline) {
+          wasOffline.current = !0, setRestored(!1), setNow(Date.now());
+          let timer2 = setInterval(() => setNow(Date.now()), 1e3);
+          return () => clearInterval(timer2);
+        }
+        if (!wasOffline.current) return;
+        wasOffline.current = !1, setRestored(!0);
+        let timer = setTimeout(() => setRestored(!1), 4e3);
+        return () => clearTimeout(timer);
+      }, [offline, linked]);
+      let seconds = expiresAt === void 0 ? void 0 : Math.max(0, Math.ceil((expiresAt - now) / 1e3)), lost = hadLink.current && (!linked || offline && seconds === 0), text = props.compact ? lost ? t("serverLinkDisconnected") : offline ? linked && seconds !== void 0 ? t("serverUnavailableCountdown", { seconds }) : t("serverUnavailableShort") : linked ? t("remoteLinkEncrypted") : void 0 : lost ? t("serverLinkDisconnected") : offline && linked && seconds !== void 0 ? t(props.countdownOnly ? "connectionHoldCountdown" : "serverUnavailableCountdown", { seconds }) : offline ? t("serverUnavailableShort") : restored ? t("serverRestored") : void 0;
+      return text === void 0 ? null : React.createElement("span", {
+        className: props.compact && !offline && !lost ? "dshRemoteEncrypted" : `dshRemoteServerNotice${lost ? " isError" : offline ? " isWarning" : " isRestored"}`,
+        role: "status",
+        "aria-live": "polite"
+      }, text, lost && props.onReconnect ? React.createElement("button", {
+        type: "button",
+        onClick: props.onReconnect
+      }, t("reconnect")) : null);
+    };
+  }
 
   // src/client/presentation.ts
   var defaultPreferredTransports = ["lan", "p2p", "turn", "relay"];
@@ -2305,16 +2352,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
   function connectionErrorMessage(code, t) {
-    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_REQUIRED" ? "hostSignInHint" : code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" || code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
+    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_REQUIRED" ? "hostSignInHint" : code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" ? "serverUnavailableError" : code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
   }
   function connectionStatusLabel(status, t) {
-    return status === void 0 ? t("checkingConnection") : status.online ? t("online") : status.reconnecting ? t(status.lastActiveAt === void 0 && status.error === void 0 ? "connecting" : "reconnecting") : t("offline");
+    return status === void 0 ? t("checkingConnection") : status.online ? t("online") : status.error !== void 0 ? connectionErrorMessage(status.error, t) : status.reconnecting ? t(status.lastActiveAt === void 0 ? "connecting" : "serverUnavailableShort") : t("offline");
   }
   function connectionStatusClass(status) {
     return status?.online ? " isOnline" : status?.reconnecting ? " isReconnecting" : status === void 0 ? "" : " isOffline";
   }
-  function messageOf(reason) {
-    return reason instanceof Error ? reason.message : String(reason);
+  function messageOf(reason, t) {
+    return typeof reason == "object" && reason !== null && "code" in reason && reason.code === "CONNECTION_FAILED" ? t("serverUnavailableError") : reason instanceof Error ? reason.message : String(reason);
   }
   function formatPlatform(value) {
     let normalized = value.toLowerCase();
@@ -2326,6 +2373,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // src/client/header.ts
   function createRemoteSessionHeaderAction(React, portal) {
+    let ServerNotice = createServerNotice(React);
     function RemoteSessionHeaderAction(props) {
       let { t } = props, status = React.useSyncExternalStore(
         props.statusFeed.subscribe,
@@ -2414,12 +2462,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
           type: "button",
           className: `dshRemoteNetwork${networkOnline ? " isOnline" : " isOffline"}`,
           title: networkLabel,
-          disabled: !networkOnline,
           "aria-haspopup": "dialog",
           "aria-expanded": routeOpen,
           onClick: () => setRouteOpen((value) => !value)
         }, React.createElement("i", { "aria-hidden": !0 }), networkLabel),
-        networkOnline ? React.createElement("span", { className: "dshRemoteEncrypted" }, t("remoteLinkEncrypted")) : null,
+        React.createElement(ServerNotice, {
+          compact: !0,
+          offline: network !== void 0 && network.controlChannelState !== "open",
+          linked: networkOnline,
+          expiresAt: network?.recoveryExpiresAt,
+          t
+        }),
         renderHostReference(),
         React.createElement("button", { type: "button", className: "dshRemoteHeaderExitLink", disabled: busy, onClick: () => void exit() }, t("exitRemote")),
         routeOpen ? renderBodyPortal(portal, React.createElement("div", {
@@ -2441,6 +2494,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement("strong", null, t("connectionRouteTitle")),
             React.createElement("button", { type: "button", "aria-label": t("close"), onClick: () => setRouteOpen(!1) }, "\xD7")
           ),
+          React.createElement(ServerNotice, {
+            offline: network !== void 0 && network.controlChannelState !== "open",
+            linked: networkOnline,
+            expiresAt: network?.recoveryExpiresAt,
+            t,
+            onReconnect: () => {
+              props.control("mode.set", { mode: "remote", targetDeviceId: status.target?.deviceId }).catch(() => {
+              });
+            }
+          }),
           React.createElement(
             "ol",
             null,
@@ -2652,8 +2715,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
     { value: "compact", label: "sidebarEntryCompact" }
   ];
   function createRemotePluginOptions(React) {
+    let ServerNotice = createServerNotice(React);
     function RemotePluginOptions(props) {
-      let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
+      let { t } = props, modeStatus = React.useSyncExternalStore(
+        props.statusFeed.subscribe,
+        props.statusFeed.getSnapshot,
+        props.statusFeed.getSnapshot
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
         setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association }));
       }, applyView = (view, updateAssociations = !0) => {
         setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? !0), setSidebarEntry(view.config.sidebar?.entry ?? "standard"), props.sidebarEntry?.publish(view.config.sidebar?.entry ?? "standard"), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
@@ -2666,7 +2734,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         applyView(view, run === associationReadRun.current), setHostStatus(status?.host), setHostName(status?.deviceName ?? ""), setHostDeviceId(status?.host?.deviceId ?? "");
       };
       React.useEffect(() => {
-        load().catch((reason) => setError(messageOf(reason)));
+        load().catch((reason) => setError(messageOf(reason, t)));
       }, []), React.useEffect(() => {
         let active = !0, authorizationKey, unsubscribe = props.statusFeed.subscribe((status) => {
           setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "");
@@ -2700,7 +2768,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch((reason) => {
-          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason)));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason, t)));
         }).finally(() => {
           active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
@@ -2718,7 +2786,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           });
           !active || run !== qrFlowRun.current || (setQrSession(session), setQrImage(image));
         }).catch((reason) => {
-          !active || run !== qrFlowRun.current || (setQrFailed(!0), setError(messageOf(reason)));
+          !active || run !== qrFlowRun.current || (setQrFailed(!0), setError(messageOf(reason, t)));
         }).finally(() => {
           active && run === qrFlowRun.current && setQrBusy(!1);
         }), () => {
@@ -2730,7 +2798,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           polling || settled || !active || run !== qrFlowRun.current || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then((result) => {
             !active || settled || run !== qrFlowRun.current || (result.status === "complete" ? (settled = !0, timer !== void 0 && clearInterval(timer), setError(void 0), setQrExpired(!1), setQrCompleted(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)) : result.status === "expired" && (settled = !0, timer !== void 0 && clearInterval(timer), setQrExpired(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)));
           }).catch((reason) => {
-            active && !settled && run === qrFlowRun.current && setError(messageOf(reason));
+            active && !settled && run === qrFlowRun.current && setError(messageOf(reason, t));
           }).finally(() => {
             polling = !1;
           }));
@@ -2744,7 +2812,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         return setError(void 0), props.control("settings.get").then((view) => {
           active && (applyView(view), setSignInOpen(!1), setQrCompleted(!1), setLoginPassword(""), setNotice({ key: "authorizationComplete" }));
         }).catch((reason) => {
-          active && setError(messageOf(reason));
+          active && setError(messageOf(reason, t));
         }), () => {
           active = !1;
         };
@@ -2761,7 +2829,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             });
             applyView(result.settings), setSignInOpen(!1), setLoginPassword(""), setNotice({ key: "authorizationComplete" });
           } catch (reason) {
-            setError(messageOf(reason));
+            setError(messageOf(reason, t));
           } finally {
             setBusy(!1);
           }
@@ -2775,7 +2843,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let view = await props.control("settings.logout");
           applyView(view, run === associationReadRun.current), setSignInOpen(!1), setNotice({ key: "signedOut" });
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setBusy(!1);
         }
@@ -2785,7 +2853,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let status = await props.control("host.reconnect");
           setHostStatus(status.host), setNotice({ key: "reconnectStarted" });
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setReconnectBusy(!1);
         }
@@ -2795,7 +2863,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let status = await props.control("host.authorization.set", { enabled });
           setHostStatus(status.host);
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setBusy(!1);
         }
@@ -2806,7 +2874,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let view = await props.control("settings.development.set", { terminalEnabled: enabled });
           applyView(view), setNotice({ key: "terminalSaved" });
         } catch (reason) {
-          setTerminalEnabled(previous), setError(messageOf(reason));
+          setTerminalEnabled(previous), setError(messageOf(reason, t));
         } finally {
           setTerminalBusy(!1);
         }
@@ -2818,7 +2886,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let view = await props.control("settings.appearance.set", { sidebarEntry: entry });
           applyView(view), setNotice({ key: "sidebarEntrySaved" });
         } catch (reason) {
-          setSidebarEntry(previous), setError(messageOf(reason));
+          setSidebarEntry(previous), setError(messageOf(reason, t));
         } finally {
           setSidebarEntryBusy(!1);
         }
@@ -2828,7 +2896,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let view = await props.control("settings.development.set", { remoteToolsEnabled: enabled, terminalEnabled });
           applyView(view), setNotice({ key: "remoteToolsSaved" });
         } catch (reason) {
-          setRemoteToolsEnabled(!enabled), setError(messageOf(reason));
+          setRemoteToolsEnabled(!enabled), setError(messageOf(reason, t));
         } finally {
           setRemoteToolsBusy(!1);
         }
@@ -2841,7 +2909,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let available = view.acpAvailability?.[backend] === !0;
             !available && view.writable && view.config.acp?.backends?.some((item) => item.id === backend && item.enabled !== !1) && applyView(await props.control("settings.acp.set", { backend, enabled: !1 })), setAcpCheckResults((current) => ({ ...current, [backend]: available })), setNotice({ key: available ? "acpAvailable" : "acpUnavailable" }), setTimeout(() => setAcpCheckResults((current) => ({ ...current, [backend]: void 0 })), 5e3);
           } catch (reason) {
-            setError(messageOf(reason));
+            setError(messageOf(reason, t));
           } finally {
             setAcpChecking((current) => ({ ...current, [backend]: !1 }));
           }
@@ -2852,7 +2920,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let view = await props.control("settings.acp.remove", { id: backend });
           applyView(view);
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setBusy(!1);
         }
@@ -2967,7 +3035,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               disabled: busy || !writable || acpChecking[item.id] === !0 || acpAvailability[item.id] !== !0,
               onChange: (event) => void props.control("settings.acp.set", { backend: item.id, enabled: event.target.checked }).then((view) => {
                 applyView(view), setAcpBackends((view.config.acp?.backends ?? []).map((v) => ({ id: v.id, enabled: v.enabled !== !1 })));
-              }).catch((reason) => setError(messageOf(reason)))
+              }).catch((reason) => setError(messageOf(reason, t)))
             })
           ))
         )
@@ -3136,7 +3204,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ),
             association === void 0 ? null : React.createElement("span", {
               className: `dshRemotePluginCardStatus${connectionStatusClass(hostStatus)}`
-            }, hostStatus === void 0 ? t("associated") : connectionStatusLabel(hostStatus, t)),
+            }, hostStatus?.authorized && !hostStatus.accountRequired && !hostStatus.online && (hostStatus.error !== void 0 || hostStatus.lastActiveAt !== void 0) ? React.createElement(ServerNotice, {
+              offline: !0,
+              linked: (hostStatus.connectedClients?.length ?? 0) > 0,
+              expiresAt: hostStatus.recoveryExpiresAt,
+              t
+            }) : modeStatus?.mode === "remote" ? t("remoteTarget", { name: modeStatus.target?.name ?? t("host") }) : t("local")),
             React.createElement("span", { className: "dshRemotePluginCardChevron", "aria-hidden": !0 }, "\u2304")
           )
         ),
@@ -3219,7 +3292,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 onClick: () => void reconnectHost()
               }, t(reconnectBusy ? "reconnectingAction" : "reconnect"))
             ),
-            hostStatus?.error === void 0 || hostStatus.online ? null : React.createElement("p", { className: "dshRemoteConnectionIssue", role: "status" }, connectionErrorMessage(hostStatus.error, t)),
+            hostStatus?.authorized && !hostStatus.accountRequired ? React.createElement(ServerNotice, {
+              offline: !hostStatus.online && hostStatus.reconnecting,
+              linked: (hostStatus.connectedClients?.length ?? 0) > 0,
+              expiresAt: hostStatus.recoveryExpiresAt,
+              t
+            }) : null,
+            hostStatus?.error === void 0 || hostStatus.online || hostStatus.reconnecting && hostStatus.error === "CONNECTION_FAILED" ? null : React.createElement("p", { className: "dshRemoteConnectionIssue", role: "status" }, connectionErrorMessage(hostStatus.error, t)),
             writable ? null : React.createElement("p", { className: "dshRemoteError" }, t("readOnly")),
             React.createElement(
               "div",
@@ -3293,6 +3372,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
   function installStyle(clientModuleId2) {
     let style = document.createElement("style");
     return style.dataset.plugin = clientModuleId2, style.dataset.pluginCss = "dsh-remote", style.textContent = [
+      ".dshRemoteConnectedPanelHeader{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;margin-bottom:6px}.dshRemoteConnectedPanelHeader .dshRemoteConnectedPanelTitle{margin-bottom:0}",
+      ".dshRemoteHostNameLine{display:flex;align-items:center;flex-wrap:wrap;gap:8px}",
+      ".dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}",
       // Browser navigation still targets the Desktop machine until Harness exposes
       // a Remote URL resolver. Hide the native guide entry in Remote mode only.
       'html.dshRemoteBrowserUnavailable [data-sidebar-right-guide-entry="browser"]{display:none!important}',
@@ -3464,7 +3546,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // src/client/workspaces.ts
   function createRemoteWorkspaceAction(React, portal) {
-    let RemoteProgressView = createRemoteProgressView(React);
+    let ServerNotice = createServerNotice(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       if (React.useEffect(() => {
@@ -3495,8 +3577,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let code = reason.code;
           if (typeof code == "string") return connectionErrorMessage(code, translate);
         }
-        return messageOf(reason);
-      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
+        return messageOf(reason, translate);
+      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [discoveryUnavailable, setDiscoveryUnavailable] = React.useState(!1), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
       React.useEffect(
         () => props.sidebarEntry.subscribe(() => setSidebarEntry(props.sidebarEntry.read())),
         [props.sidebarEntry]
@@ -3553,7 +3635,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           if (run !== qrFlowRun.current) return;
           setQrSession(session), setQrImage(image);
         } catch (reason) {
-          run === qrFlowRun.current && setError(messageOf(reason));
+          run === qrFlowRun.current && setError(messageOf(reason, t));
         } finally {
           run === qrFlowRun.current && setBusy(!1);
         }
@@ -3570,7 +3652,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch((reason) => {
-          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason)));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason, t)));
         }).finally(() => {
           active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
@@ -3598,7 +3680,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 }
               } else result.status === "expired" && (settled = !0, timer !== void 0 && window.clearInterval(timer), setQrExpired(!0), setQrSession(void 0), setQrImage(void 0));
           }).catch((reason) => {
-            active && !settled && run === qrFlowRun.current && setError(messageOf(reason));
+            active && !settled && run === qrFlowRun.current && setError(messageOf(reason, t));
           }).finally(() => {
             polling = !1;
           }));
@@ -3706,8 +3788,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
           try {
             if (!(await props.control("client.authorization.status")).hasCredentials)
               throw Object.assign(new Error("Remote account authorization is required."), { code: "ACCOUNT_AUTH_REQUIRED" });
+            setNeedsAuthorization(!1);
             let nextDevices = await props.control("devices");
-            if (setDevices(nextDevices), setNeedsAuthorization(!1), selectedHost !== void 0) {
+            if (setDevices(nextDevices), setDiscoveryUnavailable(!1), selectedHost !== void 0) {
               let nextSelectedHost = nextDevices.find((device) => device.deviceId === selectedHost.deviceId);
               nextSelectedHost === void 0 ? (setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setShowAllHermesWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setHermesWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : (setSelectedHost(nextSelectedHost), props.control("workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setWorkspaces(w)).catch(() => {
               }), props.control("codex.workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setCodexWorkspaces(w)).catch(() => {
@@ -3721,7 +3804,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             }
           } catch (reason) {
             let code = typeof reason == "object" && reason !== null && "code" in reason ? String(reason.code) : "";
-            ["ACCOUNT_AUTH_REQUIRED", "AUTH_INVALID", "AUTH_REQUIRED", "TOKEN_EXPIRED", "DEVICE_REVOKED", "DEVICE_OWNERSHIP_REQUIRED"].includes(code) ? (setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setShowAllHermesWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setHermesWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : setError(messageOf(reason));
+            ["ACCOUNT_AUTH_REQUIRED", "AUTH_INVALID", "AUTH_REQUIRED", "TOKEN_EXPIRED", "DEVICE_REVOKED", "DEVICE_OWNERSHIP_REQUIRED"].includes(code) ? (setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setShowAllHermesWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setHermesWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : code === "CONNECTION_FAILED" || messageOf(reason, t) === t("serverUnavailableError") ? setDiscoveryUnavailable(!0) : setError(messageOf(reason, t));
           }
         } catch (reason) {
           setError(connectionErrorMessageFor(reason, t));
@@ -3733,7 +3816,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
       };
       React.useEffect(() => props.subscribeOpen(() => {
         show();
-      }), [props.subscribeOpen, show]), React.useEffect(() => props.statusFeed.subscribe(setStatus), [props.statusFeed]);
+      }), [props.subscribeOpen, show]), React.useEffect(() => props.statusFeed.subscribe((next) => {
+        setStatus(next), next.host?.online && setDiscoveryUnavailable(!1);
+      }), [props.statusFeed]);
       let chooseAnotherHost = () => {
         setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setShowAllHermesWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setHermesWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
       }, resetLoginFlow = () => {
@@ -3749,7 +3834,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let nextStatus = await props.control("status");
             setStatus(nextStatus), setLoginServerUrl(nextStatus.serverUrl ?? loginServerUrl.trim()), setEditingServer(!1), setProviderReload((value) => value + 1);
           } catch (reason) {
-            setError(messageOf(reason));
+            setError(messageOf(reason, t));
           } finally {
             setSavingServer(!1), setBusy(!1);
           }
@@ -3786,14 +3871,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
         try {
           await props.control("mode.set", { mode: "local" }), window.location.reload();
         } catch (reason) {
-          setError(messageOf(reason)), setBusy(!1);
+          setError(messageOf(reason, t)), setBusy(!1);
         }
       }, setCurrentDeviceControl = async (enabled) => {
         setBusy(!0), setError(void 0);
         try {
           setStatus(await props.control("host.authorization.set", { enabled }));
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setBusy(!1);
         }
@@ -3802,7 +3887,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         try {
           await props.control("settings.logout"), setDevices([]), setSelectedHost(void 0), setConnectingHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setDirectory(void 0), setPath(""), setPassword(""), setProgress(void 0), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
         } catch (reason) {
-          setError(messageOf(reason));
+          setError(messageOf(reason, t));
         } finally {
           setBusy(!1);
         }
@@ -3833,7 +3918,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             }));
             setStatus(nextStatus), nextStatus.workspaceSelection !== void 0 && window.sessionStorage.setItem(pendingWorkspaceSelectionKey, JSON.stringify(nextStatus.workspaceSelection)), window.location.reload();
           } catch (reason) {
-            setError(messageOf(reason)), setBusy(!1);
+            setError(messageOf(reason, t)), setBusy(!1);
           }
         }
       }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), remoteActionLabel = status?.mode === "remote" ? `${remoteLabel} \xB7 ${t("exitRemote")}` : remoteLabel, visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), visiblePiWorkspaces = showAllPiWorkspaces ? piWorkspaces : piWorkspaces.slice(0, 3), visibleOpencodeWorkspaces = showAllOpencodeWorkspaces ? opencodeWorkspaces : opencodeWorkspaces.slice(0, 3), visibleClaudeWorkspaces = showAllClaudeWorkspaces ? claudeWorkspaces : claudeWorkspaces.slice(0, 3), visibleHermesWorkspaces = showAllHermesWorkspaces ? hermesWorkspaces : hermesWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, cursorAvailable = status?.remoteFeatures?.cursor === !0, antigravityAvailable = status?.remoteFeatures?.antigravity === !0, piAvailable = status?.remoteFeatures?.pi === !0, opencodeAvailable = status?.remoteFeatures?.opencode === !0, claudeAvailable = status?.remoteFeatures?.claude === !0, hermesAvailable = status?.remoteFeatures?.hermes === !0, rawUpdate = status?.update, updateInfo = rawUpdate !== void 0 && typeof rawUpdate.currentVersion == "string" && typeof rawUpdate.latestVersion == "string" ? rawUpdate : void 0, localUpdateAvailable = updateInfo !== void 0 && compareVersions(updateInfo.currentVersion, updateInfo.latestVersion) < 0, updateNotice = updateInfo !== void 0 && localUpdateAvailable ? t("updateAvailable", { latest: updateInfo.latestVersion, current: updateInfo.currentVersion }) : void 0, deviceUpdateAvailable = (device) => updateInfo !== void 0 && device.clientVersion !== void 0 && compareVersions(device.clientVersion, updateInfo.latestVersion) < 0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
@@ -3865,7 +3950,18 @@ Minimum version required to store current data is: ` + bestVersion + `.
             role: "dialog",
             "aria-label": t("currentConnectedDevices")
           },
-          React.createElement("strong", { className: "dshRemoteConnectedPanelTitle" }, t("currentConnectedDevices")),
+          React.createElement(
+            "div",
+            { className: "dshRemoteConnectedPanelHeader" },
+            React.createElement("strong", { className: "dshRemoteConnectedPanelTitle" }, t("currentConnectedDevices")),
+            React.createElement(ServerNotice, {
+              countdownOnly: !0,
+              offline: status?.host?.online === !1 && status.host.reconnecting,
+              linked: connectedCount > 0,
+              expiresAt: status?.host?.recoveryExpiresAt,
+              t
+            })
+          ),
           React.createElement(
             "div",
             { className: "dshRemoteClientList", "aria-label": t("currentConnectedDevices") },
@@ -3878,7 +3974,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
               React.createElement(
                 "span",
                 null,
-                React.createElement("strong", null, client.name.trim() === "" ? t("unknownDevice") : client.name),
+                React.createElement(
+                  "span",
+                  { className: "dshRemoteHostNameLine" },
+                  React.createElement("strong", null, client.name.trim() === "" ? t("unknownDevice") : client.name),
+                  null
+                ),
                 React.createElement("small", null, [
                   client.platform === void 0 ? void 0 : formatPlatform(client.platform),
                   connectedClientModeLabel(client.mode, t)
@@ -3888,7 +3989,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ))
           )
         ) : null
-      ) : null, listedHosts = connectingHost === void 0 ? devices : [connectingHost], computerIcon = React.createElement(
+      ) : null, serverUnavailable = discoveryUnavailable || status?.host?.online === !1 && status.host.reconnecting && (status.host.lastActiveAt !== void 0 || status.host.error === "CONNECTION_FAILED"), listedHosts = connectingHost === void 0 ? devices : [connectingHost], computerIcon = React.createElement(
         "svg",
         {
           className: "dshRemoteComputerIcon",
@@ -4232,7 +4333,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     {
                       type: "button",
                       key: device.deviceId,
-                      disabled: busy || !device.online,
+                      disabled: busy || serverUnavailable || !device.online,
                       "aria-current": connectingHost?.deviceId === device.deviceId ? "true" : void 0,
                       onClick: () => void selectHost(device)
                     },
@@ -4247,7 +4348,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                         deviceUpdateAvailable(device) ? t("updateAvailableTag") : void 0
                       ].filter(Boolean).join(" \xB7 "))
                     ),
-                    React.createElement("small", null, t(device.online ? "online" : "offline"))
+                    React.createElement("small", null, t(serverUnavailable ? "unavailable" : device.online ? "online" : "offline"))
                   )))
                 ) : null,
                 React.createElement(RemoteProgressView, { progress, t }),
@@ -4258,7 +4359,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   React.createElement(
                     "footer",
                     { className: "dshRemoteAccountFooter" },
-                    React.createElement("span", null, status?.target?.name ?? status?.deviceName ?? status?.host?.account ?? t("account")),
+                    React.createElement(
+                      "span",
+                      { className: "dshRemoteHostNameLine" },
+                      React.createElement("span", null, status?.target?.name ?? status?.deviceName ?? status?.host?.account ?? t("account")),
+                      React.createElement(ServerNotice, {
+                        offline: discoveryUnavailable || status?.host?.online === !1 && status.host.reconnecting,
+                        linked: connectedCount > 0 || status?.connected === !0,
+                        expiresAt: status?.host?.recoveryExpiresAt ?? status?.network?.recoveryExpiresAt,
+                        t
+                      })
+                    ),
                     updateNotice === void 0 ? null : React.createElement("a", {
                       className: "dshRemoteAccountUpdate",
                       href: "https://github.com/liguobao/ds-harness-remote/releases",
@@ -4803,7 +4914,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               )
             ),
             notice === void 0 ? null : React.createElement("p", { className: "dshRemoteNotice", role: "status" }, notice),
-            error === void 0 ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
+            error === void 0 || serverUnavailable && error === t("serverUnavailableError") ? null : React.createElement("p", { className: "dshRemoteError", role: "alert" }, error)
           )
         ))) : null
       );
@@ -5161,7 +5272,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         };
         React.useEffect(() => {
           refresh().catch((reason) => {
-            setError(messageOf(reason)), setSupported(!1);
+            setError(messageOf(reason, t)), setSupported(!1);
           });
         }, []), React.useEffect(() => {
           if (open)
@@ -5182,7 +5293,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               connectedProgress
             ) : await action()), window.location.reload();
           } catch (reason) {
-            setError(messageOf(reason)), setBusy(!1);
+            setError(messageOf(reason, t)), setBusy(!1);
           }
         }, loginHost = async () => {
           if (!(email.trim() === "" || password === "")) {
@@ -5190,7 +5301,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             try {
               await props.control("host.account.login", { email: email.trim(), password }), await refreshStatus();
             } catch (reason) {
-              setError(messageOf(reason));
+              setError(messageOf(reason, t));
             } finally {
               setPassword(""), setBusy(!1);
             }
@@ -5201,7 +5312,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             try {
               await props.control("host.registration-code.submit", { code: hostRegistrationCode.trim() }), setHostRegistrationCode(""), await refreshStatus();
             } catch (reason) {
-              setError(messageOf(reason));
+              setError(messageOf(reason, t));
             } finally {
               setBusy(!1);
             }

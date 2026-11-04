@@ -52,6 +52,7 @@ export interface HostRemoteStatus {
   configured: boolean
   online: boolean
   reconnecting: boolean
+  recoveryExpiresAt?: number
   lastActiveAt?: number
   error?: string
   account?: string
@@ -227,6 +228,7 @@ export class HostPluginRuntime {
       configured: this.serverApi !== undefined,
       online: this.serverConnection?.isOnline() ?? false,
       reconnecting: this.serverConnection?.isReconnecting() ?? false,
+      recoveryExpiresAt: this.serverConnection?.recoveryExpiresAt(),
       ...(this.serverConnection?.lastActivity() === undefined
         ? {}
         : { lastActiveAt: this.serverConnection.lastActivity() }),

@@ -125,6 +125,7 @@ export interface HostAuthorizationControl {
     configured: boolean
     online: boolean
     reconnecting: boolean
+    recoveryExpiresAt?: number
     lastActiveAt?: number
     error?: string
     account?: string

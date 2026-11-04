@@ -150,6 +150,14 @@ export class HostServerConnection {
 
   isOnline(): boolean { return this.online }
 
+  recoveryExpiresAt(): number | undefined {
+    const remaining = [...this.tunnels.values()].flatMap(tunnel => {
+      const ms = tunnel.lease?.remainingMs()
+      return ms === undefined ? [] : [ms]
+    })
+    return remaining.length ? Date.now() + Math.min(...remaining) : undefined
+  }
+
   lastError(): string | undefined { return this.terminalError }
 
   lastActivity(): number | undefined { return this.lastActiveAt }
@@ -329,7 +337,8 @@ export class HostServerConnection {
       }
       socket.onclose = event => {
         if (this.socket !== socket) return
-        retainOnClose = [1000, 1001, 1006, 1011, 1012, 1013, 4009].includes(event.code)
+        retainOnClose = [1000, 1001, 1006, 1011, 1012, 1013].includes(event.code)
+          || (event.code === 4009 && event.reason === 'server shutdown')
           || (event.code === 4001 && ['server shutdown', 'CONNECTION_FAILED'].includes(event.reason))
         const close = async (): Promise<void> => {
           await messageQueue.catch(() => undefined)

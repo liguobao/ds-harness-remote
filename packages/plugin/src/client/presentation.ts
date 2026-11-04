@@ -158,15 +158,17 @@ export function connectionErrorMessage(code: string, t: Translate): string {
   if (code === 'RATE_LIMITED') return t('connectionRateLimited')
   if (code === 'UNSUPPORTED_VERSION') return t('connectionVersionMismatch')
   if (code === 'INVALID_MESSAGE') return t('connectionInvalidResponse')
-  if (code === 'CONNECTION_FAILED' || code === 'SERVER_NOT_CONFIGURED') return t('connectionReachability')
+  if (code === 'CONNECTION_FAILED') return t('serverUnavailableError')
+  if (code === 'SERVER_NOT_CONFIGURED') return t('connectionReachability')
   return t('connectionUnexpected')
 }
 
 export function connectionStatusLabel(status: RemoteStatus['host'] | undefined, t: Translate): string {
   if (status === undefined) return t('checkingConnection')
   if (status.online) return t('online')
+  if (status.error !== undefined) return connectionErrorMessage(status.error, t)
   if (!status.reconnecting) return t('offline')
-  return t(status.lastActiveAt === undefined && status.error === undefined ? 'connecting' : 'reconnecting')
+  return t(status.lastActiveAt === undefined ? 'connecting' : 'serverUnavailableShort')
 }
 
 export function connectionStatusClass(status: RemoteStatus['host'] | undefined): string {
@@ -175,7 +177,12 @@ export function connectionStatusClass(status: RemoteStatus['host'] | undefined):
   return status === undefined ? '' : ' isOffline'
 }
 
-export function messageOf(reason: unknown): string { return reason instanceof Error ? reason.message : String(reason) }
+export function messageOf(reason: unknown, t: Translate): string {
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && reason.code === 'CONNECTION_FAILED') {
+    return t('serverUnavailableError')
+  }
+  return reason instanceof Error ? reason.message : String(reason)
+}
 
 export function formatPlatform(value: string): string {
   const normalized = value.toLowerCase()

@@ -17,15 +17,18 @@ describe('connection authorization lease', () => {
   it('requires a matched confirmation and counts the deadline from the request, not receipt', () => {
     const { lease, ack, expired } = setup()
     expect(lease.canDetach()).toBe(false)
+    expect(lease.remainingMs()).toBeUndefined()
     ack('unknown')
     expect(lease.canDetach()).toBe(false)
     vi.advanceTimersByTime(10_000)
     ack()
     expect(lease.canDetach()).toBe(true)
     expect(lease.recoveryTicket()).toBe('renewed')
+    expect(lease.remainingMs()).toBe(290_000)
     vi.advanceTimersByTime(290_000)
     expect(lease.canDetach()).toBe(false)
     expect(expired).toHaveBeenCalledOnce()
+    expect(lease.remainingMs()).toBeUndefined()
   })
 
   it('does not renew from stale replies, unanswered retries, or reconnection attempts', () => {

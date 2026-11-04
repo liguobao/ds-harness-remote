@@ -37,6 +37,11 @@ export class ControlLease {
     return true
   }
 
+  remainingMs(): number | undefined {
+    if (!this.confirmed || this.stopped || !this.deadline) return undefined
+    return Math.max(0, Math.min(this.deadline.mono - performance.now(), this.deadline.wall - Date.now()))
+  }
+
   canDetach(): boolean { return this.confirmed && this.valid() }
   recoveryTicket(): string | undefined { return this.canDetach() ? this.ticket : undefined }
 

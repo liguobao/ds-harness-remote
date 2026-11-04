@@ -69,6 +69,7 @@ export interface AdaptiveConnectionDetails {
   heartbeatIntervalMs?: number
   lastControlReceivedAt?: number
   lastControlSentAt?: number
+  recoveryExpiresAt?: number
   controlChannelUrl: string
   controlChannelState: 'connecting' | 'open' | 'closing' | 'closed'
   preferredTransports: Array<'lan' | 'p2p' | 'turn' | 'relay'>
@@ -214,12 +215,14 @@ export class AdaptiveTransport extends BaseTransport {
   }
 
   async connectionDetails(): Promise<AdaptiveConnectionDetails> {
+    const remainingMs = this.lease?.remainingMs()
     return {
       ...(this.connectionId === undefined ? {} : { connectionId: this.connectionId }),
       ...(this.connectedAt === undefined ? {} : { connectedAt: this.connectedAt }),
       ...(this.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs }),
       ...(this.lastControlReceivedAt === undefined ? {} : { lastControlReceivedAt: this.lastControlReceivedAt }),
       ...(this.lastControlSentAt === undefined ? {} : { lastControlSentAt: this.lastControlSentAt }),
+      recoveryExpiresAt: remainingMs === undefined ? undefined : Date.now() + remainingMs,
       controlChannelUrl: this.url,
       controlChannelState: socketState(this.socket?.readyState),
       preferredTransports: this.options.forceRelay === true
@@ -785,7 +788,8 @@ export class AdaptiveTransport extends BaseTransport {
 function adaptiveControlCloseError(event: CloseEvent): Error {
   // Self-hosted heartbeat expiry closes the socket without an error frame.
   // 4001 also carries authorization failures, so only this exact reason retries.
-  const heartbeatTimeout = (event.code === 4001 && (event.reason === 'CONNECTION_FAILED' || event.reason === 'server shutdown')) || event.code === 4009
+  const heartbeatTimeout = (event.code === 4001 && event.reason === 'CONNECTION_FAILED')
+    || (event.code === 4009 && event.reason === 'server shutdown')
   const reason = event.reason.trim().slice(0, 300)
   const detail = reason.length > 0
     ? `${reason} (WebSocket ${event.code})`

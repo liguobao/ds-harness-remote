@@ -7,6 +7,9 @@ export function installStyle(clientModuleId: string): () => void {
   style.dataset.plugin = clientModuleId
   style.dataset.pluginCss = 'dsh-remote'
   style.textContent = [
+    '.dshRemoteConnectedPanelHeader{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;margin-bottom:6px}.dshRemoteConnectedPanelHeader .dshRemoteConnectedPanelTitle{margin-bottom:0}',
+    '.dshRemoteHostNameLine{display:flex;align-items:center;flex-wrap:wrap;gap:8px}',
+    '.dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}',
     // Browser navigation still targets the Desktop machine until Harness exposes
     // a Remote URL resolver. Hide the native guide entry in Remote mode only.
     'html.dshRemoteBrowserUnavailable [data-sidebar-right-guide-entry="browser"]{display:none!important}',

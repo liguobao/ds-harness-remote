@@ -145,7 +145,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         void refresh().catch(reason => {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
           setSupported(false)
         })
       }, [])
@@ -179,7 +179,7 @@ window.__ModuleLoader__.load({
           }
           window.location.reload()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
           setBusy(false)
         }
       }
@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
           await props.control('host.account.login', { email: email.trim(), password })
           await refreshStatus()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         } finally {
           setPassword('')
           setBusy(false)
@@ -208,7 +208,7 @@ window.__ModuleLoader__.load({
           setHostRegistrationCode('')
           await refreshStatus()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         } finally {
           setBusy(false)
         }

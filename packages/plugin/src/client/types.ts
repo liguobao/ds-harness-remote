@@ -60,6 +60,7 @@ export interface RemoteStatus {
     configured: boolean
     online: boolean
     reconnecting: boolean
+    recoveryExpiresAt?: number
     lastActiveAt?: number
     error?: string
     account?: string
@@ -77,6 +78,7 @@ export interface RemoteStatus {
 interface RemoteNetworkDetails {
   connectionId?: string
   connectedAt?: number
+  recoveryExpiresAt?: number
   controlChannelUrl: string
   controlChannelState: 'connecting' | 'open' | 'closing' | 'closed'
   preferredTransports: RemoteTransportPreference[]
