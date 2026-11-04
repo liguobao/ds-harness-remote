@@ -245,12 +245,16 @@ export class SecureStore {
     // 这种情况宁可报错让用户重试，也不静默轮换身份。
     if (stored === undefined && this.getSync(KEY_IDENTITY, '').length > 0) {
       const code: number = this.assetErrorCode();
-      // 24000003 = ACCESS_DENIED（设备未解锁）；其它码说明安全存储临时不可用
+      // 24000002/24000001 = 安全存储里确实没有这条记录（例如换签名证书后系统不再允许
+      // 旧条目、或数据被系统清理）；24000003 = 设备未解锁，属于可重试
+      const lost: boolean = code === 24000002 || code === 24000001;
       const reason: string = code === 24000003
         ? '（错误码 24000003：设备未解锁）'
-        : (code === 0 ? '' : '（错误码 ' + code + '）');
-      throw new Error('设备身份读取失败（系统安全存储不可用）' + reason
-        + '。为避免设备身份被轮换，已中止；请解锁设备后重试。');
+        : (code === 0 ? '' : '（错误码 ' + code + (lost ? '：安全存储条目已丢失' : '') + '）');
+      const tail: string = lost
+        ? '。私钥已不在安全存储里，无法恢复原身份；如需继续使用，请点「重置设备身份」后重新登录。'
+        : '。为避免设备身份被轮换，已中止；请解锁设备后重试。';
+      throw new Error('设备身份读取失败（系统安全存储不可用）' + reason + tail);
     }
     if (stored !== undefined) {
       // Older builds generated 32 raw hex characters, which the Server rejects: a device id
@@ -267,6 +271,32 @@ export class SecureStore {
     identity.publicKey = toBase64Url(publicKeyBytes);
     await this.saveIdentity(identity);
     return identity;
+  }
+
+  /**
+   * 彻底重置设备身份：私钥已从安全存储丢失时的唯一出路。
+   * 清掉 KV 里的身份/凭据/主机固定，下次 loadOrCreateIdentity 会生成全新身份。
+   */
+  async resetIdentity(): Promise<void> {
+    try {
+      const raw: string = this.getSync(KEY_IDENTITY, '');
+      if (raw.length > 0) {
+        const root: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+        const deviceId: string = jsonStr(root, 'deviceId', '');
+        if (deviceId.length > 0) {
+          await this.deleteSecret(identitySecretAlias(deviceId));
+        }
+      }
+    } catch (error) {
+      logWarn('resetIdentity: 旧 asset 清理失败，继续');
+    }
+    await this.deleteSecret(ASSET_ALIAS_CREDENTIALS);
+    await this.deleteSecret(ASSET_ALIAS_HOST_PINS);
+    this.deleteSyncKey(KEY_IDENTITY);
+    this.deleteSyncKey(KEY_CREDENTIALS);
+    this.deleteSyncKey(KEY_HOST_PINS);
+    this.hostPins = {};
+    logWarn('device identity reset by user');
   }
 
   /** User-defined display names for host devices, keyed by deviceId. */

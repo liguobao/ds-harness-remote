@@ -471,6 +471,19 @@ export class AppRuntime {
     this.refreshDevices();
   }
 
+  /** 私钥已丢失时重置身份：清本地身份/凭据，重新生成，然后回到登录页。 */
+  async resetIdentityAndRestart(context: common.Context): Promise<void> {
+    await this.store.resetIdentity();
+    this.identity = undefined;
+    this.credentials = undefined;
+    this.config = await this.store.loadConfig();
+    this.identityBlocked = false;
+    this.errorMsg = '';
+    this.phase = PHASE_BOOT;
+    this.notify();
+    await this.bootstrap(context);
+  }
+
   /** 解锁 / 回到前台后重试读取设备身份。 */
   retryBootstrap(context: common.Context): void {
     if (!this.identityBlocked) {

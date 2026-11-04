@@ -1064,6 +1064,48 @@ struct Index {
           .fontSize(13)
           .fontColor('#F85749')
           .textAlign(TextAlign.Center)
+        if (this.errorMsg.indexOf('设备身份读取失败') >= 0) {
+          Row({ space: 8 }) {
+            Text('重试')
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+              .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().chip)
+              .borderRadius(14)
+              .border({ width: 1, color: this.pal().borderStrong })
+              .onClick(() => {
+                const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+                this.runtime.retryBootstrap(context);
+              })
+            Text('重置设备身份')
+              .fontSize(12)
+              .fontColor('#FFFFFF')
+              .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+              .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+              .borderRadius(14)
+              .onClick(() => {
+                const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+                AlertDialog.show({
+                  title: '重置设备身份',
+                  message: '安全存储里的私钥已经读不到了。重置会生成一个新的设备身份，'
+                    + '需要重新登录，服务器上会把这台设备当成新设备。继续？',
+                  primaryButton: {
+                    value: '取消',
+                    action: () => {
+                    }
+                  },
+                  secondaryButton: {
+                    value: '重置',
+                    fontColor: '#F85749',
+                    action: () => {
+                      this.runtime.resetIdentityAndRestart(context);
+                    }
+                  }
+                });
+              })
+          }
+          .margin({ top: 8 })
+        }
       }
       Row({ space: 10 }) {
         Text(this.buildTag())
