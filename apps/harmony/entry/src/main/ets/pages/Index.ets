@@ -1826,10 +1826,13 @@ struct Index {
       // 系统材质负责模糊和透光，内衬只留一点点白，避免糊成一块实心板
       .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
         colorMode: ThemeColorMode.SYSTEM,
-        adaptiveColor: AdaptiveColor.DEFAULT
+        adaptiveColor: AdaptiveColor.DEFAULT,
+        // 轻微去色偏（0–127），背景的杂色不会把玻璃染脏
+        blurOptions: { grayscale: [0, 24] }
       })
-      // 顶边折光：用 overlay 画，不占流内高度，按钮才居中
-      .overlay(this.DockHighlight(), { align: Alignment.Top })
+      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.14)')
+      // 折光：顶部亮线 + 底部内阴影，一并画在 overlay 里，不占流内高度
+      .overlay(this.DockGlassEdges(), { align: Alignment.Center })
       .borderRadius(30)
       .border({ width: 1,
         color: this.isDarkUi ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.90)' })
@@ -2402,18 +2405,31 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 坞顶那道折光高光：叠在玻璃上，不影响布局。 */
+  /** 玻璃的「折光」层：顶上一条亮线，底下压一层内阴影，凑出厚度。 */
   @Builder
-  DockHighlight() {
-    Row()
-      .width('86%')
-      .height(1)
-      .linearGradient({ angle: 90, colors: [
-        ['rgba(255,255,255,0)', 0],
-        [this.isDarkUi ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.98)', 0.5],
-        ['rgba(255,255,255,0)', 1]
-      ] })
-      .hitTestBehavior(HitTestMode.None)
+  DockGlassEdges() {
+    Column() {
+      Row()
+        .width('86%')
+        .height(1)
+        .linearGradient({ angle: 90, colors: [
+          ['rgba(255,255,255,0)', 0],
+          [this.isDarkUi ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.98)', 0.5],
+          ['rgba(255,255,255,0)', 1]
+        ] })
+      Blank()
+      Column()
+        .width('100%')
+        .height(22)
+        .linearGradient({ angle: 180, colors: [
+          ['rgba(0,0,0,0)', 0],
+          [this.isDarkUi ? 'rgba(0,0,0,0.22)' : 'rgba(31,45,90,0.06)', 1]
+        ] })
+        .borderRadius({ bottomLeft: 28, bottomRight: 28 })
+    }
+    .width('100%')
+    .height('100%')
+    .hitTestBehavior(HitTestMode.None)
   }
 
   /** 消息里的图片：远端链接直接交给 Image，主机本地路径走 workspaceFiles/readBytes。 */
