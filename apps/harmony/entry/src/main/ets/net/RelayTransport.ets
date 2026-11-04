@@ -30,7 +30,13 @@ export class RelayTransportOptions {
  * 某个节点打满时换个域名再试——票据是服务端签的，换节点不影响校验。
  */
 export function buildRelayCandidates(endpoint: string): string[] {
-  const out: string[] = [endpoint];
+  const out: string[] = [];
+  // 上次连通的节点优先：服务端按区域分配，但它不知道哪台刚满过
+  const preferred: string = hostOfRelay(preferredRelayHost(endpoint));
+  if (preferred.length > 0 && preferred !== hostOfRelay(endpoint)) {
+    out.push(withHost(endpoint, preferred));
+  }
+  out.push(endpoint);
   const match: RegExpMatchArray | null = endpoint.match(/^(wss?:\/\/)([^/]+)(.*)$/);
   if (match === null) {
     return out;
@@ -52,6 +58,26 @@ export function buildRelayCandidates(endpoint: string): string[] {
     }
   }
   return out;
+}
+
+/** 最近一次 attach 成功的中继 endpoint（同一次 App 运行内记忆）。 */
+let lastGoodRelayEndpoint: string = '';
+
+function preferredRelayHost(endpoint: string): string {
+  return lastGoodRelayEndpoint;
+}
+
+function hostOfRelay(endpoint: string): string {
+  const match: RegExpMatchArray | null = endpoint.match(/^wss?:\/\/([^/]+)/);
+  return match === null ? '' : match[1];
+}
+
+function withHost(endpoint: string, host: string): string {
+  const match: RegExpMatchArray | null = endpoint.match(/^(wss?:\/\/)([^/]+)(.*)$/);
+  if (match === null) {
+    return endpoint;
+  }
+  return match[1] + host + match[3];
 }
 
 /** 把中继的关闭码翻译成一句人话，原始 code/reason 仍然带着，方便报障。 */
@@ -462,7 +488,9 @@ export class RelayTransport {
             this.dataAttachResolve = undefined;
             this.dataAttachReject = undefined;
             this.dataReady = true;
-            logInfo('relay.ready epoch=' + relayEpoch + ' conn=' + this.connectionId);
+            lastGoodRelayEndpoint = relayEndpoint;
+            logInfo('relay.ready epoch=' + relayEpoch + ' conn=' + this.connectionId
+              + ' host=' + hostOfRelay(relayEndpoint));
             resolve();
             return;
           }
