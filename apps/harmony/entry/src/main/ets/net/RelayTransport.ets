@@ -260,7 +260,10 @@ export class RelayTransport {
           this.finishConnect();
         })
         .catch((e: Error) => {
-          this.fail(new Error('relay data attach failed'));
+          // 把底层原因带出来，否则线上只能看到笼统的 attach failed
+          const detail: string = e instanceof Error ? e.message : String(e);
+          logError('relay data attach failed: ' + detail);
+          this.fail(new Error('relay data attach failed: ' + detail));
         });
     } else {
       this.finishConnect();
@@ -331,6 +334,7 @@ export class RelayTransport {
         }
         try {
           const frame = parseFrame(value);
+          logInfo('relay data frame type=' + frame.type);
           if (frame.type === 'relay.ready') {
             const readyConn = jsonStr(frame.payload, 'connectionId', '');
             if (readyConn !== this.connectionId) {
@@ -357,12 +361,17 @@ export class RelayTransport {
       });
       ws.on('error', (err: Error) => {
         clearTimeout(timer);
-        reject(new Error('Relay data socket failed'));
+        const detail: string = err instanceof Error ? err.message : 'unknown';
+        logError('relay data socket error: ' + detail);
+        reject(new Error('Relay data socket failed: ' + detail));
       });
       ws.on('close', (err: Error, value: webSocket.CloseResult) => {
         clearTimeout(timer);
+        logWarn('relay data socket closed code=' + value.code + ' reason=' + value.reason
+          + ' ready=' + this.dataReady);
         if (!this.dataReady) {
-          reject(new Error('Relay data socket closed before attach'));
+          reject(new Error('Relay data socket closed before attach code=' + value.code
+            + ' reason=' + value.reason));
         } else {
           this.fail(new Error('Relay data socket closed'));
         }
@@ -370,7 +379,11 @@ export class RelayTransport {
       ws.connect(relayEndpoint, (err: Error, value: boolean) => {
         if (err) {
           clearTimeout(timer);
-          reject(new Error('Relay data socket connect failed'));
+          const detail: string = err instanceof Error ? err.message : 'unknown';
+          logError('relay data socket connect failed: ' + detail + ' url=' + relayEndpoint);
+          reject(new Error('Relay data socket connect failed: ' + detail));
+        } else {
+          logInfo('relay data socket connected url=' + relayEndpoint);
         }
       });
     });
