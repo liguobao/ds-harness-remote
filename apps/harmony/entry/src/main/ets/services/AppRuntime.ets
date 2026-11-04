@@ -478,6 +478,18 @@ export class AppRuntime {
     this.notify();
   }
 
+  /** 把一段录音（WAV base64）交给主机转写，返回文本；未连接或失败时抛错。 */
+  async transcribeVoice(audioBase64: string): Promise<string> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      throw new Error('尚未连接主机');
+    }
+    if (audioBase64.length === 0) {
+      return '';
+    }
+    return harness.speechTranscribe(audioBase64, '');
+  }
+
   async createNewSession(): Promise<void> {
     if (this.phase !== PHASE_CHAT) {
       return;

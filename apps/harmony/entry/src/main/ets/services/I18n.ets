@@ -108,6 +108,15 @@ function buildEnglish(): Map<string, string> {
   map.set('跟着系统语言走', 'Match the system language');
   map.set('始终使用中文界面', 'Always use Chinese');
   map.set('始终使用英文界面', 'Always use English');
+  // —— 语音输入 ——
+  map.set('正在听…', 'Listening…');
+  map.set('正在转写…', 'Transcribing…');
+  map.set('没有麦克风权限，去系统设置里允许后再试',
+    'No microphone permission — allow it in Settings and try again');
+  map.set('录音启动失败：', 'Could not start recording: ');
+  map.set('太短了，没听清', 'Too short — nothing captured');
+  map.set('没识别出内容', 'No speech recognised');
+  map.set('语音转写失败：', 'Transcription failed: ');
   return map;
 }
 

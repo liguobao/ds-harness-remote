@@ -3,19 +3,21 @@ import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
-  getAppRuntime } from '../services/AppRuntime';
+  getAppRuntime, errorMessage } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
+import { VoiceRecorder } from '../services/VoiceInput';
 import BuildProfile from 'BuildProfile';
 
 @Entry
 @Component
 struct Index {
   private runtime: AppRuntime = getAppRuntime();
+  private voice: VoiceRecorder = new VoiceRecorder();
   private scroller: Scroller = new Scroller();
   private fieldsPrefilled: boolean = false;
   private mainWindow: window.Window | undefined = undefined;
@@ -85,6 +87,10 @@ struct Index {
   @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
   @State showSettings: boolean = false;
+  /** 正在录音（麦克风按钮变红点）。 */
+  @State recording: boolean = false;
+  /** 录音已停止、等主机转写。 */
+  @State dictating: boolean = false;
   /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
   @State expandedRuns: string[] = [];
   private windowChromeDark: boolean = false;
@@ -512,6 +518,61 @@ struct Index {
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
+  /** 语音输入：点一下开录，再点一下收尾并转写，结果续写到输入框。 */
+  private toggleDictation(): void {
+    if (this.dictating) {
+      return;
+    }
+    if (this.recording) {
+      this.stopDictation();
+      return;
+    }
+    this.startDictation();
+  }
+
+  private startDictation(): void {
+    const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    const recorder: VoiceRecorder = this.voice;
+    this.errorMsg = '';
+    VoiceRecorder.ensurePermission(context).then((granted: boolean) => {
+      if (!granted) {
+        this.errorMsg = this.tr('没有麦克风权限，去系统设置里允许后再试');
+        return;
+      }
+      return recorder.start().then(() => {
+        this.recording = true;
+      });
+    }).catch((error: Error) => {
+      this.recording = false;
+      this.errorMsg = this.tr('录音启动失败：') + errorMessage(error);
+    });
+  }
+
+  private stopDictation(): void {
+    const recorder: VoiceRecorder = this.voice;
+    this.recording = false;
+    this.dictating = true;
+    recorder.stop().then((audioBase64: string) => {
+      if (audioBase64.length === 0) {
+        this.dictating = false;
+        this.errorMsg = this.tr('太短了，没听清');
+        return;
+      }
+      return this.runtime.transcribeVoice(audioBase64).then((text: string) => {
+        this.dictating = false;
+        if (text.length === 0) {
+          this.errorMsg = this.tr('没识别出内容');
+          return;
+        }
+        const head: string = this.promptInput.length > 0 && !this.promptInput.endsWith(' ') ? ' ' : '';
+        this.promptInput = this.promptInput + head + text;
+      });
+    }).catch((error: Error) => {
+      this.dictating = false;
+      this.errorMsg = this.tr('语音转写失败：') + errorMessage(error);
+    });
+  }
+
   private devicesMenu(): MenuElement[] {
     const items: MenuElement[] = [
       {
@@ -1651,8 +1712,44 @@ struct Index {
           .padding({ top: 4, bottom: 2 })
         }
         Row({ space: 10 }) {
-          TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…'
-                : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…') })
+          // 语音输入：点一下开始录，再点一下结束并转写；转写中显示 spinner。
+          Row() {
+            if (this.dictating) {
+              LoadingProgress()
+                .width(18)
+                .height(18)
+                .color('#22D3EE')
+            } else if (this.recording) {
+              Column()
+                .width(10)
+                .height(10)
+                .borderRadius(3)
+                .backgroundColor('#F85749')
+            } else {
+              Image($r('app.media.ic_mic'))
+                .width(20)
+                .height(20)
+                .fillColor(this.pal().text2)
+            }
+          }
+          .width(46)
+          .height(46)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(23)
+          .backgroundColor(this.recording ? 'rgba(248,87,73,0.16)'
+            : (this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)'))
+          .border({ width: 1,
+            color: this.recording ? 'rgba(248,87,73,0.55)'
+              : (this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)') })
+          .enabled(!this.dictating)
+          .onClick(() => {
+            this.toggleDictation();
+          })
+          TextInput({ text: this.promptInput, placeholder: this.recording ? '正在听…'
+              : (this.dictating ? '正在转写…'
+                : (this.generating ? '正在生成，可插话…'
+                  : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…'))) })
             .layoutWeight(1)
             .height(46)
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')

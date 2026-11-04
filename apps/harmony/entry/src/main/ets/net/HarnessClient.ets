@@ -344,6 +344,20 @@ export class HarnessAlphaClient {
     return asRecord(value);
   }
 
+  /** 语音转文字：把手里的 WAV（base64）交给主机上的语音提供商。 */
+  async speechTranscribe(audioBase64: string, language: string): Promise<string> {
+    const request: Record<string, Object> = { 'audioBase64': audioBase64 };
+    if (language.length > 0) {
+      request['language'] = language;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('speech/transcribe', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const text: string = root !== undefined ? jsonStr(root, 'text', '') : '';
+    logInfo('speech/transcribe ok -> ' + text.length + ' chars');
+    return text;
+  }
+
   /** 重命名会话。 */
   async sessionRename(sessionId: string, title: string): Promise<void> {
     const request: Record<string, Object> = { 'sessionId': sessionId, 'title': title };
