@@ -354,6 +354,13 @@ const enUS = {
     copy: 'Copy',
   },
   automation: {
+    presetDaily: 'Every day',
+    presetWorkdays: 'Weekdays',
+    presetWeekly: 'Every week',
+    presetMonthly: 'Every month',
+    presetHourly: 'Every hour',
+    presetMinutely: 'Every minute',
+    presetOnce: 'Once',
     sendTo: 'Send to',
     sendToNew: 'New conversation each run',
     sendToFixed: 'Fixed conversation',

@@ -352,6 +352,13 @@ const zhTW = {
     copy: '複製',
   },
   automation: {
+    presetDaily: '每天',
+    presetWorkdays: '工作日',
+    presetWeekly: '每週',
+    presetMonthly: '每月',
+    presetHourly: '每小時',
+    presetMinutely: '每分鐘',
+    presetOnce: '只執行一次',
     sendTo: '傳送到',
     sendToNew: '每次新建對話',
     sendToFixed: '固定對話',

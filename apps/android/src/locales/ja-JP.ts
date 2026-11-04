@@ -354,6 +354,13 @@ const jaJP = {
     copy: 'コピー',
   },
   automation: {
+    presetDaily: '毎日',
+    presetWorkdays: '平日',
+    presetWeekly: '毎週',
+    presetMonthly: '毎月',
+    presetHourly: '毎時',
+    presetMinutely: '毎分',
+    presetOnce: '1 回だけ',
     sendTo: '送信先',
     sendToNew: '毎回新しい会話',
     sendToFixed: '固定の会話',

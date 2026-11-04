@@ -354,6 +354,13 @@ const frFR = {
     copy: 'Copier',
   },
   automation: {
+    presetDaily: 'Chaque jour',
+    presetWorkdays: 'Jours ouvrés',
+    presetWeekly: 'Chaque semaine',
+    presetMonthly: 'Chaque mois',
+    presetHourly: 'Chaque heure',
+    presetMinutely: 'Chaque minute',
+    presetOnce: 'Une fois',
     sendTo: 'Envoyer vers',
     sendToNew: 'Nouvelle conversation à chaque fois',
     sendToFixed: 'Conversation fixe',

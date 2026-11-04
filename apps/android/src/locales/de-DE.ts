@@ -354,6 +354,13 @@ const deDE = {
     copy: 'Kopieren',
   },
   automation: {
+    presetDaily: 'Jeden Tag',
+    presetWorkdays: 'Werktags',
+    presetWeekly: 'Jede Woche',
+    presetMonthly: 'Jeden Monat',
+    presetHourly: 'Jede Stunde',
+    presetMinutely: 'Jede Minute',
+    presetOnce: 'Einmal',
     sendTo: 'Senden an',
     sendToNew: 'Jedes Mal neue Unterhaltung',
     sendToFixed: 'Feste Unterhaltung',

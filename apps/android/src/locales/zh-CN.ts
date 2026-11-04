@@ -352,6 +352,13 @@ const zhCN = {
     copy: '复制',
   },
   automation: {
+    presetDaily: '每天',
+    presetWorkdays: '工作日',
+    presetWeekly: '每周',
+    presetMonthly: '每月',
+    presetHourly: '每小时',
+    presetMinutely: '每分钟',
+    presetOnce: '只执行一次',
     sendTo: '发送到',
     sendToNew: '每次新建对话',
     sendToFixed: '固定对话',

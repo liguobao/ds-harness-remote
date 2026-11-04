@@ -354,6 +354,13 @@ const esES = {
     copy: 'Copiar',
   },
   automation: {
+    presetDaily: 'Cada día',
+    presetWorkdays: 'Días laborables',
+    presetWeekly: 'Cada semana',
+    presetMonthly: 'Cada mes',
+    presetHourly: 'Cada hora',
+    presetMinutely: 'Cada minuto',
+    presetOnce: 'Una vez',
     sendTo: 'Enviar a',
     sendToNew: 'Nueva conversación cada vez',
     sendToFixed: 'Conversación fija',

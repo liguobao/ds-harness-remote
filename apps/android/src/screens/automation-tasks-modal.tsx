@@ -88,6 +88,17 @@ function extractExpectedRecord(entry: ScheduleCatalogEntry): ScheduleRecord {
   }
 }
 
+type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | 'minutely' | 'once'
+
+/** Preset -> concrete Host selector kind. */
+function presetToKind(preset: SchedulePreset): TimingKind {
+  if (preset === 'workdays' || preset === 'weekly') return 'weekly'
+  if (preset === 'hourly' || preset === 'minutely') return 'every'
+  if (preset === 'monthly') return 'cron'
+  if (preset === 'once') return 'at'
+  return 'daily'
+}
+
 export function AutomationTasksModal({
   visible,
   onClose,
@@ -128,6 +139,7 @@ export function AutomationTasksModal({
   const [formPrompt, setFormPrompt] = useState('')
   const [formTargetSessionId, setFormTargetSessionId] = useState('')
   const [formKind, setFormKind] = useState<TimingKind>('daily')
+  const [formPreset, setFormPreset] = useState<SchedulePreset>('daily')
   const [formTime, setFormTime] = useState('09:00')
   const [formTimeZone, setFormTimeZone] = useState('')
   const [formIntervalMinutes, setFormIntervalMinutes] = useState(60)
@@ -250,38 +262,50 @@ export function AutomationTasksModal({
     setExpandedRow(current => (current === row ? null : row))
   }
 
-  const currentKindLabel = useMemo(() => {
-    if (formKind === 'every') return strings.automation.timingEvery
-    if (formKind === 'weekly') return strings.automation.timingWeekly
-    if (formKind === 'at') return strings.automation.timingOnce
-    if (formKind === 'cron') return 'Cron'
-    return strings.automation.timingDaily
-  }, [formKind, strings])
+  const effectiveKind: TimingKind = presetToKind(formPreset)
+  const effectiveInterval = formPreset === 'hourly' ? 60 : formPreset === 'minutely' ? 1 : formIntervalMinutes
 
-  /** Preview of the next three local runs for the rule being edited. */
+  const currentKindLabel = useMemo(() => {
+    if (formPreset === 'workdays') return strings.automation.presetWorkdays
+    if (formPreset === 'weekly') return strings.automation.presetWeekly
+    if (formPreset === 'monthly') return strings.automation.presetMonthly
+    if (formPreset === 'hourly') return strings.automation.presetHourly
+    if (formPreset === 'minutely') return strings.automation.presetMinutely
+    if (formPreset === 'once') return strings.automation.presetOnce
+    return strings.automation.presetDaily
+  }, [formPreset, strings])
+
+  /** Preview of the next three local runs for the chosen preset. */
   const nextRunsLabel = useMemo(() => {
     const stamps: Date[] = []
     const hours = Number(formTime.split(':')[0])
     const minutes = Number(formTime.split(':')[1])
     const base = new Date()
-    const pushAt = (at: Date): void => {
-      stamps.push(at)
-    }
-    if (formKind === 'every') {
-      for (let i = 1; i <= 3; i += 1) pushAt(new Date(base.getTime() + i * (formIntervalMinutes ?? 60) * 60_000))
-    } else if (formKind === 'at') {
-      pushAt(new Date(base.getTime() + (formDelayMinutes ?? 15) * 60_000))
-    } else if (formKind === 'cron') {
-      return formCronExpression || '—'
+    if (formPreset === 'minutely') {
+      for (let i = 1; i <= 3; i += 1) stamps.push(new Date(base.getTime() + i * 60_000))
+    } else if (formPreset === 'hourly') {
+      for (let i = 1; i <= 3; i += 1) stamps.push(new Date(base.getTime() + i * 3_600_000))
+    } else if (formPreset === 'once') {
+      stamps.push(new Date(base.getTime() + (formDelayMinutes ?? 15) * 60_000))
+    } else if (formPreset === 'monthly') {
+      for (let i = 1; i <= 3; i += 1) {
+        const candidate = new Date(base)
+        candidate.setMonth(base.getMonth() + i, 1)
+        candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
+        stamps.push(candidate)
+      }
     } else {
-      for (let day = 0; day < 14 && stamps.length < 3; day += 1) {
+      const weekdays = formPreset === 'workdays' ? [1, 2, 3, 4, 5] : formWeekdays
+      for (let day = 0; day < 21 && stamps.length < 3; day += 1) {
         const candidate = new Date(base)
         candidate.setDate(base.getDate() + day)
         candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
         if (candidate.getTime() <= base.getTime()) continue
-        const weekday = candidate.getDay() === 0 ? 7 : candidate.getDay()
-        if (formKind === 'weekly' && !formWeekdays.includes(weekday)) continue
-        pushAt(candidate)
+        if (formPreset === 'weekly' || formPreset === 'workdays') {
+          const weekday = candidate.getDay() === 0 ? 7 : candidate.getDay()
+          if (!weekdays.includes(weekday)) continue
+        }
+        stamps.push(candidate)
       }
     }
     if (stamps.length === 0) return '—'
@@ -291,7 +315,7 @@ export function AutomationTasksModal({
           `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`,
       )
       .join(' · ')
-  }, [formKind, formTime, formWeekdays, formIntervalMinutes, formDelayMinutes, formCronExpression])
+  }, [formPreset, formTime, formWeekdays, formDelayMinutes])
 
   const emptyTitle = useMemo(() => {
     if (statusFilter === 'inactive' && search.trim() === '') {
@@ -312,6 +336,7 @@ export function AutomationTasksModal({
       : (availableSessions[0]?.sessionId || '')
     setFormTargetSessionId(defaultSid)
     setFormKind('daily')
+    setFormPreset('daily')
     setFormTime('09:00')
     setFormTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai')
     setFormIntervalMinutes(60)
@@ -342,19 +367,27 @@ export function AutomationTasksModal({
 
     if (task.kind === 'daily') {
       setFormKind('daily')
+      setFormPreset('daily')
       setFormTime((task.time || '09:00').substring(0, 5))
     } else if (task.kind === 'every') {
+      const minutes = Math.round((task.everySeconds || 3600) / 60)
       setFormKind('every')
-      setFormIntervalMinutes(Math.round((task.everySeconds || 3600) / 60))
+      setFormPreset(minutes >= 60 ? 'hourly' : 'minutely')
+      setFormIntervalMinutes(minutes)
     } else if (task.kind === 'weekly') {
+      const days = task.weekdays && task.weekdays.length > 0 ? [...task.weekdays] : [1, 2, 3, 4, 5]
+      const workdays = days.length === 5 && days.every(day => day <= 5)
       setFormKind('weekly')
+      setFormPreset(workdays ? 'workdays' : 'weekly')
       setFormTime((task.time || '09:00').substring(0, 5))
-      setFormWeekdays(task.weekdays && task.weekdays.length > 0 ? [...task.weekdays] : [1, 2, 3, 4, 5])
+      setFormWeekdays(days)
     } else if (task.kind === 'cron') {
       setFormKind('cron')
-      setFormCronExpression(task.expression || '0 9 * * *')
+      setFormPreset('monthly')
+      setFormCronExpression(task.expression || '0 9 1 * *')
     } else {
       setFormKind('at')
+      setFormPreset('once')
       setFormDelayMinutes(30)
     }
     setFormMode('edit')
@@ -381,7 +414,7 @@ export function AutomationTasksModal({
       return
     }
 
-    if (formKind === 'daily' || formKind === 'weekly') {
+    if (formTriggerMode === 'scheduled' && ['daily', 'workdays', 'weekly', 'monthly'].includes(formPreset)) {
       if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(formTime.trim())) {
         Alert.alert(strings.automation.title, '请输入有效的 24 小时制时间（格式如 09:30）')
         return
@@ -410,18 +443,23 @@ export function AutomationTasksModal({
         }
         if (formTriggerMode === 'now') {
           req.after_seconds = 2
-        } else if (formKind === 'daily') {
+        } else if (formPreset === 'daily') {
           req.daily = { time: `${formTime.trim()}:00.000`, time_zone: tz }
-        } else if (formKind === 'every') {
-          req.every_seconds = Math.max(60, formIntervalMinutes * 60)
-        } else if (formKind === 'weekly') {
+        } else if (formPreset === 'workdays') {
+          req.weekly = { time: `${formTime.trim()}:00.000`, time_zone: tz, weekdays: [1, 2, 3, 4, 5] }
+        } else if (formPreset === 'weekly') {
           req.weekly = {
             time: `${formTime.trim()}:00.000`,
             time_zone: tz,
             weekdays: formWeekdays.length > 0 ? formWeekdays : [1, 2, 3, 4, 5],
           }
-        } else if (formKind === 'cron') {
-          req.cron = { expression: formCronExpression.trim(), time_zone: tz }
+        } else if (formPreset === 'monthly') {
+          const [monthHour, monthMinute] = formTime.split(':')
+          req.cron = { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz }
+        } else if (formPreset === 'hourly') {
+          req.every_seconds = 3600
+        } else if (formPreset === 'minutely') {
+          req.every_seconds = 60
         } else {
           req.after_seconds = Math.max(60, formDelayMinutes * 60)
         }
@@ -437,11 +475,11 @@ export function AutomationTasksModal({
       } else if (formMode === 'edit' && editSnapshot) {
         let change: ScheduleTimingChange | undefined
         if (timingDirty) {
-          if (formKind === 'daily') {
+          if (formPreset === 'daily') {
             change = { kind: 'daily', daily: { time: `${formTime.trim()}:00.000`, time_zone: tz } }
-          } else if (formKind === 'every') {
-            change = { kind: 'every', every_seconds: Math.max(60, formIntervalMinutes * 60) }
-          } else if (formKind === 'weekly') {
+          } else if (formPreset === 'workdays') {
+            change = { kind: 'weekly', weekly: { time: `${formTime.trim()}:00.000`, time_zone: tz, weekdays: [1, 2, 3, 4, 5] } }
+          } else if (formPreset === 'weekly') {
             change = {
               kind: 'weekly',
               weekly: {
@@ -450,8 +488,11 @@ export function AutomationTasksModal({
                 weekdays: formWeekdays.length > 0 ? formWeekdays : [1, 2, 3, 4, 5],
               },
             }
-          } else if (formKind === 'cron') {
-            change = { kind: 'cron', cron: { expression: formCronExpression.trim(), time_zone: tz } }
+          } else if (formPreset === 'monthly') {
+            const [monthHour, monthMinute] = formTime.split(':')
+            change = { kind: 'cron', cron: { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz } }
+          } else if (formPreset === 'hourly' || formPreset === 'minutely') {
+            change = { kind: 'every', every_seconds: formPreset === 'hourly' ? 3600 : 60 }
           } else {
             const targetInstant = new Date(Date.now() + formDelayMinutes * 60000).toISOString()
             change = { kind: 'at', at: targetInstant }
@@ -704,30 +745,36 @@ export function AutomationTasksModal({
                   <ChevronDown size={16} color={colors.subtle} />
                 </Pressable>
                 {expandedRow === 'model' && (
-                  <View style={styles.optionWrap}>
-                    {modelOptions.length === 0 ? (
-                      <Text style={styles.optionEmpty}>{strings.automation.modelUnavailable}</Text>
-                    ) : (
-                      modelOptions.map(model => {
-                        const active = currentModelLabel === model.name
-                        return (
-                          <Pressable
-                            key={model.id}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected: active }}
-                            onPress={() => {
-                              setFormModel(model.name)
-                              setExpandedRow(null)
-                            }}
-                            style={[styles.optionChip, active && styles.optionChipActive]}
-                          >
-                            <Text style={[styles.optionChipText, active && styles.optionChipTextActive]} numberOfLines={1}>
-                              {model.name}
-                            </Text>
-                          </Pressable>
-                        )
-                      })
-                    )}
+                  <View style={styles.dropdownCard}>
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                      {modelOptions.length === 0 ? (
+                        <Text style={styles.dropdownEmpty}>{strings.automation.modelUnavailable}</Text>
+                      ) : (
+                        modelOptions.map((model, index) => {
+                          const active = currentModelLabel === model.name
+                          return (
+                            <Pressable
+                              key={model.id}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: active }}
+                              onPress={() => {
+                                setFormModel(model.name)
+                                setExpandedRow(null)
+                              }}
+                              style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                            >
+                              <Text
+                                style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}
+                                numberOfLines={1}
+                              >
+                                {model.name}
+                              </Text>
+                              {active && <Check size={16} color={colors.primary} />}
+                            </Pressable>
+                          )
+                        })
+                      )}
+                    </ScrollView>
                   </View>
                 )}
               </View>
@@ -747,30 +794,36 @@ export function AutomationTasksModal({
                 </Pressable>
               </View>
               {expandedRow === 'project' && (
-                <View style={styles.optionWrap}>
-                  {workspaces.length === 0 ? (
-                    <Text style={styles.optionEmpty}>{strings.automation.projectUnavailable}</Text>
-                  ) : (
-                    workspaces.map(workspace => {
-                      const active = workspace.workspaceId === formWorkspaceId
-                      return (
-                        <Pressable
-                          key={workspace.workspaceId}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          onPress={() => {
-                            setFormWorkspaceId(workspace.workspaceId)
-                            setExpandedRow(null)
-                          }}
-                          style={[styles.optionChip, active && styles.optionChipActive]}
-                        >
-                          <Text style={[styles.optionChipText, active && styles.optionChipTextActive]} numberOfLines={1}>
-                            {workspace.title}
-                          </Text>
-                        </Pressable>
-                      )
-                    })
-                  )}
+                <View style={styles.dropdownCard}>
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                    {workspaces.length === 0 ? (
+                      <Text style={styles.dropdownEmpty}>{strings.automation.projectUnavailable}</Text>
+                    ) : (
+                      workspaces.map((workspace, index) => {
+                        const active = workspace.workspaceId === formWorkspaceId
+                        return (
+                          <Pressable
+                            key={workspace.workspaceId}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                            onPress={() => {
+                              setFormWorkspaceId(workspace.workspaceId)
+                              setExpandedRow(null)
+                            }}
+                            style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                          >
+                            <Text
+                              style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}
+                              numberOfLines={1}
+                            >
+                              {workspace.title}
+                            </Text>
+                            {active && <Check size={16} color={colors.primary} />}
+                          </Pressable>
+                        )
+                      })
+                    )}
+                  </ScrollView>
                 </View>
               )}
               <Text style={styles.formHint}>{strings.automation.projectHint}</Text>
@@ -789,30 +842,33 @@ export function AutomationTasksModal({
                   </View>
                 </Pressable>
                 {expandedRow === 'sendTo' && (
-                  <View style={styles.optionWrap}>
-                    {([
-                      { key: 'new', label: strings.automation.sendToNew },
-                      { key: 'current', label: strings.automation.sendToFixed },
-                      { key: 'existing', label: strings.automation.sendToExisting },
-                    ] as const).map(option => {
-                      const active = formTargetMode === option.key
-                      return (
-                        <Pressable
-                          key={option.key}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          onPress={() => {
-                            setFormTargetMode(option.key)
-                            setExpandedRow(option.key === 'existing' ? null : null)
-                          }}
-                          style={[styles.optionChip, active && styles.optionChipActive]}
-                        >
-                          <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      )
-                    })}
+                  <View style={styles.dropdownCard}>
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                      {([
+                        { key: 'new', label: strings.automation.sendToNew },
+                        { key: 'current', label: strings.automation.sendToFixed },
+                        { key: 'existing', label: strings.automation.sendToExisting },
+                      ] as const).map((option, index) => {
+                        const active = formTargetMode === option.key
+                        return (
+                          <Pressable
+                            key={option.key}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                            onPress={() => {
+                              setFormTargetMode(option.key)
+                              setExpandedRow(null)
+                            }}
+                            style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                          >
+                            <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>
+                              {option.label}
+                            </Text>
+                            {active && <Check size={16} color={colors.primary} />}
+                          </Pressable>
+                        )
+                      })}
+                    </ScrollView>
                   </View>
                 )}
                 {formTargetMode === 'existing' && (
@@ -878,113 +934,111 @@ export function AutomationTasksModal({
                       </View>
                     </Pressable>
                     {expandedRow === 'repeat' && (
-                      <View style={styles.optionWrap}>
-                        {([
-                          { key: 'daily', label: strings.automation.timingDaily },
-                          { key: 'every', label: strings.automation.timingEvery },
-                          { key: 'weekly', label: strings.automation.timingWeekly },
-                          { key: 'at', label: strings.automation.timingOnce },
-                        ] as const).map(option => {
-                          const active = formKind === option.key
-                          return (
-                            <Pressable
-                              key={option.key}
-                              accessibilityRole="button"
-                              accessibilityState={{ selected: active }}
-                              onPress={() => {
-                                setTimingDirty(true)
-                                setFormKind(option.key)
-                                setExpandedRow(null)
-                              }}
-                              style={[styles.optionChip, active && styles.optionChipActive]}
-                            >
-                              <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                                {option.label}
-                              </Text>
-                            </Pressable>
-                          )
-                        })}
+                      <View style={styles.dropdownCard}>
+                        <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                          {([
+                            { key: 'daily', label: strings.automation.presetDaily },
+                            { key: 'workdays', label: strings.automation.presetWorkdays },
+                            { key: 'weekly', label: strings.automation.presetWeekly },
+                            { key: 'monthly', label: strings.automation.presetMonthly },
+                            { key: 'hourly', label: strings.automation.presetHourly },
+                            { key: 'minutely', label: strings.automation.presetMinutely },
+                            { key: 'once', label: strings.automation.presetOnce },
+                          ] as const).map((option, index) => {
+                            const active = formPreset === option.key
+                            return (
+                              <Pressable
+                                key={option.key}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => {
+                                  setTimingDirty(true)
+                                  setFormPreset(option.key)
+                                  setFormKind(presetToKind(option.key))
+                                  setExpandedRow(null)
+                                }}
+                                style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                              >
+                                <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>
+                                  {option.label}
+                                </Text>
+                                {active && <Check size={16} color={colors.primary} />}
+                              </Pressable>
+                            )
+                          })}
+                        </ScrollView>
                       </View>
                     )}
 
                     <View style={styles.cardDivider} />
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => toggleRow('time')}
-                      style={styles.paramRow}
-                    >
-                      <Text style={styles.rowLabel}>
-                        {formKind === 'every' ? strings.automation.formInterval : strings.automation.formTime}
-                      </Text>
-                      <Text style={styles.rowValue}>
-                        {formKind === 'every'
-                          ? `${formIntervalMinutes} ${strings.automation.minuteUnit}`
-                          : formKind === 'at'
-                            ? `+${formDelayMinutes} ${strings.automation.minuteUnit}`
-                            : formTime}
-                      </Text>
-                    </Pressable>
-                    {expandedRow === 'time' && (
-                      <View style={styles.optionWrap}>
-                        {formKind === 'daily' &&
-                          ['08:00', '09:00', '12:00', '18:00'].map(value => {
-                            const active = formTime === value
-                            return (
-                              <Pressable
-                                key={value}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: active }}
-                                onPress={() => {
-                                  setTimingDirty(true)
-                                  setFormTime(value)
-                                }}
-                                style={[styles.optionChip, active && styles.optionChipActive]}
-                              >
-                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{value}</Text>
-                              </Pressable>
-                            )
-                          })}
-                        {formKind === 'every' &&
-                          [15, 30, 60, 120, 240, 1440].map(value => {
-                            const active = formIntervalMinutes === value
-                            return (
-                              <Pressable
-                                key={value}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: active }}
-                                onPress={() => {
-                                  setTimingDirty(true)
-                                  setFormIntervalMinutes(value)
-                                }}
-                                style={[styles.optionChip, active && styles.optionChipActive]}
-                              >
-                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                                  {value >= 60 ? `${value / 60} ${strings.automation.hourUnit}` : `${value} ${strings.automation.minuteUnit}`}
-                                </Text>
-                              </Pressable>
-                            )
-                          })}
-                        {formKind === 'at' &&
-                          [15, 30, 60, 120].map(value => {
-                            const active = formDelayMinutes === value
-                            return (
-                              <Pressable
-                                key={value}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: active }}
-                                onPress={() => {
-                                  setTimingDirty(true)
-                                  setFormDelayMinutes(value)
-                                }}
-                                style={[styles.optionChip, active && styles.optionChipActive]}
-                              >
-                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                                  +{value >= 60 ? `${value / 60} ${strings.automation.hourUnit}` : `${value} ${strings.automation.minuteUnit}`}
-                                </Text>
-                              </Pressable>
-                            )
-                          })}
-                      </View>
+                    {effectiveKind !== 'every' && (
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => toggleRow('time')}
+                          style={styles.paramRow}
+                        >
+                          <Text style={styles.rowLabel}>
+                            {effectiveKind === 'at' ? strings.automation.timingOnce : strings.automation.formTime}
+                          </Text>
+                          <Text style={styles.rowValue}>
+                            {effectiveKind === 'at'
+                              ? `+${formDelayMinutes} ${strings.automation.minuteUnit}`
+                              : formTime}
+                          </Text>
+                        </Pressable>
+                        {expandedRow === 'time' && (
+                          <View style={styles.dropdownCard}>
+                            <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                              {effectiveKind === 'at'
+                                ? [15, 30, 60, 120].map((value, index) => {
+                                    const active = formDelayMinutes === value
+                                    return (
+                                      <Pressable
+                                        key={value}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: active }}
+                                        onPress={() => {
+                                          setTimingDirty(true)
+                                          setFormDelayMinutes(value)
+                                          setExpandedRow(null)
+                                        }}
+                                        style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                                      >
+                                        <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>
+                                          {value >= 60
+                                            ? `${value / 60} ${strings.automation.hourUnit}`
+                                            : `${value} ${strings.automation.minuteUnit}`}
+                                        </Text>
+                                        {active && <Check size={16} color={colors.primary} />}
+                                      </Pressable>
+                                    )
+                                  })
+                                : ['08:00', '09:00', '12:00', '18:00'].map((value, index) => {
+                                    const active = formTime === value
+                                    return (
+                                      <Pressable
+                                        key={value}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: active }}
+                                        onPress={() => {
+                                          setTimingDirty(true)
+                                          setFormTime(value)
+                                          setExpandedRow(null)
+                                        }}
+                                        style={[styles.dropdownItem, index > 0 && styles.dropdownItemDivider]}
+                                      >
+                                        <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>
+                                          {value}
+                                        </Text>
+                                        {active && <Check size={16} color={colors.primary} />}
+                                      </Pressable>
+                                    )
+                                  })}
+                            </ScrollView>
+                          </View>
+                        )}
+                      </>
                     )}
                     {formKind === 'weekly' && (
                       <>
@@ -2064,6 +2118,45 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
       gap: spacing.xs,
       marginTop: spacing.xs,
+    },
+    dropdownCard: {
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.sm,
+      borderRadius: radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      backgroundColor: colors.card,
+      overflow: 'hidden',
+    },
+    dropdownScroll: {
+      maxHeight: 220,
+    },
+    dropdownItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+    },
+    dropdownItemDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
+    dropdownItemText: {
+      fontSize: 14,
+      color: colors.ink,
+      flex: 1,
+    },
+    dropdownItemTextActive: {
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    dropdownEmpty: {
+      fontSize: 13,
+      color: colors.muted,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
     },
     formFooter: {
       flexDirection: 'row',
