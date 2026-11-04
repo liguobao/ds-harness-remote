@@ -48,6 +48,19 @@
 配合顶边折光高光条和列表底部 148vp 留白。**只在平背景上目视过（登录页临时挂载），
 真机聊天页（消息在玻璃后面滚过）还没验**——手机回来第一件事看这个。
 
+## 语音输入（2026-11-04 加，`dd92d78`）
+
+链路：麦克风 → `VoiceInput.ets`（AudioCapturer 16k/单声道/16bit，自己拼 44 字节 WAV 头）
+→ base64 → 主机 `speech/transcribe` → 文本续写进输入框。
+
+**客户端已整条验过**（QXS-W10 上临时挂到登录页）：权限弹窗文案正确、录音 12.4s / 399KB
+PCM、停止后走转写、错误有中文提示（那台没连主机，所以停在「尚未连接主机」）。
+
+**但主机侧还缺插件**：`speech/transcribe` 由 `@deepseek-ai/dsh-experimental-api-speech-to-text`
+提供，识别器另有 `@deepseek-ai/dsh-experimental-speech-to-text-sensevoice`（要下 SenseVoice ONNX 模型）。
+当前 web profile 的 bundles 里两个都没有，所以即使插件放行了端点，主机也会回「不认识 method」。
+要真正能用，得在 profile 里装上这两个包并重启 dsh。
+
 ## 验证手段（2026-11-04 补）
 
 - 手机（PLU-AL10）掉线时，可用 `127.0.0.1:40601`（QXS-W10，HarmonyOS PC）装同一份 hap：
