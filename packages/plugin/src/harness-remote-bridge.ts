@@ -608,14 +608,15 @@ export class HarnessRemoteBridge {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
     }
     const path = typeof args.path === 'string' ? args.path : '.'
-    if (path.split(/[/\\]/).some(segment => segment === '..')) {
+    const pathSegments = process.platform === 'win32' ? path.split(/[/\\]/) : path.split('/')
+    if (pathSegments.some(segment => segment === '..')) {
       throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
     }
-    const root = await this.resolveWorkspaceRootForSession(sessionId, signal)
-    if (!root) {
+    const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal)
+    if (!sessionWorkspace) {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
     }
-    const safeRel = await this.verifyWorkspacePathContainment(root, path, endpoint)
+    const safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint)
     let finalArgs: Record<string, unknown> = isRecord(rootPayload.args)
       ? { ...rootPayload.args, path: safeRel }
       : { ...rootPayload, path: safeRel }
@@ -642,7 +643,10 @@ export class HarnessRemoteBridge {
     return isRecord(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs
   }
 
-  private async resolveWorkspaceRootForSession(sessionId: string, signal: AbortSignal): Promise<string | undefined> {
+  private async resolveWorkspaceRootForSession(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<{ root: string; cwd: string } | undefined> {
     signal.throwIfAborted()
     if (this.resolveWorkspaceRoot === undefined) {
       return undefined
@@ -655,7 +659,7 @@ export class HarnessRemoteBridge {
       const root = await realpath(cwd)
       const info = await stat(root)
       if (!info.isDirectory()) throw new Error()
-      return root
+      return { root, cwd }
     } catch {
       throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
     }
@@ -663,10 +667,11 @@ export class HarnessRemoteBridge {
 
   private async verifyWorkspacePathContainment(
     root: string,
+    cwd: string,
     path: string,
     endpoint: string,
   ): Promise<string> {
-    const candidate = isAbsolute(path) ? resolve(path) : resolve(root, path)
+    const candidate = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
     if (process.platform === 'win32') {
       const rootDrive = parse(root).root.toLowerCase()
       const candDrive = parse(candidate).root.toLowerCase()
@@ -674,8 +679,9 @@ export class HarnessRemoteBridge {
         throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
       }
     }
-    const rel = relative(root, candidate)
-    if (isPathOutside(rel)) {
+    const relCwd = relative(cwd, candidate)
+    const relRoot = relative(root, candidate)
+    if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
       throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
     }
 
@@ -685,11 +691,13 @@ export class HarnessRemoteBridge {
         throw new RpcError('WORKSPACE_PATH_DENIED', 'The workspace root is invalid or a symlink.')
       }
 
+      const base = !isPathOutside(relCwd) ? cwd : root
+      const rel = relative(base, candidate)
       const parts = rel.split(sep).filter(p => p.length > 0 && p !== '.')
-      let currentPath = root
+      let currentPath = base
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join(currentPath, parts[i])
-        const dirRel = relative(root, currentPath)
+        currentPath = join(currentPath, parts[i]!)
+        const dirRel = relative(base, currentPath)
         if (isPathOutside(dirRel)) {
           throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
         }
@@ -726,7 +734,18 @@ export class HarnessRemoteBridge {
         throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
       }
 
-      return (canonicalRel === '' ? '.' : canonicalRel).replaceAll('\\', '/')
+      // On Windows normalize backslashes to slashes; on POSIX backslashes are valid filename characters and must not be mangled
+      const safeRel = canonicalRel === '' ? '.' : (process.platform === 'win32' ? canonicalRel.replaceAll('\\', '/') : canonicalRel)
+
+      // Validate the exact path passed to the gateway resolves within workspace
+      const dispatchedCandidate = resolve(root, safeRel)
+      const dispatchedCanonical = await realpath(dispatchedCandidate)
+      const dispatchedRel = relative(root, dispatchedCanonical)
+      if (isPathOutside(dispatchedRel)) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+
+      return safeRel
     } catch (error) {
       if (error instanceof RpcError) throw error
       throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.')

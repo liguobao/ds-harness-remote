@@ -88224,14 +88224,15 @@ var HarnessRemoteBridge = class {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace identifier is missing.");
     }
     const path = typeof args.path === "string" ? args.path : ".";
-    if (path.split(/[/\\]/).some((segment) => segment === "..")) {
+    const pathSegments = process.platform === "win32" ? path.split(/[/\\]/) : path.split("/");
+    if (pathSegments.some((segment) => segment === "..")) {
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
     }
-    const root = await this.resolveWorkspaceRootForSession(sessionId, signal);
-    if (!root) {
+    const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal);
+    if (!sessionWorkspace) {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
-    const safeRel = await this.verifyWorkspacePathContainment(root, path, endpoint);
+    const safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint);
     let finalArgs = isRecord21(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
     if (endpoint === "workspaceFiles/readBytes") {
       const range = byteOrLineRange2(finalArgs);
@@ -88268,13 +88269,13 @@ var HarnessRemoteBridge = class {
       const root = await realpath7(cwd2);
       const info = await stat8(root);
       if (!info.isDirectory()) throw new Error();
-      return root;
+      return { root, cwd: cwd2 };
     } catch {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
   }
-  async verifyWorkspacePathContainment(root, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve6(path) : resolve6(root, path);
+  async verifyWorkspacePathContainment(root, cwd2, path, endpoint) {
+    const candidate = isAbsolute10(path) ? resolve6(path) : resolve6(cwd2, path);
     if (process.platform === "win32") {
       const rootDrive = parse4(root).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
@@ -88282,8 +88283,9 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
     }
-    const rel = relative5(root, candidate);
-    if (isPathOutside(rel)) {
+    const relCwd = relative5(cwd2, candidate);
+    const relRoot = relative5(root, candidate);
+    if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
     }
     try {
@@ -88291,11 +88293,13 @@ var HarnessRemoteBridge = class {
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
       }
+      const base = !isPathOutside(relCwd) ? cwd2 : root;
+      const rel = relative5(base, candidate);
       const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
-      let currentPath = root;
+      let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
         currentPath = join14(currentPath, parts[i]);
-        const dirRel = relative5(root, currentPath);
+        const dirRel = relative5(base, currentPath);
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
         }
@@ -88327,7 +88331,14 @@ var HarnessRemoteBridge = class {
       if ((endpoint === "workspaceFiles/read" || endpoint === "workspaceFiles/readAll") && Number(info.size) > MAX_READ_BYTES2) {
         throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       }
-      return (canonicalRel === "" ? "." : canonicalRel).replaceAll("\\", "/");
+      const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
+      const dispatchedCandidate = resolve6(root, safeRel);
+      const dispatchedCanonical = await realpath7(dispatchedCandidate);
+      const dispatchedRel = relative5(root, dispatchedCanonical);
+      if (isPathOutside(dispatchedRel)) {
+        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+      }
+      return safeRel;
     } catch (error62) {
       if (error62 instanceof RpcError) throw error62;
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");

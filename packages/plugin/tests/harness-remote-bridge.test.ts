@@ -663,6 +663,9 @@ describe('HarnessRemoteBridge', () => {
       const outsideFile = join(outside, 'secret.txt')
       const symlinkOutside = join(root, 'symlink-outside.txt')
       const symlinkDirOutside = join(root, 'symlink-dir')
+      const bigFile = join(root, 'big.bin')
+      const growFile = join(root, 'grow.txt')
+
       await writeFile(insideFile, 'inside content')
       await writeFile(doubleDotFile, 'double dot content')
       await writeFile(doubleDotOtherFile, 'nested content')
@@ -671,6 +674,20 @@ describe('HarnessRemoteBridge', () => {
       await writeFile(outsideFile, 'secret outside')
       await symlink(outsideFile, symlinkOutside, 'file')
       await symlink(outside, symlinkDirOutside, process.platform === 'win32' ? 'junction' : 'dir')
+
+      const bigHandle = await open(bigFile, 'w')
+      await bigHandle.write(Buffer.from('bigfile-header'), 0, 14, 0)
+      await bigHandle.truncate(5 * 1024 * 1024)
+      await bigHandle.close()
+
+      await writeFile(growFile, '1234')
+
+      if (process.platform !== 'win32') {
+        const posixEscapeFile = join(root, 'escape\\secret.txt')
+        await writeFile(posixEscapeFile, 'posix backslash content')
+        const escapeDirSymlink = join(root, 'escape')
+        await symlink(outside, escapeDirSymlink, 'dir')
+      }
 
       const endpoints = ['workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll'] as const
 
@@ -704,6 +721,7 @@ describe('HarnessRemoteBridge', () => {
         const text = await readFile(full, 'utf8').catch(() => 'inside content')
         return { ok: true as const, value: { text, absolutePath: full } }
       })
+
       const bridge = new HarnessRemoteBridge(
         gateway({ dispatch }),
         vi.fn(async () => undefined),
@@ -714,402 +732,480 @@ describe('HarnessRemoteBridge', () => {
         async (sessionId) => (sessionId === 'missing-session' ? undefined : root),
       )
 
-      // 1. 正常读取工作区内文件（相对路径、绝对路径、嵌套目录路径、合法的双点前缀文件名）
-      // 验证跨平台（Linux、macOS、Windows）均正常放行并执行断言
-      for (const endpoint of endpoints) {
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
+      const scenarios = [
+        ...endpoints.flatMap(endpoint => [
+          {
+            name: `${endpoint}: reads regular workspace file via relative path`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
+                }),
+              ).resolves.toMatchObject({ ok: true })
+            },
+          },
+          {
+            name: `${endpoint}: reads regular workspace file via absolute path`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: insideFile } },
+                }),
+              ).resolves.toMatchObject({ ok: true })
+            },
+          },
+          {
+            name: `${endpoint}: reads nested workspace file via relative path`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: 'sub/nested.txt' } },
+                }),
+              ).resolves.toMatchObject({ ok: true })
+              if (endpoint === 'workspaceFiles/readBytes') {
+                expect(dispatch).toHaveBeenLastCalledWith(
+                  endpoint,
+                  expect.objectContaining({ args: expect.objectContaining({ path: 'sub/nested.txt' }) }),
+                  expect.any(AbortSignal),
+                )
+              }
+            },
+          },
+          {
+            name: `${endpoint}: reads nested workspace file via absolute path`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: nestedFile } },
+                }),
+              ).resolves.toMatchObject({ ok: true })
+            },
+          },
+          {
+            name: `${endpoint}: reads file with double dots in filename (..notes.txt)`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: '..notes.txt' } },
+                }),
+              ).resolves.toMatchObject({ ok: true })
+            },
+          },
+          {
+            name: `${endpoint}: rejects absolute path outside workspace`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: outsideFile } },
+                }),
+              ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+              expect(dispatch).not.toHaveBeenCalled()
+            },
+          },
+          {
+            name: `${endpoint}: rejects parent traversal (../secret.txt)`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: '../secret.txt' } },
+                }),
+              ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+              expect(dispatch).not.toHaveBeenCalled()
+            },
+          },
+          {
+            name: `${endpoint}: rejects nested parent traversal (sub/../../secret.txt)`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: 'sub/../../secret.txt' } },
+                }),
+              ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+              expect(dispatch).not.toHaveBeenCalled()
+            },
+          },
+          {
+            name: `${endpoint}: rejects file symlink pointing outside workspace`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: 'symlink-outside.txt' } },
+                }),
+              ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+              expect(dispatch).not.toHaveBeenCalled()
+            },
+          },
+          {
+            name: `${endpoint}: rejects directory symlink pointing outside workspace`,
+            run: async () => {
+              await expect(
+                bridge.call({
+                  endpoint,
+                  payload: { args: { workspaceFileScopeId: 'session-1', path: 'symlink-dir/secret.txt' } },
+                }),
+              ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+              expect(dispatch).not.toHaveBeenCalled()
+            },
+          },
+        ]),
+        ...(process.platform !== 'win32'
+          ? [
+              {
+                name: 'preserves POSIX backslashes in filename without path traversal',
+                run: async () => {
+                  await expect(
+                    bridge.call({
+                      endpoint: 'workspaceFiles/read',
+                      payload: { args: { workspaceFileScopeId: 'session-1', path: 'escape\\secret.txt' } },
+                    }),
+                  ).resolves.toMatchObject({ ok: true })
+                  expect(dispatch).toHaveBeenLastCalledWith(
+                    'workspaceFiles/read',
+                    expect.objectContaining({ args: expect.objectContaining({ path: 'escape\\secret.txt' }) }),
+                    expect.any(AbortSignal),
+                  )
+                },
+              },
+            ]
+          : []),
+        ...(process.platform === 'win32'
+          ? [
+              {
+                name: 'rejects Windows cross-drive access and accepts case-insensitive drive letter',
+                run: async () => {
+                  const rootParsed = parse(root)
+                  const currentDrive = rootParsed.root.slice(0, 2)
+                  const otherDrive = currentDrive.toUpperCase() === 'C:' ? 'D:' : 'C:'
+                  const otherDrivePath = join(otherDrive + '\\', 'secret.txt')
+                  await expect(
+                    bridge.call({
+                      endpoint: 'workspaceFiles/read',
+                      payload: { args: { workspaceFileScopeId: 'session-1', path: otherDrivePath } },
+                    }),
+                  ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+                  expect(dispatch).not.toHaveBeenCalled()
 
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: insideFile } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-
-        // 验证嵌套目录内文件在各平台均正常读取（覆盖 macOS/Windows 嵌套路径）
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: 'sub/nested.txt' } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: nestedFile } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-
-        // 验证传给底层网关的 path 被重写为安全的规范化工作区相对路径
-        if (endpoint === 'workspaceFiles/readBytes') {
-          expect(dispatch).toHaveBeenLastCalledWith(
-            endpoint,
-            expect.objectContaining({ args: expect.objectContaining({ path: 'sub/nested.txt' }) }),
-            expect.any(AbortSignal),
-          )
-        }
-
-        // 合法以两个点开头的文件名不被误伤
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: '..notes.txt' } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: '..data.txt' } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-      }
-
-      // 2. 绝对路径读取工作区外文件
-      for (const endpoint of endpoints) {
-        dispatch.mockClear()
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: outsideFile } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-      }
-
-      // 3. ../ 越界
-      for (const endpoint of endpoints) {
-        dispatch.mockClear()
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: '../secret.txt' } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: 'sub/../../secret.txt' } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-      }
-
-      // 4. 符号链接跳出工作区（单个文件软链接 & 祖先目录软链接）
-      for (const endpoint of endpoints) {
-        dispatch.mockClear()
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: 'symlink-outside.txt' } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-
-        await expect(
-          bridge.call({
-            endpoint,
-            payload: { args: { workspaceFileScopeId: 'session-1', path: 'symlink-dir/secret.txt' } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-      }
-
-      // 5. Windows 盘符与大小写边界测试
-      if (process.platform === 'win32') {
-        const rootParsed = parse(root)
-        const currentDrive = rootParsed.root.slice(0, 2)
-        const otherDrive = currentDrive.toUpperCase() === 'C:' ? 'D:' : 'C:'
-        const otherDrivePath = join(otherDrive + '\\', 'secret.txt')
-        dispatch.mockClear()
-        await expect(
-          bridge.call({
-            endpoint: 'workspaceFiles/read',
-            payload: { args: { workspaceFileScopeId: 'session-1', path: otherDrivePath } },
-          }),
-        ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        expect(dispatch).not.toHaveBeenCalled()
-
-        // 盘符小写/大写不影响工作区内文件正常读取
-        const swappedDriveInside = (insideFile.startsWith(currentDrive.toLowerCase())
-          ? currentDrive.toUpperCase() + insideFile.slice(2)
-          : currentDrive.toLowerCase() + insideFile.slice(2))
-        await expect(
-          bridge.call({
-            endpoint: 'workspaceFiles/read',
-            payload: { args: { workspaceFileScopeId: 'session-1', path: swappedDriveInside } },
-          }),
-        ).resolves.toMatchObject({ ok: true })
-      }
-
-      // 6. 缺少或无效会话作用域
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/read',
-          payload: { args: { path: 'inside.txt' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
-
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/read',
-          payload: { args: { workspaceFileScopeId: 'missing-session', path: 'inside.txt' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
-
-      // 7. 保持官方网关的文件系统与响应语义（防范一致性倒退，遵循 AGENTS.md）
-      // 当文件在原生 dispatch 期间由 4 字节原地被追加写入到 24 字节时，返回官方网关包含全部 24 字节的权威响应
-      const growFile = join(root, 'grow.txt')
-      await writeFile(growFile, '1234')
-      const growDispatch = vi.fn(async () => {
-        await writeFile(growFile, '123456789012345678901234')
-        return {
-          ok: true as const,
-          value: { text: '123456789012345678901234', bytes: 24, absolutePath: growFile, eof: true },
-        }
-      })
-      const growBridge = new HarnessRemoteBridge(
-        gateway({ dispatch: growDispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        async () => root,
-      )
-      const growResult = await growBridge.call({
-        endpoint: 'workspaceFiles/read',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'grow.txt' } },
-      })
-      expect(growResult).toMatchObject({
-        ok: true,
-        value: {
-          text: '123456789012345678901234',
-          bytes: 24,
+                  const swappedDriveInside = (insideFile.startsWith(currentDrive.toLowerCase())
+                    ? currentDrive.toUpperCase() + insideFile.slice(2)
+                    : currentDrive.toLowerCase() + insideFile.slice(2))
+                  await expect(
+                    bridge.call({
+                      endpoint: 'workspaceFiles/read',
+                      payload: { args: { workspaceFileScopeId: 'session-1', path: swappedDriveInside } },
+                    }),
+                  ).resolves.toMatchObject({ ok: true })
+                },
+              },
+            ]
+          : []),
+        {
+          name: 'rejects missing workspace session identifier',
+          run: async () => {
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { path: 'inside.txt' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+          },
         },
-      })
-      expect(growDispatch).toHaveBeenCalled()
-
-      // 8. 网关失败传递测试
-      const failingDispatch = vi.fn(async () => ({
-        ok: false as const,
-        error: { code: 'GATEWAY_ERROR', message: 'backend failed', details: {} },
-      }))
-      const failingBridge = new HarnessRemoteBridge(
-        gateway({ dispatch: failingDispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        async () => root,
-      )
-      await expect(
-        failingBridge.call({
-          endpoint: 'workspaceFiles/readBytes',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
-        }),
-      ).resolves.toMatchObject({ ok: false, error: { code: 'GATEWAY_ERROR' } })
-
-      // 9. workspaceFiles/readAll 返回官方网关分发结果
-      const readAllDispatch = vi.fn(async () => ({
-        ok: true as const,
-        value: { text: 'official text', absolutePath: insideFile },
-      }))
-      const readAllBridge = new HarnessRemoteBridge(
-        gateway({ dispatch: readAllDispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        async () => root,
-      )
-      const readAllResult = await readAllBridge.call({
-        endpoint: 'workspaceFiles/readAll',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
-      })
-      expect(readAllResult).toMatchObject({
-        ok: true,
-        value: {
-          absolutePath: insideFile,
-          text: 'official text',
+        {
+          name: 'rejects unresolvable workspace session scope',
+          run: async () => {
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'missing-session', path: 'inside.txt' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+          },
         },
-      })
-
-      // 10. workspaceFiles/readBytes 载荷携带 attachments 时规范化为 base64 并剥离 attachments
-      const badAttachmentDispatch = vi.fn(async () => ({
-        ok: true as const,
-        value: { absolutePath: insideFile, data: null },
-        attachments: [{ path: ['data'], bytes: Buffer.from('inside') }],
-      }))
-      const attachmentBridge = new HarnessRemoteBridge(
-        gateway({ dispatch: badAttachmentDispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        async () => root,
-      )
-      const attachmentResult = await attachmentBridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt', range: { offset: 0, length: 6 } } },
-      })
-      expect(attachmentResult).toMatchObject({
-        ok: true,
-        value: {
-          absolutePath: insideFile,
-          data: Buffer.from('inside').toString('base64'),
+        {
+          name: 'preserves official gateway dispatch semantics when file changes concurrently',
+          run: async () => {
+            const growDispatch = vi.fn(async () => {
+              await writeFile(growFile, '123456789012345678901234')
+              return {
+                ok: true as const,
+                value: { text: '123456789012345678901234', bytes: 24, absolutePath: growFile, eof: true },
+              }
+            })
+            const growBridge = new HarnessRemoteBridge(
+              gateway({ dispatch: growDispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              async () => root,
+            )
+            const growResult = await growBridge.call({
+              endpoint: 'workspaceFiles/read',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'grow.txt' } },
+            })
+            expect(growResult).toMatchObject({
+              ok: true,
+              value: {
+                text: '123456789012345678901234',
+                bytes: 24,
+              },
+            })
+            expect(growDispatch).toHaveBeenCalled()
+          },
         },
-      })
-      expect(attachmentResult).not.toHaveProperty('attachments')
-
-      // 11. 大文件（> 4MB）有界分片读取测试：readBytes 支持读取小切片，而 readAll 拒绝 WORKSPACE_TOO_LARGE
-      const bigFile = join(root, 'big.bin')
-      const bigHandle = await open(bigFile, 'w')
-      await bigHandle.write(Buffer.from('bigfile-header'), 0, 14, 0)
-      await bigHandle.truncate(5 * 1024 * 1024)
-      await bigHandle.close()
-
-      const bigFileResult = await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0, length: 7 } } },
-      })
-      expect(bigFileResult).toMatchObject({
-        ok: true,
-        value: {
-          absolutePath: bigFile,
-          bytes: 5 * 1024 * 1024,
-          data: Buffer.from('bigfile').toString('base64'),
+        {
+          name: 'forwards official gateway errors without modification',
+          run: async () => {
+            const failingDispatch = vi.fn(async () => ({
+              ok: false as const,
+              error: { code: 'GATEWAY_ERROR', message: 'backend failed', details: {} },
+            }))
+            const failingBridge = new HarnessRemoteBridge(
+              gateway({ dispatch: failingDispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              async () => root,
+            )
+            await expect(
+              failingBridge.call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
+              }),
+            ).resolves.toMatchObject({ ok: false, error: { code: 'GATEWAY_ERROR' } })
+          },
         },
+        {
+          name: 'returns official gateway dispatch result for workspaceFiles/readAll',
+          run: async () => {
+            const readAllDispatch = vi.fn(async () => ({
+              ok: true as const,
+              value: { text: 'official text', absolutePath: insideFile },
+            }))
+            const readAllBridge = new HarnessRemoteBridge(
+              gateway({ dispatch: readAllDispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              async () => root,
+            )
+            const readAllResult = await readAllBridge.call({
+              endpoint: 'workspaceFiles/readAll',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
+            })
+            expect(readAllResult).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: insideFile,
+                text: 'official text',
+              },
+            })
+          },
+        },
+        {
+          name: 'materializes binary attachments and strips attachment wrapper for readBytes',
+          run: async () => {
+            const attachmentDispatch = vi.fn(async () => ({
+              ok: true as const,
+              value: { absolutePath: insideFile, data: null },
+              attachments: [{ path: ['data'], bytes: Buffer.from('inside') }],
+            }))
+            const attachmentBridge = new HarnessRemoteBridge(
+              gateway({ dispatch: attachmentDispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              async () => root,
+            )
+            const attachmentResult = await attachmentBridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt', range: { offset: 0, length: 6 } } },
+            })
+            expect(attachmentResult).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: insideFile,
+                data: Buffer.from('inside').toString('base64'),
+              },
+            })
+            expect(attachmentResult).not.toHaveProperty('attachments')
+          },
+        },
+        {
+          name: 'rejects files exceeding MAX_READ_BYTES on read and readAll',
+          run: async () => {
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
+
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/readAll',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
+          },
+        },
+        {
+          name: 'supports bounded slice reading on large files (> 4MB) via readBytes',
+          run: async () => {
+            const bigFileResult = await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0, length: 7 } } },
+            })
+            expect(bigFileResult).toMatchObject({
+              ok: true,
+              value: {
+                absolutePath: bigFile,
+                bytes: 5 * 1024 * 1024,
+                data: Buffer.from('bigfile').toString('base64'),
+              },
+            })
+          },
+        },
+        {
+          name: 'bounds oversized readBytes range.length to MAX_READ_BYTES',
+          run: async () => {
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0, length: 10 * 1024 * 1024 } } },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({
+                  range: expect.objectContaining({ length: 4 * 1024 * 1024 }),
+                }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'bounds top-level length to MAX_READ_BYTES',
+          run: async () => {
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', offset: 0, length: 10 * 1024 * 1024 } },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({
+                  length: 4 * 1024 * 1024,
+                }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'normalizes conflicting options.range and top-level length',
+          run: async () => {
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', options: { range: { offset: 0, length: 1 } }, length: 10 * 1024 * 1024 } },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({
+                  length: 1,
+                  options: expect.objectContaining({ range: expect.objectContaining({ length: 1 }) }),
+                }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'defaults omitted length to MAX_READ_BYTES',
+          run: async () => {
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0 } } },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({
+                  range: expect.objectContaining({ length: 4 * 1024 * 1024 }),
+                }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'replaces string length with bounded numeric length',
+          run: async () => {
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', length: '99999999' } },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({
+                args: expect.objectContaining({
+                  length: 4 * 1024 * 1024,
+                }),
+              }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'rejects ancestor directory replaced with external symlink',
+          run: async () => {
+            const fakeAncestorDir = join(root, 'ancestor-link')
+            await symlink(outside, fakeAncestorDir, process.platform === 'win32' ? 'junction' : 'dir')
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'ancestor-link/secret.txt' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+          },
+        },
+        {
+          name: 'rejects internal ancestor directory symlinks',
+          run: async () => {
+            const actualSubDir = join(root, 'actual-sub')
+            await mkdir(actualSubDir)
+            await writeFile(join(actualSubDir, 'sub.txt'), 'sub content')
+            const internalSymlinkDir = join(root, 'internal-symlink-dir')
+            await symlink(actualSubDir, internalSymlinkDir, process.platform === 'win32' ? 'junction' : 'dir')
+            await expect(
+              bridge.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'internal-symlink-dir/sub.txt' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+          },
+        },
+      ]
+
+      await runScenarios(scenarios, async () => {
+        dispatch.mockClear()
       })
-
-      // 验证超长请求在进入网关前被严格封顶为 MAX_READ_BYTES
-      dispatch.mockClear()
-      await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0, length: 10 * 1024 * 1024 } } },
-      })
-      expect(dispatch).toHaveBeenCalledWith(
-        'workspaceFiles/readBytes',
-        expect.objectContaining({
-          args: expect.objectContaining({
-            range: expect.objectContaining({ length: 4 * 1024 * 1024 }),
-          }),
-        }),
-        expect.any(AbortSignal),
-      )
-
-      // 验证顶层 offset/length 形状在进入网关前同样被严格封顶为 MAX_READ_BYTES
-      dispatch.mockClear()
-      await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', offset: 0, length: 10 * 1024 * 1024 } },
-      })
-      expect(dispatch).toHaveBeenCalledWith(
-        'workspaceFiles/readBytes',
-        expect.objectContaining({
-          args: expect.objectContaining({
-            length: 4 * 1024 * 1024,
-          }),
-        }),
-        expect.any(AbortSignal),
-      )
-
-      // 验证冲突 options.range 与顶层 length 被统一规范化
-      dispatch.mockClear()
-      await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', options: { range: { offset: 0, length: 1 } }, length: 10 * 1024 * 1024 } },
-      })
-      expect(dispatch).toHaveBeenCalledWith(
-        'workspaceFiles/readBytes',
-        expect.objectContaining({
-          args: expect.objectContaining({
-            length: 1,
-            options: expect.objectContaining({ range: expect.objectContaining({ length: 1 }) }),
-          }),
-        }),
-        expect.any(AbortSignal),
-      )
-
-      // 验证未传 length 时默认赋予 MAX_READ_BYTES
-      dispatch.mockClear()
-      await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', range: { offset: 0 } } },
-      })
-      expect(dispatch).toHaveBeenCalledWith(
-        'workspaceFiles/readBytes',
-        expect.objectContaining({
-          args: expect.objectContaining({
-            range: expect.objectContaining({ length: 4 * 1024 * 1024 }),
-          }),
-        }),
-        expect.any(AbortSignal),
-      )
-
-      // 验证畸形字符串 length（例如 "99999999"）被覆盖为有界数字
-      dispatch.mockClear()
-      await bridge.call({
-        endpoint: 'workspaceFiles/readBytes',
-        payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin', length: '99999999' } },
-      })
-      expect(dispatch).toHaveBeenCalledWith(
-        'workspaceFiles/readBytes',
-        expect.objectContaining({
-          args: expect.objectContaining({
-            length: 4 * 1024 * 1024,
-          }),
-        }),
-        expect.any(AbortSignal),
-      )
-
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/read',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
-
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/readAll',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'big.bin' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_TOO_LARGE' })
-
-      // 12. 祖先目录被替换为外部符号链接拦截测试
-      const fakeAncestorDir = join(root, 'ancestor-link')
-      await symlink(outside, fakeAncestorDir, process.platform === 'win32' ? 'junction' : 'dir')
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/read',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'ancestor-link/secret.txt' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-
-      // 13. 工作区内部的祖先符号链接同样坚决拒绝（拒绝任何祖先符号链接）
-      const actualSubDir = join(root, 'actual-sub')
-      await mkdir(actualSubDir)
-      await writeFile(join(actualSubDir, 'sub.txt'), 'sub content')
-      const internalSymlinkDir = join(root, 'internal-symlink-dir')
-      await symlink(actualSubDir, internalSymlinkDir, process.platform === 'win32' ? 'junction' : 'dir')
-      await expect(
-        bridge.call({
-          endpoint: 'workspaceFiles/read',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'internal-symlink-dir/sub.txt' } },
-        }),
-      ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
 
       await bridge.closeAll()
     } finally {
