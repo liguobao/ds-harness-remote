@@ -3045,20 +3045,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
             React.createElement(
               "span",
               { className: "dshRemoteAcpCheckCell" },
-              React.createElement(
-                "a",
-                { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? " isChecking" : acpCheckResults[item.id] === void 0 ? "" : acpCheckResults[item.id] ? " isPassed" : " isFailed"}`, onClick: (event) => {
-                  event.preventDefault(), checkAcp(item.id);
-                } },
-                acpChecking[item.id] ? t("checkingAcp") : acpCheckResults[item.id] === void 0 ? t("checkAcp") : t(acpCheckResults[item.id] ? "acpCheckPassed" : "acpCheckFailed")
-              ),
-              !writable || busy || acpChecking[item.id] === !0 || acpAvailability[item.id] === !0 || !["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id) ? null : React.createElement("a", {
+              // One entry per backend: while the command is unresolved this slot is
+              // the fix (scan / install), once it resolves it turns back into the
+              // read-only availability check. Keeping both visible at once made the
+              // row read as two competing actions.
+              writable && !busy && acpAvailability[item.id] !== !0 && ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id) ? React.createElement("a", {
                 href: `#install-acp-${item.id}`,
                 className: `dshRemoteAcpInstallLink${acpInstalling[item.id] ? " isInstalling" : ""}`,
                 onClick: (event) => {
                   event.preventDefault(), installOrConfigureAcp(item.id);
                 }
-              }, acpInstalling[item.id] ? t("installingAcp") : ["cursor", "antigravity", "hermes"].includes(item.id) ? t("configureAcp") : t("installAcp"))
+              }, acpInstalling[item.id] ? t("installingAcp") : ["cursor", "antigravity", "hermes"].includes(item.id) ? t("configureAcp") : t("installAcp")) : React.createElement(
+                "a",
+                { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? " isChecking" : acpCheckResults[item.id] === void 0 ? "" : acpCheckResults[item.id] ? " isPassed" : " isFailed"}`, onClick: (event) => {
+                  event.preventDefault(), checkAcp(item.id);
+                } },
+                acpChecking[item.id] ? t("checkingAcp") : acpCheckResults[item.id] === void 0 ? t("checkAcp") : t(acpCheckResults[item.id] ? "acpCheckPassed" : "acpCheckFailed")
+              )
             ),
             ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id) ? null : React.createElement("a", { href: `#remove-acp-${item.id}`, className: "dshRemoteAcpRemoveLink", onClick: (event) => {
               event.preventDefault(), removeAcp(item.id);
