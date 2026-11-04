@@ -159,6 +159,8 @@ export class AppRuntime {
   identityBlocked: boolean = false;
   /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
   iceServersJson: string = '';
+  /** 连接过程中的阶段文案（连接页显示，让等待有进度感）。 */
+  connectStage: string = '';
   /** System dark-mode flag, kept fresh by EntryAbility configuration updates. */
   systemDark: boolean = false;
   /** System orientation flag, kept fresh by EntryAbility configuration updates. */
@@ -368,8 +370,10 @@ export class AppRuntime {
       if (config === undefined || identity === undefined || credentials === undefined) {
         throw new Error('尚未登录');
       }
+      this.setConnectStage('读取主机信息…');
       const host: AuthorizedPeerDevice = await this.deviceForWithRetry(deviceId);
       if (!host.presenceKnown) {
+        this.setConnectStage('检查主机在线状态…');
         const presence: HostPresence = await this.presenceWithRetry(host.deviceId);
         host.online = presence.online;
         host.presenceKnown = true;
@@ -392,13 +396,14 @@ export class AppRuntime {
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
         this.handleDisconnect();
       });
+      this.setConnectStage('建立加密通道（Noise IK 握手）…');
       await core.connect();
       if (this.connectCancelled) {
         return;
       }
-      // ICE 体检：直连（lan/p2p/turn）前提是服务端给本连接下发 iceServers。
-      // 这里只探测并记日志，不改变当前数据面（仍走 relay）。
-      await this.probeIceConfig(relay);
+      // ICE 体检只用于诊断，绝不能挡在连接主链路上（慢链路下单次 HTTP 可能几十秒）
+      this.probeIceConfig(relay).catch(() => undefined);
+      this.setConnectStage('读取主机能力…');
       const gateway: RemoteGateway = new RemoteGateway(core);
       const features: RemoteHostFeatures = await gateway.probeHostFeatures();
       logInfo('host features: sessionFormat=' + features.sessionFormat + ' apiProxy=' + features.apiProxy
@@ -411,6 +416,7 @@ export class AppRuntime {
           this.handleFrame(frame);
         });
       this.harness = harness;
+      this.setConnectStage('订阅会话事件…');
       await harness.start();
       if (this.connectCancelled) {
         return;
@@ -423,6 +429,7 @@ export class AppRuntime {
       this.reconnectAttempt = 0;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
+      this.connectStage = '';
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
@@ -457,6 +464,7 @@ export class AppRuntime {
       return;
     }
     this.connectCancelled = true;
+    this.connectStage = '';
     this.teardownConnection();
     this.phase = PHASE_DEVICES;
     this.notify();
@@ -1418,6 +1426,13 @@ export class AppRuntime {
     }
     this.qrId = '';
     this.qrUrl = '';
+    this.notify();
+  }
+
+  /** 更新连接阶段文案并推给界面。 */
+  private setConnectStage(text: string): void {
+    this.connectStage = text;
+    logInfo('connect stage: ' + text);
     this.notify();
   }
 

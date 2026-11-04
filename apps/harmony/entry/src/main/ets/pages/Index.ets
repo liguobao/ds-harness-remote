@@ -55,6 +55,7 @@ struct Index {
   @State sessionSearchActive: boolean = false;
   /** 上下文占用百分比，0 表示未知。 */
   @State contextPercent: number = 0;
+  @State connectStage: string = '';
   /** 斜杠命令候选。 */
   @State slashCommands: SlashCommand[] = [];
   /** 模型选择器。 */
@@ -208,6 +209,7 @@ struct Index {
     this.currentSessionTitle = this.runtime.currentSessionTitle;
     this.infoMsg = '';
     this.contextPercent = this.runtime.contextPercent;
+    this.connectStage = this.runtime.connectStage;
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
     this.currentModelLabel = this.runtime.currentModelLabel;
@@ -1567,9 +1569,9 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor(this.pal().text)
         .letterSpacing(1)
-      Text('NOISE IK 握手 · 能力协商需要几秒')
-        .fontSize(11)
-        .fontColor(this.pal().text3)
+      Text(this.connectStage.length > 0 ? this.connectStage : 'NOISE IK 握手 · 能力协商需要几秒')
+        .fontSize(12)
+        .fontColor(this.connectStage.length > 0 ? this.pal().text2 : this.pal().text3)
         .letterSpacing(1)
       Button('取消')
         .height(36)
