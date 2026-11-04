@@ -1364,7 +1364,8 @@ struct Index {
 
   @Builder
   ChatScreen() {
-    Column() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
       Row() {
         Text('‹')
           .fontSize(26)
@@ -1568,133 +1569,181 @@ struct Index {
       }
       .layoutWeight(1)
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 4 })
+      .padding({ left: 16, right: 16, top: 8, bottom: 148 })
       .scrollBar(BarState.Off)
-      if (this.contextPills().length > 0) {
-        Row({ space: 8 }) {
-          ForEach(this.contextPills(), (pill: string) => {
-            Text(pill)
-              .fontSize(11)
-              .fontColor(this.pal().text2)
-              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-              .backgroundColor(this.pal().card)
-              .borderRadius(10)
-              .maxLines(1)
-          }, (pill: string) => pill)
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 4, bottom: 2 })
-        .justifyContent(FlexAlign.Start)
-      }
-      if (this.promptInput.startsWith('/') && this.slashCommands.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(this.slashCommands, (command: SlashCommand) => {
-              Row({ space: 6 }) {
-                Text(command.name)
-                  .fontSize(12)
-                  .fontColor('#22D3EE')
-                if (command.description.length > 0) {
-                  Text(command.description)
-                    .fontSize(11)
-                    .fontColor(this.pal().text3)
-                    .maxLines(1)
-                }
-              }
-              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-              .backgroundColor(this.pal().inputBg)
-              .borderRadius(9)
-              .border({ width: 1, color: this.pal().border })
-              .onClick(() => {
-                this.promptInput = command.name + ' ';
-              })
-            }, (command: SlashCommand) => command.name)
-          }
-          .padding({ left: 16, right: 16 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 4, bottom: 2 })
-      }
-      Row({ space: 10 }) {
-        TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…'
-              : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…') })
-          .layoutWeight(1)
-          .height(46)
-          .backgroundColor(this.pal().inputBg)
-          .fontColor(this.pal().text)
-          .fontSize(15)
-          .placeholderColor(this.pal().text3)
-          .caretColor('#22D3EE')
-          .borderRadius(23)
-          .border({ width: 1, color: this.pal().borderStrong })
-          .padding({ left: 18, right: 18 })
-          // 生成中保持可输入：否则「插话」无从谈起。
-          .enabled(true)
-          .onChange((value: string) => {
-            this.promptInput = value;
-            if (value === '/' && this.slashCommands.length === 0) {
-              this.runtime.loadSlashCommands();
-            }
-          })
-          .onSubmit(() => {
-            this.sendTap();
-          })
-        if (this.generating) {
-          Text('■')
-            .fontSize(16)
-            .fontColor('#F85749')
-            .width(46)
-            .height(46)
-            .textAlign(TextAlign.Center)
-            .backgroundColor('rgba(248,87,73,0.12)')
-            .borderRadius(23)
-            .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
-            .onClick(() => {
-              this.runtime.stopGeneration();
-            })
-        }
-        Text('↑')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .width(46)
-          .height(46)
-          .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
-          .borderRadius(23)
-          .shadow({ radius: 12, color: 'rgba(77,107,254,0.4)', offsetX: 0, offsetY: 3 })
-          .onClick(() => {
-            this.sendTap();
-          })
-          .gesture(LongPressGesture().onAction(() => {
-            ActionSheet.show({
-              title: '发送方式',
-              message: this.runtime.steerMode ? '当前：插话（立刻打断当前轮）' : '当前：排队（本轮结束后再发）',
-              sheets: [
-                {
-                  title: '排队发送',
-                  action: () => {
-                    this.runtime.setSteerMode(false);
-                  }
-                },
-                {
-                  title: '插话打断',
-                  action: () => {
-                    this.runtime.setSteerMode(true);
-                  }
-                }
-              ]
-            });
-          }))
       }
       .width('100%')
-      .padding({ left: 14, right: 14, top: 8, bottom: 10 })
+      .height('100%')
+
+      // 底部渐隐：消息滚到浮动坞下方时不硬切
+      Column()
+        .width('100%')
+        .height(110)
+        .linearGradient({ angle: 180, colors: [['rgba(0,0,0,0)', 0], [this.pal().bg, 1]] })
+        .hitTestBehavior(HitTestMode.None)
+
+      this.ComposerDock()
     }
     .width('100%')
     .height('100%')
     .constraintSize({ maxWidth: 880 })
+  }
+
+  /** 底部输入坞：系统级光感玻璃（背景模糊 + 提饱和 + 半透内衬），浮在会话层之上。 */
+  @Builder
+  ComposerDock() {
+    Column({ space: 8 }) {
+        if (this.contextPills().length > 0) {
+          Row({ space: 8 }) {
+            ForEach(this.contextPills(), (pill: string) => {
+              Text(pill)
+                .fontSize(11)
+                .fontColor(this.pal().text2)
+                .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                .backgroundColor(this.pal().card)
+                .borderRadius(10)
+                .maxLines(1)
+            }, (pill: string) => pill)
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 4, bottom: 2 })
+          .justifyContent(FlexAlign.Start)
+        }
+      Column({ space: 6 }) {
+        // 顶边高光：玻璃「折光」的那一道亮线
+        Row()
+          .width('100%')
+          .height(1)
+          .linearGradient({ angle: 90, colors: [
+            ['rgba(255,255,255,0)', 0],
+            [this.isDarkUi ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.95)', 0.5],
+            ['rgba(255,255,255,0)', 1]
+          ] })
+        if (this.promptInput.startsWith('/') && this.slashCommands.length > 0) {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.slashCommands, (command: SlashCommand) => {
+                Row({ space: 6 }) {
+                  Text(command.name)
+                    .fontSize(12)
+                    .fontColor('#22D3EE')
+                  if (command.description.length > 0) {
+                    Text(command.description)
+                      .fontSize(11)
+                      .fontColor(this.pal().text3)
+                      .maxLines(1)
+                  }
+                }
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(9)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  this.promptInput = command.name + ' ';
+                })
+              }, (command: SlashCommand) => command.name)
+            }
+            .padding({ left: 16, right: 16 })
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .padding({ top: 4, bottom: 2 })
+        }
+        Row({ space: 10 }) {
+          TextInput({ text: this.promptInput, placeholder: this.generating ? '正在生成，可插话…'
+                : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…') })
+            .layoutWeight(1)
+            .height(46)
+            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+            .fontColor(this.pal().text)
+            .fontSize(15)
+            .placeholderColor(this.pal().text3)
+            .caretColor('#22D3EE')
+            .borderRadius(23)
+            .border({ width: 1,
+              color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+            .padding({ left: 18, right: 18 })
+            // 生成中保持可输入：否则「插话」无从谈起。
+            .enabled(true)
+            .onChange((value: string) => {
+              this.promptInput = value;
+              if (value === '/' && this.slashCommands.length === 0) {
+                this.runtime.loadSlashCommands();
+              }
+            })
+            .onSubmit(() => {
+              this.sendTap();
+            })
+          if (this.generating) {
+            Text('■')
+              .fontSize(16)
+              .fontColor('#F85749')
+              .width(46)
+              .height(46)
+              .textAlign(TextAlign.Center)
+              .backgroundColor('rgba(248,87,73,0.12)')
+              .borderRadius(23)
+              .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
+              .onClick(() => {
+                this.runtime.stopGeneration();
+              })
+          }
+          Text('↑')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .width(46)
+            .height(46)
+            .textAlign(TextAlign.Center)
+            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+            .borderRadius(23)
+            .shadow({ radius: 12, color: 'rgba(77,107,254,0.4)', offsetX: 0, offsetY: 3 })
+            .onClick(() => {
+              this.sendTap();
+            })
+            .gesture(LongPressGesture().onAction(() => {
+              ActionSheet.show({
+                title: '发送方式',
+                message: this.runtime.steerMode ? '当前：插话（立刻打断当前轮）' : '当前：排队（本轮结束后再发）',
+                sheets: [
+                  {
+                    title: '排队发送',
+                    action: () => {
+                      this.runtime.setSteerMode(false);
+                    }
+                  },
+                  {
+                    title: '插话打断',
+                    action: () => {
+                      this.runtime.setSteerMode(true);
+                    }
+                  }
+                ]
+              });
+            }))
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .backgroundEffect({
+        radius: 28,
+        saturation: 1.35,
+        brightness: this.isDarkUi ? 1.04 : 1.08,
+        color: this.isDarkUi ? 'rgba(22,26,38,0.62)' : 'rgba(255,255,255,0.60)'
+      })
+      .borderRadius(26)
+      .border({ width: 1,
+        color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.85)' })
+      .shadow({
+        radius: 26,
+        color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.16)',
+        offsetX: 0,
+        offsetY: 10
+      })
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, bottom: 12 })
   }
 
   /** Shared sessions list (header + rows); wrapped by the overlay or the landscape pane. */
