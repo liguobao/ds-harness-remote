@@ -640,26 +640,46 @@ export function AutomationTasksModal({
               <View style={styles.formCard}>
                 <Text style={styles.formLabel}>{strings.automation.formFrequency}</Text>
                 <View style={styles.kindSelectorRow}>
-                  {([
-                    { key: 'daily', label: strings.automation.timingDaily },
-                    { key: 'every', label: strings.automation.timingEvery },
-                    { key: 'weekly', label: strings.automation.timingWeekly },
-                    { key: 'at', label: strings.automation.timingOnce },
-                  ] as const).map(k => (
-                    <Pressable
-                      key={k.key}
-                      accessibilityRole="button"
-                      onPress={() => {
-                        setTimingDirty(true)
-                        setFormKind(k.key)
-                      }}
-                      style={[styles.kindPill, formKind === k.key && styles.kindPillActive]}
-                    >
-                      <Text style={[styles.kindPillText, formKind === k.key && styles.kindPillTextActive]}>
-                        {k.label}
-                      </Text>
-                    </Pressable>
-                  ))}
+                  <View style={styles.kindRow}>
+                    {([
+                      { key: 'daily', label: strings.automation.timingDaily },
+                      { key: 'every', label: strings.automation.timingEvery },
+                    ] as const).map(k => (
+                      <Pressable
+                        key={k.key}
+                        accessibilityRole="button"
+                        onPress={() => {
+                          setTimingDirty(true)
+                          setFormKind(k.key)
+                        }}
+                        style={[styles.kindPill, formKind === k.key && styles.kindPillActive]}
+                      >
+                        <Text style={[styles.kindPillText, formKind === k.key && styles.kindPillTextActive]}>
+                          {k.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={styles.kindRow}>
+                    {([
+                      { key: 'weekly', label: strings.automation.timingWeekly },
+                      { key: 'at', label: strings.automation.timingOnce },
+                    ] as const).map(k => (
+                      <Pressable
+                        key={k.key}
+                        accessibilityRole="button"
+                        onPress={() => {
+                          setTimingDirty(true)
+                          setFormKind(k.key)
+                        }}
+                        style={[styles.kindPill, formKind === k.key && styles.kindPillActive]}
+                      >
+                        <Text style={[styles.kindPillText, formKind === k.key && styles.kindPillTextActive]}>
+                          {k.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
 
                 {/* Timing Options */}
@@ -1560,15 +1580,16 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '600',
     },
     kindSelectorRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
       gap: spacing.xs,
       marginTop: spacing.xs,
       marginBottom: spacing.sm,
     },
+    kindRow: {
+      flexDirection: 'row',
+      gap: spacing.xs,
+    },
     kindPill: {
       flex: 1,
-      minWidth: '45%',
       paddingVertical: spacing.sm,
       alignItems: 'center',
       justifyContent: 'center',
