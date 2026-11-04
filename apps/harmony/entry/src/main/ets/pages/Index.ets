@@ -251,7 +251,12 @@ struct Index {
     if (this.messages.length === 0 || !this.stickToBottom) {
       return;
     }
-    this.scroller.scrollToIndex(this.messages.length - 1, false);
+    // scrollEdge 比 scrollToIndex 稳：列表项高度不定时 scrollToIndex 偶尔不动
+    try {
+      this.scroller.scrollEdge(Edge.Bottom);
+    } catch (error) {
+      this.scroller.scrollToIndex(this.messages.length - 1, false);
+    }
   }
 
   private sendTap(): void {
@@ -2674,21 +2679,20 @@ struct Index {
   /** 点开图片：全屏查看，双指缩放 / 拖动 / 双击复位。 */
   private openPreview(src: string): void {
     if (!isRemoteImage(src) && !this.images.has(src)) {
+      // 慢链路下 300ms 定时器会落空，改成立即开、overlay 自己显示 loading
       this.loadMdImage(src);
-      setTimeout(() => {
-        this.previewSrc = src;
-        this.previewScale = 1;
-        this.previewOffsetX = 0;
-        this.previewOffsetY = 0;
-        this.previewActive = true;
-      }, 300);
-      return;
     }
     this.previewSrc = src;
     this.previewScale = 1;
     this.previewOffsetX = 0;
     this.previewOffsetY = 0;
     this.previewActive = true;
+  }
+
+  /** 读一下 imageVersion，让预览层在图片解码完成后自动重建。 */
+  private previewReady(): boolean {
+    const version: number = this.imageVersion;
+    return this.images.has(this.previewSrc);
   }
 
   @Builder
@@ -2738,7 +2742,7 @@ struct Index {
                 })
             )
           )
-      } else if (this.images.has(this.previewSrc)) {
+      } else if (this.previewReady()) {
         Image(this.images.pixel(this.previewSrc))
           .width('100%')
           .height('100%')
@@ -2775,6 +2779,20 @@ struct Index {
                 })
             )
           )
+      }
+      if (!isRemoteImage(this.previewSrc) && !this.previewReady()) {
+        Column({ space: 10 }) {
+          LoadingProgress()
+            .width(28)
+            .height(28)
+            .color('#22D3EE')
+          Text(this.images.errorOf(this.previewSrc).length > 0
+            ? this.tr('图片加载失败')
+            : this.tr('图片加载中…'))
+            .fontSize(12)
+            .fontColor('rgba(255,255,255,0.75)')
+        }
+        .hitTestBehavior(HitTestMode.None)
       }
       // 顶部：路径 + 关闭
       Row({ space: 10 }) {
