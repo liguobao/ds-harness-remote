@@ -25,11 +25,11 @@ const typography = theme.type
 import { resolveSessionDisplayTitle } from '../session-title'
 import { createStyles as createLegacyStyles } from './styles'
 
-function SimpleModalSurface({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+function SimpleModalSurface({ onClose, colors, children }: { onClose: () => void; colors: ThemeColors; children: React.ReactNode }) {
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 }}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden', maxHeight: 480 }}>
+      <View style={{ backgroundColor: colors.card, borderRadius: 16, overflow: 'hidden', maxHeight: 480, borderWidth: 1, borderColor: colors.border }}>
         {children}
       </View>
     </View>
@@ -301,7 +301,7 @@ export const SubagentsCard = memo(function SubagentsCard({
           >
             {sessions.map((item, index) => {
               const parsed = parseAgentLabel(resolveSessionDisplayTitle(item) ?? item.title)
-              const role = parsed.role ?? item.title ?? strings.sessions.child
+              const role = (parsed.role && parsed.role.trim().length > 0) ? parsed.role.trim() : (item.title && item.title.trim().length > 0) ? item.title.trim() : strings.sessions.child
               const isRunning = item.running === true
               const glyphStatus = isRunning ? 'running' : 'idle'
               const stateLabel = isRunning ? strings.status.running : strings.sessions.child
@@ -546,7 +546,7 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
   const listMaxHeight = 360
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <SimpleModalSurface onClose={onClose}>
+      <SimpleModalSurface onClose={onClose} colors={colors}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{strings.chat.subagentsTitle(sessions.length)}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8}>
@@ -605,7 +605,7 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
       : strings.chat.teamTaskPending
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <SimpleModalSurface onClose={onClose}>
+      <SimpleModalSurface onClose={onClose} colors={colors}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{strings.chat.teamTitle(members.length)}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8}>

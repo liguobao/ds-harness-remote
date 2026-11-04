@@ -778,7 +778,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         <View style={[styles.composerInner, readableColumn]}>
         {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
           <SessionActivityDock
-            key={session.sessionId}
+            key={`${memoryKey}:${chatImageConnectionGeneration()}`}
             session={session}
             childSessions={childSessions}
             teamState={teamState}
