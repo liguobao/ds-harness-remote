@@ -213,7 +213,7 @@ export function AutomationTasksModal({
 
   /** Sessions without a human title carry the raw id as their title. */
   const sessionLabel = (sessionId: string, title?: string | null): string =>
-    title !== undefined && title !== null && title !== '' && !title.startsWith('session-')
+    title !== undefined && title !== null && title.trim() !== '' && title !== sessionId
       ? title
       : sessionId.slice(-8)
 
@@ -1155,7 +1155,8 @@ export function AutomationTasksModal({
             </View>
 
             {/* Filter Tabs */}
-            <View style={styles.segmented}>
+            <View style={styles.filterRow}>
+              <View style={styles.segmented}>
               {(['all', 'active', 'inactive'] as const).map(f => (
                 <Pressable
                   key={f}
@@ -1178,6 +1179,16 @@ export function AutomationTasksModal({
                   </Text>
                 </Pressable>
               ))}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.common.refresh}
+                onPress={() => void loadTasks()}
+                hitSlop={8}
+                style={styles.refreshBtn}
+              >
+                <RefreshCw size={16} color={colors.muted} />
+              </Pressable>
             </View>
 
             {/* Task List or Empty State */}
@@ -1326,14 +1337,30 @@ function createStyles(colors: ThemeColors) {
     headerBtnPrimary: {
       backgroundColor: colors.primary,
     },
-    segmented: {
+    filterRow: {
       flexDirection: 'row',
-      marginHorizontal: spacing.md,
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
       marginTop: spacing.sm,
       marginBottom: spacing.sm,
+      gap: spacing.xs,
+    },
+    segmented: {
+      flex: 1,
+      flexDirection: 'row',
       padding: 3,
       borderRadius: radius.pill,
       backgroundColor: colors.surfaceStrong,
+    },
+    refreshBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.grouped,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
     },
     segment: {
       flex: 1,

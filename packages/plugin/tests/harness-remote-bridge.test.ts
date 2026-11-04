@@ -236,6 +236,24 @@ describe('HarnessRemoteBridge', () => {
     const refusing = build({ create: vi.fn(async () => { throw Object.assign(new Error('delegated child owns this session'), { code: 'subagent_session' }) }) })
     await expect(refusing.call({ endpoint: 'schedule/create', payload }))
       .resolves.toMatchObject({ ok: false, error: { code: 'subagent_session' } })
+
+    // Internal faults must not leak their message or arbitrary code to the wire.
+    const leaking = build({ create: vi.fn(async () => {
+      throw Object.assign(new Error('cannot write /private/schedule.db'), { code: 'EACCES' })
+    }) })
+    const leaked = await leaking.call({ endpoint: 'schedule/create', payload })
+    expect(leaked).toMatchObject({ ok: false, error: { code: 'FAILED' } })
+    expect(JSON.stringify(leaked)).not.toContain('/private/schedule.db')
+
+    // Malformed rules are rejected before the Host service sees them.
+    for (const request of [
+      { sessionId: 's', title: 'A', prompt: 'B', daily: { time: 'not-a-time', time_zone: 'UTC' } },
+      { sessionId: 's', title: 'A', prompt: 'B', weekly: { time: '09:00', time_zone: 'UTC', weekdays: [1, 1] } },
+      { sessionId: 's', title: '   ', prompt: 'B', every_seconds: 3600 },
+    ]) {
+      await expect(withService.call({ endpoint: 'schedule/create', payload: { args: { request } } }))
+        .resolves.toMatchObject({ ok: false, error: { code: 'invalid_rule' } })
+    }
   })
 
   it('preserves official schedule management requests, conflicts and missing-task results', async () => {

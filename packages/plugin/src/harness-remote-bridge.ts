@@ -221,39 +221,56 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
  * request itself before delegating.
  */
 export interface ScheduleCreateService {
-  create(sessionId: string, request: ScheduleCreatePayload, signal?: AbortSignal): Promise<unknown>
+  create(sessionId: string, request: ScheduleCreateRequest, signal?: AbortSignal): Promise<unknown>
 }
 
-export interface ScheduleCreatePayload {
-  title: string
-  prompt: string
-  after_seconds?: number
-  at?: string | { date: string; time: string; time_zone: string }
-  every_seconds?: number
-  daily?: { time: string; time_zone: string }
-  weekly?: { time: string; time_zone: string; weekdays: number[] }
-  cron?: { expression: string; time_zone: string }
-}
+/** Locale-independent "HH:mm" / "HH:mm:ss" / "HH:mm:ss.SSS". */
+const LOCAL_TIME = /^\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/u
 
-const localTimeSchema = z.object({ time: z.string().min(1).max(32), time_zone: z.string().min(1).max(64) }).strict()
+const localTimeSchema = z.object({
+  time: z.string().regex(LOCAL_TIME, 'expected HH:mm or HH:mm:ss'),
+  time_zone: z.string().min(1).max(64),
+}).strict()
+
+const nonBlank = (max: number) => z.string().max(max).refine(value => value.trim().length > 0, 'must not be blank')
 const scheduleCreateArgsSchema = z.object({
-  sessionId: z.string().min(1).max(128),
-  title: z.string().min(1).max(120),
-  prompt: z.string().min(1).max(20_000),
+  sessionId: nonBlank(128),
+  title: nonBlank(120),
+  prompt: nonBlank(20_000),
   after_seconds: z.number().int().positive().max(31_536_000).optional(),
   at: z.union([
     z.string().min(1).max(64),
-    z.object({ date: z.string().min(1).max(32), time: z.string().min(1).max(32), time_zone: z.string().min(1).max(64) }).strict(),
+    z.object({ date: nonBlank(32), time: nonBlank(32), time_zone: nonBlank(64) }).strict(),
   ]).optional(),
   every_seconds: z.number().int().min(60).max(31_536_000).optional(),
   daily: localTimeSchema.optional(),
   weekly: z.object({
-    time: z.string().min(1).max(32),
+    time: z.string().regex(LOCAL_TIME, 'expected HH:mm or HH:mm:ss'),
     time_zone: z.string().min(1).max(64),
-    weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7),
+    weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7)
+      .refine(days => new Set(days).size === days.length, 'weekdays must be unique'),
   }).strict().optional(),
-  cron: z.object({ expression: z.string().min(1).max(128), time_zone: z.string().min(1).max(64) }).strict().optional(),
+  cron: z.object({ expression: nonBlank(128), time_zone: z.string().min(1).max(64) }).strict().optional(),
 }).strict()
+
+export type ScheduleCreateRequest = Omit<z.infer<typeof scheduleCreateArgsSchema>, 'sessionId'>
+
+/**
+ * Refusals the reminder service publishes to clients. Anything else (fs errors,
+ * storage faults, arbitrary thrown values) is reported as a generic failure so
+ * internal detail never reaches the wire.
+ */
+const PUBLIC_SCHEDULE_ERRORS: Record<string, string> = {
+  invalid_prompt: 'The reminder prompt was rejected.',
+  invalid_selector: 'Exactly one reminder trigger is required.',
+  invalid_rule: 'The reminder rule was rejected.',
+  invalid_time_zone: 'The reminder time zone is not supported.',
+  subagent_session: 'The target session is controlled by a delegated child.',
+  session_not_found: 'The target session no longer exists.',
+  schedule_limit: 'This session already has the maximum number of reminders.',
+  schedule_ended: 'The reminder has already ended.',
+  schedule_conflict: 'The reminder changed on the Host. Reload and retry.',
+}
 
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
 
@@ -394,14 +411,20 @@ export class HarnessRemoteBridge {
     }
     const { sessionId, ...request } = parsed.data
     try {
+      // The service is expected to honour the signal; the timeout bounds how long
+      // a stuck create can hold the bridge open, not the provider's own work.
       const record = await this.schedule.create(sessionId, request, AbortSignal.timeout(60_000))
       return { ok: true, value: record }
     } catch (error) {
-      const code = isRecord(error) && typeof error.code === 'string' ? error.code : 'FAILED'
-      return {
-        ok: false,
-        error: { code, message: error instanceof Error ? error.message : 'The Host could not create the reminder.', details: {} },
+      const published = isRecord(error) && typeof error.code === 'string' ? PUBLIC_SCHEDULE_ERRORS[error.code] : undefined
+      if (published === undefined) {
+        return {
+          ok: false,
+          error: { code: 'FAILED', message: 'The Host could not create the reminder.', details: {} },
+        }
       }
+      const code = (error as { code: string }).code
+      return { ok: false, error: { code, message: published, details: {} } }
     }
   }
 

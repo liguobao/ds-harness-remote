@@ -88185,25 +88185,41 @@ var WORKSPACE_FILE_READ_ENDPOINTS = /* @__PURE__ */ new Set([
   "workspaceFiles/stat"
 ]);
 var MAX_READ_BYTES2 = 4 * 1024 * 1024;
-var localTimeSchema = external_exports.object({ time: external_exports.string().min(1).max(32), time_zone: external_exports.string().min(1).max(64) }).strict();
+var LOCAL_TIME = /^\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/u;
+var localTimeSchema = external_exports.object({
+  time: external_exports.string().regex(LOCAL_TIME, "expected HH:mm or HH:mm:ss"),
+  time_zone: external_exports.string().min(1).max(64)
+}).strict();
+var nonBlank = (max) => external_exports.string().max(max).refine((value) => value.trim().length > 0, "must not be blank");
 var scheduleCreateArgsSchema = external_exports.object({
-  sessionId: external_exports.string().min(1).max(128),
-  title: external_exports.string().min(1).max(120),
-  prompt: external_exports.string().min(1).max(2e4),
+  sessionId: nonBlank(128),
+  title: nonBlank(120),
+  prompt: nonBlank(2e4),
   after_seconds: external_exports.number().int().positive().max(31536e3).optional(),
   at: external_exports.union([
     external_exports.string().min(1).max(64),
-    external_exports.object({ date: external_exports.string().min(1).max(32), time: external_exports.string().min(1).max(32), time_zone: external_exports.string().min(1).max(64) }).strict()
+    external_exports.object({ date: nonBlank(32), time: nonBlank(32), time_zone: nonBlank(64) }).strict()
   ]).optional(),
   every_seconds: external_exports.number().int().min(60).max(31536e3).optional(),
   daily: localTimeSchema.optional(),
   weekly: external_exports.object({
-    time: external_exports.string().min(1).max(32),
+    time: external_exports.string().regex(LOCAL_TIME, "expected HH:mm or HH:mm:ss"),
     time_zone: external_exports.string().min(1).max(64),
-    weekdays: external_exports.array(external_exports.number().int().min(1).max(7)).min(1).max(7)
+    weekdays: external_exports.array(external_exports.number().int().min(1).max(7)).min(1).max(7).refine((days) => new Set(days).size === days.length, "weekdays must be unique")
   }).strict().optional(),
-  cron: external_exports.object({ expression: external_exports.string().min(1).max(128), time_zone: external_exports.string().min(1).max(64) }).strict().optional()
+  cron: external_exports.object({ expression: nonBlank(128), time_zone: external_exports.string().min(1).max(64) }).strict().optional()
 }).strict();
+var PUBLIC_SCHEDULE_ERRORS = {
+  invalid_prompt: "The reminder prompt was rejected.",
+  invalid_selector: "Exactly one reminder trigger is required.",
+  invalid_rule: "The reminder rule was rejected.",
+  invalid_time_zone: "The reminder time zone is not supported.",
+  subagent_session: "The target session is controlled by a delegated child.",
+  session_not_found: "The target session no longer exists.",
+  schedule_limit: "This session already has the maximum number of reminders.",
+  schedule_ended: "The reminder has already ended.",
+  schedule_conflict: "The reminder changed on the Host. Reload and retry."
+};
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
   constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule) {
@@ -88328,11 +88344,15 @@ var HarnessRemoteBridge = class {
       const record11 = await this.schedule.create(sessionId, request, AbortSignal.timeout(6e4));
       return { ok: true, value: record11 };
     } catch (error62) {
-      const code = isRecord21(error62) && typeof error62.code === "string" ? error62.code : "FAILED";
-      return {
-        ok: false,
-        error: { code, message: error62 instanceof Error ? error62.message : "The Host could not create the reminder.", details: {} }
-      };
+      const published = isRecord21(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      if (published === void 0) {
+        return {
+          ok: false,
+          error: { code: "FAILED", message: "The Host could not create the reminder.", details: {} }
+        };
+      }
+      const code = error62.code;
+      return { ok: false, error: { code, message: published, details: {} } };
     }
   }
   async directoryList(payload, signal) {
