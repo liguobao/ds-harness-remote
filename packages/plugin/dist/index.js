@@ -88122,6 +88122,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "schedule/list",
   "schedule/catalog",
   "schedule/history",
+  "schedule/create",
   "schedule/update",
   "schedule/delete",
   "session/attachment",

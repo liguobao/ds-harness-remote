@@ -69,6 +69,31 @@ describe('Automation Tasks and Sidebar i18n', () => {
       'frequencyWeekly',
       'frequencyEvery',
       'frequencyCron',
+      'editTask',
+      'pauseTask',
+      'resumeTask',
+      'taskPaused',
+      'taskResumed',
+      'editRule',
+      'formTitle',
+      'formPrompt',
+      'formFrequency',
+      'formTargetSession',
+      'formTime',
+      'formInterval',
+      'formWeekdays',
+      'timingDaily',
+      'timingEvery',
+      'timingWeekly',
+      'timingOnce',
+      'workdaysOnly',
+      'unsupportedBackendTitle',
+      'unsupportedBackendDesc',
+      'saveSuccess',
+      'saveFailed',
+      'retry',
+      'minuteUnit',
+      'hourUnit',
     ] as const
 
     for (const [lang, catalog] of Object.entries(messageCatalogs)) {
@@ -209,4 +234,292 @@ describe('Automation Tasks and Sidebar i18n', () => {
     expect(history).toHaveLength(1)
     expect(history[0]?.messageId).toBe('msg-1')
   })
+
+  it('creates a new schedule task and reloads catalog with generation protection', async () => {
+    let generation = 1
+    const newRecord = {
+      id: 'task-new',
+      kind: 'daily' as const,
+      title: 'Daily Digest',
+      prompt: 'Summarize news',
+      time: '08:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T08:00:00.000Z',
+    }
+    const updatedCatalog: ScheduleCatalogEntry[] = [
+      {
+        ...newRecord,
+        sessionId: 'session-1',
+        status: 'active',
+      },
+    ]
+
+    const proxy = {
+      scheduleCreate: vi.fn(async () => newRecord),
+      scheduleCatalog: vi.fn(async () => updatedCatalog),
+    }
+
+    let state: any = {
+      connection: { phase: 'connected' },
+      scheduleTasks: [],
+      scheduleLoading: false,
+      scheduleError: undefined,
+    }
+    const set = vi.fn((patch: any) => {
+      state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
+    })
+    const get = vi.fn(() => state)
+    const runtime: any = {
+      connection: { requireProxy: () => proxy },
+    }
+
+    const actions = createScheduleActions({
+      get,
+      set,
+      runtime,
+      getConnectionGeneration: () => generation,
+    })
+
+    // Successful create
+    const created = await actions.createScheduleTask('session-1', {
+      title: 'Daily Digest',
+      prompt: 'Summarize news',
+      daily: { time: '08:00:00.000', time_zone: 'UTC' },
+    })
+    expect(created).toEqual(newRecord)
+    expect(proxy.scheduleCreate).toHaveBeenCalledWith('session-1', {
+      title: 'Daily Digest',
+      prompt: 'Summarize news',
+      daily: { time: '08:00:00.000', time_zone: 'UTC' },
+    })
+    expect(proxy.scheduleCatalog).toHaveBeenCalled()
+    expect(state.scheduleTasks).toHaveLength(1)
+    expect(state.scheduleTasks[0].id).toBe('task-new')
+
+    // Stale generation during create
+    proxy.scheduleCreate.mockImplementationOnce(async () => {
+      generation = 2
+      return newRecord
+    })
+    const staleResult = await actions.createScheduleTask('session-1', {
+      title: 'Stale',
+      prompt: 'Stale',
+    })
+    expect(staleResult).toBeNull()
+  })
+
+  it('updates an existing schedule task timing and handles conflicts with generation protection', async () => {
+    let generation = 1
+    const initialTask: ScheduleCatalogEntry = {
+      id: 'task-1',
+      sessionId: 'session-1',
+      kind: 'daily',
+      title: 'Old Title',
+      prompt: 'Old Prompt',
+      time: '08:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T08:00:00.000Z',
+      status: 'active',
+    }
+    const updatedRecord = {
+      id: 'task-1',
+      kind: 'daily' as const,
+      title: 'New Title',
+      prompt: 'New Prompt',
+      time: '09:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T09:00:00.000Z',
+    }
+
+    const proxy = {
+      scheduleUpdate: vi.fn<any>(async () => ({
+        id: 'task-1',
+        updated: true,
+        record: updatedRecord,
+      })),
+    }
+
+    let state: any = {
+      connection: { phase: 'connected' },
+      scheduleTasks: [initialTask],
+      scheduleLoading: false,
+      scheduleError: undefined,
+    }
+    const set = vi.fn((patch: any) => {
+      state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
+    })
+    const get = vi.fn(() => state)
+    const runtime: any = {
+      connection: { requireProxy: () => proxy },
+    }
+
+    const actions = createScheduleActions({
+      get,
+      set,
+      runtime,
+      getConnectionGeneration: () => generation,
+    })
+
+    const expectedRecord = {
+      id: 'task-1',
+      kind: 'daily' as const,
+      title: 'Old Title',
+      prompt: 'Old Prompt',
+      time: '08:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T08:00:00.000Z',
+    }
+
+    // Successful update
+    const result = await actions.updateScheduleTask('session-1', 'task-1', expectedRecord, {
+      title: 'New Title',
+      prompt: 'New Prompt',
+      change: { kind: 'daily', daily: { time: '09:00:00.000', time_zone: 'UTC' } },
+    })
+    expect(result).toMatchObject({ id: 'task-1', updated: true })
+    expect(state.scheduleTasks[0].title).toBe('New Title')
+    expect(state.scheduleTasks[0].time).toBe('09:00:00.000')
+
+    // Stale generation during update
+    proxy.scheduleUpdate.mockImplementationOnce(async () => {
+      generation = 2
+      return { id: 'task-1', updated: true, record: updatedRecord }
+    })
+    const staleUpdate = await actions.updateScheduleTask('session-1', 'task-1', expectedRecord, {
+      title: 'Stale',
+    })
+    expect(staleUpdate).toBeNull()
+
+    // Conflict result from host
+    proxy.scheduleUpdate.mockImplementationOnce(async () => ({
+      id: 'task-1',
+      updated: false,
+      code: 'schedule_conflict' as const,
+    }))
+    const conflictResult = await actions.updateScheduleTask('session-1', 'task-1', expectedRecord, {
+      title: 'Conflicted',
+    })
+    expect(conflictResult).toMatchObject({ id: 'task-1', updated: false, code: 'schedule_conflict' })
+
+    // Title-only update: change is omitted
+    proxy.scheduleUpdate.mockClear()
+    proxy.scheduleUpdate.mockImplementationOnce(async (req: any) => ({
+      id: 'task-1',
+      updated: true,
+      record: { ...updatedRecord, title: 'Title Only' },
+    }))
+    await actions.updateScheduleTask('session-1', 'task-1', expectedRecord, {
+      title: 'Title Only',
+    })
+    expect(proxy.scheduleUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Title Only',
+      })
+    )
+    expect(proxy.scheduleUpdate.mock.calls[0][0].change).toBeUndefined()
+  })
+
+  it('createScheduleTask succeeds and updates state even if catalog refresh fails', async () => {
+    const newRecord = {
+      id: 'task-created',
+      kind: 'daily' as const,
+      title: 'Created Task',
+      prompt: 'Prompt',
+      time: '08:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T08:00:00.000Z',
+    }
+    const proxy = {
+      scheduleCreate: vi.fn(async () => newRecord),
+      scheduleCatalog: vi.fn(async () => {
+        throw new Error('Network timeout during catalog refresh')
+      }),
+    }
+    let state: any = {
+      connection: { phase: 'connected' },
+      scheduleTasks: [],
+    }
+    const set = vi.fn((patch: any) => {
+      state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
+    })
+    const get = vi.fn(() => state)
+    const runtime: any = { connection: { requireProxy: () => proxy } }
+
+    const actions = createScheduleActions({
+      get,
+      set,
+      runtime,
+      getConnectionGeneration: () => 1,
+    })
+
+    const res = await actions.createScheduleTask('session-1', {
+      title: 'Created Task',
+      prompt: 'Prompt',
+    })
+    expect(res).toEqual(newRecord)
+    expect(state.scheduleTasks).toHaveLength(1)
+    expect(state.scheduleTasks[0].id).toBe('task-created')
+    expect(state.scheduleTasks[0].status).toBe('active')
+  })
+
+  it('toggles schedule task active and inactive status with generation protection', async () => {
+    let generation = 1
+    const task: ScheduleCatalogEntry = {
+      id: 'task-1',
+      sessionId: 'session-1',
+      kind: 'daily',
+      title: 'Task',
+      prompt: 'Prompt',
+      time: '08:00:00.000',
+      timeZone: 'UTC',
+      scheduledAt: '2026-10-29T08:00:00.000Z',
+      status: 'active',
+    }
+
+    let state: any = {
+      connection: { phase: 'connected' },
+      scheduleTasks: [task],
+      scheduleLoading: false,
+      scheduleError: undefined,
+    }
+    const set = vi.fn((patch: any) => {
+      state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
+    })
+    const get = vi.fn(() => state)
+    const runtime: any = {
+      connection: { requireProxy: () => ({}) },
+    }
+
+    const actions = createScheduleActions({
+      get,
+      set,
+      runtime,
+      getConnectionGeneration: () => generation,
+    })
+
+    // Toggle from active to inactive
+    const ok = await actions.toggleScheduleTask(task)
+    expect(ok).toBe(true)
+    expect(state.scheduleTasks[0].status).toBe('inactive')
+
+    // Toggle from inactive to active
+    const ok2 = await actions.toggleScheduleTask(state.scheduleTasks[0])
+    expect(ok2).toBe(true)
+    expect(state.scheduleTasks[0].status).toBe('active')
+
+    // Stale generation
+    let calls = 0
+    const staleActions = createScheduleActions({
+      get,
+      set,
+      runtime,
+      getConnectionGeneration: () => {
+        calls++
+        return calls === 1 ? 1 : 2
+      },
+    })
+    const ok3 = await staleActions.toggleScheduleTask(state.scheduleTasks[0])
+    expect(ok3).toBe(false)
+  })
+
 })

@@ -20,7 +20,12 @@ import type {
   RemoteDevice,
   RemoteSession,
   ScheduleCatalogEntry,
+  ScheduleCreateRequest,
   ScheduleDeliveryRecord,
+  ScheduleRecord,
+  ScheduleTimingChange,
+  ScheduleUpdateRequest,
+  ScheduleUpdateResult,
   SendMessageResult,
   ServerConfig,
   SessionModels,
@@ -124,6 +129,9 @@ export interface AppState {
   reauthRequired: boolean
 
   loadScheduleTasks(): Promise<void>
+  createScheduleTask(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord | null>
+  updateScheduleTask(sessionId: string, id: string, expected: ScheduleRecord, options?: { change?: ScheduleTimingChange; title?: string; prompt?: string }): Promise<ScheduleUpdateResult | null>
+  toggleScheduleTask(task: ScheduleCatalogEntry): Promise<boolean>
   deleteScheduleTask(sessionId: string, id: string): Promise<boolean>
   loadScheduleHistory(sessionId: string, id: string): Promise<ScheduleDeliveryRecord[]>
   bootstrap(): Promise<void>
