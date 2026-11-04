@@ -387,7 +387,7 @@ export class AppRuntime {
       relayOptions.targetDeviceId = host.deviceId;
       const relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
       const secure: SecureTransport = new SecureTransport(relay, identity, host, pinnedHostKey);
-      const core: RemoteClientCore = new RemoteClientCore(secure, 35000);
+      const core: RemoteClientCore = new RemoteClientCore(secure, 45000);
       this.core = core;
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
         this.handleDisconnect();

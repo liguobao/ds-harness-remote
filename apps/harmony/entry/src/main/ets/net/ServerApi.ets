@@ -214,7 +214,8 @@ function describeNetError(e: Object): string {
 export class RemoteServerApi {
   private baseUrl: string;
   private accessToken: string | undefined;
-  private timeoutMs: number = 10000;
+  /** REST 请求预算：服务端高峰期实测 TTFB 能到 12–22 秒，10 秒会让登录直接失败。 */
+  private timeoutMs: number = 30000;
 
   constructor(baseUrl: string, accessToken?: string) {
     this.baseUrl = normalizeServerUrl(baseUrl);
