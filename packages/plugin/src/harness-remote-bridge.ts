@@ -1,5 +1,7 @@
 import { compactHistory } from './compact-history.js'
 import { randomUUID } from 'node:crypto'
+import { lstat, realpath, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
 import type {
   HarnessApiTransferChunkParams,
@@ -200,6 +202,17 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspace/unpinSession',
 ] as const
 
+export type NativeWorkspaceResolver = (sessionId: string, signal: AbortSignal) => Promise<string | undefined>
+
+export const WORKSPACE_FILE_READ_ENDPOINTS = new Set([
+  'workspaceFiles/read',
+  'workspaceFiles/readBytes',
+  'workspaceFiles/readAll',
+  'workspaceFiles/stat',
+])
+
+const MAX_READ_BYTES = 4 * 1024 * 1024
+
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
 
 /** Host-side adapter from the encrypted peer channel to the official alpha Gateway carrier. */
@@ -218,6 +231,7 @@ export class HarnessRemoteBridge {
     private readonly harnessVersion?: string,
     private readonly terminal = new TerminalPolicy(() => false, "", new Map()),
     private readonly codexWorkspace?: CodexWorkspaceBridge,
+    private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
@@ -258,7 +272,10 @@ export class HarnessRemoteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(60_000)
     try {
-      const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      if (this.resolveWorkspaceRoot !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+        nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
+      }
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
@@ -572,6 +589,223 @@ export class HarnessRemoteBridge {
       transfer.finish?.(new Error('Harness Remote stream transfer timed out'))
     }
   }
+
+  private async assertNativeWorkspaceFileCall(
+    endpoint: string,
+    payload: unknown,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const rootPayload = isRecord(payload) ? payload : {}
+    const args = requestArgs(payload)
+    const sessionId = typeof args.workspaceFileScopeId === 'string'
+      ? args.workspaceFileScopeId
+      : typeof args.sessionId === 'string'
+        ? args.sessionId
+        : typeof args.agentId === 'string'
+          ? args.agentId
+          : undefined
+    if (sessionId === undefined) {
+      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
+    }
+    const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal)
+    if (!sessionWorkspace) {
+      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+    }
+
+    const options = isRecord(args.options) ? args.options : undefined
+    const rawBaseFile = endpoint === 'workspaceFiles/readBytes'
+      ? (typeof options?.baseFile === 'string' ? options.baseFile : (typeof args.baseFile === 'string' ? args.baseFile : undefined))
+      : undefined
+
+    if (endpoint === 'workspaceFiles/readBytes') {
+      if (options !== undefined && 'baseFile' in options && options.baseFile !== undefined && typeof options.baseFile !== 'string') {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      if ('baseFile' in args && args.baseFile !== undefined && typeof args.baseFile !== 'string') {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+    }
+
+    let safeRel: string
+    if (rawBaseFile !== undefined) {
+      const path = typeof args.path === 'string' ? args.path : ''
+      const relative = path.replaceAll('\\', '/')
+      if (relative.length === 0 || relative.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.includes(' ')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      const baseSegments = process.platform === 'win32' ? rawBaseFile.replaceAll('\\', '/').split('/') : rawBaseFile.split('/')
+      if (baseSegments.some(segment => segment === '..')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint)
+      const baseCandidate = resolve(sessionWorkspace.root, safeBaseRel)
+      const baseDir = dirname(baseCandidate)
+      const targetCandidate = resolve(baseDir, path)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint)
+    } else {
+      const path = typeof args.path === 'string' ? args.path : '.'
+      const pathSegments = process.platform === 'win32' ? path.replaceAll('\\', '/').split('/') : path.split('/')
+      if (pathSegments.some(segment => segment === '..')) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint)
+    }
+
+    let finalArgs: Record<string, unknown> = isRecord(rootPayload.args)
+      ? { ...rootPayload.args, path: safeRel }
+      : { ...rootPayload, path: safeRel }
+
+    if (isRecord(finalArgs.options)) {
+      const { baseFile: _baseFile, ...restOptions } = finalArgs.options
+      finalArgs.options = restOptions
+    }
+    delete finalArgs.baseFile
+    if (endpoint === 'workspaceFiles/readBytes') {
+      const range = byteOrLineRange(finalArgs)
+      const offset = typeof range.offset === 'number' && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0
+      const rawLength = typeof range.length === 'number' && Number.isInteger(range.length) && range.length > 0 ? range.length : MAX_READ_BYTES
+      const boundedLength = Math.min(rawLength, MAX_READ_BYTES)
+      const normalizedRange = { offset, length: boundedLength }
+      if (requiresWorkspaceChangePath(this.harnessVersion)) {
+        finalArgs.options = { ...(isRecord(finalArgs.options) ? finalArgs.options : {}), range: normalizedRange }
+        delete finalArgs.range
+      } else {
+        finalArgs.range = normalizedRange
+        if (isRecord(finalArgs.options)) {
+          finalArgs.options = { ...finalArgs.options, range: normalizedRange }
+        }
+      }
+      if ('offset' in finalArgs || 'length' in finalArgs) {
+        finalArgs.offset = offset
+        finalArgs.length = boundedLength
+      }
+    }
+    return isRecord(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs
+  }
+
+  private async resolveWorkspaceRootForSession(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<{ root: string; cwd: string } | undefined> {
+    signal.throwIfAborted()
+    if (this.resolveWorkspaceRoot === undefined) {
+      return undefined
+    }
+    const cwd = await this.resolveWorkspaceRoot(sessionId, signal)
+    if (!cwd) {
+      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+    }
+    try {
+      const root = await realpath(cwd)
+      const info = await stat(root)
+      if (!info.isDirectory()) throw new Error()
+      return { root, cwd }
+    } catch {
+      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+    }
+  }
+
+  private async verifyWorkspacePathContainment(
+    root: string,
+    cwd: string,
+    path: string,
+    endpoint: string,
+  ): Promise<string> {
+    const candidate = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+    if (process.platform === 'win32') {
+      const rootDrive = parse(root).root.toLowerCase()
+      const candDrive = parse(candidate).root.toLowerCase()
+      if (rootDrive !== candDrive) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+    }
+    const relCwd = relative(cwd, candidate)
+    const relRoot = relative(root, candidate)
+    if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    }
+
+    try {
+      const rootLstat = await lstat(root)
+      if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The workspace root is invalid or a symlink.')
+      }
+
+      const base = !isPathOutside(relCwd) ? cwd : root
+      const rel = relative(base, candidate)
+      const parts = rel.split(sep).filter(p => p.length > 0 && p !== '.')
+      let currentPath = base
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPath = join(currentPath, parts[i]!)
+        const dirRel = relative(base, currentPath)
+        if (isPathOutside(dirRel)) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        }
+        const dirLstat = await lstat(currentPath)
+        if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'An ancestor directory is invalid or a symlink.')
+        }
+      }
+
+      const targetLstat = await lstat(candidate)
+      if (targetLstat.isSymbolicLink()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+
+      const canonical = await realpath(candidate)
+      if (process.platform === 'win32') {
+        const rootDrive = parse(root).root.toLowerCase()
+        const canonicalDrive = parse(canonical).root.toLowerCase()
+        if (rootDrive !== canonicalDrive) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        }
+      }
+      const canonicalRel = relative(root, canonical)
+      if (isPathOutside(canonicalRel)) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+
+      const info = await stat(canonical)
+      if (endpoint !== 'workspaceFiles/stat' && !info.isFile()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+
+      if (endpoint === 'workspaceFiles/readAll' && Number(info.size) > MAX_READ_BYTES) {
+        throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+      }
+
+      // On Windows normalize backslashes to slashes; on POSIX backslashes are valid filename characters and must not be mangled
+      const safeRel = canonicalRel === '' ? '.' : (process.platform === 'win32' ? canonicalRel.replaceAll('\\', '/') : canonicalRel)
+
+      // Validate the exact path passed to the gateway resolves within workspace
+      const dispatchedCandidate = resolve(root, safeRel)
+      const dispatchedCanonical = await realpath(dispatchedCandidate)
+      const dispatchedRel = relative(root, dispatchedCanonical)
+      if (isPathOutside(dispatchedRel)) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+      }
+
+      return safeRel
+    } catch (error) {
+      if (error instanceof RpcError) throw error
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.')
+    }
+  }
+
+}
+
+function isPathOutside(rel: string): boolean {
+  if (rel === '..' || isAbsolute(rel)) return true
+  if (process.platform === 'win32') {
+    return rel.startsWith('..\\') || rel.startsWith('../')
+  }
+  return rel.startsWith('../')
+}
+
+function byteOrLineRange(args: Record<string, unknown>): Record<string, unknown> {
+  const options = isRecord(args.options) ? args.options : undefined
+  if (options !== undefined && isRecord(options.range)) return options.range
+  return isRecord(args.range) ? args.range : args
 }
 
 /**
