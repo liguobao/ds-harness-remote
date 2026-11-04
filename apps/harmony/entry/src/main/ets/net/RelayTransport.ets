@@ -8,8 +8,14 @@ export class RelayTransportOptions {
   deviceId: string = '';
   accessToken: string = '';
   targetDeviceId: string = '';
-  capabilities: string[] = ['transport.relay', 'transport.relay.attach'];
-  preferredTransports: string[] = ['relay'];
+  /**
+   * 与原项目 client 保持一致：声明完整数据面能力，别只留 relay。
+   * 只声明 relay 时服务端只会下发中继端点，中继一满就彻底没路。
+   */
+  capabilities: string[] = ['transport.lan', 'transport.p2p', 'transport.turn',
+    'transport.relay', 'transport.relay.attach'];
+  /** 优先级照原项目 network.md：LAN -> P2P -> TURN -> Relay。 */
+  preferredTransports: string[] = ['lan', 'p2p', 'turn', 'relay'];
   /**
    * 整个控制握手（含重新要票）的预算。服务端 connect.request 偶尔要十几秒才回
    * （网关刚重启时实测 16s），所以别按秒级预算掐死。
@@ -287,6 +293,7 @@ export class RelayTransport {
         allOffered = false;
       }
     }
+    logInfo('server negotiated capabilities: ' + negotiated.join(','));
     if (!allOffered || !negotiated.includes('transport.relay')) {
       throw new Error('Server did not negotiate the required Relay capability');
     }
@@ -306,6 +313,13 @@ export class RelayTransport {
     const relayEndpoint = jsonStr(frame.payload, 'relayEndpoint', '');
     const relayTicket = jsonStr(frame.payload, 'relayTicket', '');
     const relayEpoch = jsonNum(frame.payload, 'relayEpoch', -1);
+    const hints: string[] = [];
+    for (const key of ['iceServers', 'rtcConfig', 'webrtc', 'candidates', 'lanAddress', 'transportHints']) {
+      if (jsonValue(frame.payload, key) !== undefined) {
+        hints.push(key);
+      }
+    }
+    logInfo('connect.accepted hints=[' + hints.join(',') + '] relay=' + relayEndpoint);
     if (relayEndpoint.length > 0 && relayTicket.length > 0) {
       if (this.relayCandidates.length === 0) {
         this.relayCandidates = buildRelayCandidates(relayEndpoint);
