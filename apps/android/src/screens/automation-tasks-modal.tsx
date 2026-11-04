@@ -282,7 +282,13 @@ export function AutomationTasksModal({
     }
     ref.current?.measureInWindow((x, y, width, height) => {
       const maxTop = Math.max(spacing.md, windowHeight - 320)
-      setPickerAnchor({ top: Math.min(y + height + 4, maxTop), left: x, width })
+      // Golden-ratio panel, right-aligned to the row so it sits under its control.
+      const panelWidth = Math.max(168, Math.round(width * 0.618))
+      setPickerAnchor({
+        top: Math.min(y + height + 4, maxTop),
+        left: x + width - panelWidth,
+        width: panelWidth,
+      })
       setExpandedRow(row)
     })
   }
