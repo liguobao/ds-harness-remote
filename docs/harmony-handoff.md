@@ -94,3 +94,25 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
 - 构建目录若出现 0700 权限问题，用 `umask 000` 重新构建
 - `devecocli run` 会因签名材料跨工程失配而失败，统一用 build + `hdc install`
 - 手机 hilog：`hdc -t <phone> shell "hilog -T DSHREMOTE"`
+
+## 2026-11-04 下午进度（WebRTC 直连起步，`docs/webrtc-arkweb-plan.md`）
+
+- **已验证**：ArkWeb 7.0 / Chrome 144 支持完整 WebRTC，本机（MatePad Edge）自检
+  `sdp exchanged → dc open → 收到回环数据` 全通过
+- **已落地**：
+  - `services/RtcBridge.ets`：隐藏 Web（1x1 透明）+ `javaScriptProxy`，暴露
+    `startOffer/applyAnswer/addRemoteIce/send/closeAll`，钩子 `onLocalSdp/onIce/onDataOpen/onDataBinary`
+  - `resources/rawfile/webrtc-bridge.html`：JS 侧 RTCPeerConnection + DataChannel(ordered) + 二进制收发
+- **下一步（按顺序）**：
+  1. ICE 配置：`GET /api/v1/turn/credentials`（要求 active connection，须在 connect.accepted 后请求）
+  2. `signal.offer/answer/ice` 走 Control WS；DC open 先发 `transport.selected` 再跑 Noise（协议硬约束）
+  3. `SecureTransport` 抽出 `sendFrame(bytes)`，relay/DC 两种实现
+  4. 失败回退 relay（现有路径保留），并把「上次成功传输方式」记住
+- **风险**：ArkWeb 的 NAT/局域网可达性未验证（自检是自环）；后台挂起会断 DC；DC 单帧建议 <256KB
+
+## 版本历史
+
+| versionName | versionCode | 内容 |
+|---|---|---|
+| 0.03.2 | 1000010 | 记住上次连通的中继节点 |
+| 0.03.1 | 1000009 | 光感坞、语音、图片、折叠、双语、能力声明补全 |
