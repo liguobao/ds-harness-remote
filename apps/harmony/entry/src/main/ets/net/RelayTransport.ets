@@ -19,6 +19,35 @@ export class RelayTransportOptions {
   attachRetryDelaysMs: number[] = [1200, 2500];
 }
 
+/**
+ * 服务器只给一个 relayEndpoint。同一集群里还有 gz-turn / turn 等节点，
+ * 某个节点打满时换个域名再试——票据是服务端签的，换节点不影响校验。
+ */
+export function buildRelayCandidates(endpoint: string): string[] {
+  const out: string[] = [endpoint];
+  const match: RegExpMatchArray | null = endpoint.match(/^(wss?:\/\/)([^/]+)(.*)$/);
+  if (match === null) {
+    return out;
+  }
+  const scheme: string = match[1];
+  const tail: string = match[3];
+  const host: string = match[2];
+  const suffixes: string[] = ['r2049.cn'];
+  const dot: number = host.indexOf('.');
+  if (dot > 0) {
+    const suffix: string = host.substring(dot + 1);
+    suffixes[0] = suffix;
+  }
+  const alternatives: string[] = ['gz-turn', 'turn', 'sh-turn'];
+  for (const prefix of alternatives) {
+    const candidate: string = scheme + prefix + '.' + suffixes[0] + tail;
+    if (candidate !== endpoint && !out.includes(candidate)) {
+      out.push(candidate);
+    }
+  }
+  return out;
+}
+
 /** 把中继的关闭码翻译成一句人话，原始 code/reason 仍然带着，方便报障。 */
 export function describeAttachFailure(code: number, reason: string): string {
   if (code === 4008) {
@@ -48,6 +77,8 @@ export class RelayTransport {
   private connectionId: string | undefined = undefined;
   /** 已经用掉几次 attach 机会（每次都会重新要 ticket）。 */
   private attachAttempt: number = 0;
+  /** 服务器给的中继端点 + 同集群备选（节点打满时换一台试）。 */
+  private relayCandidates: string[] = [];
   private relayCounter: number = 0;
   private connectResolve: (() => void) | undefined = undefined;
   private connectReject: ((err: Error) => void) | undefined = undefined;
@@ -68,6 +99,7 @@ export class RelayTransport {
     }
     this.notifiedClosed = false;
     this.attachAttempt = 0;
+    this.relayCandidates = [];
     return new Promise<void>((resolve, reject) => {
       this.connectResolve = resolve;
       this.connectReject = reject;
@@ -275,7 +307,12 @@ export class RelayTransport {
     const relayTicket = jsonStr(frame.payload, 'relayTicket', '');
     const relayEpoch = jsonNum(frame.payload, 'relayEpoch', -1);
     if (relayEndpoint.length > 0 && relayTicket.length > 0) {
-      this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
+      if (this.relayCandidates.length === 0) {
+        this.relayCandidates = buildRelayCandidates(relayEndpoint);
+        logInfo('relay candidates: ' + this.relayCandidates.join(' , '));
+      }
+      const target: string = this.relayCandidates[this.attachAttempt % this.relayCandidates.length];
+      this.openDataSocket(target, relayTicket, relayEpoch)
         .then(() => {
           this.attachAttempt = 0;
           this.finishConnect();
