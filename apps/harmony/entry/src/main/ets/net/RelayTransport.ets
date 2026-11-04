@@ -10,8 +10,11 @@ export class RelayTransportOptions {
   targetDeviceId: string = '';
   capabilities: string[] = ['transport.relay', 'transport.relay.attach'];
   preferredTransports: string[] = ['relay'];
-  /** 整个控制握手（含中继 attach 重试）的预算，必须大于重试间隔之和。 */
-  handshakeTimeoutMs: number = 20000;
+  /**
+   * 整个控制握手（含重新要票）的预算。服务端 connect.request 偶尔要十几秒才回
+   * （网关刚重启时实测 16s），所以别按秒级预算掐死。
+   */
+  handshakeTimeoutMs: number = 60000;
   /** 中继容量会抖一下，快速补两次就够了；真被拒就别让用户干等。 */
   attachRetryDelaysMs: number[] = [1200, 2500];
 }
@@ -43,6 +46,8 @@ export class RelayTransport {
   private socket: webSocket.WebSocket | undefined = undefined;
   private dataSocket: webSocket.WebSocket | undefined = undefined;
   private connectionId: string | undefined = undefined;
+  /** 已经用掉几次 attach 机会（每次都会重新要 ticket）。 */
+  private attachAttempt: number = 0;
   private relayCounter: number = 0;
   private connectResolve: (() => void) | undefined = undefined;
   private connectReject: ((err: Error) => void) | undefined = undefined;
@@ -62,6 +67,7 @@ export class RelayTransport {
       return Promise.resolve();
     }
     this.notifiedClosed = false;
+    this.attachAttempt = 0;
     return new Promise<void>((resolve, reject) => {
       this.connectResolve = resolve;
       this.connectReject = reject;
@@ -269,15 +275,16 @@ export class RelayTransport {
     const relayTicket = jsonStr(frame.payload, 'relayTicket', '');
     const relayEpoch = jsonNum(frame.payload, 'relayEpoch', -1);
     if (relayEndpoint.length > 0 && relayTicket.length > 0) {
-      this.attachDataWithRetry(relayEndpoint, relayTicket, relayEpoch, 0)
+      this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
         .then(() => {
+          this.attachAttempt = 0;
           this.finishConnect();
         })
         .catch((e: Error) => {
           // 把底层原因带出来，否则线上只能看到笼统的 attach failed
           const detail: string = e instanceof Error ? e.message : String(e);
           logError('relay data attach failed: ' + detail);
-          this.fail(new Error('relay data attach failed: ' + detail));
+          this.retryWithFreshTicket(detail);
         });
     } else {
       this.finishConnect();
@@ -315,23 +322,43 @@ export class RelayTransport {
   }
 
   /**
-   * 中继节点会短时打满（4008 relay capacity reached）。容量是秒级抖动的，
-   * 所以 attach 失败后按配置退避重来几次，比直接让用户看到报错靠谱。
+   * attach 失败后不重用旧 ticket：服务端可能一发票就占了一个 relay 会话，
+   * 拿旧票重试只会一直被拒，还越试越占。这里改为重新走一次 connect.request。
    */
-  private attachDataWithRetry(relayEndpoint: string, relayTicket: string, relayEpoch: number,
-    attempt: number): Promise<void> {
-    return this.openDataSocket(relayEndpoint, relayTicket, relayEpoch).catch((error: Error) => {
-      const delays: number[] = this.options.attachRetryDelaysMs;
-      if (attempt >= delays.length) {
-        throw error;
+  private retryWithFreshTicket(detail: string): void {
+    const delays: number[] = this.options.attachRetryDelaysMs;
+    if (this.attachAttempt >= delays.length || this.notifiedClosed) {
+      this.fail(new Error('relay data attach failed: ' + detail));
+      return;
+    }
+    const wait: number = delays[this.attachAttempt];
+    this.attachAttempt = this.attachAttempt + 1;
+    logWarn('relay attach retry ' + this.attachAttempt + '/' + delays.length
+      + ' with a fresh ticket in ' + wait + 'ms: ' + detail);
+    const stale: webSocket.WebSocket | undefined = this.dataSocket;
+    this.dataSocket = undefined;
+    this.dataReady = false;
+    this.connectionId = undefined;
+    if (stale !== undefined) {
+      try {
+        this.closeSocket(stale);
+      } catch (e) {
       }
-      const wait: number = delays[attempt];
-      logWarn('relay attach retry ' + (attempt + 1) + '/' + delays.length
-        + ' in ' + wait + 'ms: ' + (error instanceof Error ? error.message : String(error)));
-      return new Promise<void>((resolve) => {
-        setTimeout(resolve, wait);
-      }).then(() => this.attachDataWithRetry(relayEndpoint, relayTicket, relayEpoch, attempt + 1));
-    });
+    }
+    setTimeout(() => {
+      if (this.notifiedClosed) {
+        return;
+      }
+      const payload: Record<string, Object> = {
+        'hostDeviceId': this.options.targetDeviceId,
+        'preferredTransports': this.options.preferredTransports
+      };
+      try {
+        this.sendControl('connect.request', payload);
+      } catch (error) {
+        this.fail(new Error('relay reconnect request failed'));
+      }
+    }, wait);
   }
 
   private openDataSocket(relayEndpoint: string, relayTicket: string, relayEpoch: number): Promise<void> {
