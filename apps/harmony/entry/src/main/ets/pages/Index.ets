@@ -1282,11 +1282,16 @@ struct Index {
             Text(this.hostSubtitle(device))
               .fontSize(12)
               .fontColor(this.pal().text2)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.hostSeenLabel(device))
               .fontSize(10)
               .fontColor(this.pal().text3)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
         }
       }
       .layoutWeight(1)
@@ -1790,7 +1795,7 @@ struct Index {
             .textAlign(TextAlign.Center)
             .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
             .borderRadius(23)
-            .shadow({ radius: 12, color: 'rgba(77,107,254,0.4)', offsetX: 0, offsetY: 3 })
+            .shadow({ radius: 8, color: 'rgba(77,107,254,0.35)', offsetX: 0, offsetY: 2 })
             .onClick(() => {
               this.sendTap();
             })
@@ -1819,11 +1824,12 @@ struct Index {
       }
       .width('100%')
       // 系统材质负责模糊和透光，内衬只留一点点白，避免糊成一块实心板
-      .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
+      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
         colorMode: ThemeColorMode.SYSTEM,
         adaptiveColor: AdaptiveColor.DEFAULT
       })
-      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)')
+      // 顶边折光：用 overlay 画，不占流内高度，按钮才居中
+      .overlay(this.DockHighlight(), { align: Alignment.Top })
       .borderRadius(30)
       .border({ width: 1,
         color: this.isDarkUi ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.90)' })
@@ -2394,6 +2400,20 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 坞顶那道折光高光：叠在玻璃上，不影响布局。 */
+  @Builder
+  DockHighlight() {
+    Row()
+      .width('86%')
+      .height(1)
+      .linearGradient({ angle: 90, colors: [
+        ['rgba(255,255,255,0)', 0],
+        [this.isDarkUi ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.98)', 0.5],
+        ['rgba(255,255,255,0)', 1]
+      ] })
+      .hitTestBehavior(HitTestMode.None)
   }
 
   /** 消息里的图片：远端链接直接交给 Image，主机本地路径走 workspaceFiles/readBytes。 */
