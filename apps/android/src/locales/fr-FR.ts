@@ -354,6 +354,8 @@ const frFR = {
     copy: 'Copier',
   },
   automation: {
+    model: 'Modèle',
+    project: 'Projet',
     presetDaily: 'Chaque jour',
     presetWorkdays: 'Jours ouvrés',
     presetWeekly: 'Chaque semaine',

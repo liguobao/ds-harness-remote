@@ -354,6 +354,8 @@ const esES = {
     copy: 'Copiar',
   },
   automation: {
+    model: 'Modelo',
+    project: 'Proyecto',
     presetDaily: 'Cada día',
     presetWorkdays: 'Días laborables',
     presetWeekly: 'Cada semana',

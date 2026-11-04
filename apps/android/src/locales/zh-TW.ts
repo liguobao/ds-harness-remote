@@ -352,6 +352,8 @@ const zhTW = {
     copy: '複製',
   },
   automation: {
+    model: '模型',
+    project: '專案',
     presetDaily: '每天',
     presetWorkdays: '工作日',
     presetWeekly: '每週',

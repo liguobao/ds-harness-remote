@@ -354,6 +354,8 @@ const jaJP = {
     copy: 'コピー',
   },
   automation: {
+    model: 'モデル',
+    project: 'プロジェクト',
     presetDaily: '毎日',
     presetWorkdays: '平日',
     presetWeekly: '毎週',

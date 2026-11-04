@@ -354,6 +354,8 @@ const deDE = {
     copy: 'Kopieren',
   },
   automation: {
+    model: 'Modell',
+    project: 'Projekt',
     presetDaily: 'Jeden Tag',
     presetWorkdays: 'Werktags',
     presetWeekly: 'Jede Woche',

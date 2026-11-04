@@ -354,6 +354,8 @@ const enUS = {
     copy: 'Copy',
   },
   automation: {
+    model: 'Model',
+    project: 'Project',
     presetDaily: 'Every day',
     presetWorkdays: 'Weekdays',
     presetWeekly: 'Every week',

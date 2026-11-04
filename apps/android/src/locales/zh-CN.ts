@@ -352,6 +352,8 @@ const zhCN = {
     copy: '复制',
   },
   automation: {
+    model: '模型',
+    project: '项目',
     presetDaily: '每天',
     presetWorkdays: '工作日',
     presetWeekly: '每周',
