@@ -1634,7 +1634,7 @@ struct Index {
       }
       .layoutWeight(1)
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 148 })
+      .padding({ left: 16, right: 16, top: 8, bottom: 104 })
       .scrollBar(BarState.Off)
       }
       .width('100%')
@@ -1643,7 +1643,7 @@ struct Index {
       // 底部渐隐：消息滚到浮动坞下方时不硬切
       Column()
         .width('100%')
-        .height(110)
+        .height(96)
         .linearGradient({ angle: 180, colors: [['rgba(0,0,0,0)', 0], [this.pal().bg, 1]] })
         .hitTestBehavior(HitTestMode.None)
 
@@ -1674,16 +1674,7 @@ struct Index {
           .padding({ left: 16, right: 16, top: 4, bottom: 2 })
           .justifyContent(FlexAlign.Start)
         }
-      Column({ space: 6 }) {
-        // 顶边高光：玻璃「折光」的那一道亮线
-        Row()
-          .width('100%')
-          .height(1)
-          .linearGradient({ angle: 90, colors: [
-            ['rgba(255,255,255,0)', 0],
-            [this.isDarkUi ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.95)', 0.5],
-            ['rgba(255,255,255,0)', 1]
-          ] })
+      Column() {
         if (this.promptInput.startsWith('/') && this.slashCommands.length > 0) {
           Scroll() {
             Row({ space: 8 }) {
@@ -1827,24 +1818,24 @@ struct Index {
         .width('100%')
       }
       .width('100%')
-      .backgroundEffect({
-        radius: 28,
-        saturation: 1.35,
-        brightness: this.isDarkUi ? 1.04 : 1.08,
-        color: this.isDarkUi ? 'rgba(22,26,38,0.62)' : 'rgba(255,255,255,0.60)'
+      // 系统材质负责模糊和透光，内衬只留一点点白，避免糊成一块实心板
+      .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
+        colorMode: ThemeColorMode.SYSTEM,
+        adaptiveColor: AdaptiveColor.DEFAULT
       })
-      .borderRadius(26)
+      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)')
+      .borderRadius(30)
       .border({ width: 1,
-        color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.85)' })
+        color: this.isDarkUi ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.90)' })
       .shadow({
-        radius: 26,
-        color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.16)',
+        radius: 30,
+        color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.18)',
         offsetX: 0,
-        offsetY: 10
+        offsetY: 12
       })
     }
     .width('100%')
-    .padding({ left: 12, right: 12, bottom: 12 })
+    .padding({ left: 12, right: 12, bottom: 18 })
   }
 
   /** Shared sessions list (header + rows); wrapped by the overlay or the landscape pane. */
@@ -2448,7 +2439,8 @@ struct Index {
             })
         }
         .width('100%')
-        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 10, right: 10, top: 10, bottom: 10 })
         .backgroundColor(this.pal().chip)
         .borderRadius(10)
       } else {
