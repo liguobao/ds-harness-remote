@@ -94,6 +94,12 @@ struct Index {
   @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
   @State showSettings: boolean = false;
+  /** 图片全屏预览：src、缩放与平移。 */
+  @State previewSrc: string = '';
+  @State previewActive: boolean = false;
+  @State previewScale: number = 1;
+  @State previewOffsetX: number = 0;
+  @State previewOffsetY: number = 0;
   /** 输入坞上跟随手指/鼠标的光斑位置与强度。 */
   @State dockLightX: number = 0;
   @State dockLightY: number = 0;
@@ -755,6 +761,9 @@ struct Index {
       }
       if (this.showSettings) {
         this.SettingsOverlay()
+      }
+      if (this.previewActive) {
+        this.ImagePreviewOverlay()
       }
       // 隐藏的 WebRTC 桥：1x1 透明，仅承载 JS RTCPeerConnection
       Web({ src: $rawfile('webrtc-bridge.html'), controller: this.rtc.controller })
@@ -2580,6 +2589,126 @@ struct Index {
     });
   }
 
+  /** 点开图片：全屏查看，双指缩放 / 拖动 / 双击复位。 */
+  private openPreview(src: string): void {
+    this.previewSrc = src;
+    this.previewScale = 1;
+    this.previewOffsetX = 0;
+    this.previewOffsetY = 0;
+    this.previewActive = true;
+  }
+
+  @Builder
+  ImagePreviewOverlay() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(0,0,0,0.92)')
+        .onClick(() => {
+          this.previewActive = false;
+        })
+      if (isRemoteImage(this.previewSrc)) {
+        Image(this.previewSrc)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Contain)
+          .scale({ x: this.previewScale, y: this.previewScale })
+          .translate({ x: this.previewOffsetX, y: this.previewOffsetY })
+          .gesture(
+            GestureGroup(GestureMode.Parallel,
+              PinchGesture({ fingers: 2 })
+                .onActionUpdate((event: GestureEvent) => {
+                  this.previewScale = Math.min(6, Math.max(1, event.scale));
+                })
+                .onActionEnd(() => {
+                  if (this.previewScale <= 1.02) {
+                    this.previewScale = 1;
+                    this.previewOffsetX = 0;
+                    this.previewOffsetY = 0;
+                  }
+                }),
+              PanGesture()
+                .onActionUpdate((event: GestureEvent) => {
+                  if (this.previewScale <= 1) {
+                    return;
+                  }
+                  this.previewOffsetX = this.previewOffsetX + event.offsetX;
+                  this.previewOffsetY = this.previewOffsetY + event.offsetY;
+                }),
+              TapGesture({ count: 2 })
+                .onAction(() => {
+                  const doubled: boolean = this.previewScale > 1.05;
+                  this.previewScale = doubled ? 1 : 2.5;
+                  this.previewOffsetX = 0;
+                  this.previewOffsetY = 0;
+                })
+            )
+          )
+      } else if (this.images.has(this.previewSrc)) {
+        Image(this.images.pixel(this.previewSrc))
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Contain)
+          .scale({ x: this.previewScale, y: this.previewScale })
+          .translate({ x: this.previewOffsetX, y: this.previewOffsetY })
+          .gesture(
+            GestureGroup(GestureMode.Parallel,
+              PinchGesture({ fingers: 2 })
+                .onActionUpdate((event: GestureEvent) => {
+                  this.previewScale = Math.min(6, Math.max(1, event.scale));
+                })
+                .onActionEnd(() => {
+                  if (this.previewScale <= 1.02) {
+                    this.previewScale = 1;
+                    this.previewOffsetX = 0;
+                    this.previewOffsetY = 0;
+                  }
+                }),
+              PanGesture()
+                .onActionUpdate((event: GestureEvent) => {
+                  if (this.previewScale <= 1) {
+                    return;
+                  }
+                  this.previewOffsetX = this.previewOffsetX + event.offsetX;
+                  this.previewOffsetY = this.previewOffsetY + event.offsetY;
+                }),
+              TapGesture({ count: 2 })
+                .onAction(() => {
+                  const doubled: boolean = this.previewScale > 1.05;
+                  this.previewScale = doubled ? 1 : 2.5;
+                  this.previewOffsetX = 0;
+                  this.previewOffsetY = 0;
+                })
+            )
+          )
+      }
+      // 顶部：路径 + 关闭
+      Row({ space: 10 }) {
+        Text(this.previewSrc)
+          .fontSize(11)
+          .fontColor('rgba(255,255,255,0.75)')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text('关闭')
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor('rgba(255,255,255,0.18)')
+          .borderRadius(14)
+          .onClick(() => {
+            this.previewActive = false;
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14 })
+      .position({ x: 0, y: this.topInset + 8 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   /** 玻璃的「折光」层：跟手的光斑 + 顶上一条亮线 + 底下压一层内阴影。 */
   @Builder
   DockGlassOverlay() {
@@ -2638,6 +2767,9 @@ struct Index {
           .objectFit(ImageFit.Contain)
           .borderRadius(10)
           .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.openPreview(line.imageSrc);
+          })
       } else if (this.images.has(line.imageSrc)) {
         Image(this.images.pixel(line.imageSrc))
           .width('100%')
@@ -2645,6 +2777,9 @@ struct Index {
           .objectFit(ImageFit.Contain)
           .borderRadius(10)
           .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.openPreview(line.imageSrc);
+          })
       } else if (this.images.errorOf(line.imageSrc).length > 0) {
         Row({ space: 8 }) {
           Text('🖼')
