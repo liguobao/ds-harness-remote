@@ -88,6 +88,8 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    // 安全存储要在设备解锁后可用：回前台时补一次身份读取
+    getAppRuntime().retryBootstrap(this.context);
   }
 
   onBackground(): void {

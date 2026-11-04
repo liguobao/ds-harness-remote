@@ -4,10 +4,10 @@
       {
         "name": "default",
         "material": {
-          "storePassword": "000000206B408920AB1674C704031BBD7BA363F7B48D0F81F9D56C1FB4833B8096144F3BA9489EC85E2659559476E9BA",
+          "storePassword": "00000020394157B4E98603C03E4D89FA66F27C2A9183BFAA3180DA833DA72AF8AFD8D3CB18C380C529BDAA0A608C79E5",
           "certpath": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "000000206B408920AB1674C704031BBD7BA363F7B48D0F81F9D56C1FB4833B8096144F3BA9489EC85E2659559476E9BA",
+          "keyPassword": "00000020394157B4E98603C03E4D89FA66F27C2A9183BFAA3180DA833DA72AF8AFD8D3CB18C380C529BDAA0A608C79E5",
           "profile": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "/storage/Users/currentUser/.ohos/config/default_harmonyAY50yJABOQMuKfq0RQMzbdGo0gTAy-SrcL2A_x0tYak.p12"

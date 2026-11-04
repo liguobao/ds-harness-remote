@@ -244,7 +244,13 @@ export class SecureStore {
     // 直接生成新身份会把设备变成「新设备」：服务器侧凭据、Host 固定记录全部失效。
     // 这种情况宁可报错让用户重试，也不静默轮换身份。
     if (stored === undefined && this.getSync(KEY_IDENTITY, '').length > 0) {
-      throw new Error('设备身份读取失败（系统安全存储不可用）。为避免设备身份被轮换，已中止；请解锁设备后重试。');
+      const code: number = this.assetErrorCode();
+      // 24000003 = ACCESS_DENIED（设备未解锁）；其它码说明安全存储临时不可用
+      const reason: string = code === 24000003
+        ? '（错误码 24000003：设备未解锁）'
+        : (code === 0 ? '' : '（错误码 ' + code + '）');
+      throw new Error('设备身份读取失败（系统安全存储不可用）' + reason
+        + '。为避免设备身份被轮换，已中止；请解锁设备后重试。');
     }
     if (stored !== undefined) {
       // Older builds generated 32 raw hex characters, which the Server rejects: a device id
@@ -431,6 +437,13 @@ export class SecureStore {
     }
   }
 
+  /** 最近一次 Asset Store 读取失败的错误码（0 表示没有失败），给上层区分「未解锁」和「没有数据」。 */
+  private lastAssetErrorCode: number = 0;
+
+  assetErrorCode(): number {
+    return this.lastAssetErrorCode;
+  }
+
   private async readSecret(alias: string): Promise<string | undefined> {
     try {
       const query: asset.AssetMap = new Map<asset.Tag, asset.Value>();
@@ -447,6 +460,10 @@ export class SecureStore {
       return undefined;
     } catch (error) {
       this.assetOk = false;
+      const code: number = (error as Record<string, Object>)['code'] as number;
+      if (typeof code === 'number') {
+        this.lastAssetErrorCode = code;
+      }
       logError('asset query failed for ' + alias + ': ' + JSON.stringify(error));
       return undefined;
     }

@@ -155,6 +155,8 @@ export class AppRuntime {
   themeMode: number = 0;
   /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
   languageMode: number = 0;
+  /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
+  identityBlocked: boolean = false;
   /** System dark-mode flag, kept fresh by EntryAbility configuration updates. */
   systemDark: boolean = false;
   /** System orientation flag, kept fresh by EntryAbility configuration updates. */
@@ -271,7 +273,9 @@ export class AppRuntime {
       this.languageMode = this.store.loadLanguageMode();
       this.applyLanguage();
     } catch (error) {
-      this.errorMsg = errorMessage(error);
+      const text: string = errorMessage(error);
+      this.errorMsg = text;
+      this.identityBlocked = text.indexOf('设备身份读取失败') >= 0;
       this.phase = PHASE_SETUP;
       this.notify();
       return;
@@ -465,6 +469,18 @@ export class AppRuntime {
     this.errorMsg = '';
     this.notify();
     this.refreshDevices();
+  }
+
+  /** 解锁 / 回到前台后重试读取设备身份。 */
+  retryBootstrap(context: common.Context): void {
+    if (!this.identityBlocked) {
+      return;
+    }
+    this.identityBlocked = false;
+    this.errorMsg = '';
+    this.phase = PHASE_BOOT;
+    this.notify();
+    this.bootstrap(context);
   }
 
   async logout(): Promise<void> {
