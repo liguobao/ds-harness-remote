@@ -3667,15 +3667,15 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id6, name2, block, kx, constants7, hash22 = "sha256") {
+function createAEADCipher(id6, name2, block, kx, constants6, hash22 = "sha256") {
   const cipher = new AEADCipher();
   cipher.id = id6;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
   cipher.hashAlgorithm = hash22;
-  cipher.keyLength = constants7.K_LEN;
-  cipher.nonceLength = constants7.N_MAX;
+  cipher.keyLength = constants6.K_LEN;
+  cipher.nonceLength = constants6.N_MAX;
   cipher.nonceImplicitLength = 4;
   cipher.nonceExplicitLength = 8;
   cipher.ivLength = cipher.nonceImplicitLength;
@@ -75339,7 +75339,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error62) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open7 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open6 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -75348,7 +75348,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open7,
+      open: open6,
       failure: (error62) => this.failure(error62),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -75375,12 +75375,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open7 = this.originalOpen;
-      const rc1 = usesRc1Arity(open7);
+      const open6 = this.originalOpen;
+      const rc1 = usesRc1Arity(open6);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open7, this.runtime, callArgs) : open7.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open6, this.runtime, callArgs) : open6.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -75464,8 +75464,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open7) {
-  return open7.length >= 5;
+function usesRc1Arity(open6) {
+  return open6.length >= 5;
 }
 function endedUplink() {
   return {
@@ -75481,9 +75481,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open7 = runtime.openWireStream;
-  if (open7 !== void 0) {
-    return usesRc1Arity(open7) ? (endpoint, payload, signal, uplink, peer) => open7.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open7.call(runtime, endpoint, payload, signal);
+  const open6 = runtime.openWireStream;
+  if (open6 !== void 0) {
+    return usesRc1Arity(open6) ? (endpoint, payload, signal, uplink, peer) => open6.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open6.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -87675,9 +87675,8 @@ function closeCode(code) {
 
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { constants as constants6 } from "node:fs";
-import { lstat as lstat3, open as open6, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname6, isAbsolute as isAbsolute10, join as join14, parse as parse4, relative as relative5, resolve as resolve6, sep as sep2 } from "node:path";
+import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/promises";
+import { isAbsolute as isAbsolute10, join as join14, parse as parse4, relative as relative5, resolve as resolve6, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir4, stat as stat7 } from "node:fs/promises";
@@ -87929,41 +87928,10 @@ var HarnessRemoteBridge = class {
     }
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);
-    const heldHandles = [];
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      let verifiedFile;
-      if (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
-        const checked = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
-        nativePayload = checked.payload;
-        heldHandles.push(...checked.heldHandles);
-        if (!checked.unverified && checked.canonical && checked.handle && checked.stat) {
-          if ((params.endpoint === "workspaceFiles/read" || params.endpoint === "workspaceFiles/readAll") && Number(checked.stat.size) > MAX_READ_BYTES2) {
-            throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
-          }
-          verifiedFile = { canonical: checked.canonical, handle: checked.handle, stat: checked.stat };
-        }
-      }
-      if (verifiedFile !== void 0) {
-        const preDispatchStat = await lstat3(verifiedFile.canonical);
-        if (preDispatchStat.isSymbolicLink() || preDispatchStat.ino !== verifiedFile.stat.ino || preDispatchStat.dev !== verifiedFile.stat.dev || preDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "The target path was replaced before gateway dispatch.");
-        }
-        const nativeResult2 = await this.gateway.dispatch(params.endpoint, nativePayload, signal);
-        const postDispatchStat = await lstat3(verifiedFile.canonical);
-        if (postDispatchStat.isSymbolicLink() || postDispatchStat.ino !== verifiedFile.stat.ino || postDispatchStat.dev !== verifiedFile.stat.dev || postDispatchStat.birthtimeMs !== verifiedFile.stat.birthtimeMs) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "The target path was replaced during gateway dispatch.");
-        }
-        if (!nativeResult2.ok) throw new RpcError(nativeResult2.error.code, nativeResult2.error.message);
-        const verifiedResult = await this.readVerifiedWorkspaceFile(
-          params.endpoint,
-          nativePayload,
-          verifiedFile.canonical,
-          verifiedFile.handle,
-          verifiedFile.stat,
-          signal
-        );
-        return reservation === void 0 ? verifiedResult : this.terminal.result(params.endpoint, params.payload, verifiedResult, reservation);
+      if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+        nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
       const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
@@ -87994,10 +87962,6 @@ var HarnessRemoteBridge = class {
         code: this.gateway.failure(error62).code
       });
       throw error62;
-    } finally {
-      for (const h of heldHandles) {
-        await h.close().catch(() => void 0);
-      }
     }
   }
   async directoryList(payload, signal) {
@@ -88265,134 +88229,31 @@ var HarnessRemoteBridge = class {
     }
     const root = await this.resolveWorkspaceRootForSession(sessionId, signal);
     if (!root) {
-      if (isAbsolute10(path)) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
-      }
-      return { payload, unverified: true, heldHandles: [] };
+      throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
-    const checked = await this.openPinnedWorkspaceFile(root, path);
-    try {
-      if (typeof args.baseFile === "string") {
-        const baseChecked = await this.openPinnedWorkspaceFile(root, args.baseFile);
-        for (const h of baseChecked.heldHandles) {
-          await h.close().catch(() => void 0);
-        }
-      }
-      let finalArgs = isRecord21(rootPayload.args) ? { ...rootPayload.args, path: checked.safeRel } : { ...rootPayload, path: checked.safeRel };
-      if (endpoint === "workspaceFiles/readBytes") {
-        const range = byteOrLineRange2(finalArgs);
-        const offset = typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
-        const rawLength = typeof range.length === "number" && Number.isInteger(range.length) && range.length > 0 ? range.length : MAX_READ_BYTES2;
-        const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
-        const normalizedRange = { offset, length: boundedLength };
-        if (requiresWorkspaceChangePath(this.harnessVersion)) {
-          finalArgs.options = { ...isRecord21(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
-          delete finalArgs.range;
-        } else {
-          finalArgs.range = normalizedRange;
-          if (isRecord21(finalArgs.options)) {
-            finalArgs.options = { ...finalArgs.options, range: normalizedRange };
-          }
-        }
-        if ("offset" in finalArgs || "length" in finalArgs) {
-          finalArgs.offset = offset;
-          finalArgs.length = boundedLength;
-        }
-      }
-      const updatedPayload = isRecord21(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
-      return { payload: updatedPayload, root, handle: checked.handle, canonical: checked.canonical, stat: checked.stat, heldHandles: checked.heldHandles };
-    } catch (error62) {
-      for (const h of checked.heldHandles) {
-        await h.close().catch(() => void 0);
-      }
-      throw error62;
-    }
-  }
-  async readVerifiedWorkspaceFile(endpoint, payload, canonical, handle, info, signal) {
-    const args = requestArgs(payload);
-    const fileSize = Number(info.size);
-    const version2 = `${info.mtimeMs}:${fileSize}`;
-    if (endpoint === "workspaceFiles/stat") {
-      return { ok: true, value: { absolutePath: canonical, version: version2, bytes: fileSize } };
-    }
-    const range = byteOrLineRange2(args);
+    const safeRel = await this.verifyWorkspacePathContainment(root, path, endpoint);
+    let finalArgs = isRecord21(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
     if (endpoint === "workspaceFiles/readBytes") {
+      const range = byteOrLineRange2(finalArgs);
       const offset = typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
-      const limit = typeof range.length === "number" && Number.isInteger(range.length) && range.length > 0 ? Math.min(range.length, MAX_READ_BYTES2) : MAX_READ_BYTES2;
-      const toRead = Math.max(0, Math.min(limit, fileSize - offset));
-      const buffer4 = Buffer.allocUnsafe(toRead);
-      let bytesRead = 0;
-      while (bytesRead < toRead) {
-        signal.throwIfAborted();
-        const readResult = await handle.read(buffer4, bytesRead, toRead - bytesRead, offset + bytesRead);
-        if (readResult.bytesRead === 0) break;
-        bytesRead += readResult.bytesRead;
-      }
-      const slice = buffer4.subarray(0, bytesRead);
-      return {
-        ok: true,
-        value: {
-          absolutePath: canonical,
-          version: version2,
-          bytes: fileSize,
-          offset,
-          data: slice.toString("base64"),
-          eof: offset + slice.length >= fileSize
+      const rawLength = typeof range.length === "number" && Number.isInteger(range.length) && range.length > 0 ? range.length : MAX_READ_BYTES2;
+      const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
+      const normalizedRange = { offset, length: boundedLength };
+      if (requiresWorkspaceChangePath(this.harnessVersion)) {
+        finalArgs.options = { ...isRecord21(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        delete finalArgs.range;
+      } else {
+        finalArgs.range = normalizedRange;
+        if (isRecord21(finalArgs.options)) {
+          finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
-      };
-    }
-    if (fileSize > MAX_READ_BYTES2) {
-      throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
-    }
-    if (endpoint === "workspaceFiles/read") {
-      const offset = typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 1 ? range.offset : 1;
-      const limit = typeof range.limit === "number" && Number.isInteger(range.limit) && range.limit > 0 ? Math.min(range.limit, 2e3) : 200;
-      const buffer4 = Buffer.allocUnsafe(fileSize);
-      let total2 = 0;
-      while (total2 < buffer4.length) {
-        signal.throwIfAborted();
-        const res = await handle.read(buffer4, total2, buffer4.length - total2, total2);
-        if (res.bytesRead === 0) break;
-        total2 += res.bytesRead;
       }
-      const text2 = buffer4.subarray(0, total2).toString("utf8");
-      const lines = text2.split("\n");
-      const startLine = Math.max(0, offset - 1);
-      const pageLines = lines.slice(startLine, startLine + limit);
-      const slice = pageLines.join("\n");
-      return {
-        ok: true,
-        value: {
-          absolutePath: canonical,
-          version: version2,
-          bytes: fileSize,
-          text: slice,
-          offset,
-          lines: pageLines.length,
-          eof: startLine + pageLines.length >= lines.length
-        }
-      };
-    }
-    const buffer3 = Buffer.allocUnsafe(fileSize);
-    let total = 0;
-    while (total < buffer3.length) {
-      signal.throwIfAborted();
-      const res = await handle.read(buffer3, total, buffer3.length - total, total);
-      if (res.bytesRead === 0) break;
-      total += res.bytesRead;
-    }
-    const bytes = buffer3.subarray(0, total);
-    const text = bytes.toString("utf8");
-    return {
-      ok: true,
-      value: {
-        absolutePath: canonical,
-        version: version2,
-        bytes: fileSize,
-        text,
-        data: bytes.toString("base64")
+      if ("offset" in finalArgs || "length" in finalArgs) {
+        finalArgs.offset = offset;
+        finalArgs.length = boundedLength;
       }
-    };
+    }
+    return isRecord21(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -88412,12 +88273,8 @@ var HarnessRemoteBridge = class {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
   }
-  async openPinnedWorkspaceFile(root, path) {
+  async verifyWorkspacePathContainment(root, path, endpoint) {
     const candidate = isAbsolute10(path) ? resolve6(path) : resolve6(root, path);
-    const rel = relative5(root, candidate);
-    if (isPathOutside(rel)) {
-      throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
-    }
     if (process.platform === "win32") {
       const rootDrive = parse4(root).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
@@ -88425,18 +88282,14 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
     }
-    const heldHandles = [];
+    const rel = relative5(root, candidate);
+    if (isPathOutside(rel)) {
+      throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+    }
     try {
       const rootLstat = await lstat3(root);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
-      }
-      const dirFlags = constants6.O_RDONLY | (process.platform !== "win32" ? (constants6.O_NONBLOCK ?? 0) | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_DIRECTORY ?? 0) : 0);
-      const rootHandle = await open6(root, dirFlags);
-      heldHandles.push(rootHandle);
-      const rootStat = await rootHandle.stat();
-      if (!rootStat.isDirectory() || rootLstat.ino !== rootStat.ino || rootLstat.dev !== rootStat.dev || rootLstat.birthtimeMs !== rootStat.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is not a valid pinned directory.");
       }
       const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root;
@@ -88450,87 +88303,32 @@ var HarnessRemoteBridge = class {
         if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.");
         }
-        const dirHandle = await open6(currentPath, dirFlags);
-        heldHandles.push(dirHandle);
-        const dirStat = await dirHandle.stat();
-        if (!dirStat.isDirectory()) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is not a directory.");
-        }
       }
-      const info = await lstat3(candidate);
-      if (info.isSymbolicLink() || !info.isFile()) {
+      const targetLstat = await lstat3(candidate);
+      if (targetLstat.isSymbolicLink()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
-      }
-      const flags = constants6.O_RDONLY | (process.platform !== "win32" ? constants6.O_NONBLOCK | (constants6.O_NOFOLLOW ?? 0) : 0);
-      const handle = await open6(candidate, flags);
-      heldHandles.push(handle);
-      const openedStat = await handle.stat();
-      if (!openedStat.isFile()) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
-      }
-      if (openedStat.ino !== info.ino || openedStat.dev !== info.dev || openedStat.birthtimeMs !== info.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The target file was modified during opening.");
-      }
-      if (openedStat.dev !== rootStat.dev) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path resides on a different device.");
       }
       const canonical = await realpath7(candidate);
+      if (process.platform === "win32") {
+        const rootDrive = parse4(root).root.toLowerCase();
+        const canonicalDrive = parse4(canonical).root.toLowerCase();
+        if (rootDrive !== canonicalDrive) {
+          throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        }
+      }
       const canonicalRel = relative5(root, canonical);
       if (isPathOutside(canonicalRel)) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
-      const statByPath = await stat8(canonical);
-      const parentDir = dirname6(canonical);
-      const expectedParentHandle = heldHandles[heldHandles.length - 2] ?? rootHandle;
-      const expectedParentStat = await expectedParentHandle.stat();
-      const actualParentStat = await stat8(parentDir);
-      const statByPathRepeat = await stat8(canonical);
-      if (statByPath.ino !== statByPathRepeat.ino || statByPath.dev !== statByPathRepeat.dev || statByPath.birthtimeMs !== statByPathRepeat.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "Target path resolution changed during verification.");
+      const info = await stat8(canonical);
+      if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
+        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
       }
-      if (openedStat.ino !== statByPath.ino || openedStat.dev !== statByPath.dev || openedStat.birthtimeMs !== statByPath.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace file was replaced during opening.");
+      if ((endpoint === "workspaceFiles/read" || endpoint === "workspaceFiles/readAll") && Number(info.size) > MAX_READ_BYTES2) {
+        throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       }
-      if (actualParentStat.ino !== expectedParentStat.ino || actualParentStat.dev !== expectedParentStat.dev || actualParentStat.birthtimeMs !== expectedParentStat.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The parent directory of the opened file does not match the pinned workspace directory.");
-      }
-      if (process.platform === "linux") {
-        try {
-          const kernelPath = await realpath7(`/proc/self/fd/${handle.fd}`);
-          if (isPathOutside(relative5(root, kernelPath))) {
-            throw new RpcError("WORKSPACE_PATH_DENIED", "The opened file is outside the workspace.");
-          }
-        } catch (err5) {
-          if (err5 instanceof RpcError) throw err5;
-          throw new RpcError("WORKSPACE_PATH_DENIED", "The opened file cannot be verified.");
-        }
-      } else if (process.platform === "darwin") {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "OS-backed descriptor verification is not available on macOS.");
-      } else if (parts.length > 1) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "Nested workspace paths require OS-backed descriptor verification.");
-      }
-      const rootLstatNow = await lstat3(root);
-      if (rootLstatNow.isSymbolicLink() || !rootLstatNow.isDirectory() || rootLstatNow.ino !== rootStat.ino || rootLstatNow.dev !== rootStat.dev || rootLstatNow.birthtimeMs !== rootStat.birthtimeMs) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root was modified during opening.");
-      }
-      let verifyPath = root;
-      for (let i = 0; i < parts.length - 1; i++) {
-        verifyPath = join14(verifyPath, parts[i]);
-        const dirLstatNow = await lstat3(verifyPath);
-        if (dirLstatNow.isSymbolicLink() || !dirLstatNow.isDirectory()) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory was modified.");
-        }
-        const dirStatNow = await heldHandles[i + 1].stat();
-        if (dirLstatNow.ino !== dirStatNow.ino || dirLstatNow.dev !== dirStatNow.dev || dirLstatNow.birthtimeMs !== dirStatNow.birthtimeMs) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory was replaced.");
-        }
-      }
-      const safeRel = rel === "" ? "." : rel;
-      return { safeRel, handle, canonical, stat: openedStat, heldHandles };
+      return (canonicalRel === "" ? "." : canonicalRel).replaceAll("\\", "/");
     } catch (error62) {
-      for (const h of heldHandles) {
-        await h.close().catch(() => void 0);
-      }
       if (error62 instanceof RpcError) throw error62;
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");
     }

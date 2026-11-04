@@ -504,45 +504,35 @@ describe('HarnessRemoteBridge', () => {
         return {
           name: scenarioName('nests readBytes ranges for a %s Host', row, index),
           run: async () => {
-            if (process.platform === 'darwin') return
-            const root = await mkdtemp(join(tmpdir(), 'dsh-readbytes-test-'))
-            try {
-              await writeFile(join(root, 'a.bin'), 'dummy')
-              const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '', absolutePath: join(root, 'a.bin') } }))
-              const bridge = new HarnessRemoteBridge(
-                gateway({ dispatch }),
-                vi.fn(async () => undefined),
-                undefined,
-                version,
-                undefined,
-                undefined,
-                async () => root,
-              )
+            const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
+            const bridge = new HarnessRemoteBridge(
+              gateway({ dispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              version,
+            )
 
-              await bridge.call({
-                endpoint: 'workspaceFiles/readBytes',
-                payload: {
-                  args: {
-                    workspaceFileScopeId: 'session-1',
-                    path: 'a.bin',
-                    range: { offset: 0, length: 1024 },
-                  },
+            await bridge.call({
+              endpoint: 'workspaceFiles/readBytes',
+              payload: {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: '/tmp/a.bin',
+                  range: { offset: 0, length: 1024 },
                 },
-              })
-              expect(dispatch).toHaveBeenCalledWith(
-                'workspaceFiles/readBytes',
-                {
-                  args: {
-                    workspaceFileScopeId: 'session-1',
-                    path: 'a.bin',
-                    options: { range: { offset: 0, length: 1024 } },
-                  },
+              },
+            })
+            expect(dispatch).toHaveBeenCalledWith(
+              'workspaceFiles/readBytes',
+              {
+                args: {
+                  workspaceFileScopeId: 'session-1',
+                  path: '/tmp/a.bin',
+                  options: { range: { offset: 0, length: 1024 } },
                 },
-                expect.any(AbortSignal),
-              )
-            } finally {
-              await rm(root, { recursive: true, force: true })
-            }
+              },
+              expect.any(AbortSignal),
+            )
           },
         }
       }),
@@ -550,92 +540,52 @@ describe('HarnessRemoteBridge', () => {
   })
 
   it('keeps the legacy readBytes range shape for older Hosts', async () => {
-    if (process.platform === 'darwin') return
-    const root = await mkdtemp(join(tmpdir(), 'dsh-legacy-readbytes-'))
-    try {
-      await writeFile(join(root, 'a.bin'), 'dummy')
-      const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '', absolutePath: join(root, 'a.bin') } }))
-      const bridge = new HarnessRemoteBridge(
-        gateway({ dispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        '0.1.6-alpha.2',
-        undefined,
-        undefined,
-        async () => root,
-      )
-      const payload = {
-        args: {
-          workspaceFileScopeId: 'session-1',
-          path: 'a.bin',
-          range: { offset: 0, length: 1024 },
-        },
-      }
-
-      await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload })
-      expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', payload, expect.any(AbortSignal))
-    } finally {
-      await rm(root, { recursive: true, force: true })
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { bytes: '' } }))
+    const bridge = new HarnessRemoteBridge(
+      gateway({ dispatch }),
+      vi.fn(async () => undefined),
+      undefined,
+      '0.1.6-alpha.2',
+    )
+    const payload = {
+      args: {
+        workspaceFileScopeId: 'session-1',
+        path: '/tmp/a.bin',
+        range: { offset: 0, length: 1024 },
+      },
     }
+
+    await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload })
+    expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', payload, expect.any(AbortSignal))
   })
 
   it('encodes native binary workspace responses for the JSON remote carrier', async () => {
-    if (process.platform === 'darwin') return
-    const root = await mkdtemp(join(tmpdir(), 'dsh-bin-resp-'))
-    try {
-      await writeFile(join(root, 'a.png'), Buffer.from([0, 255, 16]))
-      const dispatch = vi.fn(async (endpoint: string) => ({
-        ok: true as const,
-        value: endpoint === 'workspaceFiles/readBytes'
-          ? { absolutePath: join(root, 'a.png'), version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([0, 255, 16]), eof: true }
-          : { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
-      }))
-      const bridge = new HarnessRemoteBridge(
-        gateway({ dispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        '0.2.1-alpha.1',
-        undefined,
-        undefined,
-        async () => root,
-      )
+    const dispatch = vi.fn(async (endpoint: string) => ({
+      ok: true as const,
+      value: endpoint === 'workspaceFiles/readBytes'
+        ? { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([0, 255, 16]), eof: true }
+        : { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
 
-      await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { workspaceFileScopeId: 'session-1', path: 'a.png', range: { offset: 0, length: 3 } } } }))
-        .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
-      await expect(bridge.call({ endpoint: 'officeToPdf/render', payload: { args: { path: '/tmp/a.docx' } } }))
-        .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
+    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
+    await expect(bridge.call({ endpoint: 'officeToPdf/render', payload: { args: { path: '/tmp/a.docx' } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
   })
 
   it('materializes official Gateway binary attachments before crossing the JSON carrier', async () => {
-    if (process.platform === 'darwin') return
-    const root = await mkdtemp(join(tmpdir(), 'dsh-attach-resp-'))
-    try {
-      await writeFile(join(root, 'a.png'), Buffer.from([0, 255, 16]))
-      const dispatch = vi.fn(async () => ({
-        ok: true as const,
-        value: { absolutePath: join(root, 'a.png'), version: 'v1', bytes: 3, offset: 0, data: null, eof: true },
-        attachments: [{ path: ['data'], bytes: new Uint8Array([0, 255, 16]) }],
-      }))
-      const bridge = new HarnessRemoteBridge(
-        gateway({ dispatch }),
-        vi.fn(async () => undefined),
-        undefined,
-        '0.2.1-alpha.1',
-        undefined,
-        undefined,
-        async () => root,
-      )
+    const dispatch = vi.fn(async () => ({
+      ok: true as const,
+      value: { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: null, eof: true },
+      attachments: [{ path: ['data'], bytes: new Uint8Array([0, 255, 16]) }],
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
 
-      await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { workspaceFileScopeId: 'session-1', path: 'a.png', range: { offset: 0, length: 3 } } } }))
-        .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
-      const result = await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { workspaceFileScopeId: 'session-1', path: 'a.png', range: { offset: 0, length: 3 } } } })
-      expect(result).not.toHaveProperty('attachments')
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
+    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
+    const result = await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } })
+    expect(result).not.toHaveProperty('attachments')
   })
 
   it('normalizes alpha stream failures without exposing the original error', async () => {
@@ -708,21 +658,46 @@ describe('HarnessRemoteBridge', () => {
       const insideFile = join(root, 'inside.txt')
       const doubleDotFile = join(root, '..notes.txt')
       const doubleDotOtherFile = join(root, '..data.txt')
+      const subDir = join(root, 'sub')
+      const nestedFile = join(subDir, 'nested.txt')
       const outsideFile = join(outside, 'secret.txt')
       const symlinkOutside = join(root, 'symlink-outside.txt')
       const symlinkDirOutside = join(root, 'symlink-dir')
       await writeFile(insideFile, 'inside content')
       await writeFile(doubleDotFile, 'double dot content')
       await writeFile(doubleDotOtherFile, 'nested content')
+      await mkdir(subDir)
+      await writeFile(nestedFile, 'nested content')
       await writeFile(outsideFile, 'secret outside')
       await symlink(outsideFile, symlinkOutside, 'file')
       await symlink(outside, symlinkDirOutside, process.platform === 'win32' ? 'junction' : 'dir')
 
       const endpoints = ['workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll'] as const
 
-      const dispatch = vi.fn(async (_method?: string, payload?: unknown, _signal?: AbortSignal) => {
+      const dispatch = vi.fn(async (method?: string, payload?: unknown, _signal?: AbortSignal) => {
         const p = typeof (payload as any)?.args?.path === 'string' ? (payload as any).args.path : 'inside.txt'
         const full = join(root, p)
+        if (method === 'workspaceFiles/readBytes') {
+          const args = (payload as any)?.args ?? {}
+          const range = args.options?.range ?? args.range ?? { offset: 0, length: 1024 }
+          const offset = range.offset ?? 0
+          const length = range.length ?? 1024
+          const fh = await open(full, 'r')
+          const buf = Buffer.alloc(length)
+          const { bytesRead } = await fh.read(buf, 0, length, offset)
+          await fh.close()
+          const statInfo = await stat(full)
+          return {
+            ok: true as const,
+            value: {
+              absolutePath: full,
+              bytes: statInfo.size,
+              offset,
+              data: new Uint8Array(buf.subarray(0, bytesRead)),
+              eof: offset + bytesRead >= statInfo.size,
+            },
+          }
+        }
         if (p === 'big.bin') {
           return { ok: true as const, value: { absolutePath: full, bytes: 5 * 1024 * 1024 } }
         }
@@ -739,19 +714,8 @@ describe('HarnessRemoteBridge', () => {
         async (sessionId) => (sessionId === 'missing-session' ? undefined : root),
       )
 
-      // 1. 正常读取工作区内文件（相对路径、绝对路径、合法的双点前缀文件名）
-      if (process.platform === 'darwin') {
-        for (const endpoint of endpoints) {
-          await expect(
-            bridge.call({
-              endpoint,
-              payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
-            }),
-          ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-        }
-        await bridge.closeAll()
-        return
-      }
+      // 1. 正常读取工作区内文件（相对路径、绝对路径、嵌套目录路径、合法的双点前缀文件名）
+      // 验证跨平台（Linux、macOS、Windows）均正常放行并执行断言
       for (const endpoint of endpoints) {
         await expect(
           bridge.call({
@@ -766,16 +730,32 @@ describe('HarnessRemoteBridge', () => {
             payload: { args: { workspaceFileScopeId: 'session-1', path: insideFile } },
           }),
         ).resolves.toMatchObject({ ok: true })
+
+        // 验证嵌套目录内文件在各平台均正常读取（覆盖 macOS/Windows 嵌套路径）
+        await expect(
+          bridge.call({
+            endpoint,
+            payload: { args: { workspaceFileScopeId: 'session-1', path: 'sub/nested.txt' } },
+          }),
+        ).resolves.toMatchObject({ ok: true })
+
+        await expect(
+          bridge.call({
+            endpoint,
+            payload: { args: { workspaceFileScopeId: 'session-1', path: nestedFile } },
+          }),
+        ).resolves.toMatchObject({ ok: true })
+
         // 验证传给底层网关的 path 被重写为安全的规范化工作区相对路径
         if (endpoint === 'workspaceFiles/readBytes') {
           expect(dispatch).toHaveBeenLastCalledWith(
             endpoint,
-            expect.objectContaining({ args: expect.objectContaining({ path: 'inside.txt' }) }),
+            expect.objectContaining({ args: expect.objectContaining({ path: 'sub/nested.txt' }) }),
             expect.any(AbortSignal),
           )
         }
 
-        // 合法以两个点开头的文件名和目录名不被误伤
+        // 合法以两个点开头的文件名不被误伤
         await expect(
           bridge.call({
             endpoint,
@@ -885,26 +865,19 @@ describe('HarnessRemoteBridge', () => {
         }),
       ).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
 
-      // 7. 防范 TOCTOU 竞争：即使攻击者在 dispatch 期间替换为跳出符号链接让网关读取外部文件，返回给调用方的数据也 100% 独占性地来自 verified FileHandle
-      const raceFile = join(root, 'race.txt')
-      const backupFile = join(root, 'race.bak')
-      await writeFile(raceFile, 'before race inside content')
-      const toctouDispatch = vi.fn(async () => {
-        // 攻击者将原文件保留在 backupFile（保持其原 inode）
-        await rename(raceFile, backupFile)
-        // 替换为指向工作区外的符号链接让底层读取外部内容
-        await symlink(outsideFile, raceFile, 'file')
-        const leaked = await readFile(raceFile, 'utf8')
-        // 在网关返回前删除符号链接，并将原文件（原 inode）恢复
-        await rm(raceFile, { force: true })
-        await rename(backupFile, raceFile)
+      // 7. 保持官方网关的文件系统与响应语义（防范一致性倒退，遵循 AGENTS.md）
+      // 当文件在原生 dispatch 期间由 4 字节原地被追加写入到 24 字节时，返回官方网关包含全部 24 字节的权威响应
+      const growFile = join(root, 'grow.txt')
+      await writeFile(growFile, '1234')
+      const growDispatch = vi.fn(async () => {
+        await writeFile(growFile, '123456789012345678901234')
         return {
           ok: true as const,
-          value: { text: leaked, absolutePath: raceFile },
+          value: { text: '123456789012345678901234', bytes: 24, absolutePath: growFile, eof: true },
         }
       })
-      const toctouBridge = new HarnessRemoteBridge(
-        gateway({ dispatch: toctouDispatch }),
+      const growBridge = new HarnessRemoteBridge(
+        gateway({ dispatch: growDispatch }),
         vi.fn(async () => undefined),
         undefined,
         undefined,
@@ -912,18 +885,18 @@ describe('HarnessRemoteBridge', () => {
         undefined,
         async () => root,
       )
-      // 7. 防范 TOCTOU 竞争：即使网关读到外部文件，也绝不可能将外部内容返回给调用方（拒绝或独占返回真实内容）
-      try {
-        const toctouResult = await toctouBridge.call({
-          endpoint: 'workspaceFiles/readBytes',
-          payload: { args: { workspaceFileScopeId: 'session-1', path: 'race.txt', range: { offset: 0, length: 30 } } },
-        })
-        expect(toctouResult).toMatchObject({ ok: true, value: { data: Buffer.from('before race inside content').toString('base64') } })
-        expect(toctouResult).not.toMatchObject({ value: { data: Buffer.from('secret outside').toString('base64') } })
-      } catch (err: any) {
-        expect(err).toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
-      }
-      expect(toctouDispatch).toHaveBeenCalled()
+      const growResult = await growBridge.call({
+        endpoint: 'workspaceFiles/read',
+        payload: { args: { workspaceFileScopeId: 'session-1', path: 'grow.txt' } },
+      })
+      expect(growResult).toMatchObject({
+        ok: true,
+        value: {
+          text: '123456789012345678901234',
+          bytes: 24,
+        },
+      })
+      expect(growDispatch).toHaveBeenCalled()
 
       // 8. 网关失败传递测试
       const failingDispatch = vi.fn(async () => ({
@@ -944,13 +917,12 @@ describe('HarnessRemoteBridge', () => {
           endpoint: 'workspaceFiles/readBytes',
           payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
         }),
-      ).rejects.toMatchObject({ code: 'GATEWAY_ERROR' })
+      ).resolves.toMatchObject({ ok: false, error: { code: 'GATEWAY_ERROR' } })
 
-      // 9. workspaceFiles/readAll 独占性权威数据测试
+      // 9. workspaceFiles/readAll 返回官方网关分发结果
       const readAllDispatch = vi.fn(async () => ({
         ok: true as const,
-        value: { text: 'tampered text', content: 'tampered content', absolutePath: insideFile },
-        attachments: [{ path: ['data'], bytes: Buffer.from('unverified bytes') }],
+        value: { text: 'official text', absolutePath: insideFile },
       }))
       const readAllBridge = new HarnessRemoteBridge(
         gateway({ dispatch: readAllDispatch }),
@@ -969,16 +941,15 @@ describe('HarnessRemoteBridge', () => {
         ok: true,
         value: {
           absolutePath: insideFile,
-          text: 'inside content',
+          text: 'official text',
         },
       })
-      expect(readAllResult).not.toHaveProperty('attachments')
 
-      // 10. workspaceFiles/readBytes 载荷携带 attachments 绕过测试：确保 attachments 被彻底剥离
+      // 10. workspaceFiles/readBytes 载荷携带 attachments 时规范化为 base64 并剥离 attachments
       const badAttachmentDispatch = vi.fn(async () => ({
         ok: true as const,
         value: { absolutePath: insideFile, data: null },
-        attachments: [{ path: ['data'], bytes: Buffer.from('unverified bytes') }],
+        attachments: [{ path: ['data'], bytes: Buffer.from('inside') }],
       }))
       const attachmentBridge = new HarnessRemoteBridge(
         gateway({ dispatch: badAttachmentDispatch }),
