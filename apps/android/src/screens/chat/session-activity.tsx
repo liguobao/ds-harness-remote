@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } fr
 import { ChevronDown, ChevronUp, Flag, PauseCircle } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import type { BackgroundJob } from '../../services/session-tools'
-import type { RemoteSession } from '../../types'
+import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import { requireSessionTools } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
@@ -11,6 +11,7 @@ import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { TaskProgressChecklist, type TodoItem } from './task-progress-checklist'
 import { BackgroundJobsCard } from './background-jobs-card'
+import { AgentTeamCard, SubagentsCard } from './agents'
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 type Todo = { content: string; status: 'pending' | 'in_progress' | 'completed' }
@@ -27,8 +28,25 @@ function jobsFrom(value: unknown, sessionId: string): BackgroundJob[] {
       || (typeof b.startedAt === 'number' ? b.startedAt : 0) - (typeof a.startedAt === 'number' ? a.startedAt : 0)) : []
 }
 
+export interface SessionActivityDockProps {
+  session: RemoteSession
+  childSessions?: RemoteSession[]
+  teamState?: {
+    members: TeamMemberSnapshot[]
+    tasks: TeamTaskSnapshot[]
+  }
+  sessions?: RemoteSession[]
+  onOpenSession?: (session: RemoteSession) => void
+}
+
 /** Current Host projections only. No inferred goals or locally persisted task state. */
-export function SessionActivityDock({ session }: { session: RemoteSession }) {
+export function SessionActivityDock({
+  session,
+  childSessions,
+  teamState,
+  sessions,
+  onOpenSession,
+}: SessionActivityDockProps) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const copy = strings.sessionActivity
@@ -36,8 +54,8 @@ export function SessionActivityDock({ session }: { session: RemoteSession }) {
   const todos = todosFrom(values?.todos)
   const projection = record(values?.goal) ? values.goal : undefined
   const goal = record(projection?.goal) && typeof projection.goal.objective === 'string' ? projection.goal : undefined
-  const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs' | undefined>()
-  const toggle = (section: 'todos' | 'goal' | 'jobs') => setExpanded(value => value === section ? undefined : section)
+  const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined>()
+  const toggle = (section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team') => setExpanded(value => value === section ? undefined : section)
   const { height } = useWindowDimensions()
   const detailsHeight = Math.min(180, height * 0.24)
   const [jobs, setJobs] = useState<BackgroundJob[]>([])
@@ -107,6 +125,26 @@ export function SessionActivityDock({ session }: { session: RemoteSession }) {
         error={jobError}
         onRefresh={() => { setRefreshing(true); setAttempt(value => value + 1) }}
         refreshing={refreshing}
+        maxHeight={detailsHeight}
+      />
+    )}
+    {childSessions && childSessions.length > 0 && (
+      <SubagentsCard
+        sessions={childSessions}
+        expanded={expanded === 'subagents'}
+        onToggle={() => toggle('subagents')}
+        onOpen={onOpenSession}
+        maxHeight={detailsHeight}
+      />
+    )}
+    {teamState !== undefined && teamState.members && teamState.members.length > 0 && (
+      <AgentTeamCard
+        members={teamState.members}
+        tasks={teamState.tasks ?? []}
+        sessions={sessions ?? []}
+        expanded={expanded === 'team'}
+        onToggle={() => toggle('team')}
+        onOpen={onOpenSession}
         maxHeight={detailsHeight}
       />
     )}

@@ -455,6 +455,8 @@ const esES = {
     goal: "Objetivo",
     jobs: "Tareas en segundo plano",
     backgroundJobs: "Tareas en segundo plano",
+    subagents: "Subagentes",
+    team: "Equipo de agentes",
     viewJobs: "Ver tareas en segundo plano",
     noJobs: "No hay tareas en segundo plano",
     loading: "Cargando…",

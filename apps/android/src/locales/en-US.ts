@@ -464,6 +464,8 @@ const enUS = {
     goal: "Goal",
     jobs: "Background tasks",
     backgroundJobs: "Background tasks",
+    subagents: "Subagents",
+    team: "Agent Team",
     viewJobs: "View background tasks",
     noJobs: "No background tasks",
     loading: "Loading…",

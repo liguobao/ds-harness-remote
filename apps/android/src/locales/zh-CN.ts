@@ -462,6 +462,8 @@ const zhCN = {
     goal: "目标",
     jobs: "后台任务",
     backgroundJobs: "后台任务",
+    subagents: "子任务",
+    team: "智能体团队",
     viewJobs: "查看后台任务",
     noJobs: "暂无后台任务",
     loading: "加载中…",

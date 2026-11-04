@@ -455,6 +455,8 @@ const deDE = {
     goal: "Ziel",
     jobs: "Hintergrundaufgaben",
     backgroundJobs: "Hintergrundaufgaben",
+    subagents: "Subagenten",
+    team: "Agenten-Team",
     viewJobs: "Hintergrundaufgaben anzeigen",
     noJobs: "Keine Hintergrundaufgaben",
     loading: "Wird geladen…",

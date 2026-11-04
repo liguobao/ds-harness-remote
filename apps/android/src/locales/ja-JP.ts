@@ -455,6 +455,8 @@ const jaJP = {
     goal: "目標",
     jobs: "バックグラウンドタスク",
     backgroundJobs: "バックグラウンドタスク",
+    subagents: "サブエージェント",
+    team: "エージェントチーム",
     viewJobs: "バックグラウンドタスクを表示",
     noJobs: "タスクはありません",
     loading: "読み込み中…",
