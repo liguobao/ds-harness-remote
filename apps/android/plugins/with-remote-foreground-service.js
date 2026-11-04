@@ -194,11 +194,26 @@ function withRemoteForegroundService(config) {
     const destination = path.join(config.modRequest.platformProjectRoot, 'app', 'src', 'main', 'java', JAVA_PATH)
     fs.mkdirSync(destination, { recursive: true })
     for (const file of fs.readdirSync(SOURCE_DIR)) {
-      fs.copyFileSync(path.join(SOURCE_DIR, file), path.join(destination, file))
+      const srcFile = path.join(SOURCE_DIR, file)
+      if (fs.statSync(srcFile).isFile()) {
+        fs.copyFileSync(srcFile, path.join(destination, file))
+      }
     }
 
-    // Localized strings for PROCESS_TEXT selection action
     const resDir = path.join(config.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res')
+    const srcResDir = path.join(SOURCE_DIR, 'res')
+    if (fs.existsSync(srcResDir)) {
+      const copyDir = (src, dest) => {
+        fs.mkdirSync(dest, { recursive: true })
+        for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+          const s = path.join(src, entry.name)
+          const d = path.join(dest, entry.name)
+          if (entry.isDirectory()) copyDir(s, d)
+          else fs.copyFileSync(s, d)
+        }
+      }
+      copyDir(srcResDir, resDir)
+    }
     const stringLocales = {
       'values': 'Ask Agent',
       'values-zh': '询问智能体',

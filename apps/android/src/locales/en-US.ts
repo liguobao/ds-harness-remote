@@ -132,6 +132,9 @@ const enUS = {
     toolUnavailable: "Details are unavailable. Try again.",
     taskEnded: "Task ended. Tap to view the result.",
     taskInput: "Your confirmation is needed. Tap to open the conversation.",
+    liveTaskRunning: 'Running',
+    liveTaskWaiting: 'Waiting',
+    liveTaskDefaultTitle: 'Remote session',
   },
   tools: {
     download: 'Save to phone',

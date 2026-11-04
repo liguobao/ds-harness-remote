@@ -132,6 +132,9 @@ const frFR = {
     toolUnavailable: "Les détails ne sont pas disponibles. Essayer à nouveau.",
     taskEnded: "Tâche terminée. Appuyez pour afficher le résultat.",
     taskInput: "Votre confirmation est nécessaire. Appuyez pour ouvrir la conversation.",
+    liveTaskRunning: 'En cours',
+    liveTaskWaiting: 'En attente',
+    liveTaskDefaultTitle: 'Session Remote',
   },
   tools: {
     download: "Enregistrer sur le téléphone",

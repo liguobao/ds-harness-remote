@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 const f=vi.hoisted(() => ({state:{} as any,memory:{ready:true,notifications:true,entries:{}} as any,phase:'active',changed:()=>{},notify:vi.fn()}))
 vi.mock('react-native', () => ({AppState:{get currentState(){return f.phase},addEventListener:()=>({remove(){}})}}))
 vi.mock('../src/state/store', () => ({useAppStore:{getState:()=>f.state,subscribe:(fn:()=>void)=>{f.changed=fn;return()=>{}}}}))
-vi.mock('../src/services/foreground-service', () => ({foregroundService:{notifyTask:f.notify}}))
+vi.mock('../src/services/foreground-service', () => ({foregroundService:{notifyTask:f.notify,updateLiveTask:vi.fn(),clearLiveTask:vi.fn()}}))
 vi.mock('../src/services/browse-memory', () => ({
   browseScope:()=> 'scope',browseKey:(s:string,id:string)=>s+id,useBrowseMemory:{getState:()=>f.memory},
   updateBrowseEntry:(s:string,id:string,p:unknown)=>{f.memory.entries[s+id]={...f.memory.entries[s+id],...p as object}},

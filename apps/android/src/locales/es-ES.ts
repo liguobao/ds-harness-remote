@@ -132,6 +132,9 @@ const esES = {
     toolUnavailable: "Los detalles no están disponibles. Intentar otra vez.",
     taskEnded: "Tarea finalizada. Toque para ver el resultado.",
     taskInput: "Se necesita su confirmación. Toque para abrir la conversación.",
+    liveTaskRunning: 'En ejecución',
+    liveTaskWaiting: 'Esperando',
+    liveTaskDefaultTitle: 'Sesión de Remote',
   },
   tools: {
     download: "guardar en el teléfono",

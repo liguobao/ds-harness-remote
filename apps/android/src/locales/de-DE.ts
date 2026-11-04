@@ -132,6 +132,9 @@ const deDE = {
     toolUnavailable: "Details sind nicht verfügbar. Versuchen Sie es erneut.",
     taskEnded: "Aufgabe beendet. Tippen Sie, um das Ergebnis anzuzeigen.",
     taskInput: "Ihre Bestätigung ist erforderlich. Tippen Sie, um die Konversation zu öffnen.",
+    liveTaskRunning: 'Wird ausgeführt',
+    liveTaskWaiting: 'Wartend',
+    liveTaskDefaultTitle: 'Remote-Sitzung',
   },
   tools: {
     download: "Auf Telefon speichern",

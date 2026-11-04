@@ -130,6 +130,9 @@ const zhTW = {
     toolUnavailable: "詳情暫時不可用，請重試",
     taskEnded: "任務已結束，點此檢視結果",
     taskInput: "需要你確認，點此開啟對話",
+    liveTaskRunning: '運行中',
+    liveTaskWaiting: '待確認',
+    liveTaskDefaultTitle: 'Remote 對話',
   },
   tools: {
     download: '儲存到手機',
