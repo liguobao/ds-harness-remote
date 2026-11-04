@@ -5,12 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { createConnection } from 'node:net'
 import { WebSocket } from 'ws'
 import { MAX_CONTROL_FRAME_BYTES, createControlFrame } from '@dsh-remote/protocol'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url, fromBase64Url } from '../../../packages/crypto/src/index.js'
 import { RelayTransport } from '../../../packages/webrtc/src/index.js'
 import { ClientSecureTransport } from '../../../packages/plugin/src/client-secure-transport.js'
-import { createRemoteServer } from '../src/server.js'
+import { createRemoteServer, normalizeIp, normalizeTrustedProxyIps } from '../src/server.js'
 
 const account = 'owner@example.com', password = 'local-test-password'
 let app: ReturnType<typeof createRemoteServer>, dir: string, base: string, accountToken: string
@@ -21,10 +22,36 @@ async function request(path: string, method = 'GET', body?: unknown, token?: str
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
 }
-async function start(pass = password) {
-  app = createRemoteServer({ account, password: pass, dataFile: join(dir, 'state.json'), publicUrl: 'http://localhost:8080' })
+async function start(pass = password, trustedProxyIps: readonly string[] = []) {
+  app = createRemoteServer({ account, password: pass, dataFile: join(dir, 'state.json'), publicUrl: 'http://localhost:8080', trustedProxyIps })
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening')
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
+}
+/** Send a raw HTTP/1.1 request so duplicate header lines stay separate (fetch merges them). */
+async function rawStatus(headerLines: string[]): Promise<number> {
+  const port = (app.server.address() as { port: number }).port
+  const crlf = String.fromCharCode(13, 10)
+  const lines = [
+    'GET /api/v1/auth/me HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    ...headerLines,
+    'Connection: close',
+    '',
+    '',
+  ]
+  return await new Promise<number>((resolve, reject) => {
+    const socket = createConnection(port, '127.0.0.1')
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error('raw request timed out')) }, 5000)
+    let buffer = ''
+    socket.on('connect', () => socket.write(lines.join(crlf)))
+    socket.on('data', chunk => {
+      buffer += chunk.toString('utf8')
+      const match = /^HTTP[/]1[.][01] ([0-9]{3})/.exec(buffer)
+      if (!match) return
+      clearTimeout(timer); socket.destroy(); resolve(Number(match[1]))
+    })
+    socket.on('error', error => { clearTimeout(timer); reject(error) })
+  })
 }
 async function device(role: 'host' | 'client' = 'client') {
   const keys = generateKeyPair()
@@ -327,4 +354,75 @@ describe('control authorization and encrypted relay', () => {
     expect(await ctx.host.next('error')).toMatchObject({ connectionId: incoming.connectionId })
     expect((await request('/devices', 'GET', undefined, second.accessToken)).status).toBe(401)
   })
+})
+
+
+describe('reverse-proxy client IP rate limiting', () => {
+  const trusted = ['127.0.0.1', '::ffff:127.0.0.1']
+  const forwarded = (ip: string) => ({ 'x-forwarded-for': ip })
+  const restart = async (ips: readonly string[] = trusted) => { await app.close(); await start(password, ips) }
+
+  it('normalizes IPv4, IPv6 and IPv4-mapped IPv6 to one canonical form', () => {
+    expect(normalizeIp('127.0.0.1')).toBe('127.0.0.1')
+    expect(normalizeIp('::ffff:127.0.0.1')).toBe('127.0.0.1')
+    expect(normalizeIp('::ffff:7f00:1')).toBe('127.0.0.1')
+    expect(normalizeIp('0:0:0:0:0:ffff:127.0.0.1')).toBe('127.0.0.1')
+    expect(normalizeIp('2001:0DB8:0000:0000:0000:0000:0000:0001')).toBe('2001:db8::1')
+    expect([...normalizeTrustedProxyIps(['127.0.0.1', '::ffff:127.0.0.1', '2001:db8::2'])]).toEqual(['127.0.0.1', '2001:db8::2'])
+    for (const invalid of ['', '10.0.0.0/8', '10.0.0.1:8080', '[::1]:8080', 'client.example.com', '1.2.3.4, 5.6.7.8', 'fe80::1%eth0']) {
+      expect(normalizeIp(invalid)).toBeNull()
+    }
+  })
+
+  it('rejects invalid trusted proxy IP lists at startup', () => {
+    for (const invalid of ['10.0.0.0/8', 'proxy.example.com', '127.0.0.1:8080', '999.1.1.1', '::1/128', '']) {
+      expect(() => createRemoteServer({ account, password, dataFile: join(dir, 'invalid.json'), publicUrl: 'http://localhost:8080', trustedProxyIps: [invalid] })).toThrow(/DSH_SERVER_TRUSTED_PROXY_IPS/)
+    }
+  })
+
+  it('keeps client B working after client A exhausts the 20/min login limit', async () => {
+    await restart()
+    const A = forwarded('10.20.0.1'), B = forwarded('10.20.0.2')
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, B)).status).toBe(200)
+    for (let i = 0; i < 20; i++) expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' }, undefined, A)).status).toBe(401)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, A)).status).toBe(429)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, B)).status).toBe(200)
+  }, 15000)
+
+  it('keeps client B working after client A exhausts the 240/min API limit', async () => {
+    await restart()
+    const A = forwarded('10.30.0.1'), B = forwarded('10.30.0.2')
+    for (let i = 0; i < 240; i++) expect((await request('/auth/me', 'GET', undefined, undefined, A)).status).toBe(401)
+    expect((await request('/auth/me', 'GET', undefined, undefined, A)).status).toBe(429)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, B)).status).toBe(200)
+  }, 30000)
+
+  it('ignores spoofed X-Forwarded-For from an untrusted peer and limits by socket IP', async () => {
+    await restart([])
+    for (let i = 0; i < 20; i++) expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' }, undefined, forwarded('10.40.0.1'))).status).toBe(401)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, forwarded('10.40.0.2'))).status).toBe(429)
+    expect(await rawStatus(['X-Forwarded-For: 10.40.0.1', 'x-forwarded-for: 10.40.0.2'])).toBe(401)
+  }, 15000)
+
+  it('rejects missing, duplicate and malformed X-Forwarded-For from a trusted peer', async () => {
+    await restart()
+    const missing = await request('/auth/me')
+    expect(missing.status).toBe(400)
+    expect(missing.data.error.code).toBe('INVALID_MESSAGE')
+    for (const value of ['10.0.0.1, 10.0.0.2', '10.0.0.1:8080', 'client.example.com', '10.0.0.0/8', '[::1]']) {
+      const result = await request('/auth/me', 'GET', undefined, undefined, forwarded(value))
+      expect(result.status).toBe(400)
+      expect(result.data.error.code).toBe('INVALID_MESSAGE')
+    }
+    expect(await rawStatus(['X-Forwarded-For: 10.0.0.1', 'x-forwarded-for: 10.0.0.2'])).toBe(400)
+    expect((await request('/auth/me', 'GET', undefined, undefined, forwarded('10.0.0.9'))).status).toBe(401)
+  }, 15000)
+
+  it('shares a rate bucket between IPv4 and IPv4-mapped IPv6 forwarded addresses', async () => {
+    await restart(['127.0.0.1'])
+    const mapped = forwarded('::ffff:10.50.0.1'), plain = forwarded('10.50.0.1'), other = forwarded('10.50.0.2')
+    for (let i = 0; i < 20; i++) expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' }, undefined, mapped)).status).toBe(401)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, plain)).status).toBe(429)
+    expect((await request('/auth/login', 'POST', { email: account, password }, undefined, other)).status).toBe(200)
+  }, 15000)
 })

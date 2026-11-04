@@ -9,6 +9,7 @@ services:
       DSH_SERVER_ACCOUNT: ${DSH_SERVER_ACCOUNT:?Set DSH_SERVER_ACCOUNT in .env}
       DSH_SERVER_PASSWORD: ${DSH_SERVER_PASSWORD:?Set DSH_SERVER_PASSWORD in .env}
       DSH_SERVER_PUBLIC_URL: ${DSH_SERVER_PUBLIC_URL:-http://localhost:8080}
+      DSH_SERVER_TRUSTED_PROXY_IPS: ${DSH_SERVER_TRUSTED_PROXY_IPS:-}
     volumes:
       - server-data:/data
     restart: unless-stopped
