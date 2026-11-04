@@ -43,6 +43,7 @@ export class SecureTransport implements RemoteTransport {
     this.noise = noise
     try {
       await waitForResponder(this.inner, noise)
+      this.inner.markSecureReady?.()
     } catch (error) {
       noise.destroy()
       this.noise = undefined

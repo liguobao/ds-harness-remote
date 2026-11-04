@@ -502,6 +502,11 @@ Server 校验 membership、双方账号归属一致且 Host online 后创建 `co
 Client 必须分别使用自己收到的 ticket 连接该 endpoint；ticket 不能发送到 Control WebSocket
 或复用到另一条 connection。缺少这些字段时，双方继续使用旧的 Control WebSocket Relay 兼容路径。
 
+当 Host、Client 和实时 Relay 节点同时声明 `transport.relay.resume.v1` 时，Server 还可以
+附带可选的 `relayRecoveryTicket`。该票据绑定 connection、双方身份、Relay 节点和 epoch，
+只用于 Server 重启后的双端 control lease 恢复，不能用于重新附着 Relay data socket。
+旧版本会忽略该字段；任一参与方未声明能力时，Server 不会下发或接受该恢复票据。
+
 WebRTC DataChannel 建立后，Initiator 必须先发送 `transport.selected`，再开始 Noise
 握手。Host 必须按同一 Control WebSocket 上的消息顺序，在创建 authenticated channel 前应用该
 选择；不得忽略该帧并仅依赖本机异步 RTC ready 回调，否则两端可能分别把同一条 Noise channel
@@ -2070,3 +2075,10 @@ Plugin configuration continues through the existing official `settings` endpoint
 Remote access namespaces remain local-only. Installation, removal, arbitrary
 plugin-manager methods and legacy ApiProxy plugin management remain disallowed.
 This adds no new wire format or capability and requires an updated Host plugin.
+
+
+## Optional WebRTC control recovery (implementation in progress)
+
+The additive `transport.webrtc.resume.v1` contract is specified in
+[WebRTC control recovery](design/webrtc-control-recovery.md). Protocol v1 and
+legacy control lifetimes remain unchanged unless all three parties negotiate it.

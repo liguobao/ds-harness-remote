@@ -87,6 +87,7 @@ export class ClientConnection {
           role: 'client',
           deviceId: identity.deviceId,
           accessToken: credentials.accessToken,
+          refreshAccessToken: async () => (await this.context.server.authenticate(identity)).accessToken,
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === 'relay',
           preferredTransports: preferredTransportsForAttempt(attempt),

@@ -1,3 +1,4 @@
+import { ControlLease } from '@dsh-remote/webrtc'
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url } from '@dsh-remote/crypto'
 import { createControlFrame, createRpcRequest, decodeMessage, encodeMessage, type RemoteMessage } from '@dsh-remote/protocol'
@@ -165,7 +166,7 @@ describe('HostServerConnection', () => {
         deviceId: 'host-1',
         clientVersion: PLUGIN_VERSION,
         harnessVersion: '0.1.0-rc.8',
-        capabilities: ['transport.relay', 'transport.relay.attach', 'harness.api.v1', 'fileviewer.read.v1'],
+        capabilities: ['transport.relay.resume.v1', 'transport.relay', 'transport.relay.attach', 'harness.api.v1', 'fileviewer.read.v1'],
       },
     })
     socket.receive(createControlFrame('hello.ack', {
@@ -670,6 +671,49 @@ describe('HostServerConnection', () => {
     )
   })
 
+  it('notifies the Server and closes the RTC when an authenticated channel is closed directly', async () => {
+    const hostKeys = generateKeyPair()
+    const clientKeys = generateKeyPair()
+    const noise = new NoiseIkSession({ role: 'responder', localPrivateKey: hostKeys.privateKey,
+      localPublicKey: hostKeys.publicKey, remotePublicKey: clientKeys.publicKey,
+      prologue: createNoisePrologue('connection-1', 'host-1', 'client-1') })
+    const initiator = new NoiseIkSession({ role: 'initiator', localPrivateKey: clientKeys.privateKey,
+      localPublicKey: clientKeys.publicKey, remotePublicKey: hostKeys.publicKey,
+      prologue: createNoisePrologue('connection-1', 'host-1', 'client-1') })
+    const rtc = { send: vi.fn(async () => undefined), close: vi.fn(async () => undefined) }
+    const dataSocket = { close: vi.fn() }
+    const socket = new FakeWebSocket()
+    socket.readyState = 1
+    let channel: AuthenticatedPeerChannel | undefined
+    const server = new HostServerConnection(
+      config(), { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...hostKeys },
+      {} as IdentityStore, { baseUrl: 'https://dsh.r2049.cn' } as HostServerApi,
+      { accept: vi.fn(async (value: AuthenticatedPeerChannel) => { channel = value }), close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+      logger(), () => socket,
+    )
+    const requests: Array<{ connectionId: string; requestId: string; ticket: string }> = []
+    const lease = new ControlLease('connection-1', 'ticket', payload => { requests.push(payload) }, () => {})
+    lease.start()
+    lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
+    const tunnel = { connectionId: 'connection-1', membershipId: 'membership-1',
+      peer: { deviceId: 'client-1', publicKey: clientKeys.publicKey }, noise, transport: 'p2p', rtc, dataSocket, lease }
+    const internals = server as unknown as { socket: FakeWebSocket; tunnels: Map<string, unknown>; completeHandshake(tunnel: unknown, payload: unknown): Promise<void>; dropTunnel(id: string): Promise<void> }
+    internals.socket = socket
+    internals.tunnels.set('connection-1', tunnel)
+    try {
+      await internals.completeHandshake(tunnel, { connectionId: 'connection-1', targetDeviceId: 'host-1', step: 1, data: toBase64Url(initiator.writeHandshake()) })
+      await channel!.close()
+      await channel!.close()
+      await internals.dropTunnel('connection-1')
+      expect(socket.sent.map(raw => JSON.parse(raw)).filter(frame => frame.type === 'connection.lease.close'))
+        .toEqual([expect.objectContaining({ payload: { connectionId: 'connection-1' } })])
+      expect(rtc.close).toHaveBeenCalledOnce()
+      expect(dataSocket.close).toHaveBeenCalledOnce()
+      expect(lease.canDetach()).toBe(false)
+      expect(internals.tunnels.size).toBe(0)
+    } finally { lease.stop(); initiator.destroy(); await server.stop() }
+  })
+
   it('disconnects an authenticated peer when its selected WebRTC channel fails', async () => {
     const keys = generateKeyPair(new Uint8Array(32).fill(15))
     const closeConnection = vi.fn(async () => true)
@@ -737,6 +781,150 @@ describe('HostServerConnection', () => {
     } finally {
       await server.stop()
     }
+  })
+
+  it('closes a confirmed RTC tunnel when control fails and automatic reconnect is disabled', async () => {
+    const socket = new FakeWebSocket()
+    const rtc = { close: vi.fn(async () => undefined) }
+    const channel = { close: vi.fn(async () => undefined) }
+    const connections = { close: vi.fn(async () => undefined) } as unknown as ConnectionController
+    const cfg = config()
+    const server = new HostServerConnection(
+      { ...cfg, forceRelay: false },
+      { schemaVersion: 1, deviceId: 'host-rtc', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+      { trustedPeer: vi.fn() } as unknown as IdentityStore,
+      { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })) } as unknown as HostServerApi,
+      connections, logger(), () => socket, async () => undefined,
+    )
+    const requests: Array<{ connectionId: string; requestId: string; ticket: string }> = []
+    const lease = new ControlLease('connection-rtc', 'ticket', payload => { requests.push(payload) }, () => {})
+    lease.start()
+    lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
+    try {
+      server.start()
+      await flush()
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', { ...helloAck('control-rtc'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      const internals = server as unknown as { tunnels: Map<string, unknown> }
+      internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
+      socket.close(1012, 'Server restart')
+      await vi.waitFor(() => expect(channel.close).toHaveBeenCalledOnce())
+      expect(rtc.close).toHaveBeenCalledOnce()
+      expect(internals.tunnels.size).toBe(0)
+      expect(lease.canDetach()).toBe(false)
+    } finally {
+      await server.stop()
+      lease.stop()
+    }
+  })
+
+  it('retains confirmed RTC on recovery and falls back safely after a Server rollback', async () => {
+    await runScenarios(['supported Server', 'rolled-back Server', 'recovery rejected', 'legacy recovery rejected', 'expired access token', 'Server unavailable'].map(name => ({ name, run: async () => {
+    const sockets: FakeWebSocket[] = []
+    const rtc = { close: vi.fn(async () => undefined) }
+    const channel = { close: vi.fn(async () => undefined) }
+    const cfg = config()
+    const server = new HostServerConnection(
+      { ...cfg, forceRelay: false, reconnect: { ...cfg.reconnect, enabled: true, initialDelayMs: 100, maxDelayMs: 1000 } },
+      { schemaVersion: 1, deviceId: 'host-rtc', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+      { trustedPeer: vi.fn() } as unknown as IdentityStore,
+      { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })), refreshCredentials: vi.fn(async () => undefined) } as unknown as HostServerApi,
+      { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+      logger(),
+      () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket },
+      async () => undefined,
+    )
+    const requests: Array<{ connectionId: string; requestId: string; ticket: string }> = []
+    const lease = new ControlLease('connection-rtc', 'ticket', payload => { requests.push(payload) }, () => {})
+    lease.start()
+    lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
+    try {
+      server.start()
+      await flush()
+      const socket = sockets[0]!
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', { ...helloAck('control-rtc'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      const internals = server as unknown as { tunnels: Map<string, unknown> }
+      internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
+      socket.close(1012, 'Server restart')
+      await vi.waitFor(() => expect(sockets).toHaveLength(2))
+      expect(rtc.close).not.toHaveBeenCalled()
+      expect(channel.close).not.toHaveBeenCalled()
+      const next = sockets[1]!
+      if (name === 'Server unavailable') {
+        next.close(1006, 'offline')
+        await vi.waitFor(() => expect(sockets).toHaveLength(3))
+        expect(rtc.close).not.toHaveBeenCalled()
+        expect(channel.close).not.toHaveBeenCalled()
+      }
+      const reconnect = name === 'Server unavailable' ? sockets[2]! : next
+      reconnect.open()
+      expect(JSON.parse(reconnect.sent[0]!).payload.recoveryTickets).toEqual(['confirmed'])
+      if (name === 'rolled-back Server' || name === 'recovery rejected' || name === 'legacy recovery rejected' || name === 'expired access token') {
+        next.close(name === 'rolled-back Server' ? 4008 : name === 'recovery rejected' ? 4012 : 4002, name === 'legacy recovery rejected' ? 'recovery authorization rejected' : 'rejected')
+        await vi.waitFor(() => expect(sockets).toHaveLength(3))
+        const legacy = sockets[2]!
+        legacy.open()
+        if (name === 'expired access token') {
+          expect(JSON.parse(legacy.sent[0]!).payload.recoveryTickets).toEqual(['confirmed'])
+          expect(rtc.close).not.toHaveBeenCalled()
+          legacy.receive(createControlFrame('hello.ack', { ...helloAck('recovered'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+        } else {
+          expect(JSON.parse(legacy.sent[0]!).payload.recoveryTickets).toBeUndefined()
+          legacy.receive(createControlFrame('hello.ack', helloAck('legacy')))
+        }
+      } else {
+        reconnect.receive(createControlFrame('hello.ack', { ...helloAck('recovered'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      }
+      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      expect(internals.tunnels.size).toBe(['rolled-back Server', 'recovery rejected', 'legacy recovery rejected'].includes(name) ? 0 : 1)
+    } finally {
+      await server.stop()
+      lease.stop()
+    }
+    expect(rtc.close).toHaveBeenCalledOnce()
+    expect(channel.close).toHaveBeenCalledOnce()
+    } })))
+  })
+
+  it('closes retained tunnels and stops retrying when the Server rejects the protocol version', async () => {
+    const sockets: FakeWebSocket[] = []
+    const rtc = { close: vi.fn(async () => undefined) }
+    const channel = { close: vi.fn(async () => undefined) }
+    const cfg = config()
+    const server = new HostServerConnection(
+      { ...cfg, forceRelay: false, reconnect: { ...cfg.reconnect, enabled: true } },
+      { schemaVersion: 1, deviceId: 'host-rtc', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+      { trustedPeer: vi.fn() } as unknown as IdentityStore,
+      { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })) } as unknown as HostServerApi,
+      { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+      logger(), () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket }, async () => undefined,
+    )
+    const requests: Array<{ connectionId: string; requestId: string; ticket: string }> = []
+    const lease = new ControlLease('connection-rtc', 'ticket', payload => { requests.push(payload) }, () => {})
+    lease.start()
+    lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
+    try {
+      server.start()
+      await flush()
+      sockets[0]!.open()
+      sockets[0]!.receive(createControlFrame('hello.ack', { ...helloAck('control-rtc'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      const internals = server as unknown as { tunnels: Map<string, unknown> }
+      internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
+      sockets[0]!.close(1012, 'Server restart')
+      await vi.waitFor(() => expect(sockets).toHaveLength(2))
+      sockets[1]!.open()
+      sockets[1]!.close(4011, 'unsupported protocol version')
+      await vi.waitFor(() => expect(channel.close).toHaveBeenCalledOnce())
+      expect(rtc.close).toHaveBeenCalledOnce()
+      expect(internals.tunnels.size).toBe(0)
+      expect(server.lastError()).toBe('UNSUPPORTED_VERSION')
+      await new Promise(resolve => setTimeout(resolve, 250))
+      expect(sockets).toHaveLength(2)
+    } finally { await server.stop(); lease.stop() }
   })
 
   it('keeps an authenticated Relay fallback when the parallel WebRTC negotiation later fails', async () => {

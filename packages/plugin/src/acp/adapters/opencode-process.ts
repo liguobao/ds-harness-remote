@@ -196,6 +196,12 @@ export class OpencodeAcpClient implements CursorAcpLike {
       this.busy.add(id)
       try { return await this.request(method, params, budget) } finally { this.busy.delete(id) }
     }
+    if (method === 'session/cancel') {
+      // OpenCode routes session/cancel through the ACP SDK's notification handler only.
+      // A request envelope (with id) is answered -32601, so this must never await a reply.
+      this.write({ jsonrpc: '2.0', method, params })
+      return {}
+    }
     const result = await this.request(method, params, budget)
     const nativeApi = this.nativeApi
     if (method === 'session/list' && nativeApi && isRecord(result) && Array.isArray(result.sessions)) {

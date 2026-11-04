@@ -410,7 +410,7 @@ const zhTW = {
   chat: {
     currentWorkSessions: '當前工作', noCurrentWorkSessions: '本次遠端尚未使用對話',
     otherHostSessions: '其他對話',
-    hostSessions: '主機對話', openHostSessions: '開啟當前主機的對話列表', backToWorkspaces: '返回工作區', noHostSessions: '當前主機暫無對話',
+    hostSessions: '主機對話', openHostSessions: '開啟當前主機的對話列表', backToWorkspaces: '返回工作區', backToChat: '返回對話', noHostSessions: '當前主機暫無對話',
     quickCheckChanges: '檢查改動', quickCheckChangesPrompt: '檢查當前程式碼改動並指出問題。', quickCommit: '提交程式碼', quickCommitPrompt: '檢查當前改動並直接提交程式碼，不要再詢問確認。', quickViewScreenshot: '檢視截圖', quickViewScreenshotPrompt: '檢視最新截圖並檢查介面問題。',
     fullAccessTitle: '開啟完全訪問許可權？', fullAccessBody: '開啟後，DeepSeek Harness 可以直接修改檔案和執行命令。只建議在你信任當前任務時使用。', codexFullAccessTitle: '允許 CodeX 完全訪問電腦？', codexFullAccessBody: '開啟後，CodeX 可訪問電腦上的全部檔案，並在後續回合中不再逐次請求命令或檔案修改確認。只建議在你完全信任當前任務時使用。', enable: '開啟完全訪問', stop: '停止回覆', selectModel: '選擇模型', selectReasoningEffort: '選擇思考程度', reasoningEffortLabel: (name: string) => `思考程度：${name}`, approvalMode: '操作許可權', approvalModeLabel: (name: string) => `操作許可權：${name}`, reconnect: '重新連線當前對話', reconnecting: '正在恢復當前對話…', offline: '裝置連線已斷開，點選右上角重新連線。', hostOperation: (name: string) => `${name}（電腦端）`,
     toolRunning: (name: string) => `正在${name}`, processRunning: '正在分析請求', older: '檢視更早的訊息', jumpToLatest: '回到最新訊息', messageLabel: '給 DeepSeek Harness 發訊息', codexMessageLabel: '給 CodeX 發訊息', cursorMessageLabel: '給 Cursor 發訊息', piMessageLabel: '給 Pi 發訊息', antigravityMessageLabel: '給 Antigravity 發訊息', opencodeMessageLabel: '給 OpenCode 發訊息', claudeMessageLabel: '給 Claude 發訊息',

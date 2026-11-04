@@ -3,6 +3,7 @@ import {
   Alert,
   ActivityIndicator,
   Animated,
+  Keyboard,
   KeyboardAvoidingView,
   PanResponder,
   Platform,
@@ -568,6 +569,15 @@ export function HostSessionsDrawer({
     })
   }
 
+  const handleBack = () => {
+    Keyboard.dismiss()
+    if (!inline) {
+      smoothClose(true)
+      return
+    }
+    onBack?.()
+  }
+
   useEffect(() => {
     if (inline) return
     const anim = Animated.parallel([
@@ -689,8 +699,8 @@ export function HostSessionsDrawer({
           >
             <RefreshCw size={17} color={colors.ink} strokeWidth={1.9} />
           </Pressable>
-          {onBack && (
-            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? 'Back'} onPress={onBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
+          {Boolean(onBack) && (
+            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={handleBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
               <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>
           )}

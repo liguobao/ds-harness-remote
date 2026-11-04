@@ -410,7 +410,7 @@ const zhCN = {
   chat: {
     currentWorkSessions: '当前工作', noCurrentWorkSessions: '本次远程尚未使用对话',
     otherHostSessions: '其他对话',
-    hostSessions: '主机对话', openHostSessions: '打开当前主机的对话列表', backToWorkspaces: '返回工作区', noHostSessions: '当前主机暂无对话',
+    hostSessions: '主机对话', openHostSessions: '打开当前主机的对话列表', backToWorkspaces: '返回工作区', backToChat: '返回会话', noHostSessions: '当前主机暂无对话',
     quickCheckChanges: '检查改动', quickCheckChangesPrompt: '检查当前代码改动并指出问题。', quickCommit: '提交代码', quickCommitPrompt: '检查当前改动并直接提交代码，不要再询问确认。', quickViewScreenshot: '查看截图', quickViewScreenshotPrompt: '查看最新截图并检查界面问题。',
     fullAccessTitle: '开启完全访问权限？', fullAccessBody: '开启后，DeepSeek Harness 可以直接修改文件和运行命令。只建议在你信任当前任务时使用。', codexFullAccessTitle: '允许 CodeX 完全访问电脑？', codexFullAccessBody: '开启后，CodeX 可访问电脑上的全部文件，并在后续回合中不再逐次请求命令或文件修改确认。只建议在你完全信任当前任务时使用。', enable: '开启完全访问', stop: '停止回复', selectModel: '选择模型', selectReasoningEffort: '选择思考程度', reasoningEffortLabel: (name: string) => `思考程度：${name}`, approvalMode: '操作权限', approvalModeLabel: (name: string) => `操作权限：${name}`, reconnect: '重新连接当前对话', reconnecting: '正在恢复当前对话…', offline: '设备连接已断开，点击右上角重新连接。', hostOperation: (name: string) => `${name}（电脑端）`,
     toolRunning: (name: string) => `正在${name}`, processRunning: '正在分析请求', older: '查看更早的消息', jumpToLatest: '回到最新消息', messageLabel: '给 DeepSeek Harness 发消息', codexMessageLabel: '给 CodeX 发消息', cursorMessageLabel: '给 Cursor 发消息', piMessageLabel: '给 Pi 发消息', antigravityMessageLabel: '给 Antigravity 发消息', opencodeMessageLabel: '给 OpenCode 发消息', claudeMessageLabel: '给 Claude 发消息',

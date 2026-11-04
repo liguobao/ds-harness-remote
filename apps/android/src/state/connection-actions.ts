@@ -79,6 +79,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           credentials.accessToken,
           frame => runtime.enqueueMuxFrame(generation, frame),
           {
+            refreshAccessToken: async () => (await serverSession.authenticate(config.baseUrl, identity)).credentials.accessToken,
             fetchIceServers: async connectionId => api.turnCredentials(connectionId),
             preferredTransports: [...preferredTransports],
             forceRelay,

@@ -15,6 +15,7 @@ export interface AndroidConnectionOptions {
   onOpencodeArchived?: (sessionId: string) => void
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   forceRelay?: boolean
+  refreshAccessToken?: () => Promise<string>
   fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
   onSecureHandshake?: () => void
   onClose?: CloseHandler
@@ -66,6 +67,7 @@ export class AndroidRemoteConnection {
       role: 'client',
       deviceId: identity.deviceId,
       accessToken,
+      refreshAccessToken: options.refreshAccessToken,
       targetDeviceId: host.deviceId,
       forceRelay: options.forceRelay || relayOnly,
       preferredTransports: options.forceRelay || relayOnly

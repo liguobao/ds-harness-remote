@@ -113,11 +113,9 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (isLegacySettingsProvider(settings)) return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
-  // `commands` identifies the terminal front door for the scoped TUI entry.
-  // `tuiCommandTrees` and `tuiScenes` are optional dsh-TUI seams and must not
-  // keep the whole Host entry pending when an older/partial profile omits
-  // them. Direct plugin callers still need the scene service to opt into the
-  // TUI path, which keeps ordinary Desktop composition unchanged.
+  // The scoped TUI entry is the normal activation path. Direct composition
+  // tests and older partial TUI profiles can still opt in by providing the
+  // command and scene registries explicitly.
   const tuiEntry = entryId === 'ds-harness-remote-tui'
   const tuiCommandsAvailable = ctx.get('commands', false) !== undefined
     && (tuiEntry || ctx.get('tuiScenes', false) !== undefined)

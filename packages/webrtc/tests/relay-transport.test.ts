@@ -245,6 +245,44 @@ describe('AdaptiveTransport capability negotiation', () => {
     expect(lastSentPayload(control, 'transport.selected')).toMatchObject({ transport: 'relay' })
   })
 
+  it('retains a confirmed independent Relay socket across control loss without resetting the relay counter', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport({ forceRelay: true, refreshAccessToken: async () => 'fresh-token' })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const control = FakeWebSocket.latest!
+      control.open()
+      control.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      control.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', relayEndpoint: 'wss://relay.example/ws', relayTicket: 'attach', relayEpoch: 4, relayRecoveryTicket: 'recovery' }))
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+      const data = FakeWebSocket.instances[1]!
+      data.open()
+      data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
+      await connecting
+      transport.markSecureReady()
+      const lease = lastSentPayload(control, 'connection.lease.request')
+      control.receive(createControlFrame('connection.lease.ack', { ...lease, ticket: 'renewed', leaseMs: 300_000 }))
+      await transport.send(Uint8Array.of(1))
+      control.readyState = 3
+      control.onclose?.({ code: 1012, reason: 'restart' })
+      await transport.send(Uint8Array.of(2))
+      const relayFrames = data.sent.map(raw => JSON.parse(raw)).filter(frame => frame.type === 'relay')
+      expect(relayFrames.map(frame => frame.payload.counter)).toEqual([0, 1])
+      expect(transport.getStats().connected).toBe(true)
+      expect(closed).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+      const recovered = FakeWebSocket.latest!
+      recovered.open()
+      recovered.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      expect(lastSentPayload(recovered, 'connection.lease.request')).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+      data.readyState = 3
+      data.onclose?.({ code: 1006, reason: '' })
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+    } finally { await transport.close() }
+  })
+
   it('closes an established WebRTC data channel when the Control socket closes', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const rtc = stalledRtc()
@@ -275,6 +313,58 @@ describe('AdaptiveTransport capability negotiation', () => {
     expect(disconnected).toHaveBeenCalledWith({ reason: 'control-closed', closeCode: 1012 })
     expect(closed).toHaveBeenCalledOnce()
     await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
+  })
+
+  it('retains confirmed WebRTC data while reauthenticating control without creating a new logical connection', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const rtc = stalledRtc()
+    const refresh = vi.fn(async () => 'fresh-access-token')
+    const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, refreshAccessToken: refresh })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', recoveryTicket: 'initial' }))
+      await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+      rtc.channel.readyState = 'open'
+      rtc.channel.onopen?.()
+      await connecting
+      transport.markSecureReady()
+      const request = lastSentPayload(socket, 'connection.lease.request')
+      socket.receive(createControlFrame('connection.lease.ack', { ...request, ticket: 'renewed', leaseMs: 300_000 }))
+      socket.readyState = 3
+      socket.onclose?.({ code: 1012, reason: 'restart' })
+      await transport.connect() // Idempotent while only control is detached.
+      await transport.send(Uint8Array.of(1))
+      expect(closed).not.toHaveBeenCalled()
+      expect(rtc.pc.close).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(FakeWebSocket.latest).not.toBe(socket))
+      const recovered = FakeWebSocket.latest!
+      // The old control heartbeat is stale, but the new socket is still
+      // handshaking. A forced lease tick must not close it.
+      const internals = transport as unknown as { lastControlReceivedAt: number; lease: { tick(force: boolean): void } }
+      internals.lastControlReceivedAt = Date.now() - 80_000
+      internals.lease.tick(true)
+      expect(FakeWebSocket.latest).toBe(recovered)
+      expect(recovered.readyState).toBe(0)
+      recovered.open()
+      expect(lastSentPayload(recovered, 'hello')).toMatchObject({ accessToken: 'fresh-access-token' })
+      recovered.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      const renewal = lastSentPayload(recovered, 'connection.lease.request')
+      expect(renewal).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+      expect(recovered.sent.map(raw => JSON.parse(raw).type)).not.toContain('connect.request')
+      recovered.receive(createControlFrame('connection.lease.ack', { ...renewal, ticket: 'recovered', leaseMs: 300_000 }))
+      // Old-socket callbacks must not close the retained session.
+      socket.onclose?.({ code: 4003, reason: 'stale replacement' })
+      await transport.send(Uint8Array.of(2))
+      expect(rtc.channel.send).toHaveBeenCalledTimes(2)
+      expect(closed).not.toHaveBeenCalled()
+      recovered.receive(createControlFrame('error', { code: 'DEVICE_REVOKED', message: 'revoked', retryable: false }))
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+    } finally { await transport.close() }
   })
 
   it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
