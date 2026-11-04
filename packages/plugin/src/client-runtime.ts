@@ -58,7 +58,12 @@ export class ClientModeRuntime {
     const lifetime = this.remoteLifetime.signal
     const connectionSignal = signal === undefined ? lifetime : AbortSignal.any([lifetime, signal])
     connectionSignal.throwIfAborted()
-    const remote = await this.connection.connect(targetDeviceId, connectionSignal)
+    const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch(error => {
+      if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
+        this.noteClientAuthFailure(error)
+      }
+      throw error
+    })
     if (connectionSignal.aborted || this.closed) {
       await remote.client.close().catch(() => undefined)
       throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
@@ -99,6 +104,14 @@ export class ClientModeRuntime {
   private readonly featureProbePromises = new WeakMap<object, Promise<RemoteHostFeatures>>()
   private recoverable?: ConnectedRemote
   private recoveryGeneration = 0
+  private clientAuthRequired = false
+
+  private noteClientAuthFailure(error: unknown): void {
+    if (error instanceof Error && 'code' in error && typeof error.code === 'string'
+      && (error.code === 'AUTH_REQUIRED' || HOST_AUTHORIZATION_ERRORS.has(error.code))) {
+      this.clientAuthRequired = true
+    }
+  }
   private readonly sessionTools = new RemoteSessionTools((hostId, signal, query) => this.withToolRemote(hostId, signal, query))
 
   runSessionTool(operation: SessionToolOperation, args: unknown, signal: AbortSignal): Promise<unknown> {
@@ -236,6 +249,7 @@ export class ClientModeRuntime {
       ...targetStatus,
       connected: this.connected !== undefined,
       recoveryGeneration: this.recoveryGeneration,
+      ...(this.clientAuthRequired && !this.connected && targetStatus.mode === 'remote' ? { clientAuthRequired: true } : {}),
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -340,6 +354,7 @@ export class ClientModeRuntime {
       authorization = await this.server.authorizeWithAccount(this.identity, email, password)
     }
     await this.authorizeHostByDefault()
+    this.clientAuthRequired = false
     this.logger.info('Client account authorized')
     return authorization
   }
@@ -356,7 +371,10 @@ export class ClientModeRuntime {
       return this.identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
-    if (result.status === 'complete') await this.authorizeHostByDefault()
+    if (result.status === 'complete') {
+      this.clientAuthRequired = false
+      await this.authorizeHostByDefault()
+    }
     return result
   }
 
@@ -754,6 +772,7 @@ export class ClientModeRuntime {
   }
 
   private async leaveRemote(): Promise<void> {
+    this.clientAuthRequired = false
     this.beginSelection()
     this.sessionTools.invalidate()
     this.remoteLifetime.abort(new ClientModeError('CANCELLED', 'The Remote connection was closed.'))
@@ -808,6 +827,7 @@ export class ClientModeRuntime {
 
   private selectRemoteTarget(remote: ConnectedRemote): void {
     this.assertRemoteCompatible(remote)
+    this.clientAuthRequired = false
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
     this.recoverable = remote
@@ -968,6 +988,7 @@ export class ClientModeRuntime {
     this.logger.warn('remote Harness transport closed', { targetDeviceId: shortId(remote.target.deviceId) })
     // CodeX/ACP have separate virtual workspace lifetimes; never replace them
     // with Harness authority after a disconnect.
+    if (!this.closed && this.gatewaySwitch.status().mode === 'remote') this.noteClientAuthFailure(error)
     if (!recover || this.closed) return
     this.reconnect.start(async signal => {
       await cleanup

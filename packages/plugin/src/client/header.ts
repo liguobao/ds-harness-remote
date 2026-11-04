@@ -8,6 +8,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
   function RemoteSessionHeaderAction(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
+    onSignIn: () => void
     t: Translate
   }): unknown {
     const { t } = props
@@ -148,7 +149,9 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
         strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
       }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement('path', { d: 'M8 21h8M12 17v4' })),
       React.createElement('span', { className: 'dshRemoteSessionTarget' }, t('remoteModeLabel', { name: status.target?.name ?? t('host') })),
-      React.createElement('button', {
+      status.clientAuthRequired ? React.createElement('button', {
+        type: 'button', className: 'dshRemoteNetwork isOffline', onClick: props.onSignIn,
+      }, t('clientSignInAgain')) : React.createElement('button', {
         type: 'button',
         className: `dshRemoteNetwork${networkOnline ? ' isOnline' : ' isOffline'}`,
         title: networkLabel,
@@ -160,7 +163,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
       networkOnline ? React.createElement('span', { className: 'dshRemoteEncrypted' }, t('remoteLinkEncrypted')) : null,
       renderHostReference(),
       React.createElement('button', { type: 'button', className: 'dshRemoteHeaderExitLink', disabled: busy, onClick: () => void exit() }, t('exitRemote')),
-      !routeOpen ? null : renderBodyPortal(portal, React.createElement('div', {
+      !routeOpen || !networkOnline ? null : renderBodyPortal(portal, React.createElement('div', {
         className: 'dshRemoteRouteBackdrop',
         role: 'presentation',
         onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setRouteOpen(false) },

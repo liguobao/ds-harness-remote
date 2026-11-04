@@ -321,7 +321,11 @@ export class HostServerApi {
     this.credentials = await this.withRefreshLock(async () => {
       // Another process may have rotated the token while we waited for the lock.
       const stored = await this.store.load(this.baseUrl, identity.deviceId)
-      if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity)
+      if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) {
+        // A rejected Client read must not implicitly register a signed-out device.
+        if (this.role === 'client') throw new ServerApiError('ACCOUNT_AUTH_REQUIRED', 'Client sign-in is required.', false)
+        return this.register(identity)
+      }
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 30_000) {
         return stored
       }
@@ -460,7 +464,19 @@ export class HostServerApi {
 
   private async request<TResult>(path: string, init: RequestInit = {}): Promise<TResult> {
     const credentials = await this.authenticate()
-    return this.publicRequest<TResult>(path, init, credentials.accessToken)
+    try {
+      return await this.publicRequest<TResult>(path, init, credentials.accessToken)
+    } catch (error) {
+      // The Server may reject a bearer before its locally cached expiry.
+      // Only retry an explicitly rejected, read-only Client request, once.
+      if (this.role !== 'client' || this.identity?.deviceId !== credentials.deviceId || (init.method ?? 'GET') !== 'GET'
+        || !(error instanceof ServerApiError) || error.status !== 401
+        || (error.code !== 'AUTH_INVALID' && error.code !== 'TOKEN_EXPIRED')) throw error
+      init.signal?.throwIfAborted()
+      const next = await this.refreshCredentials(credentials.accessToken)
+      if (next.account !== credentials.account || this.identity?.deviceId !== credentials.deviceId) throw error
+      return this.publicRequest<TResult>(path, init, next.accessToken)
+    }
   }
 
   private async publicRequest<TResult>(path: string, init: RequestInit, accessToken?: string): Promise<TResult> {

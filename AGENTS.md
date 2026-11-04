@@ -1,5 +1,14 @@
 # Repository Guide for Agents
 
+## Client reauthorization after disconnect
+
+Surface terminal Client authorization failures separately from Host status and transient
+carrier loss. Reuse the existing Client sign-in dialog; keep Host selection and fail
+closed until the user reconnects. A protocol 401 rejecting a Client GET bearer can
+refresh and retry that read once. Do not retry mutations, refresh rejections or peer
+trust failures as business requests. The self-hosted Server consumes a refresh token
+before sending its successor: loss of that response can require a new account login.
+
 ## werift 0.26.0 upgrade (2026-11-03, Issue #259)
 
 按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted

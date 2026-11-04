@@ -1826,6 +1826,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     remoteNetworkRelay: "Relay",
     remoteNetworkLan: "LAN",
     remoteNetworkOffline: "Disconnected",
+    clientSignInAgain: "Authorization expired \xB7 Sign in again",
     remoteLinkEncrypted: "End-to-end encrypted",
     connectionRouteTitle: "Connection route",
     connectionRouteFrom: "From",
@@ -2116,6 +2117,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     remoteNetworkRelay: "\u4E2D\u7EE7",
     remoteNetworkLan: "\u5C40\u57DF\u7F51",
     remoteNetworkOffline: "\u5DF2\u65AD\u5F00",
+    clientSignInAgain: "\u6388\u6743\u5DF2\u5931\u6548 \xB7 \u91CD\u65B0\u767B\u5F55",
     remoteLinkEncrypted: "\u7AEF\u5230\u7AEF\u52A0\u5BC6",
     connectionRouteTitle: "\u8FDE\u63A5\u7EBF\u8DEF",
     connectionRouteFrom: "\u8D77\u70B9",
@@ -2410,7 +2412,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
           "aria-hidden": !0
         }, React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement("path", { d: "M8 21h8M12 17v4" })),
         React.createElement("span", { className: "dshRemoteSessionTarget" }, t("remoteModeLabel", { name: status.target?.name ?? t("host") })),
-        React.createElement("button", {
+        status.clientAuthRequired ? React.createElement("button", {
+          type: "button",
+          className: "dshRemoteNetwork isOffline",
+          onClick: props.onSignIn
+        }, t("clientSignInAgain")) : React.createElement("button", {
           type: "button",
           className: `dshRemoteNetwork${networkOnline ? " isOnline" : " isOffline"}`,
           title: networkLabel,
@@ -2422,7 +2428,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         networkOnline ? React.createElement("span", { className: "dshRemoteEncrypted" }, t("remoteLinkEncrypted")) : null,
         renderHostReference(),
         React.createElement("button", { type: "button", className: "dshRemoteHeaderExitLink", disabled: busy, onClick: () => void exit() }, t("exitRemote")),
-        routeOpen ? renderBodyPortal(portal, React.createElement("div", {
+        !routeOpen || !networkOnline ? null : renderBodyPortal(portal, React.createElement("div", {
           className: "dshRemoteRouteBackdrop",
           role: "presentation",
           onMouseDown: (event) => {
@@ -2502,7 +2508,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             )
           ),
           React.createElement("p", null, t("connectionRouteEncrypted"))
-        ))) : null
+        )))
       );
     }
     return RemoteSessionHeaderAction;
@@ -3704,6 +3710,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return;
           }
           try {
+            if (nextStatus.clientAuthRequired)
+              throw Object.assign(new Error("Sign in again."), { code: "AUTH_INVALID" });
             if (!(await props.control("client.authorization.status")).hasCredentials)
               throw Object.assign(new Error("Remote account authorization is required."), { code: "ACCOUNT_AUTH_REQUIRED" });
             let nextDevices = await props.control("devices");
@@ -3758,7 +3766,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         if (!(serverDirty || savingServer || email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
           setBusy(!0), setError(void 0);
           try {
-            await props.control("settings.configure", {
+            status?.clientAuthRequired ? await props.control("client.account.login", { email: email.trim(), password }) : await props.control("settings.configure", {
               role: "client",
               serverUrl: loginServerUrl.trim(),
               email: email.trim(),
@@ -3836,7 +3844,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setError(messageOf(reason)), setBusy(!1);
           }
         }
-      }, remoteLabel = status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), remoteActionLabel = status?.mode === "remote" ? `${remoteLabel} \xB7 ${t("exitRemote")}` : remoteLabel, visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), visiblePiWorkspaces = showAllPiWorkspaces ? piWorkspaces : piWorkspaces.slice(0, 3), visibleOpencodeWorkspaces = showAllOpencodeWorkspaces ? opencodeWorkspaces : opencodeWorkspaces.slice(0, 3), visibleClaudeWorkspaces = showAllClaudeWorkspaces ? claudeWorkspaces : claudeWorkspaces.slice(0, 3), visibleHermesWorkspaces = showAllHermesWorkspaces ? hermesWorkspaces : hermesWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, cursorAvailable = status?.remoteFeatures?.cursor === !0, antigravityAvailable = status?.remoteFeatures?.antigravity === !0, piAvailable = status?.remoteFeatures?.pi === !0, opencodeAvailable = status?.remoteFeatures?.opencode === !0, claudeAvailable = status?.remoteFeatures?.claude === !0, hermesAvailable = status?.remoteFeatures?.hermes === !0, rawUpdate = status?.update, updateInfo = rawUpdate !== void 0 && typeof rawUpdate.currentVersion == "string" && typeof rawUpdate.latestVersion == "string" ? rawUpdate : void 0, localUpdateAvailable = updateInfo !== void 0 && compareVersions(updateInfo.currentVersion, updateInfo.latestVersion) < 0, updateNotice = updateInfo !== void 0 && localUpdateAvailable ? t("updateAvailable", { latest: updateInfo.latestVersion, current: updateInfo.currentVersion }) : void 0, deviceUpdateAvailable = (device) => updateInfo !== void 0 && device.clientVersion !== void 0 && compareVersions(device.clientVersion, updateInfo.latestVersion) < 0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
+      }, reauth = status?.clientAuthRequired === !0, remoteLabel = reauth ? t("clientSignInAgain") : status?.mode === "remote" ? t("activeRemote", { name: status.target?.name ?? t("host") }) : t("remoteEntry"), remoteActionLabel = !reauth && status?.mode === "remote" ? `${remoteLabel} \xB7 ${t("exitRemote")}` : remoteLabel, visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3), visibleCodexWorkspaces = showAllCodexWorkspaces ? codexWorkspaces : codexWorkspaces.slice(0, 3), visibleCursorWorkspaces = showAllCursorWorkspaces ? cursorWorkspaces : cursorWorkspaces.slice(0, 3), visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3), visiblePiWorkspaces = showAllPiWorkspaces ? piWorkspaces : piWorkspaces.slice(0, 3), visibleOpencodeWorkspaces = showAllOpencodeWorkspaces ? opencodeWorkspaces : opencodeWorkspaces.slice(0, 3), visibleClaudeWorkspaces = showAllClaudeWorkspaces ? claudeWorkspaces : claudeWorkspaces.slice(0, 3), visibleHermesWorkspaces = showAllHermesWorkspaces ? hermesWorkspaces : hermesWorkspaces.slice(0, 3), codexAvailable = status?.remoteFeatures?.codex === !0, cursorAvailable = status?.remoteFeatures?.cursor === !0, antigravityAvailable = status?.remoteFeatures?.antigravity === !0, piAvailable = status?.remoteFeatures?.pi === !0, opencodeAvailable = status?.remoteFeatures?.opencode === !0, claudeAvailable = status?.remoteFeatures?.claude === !0, hermesAvailable = status?.remoteFeatures?.hermes === !0, rawUpdate = status?.update, updateInfo = rawUpdate !== void 0 && typeof rawUpdate.currentVersion == "string" && typeof rawUpdate.latestVersion == "string" ? rawUpdate : void 0, localUpdateAvailable = updateInfo !== void 0 && compareVersions(updateInfo.currentVersion, updateInfo.latestVersion) < 0, updateNotice = updateInfo !== void 0 && localUpdateAvailable ? t("updateAvailable", { latest: updateInfo.latestVersion, current: updateInfo.currentVersion }) : void 0, deviceUpdateAvailable = (device) => updateInfo !== void 0 && device.clientVersion !== void 0 && compareVersions(device.clientVersion, updateInfo.latestVersion) < 0, selectedHostDetails = selectedHost === void 0 ? void 0 : [
         formatPlatform(selectedHost.platform),
         selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
         selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion }),
@@ -3909,11 +3917,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null, updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, entry = React.createElement(
         "div",
         { className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}` },
-        React.createElement(remoteActive && props.wide ? "div" : "button", {
-          ...remoteActive && props.wide ? {} : {
+        React.createElement(remoteActive && props.wide && !reauth ? "div" : "button", {
+          ...remoteActive && props.wide && !reauth ? {} : {
             type: "button",
             disabled: remoteActive && busy,
-            onClick: () => void (remoteActive ? openLocalWorkspaces() : show())
+            onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
           },
           className: "dshRemoteModeButton",
           title: props.wide ? remoteLabel : remoteActionLabel,
@@ -3934,7 +3942,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           disabled: remoteActive && busy,
           title: remoteActionLabel,
           "aria-label": remoteActionLabel,
-          onClick: () => void (remoteActive ? openLocalWorkspaces() : show())
+          onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
         }, computerIcon, updateDot)
       ), compact = sidebarEntry === "compact" && props.wide && props.portal !== void 0;
       return React.createElement(
@@ -5460,7 +5468,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           id: "ds-harness-remote-global-context",
           order: 20,
           locale: localeNamespace,
-          inject: () => ({ control, statusFeed })
+          inject: () => ({ control, statusFeed, onSignIn: openRemote })
         }, RemoteSessionHeaderAction)), ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
           name: "sidebar.footer.action",
           id: "ds-harness-remote-workspace",

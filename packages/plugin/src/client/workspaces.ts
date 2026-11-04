@@ -606,6 +606,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           return
         }
         try {
+          if (nextStatus.clientAuthRequired) {
+            throw Object.assign(new Error('Sign in again.'), { code: 'AUTH_INVALID' })
+          }
           const authorization = await props.control<{ hasCredentials: boolean }>('client.authorization.status')
           if (!authorization.hasCredentials) {
             throw Object.assign(new Error('Remote account authorization is required.'), { code: 'ACCOUNT_AUTH_REQUIRED' })
@@ -812,12 +815,16 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setBusy(true)
       setError(undefined)
       try {
-        await props.control('settings.configure', {
-          role: 'client',
-          serverUrl: loginServerUrl.trim(),
-          email: email.trim(),
-          password,
-        })
+        if (status?.clientAuthRequired) {
+          await props.control('client.account.login', { email: email.trim(), password })
+        } else {
+          await props.control('settings.configure', {
+            role: 'client',
+            serverUrl: loginServerUrl.trim(),
+            email: email.trim(),
+            password,
+          })
+        }
         setDevices(await props.control<RemoteDevice[]>('devices'))
         setStatus(await props.control<RemoteStatus>('status'))
         setNeedsAuthorization(false)
@@ -983,10 +990,11 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       }
     }
 
-    const remoteLabel = status?.mode === 'remote'
+    const reauth = status?.clientAuthRequired === true
+    const remoteLabel = reauth ? t('clientSignInAgain') : status?.mode === 'remote'
       ? t('activeRemote', { name: status.target?.name ?? t('host') })
       : t('remoteEntry')
-    const remoteActionLabel = status?.mode === 'remote'
+    const remoteActionLabel = !reauth && status?.mode === 'remote'
       ? `${remoteLabel} · ${t('exitRemote')}`
       : remoteLabel
     const visibleWorkspaces = showAllWorkspaces ? workspaces : workspaces.slice(0, 3)
@@ -1105,11 +1113,11 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       ? React.createElement('span', { className: 'dshRemoteUpdateDot', title: t('updateBadge'), 'aria-hidden': true })
       : null
     const entry = React.createElement('div', { className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}` },
-      React.createElement(remoteActive && props.wide ? 'div' : 'button', {
-        ...(remoteActive && props.wide ? {} : {
+      React.createElement(remoteActive && props.wide && !reauth ? 'div' : 'button', {
+        ...(remoteActive && props.wide && !reauth ? {} : {
           type: 'button',
           disabled: remoteActive && busy,
-          onClick: () => void (remoteActive ? openLocalWorkspaces() : show()),
+          onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show()),
         }),
         className: 'dshRemoteModeButton',
         title: props.wide ? remoteLabel : remoteActionLabel,
@@ -1132,7 +1140,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         disabled: remoteActive && busy,
         title: remoteActionLabel,
         'aria-label': remoteActionLabel,
-        onClick: () => void (remoteActive ? openLocalWorkspaces() : show()),
+        onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show()),
       }, computerIcon, updateDot))
     const compact = sidebarEntry === 'compact' && props.wide && props.portal !== undefined
 

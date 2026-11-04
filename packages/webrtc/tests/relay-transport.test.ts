@@ -280,8 +280,9 @@ describe('AdaptiveTransport capability negotiation', () => {
   it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
     await runScenarios([
       { code: 4001, reason: 'CONNECTION_FAILED', retryable: true },
-      { code: 4001, reason: 'AUTH_INVALID', retryable: false },
-      { code: 4001, reason: 'DEVICE_REVOKED', retryable: false },
+      { code: 4001, reason: 'AUTH_INVALID', failure: 'AUTH_INVALID', retryable: false },
+      { code: 4001, reason: 'TOKEN_EXPIRED', failure: 'TOKEN_EXPIRED', retryable: false },
+      { code: 4001, reason: 'DEVICE_REVOKED', failure: 'DEVICE_REVOKED', retryable: false },
       { code: 4001, reason: '', retryable: false },
       { code: 4001, reason: 'CONNECTION_FAILED: unknown detail', retryable: false },
       { code: 4003, reason: 'CONNECTION_FAILED', retryable: false },
@@ -300,7 +301,7 @@ describe('AdaptiveTransport capability negotiation', () => {
       socket.onclose?.(row)
       expect(closed).toHaveBeenCalledOnce()
       expect(closed).toHaveBeenCalledWith(expect.objectContaining({
-        code: row.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED', retryable: row.retryable,
+        code: row.failure ?? (row.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED'), retryable: row.retryable,
       }))
       await transport.close()
     } })), cleanupScenario1)

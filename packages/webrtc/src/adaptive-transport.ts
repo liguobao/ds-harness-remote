@@ -684,7 +684,9 @@ function adaptiveControlCloseError(event: CloseEvent): Error {
     ? `${reason} (WebSocket ${event.code})`
     : `WebSocket closed with code ${event.code}`
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
-    code: event.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED',
+    code: event.code === 4003 ? 'CONNECTION_REPLACED'
+      : event.code === 4001 && ['AUTH_INVALID', 'TOKEN_EXPIRED', 'DEVICE_REVOKED'].includes(event.reason)
+        ? event.reason : 'TRANSPORT_CLOSED',
     retryable: heartbeatTimeout || event.code === 1000 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013,
   })
 }
