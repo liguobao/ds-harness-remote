@@ -14,11 +14,14 @@ import {
 import {
   AlertCircle,
   ArrowLeft,
+  Bot,
   Calendar,
   Check,
+  ChevronDown,
   ChevronRight,
   Clock,
   Edit2,
+  Folder,
   MessageSquare,
   Pause,
   Play,
@@ -107,6 +110,8 @@ export function AutomationTasksModal({
   const selectedSession = useAppStore(state => state.selectedSession)
   const workspaces = useAppStore(state => state.workspaces)
   const language = useAppStore(state => state.language)
+  const sessionModels = useAppStore(state => state.sessionModels)
+  const createSession = useAppStore(state => state.createSession)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -216,6 +221,34 @@ export function AutomationTasksModal({
     title !== undefined && title !== null && title.trim() !== '' && title !== sessionId
       ? title
       : sessionId.slice(-8)
+
+  const [formModel, setFormModel] = useState('')
+  const [formWorkspaceId, setFormWorkspaceId] = useState('')
+  const [formTargetMode, setFormTargetMode] = useState<'current' | 'existing' | 'new'>('current')
+  const [formTriggerMode, setFormTriggerMode] = useState<'scheduled' | 'now'>('scheduled')
+  const [expandedRow, setExpandedRow] = useState<'sendTo' | 'repeat' | 'time' | 'model' | 'project' | null>(null)
+
+  const modelOptions = useMemo(
+    () => (sessionModels?.groups ?? []).flatMap(group => group.models.map(model => ({ id: model.id, name: model.name }))),
+    [sessionModels],
+  )
+  const currentModelLabel =
+    formModel !== '' ? formModel : sessionModels?.current.model ?? modelOptions[0]?.name ?? '—'
+  const pickedWorkspace = workspaces.find(workspace => workspace.workspaceId === formWorkspaceId)
+  const targetSessionId =
+    formTargetMode === 'existing'
+      ? formTargetSessionId
+      : selectedSession?.sessionId ?? ''
+  const sendToLabel =
+    formTargetMode === 'new'
+      ? strings.automation.sendToNew
+      : formTargetMode === 'existing'
+        ? strings.automation.sendToExisting
+        : strings.automation.sendToFixed
+
+  const toggleRow = (row: 'sendTo' | 'repeat' | 'time' | 'model' | 'project'): void => {
+    setExpandedRow(current => (current === row ? null : row))
+  }
 
   const currentKindLabel = useMemo(() => {
     if (formKind === 'every') return strings.automation.timingEvery
@@ -361,9 +394,13 @@ export function AutomationTasksModal({
     setSubmitting(true)
     try {
       if (formMode === 'create') {
-        const sid = formTargetSessionId || availableSessions[0]?.sessionId
+        let sid = targetSessionId
+        if (formTargetMode === 'new') {
+          const created = await createSession(formWorkspaceId || undefined)
+          sid = created ? useAppStore.getState().selectedSession?.sessionId ?? '' : ''
+        }
         if (!sid) {
-          Alert.alert(strings.automation.title, strings.automation.formTargetSession)
+          Alert.alert(strings.automation.title, strings.automation.sendTo)
           return
         }
 
@@ -371,7 +408,9 @@ export function AutomationTasksModal({
           title: formTitle.trim(),
           prompt: formPrompt.trim(),
         }
-        if (formKind === 'daily') {
+        if (formTriggerMode === 'now') {
+          req.after_seconds = 2
+        } else if (formKind === 'daily') {
           req.daily = { time: `${formTime.trim()}:00.000`, time_zone: tz }
         } else if (formKind === 'every') {
           req.every_seconds = Math.max(60, formIntervalMinutes * 60)
@@ -622,285 +661,390 @@ export function AutomationTasksModal({
               </View>
             </View>
 
-            <ScrollView contentContainerStyle={styles.formContainer} keyboardShouldPersistTaps="handled">
-              {/* Definition card: name, instruction */}
+            <ScrollView
+              contentContainerStyle={styles.formContainer}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              {/* 1. 任务 */}
               <View style={styles.formCard}>
-                <TextInput
-                  value={formTitle}
-                  onChangeText={setFormTitle}
-                  placeholder={strings.automation.name}
-                  placeholderTextColor={colors.muted}
-                  maxLength={120}
-                  style={styles.titleInput}
-                  selectionColor={colors.primary}
-                />
+                <View style={styles.cardBody}>
+                  <TextInput
+                    value={formTitle}
+                    onChangeText={setFormTitle}
+                    placeholder={strings.automation.name}
+                    placeholderTextColor={colors.muted}
+                    maxLength={120}
+                    style={styles.titleInput}
+                    selectionColor={colors.primary}
+                  />
+                </View>
                 <View style={styles.cardDivider} />
-                <TextInput
-                  value={formPrompt}
-                  onChangeText={setFormPrompt}
-                  placeholder={strings.automation.instruction}
-                  placeholderTextColor={colors.muted}
-                  multiline
-                  style={styles.promptInput}
-                  selectionColor={colors.primary}
-                />
-                {formMode === 'create' && availableSessions.length > 0 && (
-                  <>
-                    <View style={styles.cardDivider} />
-                    <Text style={styles.formLabel}>{strings.automation.formTargetSession}</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillScroll}>
-                      {availableSessions.map(s => {
-                        const active = formTargetSessionId === s.sessionId
+                <View style={styles.cardBody}>
+                  <TextInput
+                    value={formPrompt}
+                    onChangeText={setFormPrompt}
+                    placeholder={strings.automation.instruction}
+                    placeholderTextColor={colors.muted}
+                    multiline
+                    style={styles.promptInput}
+                    selectionColor={colors.primary}
+                  />
+                </View>
+                <View style={styles.cardDivider} />
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => toggleRow('model')}
+                  style={styles.paramRow}
+                >
+                  <View style={styles.modelLabel}>
+                    <Bot size={14} color={colors.muted} />
+                    <Text style={styles.modelName} numberOfLines={1}>{currentModelLabel}</Text>
+                  </View>
+                  <ChevronDown size={16} color={colors.subtle} />
+                </Pressable>
+                {expandedRow === 'model' && (
+                  <View style={styles.optionWrap}>
+                    {modelOptions.length === 0 ? (
+                      <Text style={styles.optionEmpty}>{strings.automation.modelUnavailable}</Text>
+                    ) : (
+                      modelOptions.map(model => {
+                        const active = currentModelLabel === model.name
                         return (
                           <Pressable
-                            key={s.sessionId}
+                            key={model.id}
                             accessibilityRole="button"
                             accessibilityState={{ selected: active }}
-                            onPress={() => setFormTargetSessionId(s.sessionId)}
-                            style={[styles.sessionPill, active && styles.sessionPillActive]}
+                            onPress={() => {
+                              setFormModel(model.name)
+                              setExpandedRow(null)
+                            }}
+                            style={[styles.optionChip, active && styles.optionChipActive]}
                           >
-                            <MessageSquare size={13} color={active ? colors.white : colors.muted} />
-                            <Text style={[styles.sessionPillText, active && styles.sessionPillTextActive]} numberOfLines={1}>
-                              {sessionLabel(s.sessionId, s.title)}
+                            <Text style={[styles.optionChipText, active && styles.optionChipTextActive]} numberOfLines={1}>
+                              {model.name}
                             </Text>
                           </Pressable>
                         )
-                      })}
-                    </ScrollView>
-                    <Text style={styles.formHelper}>{strings.automation.formSessionHint}</Text>
+                      })
+                    )}
+                  </View>
+                )}
+              </View>
+
+              {/* 项目 */}
+              <View style={styles.projectRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => toggleRow('project')}
+                  style={styles.projectChip}
+                >
+                  <Folder size={13} color={colors.muted} />
+                  <Text style={styles.projectChipText} numberOfLines={1}>
+                    {pickedWorkspace?.title ?? strings.automation.selectProject}
+                  </Text>
+                  <ChevronDown size={13} color={colors.subtle} />
+                </Pressable>
+              </View>
+              {expandedRow === 'project' && (
+                <View style={styles.optionWrap}>
+                  {workspaces.length === 0 ? (
+                    <Text style={styles.optionEmpty}>{strings.automation.projectUnavailable}</Text>
+                  ) : (
+                    workspaces.map(workspace => {
+                      const active = workspace.workspaceId === formWorkspaceId
+                      return (
+                        <Pressable
+                          key={workspace.workspaceId}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          onPress={() => {
+                            setFormWorkspaceId(workspace.workspaceId)
+                            setExpandedRow(null)
+                          }}
+                          style={[styles.optionChip, active && styles.optionChipActive]}
+                        >
+                          <Text style={[styles.optionChipText, active && styles.optionChipTextActive]} numberOfLines={1}>
+                            {workspace.title}
+                          </Text>
+                        </Pressable>
+                      )
+                    })
+                  )}
+                </View>
+              )}
+              <Text style={styles.formHint}>{strings.automation.projectHint}</Text>
+
+              {/* 2. 设置 */}
+              <View style={styles.formCard}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => toggleRow('sendTo')}
+                  style={styles.paramRow}
+                >
+                  <Text style={styles.rowLabel}>{strings.automation.sendTo}</Text>
+                  <View style={styles.dropdown}>
+                    <Text style={styles.dropdownText} numberOfLines={1}>{sendToLabel}</Text>
+                    <ChevronDown size={14} color={colors.muted} />
+                  </View>
+                </Pressable>
+                {expandedRow === 'sendTo' && (
+                  <View style={styles.optionWrap}>
+                    {([
+                      { key: 'new', label: strings.automation.sendToNew },
+                      { key: 'current', label: strings.automation.sendToFixed },
+                      { key: 'existing', label: strings.automation.sendToExisting },
+                    ] as const).map(option => {
+                      const active = formTargetMode === option.key
+                      return (
+                        <Pressable
+                          key={option.key}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          onPress={() => {
+                            setFormTargetMode(option.key)
+                            setExpandedRow(option.key === 'existing' ? null : null)
+                          }}
+                          style={[styles.optionChip, active && styles.optionChipActive]}
+                        >
+                          <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                )}
+                {formTargetMode === 'existing' && (
+                  <View style={styles.optionWrap}>
+                    {availableSessions.map(session => {
+                      const active = formTargetSessionId === session.sessionId
+                      return (
+                        <Pressable
+                          key={session.sessionId}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          onPress={() => setFormTargetSessionId(session.sessionId)}
+                          style={[styles.optionChip, active && styles.optionChipActive]}
+                        >
+                          <Text
+                            style={[styles.optionChipText, active && styles.optionChipTextActive]}
+                            numberOfLines={1}
+                          >
+                            {sessionLabel(session.sessionId, session.title)}
+                          </Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                )}
+
+                <View style={styles.cardDivider} />
+                <View style={styles.paramRow}>
+                  <Text style={styles.rowLabel}>{strings.automation.trigger}</Text>
+                  <View style={styles.triggerSegment}>
+                    {([
+                      { key: 'scheduled', label: strings.automation.triggerScheduled },
+                      { key: 'now', label: strings.automation.triggerNow },
+                    ] as const).map(option => {
+                      const active = formTriggerMode === option.key
+                      return (
+                        <Pressable
+                          key={option.key}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          onPress={() => setFormTriggerMode(option.key)}
+                          style={[styles.triggerSegmentItem, active && styles.triggerSegmentItemActive]}
+                        >
+                          <Text style={[styles.triggerSegmentText, active && styles.triggerSegmentTextActive]}>{option.label}</Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                </View>
+
+                {formTriggerMode === 'scheduled' && (
+                  <>
+                    <View style={styles.cardDivider} />
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => toggleRow('repeat')}
+                      style={styles.paramRow}
+                    >
+                      <Text style={styles.rowLabel}>{strings.automation.formFrequency}</Text>
+                      <View style={styles.dropdown}>
+                        <Text style={styles.dropdownText}>{currentKindLabel}</Text>
+                        <ChevronDown size={14} color={colors.muted} />
+                      </View>
+                    </Pressable>
+                    {expandedRow === 'repeat' && (
+                      <View style={styles.optionWrap}>
+                        {([
+                          { key: 'daily', label: strings.automation.timingDaily },
+                          { key: 'every', label: strings.automation.timingEvery },
+                          { key: 'weekly', label: strings.automation.timingWeekly },
+                          { key: 'at', label: strings.automation.timingOnce },
+                        ] as const).map(option => {
+                          const active = formKind === option.key
+                          return (
+                            <Pressable
+                              key={option.key}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: active }}
+                              onPress={() => {
+                                setTimingDirty(true)
+                                setFormKind(option.key)
+                                setExpandedRow(null)
+                              }}
+                              style={[styles.optionChip, active && styles.optionChipActive]}
+                            >
+                              <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          )
+                        })}
+                      </View>
+                    )}
+
+                    <View style={styles.cardDivider} />
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => toggleRow('time')}
+                      style={styles.paramRow}
+                    >
+                      <Text style={styles.rowLabel}>
+                        {formKind === 'every' ? strings.automation.formInterval : strings.automation.formTime}
+                      </Text>
+                      <Text style={styles.rowValue}>
+                        {formKind === 'every'
+                          ? `${formIntervalMinutes} ${strings.automation.minuteUnit}`
+                          : formKind === 'at'
+                            ? `+${formDelayMinutes} ${strings.automation.minuteUnit}`
+                            : formTime}
+                      </Text>
+                    </Pressable>
+                    {expandedRow === 'time' && (
+                      <View style={styles.optionWrap}>
+                        {formKind === 'daily' &&
+                          ['08:00', '09:00', '12:00', '18:00'].map(value => {
+                            const active = formTime === value
+                            return (
+                              <Pressable
+                                key={value}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => {
+                                  setTimingDirty(true)
+                                  setFormTime(value)
+                                }}
+                                style={[styles.optionChip, active && styles.optionChipActive]}
+                              >
+                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{value}</Text>
+                              </Pressable>
+                            )
+                          })}
+                        {formKind === 'every' &&
+                          [15, 30, 60, 120, 240, 1440].map(value => {
+                            const active = formIntervalMinutes === value
+                            return (
+                              <Pressable
+                                key={value}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => {
+                                  setTimingDirty(true)
+                                  setFormIntervalMinutes(value)
+                                }}
+                                style={[styles.optionChip, active && styles.optionChipActive]}
+                              >
+                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                  {value >= 60 ? `${value / 60} ${strings.automation.hourUnit}` : `${value} ${strings.automation.minuteUnit}`}
+                                </Text>
+                              </Pressable>
+                            )
+                          })}
+                        {formKind === 'at' &&
+                          [15, 30, 60, 120].map(value => {
+                            const active = formDelayMinutes === value
+                            return (
+                              <Pressable
+                                key={value}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => {
+                                  setTimingDirty(true)
+                                  setFormDelayMinutes(value)
+                                }}
+                                style={[styles.optionChip, active && styles.optionChipActive]}
+                              >
+                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                  +{value >= 60 ? `${value / 60} ${strings.automation.hourUnit}` : `${value} ${strings.automation.minuteUnit}`}
+                                </Text>
+                              </Pressable>
+                            )
+                          })}
+                      </View>
+                    )}
+                    {formKind === 'weekly' && (
+                      <>
+                        <View style={styles.cardDivider} />
+                        <View style={styles.cardBody}>
+                          <Text style={styles.rowLabel}>{strings.automation.formWeekdays}</Text>
+                          <View style={styles.weekdayRow}>
+                            {localizedWeekdays.map(day => {
+                              const selected = formWeekdays.includes(day.day)
+                              return (
+                                <Pressable
+                                  key={day.day}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected }}
+                                  onPress={() => handleToggleWeekday(day.day)}
+                                  style={[styles.weekdayChip, selected && styles.optionChipActive]}
+                                >
+                                  <Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>
+                                    {day.label}
+                                  </Text>
+                                </Pressable>
+                              )
+                            })}
+                          </View>
+                        </View>
+                      </>
+                    )}
+                    {formKind === 'cron' && (
+                      <>
+                        <View style={styles.cardDivider} />
+                        <View style={styles.paramRow}>
+                          <Text style={styles.rowLabel}>Cron</Text>
+                          <TextInput
+                            value={formCronExpression}
+                            onChangeText={value => {
+                              setTimingDirty(true)
+                              setFormCronExpression(value)
+                            }}
+                            placeholder="0 9 * * *"
+                            placeholderTextColor={colors.muted}
+                            style={styles.rowValueInput}
+                            selectionColor={colors.primary}
+                          />
+                        </View>
+                      </>
+                    )}
+
+                    <View style={styles.cardDivider} />
+                    <View style={styles.nextBlock}>
+                      <View style={styles.nextHead}>
+                        <Text style={styles.rowLabel}>{strings.automation.formNextRuns}</Text>
+                        <Text style={styles.nextValue} numberOfLines={2}>{nextRunsLabel}</Text>
+                      </View>
+                      <Text style={styles.nextHint}>{strings.automation.formLocalTime}</Text>
+                    </View>
                   </>
                 )}
               </View>
-
-
-              {/* Timing Kind Selector */}
-              <View style={styles.formCard}>
-                <View style={styles.paramRow}>
-                  <Text style={styles.paramLabel}>{strings.automation.formFrequency}</Text>
-                  <Text style={styles.paramValue}>{currentKindLabel}</Text>
-                </View>
-                <View style={styles.kindSelectorRow}>
-                  <View style={styles.kindRow}>
-                    {([
-                      { key: 'daily', label: strings.automation.timingDaily },
-                      { key: 'every', label: strings.automation.timingEvery },
-                    ] as const).map(k => (
-                      <Pressable
-                        key={k.key}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: formKind === k.key }}
-                        onPress={() => {
-                          setTimingDirty(true)
-                          setFormKind(k.key)
-                        }}
-                        style={[styles.kindPill, formKind === k.key && styles.kindPillActive]}
-                      >
-                        <Text style={[styles.kindPillText, formKind === k.key && styles.kindPillTextActive]}>
-                          {k.label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                  <View style={styles.kindRow}>
-                    {([
-                      { key: 'weekly', label: strings.automation.timingWeekly },
-                      { key: 'at', label: strings.automation.timingOnce },
-                    ] as const).map(k => (
-                      <Pressable
-                        key={k.key}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: formKind === k.key }}
-                        onPress={() => {
-                          setTimingDirty(true)
-                          setFormKind(k.key)
-                        }}
-                        style={[styles.kindPill, formKind === k.key && styles.kindPillActive]}
-                      >
-                        <Text style={[styles.kindPillText, formKind === k.key && styles.kindPillTextActive]}>
-                          {k.label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-
-                {/* Timing Options */}
-                {formKind === 'daily' && (
-                  <View style={styles.timingDetailBox}>
-                    <View style={styles.paramRow}>
-                      <Text style={styles.fieldSubLabel}>{strings.automation.formTime}</Text>
-                      <TextInput
-                        value={formTime}
-                        onChangeText={t => {
-                          setTimingDirty(true)
-                          setFormTime(t)
-                        }}
-                        placeholder="09:00"
-                        placeholderTextColor={colors.muted}
-                        maxLength={5}
-                        style={styles.timeInlineInput}
-                        selectionColor={colors.primary}
-                      />
-                    </View>
-                    <View style={styles.presetTimeRow}>
-                      {['08:00', '09:00', '12:00', '18:00'].map(t => (
-                        <Pressable
-                          key={t}
-                          accessibilityRole="button"
-                          onPress={() => {
-                            setTimingDirty(true)
-                            setFormTime(t)
-                          }}
-                          style={[styles.timeChip, formTime === t && styles.timeChipActive]}
-                        >
-                          <Text style={[styles.timeChipText, formTime === t && styles.timeChipTextActive]}>{t}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {formKind === 'every' && (
-                  <View style={styles.timingDetailBox}>
-                    <Text style={styles.fieldSubLabel}>{strings.automation.formInterval}</Text>
-                    <View style={styles.presetTimeRow}>
-                      {[
-                        { label: `15 ${strings.automation.minuteUnit}`, val: 15 },
-                        { label: `30 ${strings.automation.minuteUnit}`, val: 30 },
-                        { label: `1 ${strings.automation.hourUnit}`, val: 60 },
-                        { label: `2 ${strings.automation.hourUnit}`, val: 120 },
-                        { label: `4 ${strings.automation.hourUnit}`, val: 240 },
-                        { label: `24 ${strings.automation.hourUnit}`, val: 1440 },
-                      ].map(item => (
-                        <Pressable
-                          key={item.val}
-                          accessibilityRole="button"
-                          onPress={() => {
-                            setTimingDirty(true)
-                            setFormIntervalMinutes(item.val)
-                          }}
-                          style={[styles.timeChip, formIntervalMinutes === item.val && styles.timeChipActive]}
-                        >
-                          <Text style={[styles.timeChipText, formIntervalMinutes === item.val && styles.timeChipTextActive]}>
-                            {item.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {formKind === 'weekly' && (
-                  <View style={styles.timingDetailBox}>
-                    <Text style={styles.fieldSubLabel}>{strings.automation.formWeekdays}</Text>
-                    <View style={styles.presetTimeRow}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => {
-                          setTimingDirty(true)
-                          setFormWeekdays([1, 2, 3, 4, 5])
-                        }}
-                        style={[
-                          styles.timeChip,
-                          formWeekdays.length === 5 && formWeekdays.every(d => d <= 5) && styles.timeChipActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.timeChipText,
-                            formWeekdays.length === 5 && formWeekdays.every(d => d <= 5) && styles.timeChipTextActive,
-                          ]}
-                        >
-                          {strings.automation.workdaysOnly}
-                        </Text>
-                      </Pressable>
-                    </View>
-                    <View style={styles.weekdaysPillRow}>
-                      {localizedWeekdays.map(d => {
-                        const selected = formWeekdays.includes(d.day)
-                        return (
-                          <Pressable
-                            key={d.day}
-                            accessibilityRole="button"
-                            onPress={() => handleToggleWeekday(d.day)}
-                            style={[styles.weekdayCircle, selected && styles.weekdayCircleActive]}
-                          >
-                            <Text style={[styles.weekdayCircleText, selected && styles.weekdayCircleTextActive]}>
-                              {d.label}
-                            </Text>
-                          </Pressable>
-                        )
-                      })}
-                    </View>
-                    <Text style={[styles.fieldSubLabel, { marginTop: spacing.sm }]}>{strings.automation.formTime} (HH:mm)</Text>
-                    <TextInput
-                      value={formTime}
-                      onChangeText={t => {
-                        setTimingDirty(true)
-                        setFormTime(t)
-                      }}
-                      placeholder="09:00"
-                      placeholderTextColor={colors.muted}
-                      maxLength={5}
-                      style={styles.timeInput}
-                    />
-                  </View>
-                )}
-
-                {formKind === 'at' && (
-                  <View style={styles.timingDetailBox}>
-                    <Text style={styles.fieldSubLabel}>{strings.automation.timingOnce}</Text>
-                    <View style={styles.presetTimeRow}>
-                      {[
-                        { label: `15 ${strings.automation.minuteUnit}`, val: 15 },
-                        { label: `30 ${strings.automation.minuteUnit}`, val: 30 },
-                        { label: `1 ${strings.automation.hourUnit}`, val: 60 },
-                        { label: `2 ${strings.automation.hourUnit}`, val: 120 },
-                      ].map(item => (
-                        <Pressable
-                          key={item.val}
-                          accessibilityRole="button"
-                          onPress={() => {
-                            setTimingDirty(true)
-                            setFormDelayMinutes(item.val)
-                          }}
-                          style={[styles.timeChip, formDelayMinutes === item.val && styles.timeChipActive]}
-                        >
-                          <Text style={[styles.timeChipText, formDelayMinutes === item.val && styles.timeChipTextActive]}>
-                            +{item.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {formKind === 'cron' && (
-                  <View style={styles.timingDetailBox}>
-                    <Text style={styles.fieldSubLabel}>Cron 表达式 (分 时 日 月 周)</Text>
-                    <TextInput
-                      value={formCronExpression}
-                      onChangeText={t => {
-                        setTimingDirty(true)
-                        setFormCronExpression(t)
-                      }}
-                      placeholder="0 9 * * *"
-                      placeholderTextColor={colors.muted}
-                      style={styles.formInput}
-                  selectionColor={colors.primary}
-                    />
-                  </View>
-                )}
-                <View style={styles.cardDivider} />
-                <View style={styles.nextRunsRow}>
-                  <Text style={styles.paramLabel}>{strings.automation.formNextRuns}</Text>
-                  <Text style={styles.nextRunsValue} numberOfLines={2}>{nextRunsLabel}</Text>
-                  <Text style={styles.nextRunsHint}>{strings.automation.formLocalTime}</Text>
-                </View>
-              </View>
             </ScrollView>
 
-            {/* Fixed action bar */}
             <View style={styles.formFooter}>
               <Pressable
                 accessibilityRole="button"
@@ -1646,7 +1790,7 @@ function createStyles(colors: ThemeColors) {
     errorRetryBtnText: { ...type.caption, color: colors.white, fontWeight: '600' },
     formContainer: {
       padding: spacing.md,
-      paddingBottom: spacing.xxl + 160,
+      paddingBottom: 120,
     },
     formHeader: {
       flexDirection: 'row',
@@ -1675,52 +1819,60 @@ function createStyles(colors: ThemeColors) {
       includeFontPadding: false,
     },
     titleInput: {
-      ...type.bodyStrong,
-      fontSize: 20,
-      lineHeight: 26,
+      fontSize: 16,
+      lineHeight: 21,
+      fontWeight: '600',
       color: colors.ink,
-      paddingVertical: spacing.xs,
+      paddingVertical: 6,
+      includeFontPadding: false,
     },
     promptInput: {
-      ...type.body,
+      fontSize: 14,
+      lineHeight: 20,
       color: colors.ink,
-      minHeight: 96,
+      minHeight: 76,
       textAlignVertical: 'top',
-      paddingTop: spacing.sm,
+      paddingVertical: 2,
     },
     cardDivider: {
       height: StyleSheet.hairlineWidth,
       backgroundColor: colors.separator,
-      marginVertical: spacing.sm,
     },
     paramRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: spacing.sm,
+      minHeight: 52,
+      paddingHorizontal: spacing.md,
     },
     paramLabel: {
-      ...type.bodyStrong,
-      color: colors.ink,
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.muted,
     },
     paramValue: {
-      ...type.body,
-      color: colors.muted,
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.ink,
     },
     formHelper: {
-      ...type.caption,
+      fontSize: 12,
+      lineHeight: 16,
       color: colors.muted,
-      marginTop: spacing.xs,
+      paddingHorizontal: spacing.md,
+      marginTop: -spacing.sm,
+      marginBottom: spacing.md,
     },
     nextRunsRow: {
       gap: 2,
     },
     nextRunsHint: {
-      ...type.caption,
-      color: colors.muted,
+      fontSize: 12,
+      color: colors.subtle,
     },
     nextRunsValue: {
-      ...type.body,
+      fontSize: 13,
       color: colors.ink,
     },
     timeInlineInput: {
@@ -1729,6 +1881,189 @@ function createStyles(colors: ThemeColors) {
       minWidth: 72,
       textAlign: 'right',
       paddingVertical: 0,
+    },
+    cardBody: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+    },
+    rowLabel: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.muted,
+    },
+    rowValue: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.ink,
+    },
+    rowValueInput: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.ink,
+      textAlign: 'right',
+      minWidth: 72,
+      paddingVertical: 0,
+    },
+    formHint: {
+      fontSize: 12,
+      lineHeight: 16,
+      color: colors.muted,
+      marginTop: spacing.xs,
+    },
+    optionWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    optionChip: {
+      height: 34,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    optionChipActive: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
+    },
+    optionChipText: {
+      fontSize: 13,
+      color: colors.ink,
+    },
+    optionChipTextActive: {
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    weekdayChip: {
+      width: 40,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    nextBlock: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    nextHead: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: spacing.md,
+    },
+    nextValue: {
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.ink,
+      textAlign: 'right',
+      flex: 1,
+      marginLeft: spacing.sm,
+    },
+    nextHint: {
+      fontSize: 12,
+      color: colors.subtle,
+      marginTop: 2,
+    },
+    sessionRow: {
+      flexDirection: 'row',
+      gap: spacing.xs,
+      paddingTop: spacing.xs,
+      paddingRight: spacing.md,
+    },
+    optionChipGrid: {
+      width: '48%',
+      flexGrow: 0,
+    },
+    modelLabel: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      flex: 1,
+    },
+    modelName: {
+      fontSize: 14,
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    optionEmpty: {
+      fontSize: 13,
+      color: colors.muted,
+      paddingVertical: spacing.xs,
+    },
+    projectRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: -spacing.sm,
+      marginBottom: spacing.xs,
+    },
+    projectChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      height: 32,
+      paddingHorizontal: spacing.sm + 2,
+      borderRadius: radius.pill,
+      backgroundColor: colors.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      maxWidth: '100%',
+    },
+    projectChipText: {
+      fontSize: 13,
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    dropdown: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      maxWidth: '65%',
+    },
+    dropdownText: {
+      fontSize: 14,
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    triggerSegment: {
+      flexDirection: 'row',
+      padding: 2,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+    },
+    triggerSegmentItem: {
+      paddingHorizontal: spacing.sm + 2,
+      paddingVertical: 5,
+      borderRadius: 6,
+    },
+    triggerSegmentItemActive: {
+      backgroundColor: colors.card,
+      ...floatingShadow(colors),
+    },
+    triggerSegmentText: {
+      fontSize: 13,
+      color: colors.muted,
+    },
+    triggerSegmentTextActive: {
+      color: colors.ink,
+      fontWeight: '600',
+    },
+    weekdayRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+      marginTop: spacing.xs,
     },
     formFooter: {
       flexDirection: 'row',
@@ -1743,8 +2078,8 @@ function createStyles(colors: ThemeColors) {
       ...floatingShadow(colors),
     },
     footerCancelBtn: {
-      height: 46,
-      paddingHorizontal: spacing.lg,
+      height: 44,
+      paddingHorizontal: spacing.md,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: radius.pill,
@@ -1768,10 +2103,10 @@ function createStyles(colors: ThemeColors) {
     formCard: {
       backgroundColor: colors.card,
       borderRadius: radius.xl,
-      padding: spacing.md,
-      marginBottom: spacing.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
+      marginBottom: spacing.md,
+      overflow: 'hidden',
     },
     formLabel: {
       ...type.bodyStrong,
@@ -1797,15 +2132,12 @@ function createStyles(colors: ThemeColors) {
       marginTop: spacing.xs,
     },
     sessionPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      maxWidth: 240,
+      height: 34,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
       borderRadius: radius.pill,
-      backgroundColor: colors.grouped,
-      marginRight: spacing.xs,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
     },
