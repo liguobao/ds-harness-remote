@@ -94,6 +94,12 @@ struct Index {
   @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
   @State showSettings: boolean = false;
+  /** 是否跟随最新消息；用户往上翻时置 false，避免流式输出把列表一直拽到底。 */
+  @State stickToBottom: boolean = true;
+  private searchDebounceTimer: number = -1;
+  /** chatRows 缓存：流式输出时每帧全量重算太贵。 */
+  private chatRowsKey: string = '';
+  private chatRowsCache: ChatItem[] = [];
   /** 图片全屏预览：src、缩放与平移。 */
   @State previewSrc: string = '';
   @State previewActive: boolean = false;
@@ -242,7 +248,7 @@ struct Index {
   }
 
   private scrollChatToBottom(): void {
-    if (this.messages.length === 0) {
+    if (this.messages.length === 0 || !this.stickToBottom) {
       return;
     }
     this.scroller.scrollToIndex(this.messages.length - 1, false);
@@ -379,6 +385,18 @@ struct Index {
     return sessionGroupLabel(list[index - 1].updatedAt) === label ? '' : label;
   }
 
+  /** 标题旁的连接状态点：重连中黄、已断开红、其余绿。 */
+  private connectionDotColor(): string {
+    const status: string = this.runtime.reconnectStatus;
+    if (status.length > 0) {
+      return '#F5A623';
+    }
+    if (this.phase === PHASE_CONNECTING) {
+      return '#F5A623';
+    }
+    return '#34D399';
+  }
+
   /** 设备页底部统计：英文环境换单位，避免模板里嵌死「台 / 在线」。 */
   private hostCountLabel(): string {
     return this.en() ? `${this.devices.length} hosts` : `${this.devices.length} 台主机`;
@@ -417,6 +435,12 @@ struct Index {
   /** 连续工具调用折叠：同段 ≥2 条收成一行「N 步」，点开再逐条看。 */
   private chatRows(): ChatItem[] {
     const source: ChatItem[] = this.messages;
+    const last: ChatItem | undefined = source.length > 0 ? source[source.length - 1] : undefined;
+    const key: string = `${source.length}|${last === undefined ? 0 : last.rev}|${this.languageMode}`
+      + `|${this.expandedRuns.join(',')}`;
+    if (key === this.chatRowsKey) {
+      return this.chatRowsCache;
+    }
     const rows: ChatItem[] = [];
     let index: number = 0;
     while (index < source.length) {
@@ -446,7 +470,10 @@ struct Index {
       }
       index = end;
     }
-    return this.mergeAssistantRows(rows);
+    const merged: ChatItem[] = this.mergeAssistantRows(rows);
+    this.chatRowsKey = key;
+    this.chatRowsCache = merged;
+    return merged;
   }
 
   /**
@@ -888,6 +915,11 @@ struct Index {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+        Text(this.buildTag())
+          .fontSize(10)
+          .fontColor(this.pal().text3)
+          .width('100%')
+          .textAlign(TextAlign.Center)
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 18, bottom: 26 })
@@ -1220,9 +1252,6 @@ struct Index {
             .height(3)
             .borderRadius(2)
             .linearGradient({ angle: 90, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
-          Text(this.buildTag())
-            .fontSize(10)
-            .fontColor(this.pal().text3)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -1621,18 +1650,26 @@ struct Index {
                   this.renamingSession = false;
                 })
             } else {
-              Text(this.generating ? '正在生成…' : this.currentSessionTitle)
-                .fontSize(12)
+              Row({ space: 4 }) {
+                Column()
+                  .width(6)
+                  .height(6)
+                  .borderRadius(3)
+                  .backgroundColor(this.connectionDotColor())
+                Text(this.generating ? '正在生成…' : this.currentSessionTitle)
+                  .fontSize(12)
                 .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: 150 })
-                .onClick(() => {
-                  if (!this.generating && this.currentSessionId.length > 0) {
-                    this.sessionTitleInput = this.currentSessionTitle;
-                    this.renamingSession = true;
-                  }
-                })
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .constraintSize({ maxWidth: 150 })
+                  .onClick(() => {
+                    if (!this.generating && this.currentSessionId.length > 0) {
+                      this.sessionTitleInput = this.currentSessionTitle;
+                      this.renamingSession = true;
+                    }
+                  })
+              }
+              .alignItems(VerticalAlign.Center)
               if (this.contextPercent > 0) {
                 Text(this.contextPercent + '%')
                   .fontSize(10)
@@ -1656,7 +1693,8 @@ struct Index {
           .onClick(() => {
             ActionSheet.show({
               title: '会话信息',
-              message: `模型 ${this.currentModelLabel.length > 0 ? this.currentModelLabel : '未选择'} · 上下文 ${this.contextPercent}%`,
+              message: `模型 ${this.currentModelLabel.length > 0 ? this.currentModelLabel : '未选择'} · 上下文 `
+                + (this.contextPercent > 0 ? `${this.contextPercent}%` : '—'),
               sheets: [
                 {
                   title: '切换模型',
@@ -1763,6 +1801,11 @@ struct Index {
       .scrollBarWidth(this.isLandscape ? 6 : 3)
       .scrollBarColor(this.isDarkUi ? 'rgba(255,255,255,0.28)' : 'rgba(31,45,90,0.22)')
       .edgeEffect(EdgeEffect.Spring)
+      .onScrollIndex((first: number, last: number) => {
+        // 留 2 条余量：首帧测量时 last 常比 total-1 小 1，别因此误判成「用户翻走了」
+        const total: number = this.messages.length;
+        this.stickToBottom = total === 0 || last >= total - 2;
+      })
       }
       .width('100%')
       .height('100%')
@@ -1774,6 +1817,25 @@ struct Index {
         .linearGradient({ angle: 180, colors: [['rgba(0,0,0,0)', 0], [this.pal().bg, 1]] })
         .hitTestBehavior(HitTestMode.None)
 
+      if (!this.stickToBottom) {
+        Row() {
+          Text('↓ ' + this.tr('回到最新'))
+            .fontSize(12)
+            .fontColor(this.pal().text2)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().card)
+            .borderRadius(14)
+            .border({ width: 1, color: this.pal().border })
+            .shadow({ radius: 10, color: 'rgba(0,0,0,0.12)', offsetX: 0, offsetY: 2 })
+            .onClick(() => {
+              this.stickToBottom = true;
+              this.scrollChatToBottom();
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .margin({ bottom: 96 })
+      }
       this.ComposerDock()
     }
     .width('100%')
@@ -2020,7 +2082,14 @@ struct Index {
           .onChange((value: string) => {
             this.sessionSearchInput = value;
             this.sessionSearchActive = value.trim().length > 0;
-            this.runtime.searchSessions(value);
+            // 每敲一个字就走一次中继 RPC 太贵（一次 400~600ms），加 250ms 防抖
+            if (this.searchDebounceTimer >= 0) {
+              clearTimeout(this.searchDebounceTimer);
+            }
+            this.searchDebounceTimer = setTimeout(() => {
+              this.searchDebounceTimer = -1;
+              this.runtime.searchSessions(this.sessionSearchInput);
+            }, 250);
           })
         if (this.sessionSearchActive) {
           Text('清除')
@@ -2484,7 +2553,7 @@ struct Index {
         .width('80%')
         .justifyContent(FlexAlign.End)
         .gesture(LongPressGesture().onAction(() => {
-          this.offerFork(item);
+          this.offerMessageActions(item);
         }))
       }
       .width('100%')
@@ -2533,6 +2602,19 @@ struct Index {
               .textAlign(TextAlign.Start)
           }
           .width('100%')
+        } else if (line.linkUrl.length > 0) {
+          Text(line.text)
+            .fontSize(15)
+            .fontColor('#22D3EE')
+            .decoration({ type: TextDecorationType.Underline, color: '#22D3EE' })
+            .width('100%')
+            .textAlign(TextAlign.Start)
+            .onClick(() => {
+              const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+              context.openLink(line.linkUrl).catch(() => {
+                promptAction.showToast({ message: this.tr('无法打开链接') });
+              });
+            })
         } else {
           Text(line.text)
             .fontSize(line.heading ? 17 : 15)
@@ -2591,6 +2673,17 @@ struct Index {
 
   /** 点开图片：全屏查看，双指缩放 / 拖动 / 双击复位。 */
   private openPreview(src: string): void {
+    if (!isRemoteImage(src) && !this.images.has(src)) {
+      this.loadMdImage(src);
+      setTimeout(() => {
+        this.previewSrc = src;
+        this.previewScale = 1;
+        this.previewOffsetX = 0;
+        this.previewOffsetY = 0;
+        this.previewActive = true;
+      }, 300);
+      return;
+    }
     this.previewSrc = src;
     this.previewScale = 1;
     this.previewOffsetX = 0;
@@ -2862,25 +2955,34 @@ struct Index {
     });
   }
 
-  /** 长按消息：可从该条消息处分叉出一个新会话。 */
-  private offerFork(item: ChatItem): void {
-    if (item.seq <= 0 || this.runtime.currentSessionId.length === 0) {
-      return;
-    }
-    AlertDialog.show({
-      title: '从这里分叉',
-      message: '将新建一个会话，保留到这条消息为止的上下文，后续对话互不影响。',
-      primaryButton: {
-        value: '取消',
+  /** 长按消息：复制正文 / 从这里分叉（分叉不再占用长按默认动作）。 */
+  private offerMessageActions(item: ChatItem): void {
+    const canFork: boolean = item.seq > 0 && this.runtime.currentSessionId.length > 0;
+    const sheets: SheetInfo[] = [
+      {
+        title: this.tr('复制文本'),
         action: () => {
+          const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, item.text);
+          pasteboard.getSystemPasteboard().setData(data).then(() => {
+            promptAction.showToast({ message: this.tr('已复制') });
+          }).catch(() => {
+            promptAction.showToast({ message: this.tr('复制失败') });
+          });
         }
-      },
-      secondaryButton: {
-        value: '分叉',
+      }
+    ];
+    if (canFork) {
+      sheets.push({
+        title: this.tr('从这里分叉'),
         action: () => {
           this.runtime.forkCurrentSession(item.seq);
         }
-      }
+      });
+    }
+    ActionSheet.show({
+      title: this.tr('消息操作'),
+      message: item.kind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'),
+      sheets: sheets
     });
   }
 
@@ -2918,6 +3020,9 @@ struct Index {
         .backgroundColor(this.pal().inputBg)
         .borderRadius(16)
         .alignItems(HorizontalAlign.Start)
+        .gesture(LongPressGesture().onAction(() => {
+          this.offerMessageActions(item);
+        }))
       }
       .width('88%')
       .constraintSize({ maxWidth: 780 })
@@ -3317,6 +3422,14 @@ class MarkdownImageCache {
     this.pending.delete(key);
     this.failures.delete(key);
     this.pixels.set(key, pixel);
+    // LRU：一张手机截图解码后约 8~10MB，长会话里不设上限会吃满内存
+    while (this.pixels.size > 20) {
+      const oldest: string | undefined = this.pixels.keys().next().value;
+      if (oldest === undefined || oldest === key) {
+        break;
+      }
+      this.pixels.delete(oldest);
+    }
   }
 
   fail(key: string, reason: string): void {
@@ -3364,6 +3477,8 @@ class MdLine {
   /** 非空表示这一行是图片，值是 markdown 里的 src。 */
   imageSrc: string = '';
   imageAlt: string = '';
+  /** 非空表示这一行整行就是一个链接。 */
+  linkUrl: string = '';
 }
 
 /** 一行里切出来的片段：要么是文字，要么是一张图。 */
@@ -3475,7 +3590,15 @@ function markdownLines(source: string): MdLine[] {
       const textLine: MdLine = new MdLine();
       textLine.heading = entry.heading;
       textLine.bullet = entry.bullet;
-      textLine.text = segment.text;
+      // 整行 [文字](url) → 可点击；行内链接降级成「文字（url）」，避免裸露 markdown
+      const wholeLink: RegExpMatchArray | null = segment.text.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+      if (wholeLink !== null) {
+        textLine.linkUrl = wholeLink[2];
+        textLine.text = wholeLink[1];
+      } else {
+        textLine.text = segment.text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
+          (match: string, label: string, url: string) => `${label}（${url}）`);
+      }
       if (textLine.text.length > 0) {
         out.push(textLine);
       }
