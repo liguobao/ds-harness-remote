@@ -87,7 +87,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     return result
   }), [items])
   const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
-    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
+    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
     && !availableUiIds.has(item.id)
     && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
       || (item.uiResultMeta as { ok?: unknown }).ok !== false))

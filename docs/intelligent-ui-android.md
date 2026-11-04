@@ -1,6 +1,6 @@
 # Android Intelligent UI integration (optional) — Issue #124
 
-The remote client projects a **successfully settled** DSH `ui_render`, `ui_patch`, and `ui_render_widget` into an isolated, versioned UI Artifact (Host + Session + uiId). Tool summaries are never used as UI definitions. Failed/incomplete/stale patches do not mutate the last successful UI. Only the latest complete version appears next to the reply; the original ToolActivity text is unchanged.
+The remote client projects a **successfully settled** DSH `ui_render`, `ui_patch`, `ui_render_widget`, and `ui_compose` into an isolated, versioned UI Artifact (Host + Session + uiId). Tool summaries are never used as UI definitions. Failed/incomplete/stale patches do not mutate the last successful UI. Only the latest complete version appears next to the reply; the original ToolActivity text is unchanged. Composed answers (`kind: "composition"`) order Markdown, Catalog, and Widget blocks; `ui_patch` targets inside a composition address individual catalog blocks via `<compositionId>#<blockId>` with independent block versioning.
 
 ## Enable the offline renderer
 

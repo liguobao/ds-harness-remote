@@ -209,7 +209,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const pointers = sectionUi?.pointers ?? []
     const unavailableUi = section.items.filter((item): item is ToolActivity =>
       item.kind === 'tool' && item.state === 'finished'
-      && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
+      && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
       && !visibleUiIds.has(item.id)
       && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
         || (item.uiResultMeta as { ok?: unknown }).ok !== false))
