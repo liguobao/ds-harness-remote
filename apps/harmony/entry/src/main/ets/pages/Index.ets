@@ -1644,7 +1644,11 @@ struct Index {
       .layoutWeight(1)
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 104 })
-      .scrollBar(BarState.Off)
+      // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
+      .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
+      .scrollBarWidth(this.isLandscape ? 6 : 3)
+      .scrollBarColor(this.isDarkUi ? 'rgba(255,255,255,0.28)' : 'rgba(31,45,90,0.22)')
+      .edgeEffect(EdgeEffect.Spring)
       }
       .width('100%')
       .height('100%')
