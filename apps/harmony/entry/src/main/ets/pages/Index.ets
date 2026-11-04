@@ -97,6 +97,8 @@ struct Index {
   /** 是否跟随最新消息；用户往上翻时置 false，避免流式输出把列表一直拽到底。 */
   @State stickToBottom: boolean = true;
   private searchDebounceTimer: number = -1;
+  /** 上一次强制贴底的会话 id，用于区分「刚切进来」还是「流式更新」。 */
+  private lastScrolledSessionId: string = '';
   /** chatRows 缓存：流式输出时每帧全量重算太贵。 */
   private chatRowsKey: string = '';
   private chatRowsCache: ChatItem[] = [];
@@ -241,9 +243,22 @@ struct Index {
       this.fieldsPrefilled = true;
     }
     if (this.phase === PHASE_CHAT) {
-      setTimeout(() => {
-        this.scrollChatToBottom();
-      }, 100);
+      // 切换/首次进入会话时强制贴底一次：否则 stickToBottom 在首帧测量里可能被判成 false，
+      // 列表会停在历史中间，看不到最新消息。
+      if (this.currentSessionId !== this.lastScrolledSessionId) {
+        this.lastScrolledSessionId = this.currentSessionId;
+        this.stickToBottom = true;
+        setTimeout(() => {
+          this.scrollChatToBottom();
+          setTimeout(() => {
+            this.scrollChatToBottom();
+          }, 300);
+        }, 120);
+      } else {
+        setTimeout(() => {
+          this.scrollChatToBottom();
+        }, 100);
+      }
     }
   }
 
@@ -1806,10 +1821,14 @@ struct Index {
       .scrollBarWidth(this.isLandscape ? 6 : 3)
       .scrollBarColor(this.isDarkUi ? 'rgba(255,255,255,0.28)' : 'rgba(31,45,90,0.22)')
       .edgeEffect(EdgeEffect.Spring)
-      .onScrollIndex((first: number, last: number) => {
-        // 留 2 条余量：首帧测量时 last 常比 total-1 小 1，别因此误判成「用户翻走了」
-        const total: number = this.messages.length;
-        this.stickToBottom = total === 0 || last >= total - 2;
+      // 只有「用户手动拖动」才停止跟随；程序化滚动不产生 touch，不会误判。
+      .onTouch((event: TouchEvent) => {
+        if (event.type === TouchType.Move && this.stickToBottom) {
+          this.stickToBottom = false;
+        }
+      })
+      .onReachEnd(() => {
+        this.stickToBottom = true;
       })
       }
       .width('100%')
