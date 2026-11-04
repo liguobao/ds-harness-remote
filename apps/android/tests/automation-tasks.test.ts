@@ -416,7 +416,8 @@ describe('Automation Tasks and Sidebar i18n', () => {
         title: 'Title Only',
       })
     )
-    expect(proxy.scheduleUpdate.mock.calls[0][0].change).toBeUndefined()
+    const firstCall = proxy.scheduleUpdate.mock.calls[0] as [any] | undefined
+    expect(firstCall?.[0]?.change).toBeUndefined()
   })
 
   it('createScheduleTask succeeds and updates state even if catalog refresh fails', async () => {
