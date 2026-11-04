@@ -703,7 +703,8 @@ struct Index {
         .javaScriptProxy({
           object: this.rtc.proxyObject(),
           name: 'dshBridge',
-          methodList: ['onLog'],
+          methodList: ['onLog', 'onLocalSdp', 'onIce', 'onState', 'onIceState',
+            'onDataOpen', 'onDataClosed', 'onDataBinary', 'onError'],
           controller: this.rtc.controller
         })
         .onPageEnd(() => {

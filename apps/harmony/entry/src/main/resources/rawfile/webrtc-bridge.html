@@ -64,6 +64,91 @@
     setTimeout(function () { if (!done) { log('selftest: timeout(6s)'); } }, 6000);
   }
 
+  // ---------- 真实协商用的对外 API（由 ArkTS 通过 runJavaScript 调用） ----------
+  var pc = null, dc = null;
+
+  function call(name, arg) {
+    try {
+      if (window.dshBridge && typeof window.dshBridge[name] === 'function') {
+        window.dshBridge[name](arg === undefined ? '' : String(arg));
+      }
+    } catch (e) { log('callback ' + name + ' failed: ' + e); }
+  }
+
+  function ensurePc(iceJson) {
+    if (pc) { return pc; }
+    var PC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    var cfg = { iceServers: [] };
+    try { if (iceJson) { cfg = JSON.parse(iceJson); } } catch (e) { log('ice parse failed'); }
+    pc = new PC(cfg);
+    pc.onicecandidate = function (e) {
+      if (e.candidate && e.candidate.candidate) { call('onIce', JSON.stringify(e.candidate)); }
+    };
+    pc.onconnectionstatechange = function () { call('onState', pc.connectionState); };
+    pc.oniceconnectionstatechange = function () { call('onIceState', pc.iceConnectionState); };
+    return pc;
+  }
+
+  // 角色：Client 是 offer 侧；先建 DC 再建 offer
+  function startOffer(iceJson) {
+    var p = ensurePc(iceJson);
+    dc = p.createDataChannel('dsh', { ordered: true });
+    dc.binaryType = 'arraybuffer';
+    dc.onopen = function () { call('onDataOpen', '1'); };
+    dc.onclose = function () { call('onDataClosed', '1'); };
+    dc.onmessage = function (m) {
+      if (typeof m.data === 'string') { call('onDataText', m.data); return; }
+      var bytes = new Uint8Array(m.data), bin = '';
+      for (var i = 0; i < bytes.length; i++) { bin += String.fromCharCode(bytes[i]); }
+      call('onDataBinary', btoa(bin));
+    };
+    p.createOffer().then(function (o) { return p.setLocalDescription(o); })
+      .then(function () { call('onLocalSdp', JSON.stringify({ type: p.localDescription.type, sdp: p.localDescription.sdp })); })
+      .catch(function (err) { call('onError', 'offer failed: ' + err); });
+  }
+
+  // 收到 Host 的 answer
+  function applyAnswer(sdpJson) {
+    if (!pc) { call('onError', 'applyAnswer before startOffer'); return; }
+    var desc = JSON.parse(sdpJson);
+    pc.setRemoteDescription(new RTCSessionDescription(desc))
+      .then(function () { call('onRemoteApplied', desc.type); })
+      .catch(function (err) { call('onError', 'applyAnswer failed: ' + err); });
+  }
+
+  function addRemoteIce(candidateJson) {
+    if (!pc) { return; }
+    try {
+      var c = JSON.parse(candidateJson);
+      pc.addIceCandidate(new RTCIceCandidate(c)).catch(function (err) { log('addIce failed ' + err); });
+    } catch (e) { log('addRemoteIce parse failed'); }
+  }
+
+  function send(b64) {
+    if (!dc || dc.readyState !== 'open') { return 'nodc'; }
+    try {
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+      dc.send(bytes.buffer);
+      return 'ok';
+    } catch (e) { return 'error:' + e; }
+  }
+
+  function closeAll() {
+    try { if (dc) { dc.close(); } if (pc) { pc.close(); } } catch (e) {}
+    dc = null; pc = null;
+  }
+
+  window.dshRtc = {
+    selfTest: selfTest,
+    startOffer: startOffer,
+    applyAnswer: applyAnswer,
+    addRemoteIce: addRemoteIce,
+    send: send,
+    close: closeAll,
+    state: function () { return JSON.stringify({ pc: pc ? pc.connectionState : 'none', dc: dc ? dc.readyState : 'none' }); }
+  };
+
   window.__dshSelfTest = selfTest;
   window.addEventListener('load', function () { log('bridge loaded'); });
 })();
