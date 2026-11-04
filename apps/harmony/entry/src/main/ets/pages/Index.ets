@@ -91,6 +91,10 @@ struct Index {
   @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
   @State showSettings: boolean = false;
+  /** 输入坞上跟随手指/鼠标的光斑位置与强度。 */
+  @State dockLightX: number = 0;
+  @State dockLightY: number = 0;
+  @State dockLightOpacity: number = 0;
   /** 正在录音（麦克风按钮变红点）。 */
   @State recording: boolean = false;
   /** 录音已停止、等主机转写。 */
@@ -1832,8 +1836,14 @@ struct Index {
         blurOptions: { grayscale: [0, 24] }
       })
       .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)')
-      // 折光：顶部亮线 + 底部内阴影，一并画在 overlay 里，不占流内高度
-      .overlay(this.DockGlassEdges(), { align: Alignment.Center })
+      // 折光：跟随指针的光斑 + 顶部亮线 + 底部内阴影，都在 overlay 里，不占流内高度
+      .overlay(this.DockGlassOverlay(), { align: Alignment.Center })
+      .onTouch((event: TouchEvent) => {
+        this.trackDockLight(event);
+      })
+      .onMouse((event: MouseEvent) => {
+        this.trackDockMouse(event);
+      })
       .borderRadius(30)
       .border({ width: 1,
         color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(31,45,90,0.10)' })
@@ -2406,10 +2416,68 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 玻璃的「折光」层：顶上一条亮线，底下压一层内阴影，凑出厚度。 */
+  /** 手指按下/滑动：光斑跟到触点，并按 180ms 淡入。 */
+  private trackDockLight(event: TouchEvent): void {
+    const touches: TouchObject[] = event.touches;
+    if (event.type === TouchType.Down || event.type === TouchType.Move) {
+      if (touches.length === 0) {
+        return;
+      }
+      this.dockLightX = touches[0].x;
+      this.dockLightY = touches[0].y;
+      this.fadeDockLight(true);
+      return;
+    }
+    this.fadeDockLight(false);
+  }
+
+  /** 鼠标悬停也用同一套光斑，桌面/2in1 上鼠标划过就能看到。 */
+  private trackDockMouse(event: MouseEvent): void {
+    if (event.action === MouseAction.Move || event.action === MouseAction.Press) {
+      this.dockLightX = event.x;
+      this.dockLightY = event.y;
+      this.fadeDockLight(true);
+      return;
+    }
+    if (event.action === MouseAction.Release) {
+      this.fadeDockLight(false);
+    }
+  }
+
+  private fadeDockLight(visible: boolean): void {
+    const target: number = visible ? 1 : 0;
+    if (this.dockLightOpacity === target) {
+      return;
+    }
+    this.getUIContext().animateTo({
+      duration: visible ? 160 : 260,
+      curve: Curve.EaseOut
+    }, () => {
+      this.dockLightOpacity = target;
+    });
+  }
+
+  /** 玻璃的「折光」层：跟手的光斑 + 顶上一条亮线 + 底下压一层内阴影。 */
   @Builder
-  DockGlassEdges() {
-    Column() {
+  DockGlassOverlay() {
+    Stack() {
+      // 跟手光斑：玻璃被指针“擦亮”的那块
+      Column()
+        .width('100%')
+        .height('100%')
+        .borderRadius(30)
+        .radialGradient({
+          center: [this.dockLightX, this.dockLightY],
+          radius: 150,
+          colors: [
+            ['rgba(255,255,255,0.55)', 0],
+            ['rgba(255,255,255,0.18)', 0.45],
+            ['rgba(255,255,255,0)', 1]
+          ]
+        })
+        .opacity(this.dockLightOpacity)
+        .hitTestBehavior(HitTestMode.None)
+      Column() {
       Row()
         .width('86%')
         .height(1)
@@ -2427,6 +2495,9 @@ struct Index {
           [this.isDarkUi ? 'rgba(0,0,0,0.22)' : 'rgba(31,45,90,0.06)', 1]
         ] })
         .borderRadius({ bottomLeft: 28, bottomRight: 28 })
+      }
+      .width('100%')
+      .height('100%')
     }
     .width('100%')
     .height('100%')
