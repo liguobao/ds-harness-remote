@@ -648,6 +648,7 @@ export function AutomationTasksModal({
                       <Pressable
                         key={k.key}
                         accessibilityRole="button"
+                        accessibilityState={{ selected: formKind === k.key }}
                         onPress={() => {
                           setTimingDirty(true)
                           setFormKind(k.key)
@@ -668,6 +669,7 @@ export function AutomationTasksModal({
                       <Pressable
                         key={k.key}
                         accessibilityRole="button"
+                        accessibilityState={{ selected: formKind === k.key }}
                         onPress={() => {
                           setTimingDirty(true)
                           setFormKind(k.key)
