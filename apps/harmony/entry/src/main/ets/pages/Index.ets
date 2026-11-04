@@ -612,13 +612,14 @@ struct Index {
   /** 设备卡第二行：平台 + 主机版本（Host 没上报版本时只显示平台）。 */
   private hostSubtitle(device: RemoteHostDevice): string {
     const head: string = device.platform.length > 0 ? device.platform : this.tr('远程主机');
+    let base: string = head;
     if (device.harnessVersion.length > 0) {
-      return `${head} · ${this.tr('主机')} ${device.harnessVersion}`;
+      base = `${head} · ${this.tr('主机')} ${device.harnessVersion}`;
+    } else if (device.clientVersion.length > 0) {
+      base = `${head} · ${this.tr('插件')} ${device.clientVersion}`;
     }
-    if (device.clientVersion.length > 0) {
-      return `${head} · ${this.tr('插件')} ${device.clientVersion}`;
-    }
-    return head;
+    const seen: string = this.hostSeenLabel(device);
+    return device.online ? base : `${base} · ${seen}`;
   }
 
   /** 设备卡第三行：在线状态用绿点表达，这里只补「最近活动」，避免「在线」重复两遍。 */
@@ -1420,7 +1421,7 @@ struct Index {
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.pal().text)
-            .maxLines(1)
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .onHover((isHover: boolean) => {
               const name: string = this.displayNameFor(device);
@@ -1441,11 +1442,20 @@ struct Index {
               }
             })
         }
-        Text(this.hostSubtitle(device))
-          .fontSize(11)
-          .fontColor(this.pal().text3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: 5 }) {
+          Column()
+            .width(6)
+            .height(6)
+            .borderRadius(3)
+            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
+          Text(this.hostSubtitle(device))
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -1472,20 +1482,6 @@ struct Index {
             })
         }
       } else {
-        Row({ space: 5 }) {
-          Column()
-            .width(6)
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          Text(this.hostSeenLabel(device))
-            .fontSize(11)
-            .fontColor(device.online ? '#34D399' : this.pal().text3)
-            .maxLines(1)
-        }
-        .padding({ left: 8, right: 8, top: 5, bottom: 5 })
-        .backgroundColor(device.online ? 'rgba(52,211,153,0.12)' : this.pal().chip)
-        .borderRadius(12)
         Text(this.tr('改名'))
           .fontSize(11)
           .fontColor(this.pal().text2)
