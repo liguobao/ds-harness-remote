@@ -129,7 +129,8 @@ export class RtcBridge {
     }
     this.started = true;
     try {
-      this.controller.runJavaScript('window.__dshSelfTest && window.__dshSelfTest();');
+      this.controller.runJavaScript('window.__dshSelfTest && window.__dshSelfTest();'
+        + 'window.__dshNetTest && window.__dshNetTest();');
       logInfo('[webrtc] self-test dispatched');
     } catch (error) {
       logWarn('[webrtc] self-test dispatch failed: '

@@ -29,6 +29,17 @@
     return out;
   }
 
+  // 网络可达性：ArkWeb 的渲染进程能不能访问本机/LAN（决定 ICE 能否用主机候选）
+  function netTest() {
+    var targets = ['https://dsh.r2049.cn/health', 'http://127.0.0.1:3080/'];
+    targets.forEach(function (u) {
+      try {
+        fetch(u, { mode: 'no-cors' }).then(function () { log('nettest ok ' + u); })
+          .catch(function (e) { log('nettest fail ' + u + ' ' + e); });
+      } catch (e) { log('nettest throw ' + u + ' ' + e); }
+    });
+  }
+
   // 本机自环：两个 PeerConnection 互连，走 host candidate（不依赖服务端）
   function selfTest() {
     env();
@@ -150,6 +161,7 @@
   };
 
   window.__dshSelfTest = selfTest;
+  window.__dshNetTest = netTest;
   window.addEventListener('load', function () { log('bridge loaded'); });
 })();
 </script>

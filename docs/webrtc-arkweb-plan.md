@@ -128,6 +128,16 @@ Client                                    Server                        Host
 也就是说**任务 1 已完成**：`RtcBridge.ets` + `resources/rawfile/webrtc-bridge.html` 已落地，
 `javaScriptProxy` 回调链路可用（`window.dshBridge.onLog` → hilog）。
 
+网络可达性（同一页面的 `fetch` 探测）：
+
+```
+nettest ok   https://dsh.r2049.cn/health     ← HTTPS 出公网正常
+nettest fail http://127.0.0.1:3080/          ← 明文 HTTP 被 ArkWeb 拦（Failed to fetch）
+```
+
+结论：**ICE 配置必须走 HTTPS**（`GET /api/v1/turn/credentials` 本来就是 HTTPS，没问题）；
+如果以后要直连 Host 的明文端口，需要在 `module.json5` 或 Web 组件上放行 cleartext。
+
 下一步（任务 2/3）：把自检换成真实协商——ICE 配置从 `GET /api/v1/turn/credentials` 取，
 `signal.offer/answer/ice` 走 Control WS，DC 打开后先发 `transport.selected` 再跑 Noise。
 
