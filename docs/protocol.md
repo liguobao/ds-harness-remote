@@ -1224,8 +1224,8 @@ Android 用户可显式下载工作区原文件到系统目录选择器授权的
 
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
 `officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
-注意：上游 `list` / `changes` 限于工作区；文件读取遵循 Session 文件系统权限，允许工作区外的已授权文件，
-不能把“只读”表述成“只能读取 cwd 内文件”。旧 `fileviewer.read.v1` 仍使用 provider 授权。
+注意：上游 `list` / `changes` 限于工作区；为修复 #250 任意文件读取漏洞，原生 `workspaceFiles/read*` 与 `stat`
+严格限制在 Session 工作区根目录（cwd）物理包含范围内，拒绝未授权的工作区外路径与越界符号链接。旧 `fileviewer.read.v1` 仍使用 provider 授权。
 对 `codex:<threadId>` scope，Host 使用 CodeX thread 当前 `cwd` 作为独立根目录，并额外拒绝根目录之外的路径；
 该映射不改变 Harness Session 的既有工作区权限。CodeX 终端同样按 thread 建立独立 context。
 

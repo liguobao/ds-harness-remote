@@ -88346,7 +88346,11 @@ var HarnessRemoteBridge = class {
   }
 };
 function isPathOutside(rel) {
-  return rel === ".." || rel.startsWith("..\\") || rel.startsWith("../") || isAbsolute10(rel);
+  if (rel === ".." || isAbsolute10(rel)) return true;
+  if (process.platform === "win32") {
+    return rel.startsWith("..\\") || rel.startsWith("../");
+  }
+  return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
   const options = isRecord21(args.options) ? args.options : void 0;

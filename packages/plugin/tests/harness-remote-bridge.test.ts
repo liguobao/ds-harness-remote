@@ -685,6 +685,8 @@ describe('HarnessRemoteBridge', () => {
       if (process.platform !== 'win32') {
         const posixEscapeFile = join(root, 'escape\\secret.txt')
         await writeFile(posixEscapeFile, 'posix backslash content')
+        const posixDotDotBackslashFile = join(root, '..\\notes.txt')
+        await writeFile(posixDotDotBackslashFile, 'posix dot dot backslash content')
         const escapeDirSymlink = join(root, 'escape')
         await symlink(outside, escapeDirSymlink, 'dir')
       }
@@ -871,6 +873,22 @@ describe('HarnessRemoteBridge', () => {
                   expect(dispatch).toHaveBeenLastCalledWith(
                     'workspaceFiles/read',
                     expect.objectContaining({ args: expect.objectContaining({ path: 'escape\\secret.txt' }) }),
+                    expect.any(AbortSignal),
+                  )
+                },
+              },
+              {
+                name: 'permits legal POSIX backslash filename with leading dots (..\\notes.txt)',
+                run: async () => {
+                  await expect(
+                    bridge.call({
+                      endpoint: 'workspaceFiles/read',
+                      payload: { args: { workspaceFileScopeId: 'session-1', path: '..\\notes.txt' } },
+                    }),
+                  ).resolves.toMatchObject({ ok: true })
+                  expect(dispatch).toHaveBeenLastCalledWith(
+                    'workspaceFiles/read',
+                    expect.objectContaining({ args: expect.objectContaining({ path: '..\\notes.txt' }) }),
                     expect.any(AbortSignal),
                   )
                 },

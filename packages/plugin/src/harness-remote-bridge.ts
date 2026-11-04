@@ -755,7 +755,11 @@ export class HarnessRemoteBridge {
 }
 
 function isPathOutside(rel: string): boolean {
-  return rel === '..' || rel.startsWith('..\\') || rel.startsWith('../') || isAbsolute(rel)
+  if (rel === '..' || isAbsolute(rel)) return true
+  if (process.platform === 'win32') {
+    return rel.startsWith('..\\') || rel.startsWith('../')
+  }
+  return rel.startsWith('../')
 }
 
 function byteOrLineRange(args: Record<string, unknown>): Record<string, unknown> {
