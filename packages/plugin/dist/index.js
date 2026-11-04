@@ -88185,9 +88185,28 @@ var WORKSPACE_FILE_READ_ENDPOINTS = /* @__PURE__ */ new Set([
   "workspaceFiles/stat"
 ]);
 var MAX_READ_BYTES2 = 4 * 1024 * 1024;
+var localTimeSchema = external_exports.object({ time: external_exports.string().min(1).max(32), time_zone: external_exports.string().min(1).max(64) }).strict();
+var scheduleCreateArgsSchema = external_exports.object({
+  sessionId: external_exports.string().min(1).max(128),
+  title: external_exports.string().min(1).max(120),
+  prompt: external_exports.string().min(1).max(2e4),
+  after_seconds: external_exports.number().int().positive().max(31536e3).optional(),
+  at: external_exports.union([
+    external_exports.string().min(1).max(64),
+    external_exports.object({ date: external_exports.string().min(1).max(32), time: external_exports.string().min(1).max(32), time_zone: external_exports.string().min(1).max(64) }).strict()
+  ]).optional(),
+  every_seconds: external_exports.number().int().min(60).max(31536e3).optional(),
+  daily: localTimeSchema.optional(),
+  weekly: external_exports.object({
+    time: external_exports.string().min(1).max(32),
+    time_zone: external_exports.string().min(1).max(64),
+    weekdays: external_exports.array(external_exports.number().int().min(1).max(7)).min(1).max(7)
+  }).strict().optional(),
+  cron: external_exports.object({ expression: external_exports.string().min(1).max(128), time_zone: external_exports.string().min(1).max(64) }).strict().optional()
+}).strict();
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -88195,6 +88214,7 @@ var HarnessRemoteBridge = class {
     this.terminal = terminal;
     this.codexWorkspace = codexWorkspace;
     this.resolveWorkspaceRoot = resolveWorkspaceRoot;
+    this.schedule = schedule;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
@@ -88226,6 +88246,9 @@ var HarnessRemoteBridge = class {
       }
     }
     if (codexResult !== void 0) return reservation === void 0 ? codexResult : this.terminal.result(params.endpoint, params.payload, codexResult, reservation);
+    if (params.endpoint === "schedule/create") {
+      return this.createSchedule(params.payload);
+    }
     if (params.endpoint === "session/canOpenWorkspacePath") {
       return { ok: true, value: true };
     }
@@ -88270,6 +88293,46 @@ var HarnessRemoteBridge = class {
         code: this.gateway.failure(error62).code
       });
       throw error62;
+    }
+  }
+  /** Validate one untrusted create request, then delegate to the Host schedule service. */
+  async createSchedule(payload) {
+    if (this.schedule === void 0) {
+      return {
+        ok: false,
+        error: { code: "FEATURE_NOT_SUPPORTED", message: "This Host does not expose the schedule service.", details: {} }
+      };
+    }
+    const args = requestArgs(payload);
+    const selectors = ["after_seconds", "at", "every_seconds", "daily", "weekly", "cron"].filter((key) => args[key] !== void 0);
+    if (selectors.length !== 1) {
+      return {
+        ok: false,
+        error: { code: "invalid_selector", message: "Exactly one reminder selector is required.", details: {} }
+      };
+    }
+    const parsed = scheduleCreateArgsSchema.safeParse(args);
+    if (!parsed.success) {
+      const issue2 = parsed.error.issues[0];
+      return {
+        ok: false,
+        error: {
+          code: "invalid_rule",
+          message: issue2 === void 0 ? "The reminder request is invalid." : `${issue2.path.join(".") || "request"}: ${issue2.message}`,
+          details: {}
+        }
+      };
+    }
+    const { sessionId, ...request } = parsed.data;
+    try {
+      const record11 = await this.schedule.create(sessionId, request, AbortSignal.timeout(6e4));
+      return { ok: true, value: record11 };
+    } catch (error62) {
+      const code = isRecord21(error62) && typeof error62.code === "string" ? error62.code : "FAILED";
+      return {
+        ok: false,
+        error: { code, message: error62 instanceof Error ? error62.message : "The Host could not create the reminder.", details: {} }
+      };
     }
   }
   async directoryList(payload, signal) {
@@ -88946,7 +89009,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -88954,6 +89017,7 @@ var HostPluginRuntime = class {
     this.fileViewerHost = fileViewerHost;
     this.terminalSpawner = terminalSpawner;
     this.pluginRoutes = pluginRoutes;
+    this.schedule = schedule;
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
@@ -88977,7 +89041,8 @@ var HostPluginRuntime = class {
           () => harnessSessionGeneration(this.harnessVersion) === "v3",
           (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-        )
+        ),
+        this.schedule
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -90661,6 +90726,7 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     };
   }
   const subprocess = ctx.get("subprocess", false);
+  const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
     const hostIdentities = new IdentityStore({
       directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host")
@@ -90676,7 +90742,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
         () => ctx.get("connection"),
         () => ctx.get("webServer")?.port,
         peer
-      )
+      ),
+      schedule
     );
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {

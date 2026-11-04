@@ -174,20 +174,73 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenCalledWith('permissionPresets/catalog', { args: {} }, expect.any(AbortSignal))
     await expect(bridge.call({ endpoint: 'permissionPresets/select', payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     expect(dispatch).toHaveBeenCalledTimes(2)
-    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession', 'userQuestions/answer', 'claudeCodeMods/pressBand', 'schedule/list', 'schedule/catalog', 'schedule/create']) {
+    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession', 'userQuestions/answer', 'claudeCodeMods/pressBand', 'schedule/list', 'schedule/catalog']) {
       const payload = { args: { request: { sessionId: 'session-1' } } }
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
     }
+    // Creating a reminder never reaches the native gateway: the Host schedule
+    // service owns it, and a Host without that service answers explicitly.
+    await expect(bridge.call({ endpoint: 'schedule/create', payload: { args: { request: { sessionId: 'session-1' } } } }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'FEATURE_NOT_SUPPORTED' } })
     for (const endpoint of ['schedule/arbitrary', 'schedule/updateAll']) {
       await expect(bridge.call({ endpoint, payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     }
   })
 
+  it('creates reminders through the Host schedule service and reports its refusals', async () => {
+    const record = {
+      id: 'task-1', kind: 'daily', title: 'A', prompt: 'B',
+      time: '09:00:00.000', timeZone: 'UTC', scheduledAt: '2026-11-05T01:00:00.000Z',
+    }
+    const create = vi.fn(async () => record)
+    const payload = {
+      args: { request: { sessionId: 'session-1', title: 'A', prompt: 'B', daily: { time: '09:00:00.000', time_zone: 'UTC' } } },
+    }
+    const build = (schedule?: { create: (sessionId: string, request: unknown, signal?: AbortSignal) => Promise<unknown> }) =>
+      new HarnessRemoteBridge(
+        gateway({ dispatch: vi.fn() }), vi.fn(), undefined, undefined, undefined, undefined, undefined, schedule,
+      )
+
+    const withService = build({ create })
+    await expect(withService.call({ endpoint: 'schedule/create', payload })).resolves.toEqual({ ok: true, value: record })
+    expect(create).toHaveBeenCalledWith(
+      'session-1',
+      { title: 'A', prompt: 'B', daily: { time: '09:00:00.000', time_zone: 'UTC' } },
+      expect.any(AbortSignal),
+    )
+
+    // Host compositions that omit the reminder service stay explicit.
+    const withoutService = build()
+    await expect(withoutService.call({ endpoint: 'schedule/create', payload }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'FEATURE_NOT_SUPPORTED' } })
+
+    // Exactly one selector is required, and the request is validated before delegation.
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: { sessionId: 'session-1', title: 'A', prompt: 'B' } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_selector' } })
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: {
+        sessionId: 'session-1', title: 'A', prompt: 'B',
+        every_seconds: 3600, daily: { time: '09:00:00.000', time_zone: 'UTC' },
+      } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_selector' } })
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: { sessionId: 'session-1', title: '', prompt: 'B', every_seconds: 3600 } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_rule' } })
+
+    // A Host refusal keeps its published code instead of collapsing into a transport error.
+    const refusing = build({ create: vi.fn(async () => { throw Object.assign(new Error('delegated child owns this session'), { code: 'subagent_session' }) }) })
+    await expect(refusing.call({ endpoint: 'schedule/create', payload }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'subagent_session' } })
+  })
+
   it('preserves official schedule management requests, conflicts and missing-task results', async () => {
     await runScenarios([
       { endpoint: 'schedule/history', request: { sessionId: 'session-1', id: 'task-1', limit: 20, before: 'message-1' }, value: { id: 'task-1', records: [], earlierRecordsUnavailable: false, earlierRecordsPruned: false, retention: { days: 30, records: 100 } } },
-      { endpoint: 'schedule/create', request: { sessionId: 'session-1', title: 'Task', prompt: 'Run' }, value: { id: 'task-1', kind: 'daily', title: 'Task', prompt: 'Run', scheduledAt: '2026-10-23T00:00:00.000Z' } },
       { endpoint: 'schedule/update', request: { sessionId: 'session-1', id: 'task-1', expected: { id: 'task-1', kind: 'at', title: 'Old', prompt: 'Check build', scheduledAt: '2026-10-23T00:00:00.000Z' }, title: 'New' }, value: { id: 'task-1', updated: false, code: 'schedule_conflict' } },
       { endpoint: 'schedule/delete', request: { sessionId: 'session-1', id: 'task-1' }, value: { id: 'task-1', deleted: false, code: 'schedule_not_found' } },
     ].map(({ endpoint, request, value }) => ({

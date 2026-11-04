@@ -24,7 +24,7 @@ import {
 } from './server-api.js'
 import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
-import { HarnessRemoteBridge } from './harness-remote-bridge.js'
+import { HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
@@ -88,6 +88,8 @@ export class HostPluginRuntime {
     /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
     private readonly terminalSpawner?: RemoteTerminalSpawner,
     private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
+    /** Host `schedule` service; absent on Hosts whose composition omits reminders. */
+    private readonly schedule?: ScheduleCreateService,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -114,6 +116,7 @@ export class HostPluginRuntime {
               threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
               sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
             ),
+            this.schedule,
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(
