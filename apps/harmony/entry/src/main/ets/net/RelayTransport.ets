@@ -10,7 +10,10 @@ export class RelayTransportOptions {
   targetDeviceId: string = '';
   capabilities: string[] = ['transport.relay', 'transport.relay.attach'];
   preferredTransports: string[] = ['relay'];
-  handshakeTimeoutMs: number = 10000;
+  /** 整个控制握手（含中继 attach 重试）的预算，必须大于重试间隔之和。 */
+  handshakeTimeoutMs: number = 45000;
+  /** 中继容量会抖动（4008 relay capacity reached），attach 失败时按这个间隔重试。 */
+  attachRetryDelaysMs: number[] = [1500, 3000, 6000, 12000, 20000];
 }
 
 export class RelayConnectionInfo {
@@ -255,7 +258,7 @@ export class RelayTransport {
     const relayTicket = jsonStr(frame.payload, 'relayTicket', '');
     const relayEpoch = jsonNum(frame.payload, 'relayEpoch', -1);
     if (relayEndpoint.length > 0 && relayTicket.length > 0) {
-      this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
+      this.attachDataWithRetry(relayEndpoint, relayTicket, relayEpoch, 0)
         .then(() => {
           this.finishConnect();
         })
@@ -298,6 +301,26 @@ export class RelayTransport {
     if (cb !== undefined) {
       cb(step, fromBase64Url(data));
     }
+  }
+
+  /**
+   * 中继节点会短时打满（4008 relay capacity reached）。容量是秒级抖动的，
+   * 所以 attach 失败后按配置退避重来几次，比直接让用户看到报错靠谱。
+   */
+  private attachDataWithRetry(relayEndpoint: string, relayTicket: string, relayEpoch: number,
+    attempt: number): Promise<void> {
+    return this.openDataSocket(relayEndpoint, relayTicket, relayEpoch).catch((error: Error) => {
+      const delays: number[] = this.options.attachRetryDelaysMs;
+      if (attempt >= delays.length) {
+        throw error;
+      }
+      const wait: number = delays[attempt];
+      logWarn('relay attach retry ' + (attempt + 1) + '/' + delays.length
+        + ' in ' + wait + 'ms: ' + (error instanceof Error ? error.message : String(error)));
+      return new Promise<void>((resolve) => {
+        setTimeout(resolve, wait);
+      }).then(() => this.attachDataWithRetry(relayEndpoint, relayTicket, relayEpoch, attempt + 1));
+    });
   }
 
   private openDataSocket(relayEndpoint: string, relayTicket: string, relayEpoch: number): Promise<void> {

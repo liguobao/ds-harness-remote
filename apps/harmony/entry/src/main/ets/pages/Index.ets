@@ -633,7 +633,7 @@ struct Index {
     Column() {
       ForEach([this.languageMode], (lang: number) => {
         this.RootStack()
-      }, (lang: number) => `ui-${lang}`)
+      }, (lang: number) => `ui-${lang}-${this.themeMode}`)
     }
     .width('100%')
     .height('100%')
@@ -1824,18 +1824,19 @@ struct Index {
       }
       .width('100%')
       // 系统材质负责模糊和透光，内衬只留一点点白，避免糊成一块实心板
-      .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR, {
-        colorMode: ThemeColorMode.SYSTEM,
+      .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+        // 必须跟 App 自己的深浅色走：SYSTEM 会照系统主题取材质，App 强制深色时会错成浅玻璃
+        colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
         adaptiveColor: AdaptiveColor.DEFAULT,
         // 轻微去色偏（0–127），背景的杂色不会把玻璃染脏
         blurOptions: { grayscale: [0, 24] }
       })
-      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.14)')
+      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)')
       // 折光：顶部亮线 + 底部内阴影，一并画在 overlay 里，不占流内高度
       .overlay(this.DockGlassEdges(), { align: Alignment.Center })
       .borderRadius(30)
       .border({ width: 1,
-        color: this.isDarkUi ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.90)' })
+        color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(31,45,90,0.10)' })
       .shadow({
         radius: 30,
         color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.18)',
