@@ -35,6 +35,19 @@
    然后补英文——搬之前先在同一处加 `tr()`，否则切语言这两块仍是中文
 5. 上游 Host 缺口（需改 `ds-harness-remote` 插件，不是客户端）：`session/updateQueue` 排队投影、附件上传通道、`pinSession`/`unarchiveSession` 透传、`job/list`、`goals/*`、轨迹、子代理
 
+## 会话底栏（2026-11-04 改）
+
+`Index.ets` 的 `ChatScreen()` 现在是 `Stack(alignContent: Bottom)`：消息列表照旧在流内，
+输入区被抽成 `ComposerDock()` 浮在最上层，玻璃效果是
+
+```ts
+.backgroundEffect({ radius: 28, saturation: 1.35, brightness: 1.04|1.08, color: 半透明内衬 })
+.borderRadius(26).border(1px 亮边).shadow(柔和投影)
+```
+
+配合顶边折光高光条和列表底部 148vp 留白。**只在平背景上目视过（登录页临时挂载），
+真机聊天页（消息在玻璃后面滚过）还没验**——手机回来第一件事看这个。
+
 ## 验证手段（2026-11-04 补）
 
 - 手机（PLU-AL10）掉线时，可用 `127.0.0.1:40601`（QXS-W10，HarmonyOS PC）装同一份 hap：
