@@ -113,6 +113,11 @@ struct Index {
   @State workspaceCreateOpen: boolean = false;
   /** 文本文件预览面板。 */
   @State filePreviewOpen: boolean = false;
+  /** 消息操作面板（自绘，替代系统 ActionSheet）。 */
+  @State messageActionsOpen: boolean = false;
+  @State messageActionText: string = '';
+  @State messageActionKind: string = '';
+  @State messageActionSeq: number = 0;
   @State workspacePathInput: string = '';
   @State workspaceNameDraft: string = '';
   @State promptDraftInput: string = '';
@@ -1330,6 +1335,9 @@ struct Index {
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
+      }
+      if (this.messageActionsOpen) {
+        this.MessageActionsOverlay()
       }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
@@ -4672,40 +4680,18 @@ struct Index {
 
   /** 长按消息：复制正文 / 从这里分叉（分叉不再占用长按默认动作）。 */
   private offerMessageActions(item: ChatItem): void {
-    const canFork: boolean = item.seq > 0 && this.runtime.currentSessionId.length > 0;
-    const sheets: SheetInfo[] = [
-      {
-        title: this.tr('复制文本'),
-        action: () => {
-          const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, item.text);
-          pasteboard.getSystemPasteboard().setData(data).then(() => {
-            promptAction.showToast({ message: this.tr('已复制') });
-          }).catch(() => {
-            promptAction.showToast({ message: this.tr('复制失败') });
-          });
-        }
-      }
-    ];
-    sheets.push({
-      title: this.tr('引用到输入框'),
-      action: () => {
-        const quoted: string = item.text.split('\n').map((line: string) => '> ' + line).join('\n') + '\n\n';
-        this.promptInput = quoted + this.promptInput;
-        this.runtime.saveDraft(this.currentSessionId, this.promptInput);
-      }
-    });
-    if (canFork) {
-      sheets.push({
-        title: this.tr('从这里分叉'),
-        action: () => {
-          this.runtime.forkCurrentSession(item.seq);
-        }
-      });
-    }
-    ActionSheet.show({
-      title: this.tr('消息操作'),
-      message: item.kind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'),
-      sheets: sheets
+    this.messageActionText = item.text.length > 0 ? item.text : item.summary;
+    this.messageActionKind = item.kind;
+    this.messageActionSeq = item.seq;
+    this.messageActionsOpen = true;
+  }
+
+  private copyActionText(): void {
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.messageActionText);
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      promptAction.showToast({ message: this.tr('已复制') });
+    }).catch(() => {
+      promptAction.showToast({ message: this.tr('复制失败') });
     });
   }
 
@@ -4753,6 +4739,114 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 消息操作：底部面板，带原文预览和图标行，替代黑白的系统 ActionSheet。 */
+  @Builder
+  MessageActionRow(icon: string, label: string, danger: boolean, action: () => void) {
+    Row({ space: 12 }) {
+      Text(icon)
+        .fontSize(this.fs(15))
+        .width(26)
+        .textAlign(TextAlign.Center)
+        .fontColor(danger ? '#F85749' : '#22D3EE')
+      Text(label)
+        .fontSize(this.fs(15))
+        .fontColor(danger ? '#F85749' : this.pal().text)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .backgroundColor(this.pal().card)
+    .borderRadius(14)
+    .border({ width: 1, color: danger ? 'rgba(248,87,73,0.35)' : this.pal().border })
+    .onClick(() => {
+      action();
+    })
+  }
+
+  @Builder
+  MessageActionsOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.messageActionsOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 2 }) {
+            Text(this.tr('消息操作'))
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+            Text(this.messageActionKind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+          }
+          .alignItems(HorizontalAlign.Start)
+          Blank()
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.messageActionsOpen = false;
+            })
+        }
+        .width('100%')
+
+        // 原文预览：两行就够，让人确认点的是哪条
+        if (this.messageActionText.length > 0) {
+          Text(this.messageActionText)
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text2)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(12)
+            .border({ width: { left: 3 }, color: 'rgba(34,211,238,0.55)' })
+        }
+
+        this.MessageActionRow('⧉', this.tr('复制文本'), false, () => {
+          this.copyActionText();
+          this.messageActionsOpen = false;
+        })
+        this.MessageActionRow('❝', this.tr('引用到输入框'), false, () => {
+          const quoted: string = this.messageActionText.split('\n')
+            .map((line: string) => '> ' + line).join('\n') + '\n\n';
+          this.promptInput = quoted + this.promptInput;
+          this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+          this.messageActionsOpen = false;
+        })
+        if (this.messageActionSeq > 0 && this.runtime.currentSessionId.length > 0) {
+          this.MessageActionRow('⑂', this.tr('从这里分叉'), false, () => {
+            this.runtime.forkCurrentSession(this.messageActionSeq);
+            this.messageActionsOpen = false;
+          })
+        }
+        this.MessageActionRow('✕', this.tr('取消'), true, () => {
+          this.messageActionsOpen = false;
+        })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 520 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 300 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 文本文件预览：主机上读回来直接显示，二进制给提示。 */
