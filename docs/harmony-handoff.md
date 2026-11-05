@@ -379,10 +379,32 @@ workspace/list -> 3 item(s)
 
 **仍未做**：语音输入按住波纹条改造（用户说现在这套识别不成功）、安卓端功能差异清单。
 
+## 2026-11-05 13:45（按住说话 + 图片渲染修复，V0.09.3）
+
+**图片还是看不到 → 找到真因**：图片字节拉回来后塞进 `ChatItem.images`，但会话重新折叠历史
+（`openSessionInternal` 的 `foldHistory`、follow 快照）会把它覆盖掉，界面只剩一条空消息。
+改成「消息只记 `imageAttachmentId`，`MessageRow` 渲染时查 `runtime.imageFor(id)`」，
+补完缓存也 `notify()` 一次。日志照旧 `history image ok … base64=303520`。
+
+**语音改成输入法那种**：
+- `VoiceInput` 增加 `level()`（16bit PCM 的 RMS，归一化到 0..1）
+- 麦克风按钮改 `onTouch`：按下开录、上滑 60vp 变红「松开取消」、松手停录并转写
+- 悬浮浮层 `VoiceHoldOverlay()`：22 根波纹条（50ms 滚动一帧）+ 计时 + 提示
+- 实测（PLU-AL10）：权限 granted、`voice recording started`、松手 `bytes=46080 ms=1366`
+
+**但转写这一步被主机挡住**：`speech/transcribe` 没回执。查了主机侧：
+`@deepseek-ai/dsh-experimental-api-speech-to-text` 等三个包在 **dsh 安装目录里存在**，
+但 **web profile 的 node_modules 里没有**，`host features` 的 caps 里也没有 speech 相关能力
+——也就是 profile 没加载这个插件。要真正能用，得在 profile 里启用这两个包并**重启 dsh**
+（重启会中断正在跑的会话，必须用户点头）。
+
+客户端现在会对这种失败给一句人话：「主机未启用语音转写（缺 speech-to-text 插件），先用键盘输入」。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.09.3 | 1000049 | 按住说话+波纹条；历史图片改渲染时查缓存 |
 | 0.09.0 | 1000046 | 齿轮重画 + 响应式布局 + 文字大小四档 |
 | 0.08.8 | 1000045 | 齿轮图标放大到 24（点击区 40） |
 | 0.08.6 | 1000043 | 工作区/目录/命令清单改用白名单端点（follow、directoryPicker、agentId） |

@@ -75,6 +75,13 @@ struct Index {
   @State currentModelProvider: string = '';
   @State currentModelEffort: string = '';
   @State permissionPreset: string = '';
+  /** 按住说话：波形条高度、计时、是否处于「上滑取消」区。 */
+  @State voiceBars: number[] = [];
+  @State voiceElapsedMs: number = 0;
+  @State voiceCancelHint: boolean = false;
+  private voiceTimer: number = -1;
+  private voiceStartY: number = 0;
+  private voiceCancel: boolean = false;
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
   @State textScaleValue: number = 1;
@@ -812,22 +819,25 @@ struct Index {
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
-  /** 语音输入：点一下开录，再点一下收尾并转写，结果续写到输入框。 */
-  private toggleDictation(): void {
-    if (this.dictating) {
-      return;
-    }
-    if (this.recording) {
-      this.stopDictation();
-      return;
-    }
-    this.startDictation();
-  }
+  // ===== 按住说话（输入法那种：按住出波纹条，松手转写，上滑取消） =====
 
-  private startDictation(): void {
+  private static readonly VOICE_BAR_COUNT: number = 22;
+
+  private beginVoiceHold(): void {
+    if (this.dictating || this.recording) {
+      return;
+    }
     const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
     const recorder: VoiceRecorder = this.voice;
     this.errorMsg = '';
+    this.voiceCancel = false;
+    this.voiceCancelHint = false;
+    this.voiceElapsedMs = 0;
+    const bars: number[] = [];
+    for (let i = 0; i < Index.VOICE_BAR_COUNT; i += 1) {
+      bars.push(0.15);
+    }
+    this.voiceBars = bars;
     VoiceRecorder.ensurePermission(context).then((granted: boolean) => {
       if (!granted) {
         this.errorMsg = this.tr('没有麦克风权限，去系统设置里允许后再试');
@@ -835,6 +845,7 @@ struct Index {
       }
       return recorder.start().then(() => {
         this.recording = true;
+        this.startVoiceMeter();
       });
     }).catch((error: Error) => {
       this.recording = false;
@@ -842,11 +853,65 @@ struct Index {
     });
   }
 
-  private stopDictation(): void {
-    const recorder: VoiceRecorder = this.voice;
+  /** 50ms 一帧：把当前音量滚进波形条，顺便刷计时。 */
+  private startVoiceMeter(): void {
+    this.stopVoiceMeter();
+    this.voiceTimer = setInterval(() => {
+      if (!this.recording) {
+        return;
+      }
+      this.voiceElapsedMs = this.voice.elapsedMillis();
+      const level: number = this.voice.level();
+      const next: number[] = this.voiceBars.slice();
+      // 最新音量推到队尾，其它条左移，形成流动的波纹
+      for (let i = 0; i < next.length - 1; i += 1) {
+        next[i] = next[i + 1];
+      }
+      next[next.length - 1] = Math.max(0.12, Math.min(1, level));
+      this.voiceBars = next;
+    }, 50);
+  }
+
+  private stopVoiceMeter(): void {
+    if (this.voiceTimer !== -1) {
+      clearInterval(this.voiceTimer);
+      this.voiceTimer = -1;
+    }
+  }
+
+  /** 手指上滑超过 60vp 视为取消。 */
+  private trackVoiceMove(event: TouchEvent): void {
+    if (!this.recording || event.touches.length === 0) {
+      return;
+    }
+    const dy: number = event.touches[0].y - this.voiceStartY;
+    const cancel: boolean = dy < -60;
+    if (cancel !== this.voiceCancelHint) {
+      this.voiceCancelHint = cancel;
+    }
+  }
+
+  private endVoiceHold(): void {
+    if (!this.recording) {
+      this.stopVoiceMeter();
+      return;
+    }
+    this.stopVoiceMeter();
+    const cancelled: boolean = this.voiceCancelHint;
     this.recording = false;
+    this.voiceCancelHint = false;
+    const recorder: VoiceRecorder = this.voice;
+    if (cancelled) {
+      recorder.cancel().then(() => {
+        this.voiceBars = [];
+      }).catch(() => {
+        this.voiceBars = [];
+      });
+      return;
+    }
     this.dictating = true;
     recorder.stop().then((audioBase64: string) => {
+      this.voiceBars = [];
       if (audioBase64.length === 0) {
         this.dictating = false;
         this.errorMsg = this.tr('太短了，没听清');
@@ -863,7 +928,17 @@ struct Index {
       });
     }).catch((error: Error) => {
       this.dictating = false;
-      this.errorMsg = this.tr('语音转写失败：') + errorMessage(error);
+      this.voiceBars = [];
+      const detail: string = errorMessage(error);
+      console.error('voice transcribe failed: ' + detail);
+      // 主机没装语音插件时，与其显示一串 RPC 错误，不如直说怎么修
+      const lower: string = detail.toLowerCase();
+      if (lower.indexOf('not found') >= 0 || lower.indexOf('not allowed') >= 0
+        || lower.indexOf('unknown') >= 0 || lower.indexOf('method') >= 0) {
+        this.errorMsg = this.tr('主机未启用语音转写（缺 speech-to-text 插件），先用键盘输入');
+      } else {
+        this.errorMsg = this.tr('语音转写失败：') + detail;
+      }
     });
   }
 
@@ -1012,6 +1087,44 @@ struct Index {
     .onAppear(() => {
       this.measureInsets();
     })
+  }
+
+  /**
+   * 按住说话的浮层：波纹条 + 计时 + 松手/上滑提示。
+   * 位置贴着输入坞上方，不挡会话内容。
+   */
+  @Builder
+  VoiceHoldOverlay() {
+    Column({ space: 10 }) {
+      Row({ space: 3 }) {
+        ForEach(this.voiceBars, (bar: number, index: number) => {
+          Column()
+            .width(4)
+            .height(6 + bar * 30)
+            .borderRadius(2)
+            .backgroundColor(this.voiceCancelHint ? '#F85749' : '#22D3EE')
+            .opacity(0.55 + bar * 0.45)
+        }, (bar: number, index: number) => `bar-${index}`)
+      }
+      .height(40)
+      .alignItems(VerticalAlign.Center)
+      Row({ space: 8 }) {
+        Text((this.voiceElapsedMs / 1000).toFixed(1) + 's')
+          .fontSize(this.fs(12))
+          .fontColor(this.pal().text2)
+        Text(this.voiceCancelHint ? this.tr('松开取消') : this.tr('松开发送 · 上滑取消'))
+          .fontSize(this.fs(12))
+          .fontColor(this.voiceCancelHint ? '#F85749' : this.pal().text3)
+      }
+      .alignItems(VerticalAlign.Center)
+    }
+    .padding({ top: 14, bottom: 14, left: 22, right: 22 })
+    .backgroundColor(this.pal().panel)
+    .borderRadius(18)
+    .border({ width: 1, color: this.voiceCancelHint ? 'rgba(248,87,73,0.55)' : this.pal().border })
+    .shadow({ radius: 20, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
+    .margin({ bottom: 92 })
+    .hitTestBehavior(HitTestMode.None)
   }
 
   /** 设置面板：主题做成可选列表，不再靠一颗按钮循环切。 */
@@ -2065,6 +2178,9 @@ struct Index {
         .justifyContent(FlexAlign.Center)
         .margin({ bottom: 96 })
       }
+      if (this.recording) {
+        this.VoiceHoldOverlay()
+      }
       this.ComposerDock()
     }
     .width('100%')
@@ -2220,8 +2336,15 @@ struct Index {
             color: this.recording ? 'rgba(248,87,73,0.55)'
               : (this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)') })
           .enabled(!this.dictating)
-          .onClick(() => {
-            this.toggleDictation();
+          .onTouch((event: TouchEvent) => {
+            if (event.type === TouchType.Down) {
+              this.voiceStartY = event.touches.length > 0 ? event.touches[0].y : 0;
+              this.beginVoiceHold();
+            } else if (event.type === TouchType.Move) {
+              this.trackVoiceMove(event);
+            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+              this.endVoiceHold();
+            }
           })
           TextInput({ text: this.promptInput, placeholder: this.recording ? this.tr('正在听…')
               : (this.dictating ? this.tr('正在转写…')

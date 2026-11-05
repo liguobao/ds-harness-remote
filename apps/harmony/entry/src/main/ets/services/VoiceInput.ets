@@ -28,6 +28,8 @@ export class VoiceRecorder {
   private recording: boolean = false;
   private startedAt: number = 0;
   private readLoop: Promise<void> | undefined = undefined;
+  /** 最近一块 PCM 的归一化音量 0..1，给界面画波形用。 */
+  private levelValue: number = 0;
 
   /** 录音权限：首次点麦克风时申请，拒了就一直返回 false。 */
   static async ensurePermission(context: common.UIAbilityContext): Promise<boolean> {
@@ -46,6 +48,11 @@ export class VoiceRecorder {
 
   isRecording(): boolean {
     return this.recording;
+  }
+
+  /** 当前音量（0..1），波形条按它画。 */
+  level(): number {
+    return this.recording ? this.levelValue : 0;
   }
 
   /** 已录时长（毫秒），给界面画计时用。 */
@@ -167,6 +174,7 @@ export class VoiceRecorder {
       if (buffer.byteLength > 0) {
         this.chunks.push(new Uint8Array(buffer.slice(0)));
         this.totalBytes += buffer.byteLength;
+        this.levelValue = rmsLevel(buffer);
       }
     }
   }
@@ -180,6 +188,25 @@ export class VoiceRecorder {
     }
     return out;
   }
+}
+
+/** 16bit PCM 的归一化音量（0..1），只取幅度包络，够画波形。 */
+function rmsLevel(buffer: ArrayBuffer): number {
+  const view: Int16Array = new Int16Array(buffer);
+  if (view.length === 0) {
+    return 0;
+  }
+  let sum: number = 0;
+  const step: number = view.length > 512 ? Math.floor(view.length / 512) : 1;
+  let count: number = 0;
+  for (let i = 0; i < view.length; i += step) {
+    const sample: number = view[i] / 32768;
+    sum += sample * sample;
+    count += 1;
+  }
+  const rms: number = Math.sqrt(sum / (count > 0 ? count : 1));
+  // 语音的 RMS 通常在 0.02–0.3，乘个系数再夹到 0..1，视觉上更跟手
+  return Math.min(1, rms * 4);
 }
 
 /** 给裸 PCM 套一个 44 字节的 WAV 头，主机侧按 16kHz/单声道/16bit 校验。 */

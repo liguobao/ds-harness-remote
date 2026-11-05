@@ -110,6 +110,10 @@ function buildEnglish(): Map<string, string> {
   map.set('始终使用英文界面', 'Always use English');
   // —— 语音输入 ——
   map.set('正在听…', 'Listening…');
+  map.set('松开发送 · 上滑取消', 'Release to send · swipe up to cancel');
+  map.set('松开取消', 'Release to cancel');
+  map.set('主机未启用语音转写（缺 speech-to-text 插件），先用键盘输入',
+    'Voice transcription is not enabled on the host (speech-to-text plugin missing)');
   map.set('正在转写…', 'Transcribing…');
   map.set('没有麦克风权限，去系统设置里允许后再试',
     'No microphone permission — allow it in Settings and try again');
