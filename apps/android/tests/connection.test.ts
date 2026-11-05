@@ -217,6 +217,32 @@ afterEach(async () => {
     })
   })
 
+  it('starts a replacement carrier with a clean health-probe history', async () => {
+    vi.useFakeTimers()
+    try {
+      const connection = new AndroidRemoteConnection()
+      const closed = vi.fn()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+      // One failed probe on the first carrier: the confirmation probe is still
+      // pending when the carrier is replaced.
+      vi.spyOn(testState.cores[0]!, 'rpc').mockRejectedValue(new Error('probe failed'))
+      await vi.advanceTimersByTimeAsync(25_000)
+      expect(closed).not.toHaveBeenCalled()
+
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+      vi.spyOn(testState.cores[1]!, 'rpc').mockRejectedValue(new Error('probe failed'))
+      await vi.advanceTimersByTimeAsync(25_000)
+      // The first probe on the replacement is not yet a confirmation: the
+      // previous carrier's failure must not count against the new one.
+      expect(closed).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(closed).toHaveBeenCalledOnce()
+      await connection.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('preserves transient versus refused carrier failures through the close callback', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {

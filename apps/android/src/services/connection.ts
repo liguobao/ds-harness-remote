@@ -40,7 +40,7 @@ export class AndroidRemoteConnection {
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
-  /** Consecutive failed health probes for the active core; reset on success. */
+  /** Consecutive failed health probes for the active core; reset per carrier and on success. */
   private healthCheckFailures = 0
 
   async configureHistory(compact: boolean): Promise<void> {
@@ -120,6 +120,9 @@ export class AndroidRemoteConnection {
         35_000,
       )
       this.core = core
+      // A fresh carrier has no health history: a failure counted on the
+      // previous connection must not retire this one after a single probe.
+      this.healthCheckFailures = 0
       this.unsubscribeClose = core.onClose(() => {
         // A late close from a replaced connection must not tear down the new
         // connection that may already be stored on this instance.
