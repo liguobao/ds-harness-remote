@@ -1,4 +1,5 @@
 import { compactHistory } from './compact-history.js'
+import { applyLiteMode, isLiteModeEnabled } from './lite-mode.js'
 import { randomUUID } from 'node:crypto'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -665,10 +666,15 @@ export class HarnessRemoteBridge {
     try {
       for await (const value of source) {
         if (signal.aborted) break
-        const frame: HarnessRemoteFrameData = {
+        let frame: HarnessRemoteFrameData = {
           streamId,
           hasValue: true,
           ...(value === undefined ? {} : { value: historyFollow && this.compactHistoryEnabled && isCompactSnapshot(value) ? compactHistory(value) : value }),
+        }
+        if (isLiteModeEnabled()) {
+          const shaped = applyLiteMode(frame) as HarnessRemoteFrameData | undefined
+          if (shaped === undefined) continue
+          frame = shaped
         }
         if (encodeMessage(createEvent('harness.remote.frame', frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
           if (!transferFrames) throw new Error('Oversized Harness Remote frame')
