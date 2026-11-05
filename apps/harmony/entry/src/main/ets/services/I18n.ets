@@ -200,6 +200,7 @@ function buildEnglish(): Map<string, string> {
   map.set('本轮失败', 'Turn failed');
   map.set('未知原因', 'unknown reason');
   map.set('主机没有给出失败原因', 'the host gave no failure reason');
+  map.set('图片读取失败：', 'Could not read the image: ');
   return map;
 }
 
