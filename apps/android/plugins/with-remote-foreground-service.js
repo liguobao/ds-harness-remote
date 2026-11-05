@@ -76,8 +76,8 @@ const stringLocales = {
     live_task_status_waiting: 'Esperando',
   },
   'values-fr': {
-    ask_agent_process_text: "Demander à l\\\\'agent",
-    live_task_time_just_now: "À l\\\\'instant",
+    ask_agent_process_text: '"Demander à l\x27agent"',
+    live_task_time_just_now: '"À l\x27instant"',
     live_task_time_minutes_ago: 'Il y a %1$d min',
     live_task_time_hours_ago: 'Il y a %1$d h',
     live_task_time_days_ago: 'Il y a %1$d j',
