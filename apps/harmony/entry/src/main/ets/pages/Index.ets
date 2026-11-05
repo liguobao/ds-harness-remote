@@ -171,9 +171,9 @@ struct Index {
     }
     const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
     pasteboard.getSystemPasteboard().setData(data).then(() => {
-      promptAction.showToast({ message: '授权链接已复制' });
+      promptAction.showToast({ message: this.tr('授权链接已复制') });
     }).catch(() => {
-      promptAction.showToast({ message: '复制失败，可长按链接手动复制' });
+      promptAction.showToast({ message: this.tr('复制失败，可长按链接手动复制') });
     });
   }
 
@@ -307,15 +307,15 @@ struct Index {
   private permissionLabel(): string {
     const preset: string = this.runtime.permissionPreset;
     if (preset === 'read-only') {
-      return '只读';
+      return t('只读');
     }
     if (preset === 'workspace-write') {
-      return '可写';
+      return t('可写');
     }
     if (preset === 'danger-full-access') {
-      return '完全';
+      return t('完全');
     }
-    return '权限';
+    return t('权限');
   }
 
   private currentSessionInfo(): HarnessRemoteSession | undefined {
@@ -556,7 +556,7 @@ struct Index {
     row.timestamp = head.timestamp;
     row.rev = expanded ? 1 : 0;
     row.toolName = head.toolName;
-    row.text = `${end - start} 步 · ${expanded ? '收起' : '展开'}`;
+    row.text = `${end - start}${t(' 步 · ')}${expanded ? t('收起') : t('展开')}`;
     row.summary = this.toolRunDetail(source, start, end);
     let running: boolean = false;
     let failed: boolean = false;
@@ -704,19 +704,19 @@ struct Index {
   private devicesMenu(): MenuElement[] {
     const items: MenuElement[] = [
       {
-        value: '退出登录',
+        value: this.tr('退出登录'),
         action: () => {
           AlertDialog.show({
-            title: '退出登录',
-            message: '将清除本机保存的主机凭据，需要重新绑定才能连接。',
+            title: this.tr('退出登录'),
+            message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
             autoCancel: true,
             primaryButton: {
-              value: '取消',
+              value: this.tr('取消'),
               action: () => {
               }
             },
             secondaryButton: {
-              value: '退出',
+              value: this.tr('退出'),
               fontColor: '#F85749',
               action: () => {
                 this.runtime.logout();
@@ -1211,16 +1211,16 @@ struct Index {
               .onClick(() => {
                 const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
                 AlertDialog.show({
-                  title: '重置设备身份',
-                  message: '安全存储里的私钥已经读不到了。重置会生成一个新的设备身份，'
-                    + '需要重新登录，服务器上会把这台设备当成新设备。继续？',
+                  title: this.tr('重置设备身份'),
+                  message: this.tr('安全存储里的私钥已经读不到了。重置会生成一个新的设备身份，'
+                    + '需要重新登录，服务器上会把这台设备当成新设备。继续？'),
                   primaryButton: {
-                    value: '取消',
+                    value: this.tr('取消'),
                     action: () => {
                     }
                   },
                   secondaryButton: {
-                    value: '重置',
+                    value: this.tr('重置'),
                     fontColor: '#F85749',
                     action: () => {
                       this.runtime.resetIdentityAndRestart(context);
@@ -1569,11 +1569,11 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor(this.pal().text)
         .letterSpacing(1)
-      Text(this.connectStage.length > 0 ? this.connectStage : 'NOISE IK 握手 · 能力协商需要几秒')
+      Text(this.connectStage.length > 0 ? this.connectStage : this.tr('NOISE IK 握手 · 能力协商需要几秒'))
         .fontSize(12)
         .fontColor(this.connectStage.length > 0 ? this.pal().text2 : this.pal().text3)
         .letterSpacing(1)
-      Button('取消')
+      Button(this.tr('取消'))
         .height(36)
         .fontSize(14)
         .backgroundColor(this.pal().chip)
@@ -1643,7 +1643,7 @@ struct Index {
               .borderRadius(2.5)
               .backgroundColor(this.generating ? '#22D3EE' : '#34D399')
             if (this.renamingSession) {
-              TextInput({ text: this.sessionTitleInput, placeholder: '会话名称' })
+              TextInput({ text: this.sessionTitleInput, placeholder: this.tr('会话名称') })
                 .height(30)
                 .fontSize(12)
                 .backgroundColor(this.pal().inputBg)
@@ -1674,7 +1674,7 @@ struct Index {
                   .height(6)
                   .borderRadius(3)
                   .backgroundColor(this.connectionDotColor())
-                Text(this.generating ? '正在生成…' : this.currentSessionTitle)
+                Text(this.generating ? this.tr('正在生成…') : this.currentSessionTitle)
                   .fontSize(12)
                 .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
                   .maxLines(1)
@@ -1710,20 +1710,20 @@ struct Index {
           .textAlign(TextAlign.Center)
           .onClick(() => {
             ActionSheet.show({
-              title: '会话信息',
-              message: `模型 ${this.currentModelLabel.length > 0 ? this.currentModelLabel : '未选择'} · 上下文 `
+              title: this.tr('会话信息'),
+              message: `${this.tr('模型')} ${this.currentModelLabel.length > 0 ? this.currentModelLabel : this.tr('未选择')} · ${this.tr('上下文')} `
                 + (this.contextPercent > 0 ? `${this.contextPercent}%` : '—'),
               sheets: [
                 {
-                  title: '切换模型',
+                  title: this.tr('切换模型'),
                   action: () => {
                     this.runtime.refreshModelCatalog();
                     this.showModelPicker = true;
                   }
                 },
-                { title: '权限：只读', action: () => { this.runtime.selectPermission('read-only'); } },
-                { title: '权限：工作区可写', action: () => { this.runtime.selectPermission('workspace-write'); } },
-                { title: '权限：完全权限', action: () => { this.runtime.selectPermission('danger-full-access'); } }
+                { title: this.tr('权限：只读'), action: () => { this.runtime.selectPermission('read-only'); } },
+                { title: this.tr('权限：工作区可写'), action: () => { this.runtime.selectPermission('workspace-write'); } },
+                { title: this.tr('权限：完全权限'), action: () => { this.runtime.selectPermission('danger-full-access'); } }
               ]
             });
           })
@@ -1773,10 +1773,10 @@ struct Index {
           ListItem() {
             Column({ space: 12 }) {
               if (this.sessionsLoadFailed) {
-                Text('会话列表加载失败')
+                Text(this.tr('会话列表加载失败'))
                   .fontSize(13)
                   .fontColor('#F85749')
-                Button('重试')
+                Button(this.tr('重试'))
                   .height(34)
                   .fontSize(13)
                   .padding({ left: 24, right: 24 })
@@ -1789,12 +1789,12 @@ struct Index {
                     this.runtime.retrySessionLoad();
                   })
                 if (this.busy) {
-                  Text('正在重新加载…')
+                  Text(this.tr('正在重新加载…'))
                     .fontSize(11)
                     .fontColor(this.pal().text3)
                 }
               } else {
-                Text(this.busy ? '正在加载会话…' : '发送第一条消息开始对话')
+                Text(this.busy ? this.tr('正在加载会话…') : this.tr('发送第一条消息开始对话'))
                   .fontSize(13)
                   .fontColor(this.pal().text3)
                   .padding(32)
@@ -1952,10 +1952,10 @@ struct Index {
           .onClick(() => {
             this.toggleDictation();
           })
-          TextInput({ text: this.promptInput, placeholder: this.recording ? '正在听…'
-              : (this.dictating ? '正在转写…'
-                : (this.generating ? '正在生成，可插话…'
-                  : (this.runtime.steerMode ? '插话发送（长按发送键切换）' : '发送消息…'))) })
+          TextInput({ text: this.promptInput, placeholder: this.recording ? this.tr('正在听…')
+              : (this.dictating ? this.tr('正在转写…')
+                : (this.generating ? this.tr('正在生成，可插话…')
+                  : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')))) })
             .layoutWeight(1)
             .height(46)
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
@@ -2007,17 +2007,17 @@ struct Index {
             })
             .gesture(LongPressGesture().onAction(() => {
               ActionSheet.show({
-                title: '发送方式',
-                message: this.runtime.steerMode ? '当前：插话（立刻打断当前轮）' : '当前：排队（本轮结束后再发）',
+                title: this.tr('发送方式'),
+                message: this.runtime.steerMode ? this.tr('当前：插话（立刻打断当前轮）') : this.tr('当前：排队（本轮结束后再发）'),
                 sheets: [
                   {
-                    title: '排队发送',
+                    title: this.tr('排队发送'),
                     action: () => {
                       this.runtime.setSteerMode(false);
                     }
                   },
                   {
-                    title: '插话打断',
+                    title: this.tr('插话打断'),
                     action: () => {
                       this.runtime.setSteerMode(true);
                     }
@@ -2091,7 +2091,7 @@ struct Index {
       .width('100%')
       .padding({ left: 18, right: 18, top: 16, bottom: 12 })
       Row({ space: 8 }) {
-        TextInput({ text: this.sessionSearchInput, placeholder: '搜索会话…' })
+        TextInput({ text: this.sessionSearchInput, placeholder: this.tr('搜索会话…') })
           .layoutWeight(1)
           .height(36)
           .fontSize(13)
@@ -2133,7 +2133,7 @@ struct Index {
       .padding({ left: 16, right: 16, top: 4, bottom: 8 })
       if (this.editingWorkspaceId.length > 0) {
         Row({ space: 8 }) {
-          TextInput({ text: this.workspaceTitleInput, placeholder: '工作区名称' })
+          TextInput({ text: this.workspaceTitleInput, placeholder: this.tr('工作区名称') })
             .layoutWeight(1)
             .height(34)
             .fontSize(12)
@@ -2193,21 +2193,21 @@ struct Index {
                     message: workspace.path,
                     sheets: [
                       {
-                        title: '浏览文件',
+                        title: this.tr('浏览文件'),
                         action: () => {
                           this.showBrowser = true;
                           this.runtime.openWorkspace(workspace.workspaceId);
                         }
                       },
                       {
-                        title: '重命名',
+                        title: this.tr('重命名'),
                         action: () => {
                           this.editingWorkspaceId = workspace.workspaceId;
                           this.workspaceTitleInput = workspace.title;
                         }
                       },
                       {
-                        title: '删除工作区',
+                        title: this.tr('删除工作区'),
                         action: () => {
                           this.runtime.deleteWorkspace(workspace.workspaceId);
                         }
@@ -3100,7 +3100,7 @@ struct Index {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Text(item.rev === 1 ? '收起' : '展开')
+      Text(item.rev === 1 ? this.tr('收起') : this.tr('展开'))
         .fontSize(11)
         .fontColor('#22D3EE')
     }
@@ -3190,7 +3190,7 @@ struct Index {
       }
       if (item.approvalOutcome.length === 0) {
         Row({ space: 8 }) {
-          Button('允许')
+          Button(this.tr('允许'))
             .layoutWeight(1)
             .height(36)
             .fontSize(14)
@@ -3201,7 +3201,7 @@ struct Index {
             .onClick(() => {
               this.runtime.respondApproval(item, true);
             })
-          Button('拒绝')
+          Button(this.tr('拒绝'))
             .layoutWeight(1)
             .height(36)
             .fontSize(14)
@@ -3278,7 +3278,7 @@ struct Index {
           }
           .width('100%')
           if (question.multiSelect) {
-            Text('可多选')
+            Text(this.tr('可多选'))
               .fontSize(11)
               .fontColor(this.pal().text3)
           }
@@ -3287,7 +3287,7 @@ struct Index {
         .alignItems(HorizontalAlign.Start)
       }, (question: ChatQuestion) => question.id)
       if (item.questionOutcome.length === 0) {
-        Button('提交回答')
+        Button(this.tr('提交回答'))
           .width('100%')
           .height(38)
           .fontSize(14)
@@ -3346,7 +3346,7 @@ function serverHostLabel(url: string): string {
   while (label.length > 0 && label.charAt(label.length - 1) === '/') {
     label = label.substring(0, label.length - 1);
   }
-  return label.length > 0 ? label : '未配置服务器';
+  return label.length > 0 ? label : t('未配置服务器');
 }
 
 function formatSessionTitle(session: HarnessRemoteSession): string {
@@ -3355,26 +3355,27 @@ function formatSessionTitle(session: HarnessRemoteSession): string {
     return title;
   }
   if (session.blank) {
-    return '新会话';
+    return t('新会话');
   }
-  return `会话 ${session.sessionId.substring(0, 8)}`;
+  const shortId: string = session.sessionId.substring(0, 8);
+  return english() ? `Session ${shortId}` : `会话 ${shortId}`;
 }
 
 /** 今天 / 昨天 / 更早 —— 会话列表分组用。 */
 function sessionGroupLabel(updatedAt: number): string {
   if (updatedAt <= 0) {
-    return '更早';
+    return t('更早');
   }
   const now: Date = new Date();
   const then: Date = new Date(updatedAt);
   const startOfToday: number = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (updatedAt >= startOfToday) {
-    return '今天';
+    return t('今天');
   }
   if (updatedAt >= startOfToday - 86400000) {
-    return '昨天';
+    return t('昨天');
   }
-  return '更早';
+  return t('更早');
 }
 
 function formatSessionTime(updatedAt: number): string {
@@ -3391,6 +3392,14 @@ function formatSessionTime(updatedAt: number): string {
   if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()) {
     return `${hour}:${minuteText}`;
   }
+  if (english()) {
+    const monthNames: string[] = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName: string = monthNames[month - 1];
+    if (date.getFullYear() === now.getFullYear()) {
+      return `${monthName} ${day} ${hour}:${minuteText}`;
+    }
+    return `${monthName} ${day}, ${date.getFullYear()}`;
+  }
   if (date.getFullYear() === now.getFullYear()) {
     return `${month}月${day}日 ${hour}:${minuteText}`;
   }
@@ -3399,25 +3408,25 @@ function formatSessionTime(updatedAt: number): string {
 
 function approvalOutcomeLabel(outcome: string): string {
   if (outcome === 'allowed-once') {
-    return '已允许';
+    return t('已允许');
   }
   if (outcome === 'rejected') {
-    return '已拒绝';
+    return t('已拒绝');
   }
   if (outcome === 'cancelled') {
-    return '已取消';
+    return t('已取消');
   }
-  return '已失效';
+  return t('已失效');
 }
 
 function questionOutcomeLabel(outcome: string): string {
   if (outcome === 'answered') {
-    return '已回答';
+    return t('已回答');
   }
   if (outcome === 'queued') {
-    return '已提交';
+    return t('已提交');
   }
-  return '已取消';
+  return t('已取消');
 }
 
 

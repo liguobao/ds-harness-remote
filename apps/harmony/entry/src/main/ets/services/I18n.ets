@@ -117,6 +117,77 @@ function buildEnglish(): Map<string, string> {
   map.set('太短了，没听清', 'Too short — nothing captured');
   map.set('没识别出内容', 'No speech recognised');
   map.set('语音转写失败：', 'Transcription failed: ');
+  // —— 连接过程 ——
+  map.set('正在初始化…', 'Starting up…');
+  map.set('正在建立安全连接…', 'Establishing secure connection…');
+  map.set('NOISE IK 握手 · 能力协商需要几秒', 'Noise IK handshake · negotiating capabilities takes a few seconds');
+  // —— 会话面板 ——
+  map.set('搜索会话…', 'Search sessions…');
+  map.set('会话名称', 'Session name');
+  map.set('新会话', 'New session');
+  map.set('今天', 'Today');
+  map.set('昨天', 'Yesterday');
+  map.set('更早', 'Earlier');
+  map.set('会话列表加载失败', 'Could not load sessions');
+  map.set('正在重新加载…', 'Reloading…');
+  map.set('正在加载会话…', 'Loading sessions…');
+  map.set('发送第一条消息开始对话', 'Send the first message to start');
+  map.set('工作区名称', 'Workspace name');
+  map.set('浏览文件', 'Browse files');
+  map.set('重命名', 'Rename');
+  map.set('删除工作区', 'Delete workspace');
+  // —— 聊天页 ——
+  map.set('正在生成…', 'Generating…');
+  map.set('会话信息', 'Session info');
+  map.set('模型', 'Model');
+  map.set('上下文', 'context');
+  map.set('未选择', 'none');
+  map.set('切换模型', 'Switch model');
+  map.set('权限', 'Perm');
+  map.set('只读', 'Read');
+  map.set('可写', 'Write');
+  map.set('完全', 'Full');
+  map.set('权限：只读', 'Permission: read-only');
+  map.set('权限：工作区可写', 'Permission: workspace write');
+  map.set('权限：完全权限', 'Permission: full access');
+  map.set(' 步 · ', ' steps · ');
+  map.set('收起', 'collapse');
+  map.set('展开', 'expand');
+  map.set('回到最新', 'Jump to latest');
+  map.set('发送消息…', 'Send a message…');
+  map.set('正在生成，可插话…', 'Generating — you can steer…');
+  map.set('插话发送（长按发送键切换）', 'Steer (long-press send to switch)');
+  map.set('发送方式', 'Send mode');
+  map.set('当前：插话（立刻打断当前轮）', 'Now: steer (interrupts this turn)');
+  map.set('当前：排队（本轮结束后再发）', 'Now: queued (sent after this turn)');
+  map.set('排队发送', 'Queue');
+  map.set('插话打断', 'Steer');
+  map.set('允许', 'Allow');
+  map.set('拒绝', 'Reject');
+  map.set('可多选', 'multi-select');
+  map.set('提交回答', 'Submit answer');
+  map.set('已允许', 'allowed');
+  map.set('已拒绝', 'rejected');
+  map.set('已取消', 'cancelled');
+  map.set('已失效', 'expired');
+  map.set('已回答', 'answered');
+  map.set('已提交', 'submitted');
+  map.set('消息操作', 'Message actions');
+  map.set('复制文本', 'Copy text');
+  map.set('已复制', 'Copied');
+  map.set('复制失败', 'Copy failed');
+  map.set('从这里分叉', 'Fork from here');
+  map.set('你发送的消息', 'Your message');
+  map.set('助手回复', 'Assistant reply');
+  map.set('图片加载中…', 'Loading image…');
+  map.set('图片加载失败', 'Image failed to load');
+  map.set('无法打开链接', 'Could not open link');
+  // —— 登录 / 设备页补漏 ——
+  map.set('未配置服务器', 'No server configured');
+  map.set('授权链接已复制', 'Authorization link copied');
+  map.set('复制失败，可长按链接手动复制', 'Copy failed — long-press the link to copy it');
+  map.set('重置设备身份', 'Reset device identity');
+  map.set('重置', 'Reset');
   return map;
 }
 
