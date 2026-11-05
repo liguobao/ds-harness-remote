@@ -1,6 +1,6 @@
 // Simplified upstream HostsPage + product AppHeader. No remote/open/admin actions.
-import { Alert, Button, Card, Empty, Input, Layout, Modal, Space, Table, Tag, Typography } from 'antd'
-import { GithubOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Empty, Input, Layout, Space, Table, Tag, Typography } from 'antd'
+import { EditOutlined, GithubOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { api, RequestError, type Device, type DeviceList } from './api'
@@ -40,13 +40,20 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
   }
   const devices = [...(result?.items ?? [])].sort((a, b) => Number(b.online) - Number(a.online))
   const columns: TableColumnsType<Device> = [
-    { title: '设备名称', dataIndex: 'name', key: 'name', render: (name: string, d) => <Space size={10}><span className={`host-status-dot ${d.online ? 'is-online' : ''}`} /><Text strong className="selfhost-device-name">{name}</Text></Space> },
+    {
+      title: '设备名称', dataIndex: 'name', key: 'name', render: (name: string, d) => renaming?.deviceId === d.deviceId
+        ? <Space size={6}>
+            <Input size="small" value={newName} autoFocus maxLength={80} style={{ width: 200 }} onChange={event => setNewName(event.target.value)} onPressEnter={() => void submitRename()} onKeyDown={event => { if (event.key === 'Escape') setRenaming(undefined) }} />
+            <Button size="small" type="primary" loading={savingName} onClick={() => void submitRename()}>保存</Button>
+            <Button size="small" onClick={() => setRenaming(undefined)}>取消</Button>
+          </Space>
+        : <Space size={10}><span className={`host-status-dot ${d.online ? 'is-online' : ''}`} /><Text strong className="selfhost-device-name">{name}</Text><Button type="text" size="small" icon={<EditOutlined />} aria-label="修改设备名称" onClick={() => { setRenaming(d); setNewName(d.name) }} /></Space>,
+    },
     { title: '状态', dataIndex: 'online', key: 'online', render: (online: boolean) => online ? <Tag color="green">在线</Tag> : <Tag>离线</Tag> },
     { title: '角色', dataIndex: 'role', key: 'role', render: (role: string) => role === 'host' ? 'Host' : '客户端' },
     { title: '系统', dataIndex: 'platform', key: 'platform', render: (platform: string) => ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux', android: 'Android' })[platform] ?? platform },
     { title: '插件版本', dataIndex: 'clientVersion', key: 'clientVersion' },
     { title: 'Harness 版本', dataIndex: 'harnessVersion', key: 'harnessVersion', render: (value?: string) => value || '—' },
-    { title: '操作', key: 'actions', render: (_: unknown, d: Device) => <Button size="small" onClick={() => { setRenaming(d); setNewName(d.name) }}>改名</Button> },
   ]
   return <>
     <Layout.Header className="topbar product-topbar"><div className="topbar-inner"><div className="topbar-brand-group is-product"><a className="topbar-brand" href="/" aria-label="返回首页"><img className="topbar-brand-mark" src="/brand-whale.webp" alt="" width="40" height="40" /><span className="topbar-brand-copy"><Title level={3}>DeepSeek Harness Remote</Title><small>安全远程访问</small></span></a></div><div className="topbar-actions"><a className="topbar-github-link product-github-link" href="https://github.com/liguobao/dsh-harness-remote" target="_blank" rel="noreferrer" aria-label="GitHub"><GithubOutlined /> GitHub</a><ThemeToggle /><Button type="text" loading={loggingOut} onClick={() => void logout()}>退出登录</Button></div></div></Layout.Header>
@@ -61,8 +68,5 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
         {updated && <Paragraph className="selfhost-caption" type="secondary">更新于 {updated}</Paragraph>}
       </div></div></div>
     </Layout.Content><SiteFooter />
-    <Modal title="修改设备名称" open={!!renaming} confirmLoading={savingName} onOk={() => void submitRename()} onCancel={() => setRenaming(undefined)} okText="保存" cancelText="取消">
-      <Input value={newName} onChange={event => setNewName(event.target.value)} maxLength={80} placeholder="请输入新的设备名称" onPressEnter={() => void submitRename()} />
-    </Modal>
   </>
 }
