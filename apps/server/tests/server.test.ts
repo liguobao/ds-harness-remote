@@ -503,6 +503,9 @@ describe('webrtc signaling and TURN credentials', () => {
     })
     accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
     const ctx = await connection({ hostCapabilities: fullCapabilities, clientCapabilities: fullCapabilities })
+    // The optional TURN node diagnostic must survive the Server's forwarding.
+    ctx.client.send('transport.selected', { connectionId: ctx.connectionId, targetDeviceId: ctx.h.deviceId, transport: 'turn', turnNode: 'turn.example.test:3478' })
+    expect(await ctx.host.next('transport.selected')).toMatchObject({ transport: 'turn', turnNode: 'turn.example.test:3478' })
     const before = Date.now()
     const result = await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.c.accessToken)
     expect(result.status).toBe(200)

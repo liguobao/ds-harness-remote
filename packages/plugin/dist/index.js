@@ -64924,7 +64924,10 @@ var signalIcePayloadSchema = external_exports.object({
 var transportSelectedPayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
   targetDeviceId: external_exports.string().min(1),
-  transport: selectedTransportEnum
+  transport: selectedTransportEnum,
+  /** Relay hostname the initiator actually used when transport is "turn"
+   *  (best-effort, from ICE stats; absent for other transports). */
+  turnNode: external_exports.string().min(1).max(253).optional()
 });
 var pingPongPayloadSchema = external_exports.object({
   nonce: external_exports.string().min(1)
@@ -97244,6 +97247,14 @@ var HostServerConnection = class {
     }
     tunnel.transport = payload.transport;
     tunnel.transportMode = tunnel.rtc.selectedPathMode();
+    if (payload.turnNode !== void 0) {
+      this.logger.info("client selected a turn relay", {
+        connectionId: shortId3(tunnel.connectionId),
+        peerDeviceId: shortId3(tunnel.peer.deviceId),
+        // Hostnames only: never echo arbitrary client-supplied text into logs.
+        turnNode: TURN_NODE_TEXT.test(payload.turnNode) ? payload.turnNode : "<invalid>"
+      });
+    }
     await this.resumePendingHandshake(tunnel);
   }
   canUseWebRtc() {
@@ -97680,6 +97691,7 @@ function objectValue(value, key) {
 function shortId3(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
+var TURN_NODE_TEXT = /^[A-Za-z0-9.[\]:-]+$/;
 function asError2(error62) {
   return error62 instanceof Error ? error62 : new Error("Unknown Server connection error.");
 }

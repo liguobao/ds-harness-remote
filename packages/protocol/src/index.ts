@@ -1153,6 +1153,9 @@ export const transportSelectedPayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
   transport: selectedTransportEnum,
+  /** Relay hostname the initiator actually used when transport is "turn"
+   *  (best-effort, from ICE stats; absent for other transports). */
+  turnNode: z.string().min(1).max(253).optional(),
 })
 
 export const pingPongPayloadSchema = z.object({
