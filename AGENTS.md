@@ -30,8 +30,10 @@ control/status 与远程工作区建立不受影响。
 73 文件 / 531 tests、Android 54 文件 / 520 tests。另在
 独立 DSH 0.2.2-rc.1（Node 24.9.0、独立 DSH_HOME）安装本仓库构建产物，经本仓库开源自部署
 Server 完成 Host 激活、Web UI 渲染、control/status 与 settings 读写、远程工作区建立烟测；
-其中 `account/watch` 被 allowlist 拒绝属预期。未做真实 Desktop/Android APK、原生真机、加密
-跨设备 E2E 或 0.2.2 新 UI 的人工验收；官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案仍
+其中 `account/watch` 被 allowlist 拒绝属预期。同一构建另在独立 DSH `0.2.1-rc.5` Host（全新
+profile 安装、复制既有凭据）上完成激活、control/status 与 0.2.2-rc.1 Client → 0.2.1 Host
+的加密远程工作区打开，确认 owner Peer 修复同时覆盖上一版（两版 `Peer`/`createPeer` 契约
+相同）。未做真实 Desktop/Android APK、原生真机、加密跨设备 E2E 或 0.2.2 新 UI 的人工验收；官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案仍
 待补齐，`$events` 在缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合上不可用（Desktop 客户端
 会重连循环）也尚未在插件侧做降级提示。
 

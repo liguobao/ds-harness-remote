@@ -4,7 +4,7 @@
 
 ### 更新
 
-- 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约恢复展示，CodeX/ACP 会话的实时状态适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用。
+- 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约恢复展示，CodeX/ACP 会话的实时状态适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用；Harness `0.2.1-rc.5` 继续可用。
 - 要求 Node.js `>=24.9`（与 Harness 0.2.2 一致）；Linux 安装器改为安装 Node.js 24.9.0。
 
 ### 修复
@@ -18,7 +18,7 @@
 
 ### Updates
 
-- Support DeepSeek Harness `0.2.2-rc.1`: remote session images display again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the new Trajectory raw results, automation editing, and third-party plugin update surfaces work over Remote.
+- Support DeepSeek Harness `0.2.2-rc.1`: remote session images display again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the new Trajectory raw results, automation editing, and third-party plugin update surfaces work over Remote. Harness `0.2.1-rc.5` remains supported.
 - Require Node.js `>=24.9`, matching Harness 0.2.2. The Linux installer now provisions Node.js 24.9.0.
 
 ### Fixes
