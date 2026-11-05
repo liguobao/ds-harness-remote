@@ -1750,10 +1750,10 @@ struct Index {
         .width('100%')
       }
       .width('100%')
-      .constraintSize({ maxWidth: 520 })
-      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .constraintSize({ maxWidth: 420 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
       .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 22, topRight: 22 })
+      .borderRadius({ topLeft: 20, topRight: 20 })
       .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
       .transition(TransitionEffect.translate({ y: 320 })
         .combine(TransitionEffect.opacity(0))
@@ -4746,19 +4746,19 @@ struct Index {
   MessageActionRow(icon: string, label: string, danger: boolean, action: () => void) {
     Row({ space: 12 }) {
       Text(icon)
-        .fontSize(this.fs(15))
-        .width(26)
+        .fontSize(this.fs(14))
+        .width(22)
         .textAlign(TextAlign.Center)
         .fontColor(danger ? '#F85749' : '#22D3EE')
       Text(label)
-        .fontSize(this.fs(15))
+        .fontSize(this.fs(14))
         .fontColor(danger ? '#F85749' : this.pal().text)
         .layoutWeight(1)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .backgroundColor(this.pal().card)
-    .borderRadius(14)
+    .borderRadius(12)
     .border({ width: 1, color: danger ? 'rgba(248,87,73,0.35)' : this.pal().border })
     .onClick(() => {
       action();
@@ -4775,11 +4775,11 @@ struct Index {
         .onClick(() => {
           this.messageActionsOpen = false;
         })
-      Column({ space: 10 }) {
+      Column({ space: 8 }) {
         Row() {
-          Column({ space: 2 }) {
+          Column({ space: 1 }) {
             Text(this.tr('消息操作'))
-              .fontSize(16)
+              .fontSize(15)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.pal().text)
             Text(this.messageActionKind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'))
@@ -4831,15 +4831,12 @@ struct Index {
             this.messageActionsOpen = false;
           })
         }
-        this.MessageActionRow('✕', this.tr('取消'), true, () => {
-          this.messageActionsOpen = false;
-        })
       }
       .width('100%')
-      .constraintSize({ maxWidth: 520 })
-      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .constraintSize({ maxWidth: 360 })
+      .padding({ left: 14, right: 14, top: 12, bottom: 16 })
       .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 22, topRight: 22 })
+      .borderRadius({ topLeft: 20, topRight: 20 })
       .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
       .transition(TransitionEffect.translate({ y: 300 })
         .combine(TransitionEffect.opacity(0))
@@ -5036,10 +5033,10 @@ struct Index {
           })
       }
       .width('100%')
-      .constraintSize({ maxWidth: 520 })
-      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .constraintSize({ maxWidth: 420 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
       .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 22, topRight: 22 })
+      .borderRadius({ topLeft: 20, topRight: 20 })
       .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
       .transition(TransitionEffect.translate({ y: 320 })
         .combine(TransitionEffect.opacity(0))
