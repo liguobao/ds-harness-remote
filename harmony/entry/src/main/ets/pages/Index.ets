@@ -246,6 +246,66 @@ struct Index {
     }
   }
 
+  /**
+   * 系统返回（左右边缘内滑 / 返回键）。
+   * 顺序：先关浮层 → 会话页回到主机列表（连接保留）→ 连接中取消 → 其余交给系统。
+   * 返回 true 表示已处理，不会退出应用。
+   */
+  onBackPress(): boolean {
+    if (this.previewActive) {
+      this.previewActive = false;
+      return true;
+    }
+    if (this.messageActionsOpen) {
+      this.messageActionsOpen = false;
+      return true;
+    }
+    if (this.promptPanelOpen) {
+      this.promptPanelOpen = false;
+      return true;
+    }
+    if (this.trajectoryOpen) {
+      this.trajectoryOpen = false;
+      return true;
+    }
+    if (this.filePreviewOpen) {
+      this.filePreviewOpen = false;
+      return true;
+    }
+    if (this.workspaceCreateOpen) {
+      this.workspaceCreateOpen = false;
+      return true;
+    }
+    if (this.choiceOpen) {
+      this.choiceOpen = false;
+      return true;
+    }
+    if (this.showServerSwitch || this.showMoreMenu || this.showModelPicker
+      || this.showSessionPanel || this.showBrowser || this.showSettings) {
+      this.showServerSwitch = false;
+      this.showMoreMenu = false;
+      this.showModelPicker = false;
+      this.showSessionPanel = false;
+      this.showBrowser = false;
+      this.showSettings = false;
+      return true;
+    }
+    if (this.showSessions) {
+      this.closeDrawer();
+      return true;
+    }
+    if (this.phase === PHASE_CHAT) {
+      // 会话页 → 主机列表，连接保持不断（和左上角箭头同一个行为）
+      this.runtime.keepAliveToDevices();
+      return true;
+    }
+    if (this.phase === PHASE_CONNECTING) {
+      this.runtime.cancelConnect();
+      return true;
+    }
+    return false;
+  }
+
   onPageShow(): void {
     this.runtime.appBackground = false;
   }
