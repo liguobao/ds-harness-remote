@@ -488,7 +488,25 @@ struct Index {
       if (picked.length === 0) {
         return;
       }
-      this.pendingImages = this.pendingImages.concat(picked);
+      // 预检：单张 base64 超过 3.5MB 就会顶到协议单条上限，直接挡下来并说明原因
+      const limit: number = 3500000;
+      const accepted: PickedImage[] = [];
+      let rejected: number = 0;
+      for (const image of picked) {
+        if (image.base64.length > limit) {
+          rejected++;
+        } else {
+          accepted.push(image);
+        }
+      }
+      if (rejected > 0) {
+        promptAction.showToast({
+          message: this.tr('有 ') + rejected + this.tr(' 张图片过大已跳过（单张上限约 3.5MB）')
+        });
+      }
+      if (accepted.length > 0) {
+        this.pendingImages = this.pendingImages.concat(accepted);
+      }
     }).catch((error: Error) => {
       this.pickingImages = false;
       this.errorMsg = this.tr('图片读取失败：') + error.message;
@@ -3238,6 +3256,13 @@ struct Index {
                       .borderRadius(10)
                       .backgroundColor(this.pal().chip)
                   }
+                  Text(Math.max(1, Math.round(picked.bytes / 1024)) + 'K')
+                    .fontSize(this.fs(9))
+                    .fontColor('#FFFFFF')
+                    .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+                    .backgroundColor('rgba(0,0,0,0.45)')
+                    .borderRadius(6)
+                    .margin({ top: 58, right: 2 })
                   Text('✕')
                     .fontSize(this.fs(11))
                     .fontColor('#FFFFFF')
