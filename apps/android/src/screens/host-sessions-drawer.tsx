@@ -21,19 +21,25 @@ import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Bot,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   Clock,
   Puzzle,
   Folder,
   FolderOpen,
   FolderPlus,
+  Laptop,
   LayoutGrid,
+  Monitor,
   Plus,
   RefreshCw,
   Search,
+  Server,
+  Settings,
   Sliders,
   X,
 } from 'lucide-react-native'
@@ -124,6 +130,8 @@ export function HostSessionsDrawer({
   onNewSession,
   onOpenAutomationTasks,
   onOpenPlugins,
+  onOpenHostSwitcher,
+  onOpenSettings,
   inline = false,
   backLabel,
 }: {
@@ -134,12 +142,16 @@ export function HostSessionsDrawer({
   onNewSession?: () => Promise<void> | void
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
+  onOpenHostSwitcher?: () => void
+  onOpenSettings?: () => void
   inline?: boolean
   backLabel?: string
 }) {
   const language = useAppStore(state => state.language)
   const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
   const deviceName = useAppStore(state => state.selectedDevice?.name)
+  const platform = useAppStore(state => state.selectedDevice?.platform)
+  const connectionPhase = useAppStore(state => state.connection.phase)
   const sessions = useAppStore(state => state.sessions)
   const recentIds = useAppStore(state => state.currentWorkSessionIds)
   const availableBackends = useAppStore(state => [
@@ -680,6 +692,33 @@ export function HostSessionsDrawer({
     </View>
   )
 
+  const hostStatusDotColor = connectionPhase === 'connected'
+    ? colors.success
+    : connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+      ? colors.warning
+      : colors.disabled
+  const hostStatusLabel = connectionPhase === 'connected'
+    ? strings.status.online
+    : connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+      ? strings.status.waiting
+      : strings.status.offline
+  const HostPlatformIcon = platform === 'win32' ? Monitor : platform === 'linux' ? Server : Laptop
+  const hostFooterDeviceInfo = (
+    <>
+      <HostPlatformIcon size={20} color={colors.ink} strokeWidth={1.8} />
+      <View style={styles.hostFooterInfo}>
+        <View style={styles.hostFooterNameRow}>
+          <Text numberOfLines={1} style={styles.hostFooterName}>{deviceName ?? strings.devices.title}</Text>
+          <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />
+        </View>
+        <View style={styles.hostFooterStatusRow}>
+          <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
+          <Text style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
+        </View>
+      </View>
+    </>
+  )
+
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
       {/* 当前主机 */}
@@ -690,6 +729,17 @@ export function HostSessionsDrawer({
           <Text style={styles.brandTitle} numberOfLines={1}>{deviceName ?? strings.devices.title}</Text>
         </Pressable>
         <View style={styles.brandRight}>
+          {onOpenHostSwitcher !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.remoteHosts.switchTitle}
+              onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
+              hitSlop={8}
+              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+            >
+              <ArrowLeftRight size={17} color={colors.ink} strokeWidth={1.9} />
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.common.refresh}
@@ -829,6 +879,7 @@ export function HostSessionsDrawer({
         ListEmptyComponent={groupsReady ? null : <ActivityIndicator color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
         keyExtractor={item => item.sessionId}
         keyboardShouldPersistTaps="handled"
+        style={styles.sectionList}
         contentContainerStyle={styles.listContainer}
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => {
@@ -1032,6 +1083,37 @@ export function HostSessionsDrawer({
           )
         }}
       />
+
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧唯一设置按钮 */}
+      <View style={styles.hostFooterBar}>
+        {onOpenHostSwitcher !== undefined ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
+            onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
+            style={({ pressed }) => [styles.hostFooterDevice, pressed && styles.pressedBg]}
+          >
+            {hostFooterDeviceInfo}
+          </Pressable>
+        ) : (
+          <View style={styles.hostFooterDevice}>{hostFooterDeviceInfo}</View>
+        )}
+        {onOpenSettings !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.settings.title}
+            onPress={() => {
+              Keyboard.dismiss()
+              if (!inline) closeDrawer()
+              onOpenSettings()
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+          >
+            <Settings size={18} color={colors.ink} strokeWidth={1.9} />
+          </Pressable>
+        )}
+      </View>
 
       <View style={styles.newSessionFloat} pointerEvents="box-none">
         <Pressable
@@ -1389,7 +1471,7 @@ const createStyles = (colors: ThemeColors) =>
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
 
     // Floating black pill, as in the reference sidebar.
-    newSessionFloat: { position: 'absolute', right: spacing.lg, bottom: spacing.lg, zIndex: 20 },
+    newSessionFloat: { position: 'absolute', right: spacing.lg, bottom: 76, zIndex: 20 },
     newSessionBtnRound: {
       width: 48,
       height: 48,
@@ -1437,7 +1519,34 @@ const createStyles = (colors: ThemeColors) =>
     },
     searchInput: { flex: 1, ...type.body, fontSize: 15, color: colors.ink, paddingVertical: 0 },
 
-    listContainer: { paddingBottom: 104 },
+    listContainer: { paddingBottom: 148 },
+
+    // 底部常驻栏：左侧当前远程主机状态/切换入口，右侧唯一设置圆钮
+    hostFooterBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+      backgroundColor: colors.background,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs + 2,
+    },
+    hostFooterDevice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      flex: 1,
+      minWidth: 0,
+      borderRadius: radius.lg,
+    },
+    hostFooterInfo: { flex: 1, minWidth: 0, gap: 2 },
+    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
+    hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
+    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
+    hostFooterStatusText: { ...type.caption, color: colors.muted },
+    sectionList: { flex: 1 },
 
     workspaceRow: {
       flexDirection: 'row',
