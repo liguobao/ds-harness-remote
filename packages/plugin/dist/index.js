@@ -75843,6 +75843,9 @@ function nodeBinaryCandidates() {
     if (!candidates.includes(value)) candidates.push(value);
   };
   add3(process.env.DSH_REMOTE_NODE);
+  for (const runtime of [process.env.DSH_PRIMARY_RUNTIME, process.env.DSH_BUNDLED_PRIMARY_RUNTIME]) {
+    if (runtime !== void 0 && runtime.trim() !== '') add3(join4(runtime, 'dependencies', 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node'));
+  }
   add3(process.env.NODE);
   add3(process.execPath);
   for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join4(part, process.platform === "win32" ? "node.exe" : "node"));
