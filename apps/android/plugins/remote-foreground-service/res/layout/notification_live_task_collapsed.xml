@@ -3,7 +3,6 @@
     android:id="@+id/live_task_card_collapsed"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="@drawable/bg_live_task_card"
     android:gravity="center_vertical"
     android:orientation="horizontal"
     android:paddingStart="12dp"
@@ -12,25 +11,13 @@
     android:paddingBottom="8dp">
 
     <TextView
-        android:id="@+id/live_task_badge"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:background="@drawable/bg_live_task_badge"
-        android:gravity="center"
-        android:includeFontPadding="false"
-        android:textColor="#FFFFFFFF"
-        android:textSize="12sp"
-        android:textStyle="bold" />
-
-    <TextView
         android:id="@+id/live_task_title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="#FFFFFFFF"
+        android:textColor="#1F1F1F"
         android:textSize="13sp" />
 
     <ImageView

@@ -10,6 +10,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -207,6 +208,9 @@ class RemoteForegroundService : Service() {
       }
       val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
       val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+      val titleColor = if (night) Color.WHITE else Color.parseColor("#1F1F1F")
+      val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
       try {
         val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
@@ -214,8 +218,9 @@ class RemoteForegroundService : Service() {
           setTextViewText(R.id.live_task_status_text, status)
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+          setTextColor(R.id.live_task_time, timeColor)
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
         }
 
@@ -223,8 +228,8 @@ class RemoteForegroundService : Service() {
           setImageViewResource(R.id.live_task_status_dot, dotRes)
           setTextViewText(R.id.live_task_status_text, status)
           setTextColor(R.id.live_task_status_text, statusColor)
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
         }
 
