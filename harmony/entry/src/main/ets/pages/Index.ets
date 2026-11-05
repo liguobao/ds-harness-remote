@@ -109,6 +109,10 @@ struct Index {
   @State promptPanelOpen: boolean = false;
   /** 执行轨迹面板：把本次会话里的工具调用按顺序列成时间线。 */
   @State trajectoryOpen: boolean = false;
+  /** 新建工作区面板。 */
+  @State workspaceCreateOpen: boolean = false;
+  @State workspacePathInput: string = '';
+  @State workspaceNameDraft: string = '';
   @State promptDraftInput: string = '';
   /** 上一次同步到的会话 id，用来判断「切了会话」并搬运草稿。 */
   private lastSyncedSessionId: string = '';
@@ -1318,6 +1322,9 @@ struct Index {
       }
       if (this.trajectoryOpen) {
         this.TrajectoryOverlay()
+      }
+      if (this.workspaceCreateOpen) {
+        this.WorkspaceCreateOverlay()
       }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
@@ -3522,6 +3529,19 @@ struct Index {
               .onClick(() => {
                 this.runtime.setSelectedWorkspace('');
               })
+            Text('＋ ' + this.tr('新建'))
+              .fontSize(this.fs(11))
+              .fontColor('#22D3EE')
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .backgroundColor('rgba(34,211,238,0.10)')
+              .borderRadius(9)
+              .border({ width: 1, color: 'rgba(34,211,238,0.40)' })
+              .onClick(() => {
+                this.workspacePathInput = this.runtime.browsePath.length > 0
+                  ? this.runtime.browsePath : '';
+                this.workspaceNameDraft = '';
+                this.workspaceCreateOpen = true;
+              })
             ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
               Text(workspace.title.length > 0 ? workspace.title : workspace.path)
                 .fontSize(this.fs(11))
@@ -4724,6 +4744,123 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */
+  @Builder
+  WorkspaceCreateOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.workspaceCreateOpen = false;
+        })
+      Column({ space: 12 }) {
+        Row() {
+          Text(this.tr('新建工作区'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.workspaceCreateOpen = false;
+            })
+        }
+        .width('100%')
+
+        Column({ space: 6 }) {
+          Text(this.tr('主机上的目录（绝对路径）'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .width('100%')
+          TextInput({ text: this.workspacePathInput, placeholder: '/home/user/project' })
+            .width('100%')
+            .height(46)
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text)
+            .placeholderColor(this.pal().text3)
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(12)
+            .border({ width: 1, color: this.pal().border })
+            .padding({ left: 14, right: 14 })
+            .onChange((value: string) => {
+              this.workspacePathInput = value;
+            })
+          if (this.runtime.browsePath.length > 0) {
+            Text(this.tr('填入当前浏览目录') + '：' + this.runtime.browsePath)
+              .fontSize(this.fs(10))
+              .fontColor('#22D3EE')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .onClick(() => {
+                this.workspacePathInput = this.runtime.browsePath;
+              })
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+
+        Column({ space: 6 }) {
+          Text(this.tr('显示名称（可留空）'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .width('100%')
+          TextInput({ text: this.workspaceNameDraft, placeholder: this.tr('留空则用目录名') })
+            .width('100%')
+            .height(46)
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text)
+            .placeholderColor(this.pal().text3)
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(12)
+            .border({ width: 1, color: this.pal().border })
+            .padding({ left: 14, right: 14 })
+            .onChange((value: string) => {
+              this.workspaceNameDraft = value;
+            })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+
+        Text(this.tr('创建'))
+          .fontSize(this.fs(14))
+          .fontColor('#FFFFFF')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 13, bottom: 13 })
+          .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+          .borderRadius(12)
+          .onClick(() => {
+            const path: string = this.workspacePathInput.trim();
+            if (path.length === 0) {
+              promptAction.showToast({ message: this.tr('先填一个主机上的绝对路径') });
+              return;
+            }
+            this.runtime.createWorkspace(path, this.workspaceNameDraft.trim());
+            this.workspaceCreateOpen = false;
+          })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 520 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 轨迹条目：只挑工具调用，按 seq 升序。 */
