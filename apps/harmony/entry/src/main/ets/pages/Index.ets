@@ -3048,17 +3048,16 @@ struct Index {
         if (!this.keyboardVisible && this.contextPills().length > 0) {
           Row({ space: 8 }) {
             ForEach(this.contextPills(), (pill: string) => {
+              // 语境提示做成纯文字：带底色的胶囊连排会看成一条横带，压在输入框上方很割裂
               Text(pill)
-                .fontSize(this.fs(11))
-                .fontColor(this.pal().text2)
-                .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-                .backgroundColor(this.pal().card)
-                .borderRadius(10)
+                .fontSize(this.fs(10))
+                .fontColor(this.pal().text3)
                 .maxLines(1)
+                .opacity(0.9)
             }, (pill: string) => pill)
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 4, bottom: 2 })
+          .padding({ left: 20, right: 20, top: 2, bottom: 4 })
           .justifyContent(FlexAlign.Start)
         }
       Column() {
@@ -3278,7 +3277,7 @@ struct Index {
       }
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
-      .padding({ left: 12, right: 12, top: 10, bottom: 18 })
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
