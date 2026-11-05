@@ -225,6 +225,10 @@ struct Index {
   private measureInsets(): void {
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
       this.mainWindow = win;
+      // 沉浸式布局：页面铺到状态栏/导航条下面，避让交给 applyInsets 的 padding。
+      // 不开这个，expandSafeArea 不会真的延伸到系统栏区域，底部就会多出一条导航条留白。
+      win.setWindowLayoutFullScreen(true).catch(() => {
+      });
       this.applyInsets(win);
       win.on('avoidAreaChange', () => {
         this.applyInsets(win);
@@ -743,7 +747,8 @@ struct Index {
     }
     // 手机上系统报的导航区高度常常是 50vp 往上（含手势区），按它留白会空一大条，
     // 这里只让出导航条本身的可视高度，多留 8vp 呼吸位。
-    return 8;
+    // 手机上系统手势条是浮层，内容可以直接贴到底，不再单独留白
+    return 0;
   }
 
   /** 设备页内容列宽：按断点给（手机满宽 / 平板 1040 / 2in1 1200），都居中。 */
@@ -1323,6 +1328,8 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pal().bg)
+    // 让页面铺到系统栏下面（内容自己用 padding 避让），否则底部会多出导航条那一条留白
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .padding({ top: this.topSafePadding(), bottom: this.bottomSafePadding() })
     .onAppear(() => {
       this.measureInsets();
