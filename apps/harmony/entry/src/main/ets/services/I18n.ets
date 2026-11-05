@@ -208,6 +208,9 @@ function buildEnglish(): Map<string, string> {
   map.set('图片读取失败：', 'Could not read the image: ');
   // —— 顶栏齿轮面板 ——
   map.set('会话设置', 'Session settings');
+  map.set('服务器', 'Server');
+  map.set('切换', 'Switch');
+  map.set('当前', 'Current');
   map.set('更换', 'Change');
   map.set('推理等级', 'Reasoning');
   map.set('正在读取模型目录…', 'Loading model catalog…');

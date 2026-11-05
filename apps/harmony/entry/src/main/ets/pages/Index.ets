@@ -12,6 +12,7 @@ import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import { VoiceRecorder } from '../services/VoiceInput';
 import { PickedImage, pickImages } from '../services/ImagePicker';
+import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { image } from '@kit.ImageKit';
@@ -84,6 +85,7 @@ struct Index {
   private voiceCancel: boolean = false;
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
+  @State profilesList: SavedProfile[] = [];
   @State textScaleValue: number = 1;
   /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
   @State windowWidthVp: number = 0;
@@ -259,6 +261,7 @@ struct Index {
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
     this.textScaleMode = this.runtime.textScaleMode;
+    this.profilesList = this.runtime.profiles.slice();
     this.textScaleValue = this.runtime.textScale();
     this.permissionPreset = this.runtime.permissionPreset;
     this.permissionOptionsList = this.runtime.permissionOptions.slice();
@@ -1154,6 +1157,58 @@ struct Index {
             })
         }
         .width('100%')
+        if (this.profilesList.length > 0) {
+          Column({ space: 8 }) {
+            Text(this.tr('服务器'))
+              .fontSize(12)
+              .fontColor(this.pal().text3)
+              .width('100%')
+            ForEach(this.profilesList, (profile: SavedProfile) => {
+              Row({ space: 10 }) {
+                Column({ space: 2 }) {
+                  Text(profile.email)
+                    .fontSize(14)
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(profile.baseUrl)
+                    .fontSize(11)
+                    .fontColor(this.pal().text3)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+                if (profile.baseUrl === this.runtime.serverUrl && profile.email === this.runtime.email) {
+                  Text(this.tr('当前'))
+                    .fontSize(10)
+                    .fontColor('#22D3EE')
+                    .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                    .backgroundColor('rgba(34,211,238,0.12)')
+                    .borderRadius(8)
+                } else {
+                  Text(this.tr('切换'))
+                    .fontSize(11)
+                    .fontColor('#0B1220')
+                    .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                    .backgroundColor('#22D3EE')
+                    .borderRadius(9)
+                    .onClick(() => {
+                      this.showSettings = false;
+                      this.runtime.switchProfile(profile);
+                    })
+                }
+              }
+              .width('100%')
+              .padding({ top: 9, bottom: 9, left: 14, right: 14 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+            }, (profile: SavedProfile) => profile.baseUrl + '|' + profile.email)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
         Column({ space: 8 }) {
           Text(this.tr('外观'))
             .fontSize(12)

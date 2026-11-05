@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { SecureStore, StoredServerConfig } from './SecureStore';
+import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
@@ -203,6 +203,8 @@ export class AppRuntime {
   languageMode: number = 0;
   /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
   textScaleMode: number = 1;
+  /** 已保存的服务器/账号登录态（一键切换，不用重输密码）。 */
+  profiles: SavedProfile[] = [];
   /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
   identityBlocked: boolean = false;
   /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
@@ -348,6 +350,7 @@ export class AppRuntime {
       this.themeMode = this.store.loadThemeMode();
       this.languageMode = this.store.loadLanguageMode();
       this.textScaleMode = this.store.loadTextScale();
+      this.profiles = this.store.loadProfiles();
       this.applyLanguage();
     } catch (error) {
       const text: string = errorMessage(error);
@@ -398,6 +401,7 @@ export class AppRuntime {
       this.email = config.email;
       this.phase = PHASE_DEVICES;
       this.busy = false;
+      await this.rememberProfile();
       this.notify();
       await this.refreshDevices();
       return;
@@ -615,6 +619,8 @@ export class AppRuntime {
 
   async logout(): Promise<void> {
     this.teardownConnection();
+    // 退出前先把手上的登录态存成 profile：以后在设置里一键切回来，不用重输密码
+    await this.rememberProfile();
     this.phase = PHASE_SETUP;
     this.busy = false;
     this.errorMsg = '';
@@ -757,6 +763,89 @@ export class AppRuntime {
       logInfo('slash command not handled, falling back to prompt: ' + line.split(' ')[0]);
       return false;
     }
+  }
+
+  /** 把当前 config+credentials 记成一份 profile（同一 server+账号则覆盖）。 */
+  private async rememberProfile(): Promise<void> {
+    const config: StoredServerConfig | undefined = this.config;
+    const credentials: TokenPair | undefined = this.credentials;
+    const identity: DeviceIdentity | undefined = this.identity;
+    if (config === undefined || credentials === undefined) {
+      return;
+    }
+    const next: SavedProfile[] = [];
+    for (const existing of this.profiles) {
+      if (existing.baseUrl !== config.baseUrl || existing.email !== config.email) {
+        next.push(existing);
+      }
+    }
+    const profile: SavedProfile = new SavedProfile();
+    profile.baseUrl = config.baseUrl;
+    profile.email = config.email;
+    profile.accessToken = credentials.accessToken;
+    profile.accessTokenExpiresAt = credentials.accessTokenExpiresAt;
+    profile.refreshToken = credentials.refreshToken;
+    profile.refreshTokenExpiresAt = credentials.refreshTokenExpiresAt;
+    profile.deviceId = identity !== undefined ? identity.deviceId : '';
+    next.unshift(profile);
+    this.profiles = next;
+    try {
+      await this.store.saveProfiles(next);
+    } catch (error) {
+      logWarn('save profiles failed: ' + errorMessage(error));
+    }
+  }
+
+  /** 切换到一个已保存的服务器/账号：不需要重新输密码。 */
+  async switchProfile(profile: SavedProfile): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    this.errorMsg = '';
+    this.notify();
+    try {
+      this.teardownConnection();
+      this.clearReconnectTimer();
+      const config: StoredServerConfig = new StoredServerConfig();
+      config.baseUrl = profile.baseUrl;
+      config.email = profile.email;
+      const tokens: TokenPair = new TokenPair();
+      tokens.accessToken = profile.accessToken;
+      tokens.accessTokenExpiresAt = profile.accessTokenExpiresAt;
+      tokens.refreshToken = profile.refreshToken;
+      tokens.refreshTokenExpiresAt = profile.refreshTokenExpiresAt;
+      await this.store.saveConfig(config);
+      await this.store.saveCredentials(tokens);
+      this.config = config;
+      this.credentials = tokens;
+      this.serverUrl = config.baseUrl;
+      this.email = config.email;
+      const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
+      this.identity = identity;
+      this.phase = PHASE_DEVICES;
+      this.busy = false;
+      await this.rememberProfile();
+      this.notify();
+      await this.refreshDevices();
+    } catch (error) {
+      this.busy = false;
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  /** 删掉一套保存的登录态（不影响服务端注册）。 */
+  async forgetProfile(profile: SavedProfile): Promise<void> {
+    const next: SavedProfile[] = [];
+    for (const existing of this.profiles) {
+      if (existing.baseUrl !== profile.baseUrl || existing.email !== profile.email) {
+        next.push(existing);
+      }
+    }
+    this.profiles = next;
+    await this.store.saveProfiles(next);
+    this.notify();
   }
 
   /** 载入 Host 工作区列表。 */
