@@ -209,6 +209,10 @@ function buildEnglish(): Map<string, string> {
   // —— 顶栏齿轮面板 ——
   map.set('会话设置', 'Session settings');
   map.set('服务器', 'Server');
+  map.set('切换账号', 'Switch account');
+  map.set('切换服务器', 'Switch server');
+  map.set('已保存的登录态，点一下就切（无需重新输密码）',
+    'Saved sign-ins — tap one to switch, no password needed');
   map.set('切换', 'Switch');
   map.set('当前', 'Current');
   map.set('更换', 'Change');

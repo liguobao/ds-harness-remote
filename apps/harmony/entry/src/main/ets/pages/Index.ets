@@ -394,6 +394,47 @@ struct Index {
   }
 
   /** 权限预设的中文短标签。 */
+  /** 顶栏切换按钮的文案：当前账号（邮箱前缀）+ 服务器主机名。 */
+  private accountSwitchLabel(): string {
+    const email: string = this.runtime.email;
+    const at: number = email.indexOf('@');
+    const short: string = at > 0 ? email.substring(0, at) : email;
+    const server: string = serverHostLabel(this.runtime.serverUrl);
+    if (short.length === 0) {
+      return this.tr('切换账号');
+    }
+    return short + ' ⇄ ' + (server.length > 0 ? server : this.tr('服务器'));
+  }
+
+  /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
+  private openAccountSwitcher(): void {
+    const sheets: SheetInfo[] = [];
+    for (const profile of this.profilesList) {
+      const at: number = profile.email.indexOf('@');
+      const short: string = at > 0 ? profile.email.substring(0, at) : profile.email;
+      const active: boolean = profile.baseUrl === this.runtime.serverUrl
+        && profile.email === this.runtime.email;
+      const host: string = serverHostLabel(profile.baseUrl);
+      const title: string = (active ? '✓ ' : '') + short + ' · ' + host;
+      sheets.push({
+        title: title,
+        action: () => {
+          if (!active) {
+            this.runtime.switchProfile(profile);
+          }
+        }
+      });
+    }
+    if (sheets.length === 0) {
+      return;
+    }
+    ActionSheet.show({
+      title: this.tr('切换服务器'),
+      message: this.tr('已保存的登录态，点一下就切（无需重新输密码）'),
+      sheets: sheets
+    });
+  }
+
   /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
   private fs(base: number): number {
     return Math.round(base * this.textScaleValue * 10) / 10;
@@ -1647,6 +1688,19 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
+        if (this.profilesList.length > 1) {
+          Button(this.accountSwitchLabel())
+            .height(32)
+            .fontSize(12)
+            .backgroundColor('rgba(34,211,238,0.12)')
+            .fontColor('#0E7490')
+            .borderRadius(16)
+            .border({ width: 1, color: 'rgba(34,211,238,0.45)' })
+            .constraintSize({ maxWidth: 190 })
+            .onClick(() => {
+              this.openAccountSwitcher();
+            })
+        }
         Button(this.themeLabel(this.themeMode))
           .height(32)
           .fontSize(13)
