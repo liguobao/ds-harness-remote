@@ -344,7 +344,7 @@ export class RemoteServerApi {
         ? errorBody.error.message
         : typeof errorBody.detail === 'string' ? errorBody.detail : 'The server rejected the request.'
       const code = mapStatus(response.status, detail, errorBody.error?.code ?? errorBody.code)
-      throw new RemoteApiError(code, detail, response.status, errorBody.error?.retryable === true || response.status >= 500)
+      throw new RemoteApiError(code, detail, response.status, errorBody.error?.retryable === true || response.status >= 500 || response.status === 429)
     }
     return body as TResult
   }
@@ -450,6 +450,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function mapStatus(status: number, detail: string, serverCode: unknown): string {
+  if (status === 429) return 'RATE_LIMITED'
   if (typeof serverCode === 'string') return serverCode
   if (status === 401) return 'AUTH_INVALID'
   if (status === 403) return 'AUTH_REQUIRED'

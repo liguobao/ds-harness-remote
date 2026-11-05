@@ -12,6 +12,16 @@ const identity: DeviceIdentity = {
 }
 
 describe('Remote Server API compatibility', () => {
+  it('preserves authorization when a rate limit carries an auth error code', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'DEVICE_REVOKED', message: 'Retry later' } }), { status: 429 }))
+      .mockResolvedValueOnce(jsonResponse({ name: 'OK' }))
+    const api = new RemoteServerApi('https://remote.example.com', 'token', fetchImplementation)
+    await expect(api.renameAccountDevice('host', 'OK')).rejects.toMatchObject({ code: 'RATE_LIMITED', retryable: true })
+    expect(await api.renameAccountDevice('host', 'OK')).toEqual({ name: 'OK' })
+    expect(fetchImplementation.mock.calls[1]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer token' })
+  })
+
   it('renames an account-owned device with authenticated PATCH and the canonical server name', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async () => jsonResponse({ name: '书房电脑' }))
     const api = new RemoteServerApi('https://remote.example.com/prefix', 'client-device-token', fetchImplementation)

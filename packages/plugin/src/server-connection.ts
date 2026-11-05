@@ -352,7 +352,7 @@ export class HostServerConnection {
         // peer heartbeat expiry. Another instance replacing us (4003) and
         // revocation (4004) must never retain; the reason string is the
         // semantic key because deployments disagree on the shutdown code.
-        retainOnClose = [1000, 1001].includes(event.code)
+        retainOnClose = [1000, 1001, 4007].includes(event.code)
           || (closeSemantics.retryable && !closeSemantics.replaced)
         const close = async (): Promise<void> => {
           await messageQueue.catch(() => undefined)

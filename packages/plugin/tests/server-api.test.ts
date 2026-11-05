@@ -765,6 +765,7 @@ it('uses newly saved credentials after a delayed refresh rejection without retry
 
 it('retries unstructured authorization responses but preserves explicit protocol rejections', async () => {
   const responses = [
+    { name: 'rate limit with revoked code', status: 429, body: JSON.stringify({ error: { code: 'DEVICE_REVOKED', message: 'Retry later', retryable: false } }), limited: true },
     { name: 'HTML 401', status: 401, body: '<html>gateway challenge</html>', reason: 'invalid_json' },
     { name: 'empty 401', status: 401, body: '', reason: 'invalid_error_envelope' },
     { name: 'gateway JSON 401', status: 401, body: '{"detail":"gateway unavailable"}', reason: 'invalid_error_envelope' },
@@ -787,7 +788,7 @@ it('retries unstructured authorization responses but preserves explicit protocol
       .mockResolvedValueOnce(json(tokens({ refreshToken: 'recovered-refresh-value' })))
     const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
     await expect(api.authenticate(identity)).rejects.toMatchObject({
-      code: row.terminal ?? 'CONNECTION_FAILED', retryable: row.terminal === undefined,
+      code: row.terminal ?? (row.limited ? 'RATE_LIMITED' : 'CONNECTION_FAILED'), retryable: row.terminal === undefined,
       status: row.status, phase: 'credential_refresh', reason: row.reason ?? 'http_error',
     })
     expect(await store.load('https://dsh.r2049.cn', identity.deviceId)).toEqual(initial)
