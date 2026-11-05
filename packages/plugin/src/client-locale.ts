@@ -21,6 +21,7 @@ export const en = {
 
   pluginTitle: 'DeepSeek Remote',
   pluginDescription: 'P2P-based, end-to-end encrypted remote access to DeepSeek Harness, CodeX, Claude Code, Pi, and other workspaces from web and mobile clients.',
+  openPluginSettings: 'Remote settings',
   expandSettings: 'Show settings: {name}',
   collapseSettings: 'Hide settings: {name}',
   unsaved: 'Unsaved',
@@ -332,6 +333,7 @@ export const zh: Record<keyof typeof en, string> = {
 
   pluginTitle: 'DeepSeek 远程连接',
   pluginDescription: '基于 P2P 网络，使用端到端加密远程访问 DeepSeek Harness、CodeX、Claude Code、Pi 等工作区，支持Web和移动端。',
+  openPluginSettings: '远程设置',
   expandSettings: '展开设置：{name}',
   collapseSettings: '收起设置：{name}',
   unsaved: '未保存',

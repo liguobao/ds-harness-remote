@@ -1651,6 +1651,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     settings: "Settings",
     pluginTitle: "DeepSeek Remote",
     pluginDescription: "P2P-based, end-to-end encrypted remote access to DeepSeek Harness, CodeX, Claude Code, Pi, and other workspaces from web and mobile clients.",
+    openPluginSettings: "Remote settings",
     expandSettings: "Show settings: {name}",
     collapseSettings: "Hide settings: {name}",
     unsaved: "Unsaved",
@@ -1959,6 +1960,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     settings: "\u8BBE\u7F6E",
     pluginTitle: "DeepSeek \u8FDC\u7A0B\u8FDE\u63A5",
     pluginDescription: "\u57FA\u4E8E P2P \u7F51\u7EDC\uFF0C\u4F7F\u7528\u7AEF\u5230\u7AEF\u52A0\u5BC6\u8FDC\u7A0B\u8BBF\u95EE DeepSeek Harness\u3001CodeX\u3001Claude Code\u3001Pi \u7B49\u5DE5\u4F5C\u533A\uFF0C\u652F\u6301Web\u548C\u79FB\u52A8\u7AEF\u3002",
+    openPluginSettings: "\u8FDC\u7A0B\u8BBE\u7F6E",
     expandSettings: "\u5C55\u5F00\u8BBE\u7F6E\uFF1A{name}",
     collapseSettings: "\u6536\u8D77\u8BBE\u7F6E\uFF1A{name}",
     unsaved: "\u672A\u4FDD\u5B58",
@@ -3230,7 +3232,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
       ) : null;
       return React.createElement(
         props.view === "page" ? "div" : "li",
-        { className: `dshRemotePluginCard${open ? " isOpen" : ""}${props.view === "page" ? " dshRemotePluginModern" : ""}` },
+        {
+          className: `dshRemotePluginCard${open ? " isOpen" : ""}${props.view === "page" ? " dshRemotePluginModern" : ""}`,
+          ...props.view === "page" ? { "data-dsh-remote-settings": "" } : {}
+        },
         React.createElement(
           "div",
           { className: "dshRemotePluginCardHeader" },
@@ -3518,6 +3523,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       // spacing for `view: page`. Keep the legacy card only for older hosts;
       // current DSH must not get a second, old-style card inside that page.
       ".dshRemotePluginCard{list-style:none;border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);border-radius:var(--dsw-radius-xl,16px);transition:border-color .16s,background .16s}",
+      ".dshRemoteDetailSettingsAction{appearance:none;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;line-height:1.4;color:inherit;cursor:pointer;background:transparent;border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;padding:5px 10px;transition:border-color .16s,background .16s}.dshRemoteDetailSettingsAction:hover{border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-bg-layer-2)}.dshRemoteDetailSettingsAction:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}",
       ".dshRemotePluginModern{box-sizing:border-box;width:100%;max-width:none;box-shadow:none;border:0;background:transparent;border-radius:0}.dshRemotePluginModern>.dshRemotePluginCardHeader{display:none}.dshRemotePluginModern>.dshRemotePluginCardBody{border-top:0;margin:0;padding:0}",
       ".dshRemotePluginCard:hover{border-color:var(--dsw-alias-label-dimmed)}.dshRemotePluginCard.isOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}",
       ".dshRemotePluginCard.dshRemotePluginModern:hover,.dshRemotePluginCard.dshRemotePluginModern.isOpen{border-color:transparent;background:transparent}",
@@ -5298,7 +5304,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
         } catch {
           return;
         }
-      })(), RemotePluginOptions = createRemotePluginOptions(React), RemoteWorkspaceAction = createRemoteWorkspaceAction(React, portal), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React, portal), openHarnessSettings;
+      })(), RemotePluginOptions = createRemotePluginOptions(React);
+      function RemotePluginSettingsAction(props) {
+        if (pluginSubjectPackageName(props.subject) !== "ds-harness-remote") return null;
+        let label = props.t("openPluginSettings");
+        return React.createElement("button", {
+          type: "button",
+          className: "dshRemoteDetailSettingsAction",
+          "aria-label": label,
+          onClick: (event) => {
+            (event.currentTarget?.closest("[data-plugin-detail],[data-plugin-row-detail]") ?? document).querySelector("[data-dsh-remote-settings]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        }, label);
+      }
+      let RemoteWorkspaceAction = createRemoteWorkspaceAction(React, portal), RemoteProgressView = createRemoteProgressView(React), RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React, portal), openHarnessSettings;
       function RemoteSettingsLauncher(props) {
         return openHarnessSettings = props.openSettings, null;
       }
@@ -5657,7 +5676,20 @@ Minimum version required to store current data is: ` + bestVersion + `.
             preferredQrProvider: ctx.locale.getLocale().active === "zh" ? "zhihu" : "github",
             sidebarEntry
           })
-        }, RemotePluginOptions));
+        }, RemotePluginOptions)), ctx.slots.inject("plugins.detail.actions", () => ctx.slots.register({
+          name: "plugins.detail.actions",
+          id: "ds-harness-remote-settings-link",
+          order: 30,
+          locale: localeNamespace,
+          inject: () => ({})
+        }, RemotePluginSettingsAction));
+      }
+      function pluginSubjectPackageName(subject) {
+        if (typeof subject != "object" || subject === null) return;
+        let pkg = subject.pkg;
+        if (typeof pkg != "object" || pkg === null) return;
+        let name = pkg.name;
+        return typeof name == "string" ? name : void 0;
       }
       function isMissingControlRoute(reason) {
         return reason instanceof Error && reason.message.startsWith(`transport failure for ${CONTROL_RPC_PREFIX}/`) && (reason.message.endsWith(": HTTP 404") || reason.message.endsWith(": HTTP 405"));

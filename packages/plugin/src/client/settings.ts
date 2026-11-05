@@ -662,7 +662,10 @@ export function createRemotePluginOptions(React: ClientReact) {
           }, t(busy ? 'signingIn' : 'startSignIn'))),
     )
 
-    return React.createElement(props.view === 'page' ? 'div' : 'li', { className: `dshRemotePluginCard${open ? ' isOpen' : ''}${props.view === 'page' ? ' dshRemotePluginModern' : ''}` },
+    return React.createElement(props.view === 'page' ? 'div' : 'li', {
+      className: `dshRemotePluginCard${open ? ' isOpen' : ''}${props.view === 'page' ? ' dshRemotePluginModern' : ''}`,
+      ...(props.view === 'page' ? { 'data-dsh-remote-settings': '' } : {}),
+    },
       React.createElement('div', { className: 'dshRemotePluginCardHeader' },
         React.createElement('button', {
           type: 'button',
