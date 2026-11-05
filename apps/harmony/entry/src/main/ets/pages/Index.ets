@@ -1452,10 +1452,12 @@ struct Index {
             .height(6)
             .borderRadius(3)
             .backgroundColor(device.online ? '#34D399' : this.pal().text3)
+          // 手机上右侧三个按钮把这一列压得很窄，单行省略会把版本号整段吃掉，
+          // 所以允许折到第二行（整卡可点即连接，别指望用户读截断的字）
           Text(this.hostSubtitle(device))
             .fontSize(11)
             .fontColor(this.pal().text3)
-            .maxLines(1)
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
         }
@@ -1489,7 +1491,7 @@ struct Index {
         Text(this.tr('改名'))
           .fontSize(11)
           .fontColor(this.pal().text2)
-          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .padding({ left: 8, right: 8, top: 5, bottom: 5 })
           .backgroundColor(this.pal().chip)
           .borderRadius(13)
           .border({ width: 1, color: this.pal().borderStrong })
@@ -1499,7 +1501,7 @@ struct Index {
         if (this.runtime.hasHostPin(device.deviceId)) {
           Text('🔑')
             .fontSize(12)
-            .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+            .padding({ left: 6, right: 6, top: 5, bottom: 5 })
             .backgroundColor(this.pal().chip)
             .borderRadius(13)
             .border({ width: 1, color: this.pal().borderStrong })
@@ -1529,7 +1531,7 @@ struct Index {
           Text(this.tr('连接'))
             .fontSize(14)
             .fontColor('#FFFFFF')
-            .padding({ left: 20, right: 20, top: 9, bottom: 9 })
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
             .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
             .borderRadius(20)
             .shadow({ radius: 10, color: 'rgba(77,107,254,0.30)', offsetX: 0, offsetY: 3 })
