@@ -73628,10 +73628,11 @@ var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
 var WELCOME_NOTICE_VERSION = "2026-08-13.1";
 var RemoteTypertGateway2 = class {
-  constructor(client, compatibility, harnessVersion) {
+  constructor(client, compatibility, harnessVersion, deferStreamDisconnect = false) {
     this.client = client;
     this.compatibility = compatibility;
     this.harnessVersion = harnessVersion;
+    this.deferStreamDisconnect = deferStreamDisconnect;
   }
   frameTransfers;
   async invoke(request) {
@@ -73683,17 +73684,15 @@ var RemoteTypertGateway2 = class {
     return { ok: true, value };
   }
   async open(endpoint, payload, signal) {
-    if (this.frameTransfers === void 0) {
-      const description = await this.client.rpc("harness.transport.describe", {}, signal);
-      this.frameTransfers = isRecord8(description) && Array.isArray(description.capabilities) && description.capabilities.includes("harness.remote.stream.transfer.v1");
-    }
     signal.throwIfAborted();
     const streamId = uuidV7();
     const queue = new AsyncValueQueue4();
     const lifetime = new AbortController();
     const transferSignal = AbortSignal.any([signal, lifetime.signal]);
+    let disconnected = false;
     const unsubscribe = this.client.onEvent((event) => routeStreamEvent(event, streamId, queue));
     const unsubscribeClose = this.client.onClose(() => {
+      disconnected = true;
       lifetime.abort();
       queue.fail(new RemoteClientError("TRANSPORT_CLOSED", "The remote Harness stream transport closed."));
     });
@@ -73706,6 +73705,11 @@ var RemoteTypertGateway2 = class {
     };
     signal.addEventListener("abort", onAbort, { once: true });
     try {
+      if (this.frameTransfers === void 0) {
+        const description = await this.client.rpc("harness.transport.describe", {}, signal);
+        this.frameTransfers = isRecord8(description) && Array.isArray(description.capabilities) && description.capabilities.includes("harness.remote.stream.transfer.v1");
+      }
+      signal.throwIfAborted();
       await this.client.rpc("harness.remote.stream.open", {
         streamId,
         endpoint,
@@ -73718,11 +73722,12 @@ var RemoteTypertGateway2 = class {
       unsubscribeClose();
       lifetime.abort();
       void this.client.rpc("harness.remote.stream.close", { streamId }).catch(() => void 0);
+      await this.deferDisconnect(error62, disconnected, signal);
       throw error62;
     }
-    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal);
+    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal, () => disconnected);
   }
-  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal) {
+  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal, disconnected) {
     try {
       for await (const item of queue) {
         let frame = item;
@@ -73745,6 +73750,9 @@ var RemoteTypertGateway2 = class {
         const value = frame.value;
         yield this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, value) : normalizeAssistantMessageStreamValue(endpoint, value);
       }
+    } catch (error62) {
+      await this.deferDisconnect(error62, disconnected(), signal);
+      throw error62;
     } finally {
       lifetime.abort();
       signal.removeEventListener("abort", onAbort);
@@ -73753,6 +73761,11 @@ var RemoteTypertGateway2 = class {
       queue.close();
       await this.client.rpc("harness.remote.stream.close", { streamId }).catch(() => void 0);
     }
+  }
+  async deferDisconnect(error62, disconnected, signal) {
+    if (!this.deferStreamDisconnect || !disconnected || signal.aborted) return;
+    if (isRecord8(error62) && error62.isDSHRemoteError === true) return;
+    await new Promise((resolve8) => signal.addEventListener("abort", () => resolve8(), { once: true }));
   }
   async callTransferred(encoded, signal) {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -77560,7 +77573,8 @@ var ClientModeRuntime = class {
     return new RemoteTypertGateway2(
       remote.client,
       localSessionGeneration === "v3" && remote.features.sessionFormat !== 3 ? "legacy-to-v3" : void 0,
-      remote.harnessVersion
+      remote.harnessVersion,
+      true
     );
   }
   selectCodexTarget(virtual, remote) {

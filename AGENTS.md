@@ -15,6 +15,19 @@ Windows Node 22.23.4 / pnpm 9.15.4：五个 packages 构建、Plugin check 和 8
 缺失依赖记录失败，验证时只在本地修复安装并在安装后恢复原 lockfile 字节，不提交
 依赖变化。未做真实 DSH profile、Desktop/Android 或跨设备验收。
 
+## Native subscription recovery (2026-11-03)
+
+Remote transport loss must not become a terminal wire error for native Harness
+snapshot consumers: `RemoteSnapshotStream` stops consuming after such an error,
+so a later `ctx.connection.reconnect()` cannot restore workspace/session updates.
+The selected Harness gateway now defers transport-close failures until its caller
+is cancelled by the existing post-authentication carrier reset (or disposal).
+It does not reopen streams or replay RPCs. One-shot gateways and Host business
+failures retain their normal error behavior. `native-stream-recovery.test.ts`
+uses the native snapshot consumer to cover recovery, cancellation during open,
+permission refusal and queue overflow; `client-reconnect.test.ts` covers the
+runtime's cancellation boundary and fresh Host history reads.
+
 ## werift 0.26.0 upgrade (2026-11-03, Issue #259)
 
 按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted

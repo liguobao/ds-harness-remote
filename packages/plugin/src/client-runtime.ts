@@ -819,6 +819,7 @@ export class ClientModeRuntime {
       remote.client,
       localSessionGeneration === 'v3' && remote.features.sessionFormat !== 3 ? 'legacy-to-v3' : undefined,
       remote.harnessVersion,
+      true,
     )
   }
 
