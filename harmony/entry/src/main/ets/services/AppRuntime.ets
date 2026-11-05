@@ -735,6 +735,14 @@ export class AppRuntime {
     });
   }
 
+  /** 读主机上的文件字节（不转文本），给 PDF 这类需要二进制的内容用。 */
+  async readFileBuffer(path: string): Promise<ArrayBuffer> {
+    const base64: string = await this.readImageBase64(path);
+    const helper: util.Base64Helper = new util.Base64Helper();
+    const bytes: Uint8Array = helper.decodeSync(base64);
+    return bytes.buffer as ArrayBuffer;
+  }
+
   /** 预览主机上的文本文件：走 workspaceFiles/readBytes，base64 解码成 UTF-8。 */
   async previewFile(path: string): Promise<void> {
     this.filePreviewPath = path;

@@ -1,4 +1,5 @@
 import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
+import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
@@ -113,6 +114,10 @@ struct Index {
   @State workspaceCreateOpen: boolean = false;
   /** 文本文件预览面板。 */
   @State filePreviewOpen: boolean = false;
+  /** 预览的是不是 PDF（走系统 PDF Kit 渲染）。 */
+  @State previewIsPdf: boolean = false;
+  @State pdfError: string = '';
+  private pdfController: pdfViewManager.PdfController = new pdfViewManager.PdfController();
   /** 消息操作面板（自绘，替代系统 ActionSheet）。 */
   @State messageActionsOpen: boolean = false;
   @State messageActionText: string = '';
@@ -3800,7 +3805,7 @@ struct Index {
                   return;
                 }
                 this.filePreviewOpen = true;
-                this.runtime.previewFile(full);
+                this.openFilePreview(full);
               })
             }
           }, (entry: DirectoryEntry) => entry.path.length > 0 ? entry.path : entry.name)
@@ -4733,6 +4738,36 @@ struct Index {
     this.messageActionsOpen = true;
   }
 
+  /** 点开一个文件：PDF 交给系统 PDF Kit，其它按文本预览。 */
+  private openFilePreview(path: string): void {
+    const lower: string = path.toLowerCase();
+    const isPdf: boolean = lower.endsWith('.pdf');
+    this.previewIsPdf = isPdf;
+    this.pdfError = '';
+    if (!isPdf) {
+      this.runtime.previewFile(path);
+      return;
+    }
+    this.runtime.filePreviewPath = path;
+    this.runtime.filePreviewLoading = true;
+    this.runtime.filePreviewError = '';
+    this.runtime.notify();
+    this.runtime.readFileBuffer(path).then((buffer: ArrayBuffer) => {
+      this.pdfController.loadDocumentFromMemory(buffer).then(() => {
+        this.runtime.filePreviewLoading = false;
+        this.runtime.notify();
+      }).catch((error: Error) => {
+        this.pdfError = error.message;
+        this.runtime.filePreviewLoading = false;
+        this.runtime.notify();
+      });
+    }).catch((error: Error) => {
+      this.pdfError = error.message;
+      this.runtime.filePreviewLoading = false;
+      this.runtime.notify();
+    });
+  }
+
   private copyActionText(): void {
     const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.messageActionText);
     pasteboard.getSystemPasteboard().setData(data).then(() => {
@@ -4944,6 +4979,22 @@ struct Index {
               .fontColor(this.pal().text2)
           }
           .padding({ top: 12, bottom: 12 })
+        } else if (this.previewIsPdf && this.pdfError.length === 0) {
+          PdfView({
+            controller: this.pdfController,
+            pageLayout: pdfService.PageLayout.LAYOUT_SINGLE,
+            isContinuous: true,
+            showScroll: true,
+            pageFit: pdfService.PageFit.FIT_WIDTH
+          })
+            .width('100%')
+            .height(this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 420)
+            .borderRadius(12)
+        } else if (this.previewIsPdf && this.pdfError.length > 0) {
+          Text(this.tr('PDF 打开失败：') + this.pdfError)
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .padding({ top: 12, bottom: 12 })
         } else if (this.runtime.filePreviewError.length > 0) {
           Text(this.runtime.filePreviewError)
             .fontSize(this.fs(12))
