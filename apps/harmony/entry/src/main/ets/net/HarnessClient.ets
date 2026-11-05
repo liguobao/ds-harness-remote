@@ -472,8 +472,9 @@ export class HarnessAlphaClient {
 
   /** 可用模型目录（含每个模型的推理等级选项）。 */
   async modelCatalog(): Promise<Record<string, Object>> {
-    const request: Record<string, Object> = {};
-    const args: Record<string, Object> = { 'request': request };
+    // session/modelCatalog 在主机侧没有参数（descriptor parameters: []），
+    // 包一层 {request:{}} 会被 typert gateway 判成 unexpected "request"。
+    const args: Record<string, Object> = {};
     const value: Object = await this.callValue('session/modelCatalog', args);
     const root: Record<string, Object> | undefined = asRecord(value);
     return root !== undefined ? root : {};

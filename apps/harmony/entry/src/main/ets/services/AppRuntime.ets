@@ -146,6 +146,9 @@ export class AppRuntime {
   modelOptions: ModelOption[] = [];
   /** 当前模型展示名；空表示未知。 */
   currentModelLabel: string = '';
+  /** 当前模型完整选择（面板显示与高亮用）。 */
+  currentModelProvider: string = '';
+  currentModelEffort: string = '';
   modelCatalogLoaded: boolean = false;
   /** 斜杠命令候选（主机清单 + 内置兜底）。 */
   slashCommands: SlashCommand[] = [];
@@ -1057,8 +1060,23 @@ export class AppRuntime {
         const defaultModel: string = jsonStr(fallback, 'model', '');
         if (defaultModel.length > 0) {
           this.currentModelLabel = defaultModel;
+          this.currentModelProvider = jsonStr(fallback, 'provider', '');
+          this.currentModelEffort = jsonStr(fallback, 'reasoningEffort', '');
         }
       }
+      const failures: Object[] | undefined = asArray(raw['failures']);
+      if (failures !== undefined) {
+        for (const failureValue of failures) {
+          const failure: Record<string, Object> | undefined = asRecord(failureValue);
+          if (failure !== undefined) {
+            logWarn('model catalog failure: ' + jsonStr(failure, 'id', '?') + ' '
+              + jsonStr(failure, 'message', ''));
+          }
+        }
+      }
+      logInfo('model catalog: options=' + options.length
+        + ' current=' + this.currentModelProvider + '/' + this.currentModelLabel
+        + (this.currentModelEffort.length > 0 ? ' @' + this.currentModelEffort : ''));
       this.modelCatalogLoaded = options.length > 0;
       this.notify();
     } catch (error) {
@@ -1093,6 +1111,10 @@ export class AppRuntime {
     try {
       await harness.selectModel(sessionId, provider, model, reasoningEffort);
       this.currentModelLabel = model;
+      this.currentModelProvider = provider;
+      this.currentModelEffort = reasoningEffort;
+      logInfo('model selected: ' + provider + '/' + model
+        + (reasoningEffort.length > 0 ? ' @' + reasoningEffort : ''));
       this.notify();
     } catch (error) {
       this.errorMsg = errorMessage(error);

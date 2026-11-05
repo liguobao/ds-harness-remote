@@ -257,10 +257,34 @@ currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"
 所以补水排程必须放在 `openSessionInternal` 折完历史之后；只挂在 `openSession` 上会漏掉
 「连上后自动打开的会话」。实测 `history image ok … base64=303520`（227 KB 原图）。
 
+## 2026-11-05 中午后（齿轮面板 + 修模型切换，V0.08.0）
+
+**模型切换修好了**：根因是 `session/modelCatalog` 在主机侧是**无参数**方法
+（descriptor `parameters: []`），客户端却包了 `{request:{}}`，被 typert gateway 判
+`unexpected "request"`，目录永远拉不到 → 面板里永远是「未选择」。改成裸 `{}` 参数后
+目录正常（7 个模型），`session/selectModel` 也通：
+`session/selectModel ok -> deepseek-official/deepseek-v4-pro` + `model selected ... @high`。
+
+**顶栏 ⋯ → 齿轮**：新增 `ic_settings.svg`，点开 `SessionPanelOverlay()`（自定义底部面板）
+替代原来的 ActionSheet，把模型/推理等级/权限/上下文/连接收在一处，每行带当前值：
+
+- 模型行：`provider/model @effort` + 「更换」→ 原 ModelPickerOverlay
+- 推理等级行：只在该模型有 efforts 时显示，当前档高亮，点了直接 `selectModel`
+- 权限：三个 chip，当前档高亮（绿），点一下切
+- 上下文：百分比（≥80 红）+「压缩上下文」（发 `/compact`）
+- 连接：`主机 · LAN/TURN/中继` + 「断开连接」
+
+`AppRuntime` 现在记录完整选择（`currentModelProvider/currentModelEffort`），面板和徽标共用。
+
+**注意（重要）**：切换模型作用于「当前打开的会话」。刚才在 QXS-W10 上验机时，App 的当前会话
+正好是「继续 dsnre 会话」（也就是本会话），所以把这个会话的模型切成了 `deepseek-v4-pro`——
+它不支持图片输入。要切回 `deepseek-flash`：齿轮 → 更换 → 选 DeepSeek-V41-Flash。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.08.0 | 1000037 | 齿轮面板 + 修模型切换（modelCatalog 无参） |
 | 0.07.2 | 1000035 | 历史图片回显：session/attachment 拉字节并缓存 |
 | 0.07.0 | 1000033 | TURN 候选 + LAN/P2P/TURN 徽标 + 图片插入 |
 | 0.06.1 | 1000031 | LAN-only WebRTC 直连跑通（offer/answer/ice + RTCH 分块 + 回落中继） |

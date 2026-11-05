@@ -68,8 +68,12 @@ struct Index {
   @State slashCommands: SlashCommand[] = [];
   /** 模型选择器。 */
   @State showModelPicker: boolean = false;
+  /** 顶栏齿轮打开的面板。 */
+  @State showSessionPanel: boolean = false;
   @State modelOptions: ModelOption[] = [];
   @State currentModelLabel: string = '';
+  @State currentModelProvider: string = '';
+  @State currentModelEffort: string = '';
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
   @State selectedWorkspaceId: string = '';
@@ -224,6 +228,8 @@ struct Index {
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
     this.currentModelLabel = this.runtime.currentModelLabel;
+    this.currentModelProvider = this.runtime.currentModelProvider;
+    this.currentModelEffort = this.runtime.currentModelEffort;
     this.workspaces = this.runtime.workspaces;
     this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
     this.browsePath = this.runtime.browsePath;
@@ -876,6 +882,9 @@ struct Index {
       .height('100%')
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
+      }
+      if (this.showSessionPanel) {
+        this.SessionPanelOverlay()
       }
       if (this.showModelPicker) {
         this.ModelPickerOverlay()
@@ -1790,31 +1799,16 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        Text('⋯')
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.pal().text2)
+        Image($r('app.media.ic_settings'))
           .width(38)
           .height(38)
-          .textAlign(TextAlign.Center)
+          .objectFit(ImageFit.CENTER)
+          .fillColor(this.pal().text2)
           .onClick(() => {
-            ActionSheet.show({
-              title: this.tr('会话信息'),
-              message: `${this.tr('模型')} ${this.currentModelLabel.length > 0 ? this.currentModelLabel : this.tr('未选择')} · ${this.tr('上下文')} `
-                + (this.contextPercent > 0 ? `${this.contextPercent}%` : '—'),
-              sheets: [
-                {
-                  title: this.tr('切换模型'),
-                  action: () => {
-                    this.runtime.refreshModelCatalog();
-                    this.showModelPicker = true;
-                  }
-                },
-                { title: this.tr('权限：只读'), action: () => { this.runtime.selectPermission('read-only'); } },
-                { title: this.tr('权限：工作区可写'), action: () => { this.runtime.selectPermission('workspace-write'); } },
-                { title: this.tr('权限：完全权限'), action: () => { this.runtime.selectPermission('danger-full-access'); } }
-              ]
-            });
+            if (!this.runtime.modelCatalogLoaded) {
+              this.runtime.refreshModelCatalog();
+            }
+            this.showSessionPanel = true;
           })
         Text('＋')
           .fontSize(22)
@@ -2535,6 +2529,243 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  /**
+   * 顶栏齿轮面板：把「会话信息 / 模型 / 推理等级 / 权限 / 上下文 / 连接」收在一处。
+   * 每一行都带当前值，点哪行改哪个；比原来的 ActionSheet 少一层猜测。
+   */
+  @Builder
+  SessionPanelOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showSessionPanel = false;
+        })
+      Column({ space: 0 }) {
+        Row() {
+          Column({ space: 2 }) {
+            Text(this.tr('会话设置'))
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+            Text(this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('新会话'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(32)
+            .height(32)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.showSessionPanel = false;
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 12, top: 16, bottom: 8 })
+
+        // —— 模型 ——
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(this.tr('模型'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+            Text(this.modelSummary())
+              .fontSize(14)
+              .fontColor(this.pal().text)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text(this.tr('更换'))
+            .fontSize(12)
+            .fontColor('#22D3EE')
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(10)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.runtime.refreshModelCatalog();
+              this.showModelPicker = true;
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, top: 12, bottom: 12 })
+
+        // —— 推理等级（当前模型有等级才显示）——
+        if (this.currentModelEfforts().length > 0) {
+          Column({ space: 6 }) {
+            Text(this.tr('推理等级'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+              .width('100%')
+            Scroll() {
+              Row({ space: 8 }) {
+                ForEach(this.currentModelEfforts(), (effort: string) => {
+                  Text(effort)
+                    .fontSize(11)
+                    .fontColor(effort === this.currentModelEffort ? '#0B1220' : this.pal().text2)
+                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                    .backgroundColor(effort === this.currentModelEffort ? '#22D3EE' : this.pal().inputBg)
+                    .borderRadius(10)
+                    .border({ width: 1, color: this.pal().border })
+                    .onClick(() => {
+                      this.runtime.selectModel(this.currentModelProvider, this.currentModelLabel, effort);
+                    })
+                }, (effort: string) => effort)
+              }
+            }
+            .scrollable(ScrollDirection.Horizontal)
+            .scrollBar(BarState.Off)
+            .width('100%')
+          }
+          .width('100%')
+          .padding({ left: 18, right: 18, top: 4, bottom: 12 })
+        }
+
+        // —— 权限 ——
+        Column({ space: 6 }) {
+          Text(this.tr('权限'))
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          Row({ space: 8 }) {
+            ForEach(this.permissionChoices(), (preset: string) => {
+              Text(this.permissionChoiceLabel(preset))
+                .fontSize(11)
+                .fontColor(preset === this.runtime.permissionPreset ? '#0B1220' : this.pal().text2)
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor(preset === this.runtime.permissionPreset ? '#34D399' : this.pal().inputBg)
+                .borderRadius(10)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  this.runtime.selectPermission(preset);
+                })
+            }, (preset: string) => preset)
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, top: 4, bottom: 12 })
+
+        // —— 上下文 ——
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(this.tr('上下文'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+            Text(this.contextPercent > 0 ? `${this.contextPercent}%` : '—')
+              .fontSize(14)
+              .fontColor(this.contextPercent >= 80 ? '#F85749' : this.pal().text)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text(this.tr('压缩上下文'))
+            .fontSize(12)
+            .fontColor('#22D3EE')
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(10)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.runtime.sendPrompt('/compact');
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, top: 4, bottom: 12 })
+
+        // —— 连接 ——
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(this.tr('连接'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+            Text(this.connectionSummary())
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text(this.tr('断开连接'))
+            .fontSize(12)
+            .fontColor('#F85749')
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor('rgba(248,87,73,0.10)')
+            .borderRadius(10)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.runtime.disconnectToDevices();
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, top: 4, bottom: 18 })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 520 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20, bottomLeft: 0, bottomRight: 0 })
+      .border({ width: 1, color: this.pal().border })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 面板里的模型行文案：provider/model @effort。 */
+  private modelSummary(): string {
+    if (this.currentModelLabel.length === 0) {
+      return this.runtime.modelCatalogLoaded ? this.tr('未选择') : this.tr('正在读取模型目录…');
+    }
+    const head: string = this.currentModelProvider.length > 0
+      ? this.currentModelProvider + '/' + this.currentModelLabel
+      : this.currentModelLabel;
+    return this.currentModelEffort.length > 0 ? head + ' @' + this.currentModelEffort : head;
+  }
+
+  /** 当前模型支持哪些推理等级（从目录里找）。 */
+  private currentModelEfforts(): string[] {
+    for (const option of this.runtime.modelOptions) {
+      if (option.model === this.currentModelLabel
+        && (this.currentModelProvider.length === 0 || option.provider === this.currentModelProvider)) {
+        return option.efforts;
+      }
+    }
+    return [];
+  }
+
+  private permissionChoices(): string[] {
+    return ['read-only', 'workspace-write', 'danger-full-access'];
+  }
+
+  private permissionChoiceLabel(preset: string): string {
+    if (preset === 'read-only') {
+      return this.tr('只读');
+    }
+    if (preset === 'workspace-write') {
+      return this.tr('可写');
+    }
+    return this.tr('完全');
+  }
+
+  /** 面板里的连接行：主机 + 数据面。 */
+  private connectionSummary(): string {
+    const host: string = this.connectedHostDisplay();
+    const mode: string = this.transportBadgeText();
+    if (host.length === 0) {
+      return this.tr('未连接');
+    }
+    return mode.length > 0 ? host + ' · ' + mode : host;
   }
 
   /** 模型选择器：底部面板形式，点选后立即切换当前会话的模型。 */
