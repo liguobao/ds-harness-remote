@@ -11,6 +11,7 @@ import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ReplyStatusDots } from './messages'
+import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
 import { createStyles } from './styles'
 import type { useChatMentions } from './use-chat-mentions'
 
@@ -52,6 +53,7 @@ type Props = {
   model: { available: boolean; label: string | undefined; selecting: boolean; onOpen: () => void }
   promptsPickerOpen: boolean
   onExpand: () => void
+  onOpenExpand?: () => void
   onOpenActions: () => void
   onOpenPrompts: () => void
   onSubmit: () => void
@@ -60,7 +62,7 @@ type Props = {
 
 export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning,
   hasComposerContent, connected, composerDisabled, sendDisabled, compactComposer,
-  composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
+  composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { composerInputRef, mentionType, mentionGroups, selection, closeMention, onChangeText, onSelectionChange } = input
@@ -99,6 +101,17 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
           {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
         </Pressable>
       </View> : <View style={styles.composerCard}>
+        {draft.length > 0 && !compactRunning && onOpenExpand !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.expandComposer}
+            onPress={onOpenExpand}
+            hitSlop={8}
+            style={({ pressed }) => [styles.composerExpandButton, pressed && styles.plusPressed]}
+          >
+            <ExpandCornerIcon size={17} color={colors.muted} />
+          </Pressable>
+        )}
         <View style={styles.composerInputWrap}>
           {quotes?.map((quoteText, index) => (
             <Pressable
@@ -118,7 +131,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
           <TextInput
             ref={composerInputRef}
             accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
-            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
+            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }, draft.length > 0 && !compactRunning && onOpenExpand !== undefined && { paddingRight: 32 }]}
             onChangeText={onChangeText}
             onSelectionChange={onSelectionChange}
             onKeyPress={({ nativeEvent }) => {
