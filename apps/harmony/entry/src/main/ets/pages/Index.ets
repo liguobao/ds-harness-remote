@@ -3152,14 +3152,15 @@ struct Index {
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .borderRadius(23)
-          .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+          // 对齐资讯类 App 的底栏光感：厚材质 + 低白度过衬，让下层内容模糊透上来
+          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
             colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
             adaptiveColor: AdaptiveColor.DEFAULT,
-            blurOptions: { grayscale: [0, 24] }
+            blurOptions: { grayscale: [0, 12] }
           })
           .border({ width: 1,
             color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
-          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.52)')
           .shadow({ radius: 12,
             color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
             offsetX: 0, offsetY: 5 })
@@ -3177,7 +3178,12 @@ struct Index {
               : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
             .constraintSize({ minHeight: 46, maxHeight: 132 })
-            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.52)')
+            .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
+              colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+              adaptiveColor: AdaptiveColor.DEFAULT,
+              blurOptions: { grayscale: [0, 12] }
+            })
             .fontColor(this.pal().text)
             .fontSize(this.fs(15))
             .lineHeight(this.fs(22))
@@ -3214,10 +3220,10 @@ struct Index {
               .backgroundColor('rgba(248,87,73,0.12)')
               .borderRadius(23)
               .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
-              .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+              .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
                 colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
                 adaptiveColor: AdaptiveColor.DEFAULT,
-                blurOptions: { grayscale: [0, 24] }
+                blurOptions: { grayscale: [0, 12] }
               })
               .shadow({ radius: 12,
                 color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
