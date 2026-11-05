@@ -106,7 +106,7 @@ const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
 
-export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
+export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces, onOpenHostSwitcher, onOpenSettings }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void; onOpenHostSwitcher?: () => void; onOpenSettings?: () => void }) {
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
   const session = useAppStore(state => state.selectedSession)
@@ -696,6 +696,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               onSelect={async next => { await openSession(next) }}
               onOpenAutomationTasks={() => setAutomationTasksOpen(true)}
               onOpenPlugins={pluginsAvailable ? () => setPluginsOpen(true) : undefined}
+              onOpenHostSwitcher={onOpenHostSwitcher}
+              onOpenSettings={onOpenSettings}
             />
           </View>
         )}
@@ -922,6 +924,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           setSessionsOpen(false)
           setPluginsOpen(true)
         } : undefined}
+        onOpenHostSwitcher={onOpenHostSwitcher}
+        onOpenSettings={() => { setSessionsOpen(false); onOpenSettings?.() }}
         onSelect={async next => {
           const pending = openSession(next)
           const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId
