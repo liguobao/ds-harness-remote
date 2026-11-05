@@ -26,6 +26,7 @@ export interface HostSwitcherSheetProps {
  * on rows or the close button.
  */
 export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts }: HostSwitcherSheetProps) {
+  useAppStore(state => state.language)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)

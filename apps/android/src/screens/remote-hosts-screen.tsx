@@ -30,6 +30,7 @@ export function RemoteHostsScreen({
   autoConnectHost,
   onToggleAutoConnectHost,
 }: RemoteHostsScreenProps) {
+  useAppStore(state => state.language)
   const config = useAppStore(state => state.config)
   const account = useAppStore(state => state.account)
   const devices = useAppStore(state => state.devices)
