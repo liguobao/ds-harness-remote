@@ -280,10 +280,30 @@ currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"
 正好是「继续 dsnre 会话」（也就是本会话），所以把这个会话的模型切成了 `deepseek-v4-pro`——
 它不支持图片输入。要切回 `deepseek-flash`：齿轮 → 更换 → 选 DeepSeek-V41-Flash。
 
+## 2026-11-05 13:00（修 WebRTC 与中继的抢跑，V0.08.1）
+
+现象：App 重连后顶栏徽标显示「中继」而不是 LAN。日志抓到的竞态：
+
+```
+12:46:32.447 webrtc: 回落中继（没等到 signal.answer（12000ms））
+12:46:32.813 ctl frame type=signal.answer      ← 晚 0.4s 才到
+12:46:32.820 [webrtc] error: applyAnswer before startOffer
+```
+
+我们 12s 一到就关 peer 去要中继票，主机的 answer 后脚就到，白丢一次直连。
+
+- `webrtcSignalTimeoutMs` 12s → **16s**：主机的协商超时也是 12s，客户端要略长，
+  让主机先给结论，别和它抢
+- 一旦 `dataMode === 'relay'`，迟到的 `signal.answer` / `signal.ice` 直接丢弃并记一行日志，
+  不再打到已关闭的 peer
+- 修完实测：`数据面路径=lan`、`transport.selected sent transport=lan`、
+  `connected to host … transport=lan`
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.08.1 | 1000038 | 等 answer 预算 12s→16s；回落中继后忽略迟到信令 |
 | 0.08.0 | 1000037 | 齿轮面板 + 修模型切换（modelCatalog 无参） |
 | 0.07.2 | 1000035 | 历史图片回显：session/attachment 拉字节并缓存 |
 | 0.07.0 | 1000033 | TURN 候选 + LAN/P2P/TURN 徽标 + 图片插入 |

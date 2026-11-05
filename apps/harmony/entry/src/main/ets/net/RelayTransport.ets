@@ -33,8 +33,11 @@ export class RelayTransportOptions {
   fetchIceServers: ((connectionId: string) => Promise<string>) | undefined = undefined;
   /** 等 ICE 配置最多等多久，超了就先 LAN-only 开协商。 */
   iceFetchTimeoutMs: number = 2500;
-  /** 等 signal.answer 的预算。 */
-  webrtcSignalTimeoutMs: number = 12000;
+  /**
+   * 等 signal.answer 的预算。主机自己的协商超时是 12s，我们取 16s：
+   * 实测 12s 时出现过「我们刚放弃、主机 answer 后脚就到」的竞态，白丢一次直连。
+   */
+  webrtcSignalTimeoutMs: number = 16000;
   /** 收到 answer 之后等 DataChannel 打通的预算（ICE 连通性检查 + DTLS）。 */
   webrtcConnectTimeoutMs: number = 25000;
 }
@@ -376,6 +379,11 @@ export class RelayTransport {
         const payload = frame.payload;
         const sdp: string = jsonStr(payload, 'sdp', '');
         const rtc = this.options.rtc;
+        if (this.dataMode === 'relay') {
+          // 已经回落到中继：peer 已关，迟到的 answer 只能丢掉（下次连接会重新协商）
+          logInfo('webrtc: 忽略迟到的 signal.answer（已回落中继）');
+          return;
+        }
         if (rtc !== undefined && sdp.length > 0) {
           logInfo('webrtc: signal.answer 收到 len=' + sdp.length + '，等 DataChannel');
           this.clearRtcSignalTimer();
@@ -392,6 +400,9 @@ export class RelayTransport {
         const payload = frame.payload;
         const candidate: Object | undefined = payload['candidate'];
         const rtc = this.options.rtc;
+        if (this.dataMode === 'relay') {
+          return;
+        }
         if (rtc !== undefined && candidate !== undefined && candidate !== null) {
           rtc.addRemoteIce(JSON.stringify(candidate));
         }
