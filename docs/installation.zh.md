@@ -26,7 +26,7 @@ sudo -H bash -c '
 脚本执行：
 
 1. 检查已有 `DSH_COMMAND` 或 PATH 中的 DSH；存在则复用，不自动升级它。
-2. 找不到 DSH 时，在 `/opt/dsh-remote/runtime.*` 中安装官方 Node.js 22.23.0、DSH 与插件管理所需的私有 pnpm 9.15.4。Node.js 归档按[官方校验清单](https://nodejs.org/dist/v22.23.0/SHASUMS256.txt)中的固定 SHA-256 校验。稳定 launcher 为 `/opt/dsh-remote/bin/dsh`，重复运行会复用。
+2. 找不到 DSH 时，在 `/opt/dsh-remote/runtime.*` 中安装官方 Node.js 24.9.0、DSH 与插件管理所需的私有 pnpm 9.15.4。Node.js 归档按[官方校验清单](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt)中的固定 SHA-256 校验。稳定 launcher 为 `/opt/dsh-remote/bin/dsh`，重复运行会复用。
 3. 使用官方 `dsh plugin` 安装或更新所选 profile 的 Remote，默认 `web` profile 和 npm `latest`。
 4. 传入 Token 时，通过既有 Host 注册码接口兑换并保存设备凭据。Token 不写入日志、服务配置或持久设备凭据字段；不是模型 API Key。
 5. 检查 profile 确认启用了官方 Web Host 入口，配置 systemd **系统服务**，启用开机自启并启动/重启本安装器管理的匹配实例。无需登录或开启 linger。
@@ -71,7 +71,7 @@ Desktop 默认 `desktop` profile，独立 CLI 默认 `web`，可用 `DSH_COMMAND
 Desktop 也可打开 **扩展 / 插件管理**，从 npm 安装：
 
 ```text
-ds-harness-remote@0.6.2
+ds-harness-remote@0.6.3
 ```
 
 普通独立 CLI 不能管理保留的 `desktop` profile，必须使用 Desktop 官方 launcher。

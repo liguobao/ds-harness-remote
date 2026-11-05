@@ -1,5 +1,22 @@
 ## 版本兼容
 
+## 当前兼容目标（2026-11-05）
+
+当前适配基线为 `dsh-v0.2.2-rc.1`，保留上一版 `dsh-v0.2.1-rc.5`（以及 `0.2.0-rc.2`/rc.1）的官方 Typert / Session V3 接入。peer range 明确接纳 `0.2.1` 与 `0.2.2` 的 alpha/beta/RC 和正式版；本版已按 `0.2.2-rc.1` 发布内容完成 runtime 适配与本地验证。
+
+0.2.2 的适配范围：
+
+- 开发基线升级到 `0.2.2-rc.1`，随附 Cordis `4.1.0`、Loader `1.1.0`、Include `1.1.0` 与 Node.js `>=24.9`（0.2.2 的 engines 要求）。CI、`scripts/install.sh` 私有 runtime 与安装文档同步升级到 Node.js 24.9.0。
+- 0.2.2 把 `session/attachment` 请求从 `attachmentId` 改为完整 `ImageAttachmentRef`（Host 校验格式、字节数与尺寸）。Android 发送完整引用；Host 桥按运行中 Harness 版本归一：旧 Host 自动降级为 `attachmentId`，旧客户端对新 Host 无法补齐校验字段时由官方 Gateway 显式拒绝。
+- 0.2.2 把 `session/control` 的投影更新帧改为 `{ seq, changes: [{ key, val }] }`。CodeX/ACP 虚拟会话同时发送新旧字段，保证 0.2.0–0.2.2 官方客户端都能应用；虚拟 `session/page` 结果补充 `cursor`，并接受 `session/events` 别名。
+- 0.2.2 的虚拟 `session/attachment` 请求同样携带完整引用，CodeX/ACP 虚拟载体两种形态都接受。
+- Remote Host 固定 allowlist 增加 0.2.2 官方客户端会调用的端点：`toolResults/watch`、`schedule/edit`/`run`/`deleteInactive`/`deliveryLimits`、`pluginManager/listVersions`/`readBundleDetail`/`updateBundle`、`session/events`。`pluginManager/updateBundle` 允许受信任设备更新第三方组合包，但禁止远程更新 Remote 自身或包含它的组合包。
+- 0.2.2 的 Session 投影摘要变为可选、`session/follow` 新增被动 `activate`、`session/page.throughSeq` 变为可选等变化均为向后兼容的加法；既有 Remote 客户端与 `remote_*` 工具继续工作。
+
+验证：Plugin check、72 文件 / 527 tests、生产构建与 DSH bundle 校验通过；Android check 与 54 文件 / 520 tests 通过。另以独立 DSH 0.2.2-rc.1 + 本仓库开源自部署 Server + 已安装插件完成 Host 激活、Web UI 渲染、控制面/设置读写与远程工作区建立烟测。未做真实 Desktop/Android APK、跨设备加密 E2E 与 0.2.2 新 UI 的人工验收；新增 6 种官方 UI 语言的 Remote 文案仍待补齐。
+
+Remote Plugin 与 dsh-TUI 的适配基线是分开的。当前公开 dsh-TUI `0.17.0` 的主适配线是 `dsh-v0.2.1-rc.3`，因此本仓库不把 dsh-TUI `0.17.0` + 新 Harness 基线宣称为已完成 runtime 验收的组合。
+
 ## 当前兼容目标（2026-10-31）
 
 当前适配基线为 `dsh-v0.2.1-rc.5`，保留上一版 `dsh-v0.2.0-rc.2`（以及 rc.1）的官方 Typert / Session V3 接入。peer range 明确接纳 `0.2.1` 与 `0.2.2` 的 alpha/beta/RC 和正式版；后续 `0.2.2` RC 在官方 carrier 契约不变时无需仅为版本号改包。未来版本尚未发布，范围接纳不等于已完成其 runtime 验证。 本轮已按官方 `0.2.1-rc.5` 发布内容完成 Plugin check/build、DSH bundle 校验，以及思考内容流转烟测：Android reasoning reducer/自动滚动 18 个测试通过，Plugin ACP/Codex reasoning 投影 30 个测试通过。未做真实 Desktop/Android APK 或跨设备 UI 人工验收。

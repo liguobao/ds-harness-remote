@@ -116,21 +116,44 @@ afterEach(async () => {
       await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
       const core = testState.cores[0]!
       const controller = new AbortController()
-      const value = { attachment: { attachmentId: 'a1', mediaType: 'image/png' }, data: 'synthetic' }
+      const attachment = { attachmentId: 'a1', mediaType: 'image/png', bytes: 8, width: 4, height: 2, name: 'a.png' }
+      const value = { attachment, data: 'synthetic' }
       const rpc = core.rpc.bind(core)
       vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
         if (method !== 'harness.remote.call') return rpc(method, params)
-        expect(params).toEqual({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+        expect(params).toEqual({
+          endpoint: 'session/attachment',
+          payload: { args: { request: { sessionId: 's1', attachment } } },
+        })
         if (mode === 'disconnected') await connection.close()
         if (mode === 'cancelled') controller.abort()
         return { ok: true, value: mode === 'business-result' ? { ok: true, value }
           : mode === 'denied' ? { ok: false, error: { code: 'not-found' } } : value }
       })
       try {
-        const result = connection.readSessionImageAttachment('s1', 'a1', controller.signal)
+        const result = connection.readSessionImageAttachment('s1', attachment, controller.signal)
         if (mode === 'direct' || mode === 'business-result') await expect(result).resolves.toEqual(value)
         else await expect(result).rejects.toThrow()
       } finally { await connection.close() }
+      // Messages recorded before 0.2.2 kept only the durable id; keep that fallback for older Hosts.
+      prepareScenario1()
+      testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+      const legacyConnection = new AndroidRemoteConnection()
+      await legacyConnection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      const legacyCore = testState.cores[0]!
+      const legacyRpc = legacyCore.rpc.bind(legacyCore)
+      vi.spyOn(legacyCore, 'rpc').mockImplementation(async (method, params) => {
+        if (method !== 'harness.remote.call') return legacyRpc(method, params)
+        expect(params).toEqual({
+          endpoint: 'session/attachment',
+          payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } },
+        })
+        return { ok: true, value }
+      })
+      try {
+        await expect(legacyConnection.readSessionImageAttachment('s1', { attachmentId: 'a1' }, new AbortController().signal))
+          .resolves.toEqual(value)
+      } finally { await legacyConnection.close() }
     } })))
   })
 

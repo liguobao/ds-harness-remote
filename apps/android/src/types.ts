@@ -341,6 +341,8 @@ export interface ChatImage {
   uri?: string
   name?: string
   mediaType?: string
+  /** Encoded byte length of a durable Host attachment, required by the 0.2.2 read contract. */
+  bytes?: number
   width?: number
   height?: number
 }

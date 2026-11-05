@@ -59,8 +59,8 @@ elif [[ "$os" = Linux && -x "$DSH_INSTALL_ROOT/bin/dsh" ]]; then
 elif [[ "$os" = Linux ]]; then
   for prerequisite in curl tar sha256sum; do command -v "$prerequisite" >/dev/null || fail "Required command missing: $prerequisite"; done
   case "$(uname -m)" in
-    x86_64) arch=x64; sha=535eeb608ca1e0b71d49a0e36991d449d5f935fbb04eca61677519b010cd673a ;;
-    aarch64|arm64) arch=arm64; sha=0c96aa074abd109e0b5da8d10202a9bbcea9bcf9ddb587b20944f71b8f21f8c8 ;;
+    x86_64) arch=x64; sha=d57d6c28a35785f58f33899a0aa0bfc83f7a8ef4448b6cf3f7d0961efc7b9189 ;;
+    aarch64|arm64) arch=arm64; sha=dab232a90169737a48149149dd6707e7fdcbaefbaa94b4871047a38e93db947f ;;
     *) fail 'Private Node bootstrap supports Linux x64 and arm64 only.' ;;
   esac
   version=${DSH_VERSION:-latest}
@@ -69,9 +69,9 @@ elif [[ "$os" = Linux ]]; then
   mkdir -p "$DSH_INSTALL_ROOT/bin"
   chmod 755 "$DSH_INSTALL_ROOT" "$DSH_INSTALL_ROOT/bin"
   runtime=$(mktemp -d "$DSH_INSTALL_ROOT/runtime.XXXXXXXX")
-  say 'Installing private Node.js 22.23.0, Harness and pnpm (system runtime is unchanged).'
+  say 'Installing private Node.js 24.9.0, Harness and pnpm (system runtime is unchanged).'
   archive=$runtime/node.tar.gz
-  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "https://nodejs.org/dist/v22.23.0/node-v22.23.0-linux-${arch}.tar.gz"
+  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "https://nodejs.org/dist/v24.9.0/node-v24.9.0-linux-${arch}.tar.gz"
   printf '%s  %s\n' "$sha" "$archive" | sha256sum --check --status || fail 'Node archive checksum mismatch.'
   mkdir "$runtime/node"
   tar -xzf "$archive" --strip-components=1 -C "$runtime/node"

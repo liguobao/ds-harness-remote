@@ -1,5 +1,32 @@
 # Repository Guide for Agents
 
+## Harness 0.2.2 compatibility (2026-11-05)
+
+开发基线升级到 `dsh-v0.2.2-rc.1`，随附 Cordis `4.1.0`、Loader `1.1.0`、Include `1.1.0`
+与 `@types/node` 24；0.2.2 要求 Node.js `>=24.9`，CI 四个 job、`scripts/install.sh` 私有
+runtime（含 x64/arm64 SHA-256）与安装文档同步到 Node.js 24.9.0。peer range 原本已接纳
+`0.2.2` 预发布版，本轮不改范围。
+
+适配内容：Android 的 `session/attachment` 改发完整 `ImageAttachmentRef`（从消息 content 保留
+`bytes`，并校验返回引用）；Host 桥按 `harnessVersion` 把完整引用降级为旧 Host 的
+`attachmentId`，旧客户端对新 Host 无法补齐校验字段时由官方 Gateway 显式拒绝。CodeX/ACP 虚拟
+control 帧同时发送旧 `key/value` 与新 `changes`，虚拟 `session/page` 补 `cursor` 并接受
+`session/events` 别名；两边虚拟 `session/attachment` 同时接受 id 与完整引用。Remote allowlist
+增加 `toolResults/watch`、`schedule/edit|run|deleteInactive|deliveryLimits`、
+`pluginManager/listVersions|readBundleDetail|updateBundle`、`session/events`；
+`pluginManager/updateBundle` 复用 Remote 自有组合包保护，允许第三方组合包受信任更新。
+
+验证：全仓 `pnpm --filter './packages/**' -r build`、`pnpm -r check`、`pnpm -r test`、
+`pnpm install --frozen-lockfile`、串行生产 build（含 Android Expo export）、
+`verify-dsh-plugin.mjs`、`verify-packed-webrtc.mjs` 与 `git diff --check` 通过；其中 Plugin
+72 文件 / 527 tests、Android 54 文件 / 520 tests。另在
+独立 DSH 0.2.2-rc.1（Node 24.9.0、独立 DSH_HOME）安装本仓库构建产物，经本仓库开源自部署
+Server 完成 Host 激活、Web UI 渲染、control/status 与 settings 读写、远程工作区建立烟测；
+其中 `account/watch` 被 allowlist 拒绝属预期。未做真实 Desktop/Android APK、原生真机、加密
+跨设备 E2E 或 0.2.2 新 UI 的人工验收；官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案仍
+待补齐，`$events` 在缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合上不可用（Desktop 客户端
+会重连循环）也尚未在插件侧做降级提示。
+
 ## Legacy loader ownership (2026-11-04, Issue #244)
 
 启动迁移仅自动禁用项目自有的 `@dsh-remote/plugin` 旧名；不再按裸名 `dsh-remote`
@@ -254,7 +281,7 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 
 ## Development
 
-环境：Node.js 22、pnpm 9.15.4。Android 原生开发还需要 Android Studio、Android SDK 和 JDK。
+环境：Node.js 24.9、pnpm 9.15.4。Android 原生开发还需要 Android Studio、Android SDK 和 JDK。
 
 ```bash
 pnpm install
@@ -303,7 +330,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。当前待发布版本为 `0.6.2`（跳过 0.6.1，未发布过），Android `versionCode` / Expo iOS `buildNumber` 为 `70`；发版准备已将安装说明同步到 `ds-harness-remote@0.6.2`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
+凭据或迁移旧 service。当前待发布版本为 `0.6.3`，Android `versionCode` / Expo iOS `buildNumber` 为 `71`；发版准备已将安装说明同步到 `ds-harness-remote@0.6.3`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
 
 ## Validation Baseline
 

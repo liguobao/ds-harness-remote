@@ -1,4 +1,4 @@
-import { createChatImageLoader } from '../services/chat-image-loader'
+import { chatImageAttachmentReference, createChatImageLoader } from '../services/chat-image-loader'
 import { loadWorkspacePreview } from '../services/workspace-file-preview'
 import type { RemoteSession } from '../types'
 import { create } from 'zustand'
@@ -117,14 +117,15 @@ export function sessionChatImageLoader(session: RemoteSession) {
         || runtime.connection.requireProxy() !== proxy
         || state.selectedSession?.sessionId !== session.sessionId) throw new Error('Image connection expired')
     },
-    attachment: (sessionId, attachmentId, signal) => {
+    attachment: (sessionId, image, signal) => {
       if (session.backend === 'codex') {
+        if (image.attachmentId === undefined) throw new Error('Image attachment unavailable')
         return runtime.connection.requireCodex().request('dsh/sessionAttachment', {
-          threadId: sessionId.replace(/^codex:/u, ''), attachmentId,
+          threadId: sessionId.replace(/^codex:/u, ''), attachmentId: image.attachmentId,
         }, signal)
       }
       if (session.backend !== undefined && session.backend !== 'harness') throw new Error('Image attachment unavailable')
-      return runtime.connection.readSessionImageAttachment(sessionId, attachmentId, signal)
+      return runtime.connection.readSessionImageAttachment(sessionId, chatImageAttachmentReference(image), signal)
     },
     workspace: (path, signal) => {
       if (session.backend === 'codex' || session.backend === 'claude' || session.backend === 'hermes') throw new Error('Image preview unavailable')

@@ -18,8 +18,9 @@ describe('chat image reads', () => {
     await runScenarios([
       { name: 'session attachment authority', run: async () => {
         const { load, attachment, workspace, controller } = setup()
-        expect(await load({ attachmentId: 'a1', sessionId: 'child' }, controller.signal)).toBe(uri)
-        expect(attachment).toHaveBeenCalledWith('child', 'a1', controller.signal)
+        const image = { attachmentId: 'a1', sessionId: 'child' }
+        expect(await load(image, controller.signal)).toBe(uri)
+        expect(attachment).toHaveBeenCalledWith('child', image, controller.signal)
         expect(workspace).not.toHaveBeenCalled()
       } },
       { name: 'Host path through authorized workspace reader', run: async () => {
@@ -37,6 +38,24 @@ describe('chat image reads', () => {
       })),
     ])
     expect(chatImageWorkspacePath('C:\\work\\image.png')).toBe('C:\\work\\image.png')
+  })
+
+  it('sends the full 0.2.2 reference and rejects a response that disagrees with it', async () => {
+    await runScenarios(['accepted', 'byte-length', 'dimensions'].map(mode => ({ name: mode, run: async () => {
+      const { load, attachment, controller } = setup()
+      const reference = { attachmentId: 'a1', mediaType: 'image/png', bytes: 79, width: 1, height: 1, name: 'a.png' }
+      attachment.mockImplementation(async () => ({
+        attachment: {
+          ...reference,
+          ...(mode === 'byte-length' ? { bytes: 80 } : {}),
+          ...(mode === 'dimensions' ? { width: 2 } : {}),
+        },
+        data,
+      }))
+      if (mode === 'accepted') expect(await load(reference, controller.signal)).toBe(uri)
+      else await expect(load(reference, controller.signal)).rejects.toThrow()
+      expect(attachment).toHaveBeenCalledWith('s1', reference, controller.signal)
+    } })))
   })
 
   it('rejects mismatched responses and stale or cancelled reads', async () => {

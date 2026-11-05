@@ -659,6 +659,7 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
     if (uri === undefined && attachmentId === undefined) return []
     const name = stringValue(block.name) ?? stringValue(attachment.name)
     const mediaType = stringValue(block.mediaType) ?? stringValue(attachment.mediaType)
+    const bytes = typeof block.bytes === 'number' ? block.bytes : typeof attachment.bytes === 'number' ? attachment.bytes : undefined
     const width = typeof block.width === 'number' ? block.width : typeof attachment.width === 'number' ? attachment.width : undefined
     const height = typeof block.height === 'number' ? block.height : typeof attachment.height === 'number' ? attachment.height : undefined
     return [{
@@ -666,6 +667,7 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
       ...(uri === undefined ? {} : { uri }),
       ...(name === undefined ? {} : { name }),
       ...(mediaType === undefined ? {} : { mediaType }),
+      ...(bytes === undefined ? {} : { bytes }),
       ...(width === undefined ? {} : { width }),
       ...(height === undefined ? {} : { height }),
     }]

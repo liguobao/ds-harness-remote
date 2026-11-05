@@ -1,17 +1,29 @@
 # TODO
 
-更新日期：2026-11-03。当前源码版本为 `0.6.2`，Android `versionCode 70`，Expo iOS `buildNumber 70`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
+更新日期：2026-11-05。当前源码版本为 `0.6.3`，Android `versionCode 71`，Expo iOS `buildNumber 71`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
 
 最近一次构建验证见 [AGENTS.md 的 0.5.20 合并后重建记录](../AGENTS.md#post-merge-0520-rebuild-2026-10-27)：全仓 check、847 tests、串行生产 build（含 Android Hermes）、DSH bundle 与打包检查通过。这是既有验证记录，本轮文档清理未重新运行；未新增 APK、原生真机或跨设备验收。Metro noble/hashes exports fallback 警告仍保留。
 
-Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
-peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
+Harness `0.2.2-rc.1` 为开发基线（Node.js `>=24.9`）。保留 `0.2.1-rc.5`、`0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
+peer range 接纳 `0.2.1` 与 `0.2.2` 预发布版。0.2.2 的 runtime 适配范围与验证边界见兼容性说明。
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。
 完整 Server、Remote Web 和 Admin 在独立 Server 仓库实现。
 本仓库 `apps/server` 提供最小单账号 Relay Server。
 
 状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
 RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真机验收。
+
+## 2026-11-05 Harness 0.2.2-rc.1 适配
+
+- [x] 开发基线、Cordis 4.1 / Loader 1.1 / Include 1.1、Node.js 24.9 与 CI/install.sh/文档同步。
+- [x] `session/attachment` 完整引用（Android 发送；Host 按版本降级给旧 Host）。
+- [x] CodeX/ACP 虚拟投影帧 `changes`、虚拟附件引用、`session/page` cursor 与 `session/events` 别名。
+- [x] Remote allowlist 新端点（toolResults / schedule / pluginManager）与插件更新自我保护。
+- [ ] 真实 Desktop 0.2.2 人工烟测：侧栏入口与更新徽标几何、插件页富文本详情/更新按钮、设置页导航图标、Remote Header 与文件预览。
+- [ ] 官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案与 `locale/*.json` 元信息。
+- [ ] 真实账号加密跨设备 E2E：Host 0.2.2 + Android/Desktop 客户端，覆盖图片附件、CodeX/ACP 投影、Trajectory 原始 JSON 与自动化任务编辑。
+- [ ] 缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合（headless/TUI/自定义 profile）上 `$events` 不可用，Desktop 客户端会重连循环；评估插件侧启动告警与客户端降级（空闲事件流 + UI 提示）。
+- [ ] `pluginManager/updateBundle` 远程更新在真实 npm 安装与失败回滚场景的人工验证。
 
 ## 2026-11-02 Android Mermaid 渲染（Issue #255）
 

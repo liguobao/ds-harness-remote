@@ -26,7 +26,7 @@ Omit `sudo -H` when already in a root shell. For a repository checkout, replace 
 The installer:
 
 1. Reuses `DSH_COMMAND` or an existing DSH on PATH without upgrading it.
-2. If absent, installs official Node.js 22.23.0, DSH and private pnpm 9.15.4 under `/opt/dsh-remote/runtime.*`. The Node.js archive is pinned to the [official SHA-256 checksums](https://nodejs.org/dist/v22.23.0/SHASUMS256.txt). The stable launcher is `/opt/dsh-remote/bin/dsh`, reused on subsequent runs.
+2. If absent, installs official Node.js 24.9.0, DSH and private pnpm 9.15.4 under `/opt/dsh-remote/runtime.*`. The Node.js archive is pinned to the [official SHA-256 checksums](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt). The stable launcher is `/opt/dsh-remote/bin/dsh`, reused on subsequent runs.
 3. Installs/updates Remote using official `dsh plugin` management, defaulting to the `web` profile and npm `latest`.
 4. If a token is supplied, exchanges it through the existing Host registration-code API and persists device credentials. The token is not written to logs, service configuration or persistent device-credential fields. It is not a model API key.
 5. Verifies the profile has an active official Web Host startup, configures a systemd **system service**, enables boot startup, and starts/restarts the matching installer-managed instance. No login or linger is needed.
@@ -71,7 +71,7 @@ Desktop defaults to `desktop`; standalone CLI defaults to `web`. Override with `
 Alternatively, open Desktop **Extensions / Plugin management** and install from npm:
 
 ```text
-ds-harness-remote@0.6.2
+ds-harness-remote@0.6.3
 ```
 
 An ordinary standalone CLI cannot manage the reserved `desktop` profile; use Desktop's official launcher.

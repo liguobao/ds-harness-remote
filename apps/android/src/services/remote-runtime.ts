@@ -62,8 +62,8 @@ export class AndroidRemoteRuntime {
   }
   configureHistory(compact: boolean) { return this.client.configureHistory(compact) }
   requireProxy() { return this.client.requireProxy() }
-  readSessionImageAttachment(sessionId: string, attachmentId: string, signal: AbortSignal) {
-    return this.client.readSessionImageAttachment(sessionId, attachmentId, signal)
+  readSessionImageAttachment(sessionId: string, attachment: Record<string, unknown>, signal: AbortSignal) {
+    return this.client.readSessionImageAttachment(sessionId, attachment, signal)
   }
   requireBotClient() { return this.client.requireBotClient() }
   requireCodex() { return this.client.requireCodex() }

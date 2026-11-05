@@ -264,6 +264,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(await this.forkSession(requestArg(args), signal))
         case 'session/history': return business(await this.sessionHistory(requestArg(args), signal))
+        case 'session/events':
         case 'session/page': return business(await this.sessionPage(requestArg(args), signal))
         case 'session/prompt': return business(await this.prompt(requestArg(args), signal))
         case 'session/cancel': return business(await this.cancel(requestArg(args), signal))
@@ -763,7 +764,11 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async attachment(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = requiredString(request.sessionId, 'sessionId')
-    const attachmentId = requiredString(request.attachmentId, 'attachmentId')
+    // 0.2.2 sends the full ImageAttachmentRef; older clients send only its id.
+    const attachmentId = string(request.attachmentId) ?? string(record(request.attachment).attachmentId)
+    if (attachmentId === undefined) {
+      return failure('attachment-error', 'The CodeX image is not available in this virtual Session.', { reason: 'invalid' })
+    }
     if (!attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX)) {
       return failure('attachment-error', 'The CodeX image is not available in this virtual Session.', { reason: 'not-referenced' })
     }
@@ -827,7 +832,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       throughSeq: optionalInteger(request.throughSeq),
       maxMessages: optionalPositiveInteger(request.maxMessages),
     }, signal)
-    return success({ records: page.records, hasMore: page.hasMore })
+    return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
   }
 
   private activeTurnId(threadId: string): string | undefined {

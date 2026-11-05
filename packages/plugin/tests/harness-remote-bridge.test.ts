@@ -51,6 +51,90 @@ describe('HarnessRemoteBridge', () => {
     } })))
   })
 
+  it('forwards the 0.2.2 client endpoints without widening unrelated authority', async () => {
+    await runScenarios([
+      { endpoint: 'pluginManager/listVersions', args: { name: 'third-party' } },
+      { endpoint: 'pluginManager/readBundleDetail', args: { name: 'third-party', language: 'en' } },
+      { endpoint: 'schedule/edit', args: { id: 'task', action: { kind: 'remove' } } },
+      { endpoint: 'schedule/run', args: { id: 'task' } },
+      { endpoint: 'schedule/deleteInactive', args: {} },
+      { endpoint: 'schedule/deliveryLimits', args: {} },
+      { endpoint: 'session/events', args: { request: { address: { sessionId: 's1' } } } },
+    ].map(({ endpoint, args }) => ({ name: endpoint, run: async () => {
+      const outcome = { ok: true as const, value: { status: 'ok' } }
+      const dispatch = vi.fn(async () => outcome)
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+      await expect(bridge.call({ endpoint, payload: { args } })).resolves.toEqual(outcome)
+      expect(dispatch).toHaveBeenLastCalledWith(endpoint, { args }, expect.any(AbortSignal))
+    } })))
+    const opened = vi.fn(async () => (async function* () { return })())
+    const bridge = new HarnessRemoteBridge(gateway({ open: opened }), vi.fn(async () => undefined))
+    await expect(bridge.openStream({
+      streamId: 'tool-results',
+      endpoint: 'toolResults/watch',
+      payload: { args: { sessionId: 's1', seq: 4 } },
+    })).resolves.toEqual({ opened: true, streamId: 'tool-results' })
+    expect(opened).toHaveBeenCalledWith('toolResults/watch', { args: { sessionId: 's1', seq: 4 } }, expect.any(AbortSignal))
+  })
+
+  it('allows third-party bundle updates but never updates this Remote plugin remotely', async () => {
+    const update = vi.fn(async (method: string) => method === 'pluginManager/listBundles'
+      ? {
+        ok: true as const,
+        value: [
+          { name: 'third-party', updatable: true, rows: [{ moduleName: 'third-party' }] },
+          { name: 'ds-harness-remote', updatable: true, rows: [] },
+          { name: 'remote-owned', updatable: true, rows: [{ moduleName: 'ds-harness-remote' }] },
+          { name: 'static', updatable: false, rows: [{ moduleName: 'static' }] },
+          { name: 'protected', updatable: true, readOnlyReason: 'management-required', rows: [] },
+        ],
+      }
+      : { ok: true as const, value: { from: '1.0.0', to: '1.1.0' } })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch: update }), vi.fn())
+    await expect(bridge.call({
+      endpoint: 'pluginManager/updateBundle',
+      payload: { args: { name: 'third-party', version: '1.1.0' } },
+    })).resolves.toEqual({ ok: true, value: { from: '1.0.0', to: '1.1.0' } })
+    await runScenarios(['ds-harness-remote', 'remote-owned', 'static', 'protected', 'missing'].map(name => ({
+      name, run: async () => {
+        await expect(bridge.call({
+          endpoint: 'pluginManager/updateBundle',
+          payload: { args: { name, version: '1.1.0' } },
+        })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      },
+    })))
+    await expect(bridge.call({
+      endpoint: 'pluginManager/updateBundle',
+      payload: { args: { name: 'third-party', version: '1.1.0', spec: 'x' } },
+    })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+  })
+
+  it('reduces the 0.2.2 attachment reference for older Hosts only', async () => {
+    const attachment = { attachmentId: 'a1', mediaType: 'image/png', bytes: 8, width: 4, height: 2, name: 'a.png' }
+    const run = async (harnessVersion: string | undefined) => {
+      const dispatch = vi.fn(async (_method: string, payload: unknown) => ({ ok: true as const, value: { attachment, data: '' } }))
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(), undefined, harnessVersion)
+      await expect(bridge.call({
+        endpoint: 'session/attachment',
+        payload: { args: { request: { sessionId: 's1', attachment } } },
+      })).resolves.toEqual({ ok: true, value: { attachment, data: '' } })
+      return dispatch.mock.lastCall?.[1] as unknown
+    }
+    await expect(run('0.2.1-rc.5')).resolves.toEqual({ args: { request: { sessionId: 's1', attachmentId: 'a1' } } })
+    await expect(run('0.2.2-rc.1')).resolves.toEqual({ args: { request: { sessionId: 's1', attachment } } })
+    await expect(run('0.2.2')).resolves.toEqual({ args: { request: { sessionId: 's1', attachment } } })
+    await expect(run(undefined)).resolves.toEqual({ args: { request: { sessionId: 's1', attachmentId: 'a1' } } })
+    // A legacy client talking to a 0.2.2 Host cannot supply the verified fields; the official Gateway rejects it.
+    const legacyDispatch = vi.fn(async () => ({ ok: true as const, value: { attachment, data: '' } }))
+    const legacyBridge = new HarnessRemoteBridge(gateway({ dispatch: legacyDispatch }), vi.fn(), undefined, '0.2.2-rc.1')
+    await legacyBridge.call({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+    expect(legacyDispatch).toHaveBeenLastCalledWith(
+      'session/attachment',
+      { args: { request: { sessionId: 's1', attachmentId: 'a1' } } },
+      expect.any(AbortSignal),
+    )
+  })
+
   it('filters oversized or unknown third-party projections from session/list', async () => {
     const rawSessions = [
       {

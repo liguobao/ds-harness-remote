@@ -241,6 +241,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(failure('bad-request', `${this.backendLabel()} Remote does not support session fork yet.`))
         case 'session/history': return business(await this.sessionHistory(requestArg(args)))
+        case 'session/events':
         case 'session/page': return business(await this.sessionPage(requestArg(args)))
         case 'session/prompt': return business(await this.prompt(requestArg(args), signal))
         case 'session/cancel': return business(await this.cancel(requestArg(args), signal))
@@ -531,7 +532,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async attachment(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
+    // 0.2.2 sends the full ImageAttachmentRef; older clients send only its id.
     const attachmentId = string(request.attachmentId)
+      ?? string(record(request.attachment).attachmentId)
     const session = this.ensureSessionRegistered(sessionId)
     if ((this.backend !== 'antigravity' && this.backend !== 'hermes') || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this Session.')
     await this.hydrateSession(session)
@@ -613,7 +616,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       throughSeq: optionalInteger(request.throughSeq),
       limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50,
     })
-    return success({ records: page.records, hasMore: page.hasMore })
+    return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
   }
 
   private historyPage(

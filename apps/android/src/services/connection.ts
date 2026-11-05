@@ -221,13 +221,26 @@ export class AndroidRemoteConnection {
     return this.proxy
   }
 
-  /** Read an existing session reference through its native carrier; never accept a filesystem path. */
-  async readSessionImageAttachment(sessionId: string, attachmentId: string, signal: AbortSignal): Promise<unknown> {
+  /**
+   * Read an existing session attachment through its native carrier; never accept
+   * a filesystem path. 0.2.2 Hosts require the full image reference (id, media
+   * type, byte length and dimensions are verified), while older Hosts only know
+   * the durable id, so send the reference once the message carries every field.
+   */
+  async readSessionImageAttachment(
+    sessionId: string,
+    attachment: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<unknown> {
     const core = this.core
     const proxy = this.requireProxy()
     if (core === undefined) throw new Error(strings.runtime.connectHostFirst)
+    const attachmentId = typeof attachment.attachmentId === 'string' ? attachment.attachmentId : undefined
+    if (attachmentId === undefined) throw new Error(strings.common.unavailable)
+    const fullReference = typeof attachment.mediaType === 'string' && typeof attachment.bytes === 'number'
+      && typeof attachment.width === 'number' && typeof attachment.height === 'number'
     const value = await new RemoteTypertGateway(core).call<unknown>('session/attachment', {
-      args: { request: { sessionId, attachmentId } },
+      args: { request: fullReference ? { sessionId, attachment } : { sessionId, attachmentId } },
     }, signal, { maxResponseBytes: 12 * 1024 * 1024 })
     if (this.core !== core || this.proxy !== proxy || signal.aborted) throw new Error(strings.runtime.connectHostFirst)
     // Typert versions may preserve the official business Result inside the carrier result.

@@ -140,8 +140,11 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'pluginInventory/list',
   'pluginManager/listBundles',
   'pluginManager/listPlugins',
+  'pluginManager/listVersions',
+  'pluginManager/readBundleDetail',
   'pluginManager/setBundleEnabled',
   'pluginManager/setPluginEnabled',
+  'pluginManager/updateBundle',
   'permissionPresets/catalog',
   'schedule/list',
   'schedule/catalog',
@@ -149,6 +152,10 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'schedule/create',
   'schedule/update',
   'schedule/delete',
+  'schedule/deleteInactive',
+  'schedule/deliveryLimits',
+  'schedule/edit',
+  'schedule/run',
   'session/attachment',
   'session/cancel',
   'session/canOpenWorkspacePath',
@@ -157,6 +164,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'session/follow',
   'session/fork',
   'session/list',
+  'session/events',
   'session/modelCatalog',
   'session/page',
   'session/prompt',
@@ -190,6 +198,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspaceFiles/changes',
   'officeToPdf/render',
   'officeToPdf/generation',
+  'toolResults/watch',
   'workspace/archiveSession',
   'workspace/create',
   'workspace/delete',
@@ -336,6 +345,7 @@ export class HarnessRemoteBridge {
     const signal = AbortSignal.timeout(60_000)
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
+      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion)
       if (this.resolveWorkspaceRoot !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
       }
@@ -358,7 +368,7 @@ export class HarnessRemoteBridge {
       // wire shape and are left unchanged.)
       const filteredResult = filterSessionListProjections(params.endpoint, result)
       const wireResult = normalizeWorkspaceBinaryResult(params.endpoint,
-        this.compactHistoryEnabled && ['session/page', 'session/history', 'subagent/history'].includes(params.endpoint)
+        this.compactHistoryEnabled && ['session/page', 'session/events', 'session/history', 'subagent/history'].includes(params.endpoint)
           ? compactHistory(filteredResult) : filteredResult)
       return reservation === undefined ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation)
     } catch (error) {
@@ -592,6 +602,10 @@ export class HarnessRemoteBridge {
   }
 
   private async checkPluginManagement(endpoint: string, payload: unknown): Promise<void> {
+    if (endpoint === 'pluginManager/updateBundle') {
+      await this.checkRemoteBundleUpdate(payload)
+      return
+    }
     if (endpoint !== 'pluginManager/setPluginEnabled' && endpoint !== 'pluginManager/setBundleEnabled') return
     const plugin = endpoint === 'pluginManager/setPluginEnabled'
     const key = plugin ? 'id' : 'name'
@@ -607,12 +621,32 @@ export class HarnessRemoteBridge {
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError('PERMISSION_DENIED', 'Cannot verify the Host plugin inventory.')
     const row = result.value.find(value => isRecord(value) && value[plugin ? 'entryId' : 'name'] === args[key])
     if (!isRecord(row) || row.readOnlyReason !== undefined) throw new RpcError('PERMISSION_DENIED', 'The Host plugin cannot be changed remotely.')
-    const remoteModule = (value: unknown): boolean => typeof value === 'string'
-      && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value)
-    if (remoteModule(plugin ? row.moduleName : row.name)
-      || (!plugin && (!Array.isArray(row.rows) || row.rows.some(value => !isRecord(value) || remoteModule(value.moduleName))
-        || (Array.isArray(row.overrides) && row.overrides.some(value => remoteModule(value) || value === 'ds-harness-remote-tui'))))) {
+    if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError('PERMISSION_DENIED', 'The Remote plugin can only be enabled or disabled locally on the Host.')
+    }
+  }
+
+  /**
+   * 0.2.2 adds official third-party bundle updates. Keep the mutation available
+   * to trusted devices but never let a Remote user replace this plugin (or a
+   * bundle owning it) from over the encrypted channel.
+   */
+  private async checkRemoteBundleUpdate(payload: unknown): Promise<void> {
+    const parsed = z.object({
+      args: z.object({
+        name: z.string().min(1).max(4096),
+        version: z.string().min(1).max(256),
+      }).strict(),
+    }).strict().safeParse(payload)
+    if (!parsed.success) throw new RpcError('INVALID_MESSAGE', 'Invalid plugin update request.')
+    const result = await this.gateway.dispatch('pluginManager/listBundles', { args: {} }, AbortSignal.timeout(60_000))
+    if (!result.ok || !Array.isArray(result.value)) throw new RpcError('PERMISSION_DENIED', 'Cannot verify the Host plugin inventory.')
+    const row = result.value.find(value => isRecord(value) && value.name === parsed.data.args.name)
+    if (!isRecord(row) || row.readOnlyReason !== undefined || row.updatable !== true) {
+      throw new RpcError('PERMISSION_DENIED', 'The Host plugin cannot be updated remotely.')
+    }
+    if (remoteOwnedBundleRow(row, false)) {
+      throw new RpcError('PERMISSION_DENIED', 'The Remote plugin can only be updated locally on the Host.')
     }
   }
 
@@ -954,6 +988,41 @@ function normalizeWorkspaceRequestPayload(endpoint: string, payload: unknown, ha
   return payload
 }
 
+/**
+ * 0.2.2 changed `session/attachment` from one durable id to the full
+ * `ImageAttachmentRef` (the Host now verifies media type, byte length and
+ * dimensions against the stored object). Older Hosts only understand the id,
+ * so reduce a Remote client's reference to that field before dispatch. A legacy
+ * client talking to a 0.2.2 Host cannot supply the full reference; the official
+ * Gateway rejects that request explicitly instead of guessing.
+ * @param endpoint - requested Typert endpoint.
+ * @param payload - untouched `{ args: ... }` Remote payload.
+ * @param harnessVersion - running Host Harness version.
+ * @returns the payload the running Host understands.
+ */
+function normalizeSessionAttachmentPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+  if (endpoint !== 'session/attachment' || !isRecord(payload) || !isRecord(payload.args)) return payload
+  const request = isRecord(payload.args.request) ? payload.args.request : undefined
+  if (request === undefined || isDshV022OrNewer(harnessVersion)) return payload
+  const attachment = isRecord(request.attachment) ? request.attachment : undefined
+  const attachmentId = attachment !== undefined && typeof attachment.attachmentId === 'string'
+    ? attachment.attachmentId
+    : typeof request.attachmentId === 'string' ? request.attachmentId : undefined
+  if (attachmentId === undefined) return payload
+  const sessionId = request.sessionId
+  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } }
+}
+
+/** Whether this Host reads the 0.2.2 attachment-reference request shape. */
+function isDshV022OrNewer(version: string | undefined): boolean {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
+  if (match === null) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  const patch = Number(match[3])
+  return major > 0 || (major === 0 && (minor > 2 || (minor === 2 && patch >= 2)))
+}
+
 function isDshV02OrNewer(version: string | undefined): boolean {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version?.trim() ?? '')
   if (match === null) return false
@@ -1201,4 +1270,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isCompactSnapshot(value: unknown): boolean {
   return value !== null && typeof value === 'object' && (value as { type?: unknown }).type === 'snapshot'
+}
+
+/** Whether one official plugin-manager row belongs to this Remote plugin or its bundle. */
+function remoteOwnedBundleRow(row: Record<string, unknown>, plugin: boolean): boolean {
+  const remoteModule = (value: unknown): boolean => typeof value === 'string'
+    && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value)
+  if (remoteModule(plugin ? row.moduleName : row.name)) return true
+  return !plugin && (!Array.isArray(row.rows)
+    || row.rows.some(value => !isRecord(value) || remoteModule(value.moduleName))
+    || (Array.isArray(row.overrides)
+      && row.overrides.some(value => remoteModule(value) || value === 'ds-harness-remote-tui')))
 }

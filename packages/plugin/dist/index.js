@@ -58478,7 +58478,15 @@ var AcpEventCarrier = class {
   }
   publishProjection(sessionId, key, value, seq = this.context.nextProjectionSeq()) {
     for (const queue of this.context.controlStreams) {
-      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq, seq });
+      queue.push({
+        type: "projection",
+        sessionId,
+        seq,
+        key,
+        value,
+        asOfSeq: seq,
+        changes: [{ key, val: value }]
+      });
     }
   }
 };
@@ -59287,6 +59295,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(failure2("bad-request", `${this.backendLabel()} Remote does not support session fork yet.`));
         case "session/history":
           return business(await this.sessionHistory(requestArg(args)));
+        case "session/events":
         case "session/page":
           return business(await this.sessionPage(requestArg(args)));
         case "session/prompt":
@@ -59576,7 +59585,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async attachment(request) {
     const sessionId = extractSessionId(request);
-    const attachmentId = string4(request.attachmentId);
+    const attachmentId = string4(request.attachmentId) ?? string4(record2(request.attachment).attachmentId);
     const session2 = this.ensureSessionRegistered(sessionId);
     if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
@@ -59654,7 +59663,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       throughSeq: optionalInteger(request.throughSeq),
       limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50
     });
-    return success2({ records: page.records, hasMore: page.hasMore });
+    return success2({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
   }
   historyPage(session2, options = {}) {
     const lastSessionSeq = session2.events.at(-1)?.event.seq ?? -1;
@@ -71434,7 +71443,9 @@ var CodexEventCarrier = class {
     return void 0;
   }
   publishProjection(sessionId, key, value, seq) {
-    for (const queue of this.context.controlStreams) queue.push({ type: "projection", sessionId, key, value, seq });
+    for (const queue of this.context.controlStreams) {
+      queue.push({ type: "projection", sessionId, seq, key, value, changes: [{ key, val: value }] });
+    }
   }
 };
 
@@ -72629,6 +72640,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           return business2(await this.forkSession(requestArg2(args), signal));
         case "session/history":
           return business2(await this.sessionHistory(requestArg2(args), signal));
+        case "session/events":
         case "session/page":
           return business2(await this.sessionPage(requestArg2(args), signal));
         case "session/prompt":
@@ -73085,7 +73097,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   async attachment(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
-    const attachmentId = requiredString2(request.attachmentId, "attachmentId");
+    const attachmentId = string5(request.attachmentId) ?? string5(record5(request.attachment).attachmentId);
+    if (attachmentId === void 0) {
+      return failure3("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "invalid" });
+    }
     if (!attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX2)) {
       return failure3("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "not-referenced" });
     }
@@ -73141,7 +73156,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       throughSeq: optionalInteger2(request.throughSeq),
       maxMessages: optionalPositiveInteger2(request.maxMessages)
     }, signal);
-    return success3({ records: page.records, hasMore: page.hasMore });
+    return success3({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
   }
   activeTurnId(threadId) {
     for (const follow of this.follows) if (follow.threadId === threadId && follow.stepOpen) return follow.activeTurnId;
@@ -74818,7 +74833,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.6.2";
+var PLUGIN_VERSION = "0.6.3";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -88755,8 +88770,11 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "pluginInventory/list",
   "pluginManager/listBundles",
   "pluginManager/listPlugins",
+  "pluginManager/listVersions",
+  "pluginManager/readBundleDetail",
   "pluginManager/setBundleEnabled",
   "pluginManager/setPluginEnabled",
+  "pluginManager/updateBundle",
   "permissionPresets/catalog",
   "schedule/list",
   "schedule/catalog",
@@ -88764,6 +88782,10 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "schedule/create",
   "schedule/update",
   "schedule/delete",
+  "schedule/deleteInactive",
+  "schedule/deliveryLimits",
+  "schedule/edit",
+  "schedule/run",
   "session/attachment",
   "session/cancel",
   "session/canOpenWorkspacePath",
@@ -88772,6 +88794,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "session/follow",
   "session/fork",
   "session/list",
+  "session/events",
   "session/modelCatalog",
   "session/page",
   "session/prompt",
@@ -88805,6 +88828,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspaceFiles/changes",
   "officeToPdf/render",
   "officeToPdf/generation",
+  "toolResults/watch",
   "workspace/archiveSession",
   "workspace/create",
   "workspace/delete",
@@ -88916,6 +88940,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
+      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion);
       if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
@@ -88928,7 +88953,7 @@ var HarnessRemoteBridge = class {
       const filteredResult = filterSessionListProjections(params.endpoint, result);
       const wireResult = normalizeWorkspaceBinaryResult2(
         params.endpoint,
-        this.compactHistoryEnabled && ["session/page", "session/history", "subagent/history"].includes(params.endpoint) ? compactHistory(filteredResult) : filteredResult
+        this.compactHistoryEnabled && ["session/page", "session/events", "session/history", "subagent/history"].includes(params.endpoint) ? compactHistory(filteredResult) : filteredResult
       );
       return reservation === void 0 ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation);
     } catch (error62) {
@@ -89146,6 +89171,10 @@ var HarnessRemoteBridge = class {
     await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()]);
   }
   async checkPluginManagement(endpoint, payload) {
+    if (endpoint === "pluginManager/updateBundle") {
+      await this.checkRemoteBundleUpdate(payload);
+      return;
+    }
     if (endpoint !== "pluginManager/setPluginEnabled" && endpoint !== "pluginManager/setBundleEnabled") return;
     const plugin = endpoint === "pluginManager/setPluginEnabled";
     const key = plugin ? "id" : "name";
@@ -89159,9 +89188,31 @@ var HarnessRemoteBridge = class {
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
     const row = result.value.find((value) => isRecord21(value) && value[plugin ? "entryId" : "name"] === args[key]);
     if (!isRecord21(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
-    const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-    if (remoteModule(plugin ? row.moduleName : row.name) || !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord21(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value) || value === "ds-harness-remote-tui"))) {
+    if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
+    }
+  }
+  /**
+   * 0.2.2 adds official third-party bundle updates. Keep the mutation available
+   * to trusted devices but never let a Remote user replace this plugin (or a
+   * bundle owning it) from over the encrypted channel.
+   */
+  async checkRemoteBundleUpdate(payload) {
+    const parsed = external_exports.object({
+      args: external_exports.object({
+        name: external_exports.string().min(1).max(4096),
+        version: external_exports.string().min(1).max(256)
+      }).strict()
+    }).strict().safeParse(payload);
+    if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
+    const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
+    if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
+    const row = result.value.find((value) => isRecord21(value) && value.name === parsed.data.args.name);
+    if (!isRecord21(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+      throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
+    }
+    if (remoteOwnedBundleRow(row, false)) {
+      throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be updated locally on the Host.");
     }
   }
   assertAllowed(endpoint) {
@@ -89439,6 +89490,24 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   }
   return payload;
 }
+function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion) {
+  if (endpoint !== "session/attachment" || !isRecord21(payload) || !isRecord21(payload.args)) return payload;
+  const request = isRecord21(payload.args.request) ? payload.args.request : void 0;
+  if (request === void 0 || isDshV022OrNewer(harnessVersion)) return payload;
+  const attachment = isRecord21(request.attachment) ? request.attachment : void 0;
+  const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
+  if (attachmentId === void 0) return payload;
+  const sessionId = request.sessionId;
+  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+}
+function isDshV022OrNewer(version2) {
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2?.trim() ?? "");
+  if (match === null) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  return major > 0 || major === 0 && (minor > 2 || minor === 2 && patch >= 2);
+}
 function isDshV02OrNewer(version2) {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2?.trim() ?? "");
   if (match === null) return false;
@@ -89643,6 +89712,11 @@ function isRecord21(value) {
 }
 function isCompactSnapshot(value) {
   return value !== null && typeof value === "object" && value.type === "snapshot";
+}
+function remoteOwnedBundleRow(row, plugin) {
+  const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
+  if (remoteModule(plugin ? row.moduleName : row.name)) return true;
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord21(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value) || value === "ds-harness-remote-tui"));
 }
 
 // src/service.ts

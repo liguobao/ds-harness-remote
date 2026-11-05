@@ -1,5 +1,22 @@
 ## Compatibility
 
+## Current compatibility targets (2026-11-05)
+
+The development baseline is `dsh-v0.2.2-rc.1`, retaining `dsh-v0.2.1-rc.5` (and `0.2.0-rc.2`/rc.1) on the official Typert / Session V3 carrier. Peer ranges admit the `0.2.1` and `0.2.2` alpha/beta/RC and stable releases; this round adapts and locally validates the `0.2.2-rc.1` release.
+
+What the 0.2.2 adaptation covers:
+
+- The development baseline moves to `0.2.2-rc.1` with Cordis `4.1.0`, Loader `1.1.0`, Include `1.1.0` and Node.js `>=24.9` (the 0.2.2 engine requirement). CI, the private runtime in `scripts/install.sh` and the installation docs move to Node.js 24.9.0.
+- 0.2.2 changes the `session/attachment` request from `attachmentId` to the full `ImageAttachmentRef` (the Host verifies format, byte length and dimensions). Android sends the full reference; the Host bridge normalizes by running Harness version: older Hosts receive the durable id, while a legacy client talking to a 0.2.2 Host is rejected explicitly by the official Gateway because the verified fields cannot be supplied.
+- 0.2.2 changes `session/control` projection updates to `{ seq, changes: [{ key, val }] }`. The CodeX/ACP virtual sessions send both old and new fields so 0.2.0–0.2.2 official clients apply them; the virtual `session/page` result now carries `cursor` and accepts the `session/events` alias.
+- The virtual `session/attachment` request also carries the full reference in 0.2.2; the CodeX/ACP virtual carriers accept both shapes.
+- The fixed Remote Host allowlist adds the endpoints the 0.2.2 official client calls: `toolResults/watch`, `schedule/edit`/`run`/`deleteInactive`/`deliveryLimits`, `pluginManager/listVersions`/`readBundleDetail`/`updateBundle` and `session/events`. `pluginManager/updateBundle` lets trusted devices update third-party bundles but never the Remote plugin itself (or a bundle containing it).
+- The other 0.2.2 Session changes (optional projection summaries, passive `session/follow` `activate`, optional `session/page.throughSeq`) are additive; existing Remote clients and `remote_*` tools keep working.
+
+Validation: Plugin check, 72 files / 527 tests, production build and DSH bundle verification pass; Android check and 54 files / 520 tests pass. A separate DSH 0.2.2-rc.1 instance with this repository's open-source Server and the installed plugin also passed Host activation, Web UI rendering, control-plane/settings reads and writes, and opening a Remote workspace. Real Desktop/Android APK, encrypted cross-device E2E and the new 0.2.2 UI still lack manual acceptance; Remote copy for the six new official UI languages remains to be added.
+
+The Remote Plugin baseline and the dsh-TUI baseline are separate. The current public dsh-TUI `0.17.0` release lists `dsh-v0.2.1-rc.3` as its primary compatibility line, so this repository does not claim dsh-TUI `0.17.0` plus the new Harness baseline as runtime-validated.
+
 ## Current compatibility targets (2026-10-25)
 
 The development baseline is `dsh-v0.2.1-rc.5`, retaining the previous `dsh-v0.2.0-rc.2` (and rc.1) official Typert / Session V3 carrier. Peer ranges explicitly admit `0.2.1` and `0.2.2` prereleases and stable releases. A future `0.2.2` RC with the same official carrier contract requires no version-only package edit; that future runtime has not been validated.

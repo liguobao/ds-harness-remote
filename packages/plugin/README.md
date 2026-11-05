@@ -42,13 +42,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.6.2
+ds-harness-remote@0.6.3
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.6.2
+dsh plugin --profile desktop add -w ds-harness-remote@0.6.3
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -58,7 +58,7 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.2
+dsh plugin --profile web add -w ds-harness-remote@0.6.3
 ```
 
 ### dsh-TUI Host
@@ -66,7 +66,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.6.2
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.6.2
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.6.3
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
