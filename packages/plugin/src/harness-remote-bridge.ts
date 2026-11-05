@@ -146,6 +146,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'schedule/list',
   'schedule/catalog',
   'schedule/history',
+  'schedule/create',
   'schedule/update',
   'schedule/delete',
   'session/attachment',
@@ -213,6 +214,64 @@ export const WORKSPACE_FILE_READ_ENDPOINTS = new Set([
 
 const MAX_READ_BYTES = 4 * 1024 * 1024
 
+/**
+ * Host-owned reminder service (`ctx.schedule`). The official package exposes
+ * create() only to in-process callers; this bridge is the single place an
+ * authenticated Remote client may reach it, and it validates the untrusted
+ * request itself before delegating.
+ */
+export interface ScheduleCreateService {
+  create(sessionId: string, request: ScheduleCreateRequest, signal?: AbortSignal): Promise<unknown>
+}
+
+/** Locale-independent "HH:mm" / "HH:mm:ss" / "HH:mm:ss.SSS". */
+const LOCAL_TIME = /^\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/u
+
+const localTimeSchema = z.object({
+  time: z.string().regex(LOCAL_TIME, 'expected HH:mm or HH:mm:ss'),
+  time_zone: z.string().min(1).max(64),
+}).strict()
+
+const nonBlank = (max: number) => z.string().max(max).refine(value => value.trim().length > 0, 'must not be blank')
+const scheduleCreateArgsSchema = z.object({
+  sessionId: nonBlank(128),
+  title: nonBlank(120),
+  prompt: nonBlank(20_000),
+  after_seconds: z.number().int().positive().max(31_536_000).optional(),
+  at: z.union([
+    z.string().min(1).max(64),
+    z.object({ date: nonBlank(32), time: nonBlank(32), time_zone: nonBlank(64) }).strict(),
+  ]).optional(),
+  every_seconds: z.number().int().min(60).max(31_536_000).optional(),
+  daily: localTimeSchema.optional(),
+  weekly: z.object({
+    time: z.string().regex(LOCAL_TIME, 'expected HH:mm or HH:mm:ss'),
+    time_zone: z.string().min(1).max(64),
+    weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7)
+      .refine(days => new Set(days).size === days.length, 'weekdays must be unique'),
+  }).strict().optional(),
+  cron: z.object({ expression: nonBlank(128), time_zone: z.string().min(1).max(64) }).strict().optional(),
+}).strict()
+
+export type ScheduleCreateRequest = Omit<z.infer<typeof scheduleCreateArgsSchema>, 'sessionId'>
+
+/**
+ * Refusals the reminder service publishes to clients. Anything else (fs errors,
+ * storage faults, arbitrary thrown values) is reported as a generic failure so
+ * internal detail never reaches the wire.
+ */
+const PUBLIC_SCHEDULE_ERRORS: Record<string, string> = {
+  invalid_prompt: 'The reminder prompt was rejected.',
+  invalid_selector: 'Exactly one reminder trigger is required.',
+  invalid_rule: 'The reminder rule was rejected.',
+  invalid_time_zone: 'The reminder time zone is not supported.',
+  subagent_session: 'The target session is controlled by a delegated child.',
+  session_not_found: 'The target session no longer exists.',
+  schedule_limit: 'This session already has the maximum number of reminders.',
+  schedule_ended: 'The reminder has already ended.',
+  schedule_conflict: 'The reminder changed on the Host. Reload and retry.',
+}
+
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
 
 /** Host-side adapter from the encrypted peer channel to the official alpha Gateway carrier. */
@@ -232,6 +291,7 @@ export class HarnessRemoteBridge {
     private readonly terminal = new TerminalPolicy(() => false, "", new Map()),
     private readonly codexWorkspace?: CodexWorkspaceBridge,
     private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
+    private readonly schedule?: ScheduleCreateService,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
@@ -261,6 +321,9 @@ export class HarnessRemoteBridge {
       }
     }
     if (codexResult !== undefined) return reservation === undefined ? codexResult : this.terminal.result(params.endpoint, params.payload, codexResult, reservation)
+    if (params.endpoint === 'schedule/create') {
+      return this.createSchedule(params.payload)
+    }
     if (params.endpoint === 'session/canOpenWorkspacePath') {
       return { ok: true, value: true }
     }
@@ -315,6 +378,53 @@ export class HarnessRemoteBridge {
         code: this.gateway.failure(error).code,
       })
       throw error
+    }
+  }
+
+  /** Validate one untrusted create request, then delegate to the Host schedule service. */
+  private async createSchedule(payload: unknown): Promise<TypertRpcResult> {
+    if (this.schedule === undefined) {
+      return {
+        ok: false,
+        error: { code: 'FEATURE_NOT_SUPPORTED', message: 'This Host does not expose the schedule service.', details: {} },
+      }
+    }
+    const args = requestArgs(payload)
+    const selectors = ['after_seconds', 'at', 'every_seconds', 'daily', 'weekly', 'cron'].filter(key => args[key] !== undefined)
+    if (selectors.length !== 1) {
+      return {
+        ok: false,
+        error: { code: 'invalid_selector', message: 'Exactly one reminder selector is required.', details: {} },
+      }
+    }
+    const parsed = scheduleCreateArgsSchema.safeParse(args)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_rule',
+          message: issue === undefined ? 'The reminder request is invalid.' : `${issue.path.join('.') || 'request'}: ${issue.message}`,
+          details: {},
+        },
+      }
+    }
+    const { sessionId, ...request } = parsed.data
+    try {
+      // The service is expected to honour the signal; the timeout bounds how long
+      // a stuck create can hold the bridge open, not the provider's own work.
+      const record = await this.schedule.create(sessionId, request, AbortSignal.timeout(60_000))
+      return { ok: true, value: record }
+    } catch (error) {
+      const published = isRecord(error) && typeof error.code === 'string' ? PUBLIC_SCHEDULE_ERRORS[error.code] : undefined
+      if (published === undefined) {
+        return {
+          ok: false,
+          error: { code: 'FAILED', message: 'The Host could not create the reminder.', details: {} },
+        }
+      }
+      const code = (error as { code: string }).code
+      return { ok: false, error: { code, message: published, details: {} } }
     }
   }
 
@@ -630,7 +740,7 @@ export class HarnessRemoteBridge {
     if (rawBaseFile !== undefined) {
       const path = typeof args.path === 'string' ? args.path : ''
       const relative = path.replaceAll('\\', '/')
-      if (relative.length === 0 || relative.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.includes(' ')) {
+      if (relative.length === 0 || relative.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.includes('\x00')) {
         throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
       }
       const baseSegments = process.platform === 'win32' ? rawBaseFile.replaceAll('\\', '/').split('/') : rawBaseFile.split('/')

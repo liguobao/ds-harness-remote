@@ -499,9 +499,14 @@ export function transportPreferenceOptions(): TransportPreferenceOption[] {
 
 export type {
   ScheduleCatalogEntry,
+  ScheduleCreateRequest,
   ScheduleDeleteResult,
   ScheduleDeliveryHistoryResult,
   ScheduleDeliveryReceipt,
   ScheduleDeliveryRecord,
   ScheduleKind,
+  ScheduleRecord,
+  ScheduleTimingChange,
+  ScheduleUpdateRequest,
+  ScheduleUpdateResult,
 } from '@dsh-remote/client-core'

@@ -179,8 +179,80 @@ describe('HarnessRemoteBridge', () => {
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
     }
-    for (const endpoint of ['schedule/create', 'schedule/arbitrary', 'schedule/updateAll']) {
+    // Creating a reminder never reaches the native gateway: the Host schedule
+    // service owns it, and a Host without that service answers explicitly.
+    await expect(bridge.call({ endpoint: 'schedule/create', payload: { args: { request: { sessionId: 'session-1' } } } }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'FEATURE_NOT_SUPPORTED' } })
+    for (const endpoint of ['schedule/arbitrary', 'schedule/updateAll']) {
       await expect(bridge.call({ endpoint, payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+    }
+  })
+
+  it('creates reminders through the Host schedule service and reports its refusals', async () => {
+    const record = {
+      id: 'task-1', kind: 'daily', title: 'A', prompt: 'B',
+      time: '09:00:00.000', timeZone: 'UTC', scheduledAt: '2026-11-05T01:00:00.000Z',
+    }
+    const create = vi.fn(async () => record)
+    const payload = {
+      args: { request: { sessionId: 'session-1', title: 'A', prompt: 'B', daily: { time: '09:00:00.000', time_zone: 'UTC' } } },
+    }
+    const build = (schedule?: { create: (sessionId: string, request: unknown, signal?: AbortSignal) => Promise<unknown> }) =>
+      new HarnessRemoteBridge(
+        gateway({ dispatch: vi.fn() }), vi.fn(), undefined, undefined, undefined, undefined, undefined, schedule,
+      )
+
+    const withService = build({ create })
+    await expect(withService.call({ endpoint: 'schedule/create', payload })).resolves.toEqual({ ok: true, value: record })
+    expect(create).toHaveBeenCalledWith(
+      'session-1',
+      { title: 'A', prompt: 'B', daily: { time: '09:00:00.000', time_zone: 'UTC' } },
+      expect.any(AbortSignal),
+    )
+
+    // Host compositions that omit the reminder service stay explicit.
+    const withoutService = build()
+    await expect(withoutService.call({ endpoint: 'schedule/create', payload }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'FEATURE_NOT_SUPPORTED' } })
+
+    // Exactly one selector is required, and the request is validated before delegation.
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: { sessionId: 'session-1', title: 'A', prompt: 'B' } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_selector' } })
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: {
+        sessionId: 'session-1', title: 'A', prompt: 'B',
+        every_seconds: 3600, daily: { time: '09:00:00.000', time_zone: 'UTC' },
+      } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_selector' } })
+    await expect(withService.call({
+      endpoint: 'schedule/create',
+      payload: { args: { request: { sessionId: 'session-1', title: '', prompt: 'B', every_seconds: 3600 } } },
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_rule' } })
+
+    // A Host refusal keeps its published code instead of collapsing into a transport error.
+    const refusing = build({ create: vi.fn(async () => { throw Object.assign(new Error('delegated child owns this session'), { code: 'subagent_session' }) }) })
+    await expect(refusing.call({ endpoint: 'schedule/create', payload }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'subagent_session' } })
+
+    // Internal faults must not leak their message or arbitrary code to the wire.
+    const leaking = build({ create: vi.fn(async () => {
+      throw Object.assign(new Error('cannot write /private/schedule.db'), { code: 'EACCES' })
+    }) })
+    const leaked = await leaking.call({ endpoint: 'schedule/create', payload })
+    expect(leaked).toMatchObject({ ok: false, error: { code: 'FAILED' } })
+    expect(JSON.stringify(leaked)).not.toContain('/private/schedule.db')
+
+    // Malformed rules are rejected before the Host service sees them.
+    for (const request of [
+      { sessionId: 's', title: 'A', prompt: 'B', daily: { time: 'not-a-time', time_zone: 'UTC' } },
+      { sessionId: 's', title: 'A', prompt: 'B', weekly: { time: '09:00', time_zone: 'UTC', weekdays: [1, 1] } },
+      { sessionId: 's', title: '   ', prompt: 'B', every_seconds: 3600 },
+    ]) {
+      await expect(withService.call({ endpoint: 'schedule/create', payload: { args: { request } } }))
+        .resolves.toMatchObject({ ok: false, error: { code: 'invalid_rule' } })
     }
   })
 

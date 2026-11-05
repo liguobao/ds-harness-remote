@@ -17,6 +17,7 @@ import type { HostWebServerLike } from './control-route.js'
 import { IdentityStore, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
+import type { ScheduleCreateService } from './harness-remote-bridge.js'
 import { ClientServerApi } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
@@ -234,6 +235,14 @@ async function activate(
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
+  // The official reminder service is optional in a Host composition; when it is
+  // absent the bridge reports FEATURE_NOT_SUPPORTED instead of inventing one.
+  // The reminder service is a sibling bundle service; resolve it from the root
+  // when this plugin's own context cannot see it. Absent service = explicit
+  // FEATURE_NOT_SUPPORTED from the bridge, never a fabricated one.
+  const schedule = (ctx.get('schedule', false)
+    ?? (ctx.root === undefined ? undefined : ctx.root.get('schedule', false))) as ScheduleCreateService | undefined
+
   const createRuntimes = (config: ResolvedConfig) => {
     const hostIdentities = new IdentityStore({
       directory: config.serverUrl === undefined
@@ -252,6 +261,7 @@ async function activate(
         () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
         peer,
       ),
+      schedule,
     )
 
     let clientRuntime: ClientModeRuntime | undefined
