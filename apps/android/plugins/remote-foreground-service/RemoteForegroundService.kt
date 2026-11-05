@@ -210,8 +210,6 @@ class RemoteForegroundService : Service() {
 
       try {
         val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
-          setImageViewResource(R.id.live_task_app_icon, applicationInfo.icon)
-          setTextViewText(R.id.live_task_app_name, getString(R.string.app_name))
           setImageViewResource(R.id.live_task_status_dot, dotRes)
           setTextViewText(R.id.live_task_status_text, status)
           setTextColor(R.id.live_task_status_text, statusColor)

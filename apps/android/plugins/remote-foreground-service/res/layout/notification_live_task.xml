@@ -15,28 +15,9 @@
         android:orientation="horizontal">
 
         <ImageView
-            android:id="@+id/live_task_app_icon"
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:contentDescription="@null"
-            android:scaleType="centerCrop" />
-
-        <TextView
-            android:id="@+id/live_task_app_name"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#FFFFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <ImageView
             android:id="@+id/live_task_status_dot"
             android:layout_width="6dp"
             android:layout_height="6dp"
-            android:layout_marginStart="8dp"
             android:contentDescription="@null" />
 
         <TextView
