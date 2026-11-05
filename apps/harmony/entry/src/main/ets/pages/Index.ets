@@ -207,7 +207,16 @@ struct Index {
 
   private applyInsets(win: window.Window): void {
     const ui: UIContext = this.getUIContext();
-    const topPx: number = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height;
+    // 2in1 全屏时系统状态栏高度是 0，但窗口自己那条标题栏还在，内容会顶到它下面被挡住，
+    // 所以取「系统栏高度」和「窗口装饰高度」里大的那个当顶部安全区。
+    let decorPx: number = 0;
+    try {
+      decorPx = win.getWindowDecorHeight();
+    } catch (error) {
+      decorPx = 0;
+    }
+    const systemTopPx: number = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height;
+    const topPx: number = Math.max(systemTopPx, decorPx);
     const bottomPx: number = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height;
     this.topInset = ui.px2vp(topPx);
     this.bottomInset = ui.px2vp(bottomPx);
@@ -660,6 +669,18 @@ struct Index {
 
   private closeDrawer(): void {
     this.settleDrawer(false);
+  }
+
+  /** 设备页内容列宽：手机满宽，平板/PC 给到 1040 并居中，别缩成一条窄带。 */
+  private deviceColumnWidth(): number {
+    const w: number = this.windowWidthVp;
+    if (w <= 0) {
+      return 360;
+    }
+    if (w < 720) {
+      return w;
+    }
+    return Math.min(1040, w - 120);
   }
 
   /** 小女仆的出场条件：窗口够高就出来，手机横屏（约 405vp）这种就不挤列表。 */
@@ -1211,7 +1232,8 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pal().bg)
-    .padding({ top: this.topInset, bottom: this.bottomInset })
+    // 顶部留一点兜底：2in1 全屏时系统状态栏高度是 0，但窗口自己那条标题栏还在
+    .padding({ top: Math.max(this.topInset, 30), bottom: Math.max(this.bottomInset, 64) })
     .onAppear(() => {
       this.measureInsets();
     })
@@ -2262,6 +2284,10 @@ struct Index {
   @Builder
   DevicesScreen() {
     Column() {
+      // 宽屏空间富裕，整块内容垂直居中，不至于全堆在顶部、下面空一大片
+      if (this.windowWidthVp >= 900) {
+        Blank()
+      }
       // 第一行：标题压在整行正中，按钮独立浮在右侧，标题位置不再被按钮宽度带偏
       Stack({ alignContent: Alignment.Center }) {
         Column({ space: 6 }) {
@@ -2367,13 +2393,20 @@ struct Index {
           }
         }, (device: RemoteHostDevice) => `${device.deviceId}#${this.languageMode}`)
       }
-      .layoutWeight(1)
       .width('100%')
+      .constraintSize({ maxHeight: 560 })
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
-      // 列表下面这块一直是空的，放一只会呼吸的小女仆；纵向空间不够时让位给列表
+      // 剩下的空间留给陪伴小人：她在中间垂直居中，宽屏下不会孤零零贴底边
       if (this.showMascot()) {
-        this.MaidMascot()
+        Column() {
+          this.MaidMascot()
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Blank()
       }
       if (this.devices.length === 0 && !this.busy) {
         Text(this.tr('暂无远程主机，请先在服务器上注册主机设备'))
@@ -2386,6 +2419,7 @@ struct Index {
         .width('100%')
         .height(0.5)
         .backgroundColor(this.pal().border)
+        .margin({ top: 8 })
       Row({ space: 12 }) {
         Column({ space: 2 }) {
           // 账号只显示邮箱前缀：google-110176351561077530156@… 那种长串会把整行吃掉
@@ -2413,7 +2447,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .constraintSize({ maxWidth: 760 })
+    .constraintSize({ maxWidth: this.deviceColumnWidth() })
   }
 
   /** 列表下方的陪伴小人：缓慢上下浮 + 轻微摆头，落地处有一圈随呼吸缩放的影子。 */
@@ -2437,8 +2471,12 @@ struct Index {
           .rotate({ angle: this.maidBob ? 1.2 : -1.2 })
           .animation({ duration: 2000, curve: Curve.EaseInOut })
       }
-      .height(208)
+      .height(190)
       .width('100%')
+      Text(this.tr('选一台主机，继续上次的工作'))
+        .fontSize(12)
+        .fontColor(this.pal().text3)
+        .padding({ top: 2 })
     }
     .width('100%')
     .padding({ top: 2, bottom: 6 })

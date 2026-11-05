@@ -76,6 +76,7 @@ function buildEnglish(): Map<string, string> {
   map.set('重试', 'Retry');
   // —— 设备页 ——
   map.set('DSH主机列表', 'DSH hosts');
+  map.set('选一台主机，继续上次的工作', 'Pick a host and pick up where you left off');
   map.set('远程主机', 'Remote hosts');
   map.set('在线', 'online');
   map.set('离线', 'offline');
