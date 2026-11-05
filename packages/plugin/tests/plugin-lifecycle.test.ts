@@ -17,6 +17,42 @@ afterEach(async () => {
 })
 
 describe('Cordis plugin lifecycle', () => {
+  it('migrates only owned legacy entries without disabling an unrelated plugin', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-legacy-ownership-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline fixture') }))
+    const entries = [
+      { id: 'current', options: { id: 'current', name: '@dsh-remote/plugin', disabled: false } },
+      { id: 'foreign', options: { id: 'foreign', name: 'dsh-remote', disabled: false } },
+      { id: 'foreign-null', options: { id: 'foreign-null', name: 'dsh-remote', disabled: null } },
+      { id: 'foreign-disabled', options: { id: 'foreign-disabled', name: 'dsh-remote', disabled: true } },
+      { id: 'owned', options: { id: 'owned', name: '@dsh-remote/plugin', disabled: false } },
+      { id: 'owned-disabled', options: { id: 'owned-disabled', name: '@dsh-remote/plugin', disabled: true } },
+      { id: 'other', options: { id: 'other', name: 'another-plugin', disabled: false } },
+    ]
+    const update = vi.fn(async (id: string, options: { disabled?: boolean | null }) => {
+      Object.assign(entries.find(entry => entry.id === id)!.options, options)
+    })
+    const ctx = new Context()
+    ctx.provide('loader', { locate: () => 'current', entries: () => entries, update } as never)
+    ctx.provide('settings', settings({ deviceName: 'Cordis ownership test host' }))
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', connection())
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis ownership test host' })
+    try {
+      await vi.waitFor(() => expect(ctx.dshRemote.currentIdentity()).toBeDefined())
+      expect(update.mock.calls).toEqual([['owned', { disabled: true }]])
+      expect(entries.map(entry => [entry.id, entry.options.disabled])).toEqual([
+        ['current', false], ['foreign', false], ['foreign-null', null], ['foreign-disabled', true],
+        ['owned', true], ['owned-disabled', true], ['other', false],
+      ])
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('switches Server authority live and cancels discovery belonging to the old Server', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-server-switch-'))
     directories.push(dshHome)

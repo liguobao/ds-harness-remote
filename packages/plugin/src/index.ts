@@ -44,7 +44,9 @@ declare module '@deepseek-ai/cordis' {
 export const name = 'ds-harness-remote'
 export { Config }
 
-const legacyLoaderModuleNames = new Set(['dsh-remote', '@dsh-remote/plugin'])
+// The unscoped dsh-remote package belongs to another publisher. A bare name
+// cannot establish ownership of a legacy local alias, so leave it unchanged.
+const legacyLoaderModuleNames = new Set(['@dsh-remote/plugin'])
 // Settings-registry generation (≤0.1.6). The branded `SettingsNamespace` type
 // was removed with the registry in rc.1, so the literals stay plain strings.
 const pluginSettingsNamespace = 'ds-harness-remote'
