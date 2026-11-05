@@ -210,7 +210,10 @@ function buildEnglish(): Map<string, string> {
   map.set('会话设置', 'Session settings');
   map.set('服务器', 'Server');
   map.set('切换账号', 'Switch account');
+  map.set('已保存的登录（一键进入）', 'Saved sign-ins (one tap)');
+  map.set('进入', 'Enter');
   map.set('切换服务器', 'Switch server');
+  map.set('登录其他服务器…', 'Sign in to another server…');
   map.set('已保存的登录态，点一下就切（无需重新输密码）',
     'Saved sign-ins — tap one to switch, no password needed');
   map.set('切换', 'Switch');

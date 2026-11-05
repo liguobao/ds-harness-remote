@@ -1711,7 +1711,9 @@ export class AppRuntime {
         return;
       }
     } catch (error) {
-      this.errorMsg = errorMessage(error);
+      // 自建 server 不一定实现 /auth/oauth/providers；这只是「能不能扫码登录」的探测，
+      // 失败不该在登录页糊一条红字（METHOD_NOT_FOUND 之类），记日志就够。
+      logWarn('oauth providers unavailable: ' + errorMessage(error));
     }
     this.providers = [];
     this.notify();

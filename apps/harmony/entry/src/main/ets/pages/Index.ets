@@ -428,6 +428,12 @@ struct Index {
     if (sheets.length === 0) {
       return;
     }
+    sheets.push({
+      title: this.tr('登录其他服务器…'),
+      action: () => {
+        this.runtime.logout();
+      }
+    });
     ActionSheet.show({
       title: this.tr('切换服务器'),
       message: this.tr('已保存的登录态，点一下就切（无需重新输密码）'),
@@ -1424,6 +1430,49 @@ struct Index {
           .fontColor(this.pal().text2)
           .letterSpacing(1)
       }
+      if (this.profilesList.length > 0) {
+        Column({ space: 8 }) {
+          Text(this.tr('已保存的登录（一键进入）'))
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          ForEach(this.profilesList, (profile: SavedProfile) => {
+            Row({ space: 10 }) {
+              Column({ space: 2 }) {
+                Text(profile.email)
+                  .fontSize(13)
+                  .fontColor(this.pal().text)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(profile.baseUrl)
+                  .fontSize(10)
+                  .fontColor(this.pal().text3)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              Text(this.tr('进入'))
+                .fontSize(11)
+                .fontColor('#0B1220')
+                .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+                .backgroundColor('#22D3EE')
+                .borderRadius(10)
+            }
+            .width('100%')
+            .padding({ top: 8, bottom: 8, left: 12, right: 12 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(12)
+            .border({ width: 1, color: this.pal().border })
+            .enabled(!this.busy)
+            .onClick(() => {
+              this.runtime.switchProfile(profile);
+            })
+          }, (profile: SavedProfile) => 'login-' + profile.baseUrl + '|' + profile.email)
+        }
+        .width('100%')
+        .padding({ top: 4, bottom: 4 })
+      }
       TextInput({ text: this.serverInput, placeholder: this.tr('服务器地址（http://…）') })
         .height(48)
         .backgroundColor(this.pal().chip)
@@ -1688,7 +1737,7 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        if (this.profilesList.length > 1) {
+        if (this.profilesList.length > 0) {
           Button(this.accountSwitchLabel())
             .height(32)
             .fontSize(12)
