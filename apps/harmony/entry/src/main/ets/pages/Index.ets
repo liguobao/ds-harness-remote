@@ -1233,8 +1233,11 @@ struct Index {
             colors: [[this.isDarkUi ? 'rgba(147,97,255,0.18)' : 'rgba(147,97,255,0.12)', 0],
               ['rgba(147,97,255,0)', 1]] })
       }
+      // 背景层用绝对定位铺满整个窗口（含上下安全区），
+      // 否则根容器的 padding 会把渐变内缩，底栏下方那块留白露出纯色底，突然后一块白
+      .height(this.windowHeightVp > 0 ? this.windowHeightVp : 800)
+      .position({ x: 0, y: -this.topSafePadding() })
       .width('100%')
-      .height('100%')
       .hitTestBehavior(HitTestMode.None)
       Column() {
         if (this.phase === PHASE_BOOT) {
