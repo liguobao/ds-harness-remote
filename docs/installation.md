@@ -4,6 +4,20 @@
 
 The sole installer is `scripts/install.sh`. There are no Windows, separate uninstall or token-wrapper scripts.
 
+## Online updates in DSH Plugin management
+
+Starting with DSH 0.2.2, Remote **installed from npm** can check for versions and update under **Extensions / Plugin management → ds-harness-remote**. The official DSH plugin manager owns the update. With hot reload, it stops the old version before installing the new one and attempts to restore the previous version if installation fails or is cancelled. Restoration can also fail; check the final result in Plugin management and restart when requested.
+
+GitHub, local directory, `file:` and `link:` installations are not eligible for official online updates. To switch to npm, use the same Desktop's official `dsh` launcher:
+
+```sh
+dsh plugin --profile desktop add -w ds-harness-remote@latest
+```
+
+For a Web Host, use its actual launcher, `DSH_HOME` and profile (usually `web`). Restart when requested after switching sources, then check versions in Plugin management. Keep the profile and Remote credential directory.
+
+The Remote sidebar version badge remains a notice linking to release notes. Install updates through the local DSH Plugin management page. Updating Remote interrupts the remote connections it carries, so perform this operation on the machine running the plugin.
+
 ## Linux: DSH, one-time registration and boot startup
 
 **Linux requires root. The system service runs as root, so Remote Host, Agent tools and remote terminals also have root privileges. Only grant access to trusted accounts.** This installer currently does not configure a non-root service user.

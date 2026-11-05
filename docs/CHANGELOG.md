@@ -5,6 +5,7 @@ Android build 71.
 ### English
 
 - Support DeepSeek Harness `0.2.2-rc.1`: remote session images load again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the newly added Trajectory raw results, automation editing and third-party plugin update surfaces work over Remote. Harness `0.2.1-rc.5` remains supported and validated.
+- Document online updates for Remote itself in DSH 0.2.2 Plugin management: npm installations can check versions and update, with DSH attempting to restore the previous version after a failed hot update; GitHub and local link installations must switch to npm first.
 - Require Node.js `>=24.9`, matching Harness 0.2.2. The Linux installer now provisions Node.js 24.9.0.
 - Fix a Harness 0.2.2 reconnect loop caused by opening the forwarded Remote event stream without a calling owner Peer.
 - Inline the Host bundle's runtime dependencies, so installations that do not carry the package's runtime dependencies (local-path links, manual copies and generated installs) no longer fail to load with `Cannot find package 'ws'`.
@@ -26,6 +27,7 @@ Thanks to @dreamfarer-space, @bluesmilery, @ltmroberthk915, @stubborn726, @vccdd
 ### 中文
 
 - 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约重新可用，CodeX/ACP 会话的实时状态更新适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用。同时保留并已验证 Harness `0.2.1-rc.5` 兼容。
+- 明确 Remote 自身的 DSH 0.2.2 插件页在线更新入口：npm 安装可检查版本并更新，热更新失败时由 DSH 尝试恢复旧版；GitHub / 本地 link 安装需先切换至 npm。
 - 要求 Node.js `>=24.9`（与 Harness 0.2.2 一致）；Linux 安装器改为安装 Node.js 24.9.0。
 - 修复 Harness 0.2.2 上转发事件流因缺少调用 owner Peer 而触发 Desktop 客户端重连循环的问题。
 - Host bundle 内联运行时依赖；本地路径 link、手工复制或生成式安装等不携带包依赖的场景不再因 `Cannot find package 'ws'` 而加载失败。

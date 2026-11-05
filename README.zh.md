@@ -77,6 +77,8 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
 `dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`。
 
+DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
+
 ### Linux 一键安装
 
 见官网首页[https://dsh.r2049.cn](https://dsh.r2049.cn/)，登陆后获取一键安装授权码安装即可。

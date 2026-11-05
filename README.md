@@ -97,6 +97,8 @@ from npm, and enter this package:
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
 with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`.
 
+On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
+
 ### Linux one-command installation
 
 Visit [https://dsh.r2049.cn](https://dsh.r2049.cn/), sign in, and obtain an installation authorization code to install with one command.

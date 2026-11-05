@@ -4,6 +4,20 @@
 
 安装入口只保留 `scripts/install.sh`，不提供 Windows、独立卸载或 Token 包装脚本。
 
+## DSH 插件页在线更新
+
+DSH 0.2.2 起，**从 npm 安装**的 Remote 可在 **扩展 / 插件管理 → ds-harness-remote** 中检查版本并确认更新。更新由 DSH 官方插件管理器执行；支持热更新的宿主会先停止旧版再安装新版，失败或取消时尝试恢复旧版。恢复也可能失败，请以插件页的最终结果为准；宿主要求重启时按提示重启。
+
+GitHub、本地目录、`file:` 和 `link:` 安装不会出现官方在线更新入口。要改用 npm，在同一 Desktop 的官方 `dsh` 启动器中执行：
+
+```sh
+dsh plugin --profile desktop add -w ds-harness-remote@latest
+```
+
+Web Host 改用实际启动它的 `dsh`、`DSH_HOME` 和 profile（通常为 `web`）。切换安装来源后按宿主提示重启，再回插件页检查版本；不要删除 profile 或 Remote 凭据目录。
+
+Remote 侧栏的版本徽标仍是更新提示，点击链接打开发布页；实际安装在本机 DSH 插件页完成。更新 Remote 会中断它承载的远程连接，请在运行该插件的本机操作。
+
 ## Linux：DSH + 一次性注册 + 开机自启
 
 **Linux 必须以 root 运行。系统服务以 root 运行，Remote Host、Agent 工具和远程终端也具有 root 权限。请仅向可信账号开放此服务器。** 当前不支持通过此安装器配置非 root 服务用户。
