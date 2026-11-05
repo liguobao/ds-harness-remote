@@ -64,6 +64,8 @@ export interface AdaptiveDisconnectDiagnostic {
   reason: 'control-closed' | 'control-error' | 'invalid-control-frame' | 'webrtc-closed'
   closeCode?: number
   closeReason?: string
+  /** Selected data-plane transport of an established WebRTC path that closed. */
+  transport?: 'lan' | 'p2p' | 'turn'
 }
 
 export interface AdaptiveConnectionDetails {
@@ -478,12 +480,18 @@ export class AdaptiveTransport extends BaseTransport {
       iceServers = []
     }
     throwIfAborted(signal)
+    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs)
+    // Without STUN/TURN servers only same-LAN host candidates can succeed;
+    // fail fast instead of waiting the full timeout on cross-network links.
+    const effectiveNegotiateTimeoutMs = iceServers.length === 0
+      ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS)
+      : negotiatedMs
     const rtc = new RtcDataChannelTransport({
       role: 'initiator',
       factory,
       iceServers,
       onSignal: signal => this.sendRtcSignal(signal),
-      negotiateTimeoutMs: negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs),
+      negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,
       onDiagnostic: event => {
         this.lastRtcDiagnostics = event.diagnostics
@@ -501,7 +509,11 @@ export class AdaptiveTransport extends BaseTransport {
       // transport switches to Relay. That is not a loss of the established
       // Adaptive transport, so only surface closes from an active WebRTC path.
       if (this.rtc === rtc && this.dataMode === 'webrtc') {
-        this.failConnection(new Error('Active WebRTC channel closed'), { reason: 'webrtc-closed' })
+        const transport = this.selected
+        this.failConnection(new Error('Active WebRTC channel closed'), {
+          reason: 'webrtc-closed',
+          ...(transport === 'lan' || transport === 'p2p' || transport === 'turn' ? { transport } : {}),
+        })
       }
     })
     try {
@@ -847,10 +859,16 @@ function socketState(readyState: number | undefined): AdaptiveConnectionDetails[
 }
 
 function negotiateTimeout(serverMs: number | undefined, localMs: number | undefined): number | undefined {
-  if (serverMs === undefined) return localMs
-  if (localMs === undefined) return serverMs
-  return Math.max(serverMs, localMs)
+  // An explicit local setting wins; the server fallback hint must never be
+  // able to stretch a mobile client's WebRTC wait beyond its own budget.
+  if (localMs !== undefined) return localMs
+  if (serverMs === undefined) return undefined
+  return Math.min(SERVER_NEGOTIATE_TIMEOUT_MAX_MS, Math.max(SERVER_NEGOTIATE_TIMEOUT_MIN_MS, serverMs))
 }
+
+const DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4_000
+const SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6_000
+const SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12_000
 
 // React Native AbortSignal implementations may omit throwIfAborted().
 function throwIfAborted(signal: AbortSignal | undefined): void {

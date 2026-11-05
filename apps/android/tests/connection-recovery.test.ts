@@ -36,21 +36,25 @@ describe('foreground carrier recovery', () => {
       state.transportPreference = preference as RecoveryState['transportPreference']
       offline()
       recovery.update()
-      await vi.advanceTimersByTimeAsync(999)
-      expect(reconnect).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(1)
+      // First retry is immediate (0ms) so a dropped P2P path heals over the
+      // relay without a fixed startup delay.
+      await vi.advanceTimersByTimeAsync(0)
       expect(reconnect).toHaveBeenCalledTimes(1)
-      await vi.advanceTimersByTimeAsync(3_000)
+      await vi.advanceTimersByTimeAsync(1_000)
       expect(reconnect).toHaveBeenCalledTimes(2)
-      await vi.advanceTimersByTimeAsync(8_000)
+      await vi.advanceTimersByTimeAsync(3_000)
       expect(reconnect).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(8_000)
+      expect(reconnect).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(15_000 + 30_000 + 30_000 + 60_000)
+      expect(reconnect).toHaveBeenCalledTimes(8)
       expect(exhausted).toHaveBeenCalledOnce()
       recovery.update()
       expect(exhausted).toHaveBeenCalledOnce()
       await vi.advanceTimersByTimeAsync(60_000)
-      expect(reconnect).toHaveBeenCalledTimes(3)
+      expect(reconnect).toHaveBeenCalledTimes(8)
       expect(reconnect.mock.calls.map(([options]) => options)).toEqual(
-        Array.from({ length: 3 }, () => preference === 'auto' ? { forceRelay: true } : {}),
+        Array.from({ length: 8 }, () => preference === 'auto' ? { forceRelay: true } : {}),
       )
     } })), prepare)
   })
@@ -70,9 +74,22 @@ describe('foreground carrier recovery', () => {
         if (action === 'refused') state.connection.retryable = false
         if (action === 'manual-connect') state.connection.phase = 'connecting'
         recovery.update()
+        if (action === 'never-connected') {
+          // A first attempt that never established retries twice immediately
+          // over Relay and then gives up instead of hanging.
+          await vi.advanceTimersByTimeAsync(0)
+          expect(reconnect).toHaveBeenCalledTimes(1)
+          expect(reconnect).toHaveBeenLastCalledWith({ forceRelay: true })
+          await vi.advanceTimersByTimeAsync(1_000)
+          expect(reconnect).toHaveBeenCalledTimes(2)
+          await vi.advanceTimersByTimeAsync(300_000)
+          expect(reconnect).toHaveBeenCalledTimes(2)
+          expect(exhausted).toHaveBeenCalledOnce()
+          return
+        }
         await vi.advanceTimersByTimeAsync(30_000)
         expect(reconnect).not.toHaveBeenCalled()
-        if (action === 'never-connected' || action === 'refused') expect(exhausted).toHaveBeenCalledOnce()
+        if (action === 'refused') expect(exhausted).toHaveBeenCalledOnce()
       } })), prepare)
   })
 
@@ -80,7 +97,7 @@ describe('foreground carrier recovery', () => {
     let finish!: (value: boolean) => void
     reconnect.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     offline()
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(0)
     recovery.update()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(reconnect).toHaveBeenCalledOnce()
@@ -90,15 +107,17 @@ describe('foreground carrier recovery', () => {
     await vi.advanceTimersByTimeAsync(0)
     offline()
     reconnect.mockImplementationOnce(async () => { throw new Error('unavailable') })
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(0)
     expect(reconnect).toHaveBeenLastCalledWith({})
-    await vi.advanceTimersByTimeAsync(3_000)
+    await vi.advanceTimersByTimeAsync(1_000)
     expect(reconnect).toHaveBeenLastCalledWith({ forceRelay: true })
     recovery.setActive(false)
     await vi.advanceTimersByTimeAsync(30_000)
     expect(reconnect).toHaveBeenCalledTimes(3)
+    // Returning to the foreground re-arms immediately, even after the
+    // previous cycle was on its way through the backoff ladder.
     recovery.setActive(true)
-    await vi.advanceTimersByTimeAsync(8_000)
+    await vi.advanceTimersByTimeAsync(0)
     expect(reconnect).toHaveBeenCalledTimes(4)
   })
 })

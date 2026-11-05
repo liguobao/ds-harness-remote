@@ -492,25 +492,32 @@ describe('AdaptiveTransport capability negotiation', () => {
         expect(transport.getStats().connected).toBe(false)
         if (reason === 'local-close') expect(diagnostic).not.toHaveBeenCalled()
         else expect(diagnostic.mock.calls).toEqual([[{
-          reason, ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
+          reason,
+          ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
+          ...(reason === 'webrtc-closed' ? { transport: 'p2p' } : {}),
         }]])
         socket.onclose?.({ code: 1006, reason: '' })
         expect(closed).toHaveBeenCalledOnce()
       },
     })), cleanupScenario1)
   })
-  it('separates authorization from RTC timeout while preserving old and new Server budgets', async () => {
+  it('separates authorization from RTC timeout while clamping Server budgets', async () => {
     await runScenarios([
       { name: 'old Server without timeout', server: undefined, local: undefined, budget: 8000 },
-      { name: 'Server requests twenty seconds', server: 20000, local: undefined, budget: 20000 },
-      { name: 'Server budget exceeds local direct budget', server: 20000, local: 12000, budget: 20000 },
+      { name: 'Server twenty seconds clamped to the mobile ceiling', server: 20000, local: undefined, budget: 12000 },
+      { name: 'local budget wins over larger Server budget', server: 20000, local: 12000, budget: 12000 },
       { name: 'local budget exceeds Server budget', server: 8000, local: 12000, budget: 12000 },
     ].map(row => ({ name: row.name, run: async () => {
       vi.useFakeTimers()
       vi.stubGlobal('WebSocket', FakeWebSocket)
       const rtc = stalledRtc()
       const fallback = vi.fn()
-      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, negotiateTimeoutMs: row.local, onWebRtcFallback: fallback })
+      const transport = createAdaptiveTransport({
+        rtcFactory: rtc.factory,
+        negotiateTimeoutMs: row.local,
+        fetchIceServers: async () => [{ urls: 'stun:stun.example.test' }],
+        onWebRtcFallback: fallback,
+      })
       let ready = false
       const connecting = transport.connect().then(() => { ready = true })
       const socket = FakeWebSocket.latest!
@@ -587,7 +594,14 @@ describe('AdaptiveTransport capability negotiation', () => {
       vi.stubGlobal('WebSocket', FakeWebSocket)
       const rtc = stalledRtc()
       const abort = new AbortController()
-      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, signal: abort.signal })
+      const transport = createAdaptiveTransport({
+        rtcFactory: rtc.factory,
+        signal: abort.signal,
+        // Keep a wide negotiation window: these scenarios cancel in the
+        // middle of pending RTC, which must stay pending until acted on.
+        negotiateTimeoutMs: 20_000,
+        fetchIceServers: async () => [{ urls: 'stun:stun.example.test' }],
+      })
       const outcome = transport.connect().then(() => 'ready', error => error.message as string)
       const socket = FakeWebSocket.latest!
       socket.open()

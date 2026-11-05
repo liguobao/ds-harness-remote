@@ -32,6 +32,8 @@ export class SessionRuntime {
   connectionGeneration = 0
   /** Rows created before this instant predate the current connection (reconcile scope). */
   connectionStartedAt = 0
+  /** Consecutive WebRTC negotiation fallbacks on the current host (relay downgrade memory). */
+  webRtcFallbackStreak = 0
   pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []

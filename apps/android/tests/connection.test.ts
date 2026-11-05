@@ -171,7 +171,7 @@ afterEach(async () => {
       const core = testState.cores[0]!
       const rpc = vi.spyOn(core, 'rpc')
       let finish!: (value: unknown) => void
-      if (outcome === 'silent') rpc.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      if (outcome === 'silent') rpc.mockImplementation(() => new Promise((_resolve, reject) => {
         setTimeout(() => reject(new Error('RPC_TIMEOUT')), 5_000)
       }))
       if (outcome === 'shared-probe' || outcome === 'replaced') {
@@ -180,8 +180,12 @@ afterEach(async () => {
       if (outcome === 'disconnected') await connection.close()
       await vi.advanceTimersByTimeAsync(25_000)
       if (outcome === 'silent') {
+        // A single slow probe must not retire the carrier; one fast
+        // confirmation probe follows before the connection is closed.
         expect(closed).not.toHaveBeenCalled()
         await vi.advanceTimersByTimeAsync(5_000)
+        expect(closed).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(10_000)
         expect(closed).toHaveBeenCalledOnce()
         expect(() => connection.requireProxy()).toThrow()
       } else if (outcome === 'shared-probe') {
