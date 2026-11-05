@@ -59,8 +59,17 @@ export class TypertGatewaySwitch {
   private remoteSupport: RemoteCommandSupport = { execute: false, list: false }
   private target?: { deviceId: string; name: string }
   private installed = false
+  /** Lazily-created owner Peer supplied when a local open carries none. */
+  private readonly fallbackPeer?: () => unknown
 
-  constructor(gateway: TypertGatewayLike) {
+  /**
+   * @param gateway - official Typert Gateway service.
+   * @param fallbackPeer - owner Peer factory for local opens whose caller has no
+   *   per-connection Peer. Harness 0.2.2 rejects a forwarded-event open without a
+   *   live Peer (`peer.signal`), so a peerless local carrier must still carry one.
+   */
+  constructor(gateway: TypertGatewayLike, fallbackPeer?: () => unknown) {
+    this.fallbackPeer = fallbackPeer
     this.runtime = gateway as RuntimeGateway
     this.originalInvoke = gateway.invoke
     this.localInvoke = this.originalInvoke.bind(gateway)
@@ -73,7 +82,12 @@ export class TypertGatewaySwitch {
   }
 
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
-  local(peer?: unknown): LocalTypertGateway {
+  local(callingPeer?: unknown): LocalTypertGateway {
+    // A local carrier always needs an owner Peer: the official Gateway reads
+    // `peer.signal`, `peer.principal` and `peer.interactions` for streams and
+    // access decisions. Resolve the fallback once so every call through this
+    // gateway shares the same peer lifetime.
+    const peer = callingPeer ?? this.fallbackPeer?.()
     const invoke: RemoteInvoke = request => this.localInvoke({ ...request, ...(peer === undefined ? {} : { peer }) })
     const dispatch: CarrierDispatch = this.localDispatch === undefined ? (async (endpoint, payload, signal) => {
       try {
@@ -252,6 +266,17 @@ function endedUplink(): AsyncIterable<unknown> {
   }
 }
 
+/**
+ * The rc.1 carrier dereferences the calling Peer for every stream (and always
+ * for forwarded events). Produce an actionable failure instead of a TypeError
+ * when no owner Peer could be created for this Host composition.
+ * @param endpoint - stream endpoint being opened.
+ * @returns the error to reject the open with.
+ */
+function missingPeerError(endpoint: string): Error {
+  return new Error(`The Harness Gateway stream ${endpoint} requires an owner Peer, but none is available in this Host composition.`)
+}
+
 /** Controller aborted with the logical stream so the rc.1 carrier owns one lifetime. */
 function linkControl(signal: AbortSignal): AbortController {
   const control = new AbortController()
@@ -271,8 +296,9 @@ function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): C
   const open = runtime.openWireStream
   if (open !== undefined) {
     return usesRc1Arity(open)
-      ? (endpoint, payload, signal, uplink, peer) => (open as Rc1OpenWireStream)
-        .call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal))
+      ? (endpoint, payload, signal, uplink, peer) => peer === undefined
+        ? Promise.reject(missingPeerError(endpoint))
+        : (open as Rc1OpenWireStream).call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal))
       : (endpoint, payload, signal) => (open as CarrierOpen).call(runtime, endpoint, payload, signal)
   }
   const wire = gateway.wireStream
@@ -280,7 +306,9 @@ function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): C
   const wireOpen = wire.open
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen as Rc1WireStreamOpen
-    return (endpoint, payload, signal, uplink, peer) => rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal)
+    return (endpoint, payload, signal, uplink, peer) => peer === undefined
+      ? Promise.reject(missingPeerError(endpoint))
+      : rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal)
   }
   const legacy = wireOpen as LegacyWireStreamOpen
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal)

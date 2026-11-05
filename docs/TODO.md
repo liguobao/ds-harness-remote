@@ -19,6 +19,7 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 - [x] `session/attachment` 完整引用（Android 发送；Host 按版本降级给旧 Host）。
 - [x] CodeX/ACP 虚拟投影帧 `changes`、虚拟附件引用、`session/page` cursor 与 `session/events` 别名。
 - [x] Remote allowlist 新端点（toolResults / schedule / pluginManager）与插件更新自我保护。
+- [x] 本地 carrier 始终携带 owner Peer：官方 `Peer`/`OperatorPeer` 优先，缺失时回退官方 Connection `createPeer`；peerless open 报明确错误而非官方 Gateway TypeError。
 - [ ] 真实 Desktop 0.2.2 人工烟测：侧栏入口与更新徽标几何、插件页富文本详情/更新按钮、设置页导航图标、Remote Header 与文件预览。
 - [ ] 官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案与 `locale/*.json` 元信息。
 - [ ] 真实账号加密跨设备 E2E：Host 0.2.2 + Android/Desktop 客户端，覆盖图片附件、CodeX/ACP 投影、Trajectory 原始 JSON 与自动化任务编辑。

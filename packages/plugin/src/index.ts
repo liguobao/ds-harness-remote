@@ -33,6 +33,12 @@ import {
 } from './tui-command.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
+import {
+  createOwnerPeerFactory,
+  ownerPeerConstructor,
+  type OwnerPeerLike,
+  type OwnerPeerServiceLike,
+} from './owner-peer.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -98,6 +104,7 @@ interface LoaderLike {
 interface DshWebServerPortLike {
   port?: number
 }
+
 
 export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined = undefined): void {
   const readConfig = (): ConfigInput => readEntryConfig(entry)
@@ -212,23 +219,38 @@ async function activate(
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
   const nativeTypertGateway = ctx.get('typertGateway') as TypertGatewayLike
-  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway)
-  const localTypertGateway = hostGateway.local()
-  // Only the authenticated ConnectionController callback creates these owner
-  // peers. Never share a browser Peer or accept a principal from the tunnel.
+  // Only the authenticated ConnectionController callback creates per-connection
+  // owner peers. Never share a browser Peer or accept a principal from the tunnel.
   const connectionExports = DshConnection as Record<string, unknown>
-  const PeerConstructor = (typeof connectionExports.Peer === 'function'
-    ? connectionExports.Peer
-    : connectionExports.OperatorPeer) as (new (ctx: Context, options?: unknown) => { dispose(): unknown }) | undefined
-  if (typeof PeerConstructor === 'function') {
-    localTypertGateway.createPeer = () => {
-      const peer = new PeerConstructor(ctx, { principal: { kind: 'owner' } })
-      return {
-        ...hostGateway.local(peer),
-        dispose: async () => {
-          await peer.dispose?.()
-        },
-      }
+  // Harness 0.2.2 dereferences `peer.signal` for forwarded Remote events. Prefer
+  // the official Peer export, but fall back to the Connection Host service when a
+  // build's module shape no longer exposes it, so a local carrier never opens
+  // peerless.
+  const connectionService = ctx.get('connection', false) as OwnerPeerServiceLike | undefined
+  const createOwnerPeer = createOwnerPeerFactory(
+    ctx,
+    ownerPeerConstructor(connectionExports),
+    connectionService,
+  )
+  const hostConnectionPeer = createOwnerPeer()
+  let fallbackPeer: OwnerPeerLike | undefined = hostConnectionPeer
+  // The fallback Peer pairs with the Host connection service when that service
+  // minted it; dispose it with the plugin even when no Remote client connects.
+  ctx.effect(() => () => {
+    const peer = fallbackPeer
+    fallbackPeer = undefined
+    return peer?.dispose?.()
+  }, 'dsh-remote fallback owner peer')
+  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer)
+  const localTypertGateway = hostGateway.local()
+  localTypertGateway.createPeer = () => {
+    const peer = createOwnerPeer()
+    if (peer === undefined) return localTypertGateway
+    return {
+      ...hostGateway.local(peer),
+      dispose: async () => {
+        await peer.dispose?.()
+      },
     }
   }
   // The Host `subprocess` service owns PTY allocation, containment, and process

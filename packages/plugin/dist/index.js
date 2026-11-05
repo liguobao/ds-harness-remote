@@ -75632,7 +75632,16 @@ var TypertGatewaySwitch = class {
   remoteSupport = { execute: false, list: false };
   target;
   installed = false;
-  constructor(gateway) {
+  /** Lazily-created owner Peer supplied when a local open carries none. */
+  fallbackPeer;
+  /**
+   * @param gateway - official Typert Gateway service.
+   * @param fallbackPeer - owner Peer factory for local opens whose caller has no
+   *   per-connection Peer. Harness 0.2.2 rejects a forwarded-event open without a
+   *   live Peer (`peer.signal`), so a peerless local carrier must still carry one.
+   */
+  constructor(gateway, fallbackPeer) {
+    this.fallbackPeer = fallbackPeer;
     this.runtime = gateway;
     this.originalInvoke = gateway.invoke;
     this.localInvoke = this.originalInvoke.bind(gateway);
@@ -75644,7 +75653,8 @@ var TypertGatewaySwitch = class {
     this.localOpen = createLocalOpen(gateway, this.runtime);
   }
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
-  local(peer) {
+  local(callingPeer) {
+    const peer = callingPeer ?? this.fallbackPeer?.();
     const invoke = (request) => this.localInvoke({ ...request, ...peer === void 0 ? {} : { peer } });
     const dispatch = this.localDispatch === void 0 ? (async (endpoint, payload, signal) => {
       try {
@@ -75789,6 +75799,9 @@ function endedUplink() {
     }
   };
 }
+function missingPeerError(endpoint) {
+  return new Error(`The Harness Gateway stream ${endpoint} requires an owner Peer, but none is available in this Host composition.`);
+}
 function linkControl(signal) {
   const control = new AbortController();
   if (signal.aborted) control.abort(signal.reason);
@@ -75798,14 +75811,14 @@ function linkControl(signal) {
 function createLocalOpen(gateway, runtime) {
   const open6 = runtime.openWireStream;
   if (open6 !== void 0) {
-    return usesRc1Arity(open6) ? (endpoint, payload, signal, uplink, peer) => open6.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open6.call(runtime, endpoint, payload, signal);
+    return usesRc1Arity(open6) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open6.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open6.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
   const wireOpen = wire.open;
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen;
-    return (endpoint, payload, signal, uplink, peer) => rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal);
+    return (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal);
   }
   const legacy = wireOpen;
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal);
@@ -91241,6 +91254,29 @@ var PluginUpdateChecker = class {
   }
 };
 
+// src/owner-peer.ts
+function ownerPeerConstructor(connectionExports) {
+  const candidate = typeof connectionExports.Peer === "function" ? connectionExports.Peer : connectionExports.OperatorPeer;
+  return typeof candidate === "function" ? candidate : void 0;
+}
+function createOwnerPeerFactory(ctx, constructor, connection) {
+  return () => {
+    if (constructor !== void 0) {
+      try {
+        return new constructor(ctx, { principal: { kind: "owner" }, interactions: "answer" });
+      } catch {
+      }
+    }
+    const createPeer = connection?.createPeer;
+    if (typeof createPeer !== "function") return void 0;
+    try {
+      return createPeer.call(connection, { principal: { kind: "owner" }, interactions: "answer" });
+    } catch {
+      return void 0;
+    }
+  };
+}
+
 // src/remote-file-content-provider.ts
 var REMOTE_FILE_SAVE_AS_MAX_BYTES = 100 * 1024 * 1024;
 var REMOTE_FILE_FAST_SAVE_AS_MAX_BYTES = 1024 * 1024 * 1024;
@@ -91444,21 +91480,32 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   }, config2.logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const nativeTypertGateway = ctx.get("typertGateway");
-  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway);
-  const localTypertGateway = hostGateway.local();
   const connectionExports = DshConnection;
-  const PeerConstructor = typeof connectionExports.Peer === "function" ? connectionExports.Peer : connectionExports.OperatorPeer;
-  if (typeof PeerConstructor === "function") {
-    localTypertGateway.createPeer = () => {
-      const peer = new PeerConstructor(ctx, { principal: { kind: "owner" } });
-      return {
-        ...hostGateway.local(peer),
-        dispose: async () => {
-          await peer.dispose?.();
-        }
-      };
+  const connectionService = ctx.get("connection", false);
+  const createOwnerPeer = createOwnerPeerFactory(
+    ctx,
+    ownerPeerConstructor(connectionExports),
+    connectionService
+  );
+  const hostConnectionPeer = createOwnerPeer();
+  let fallbackPeer = hostConnectionPeer;
+  ctx.effect(() => () => {
+    const peer = fallbackPeer;
+    fallbackPeer = void 0;
+    return peer?.dispose?.();
+  }, "dsh-remote fallback owner peer");
+  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
+  const localTypertGateway = hostGateway.local();
+  localTypertGateway.createPeer = () => {
+    const peer = createOwnerPeer();
+    if (peer === void 0) return localTypertGateway;
+    return {
+      ...hostGateway.local(peer),
+      dispose: async () => {
+        await peer.dispose?.();
+      }
     };
-  }
+  };
   const subprocess = ctx.get("subprocess", false);
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {

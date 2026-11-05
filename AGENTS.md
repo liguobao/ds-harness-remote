@@ -16,10 +16,18 @@ control 帧同时发送旧 `key/value` 与新 `changes`，虚拟 `session/page` 
 `pluginManager/listVersions|readBundleDetail|updateBundle`、`session/events`；
 `pluginManager/updateBundle` 复用 Remote 自有组合包保护，允许第三方组合包受信任更新。
 
+0.2.2 的官方 Gateway 对每条本地 carrier 都读取调用 Peer（`peer.signal`/`peer.principal`/
+`peer.interactions`），缺失时 `$events` 打开会抛 `TypeError`。插件激活时改为始终为本地
+carrier 准备 owner Peer：优先官方 `Peer`/`OperatorPeer` 导出，缺失或构造失败时回退官方
+Connection Host 服务的 `createPeer`，`TypertGatewaySwitch.local()` 在未显式传入 Peer 时
+使用该共享 fallback；两者都不可用时报明确错误而不是让官方 Gateway 抛 TypeError。新增
+`owner-peer.test.ts` 与 switch 回归覆盖该边界，并在独立 DSH 0.2.2-rc.1 上确认激活、
+control/status 与远程工作区建立不受影响。
+
 验证：全仓 `pnpm --filter './packages/**' -r build`、`pnpm -r check`、`pnpm -r test`、
 `pnpm install --frozen-lockfile`、串行生产 build（含 Android Expo export）、
 `verify-dsh-plugin.mjs`、`verify-packed-webrtc.mjs` 与 `git diff --check` 通过；其中 Plugin
-72 文件 / 527 tests、Android 54 文件 / 520 tests。另在
+73 文件 / 531 tests、Android 54 文件 / 520 tests。另在
 独立 DSH 0.2.2-rc.1（Node 24.9.0、独立 DSH_HOME）安装本仓库构建产物，经本仓库开源自部署
 Server 完成 Host 激活、Web UI 渲染、control/status 与 settings 读写、远程工作区建立烟测；
 其中 `account/watch` 被 allowlist 拒绝属预期。未做真实 Desktop/Android APK、原生真机、加密

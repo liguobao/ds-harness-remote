@@ -12,8 +12,9 @@
 - 0.2.2 的虚拟 `session/attachment` 请求同样携带完整引用，CodeX/ACP 虚拟载体两种形态都接受。
 - Remote Host 固定 allowlist 增加 0.2.2 官方客户端会调用的端点：`toolResults/watch`、`schedule/edit`/`run`/`deleteInactive`/`deliveryLimits`、`pluginManager/listVersions`/`readBundleDetail`/`updateBundle`、`session/events`。`pluginManager/updateBundle` 允许受信任设备更新第三方组合包，但禁止远程更新 Remote 自身或包含它的组合包。
 - 0.2.2 的 Session 投影摘要变为可选、`session/follow` 新增被动 `activate`、`session/page.throughSeq` 变为可选等变化均为向后兼容的加法；既有 Remote 客户端与 `remote_*` 工具继续工作。
+- 0.2.2 的官方 Gateway 要求本地 carrier 携带存活调用 Peer，否则 `$events` 打开会以 `TypeError` 失败并让 Desktop 客户端重连循环。Host 激活时始终准备 owner Peer（官方 `Peer`/`OperatorPeer` 优先，缺失时回退官方 Connection 服务 `createPeer`），无 Peer 的本地 open 使用共享 fallback 或明确错误。
 
-验证：Plugin check、72 文件 / 527 tests、生产构建与 DSH bundle 校验通过；Android check 与 54 文件 / 520 tests 通过。另以独立 DSH 0.2.2-rc.1 + 本仓库开源自部署 Server + 已安装插件完成 Host 激活、Web UI 渲染、控制面/设置读写与远程工作区建立烟测。未做真实 Desktop/Android APK、跨设备加密 E2E 与 0.2.2 新 UI 的人工验收；新增 6 种官方 UI 语言的 Remote 文案仍待补齐。
+验证：Plugin check、73 文件 / 531 tests、生产构建与 DSH bundle 校验通过；Android check 与 54 文件 / 520 tests 通过。另以独立 DSH 0.2.2-rc.1 + 本仓库开源自部署 Server + 已安装插件完成 Host 激活、Web UI 渲染、控制面/设置读写与远程工作区建立烟测。未做真实 Desktop/Android APK、跨设备加密 E2E 与 0.2.2 新 UI 的人工验收；新增 6 种官方 UI 语言的 Remote 文案仍待补齐。
 
 Remote Plugin 与 dsh-TUI 的适配基线是分开的。当前公开 dsh-TUI `0.17.0` 的主适配线是 `dsh-v0.2.1-rc.3`，因此本仓库不把 dsh-TUI `0.17.0` + 新 Harness 基线宣称为已完成 runtime 验收的组合。
 
