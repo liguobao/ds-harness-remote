@@ -1086,17 +1086,13 @@ struct Index {
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
       }
-      if (this.choiceOpen) {
-        this.ChoiceSheetOverlay()
+      // 挂载顺序 = 层级顺序：越靠后越在上层。
+      // 设置面板在下面，它打开的二级点选必须排在它之后，否则会被压在设置底下点不到。
+      if (this.showSettings) {
+        this.SettingsOverlay()
       }
-      if (this.deviceMenuId.length > 0) {
-        this.DeviceMenuOverlay()
-      }
-      if (this.showServerSwitch) {
-        this.ServerSwitchOverlay()
-      }
-      if (this.showMoreMenu) {
-        this.MoreMenuOverlay()
+      if (this.showBrowser) {
+        this.FileBrowserOverlay()
       }
       if (this.showSessionPanel) {
         this.SessionPanelOverlay()
@@ -1104,11 +1100,17 @@ struct Index {
       if (this.showModelPicker) {
         this.ModelPickerOverlay()
       }
-      if (this.showBrowser) {
-        this.FileBrowserOverlay()
+      if (this.showMoreMenu) {
+        this.MoreMenuOverlay()
       }
-      if (this.showSettings) {
-        this.SettingsOverlay()
+      if (this.showServerSwitch) {
+        this.ServerSwitchOverlay()
+      }
+      if (this.deviceMenuId.length > 0) {
+        this.DeviceMenuOverlay()
+      }
+      if (this.choiceOpen) {
+        this.ChoiceSheetOverlay()
       }
       if (this.previewActive) {
         this.ImagePreviewOverlay()
