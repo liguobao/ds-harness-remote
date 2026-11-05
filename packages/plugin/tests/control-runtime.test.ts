@@ -108,6 +108,19 @@ describe('PluginControlRuntime settings setup', () => {
     expect(apply.mock.calls[0]?.[0].codex.enabled).toBe(true)
   })
 
+  it('reads back the lite mode switch and keeps it across unrelated saves', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({})
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, undefined))
+    await expect(handler('settings.lite.set', { enabled: true }, signal()))
+      .resolves.toMatchObject({ ok: true, value: { config: { liteMode: true } } })
+    await expect(handler('settings.get', {}, signal()))
+      .resolves.toMatchObject({ ok: true, value: { config: { liteMode: true } } })
+    await expect(handler('settings.development.set', { terminalEnabled: false }, signal()))
+      .resolves.toMatchObject({ ok: true })
+    expect(settings.get().liteMode).toBe(true)
+  })
+
   it('coexists with a Remote Web UI that already owns /remote', async () => {
     const channels = new Set(['/remote'])
     const connection = {
