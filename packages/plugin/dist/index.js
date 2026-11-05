@@ -3667,15 +3667,15 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id6, name2, block, kx, constants6, hash22 = "sha256") {
+function createAEADCipher(id6, name2, block, kx, constants7, hash22 = "sha256") {
   const cipher = new AEADCipher();
   cipher.id = id6;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
   cipher.hashAlgorithm = hash22;
-  cipher.keyLength = constants6.K_LEN;
-  cipher.nonceLength = constants6.N_MAX;
+  cipher.keyLength = constants7.K_LEN;
+  cipher.nonceLength = constants7.N_MAX;
   cipher.nonceImplicitLength = 4;
   cipher.nonceExplicitLength = 8;
   cipher.ivLength = cipher.nonceImplicitLength;
@@ -5102,14 +5102,14 @@ function addressFromSocket(socket) {
   return [socket.remoteAddress, socket.remotePort];
 }
 async function waitForListening(server, host, port) {
-  return await new Promise((resolve7, reject) => {
+  return await new Promise((resolve8, reject) => {
     const onError = (error62) => {
       server.off("listening", onListening);
       reject(error62);
     };
     const onListening = () => {
       server.off("error", onError);
-      resolve7();
+      resolve8();
     };
     server.once("error", onError);
     server.once("listening", onListening);
@@ -6439,18 +6439,18 @@ function normalizeCandidateUfrag(message) {
   return { ...init, usernameFragment: fromString };
 }
 function settledState(event, current, done) {
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     if (done(current()) || event.ended) {
-      resolve7(current());
+      resolve8(current());
       return;
     }
     const { unSubscribe } = event.subscribe(
       (state2) => {
         if (!done(state2)) return;
         unSubscribe();
-        resolve7(state2);
+        resolve8(state2);
       },
-      () => resolve7(current())
+      () => resolve8(current())
     );
   });
 }
@@ -6965,7 +6965,7 @@ var init_lib = __esm({
           error62
         );
       };
-      watch = (cb, timeLimit) => new Promise((resolve7, reject) => {
+      watch = (cb, timeLimit) => new Promise((resolve8, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event watch timeout");
         }, timeLimit);
@@ -6974,22 +6974,22 @@ var init_lib = __esm({
           if (done) {
             if (timeout) clearTimeout(timeout);
             unSubscribe();
-            resolve7(args);
+            resolve8(args);
           }
         });
       });
-      asPromise = (timeLimit) => new Promise((resolve7, reject) => {
+      asPromise = (timeLimit) => new Promise((resolve8, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event asPromise timeout");
         }, timeLimit);
         this.once(
           (...args) => {
             if (timeout) clearTimeout(timeout);
-            resolve7(args);
+            resolve8(args);
           },
           () => {
             if (timeout) clearTimeout(timeout);
-            resolve7([]);
+            resolve8([]);
           },
           (err5) => {
             if (timeout) clearTimeout(timeout);
@@ -7291,7 +7291,7 @@ var init_lib = __esm({
         if (this.closed) {
           throw new Error("udp transport closed");
         }
-        await new Promise((resolve7, reject) => {
+        await new Promise((resolve8, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -7299,7 +7299,7 @@ var init_lib = __esm({
             this.socket.off("listening", onListening);
             this.socket.off("error", onBindError);
             this.socket.off("close", onClose);
-            error62 ? reject(error62) : resolve7();
+            error62 ? reject(error62) : resolve8();
           };
           const onListening = () => {
             this.listening = true;
@@ -7497,7 +7497,7 @@ var init_lib = __esm({
         }
         const client = this.createClient();
         this.client = client;
-        this.connecting = new Promise((resolve7, reject) => {
+        this.connecting = new Promise((resolve8, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -7506,7 +7506,7 @@ var init_lib = __esm({
             client.off(this.connectEvent, onConnect);
             client.off("error", onConnectError);
             this.rejectConnecting = void 0;
-            error62 ? reject(error62) : resolve7();
+            error62 ? reject(error62) : resolve8();
           };
           const onConnect = () => {
             settle2();
@@ -7553,13 +7553,13 @@ var init_lib = __esm({
       send = async (data2, addr) => {
         void addr;
         await this.connecting;
-        await new Promise((resolve7, reject) => {
+        await new Promise((resolve8, reject) => {
           this.client.write(data2, (err5) => {
             if (err5) {
               reject(err5);
               return;
             }
-            resolve7();
+            resolve8();
           });
         });
       };
@@ -14810,10 +14810,10 @@ var init_lib = __esm({
       }
     };
     cancelable = (ex) => {
-      let resolve7;
+      let resolve8;
       let reject;
       const p = new Promise((r, f) => {
-        resolve7 = r;
+        resolve8 = r;
         reject = f;
       });
       p.then(() => {
@@ -14824,9 +14824,9 @@ var init_lib = __esm({
         onCancel.complete();
       });
       const onCancel = new Event2();
-      ex(resolve7, reject, onCancel).catch(() => {
+      ex(resolve8, reject, onCancel).catch(() => {
       });
-      return { awaitable: p, resolve: resolve7, reject };
+      return { awaitable: p, resolve: resolve8, reject };
     };
     COOKIE = 554869826;
     FINGERPRINT_LENGTH = 8;
@@ -15319,21 +15319,21 @@ var init_lib = __esm({
           clearTimeout(this.waitTimer);
           this.waitTimer = void 0;
         }
-        const resolve7 = this.waitResolve;
+        const resolve8 = this.waitResolve;
         this.waitResolve = void 0;
-        resolve7?.();
+        resolve8?.();
       }
       wait(ms) {
-        return new Promise((resolve7) => {
+        return new Promise((resolve8) => {
           if (this.ended || this.signal?.aborted) {
-            resolve7();
+            resolve8();
             return;
           }
-          this.waitResolve = resolve7;
+          this.waitResolve = resolve8;
           this.waitTimer = setTimeout(() => {
             this.waitTimer = void 0;
             this.waitResolve = void 0;
-            resolve7();
+            resolve8();
           }, ms);
         });
       }
@@ -15614,13 +15614,13 @@ var init_lib = __esm({
       async sendFrame(data2, addr) {
         const entry = await this.getSocket(addr);
         try {
-          await new Promise((resolve7, reject) => {
+          await new Promise((resolve8, reject) => {
             entry.socket.write(encodeTcpFrame(data2), (error62) => {
               if (error62) {
                 reject(error62);
                 return;
               }
-              resolve7();
+              resolve8();
             });
           });
         } catch (error62) {
@@ -15703,7 +15703,7 @@ var init_lib = __esm({
         if (pending) {
           return await pending;
         }
-        const connecting = new Promise((resolve7, reject) => {
+        const connecting = new Promise((resolve8, reject) => {
           const socket = connect3({
             host: addr[0],
             port: addr[1],
@@ -15716,7 +15716,7 @@ var init_lib = __esm({
           };
           const onConnect = () => {
             socket.off("error", onError);
-            resolve7(entry);
+            resolve8(entry);
           };
           socket.once("error", onError);
           socket.once("connect", onConnect);
@@ -15765,8 +15765,8 @@ var init_lib = __esm({
       }
       async close() {
         await super.close();
-        await new Promise((resolve7) => {
-          this.server.close(() => resolve7());
+        await new Promise((resolve8) => {
+          this.server.close(() => resolve8());
         });
       }
     };
@@ -16421,8 +16421,8 @@ var init_lib = __esm({
     Connection = class {
       constructor(_iceControlling, options) {
         this._iceControlling = _iceControlling;
-        this.closedSignal = new Promise((resolve7) => {
-          this.signalClosed = resolve7;
+        this.closedSignal = new Promise((resolve8) => {
+          this.signalClosed = resolve8;
         });
         this.options = {
           ...defaultOptions,
@@ -17388,8 +17388,8 @@ var init_lib = __esm({
               serverReflexiveCandidate(protocol, stunServer).catch(
                 () => void 0
               ),
-              new Promise((resolve7) => {
-                timer2 = setTimeout(() => resolve7(void 0), timeout * 1e3);
+              new Promise((resolve8) => {
+                timer2 = setTimeout(() => resolve8(void 0), timeout * 1e3);
               })
             ]);
             clearTimeout(timer2);
@@ -17655,14 +17655,14 @@ var init_lib = __esm({
         return this.consentFresh;
       }
       abortableDelay(ms, signal) {
-        return new Promise((resolve7, reject) => {
+        return new Promise((resolve8, reject) => {
           if (signal.aborted) {
             reject(new DOMException("The operation was aborted", "AbortError"));
             return;
           }
           const timer2 = setTimeout(() => {
             signal.removeEventListener("abort", onAbort);
-            resolve7();
+            resolve8();
           }, ms);
           const onAbort = () => {
             clearTimeout(timer2);
@@ -19689,8 +19689,8 @@ var init_lib = __esm({
           this.outboundStreamSeq[streamId] = uint16Add(streamSeqNum, 1);
         }
         const lastChunk = chunks[chunks.length - 1];
-        const sent = lastChunk && !this.isStopped ? new Promise((resolve7) => {
-          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve7 });
+        const sent = lastChunk && !this.isStopped ? new Promise((resolve8) => {
+          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve8 });
         }) : void 0;
         await this.transmit();
         await sent;
@@ -25665,9 +25665,9 @@ var init_lib = __esm({
           this.settlePendingRtp(item);
         }
       }
-      enqueuePendingRtp(rtp, resolve7, reject) {
+      enqueuePendingRtp(rtp, resolve8, reject) {
         const packet = Buffer.isBuffer(rtp) ? RtpPacket.deSerialize(rtp) : rtp.clone();
-        this.pendingRtp.push({ packet, resolve: resolve7, reject });
+        this.pendingRtp.push({ packet, resolve: resolve8, reject });
         while (this.pendingRtp.length > this.pendingRtpMaxLength) {
           const dropped = this.pendingRtp.shift();
           if (dropped) {
@@ -25870,8 +25870,8 @@ var init_lib = __esm({
           await this.dispatchRtp(rtp);
           return;
         }
-        await new Promise((resolve7, reject) => {
-          this.enqueuePendingRtp(rtp, resolve7, reject);
+        await new Promise((resolve8, reject) => {
+          this.enqueuePendingRtp(rtp, resolve8, reject);
           void this.drainPendingRtp();
         });
       }
@@ -28181,7 +28181,7 @@ var init_lib = __esm({
       async close() {
         if (this.sctpTransport) {
           await this.sctpTransport.stop();
-          await new Promise((resolve7) => setImmediate(resolve7));
+          await new Promise((resolve8) => setImmediate(resolve8));
         }
         this.onDataChannel.allUnsubscribe();
       }
@@ -30148,11 +30148,11 @@ var init_lib = __esm({
         const previous = this.descriptionTail;
         let releaseDone;
         let releaseApplied;
-        const done = new Promise((resolve7) => {
-          releaseDone = resolve7;
+        const done = new Promise((resolve8) => {
+          releaseDone = resolve8;
         });
-        const applied = new Promise((resolve7) => {
-          releaseApplied = resolve7;
+        const applied = new Promise((resolve8) => {
+          releaseApplied = resolve8;
         });
         this.descriptionTail = afterApplied ? {
           done: Promise.all([previous.done, done]).then(() => void 0),
@@ -30724,7 +30724,7 @@ var init_lib = __esm({
             this.negotiationNeed.discardPendingOffer();
             this.negotiationNeed.recheck = true;
             this.setSignalingState("stable");
-            await new Promise((resolve7) => setImmediate(resolve7));
+            await new Promise((resolve8) => setImmediate(resolve8));
             this.assertOpenAfterYield();
           }
           if (remoteSdp.type === "offer" && this.signalingState === "have-remote-offer") {
@@ -41565,7 +41565,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve7) {
+function isRecursive(inst, stack, resolve8) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -41575,7 +41575,7 @@ function isRecursive(inst, stack, resolve7) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve7);
+      const answer = isRecursive(child, stack, resolve8);
       if (answer > result)
         result = answer;
     }
@@ -41586,7 +41586,7 @@ function isRecursive(inst, stack, resolve7) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve7) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve8) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -41650,7 +41650,7 @@ function isRecursive(inst, stack, resolve7) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve8 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -57870,13 +57870,13 @@ var RemoteClientCore = class {
     }
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
     const request = createRpcRequest(method, params);
-    const result = new Promise((resolve7, reject) => {
+    const result = new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const pending = {
         method,
-        resolve: resolve7,
+        resolve: resolve8,
         reject,
         timer: timer2
       };
@@ -58351,7 +58351,7 @@ var AsyncValueQueue = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve7) => this.waiters.push(resolve7));
+      const next = await new Promise((resolve8) => this.waiters.push(resolve8));
       if (next.done) return;
       yield next.value;
     }
@@ -59031,11 +59031,11 @@ var AcpSessionTitles = class {
   }
 };
 function waitForTitle(delay, signal) {
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     const finish = () => {
       clearTimeout(timer2);
       signal.removeEventListener("abort", finish);
-      resolve7();
+      resolve8();
     };
     const timer2 = setTimeout(finish, delay);
     signal.addEventListener("abort", finish, { once: true });
@@ -59932,7 +59932,7 @@ async function waitForRelayCapacity(socket) {
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
     if (socket.readyState !== 1 || Date.now() - started > 1e4)
       throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve7) => setTimeout(resolve7, 10));
+    await new Promise((resolve8) => setTimeout(resolve8, 10));
   }
   if (socket.readyState !== 1)
     throw new Error("Relay transport closed");
@@ -60396,8 +60396,8 @@ var RtcDataChannelTransport = class {
     if (this.connectPromise !== void 0)
       return this.connectPromise;
     this.armAbort(signal);
-    this.connectPromise = new Promise((resolve7, reject) => {
-      this.openResolve = resolve7;
+    this.connectPromise = new Promise((resolve8, reject) => {
+      this.openResolve = resolve8;
       this.openReject = reject;
       this.negotiateTimer = setTimeout(() => {
         void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
@@ -60622,14 +60622,14 @@ var RtcDataChannelTransport = class {
       if (this.closed || this.opened)
         return;
       this.opened = true;
-      const resolve7 = this.openResolve;
+      const resolve8 = this.openResolve;
       this.clearNegotiation();
       void this.resolveSelectedTransport().then(() => {
         if (this.closed)
           return;
         this.openResolve = void 0;
         this.openReject = void 0;
-        resolve7?.();
+        resolve8?.();
       });
     };
     channel.onmessage = (event) => {
@@ -60757,9 +60757,9 @@ var RtcDataChannelTransport = class {
     this.lastBufferedAmount = 0;
   }
   async refreshStatsDiagnostics() {
-    const stats = [...await new Promise((resolve7, reject) => {
+    const stats = [...await new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
-      Promise.resolve().then(() => this.pc.getStats()).then(resolve7, reject).finally(() => clearTimeout(timer2));
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve8, reject).finally(() => clearTimeout(timer2));
     })];
     if (this.closed)
       return {};
@@ -61028,7 +61028,7 @@ function asError(error62) {
   return error62 instanceof Error ? error62 : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
 }
 function sleep(ms) {
-  return new Promise((resolve7) => setTimeout(resolve7, ms));
+  return new Promise((resolve8) => setTimeout(resolve8, ms));
 }
 
 // ../webrtc/dist/control-lease.js
@@ -61172,8 +61172,8 @@ var AdaptiveTransport = class extends BaseTransport {
     this.socket = new WebSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
-    await new Promise((resolve7, reject) => {
-      this.readyResolve = resolve7;
+    await new Promise((resolve8, reject) => {
+      this.readyResolve = resolve8;
       this.readyReject = reject;
       const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
       this.options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -61201,7 +61201,7 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       socket.onclose = (event) => {
         if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code });
+          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
       };
     });
   }
@@ -61570,7 +61570,8 @@ var AdaptiveTransport = class extends BaseTransport {
     socket?.close();
     if (this.recoveryTimer !== void 0)
       return;
-    const delay = this.recoveryAttempt++ === 0 ? 0 : Math.min(15e3, 1e3 * 2 ** Math.min(this.recoveryAttempt, 4)) * (0.8 + Math.random() * 0.4);
+    const delay = recoveryDelayMs(this.recoveryAttempt, diagnostic);
+    this.recoveryAttempt++;
     this.recoveryTimer = setTimeout(() => {
       this.recoveryTimer = void 0;
       void this.reopenControl();
@@ -61612,7 +61613,7 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       socket.onclose = (event) => {
         if (this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code });
+          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
       };
     } catch (error62) {
       if (this.lifetime !== lifetime)
@@ -61626,7 +61627,7 @@ var AdaptiveTransport = class extends BaseTransport {
   async fetchIceServers(connectionId, signal) {
     if (this.options.fetchIceServers === void 0)
       return [];
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const request = new AbortController();
       let settled = false;
       const finish = (error62, servers = []) => {
@@ -61638,7 +61639,7 @@ var AdaptiveTransport = class extends BaseTransport {
         if (error62)
           reject(error62);
         else
-          resolve7(servers);
+          resolve8(servers);
       };
       const onAbort = () => {
         finish(new Error("ICE configuration request was aborted"));
@@ -61688,7 +61689,7 @@ var AdaptiveTransport = class extends BaseTransport {
     const socket = new WebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     this.dataSocket = socket;
-    await new Promise((resolve7, reject) => {
+    await new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         reject(new Error("Relay data attach timed out"));
         socket.close();
@@ -61710,7 +61711,7 @@ var AdaptiveTransport = class extends BaseTransport {
             }
             clearTimeout(timer2);
             this.dataReady = true;
-            resolve7();
+            resolve8();
             return;
           }
           void this.handleDataSocketFrame(data2.type, data2.payload).catch((error62) => {
@@ -61834,13 +61835,20 @@ var AdaptiveTransport = class extends BaseTransport {
   }
 };
 function adaptiveControlCloseError(event) {
-  const heartbeatTimeout = event.code === 4001 && event.reason === "CONNECTION_FAILED" || event.code === 4009 && event.reason === "server shutdown";
+  const heartbeatTimeout = event.code === 4001 && (event.reason === "CONNECTION_FAILED" || event.reason === "server shutdown") || event.code === 4009;
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
     retryable: heartbeatTimeout || event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
   });
+}
+function recoveryDelayMs(attempt, diagnostic) {
+  if (attempt === 0) {
+    return diagnostic.closeCode === 4001 && diagnostic.closeReason === "server shutdown" ? Math.random() * 15e3 : 0;
+  }
+  const step = Math.min(attempt + 1, 4);
+  return Math.min(15e3, 1e3 * 2 ** step) * (0.8 + Math.random() * 0.4);
 }
 function isObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -61959,7 +61967,7 @@ function shortId(value) {
 }
 async function waitForCodexFrames(stream, signal) {
   if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
-  await new Promise((resolve7, reject) => {
+  await new Promise((resolve8, reject) => {
     const previousWake = stream.wake;
     const timer2 = setTimeout(done, 25e3);
     const onAbort = () => {
@@ -61973,7 +61981,7 @@ async function waitForCodexFrames(stream, signal) {
     }
     function done() {
       cleanup();
-      resolve7();
+      resolve8();
     }
     stream.wake = () => {
       previousWake();
@@ -69320,7 +69328,7 @@ var ClientSecureTransport = class {
   }
 };
 async function waitForResponder(inner, noise, signal) {
-  await new Promise((resolve7, reject) => {
+  await new Promise((resolve8, reject) => {
     let settled = false;
     let unsubscribe = () => {
     };
@@ -69335,7 +69343,7 @@ async function waitForResponder(inner, noise, signal) {
       unsubscribe();
       unsubscribeClose();
       signal.removeEventListener("abort", onAbort);
-      if (error62 === void 0) resolve7();
+      if (error62 === void 0) resolve8();
       else reject(error62);
     };
     unsubscribe = inner.onHandshake((step, data2) => {
@@ -69581,11 +69589,11 @@ var ClientReconnect = class {
     let delay = this.config.initialDelayMs;
     while (!pending.signal.aborted) {
       const jitter = delay * this.config.jitter * (Math.random() * 2 - 1);
-      await new Promise((resolve7) => {
+      await new Promise((resolve8) => {
         const finish = () => {
           clearTimeout(timer2);
           pending.signal.removeEventListener("abort", finish);
-          resolve7();
+          resolve8();
         };
         const timer2 = setTimeout(finish, Math.max(0, delay + jitter));
         pending.signal.addEventListener("abort", finish, { once: true });
@@ -69724,7 +69732,7 @@ var LoopbackHost = class {
         const response = handle.response;
         let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
         if (chunk === null && !response.readableEnded && !response.destroyed) {
-          await new Promise((resolve7, reject) => {
+          await new Promise((resolve8, reject) => {
             const timer2 = setTimeout(() => finish(new Error("timeout")), 2e4);
             const ready = () => finish();
             const fail6 = () => finish(new Error("closed"));
@@ -69734,7 +69742,7 @@ var LoopbackHost = class {
               response.off("end", ready);
               response.off("close", ready);
               response.off("error", fail6);
-              error62 === void 0 ? resolve7() : reject(error62);
+              error62 === void 0 ? resolve8() : reject(error62);
             };
             response.once("readable", ready);
             response.once("end", ready);
@@ -69765,22 +69773,22 @@ var LoopbackHost = class {
           this.close(value.id);
           throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
         }
-        await new Promise((resolve7, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve7()));
+        await new Promise((resolve8, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve8()));
         return { sent: true };
       }
       if (value.op === "ws.read") {
         if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
         handle.reading = true;
         try {
-          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve7) => {
+          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve8) => {
             const timer2 = setTimeout(() => {
               handle.wake = void 0;
-              resolve7();
+              resolve8();
             }, 2e4);
             handle.wake = () => {
               clearTimeout(timer2);
               handle.wake = void 0;
-              resolve7();
+              resolve8();
             };
           });
           let bytes = 0;
@@ -69827,7 +69835,7 @@ var LoopbackHost = class {
   openHttp(value) {
     const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
     if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const headers = Object.fromEntries(cleanHeaders(value.headers));
       let handle;
       const request = httpRequest({
@@ -69846,7 +69854,7 @@ var LoopbackHost = class {
         handle.response = response;
         response.on("error", () => void 0);
         clearTimeout(timer2);
-        resolve7({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
+        resolve8({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
       });
       const timer2 = setTimeout(() => {
         request.destroy();
@@ -69862,7 +69870,7 @@ var LoopbackHost = class {
     });
   }
   openWs(value) {
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const socket = new WebSocket2(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
         headers: Object.fromEntries(cleanHeaders(value.headers)),
         followRedirects: false,
@@ -69872,7 +69880,7 @@ var LoopbackHost = class {
       });
       const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
       this.handles.set(value.id, handle);
-      socket.once("open", () => resolve7({ protocol: socket.protocol }));
+      socket.once("open", () => resolve8({ protocol: socket.protocol }));
       socket.on("message", (data2, binary) => {
         if (handle.closed) return;
         const message = { data: Buffer.from(data2).toString("base64"), binary };
@@ -69931,7 +69939,7 @@ var LoopbackPreview = class {
       for (const client of running.ws.clients) client.terminate();
       running.ws.close();
       running.server.closeAllConnections();
-      await new Promise((resolve7) => running.server.close(() => resolve7()));
+      await new Promise((resolve8) => running.server.close(() => resolve8()));
     }
     this.servers.clear();
   }
@@ -69986,11 +69994,11 @@ var LoopbackPreview = class {
         void this.release(id6);
       });
     });
-    await new Promise((resolve7, reject) => {
+    await new Promise((resolve8, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => {
         server.off("error", reject);
-        resolve7();
+        resolve8();
       });
     });
     const address2 = server.address();
@@ -70056,10 +70064,10 @@ var LoopbackPreview = class {
       while (!signal.aborted) {
         const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id6 }, signal);
         if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
-          await new Promise((resolve7, reject) => {
+          await new Promise((resolve8, reject) => {
             const ready = () => {
               cleanup();
-              resolve7();
+              resolve8();
             };
             const closed = () => {
               cleanup();
@@ -70119,7 +70127,7 @@ var LoopbackPreview = class {
           const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id6 }, signal);
           for (const message of result.messages) {
             if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
-            await new Promise((resolve7, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve7()));
+            await new Promise((resolve8, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve8()));
           }
           if (result.closed) break;
         }
@@ -71314,7 +71322,7 @@ var AsyncValueQueue2 = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve7) => this.waiters.push(resolve7));
+      const next = await new Promise((resolve8) => this.waiters.push(resolve8));
       if (next.done) return;
       yield next.value;
     }
@@ -73209,13 +73217,13 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
 function awaitWithAbort(promise2, signal) {
   if (signal === void 0) return promise2;
   signal.throwIfAborted();
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     promise2.then(
       (value) => {
         signal.removeEventListener("abort", onAbort);
-        resolve7(value);
+        resolve8(value);
       },
       (error62) => {
         signal.removeEventListener("abort", onAbort);
@@ -73831,7 +73839,7 @@ var AsyncValueQueue4 = class {
         if (this.error !== void 0) throw this.error;
         return;
       }
-      const next = await new Promise((resolve7) => this.waiters.push(resolve7));
+      const next = await new Promise((resolve8) => this.waiters.push(resolve8));
       if (next.done) {
         if (this.error !== void 0) throw this.error;
         return;
@@ -74532,7 +74540,7 @@ var ServerCredentialStore = class {
       } catch (error62) {
         if (!(error62 instanceof Error) || !("code" in error62) || error62.code !== "EEXIST") throw error62;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-        await new Promise((resolve7) => setTimeout(resolve7, 50));
+        await new Promise((resolve8) => setTimeout(resolve8, 50));
       }
     }
     try {
@@ -75356,8 +75364,8 @@ var Queue = class {
         this.bytes -= entry.bytes;
         yield entry.value;
       } else if (this.closed) break;
-      else await new Promise((resolve7) => {
-        this.wake = resolve7;
+      else await new Promise((resolve8) => {
+        this.wake = resolve8;
       });
     }
     if (this.error) throw this.error;
@@ -75430,8 +75438,8 @@ var TerminalCarrierCompat = class {
     const abort = () => entry.control.abort();
     signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve7, reject) => {
-        entry.pending.set(sequence2, { resolve: resolve7, reject });
+      await new Promise((resolve8, reject) => {
+        entry.pending.set(sequence2, { resolve: resolve8, reject });
         try {
           entry.queue.push(value);
         } catch (error62) {
@@ -75468,8 +75476,8 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
     throw error62;
   }
   let startInput;
-  const ready = new Promise((resolve7) => {
-    startInput = resolve7;
+  const ready = new Promise((resolve8) => {
+    startInput = resolve8;
   });
   lifetime.addEventListener("abort", startInput, { once: true });
   if (lifetime.aborted) startInput();
@@ -75949,8 +75957,8 @@ var ExternalNativePeerConnection = class {
   request(method, payload) {
     if (this.closed) return Promise.reject(new Error("native rtc helper is closed"));
     const id6 = this.nextRequestId++;
-    const promise2 = new Promise((resolve7, reject) => {
-      this.pending.set(id6, { resolve: resolve7, reject });
+    const promise2 = new Promise((resolve8, reject) => {
+      this.pending.set(id6, { resolve: resolve8, reject });
     });
     this.write({ id: id6, method, payload });
     return promise2;
@@ -76744,10 +76752,10 @@ function parseRouteTarget(value) {
 async function detectRouteHostIpv4(target3, timeoutMs) {
   const socket = createSocket4("udp4");
   try {
-    return await new Promise((resolve7, reject) => {
+    return await new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         cleanup();
-        resolve7(void 0);
+        resolve8(void 0);
       }, timeoutMs);
       const cleanup = () => {
         clearTimeout(timer2);
@@ -76761,7 +76769,7 @@ async function detectRouteHostIpv4(target3, timeoutMs) {
       socket.connect(target3.port, target3.host, () => {
         cleanup();
         const address2 = socket.address();
-        resolve7(typeof address2 === "string" ? void 0 : address2.address);
+        resolve8(typeof address2 === "string" ? void 0 : address2.address);
       });
     });
   } finally {
@@ -77669,7 +77677,7 @@ var ClientModeRuntime = class {
 
 // src/control-runtime.ts
 import { hostname as hostname4 } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
@@ -78067,15 +78075,15 @@ var CodexAppServerClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve7) => {
+    await new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve7();
+        resolve8();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve7();
+        resolve8();
       });
       child.kill("SIGTERM");
     });
@@ -78131,13 +78139,13 @@ var CodexAppServerClient = class {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve7, reject) => {
+    const result = new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve7, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve8, reject, timer: timer2 });
     });
     try {
       this.write({ id: id6, method, params });
@@ -80248,15 +80256,15 @@ var CursorAcpClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve7) => {
+    await new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve7();
+        resolve8();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve7();
+        resolve8();
       });
       child.kill("SIGTERM");
     });
@@ -80331,13 +80339,13 @@ var CursorAcpClient = class {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve7, reject) => {
+    const result = new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve7, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve8, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id6, method, params });
@@ -80880,14 +80888,14 @@ async function discoverTerminalShells(provider, signal = new AbortController().s
     platform: process.platform === "win32" ? "windows" : "posix",
     defaultShell: process.platform === "win32" ? process.env.ComSpec : process.env.SHELL || userInfo().shell || void 0
   } : await provider.terminalEnvironment(signal);
-  const resolve7 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
+  const resolve8 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
   const preferred = profile(environment.defaultShell || (environment.platform === "windows" ? "cmd.exe" : "/bin/sh"));
-  preferred.path = await resolve7(preferred.path, void 0, signal);
+  preferred.path = await resolve8(preferred.path, void 0, signal);
   if (provider && !provider.terminalEnvironment) return [preferred];
   const candidates = ["zsh", "bash", "fish", "pwsh", "powershell", "cmd"];
   const found = await Promise.all(candidates.map(async (file2) => {
     try {
-      return { ...profile(file2), path: await resolve7(file2, void 0, signal) };
+      return { ...profile(file2), path: await resolve8(file2, void 0, signal) };
     } catch (error62) {
       if (error62 instanceof RpcError && error62.code === "TERMINAL_SHELL_UNAVAILABLE" || error62 instanceof Error && error62.name === "SubprocessExecutableNotFoundError") return void 0;
       throw error62;
@@ -80914,14 +80922,14 @@ function pipeTerminalSpawner() {
     output2.setEncoding("utf8");
     child.stdout.pipe(output2, { end: false });
     child.stderr.pipe(output2, { end: false });
-    const completed = new Promise((resolve7, reject) => {
+    const completed = new Promise((resolve8, reject) => {
       child.once("error", (error62) => {
         output2.destroy();
         reject(error62);
       });
       child.once("close", (exitCode) => {
         output2.end();
-        resolve7({ exitCode });
+        resolve8({ exitCode });
       });
     });
     void completed.catch(() => void 0);
@@ -80930,8 +80938,8 @@ function pipeTerminalSpawner() {
     };
     spec.signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve7, reject) => {
-        child.once("spawn", resolve7);
+      await new Promise((resolve8, reject) => {
+        child.once("spawn", resolve8);
         child.once("error", reject);
       });
       spec.signal.throwIfAborted();
@@ -81044,8 +81052,8 @@ var TerminalFollower = class {
           this.bytes -= next.bytes;
           yield next.value;
         } else if (this.finished) break;
-        else await new Promise((resolve7) => {
-          this.wake = resolve7;
+        else await new Promise((resolve8) => {
+          this.wake = resolve8;
         });
       }
       if (this.failure) throw this.failure;
@@ -81126,7 +81134,7 @@ var OwnedTerminal = class {
           start = end;
           await this.enqueue(async () => {
             if (this.disposed) return;
-            await new Promise((resolve7) => this.screen.write(data2, resolve7));
+            await new Promise((resolve8) => this.screen.write(data2, resolve8));
             this.sequence++;
             this.emit({ type: "output", sequence: this.sequence, data: data2 });
           });
@@ -81453,7 +81461,7 @@ var AsyncQueue = class {
     const value = this.values.shift();
     if (value !== void 0) return Promise.resolve({ done: false, value });
     if (this.ended) return Promise.resolve({ done: true, value: void 0 });
-    return new Promise((resolve7) => this.waiters.push(resolve7));
+    return new Promise((resolve8) => this.waiters.push(resolve8));
   }
   [Symbol.asyncIterator]() {
     return this;
@@ -82669,15 +82677,15 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve7) => {
+    await new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve7();
+        resolve8();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve7();
+        resolve8();
       });
       child.kill("SIGTERM");
     });
@@ -82702,7 +82710,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.stderrBytes = 0;
     let initResolved = false;
     let rejectInit;
-    const initPromise = new Promise((resolve7, reject) => {
+    const initPromise = new Promise((resolve8, reject) => {
       rejectInit = reject;
       const timer2 = setTimeout(() => {
         if (!initResolved) {
@@ -82720,7 +82728,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
               this.activeConversationId = conversationId;
               this.attachWatcher(conversationId);
             }
-            resolve7();
+            resolve8();
           }
         });
       };
@@ -82779,7 +82787,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const selected = this.selections.get(sessionId);
     if (selected) this.emitNotification("session/update", { sessionId, update: { sessionUpdate: "model_selection", selected } });
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = void 0;
@@ -82787,7 +82795,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         }
       }, timeoutMs);
       timer2.unref?.();
-      this.currentPromptPending = { sessionId, resolve: resolve7, reject, timer: timer2 };
+      this.currentPromptPending = { sessionId, resolve: resolve8, reject, timer: timer2 };
       const payload = {
         event: "user",
         message: { content: promptText }
@@ -83048,12 +83056,12 @@ var OpencodeNativeApi = class {
 };
 async function opencodeLoopbackPort() {
   const server = createServer3();
-  await new Promise((resolve7, reject) => {
+  await new Promise((resolve8, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve7());
+    server.listen(0, "127.0.0.1", () => resolve8());
   });
   const address2 = server.address();
-  await new Promise((resolve7, reject) => server.close((error62) => error62 ? reject(error62) : resolve7()));
+  await new Promise((resolve8, reject) => server.close((error62) => error62 ? reject(error62) : resolve8()));
   if (!address2 || typeof address2 === "string") throw unavailable();
   return address2.port;
 }
@@ -83311,15 +83319,15 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       await history;
       return;
     }
-    await Promise.all([history, new Promise((resolve7) => {
+    await Promise.all([history, new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve7();
+        resolve8();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve7();
+        resolve8();
       });
       child.kill("SIGTERM");
     })]);
@@ -83398,13 +83406,13 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve7, reject) => {
+    const result = new Promise((resolve8, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new OpencodeAcpError("OPENCODE_REQUEST_TIMEOUT", "OpenCode ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve7, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve8, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id6, method, params });
@@ -83757,15 +83765,15 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile3 } = await import("node:child_process");
-    const { promisify: promisify4 } = await import("node:util");
-    const execFileAsync2 = promisify4(execFile3);
+    const { execFile: execFile4 } = await import("node:child_process");
+    const { promisify: promisify5 } = await import("node:util");
+    const execFileAsync3 = promisify5(execFile4);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync2("sqlite3", [dbPath, "-json", formattedSql]);
+    const { stdout } = await execFileAsync3("sqlite3", [dbPath, "-json", formattedSql]);
     return JSON.parse(stdout || "[]");
   } catch {
     return [];
@@ -85592,6 +85600,344 @@ function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/acp/backend-installer.ts
+import { execFile as execFile3, execFileSync } from "node:child_process";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync2 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
+import { promisify as promisify4 } from "node:util";
+var execFileAsync2 = promisify4(execFile3);
+var BUILTIN_ACP_SPECS = Object.freeze({
+  codex: Object.freeze({
+    id: "codex",
+    name: "CodeX",
+    kind: "npm_package",
+    npmPackage: "@openai/codex",
+    downloadUrl: "https://github.com/openai/codex"
+  }),
+  cursor: Object.freeze({
+    id: "cursor",
+    name: "Cursor",
+    kind: "desktop_cli",
+    downloadUrl: "https://cursor.com"
+  }),
+  antigravity: Object.freeze({
+    id: "antigravity",
+    name: "Antigravity",
+    kind: "desktop_cli",
+    downloadUrl: "https://antigravity.google"
+  }),
+  pi: Object.freeze({
+    id: "pi",
+    name: "Pi",
+    kind: "npm_package",
+    npmPackage: "pi-acp",
+    downloadUrl: "https://www.npmjs.com/package/pi-acp"
+  }),
+  claude: Object.freeze({
+    id: "claude",
+    name: "Claude",
+    kind: "npm_package",
+    npmPackage: "@anthropic-ai/claude-agent-acp",
+    downloadUrl: "https://www.npmjs.com/package/@anthropic-ai/claude-agent-acp"
+  }),
+  opencode: Object.freeze({
+    id: "opencode",
+    name: "OpenCode",
+    kind: "npm_package",
+    npmPackage: "opencode-ai",
+    downloadUrl: "https://opencode.ai"
+  }),
+  hermes: Object.freeze({
+    id: "hermes",
+    name: "Hermes",
+    kind: "desktop_cli",
+    downloadUrl: "https://hermes-agent.nousresearch.com"
+  })
+});
+function isBuiltinAcpBackend(id6) {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_ACP_SPECS, id6);
+}
+function defaultCheckExecutable(candidate, platform3 = process.platform) {
+  try {
+    if (!existsSync4(candidate)) return false;
+    const stat10 = statSync2(candidate);
+    if (!stat10.isFile()) return false;
+    if (platform3 === "win32") return true;
+    accessSync2(candidate, constants5.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var cachedNpmPrefix;
+var npmPrefixDiscovered = false;
+function discoverSystemNpmPrefix(platform3 = process.platform) {
+  if (npmPrefixDiscovered) return cachedNpmPrefix;
+  npmPrefixDiscovered = true;
+  const npmCli = findNodeNpmCli();
+  if (!npmCli) return void 0;
+  try {
+    const out = execFileSync(process.execPath, [npmCli, "config", "get", "prefix"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 3e3,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
+    });
+    const trimmed = out.trim();
+    if (trimmed.length > 0 && existsSync4(trimmed)) {
+      cachedNpmPrefix = trimmed;
+      return trimmed;
+    }
+  } catch {
+  }
+  return void 0;
+}
+function candidateBinaryPaths(id6, options = {}) {
+  const platform3 = options.platform ?? process.platform;
+  const pJoin = platform3 === "win32" ? win32.join : posix.join;
+  const env = options.env ?? process.env;
+  const home = options.homedir ?? homedir7();
+  const localAppData = env.LOCALAPPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Local") : "");
+  const appData = env.APPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Roaming") : "");
+  const programFiles = env.ProgramFiles ?? (platform3 === "win32" ? "C:\\Program Files" : "");
+  const programFilesX86 = env["ProgramFiles(x86)"] ?? (platform3 === "win32" ? "C:\\Program Files (x86)" : "");
+  const candidates = [];
+  const npmBackends = /* @__PURE__ */ new Set(["codex", "claude", "pi", "opencode"]);
+  const npmBinDirs = [];
+  if (npmBackends.has(id6)) {
+    const resolvedPrefix = options.npmPrefix ?? discoverSystemNpmPrefix(platform3);
+    if (resolvedPrefix) {
+      npmBinDirs.push(platform3 === "win32" ? resolvedPrefix : pJoin(resolvedPrefix, "bin"));
+    }
+    if (platform3 === "win32") {
+      if (appData) npmBinDirs.push(pJoin(appData, "npm"));
+      npmBinDirs.push("D:\\npm-global", "C:\\npm-global");
+    } else {
+      npmBinDirs.push(pJoin(home, ".npm-global", "bin"), "/usr/local/bin", "/opt/homebrew/bin");
+    }
+  }
+  if (platform3 === "win32") {
+    switch (id6) {
+      case "hermes":
+        candidates.push(
+          "D:\\Hermes\\bin\\hermes.exe",
+          "C:\\Hermes\\bin\\hermes.exe",
+          pJoin(localAppData, "Hermes", "bin", "hermes.exe"),
+          pJoin(home, ".hermes", "bin", "hermes.exe"),
+          pJoin(home, "hermes-agent", ".hermes", "bin", "hermes.exe")
+        );
+        break;
+      case "cursor":
+        candidates.push(
+          pJoin(localAppData, "Programs", "cursor", "resources", "app", "bin", "agent.cmd"),
+          pJoin(localAppData, "Programs", "Cursor", "resources", "app", "bin", "agent.cmd"),
+          pJoin(programFiles, "Cursor", "resources", "app", "bin", "agent.cmd"),
+          pJoin(programFilesX86, "Cursor", "resources", "app", "bin", "agent.cmd"),
+          "D:\\Program Files\\Cursor\\resources\\app\\bin\\agent.cmd",
+          "D:\\Cursor\\resources\\app\\bin\\agent.cmd",
+          pJoin(home, ".local", "bin", "agent.cmd"),
+          pJoin(home, ".local", "bin", "agent.exe")
+        );
+        break;
+      case "antigravity":
+        candidates.push(
+          pJoin(localAppData, "Programs", "Antigravity", "agy.exe"),
+          pJoin(localAppData, "antigravity", "bin", "agy.exe"),
+          pJoin(programFiles, "Antigravity", "agy.exe"),
+          pJoin(home, ".local", "bin", "agy.exe")
+        );
+        break;
+      case "codex":
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "codex.cmd"), pJoin(dir, "codex.exe"));
+        }
+        break;
+      case "claude":
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "claude-agent-acp.cmd"), pJoin(dir, "claude-agent-acp.exe"));
+        }
+        break;
+      case "pi":
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "pi-acp.cmd"), pJoin(dir, "pi-acp.exe"));
+        }
+        break;
+      case "opencode":
+        candidates.push(
+          pJoin(home, ".opencode", "bin", "opencode.exe"),
+          pJoin(localAppData, "opencode", "bin", "opencode.exe")
+        );
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "opencode.cmd"), pJoin(dir, "opencode.exe"));
+        }
+        break;
+    }
+  } else {
+    switch (id6) {
+      case "codex":
+        candidates.push(
+          "/Applications/ChatGPT.app/Contents/Resources/codex-cli/codex",
+          "/Applications/ChatGPT.app/Contents/Resources/codex",
+          pJoin(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "codex"),
+          pJoin(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex")
+        );
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "codex"));
+        }
+        break;
+      case "cursor":
+        candidates.push(
+          pJoin(home, ".local", "bin", "agent"),
+          "/Applications/Cursor.app/Contents/MacOS/agent",
+          "/Applications/Cursor.app/Contents/Resources/app/bin/agent",
+          pJoin(home, "Applications", "Cursor.app", "Contents", "Resources", "app", "bin", "agent")
+        );
+        break;
+      case "antigravity":
+        candidates.push(
+          pJoin(home, ".local", "bin", "agy"),
+          "/Applications/Antigravity.app/Contents/MacOS/agy",
+          "/Applications/Antigravity.app/Contents/Resources/bin/agy",
+          pJoin(home, "Applications", "Antigravity.app", "Contents", "Resources", "bin", "agy")
+        );
+        break;
+      case "pi":
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "pi-acp"));
+        }
+        break;
+      case "claude":
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "claude-agent-acp"));
+        }
+        break;
+      case "opencode":
+        candidates.push(
+          pJoin(home, ".opencode", "bin", "opencode"),
+          pJoin(home, ".local", "bin", "opencode")
+        );
+        for (const dir of npmBinDirs) {
+          candidates.push(pJoin(dir, "opencode"));
+        }
+        break;
+      case "hermes":
+        candidates.push(
+          pJoin(home, ".hermes", "bin", "hermes"),
+          pJoin(home, ".local", "bin", "hermes"),
+          "/usr/local/bin/hermes",
+          "/opt/homebrew/bin/hermes"
+        );
+        break;
+    }
+  }
+  return [...new Set(candidates.filter((p) => typeof p === "string" && p.trim().length > 0))];
+}
+function lookupSystemPath(command, platform3 = process.platform) {
+  try {
+    const probe = platform3 === "win32" ? "where" : "which";
+    const output2 = execFileSync(probe, [command], {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 5e3
+    });
+    const firstLine = output2.split(/\r?\n/).find((line) => line.trim().length > 0);
+    if (firstLine && defaultCheckExecutable(firstLine.trim(), platform3)) {
+      return platform3 === "win32" ? win32.resolve(firstLine.trim()) : posix.resolve(firstLine.trim());
+    }
+    return void 0;
+  } catch {
+    return void 0;
+  }
+}
+function findExistingBinary(id6, options = {}) {
+  const platform3 = options.platform ?? process.platform;
+  const check2 = options.checkExecutable ?? ((path) => defaultCheckExecutable(path, platform3));
+  const candidates = candidateBinaryPaths(id6, options);
+  for (const candidate of candidates) {
+    if (check2(candidate)) {
+      return platform3 === "win32" ? win32.resolve(candidate) : posix.resolve(candidate);
+    }
+  }
+  const defaultCommands = {
+    codex: "codex",
+    cursor: "agent",
+    antigravity: "agy",
+    pi: "pi-acp",
+    claude: "claude-agent-acp",
+    opencode: "opencode",
+    hermes: "hermes"
+  };
+  const defaultCmd = defaultCommands[id6] ?? id6;
+  const fromPath = lookupSystemPath(defaultCmd, platform3);
+  if (fromPath && check2(fromPath)) {
+    return fromPath;
+  }
+  return void 0;
+}
+function findNodeNpmCli(nodeExecPath = process.execPath) {
+  const nodeDir = dirname5(nodeExecPath);
+  const candidates = [
+    join13(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
+    join13(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    "D:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+    "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
+  ];
+  for (const candidate of candidates) {
+    if (existsSync4(candidate)) return candidate;
+  }
+  return void 0;
+}
+async function installOrConfigureBackend(backendId, options = {}) {
+  if (!isBuiltinAcpBackend(backendId)) {
+    throw new Error("Unsupported ACP backend.");
+  }
+  const spec = BUILTIN_ACP_SPECS[backendId];
+  const existing = findExistingBinary(backendId, options);
+  if (existing) {
+    return {
+      action: "configured",
+      detectedCommand: existing,
+      downloadUrl: spec.downloadUrl
+    };
+  }
+  if (spec.kind === "desktop_cli" || !spec.npmPackage) {
+    return {
+      action: "download_required",
+      downloadUrl: spec.downloadUrl
+    };
+  }
+  const platform3 = options.platform ?? process.platform;
+  const timeoutMs = options.timeoutMs ?? 12e4;
+  const npmCli = options.npmCliPath ?? findNodeNpmCli();
+  if (!npmCli && platform3 === "win32") {
+    throw new Error("Node package manager (npm-cli.js) could not be located on this host.");
+  }
+  const fileToExec = npmCli ? process.execPath : "npm";
+  const argsToExec = npmCli ? [npmCli, "install", "-g", spec.npmPackage, "--no-fund", "--no-audit"] : ["install", "-g", spec.npmPackage, "--no-fund", "--no-audit"];
+  const runner = options.execFileImpl ?? (async (file2, cmdArgs, opts) => {
+    return execFileAsync2(file2, cmdArgs, opts);
+  });
+  try {
+    await runner(fileToExec, argsToExec, {
+      timeout: timeoutMs,
+      encoding: "utf8",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
+    });
+  } catch {
+    throw new Error(`Silent installation of ${spec.name} failed.`);
+  }
+  const newlyInstalled = findExistingBinary(backendId, options);
+  if (newlyInstalled) {
+    return {
+      action: "installed",
+      detectedCommand: newlyInstalled,
+      downloadUrl: spec.downloadUrl
+    };
+  }
+  throw new Error(`Installation of ${spec.name} completed but executable could not be verified.`);
+}
+
 // src/control-runtime.ts
 var PluginControlRuntime = class {
   constructor(config2, identityDirectory, settings, client, host, switchServer, updates) {
@@ -85638,6 +85984,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.set") return ok3(await this.setAcp(payload));
       if (endpoint === "settings.acp.add") return ok3(await this.addAcp(payload));
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
+      if (endpoint === "settings.acp.installOrConfigure") return ok3(await this.installOrConfigureAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
         const value = record9(payload);
@@ -85877,6 +86224,60 @@ var PluginControlRuntime = class {
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
     return { ...await this.settingsView(), applies: "live" };
   }
+  async installOrConfigureAcp(payload) {
+    if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
+    const value = record9(payload);
+    const backend = value.backend;
+    if (typeof backend !== "string" || !isBuiltinAcpBackend(backend)) {
+      throw new ClientModeError("INVALID_MESSAGE", "A valid built-in ACP backend is required.");
+    }
+    const outcome = await installOrConfigureBackend(backend);
+    if (outcome.action === "download_required") {
+      const view2 = await this.settingsView();
+      return {
+        ...view2,
+        acpInstallResult: {
+          backend,
+          action: "download_required",
+          downloadUrl: outcome.downloadUrl
+        }
+      };
+    }
+    const detected = outcome.detectedCommand;
+    if (!detected) {
+      throw new ClientModeError("ACP_UNAVAILABLE", `Backend ${backend} could not be configured.`);
+    }
+    const defaultArgsMap = {
+      codex: ["app-server"],
+      cursor: ["acp"],
+      antigravity: ["--input-format", "stream-json", "--output-format", "stream-json"],
+      hermes: ["acp"],
+      opencode: ["acp"],
+      pi: [],
+      claude: []
+    };
+    const defaultArgs = defaultArgsMap[backend] ?? ["acp"];
+    const current = resolveConfig(this.settings.get());
+    const existing = current.acp?.backends.some((item) => item.id === backend);
+    const backends = existing ? (current.acp?.backends ?? []).map((item) => item.id === backend ? { ...item, command: detected, enabled: true } : item) : [...current.acp?.backends ?? [], { id: backend, command: detected, enabled: true, args: defaultArgs }];
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...backend === "cursor" ? { cursor: { ...current.cursor, binary: detected, enabled: true } } : {},
+      ...backend === "codex" ? { codex: { ...current.codex, binary: detected, enabled: true } } : {},
+      acp: { enabled: true, backends }
+    });
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
+    const view = await this.settingsView();
+    return {
+      ...view,
+      applies: "live",
+      acpInstallResult: {
+        backend,
+        action: outcome.action,
+        downloadUrl: outcome.downloadUrl
+      }
+    };
+  }
   async authorizeOwnedRole(serverUrl, sourceRole, targetRole) {
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
     const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname4());
@@ -85963,12 +86364,18 @@ var PluginControlRuntime = class {
   }
 };
 function backendCommandAvailable(backend, command) {
-  const candidates = backend === "codex" ? codexBinaryCandidates(command) : backend === "cursor" || backend === "antigravity" || backend === "opencode" ? cursorBinaryCandidates(command) : [command];
-  return candidates.some(commandAvailable);
+  if (!command || typeof command !== "string" || command.trim().length === 0) return false;
+  const trimmed = command.trim();
+  if (defaultCheckExecutable(trimmed)) return true;
+  const candidates = backend === "codex" ? codexBinaryCandidates(trimmed) : backend === "cursor" || backend === "antigravity" || backend === "opencode" ? cursorBinaryCandidates(trimmed) : [trimmed];
+  return candidates.some((candidate) => defaultCheckExecutable(candidate) || commandAvailable(candidate));
 }
 function commandAvailable(command) {
   try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
+    execFileSync2(process.platform === "win32" ? "where" : "which", [command], {
+      stdio: "ignore",
+      timeout: 5e3
+    });
     return true;
   } catch {
     return false;
@@ -86064,9 +86471,9 @@ function redact(value, key = "") {
 
 // src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
-import { constants as constants5 } from "node:fs";
+import { constants as constants6 } from "node:fs";
 import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join13 } from "node:path";
+import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
@@ -86145,8 +86552,8 @@ var WorkspaceUploadHost = class {
     const root = await realpath6(sourceRoot);
     const directory = await stat6(root);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join13(root, `.dsh-upload-${randomUUID16()}.part`);
-    const handle = await open5(temp, constants5.O_CREAT | constants5.O_EXCL | constants5.O_RDWR | (constants5.O_NOFOLLOW ?? 0), 384);
+    const temp = join14(root, `.dsh-upload-${randomUUID16()}.part`);
+    const handle = await open5(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
     const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
@@ -86189,7 +86596,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension}`;
       try {
-        await link(upload.temp, join13(upload.root, name2));
+        await link(upload.temp, join14(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -87030,7 +87437,7 @@ var HostServerConnection = class {
     let retainOnClose = false;
     let invalidControl = false;
     let messageQueue = Promise.resolve();
-    await new Promise((resolve7, reject) => {
+    await new Promise((resolve8, reject) => {
       let settled = false;
       const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
       const finish = (error62) => {
@@ -87041,7 +87448,7 @@ var HostServerConnection = class {
         if (this.socket === socket) this.socket = void 0;
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
         const cleanup = preserve ? Promise.all([...this.tunnels.values()].filter((tunnel) => !tunnel.lease?.canDetach()).map((tunnel) => this.dropTunnel(tunnel.connectionId))) : this.dropTunnels();
-        void cleanup.finally(() => error62 === void 0 ? resolve7() : reject(error62));
+        void cleanup.finally(() => error62 === void 0 ? resolve8() : reject(error62));
       };
       socket.onopen = () => {
         this.sendControl("hello", {
@@ -87645,14 +88052,14 @@ var HostServerConnection = class {
     const socket = this.createWebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     tunnel.dataSocket = socket;
-    await new Promise((resolve7, reject) => {
+    await new Promise((resolve8, reject) => {
       let settled = false;
       const timer2 = setTimeout(() => finish(new Error("Relay data attach timed out")), 15e3);
       const finish = (error62) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer2);
-        if (error62 === void 0) resolve7();
+        if (error62 === void 0) resolve8();
         else reject(error62);
       };
       socket.onopen = () => {
@@ -87769,14 +88176,14 @@ var HostServerConnection = class {
   waitBeforeRetry(baseDelay) {
     const spread = baseDelay * this.config.reconnect.jitter;
     const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2));
-    return new Promise((resolve7) => {
+    return new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         this.retryWake = void 0;
-        resolve7();
+        resolve8();
       }, delay);
       this.retryWake = () => {
         clearTimeout(timer2);
-        resolve7();
+        resolve8();
       };
     });
   }
@@ -87997,29 +88404,29 @@ function closeCode(code) {
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname6, isAbsolute as isAbsolute10, join as join14, parse as parse4, relative as relative5, resolve as resolve6, sep as sep2 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve7, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir4, stat as stat7 } from "node:fs/promises";
-import { homedir as homedir7, platform as platform2 } from "node:os";
-import { basename as basename6, dirname as dirname5, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve5 } from "node:path";
+import { homedir as homedir8, platform as platform2 } from "node:os";
+import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve6 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
-  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve5(path) === parse3(path).root) {
+  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve6(path) === parse3(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
   await mkdir4(path, { recursive: true });
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve5(homedir7());
-  const target3 = path === void 0 || path.trim() === "" ? home : resolve5(path);
+  const home = resolve6(homedir8());
+  const target3 = path === void 0 || path.trim() === "" ? home : resolve6(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir4(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve5(target3, row.name);
+    const child = resolve6(target3, row.name);
     let directory = row.isDirectory();
     if (!directory && row.isSymbolicLink()) directory = await stat7(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
@@ -88041,10 +88448,10 @@ function crumbs(path) {
   let current = path;
   while (current !== root) {
     segments.unshift(basename6(current));
-    current = dirname5(current);
+    current = dirname6(current);
   }
   for (const segment of segments) {
-    current = resolve5(current, segment);
+    current = resolve6(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -88504,8 +88911,8 @@ var HarnessRemoteBridge = class {
     const transferId = randomUUID17();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
-    const completed = new Promise((resolve7, reject) => {
-      finish = (error62) => error62 === void 0 ? resolve7() : reject(error62);
+    const completed = new Promise((resolve8, reject) => {
+      finish = (error62) => error62 === void 0 ? resolve8() : reject(error62);
     });
     void completed.catch(() => void 0);
     const transfer = { bytes, totalChunks, nextIndex: 0, touchedAt: Date.now(), finish };
@@ -88570,9 +88977,9 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint);
-      const baseCandidate = resolve6(sessionWorkspace.root, safeBaseRel);
-      const baseDir = dirname6(baseCandidate);
-      const targetCandidate = resolve6(baseDir, path);
+      const baseCandidate = resolve7(sessionWorkspace.root, safeBaseRel);
+      const baseDir = dirname7(baseCandidate);
+      const targetCandidate = resolve7(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint);
     } else {
       const path = typeof args.path === "string" ? args.path : ".";
@@ -88629,7 +89036,7 @@ var HarnessRemoteBridge = class {
     }
   }
   async verifyWorkspacePathContainment(root, cwd2, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve6(path) : resolve6(cwd2, path);
+    const candidate = isAbsolute10(path) ? resolve7(path) : resolve7(cwd2, path);
     if (process.platform === "win32") {
       const rootDrive = parse4(root).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
@@ -88652,7 +89059,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
       let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join14(currentPath, parts[i]);
+        currentPath = join15(currentPath, parts[i]);
         const dirRel = relative5(base, currentPath);
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
@@ -88686,7 +89093,7 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       }
       const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
-      const dispatchedCandidate = resolve6(root, safeRel);
+      const dispatchedCandidate = resolve7(root, safeRel);
       const dispatchedCanonical = await realpath7(dispatchedCandidate);
       const dispatchedRel = relative5(root, dispatchedCanonical);
       if (isPathOutside(dispatchedRel)) {
@@ -88937,8 +89344,8 @@ function isCompactSnapshot(value) {
 }
 
 // src/service.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { existsSync as existsSync4 } from "node:fs";
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { existsSync as existsSync5 } from "node:fs";
 
 // src/codex-workspace-bridge.ts
 var CodexWorkspaceBridge = class extends WorkspaceBridge {
@@ -89374,12 +89781,12 @@ var HostPluginRuntime = class {
   acpAvailable(command) {
     if (command === "opencode") {
       try {
-        if (existsSync4("/usr/local/bin/opencode") || existsSync4("/var/lib/dsh/.opencode/bin/opencode")) return true;
+        if (existsSync5("/usr/local/bin/opencode") || existsSync5("/var/lib/dsh/.opencode/bin/opencode")) return true;
       } catch {
       }
     }
     try {
-      execFileSync2(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
+      execFileSync3(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
       return true;
     } catch {
       return false;
@@ -89472,11 +89879,11 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
   };
 }
 function withSignal(pending, signal) {
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
-    void pending.then(resolve7, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    void pending.then(resolve8, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
 }
 
@@ -89496,7 +89903,7 @@ var workspaceSchema = object4(
   { backend: string8, workspaceId: string8, path: string8, title: string8 },
   ["backend", "workspaceId", "path", "title"]
 );
-function remoteDiscoveryTools(resolve7) {
+function remoteDiscoveryTools(resolve8) {
   const output2 = (schema) => ({
     schema,
     render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }]
@@ -89504,12 +89911,12 @@ function remoteDiscoveryTools(resolve7) {
   const run = async (signal, query) => {
     const lifetime = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
     lifetime.throwIfAborted();
-    const client = resolve7();
+    const client = resolve8();
     if (client === void 0) throw new Error("REMOTE_UNAVAILABLE: Configure Remote and sign in through the local Remote panel first.");
     try {
       const result = await query(client, lifetime);
       lifetime.throwIfAborted();
-      if (resolve7() !== client) throw new Error("Remote runtime changed.");
+      if (resolve8() !== client) throw new Error("Remote runtime changed.");
       return result;
     } catch {
       lifetime.throwIfAborted();
@@ -89549,7 +89956,7 @@ function remoteDiscoveryTools(resolve7) {
     }
   ];
 }
-function remoteSessionTools(resolve7) {
+function remoteSessionTools(resolve8) {
   const target3 = {
     hostId: { ...string8, description: "Exact hostId from remote_list_hosts." },
     backend: { type: "string", enum: ["harness"], description: "Session operations currently support native Harness only." },
@@ -89610,11 +90017,11 @@ function remoteSessionTools(resolve7) {
       sessionToolInputs[name2].parse(args);
       const signal = AbortSignal.any([exec2.signal, AbortSignal.timeout(name2 === "remote_upload_file" ? 60 * 6e4 : 12e4)]);
       signal.throwIfAborted();
-      const client = resolve7();
+      const client = resolve8();
       if (!client) throw new Error("REMOTE_UNAVAILABLE: Sign in through the local Remote panel.");
       try {
         const result = await client.runSessionTool(name2, args, signal);
-        if (resolve7() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
+        if (resolve8() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
         return result;
       } catch (error62) {
         if (error62 instanceof RemoteSessionToolError) throw error62;
@@ -89623,10 +90030,10 @@ function remoteSessionTools(resolve7) {
     }
   }));
 }
-function installRemoteDiscoveryTools(ctx, resolve7) {
+function installRemoteDiscoveryTools(ctx, resolve8) {
   ctx.inject(["tools"], (toolContext) => {
     const tools = toolContext.get("tools");
-    for (const definition of [...remoteDiscoveryTools(resolve7), ...remoteSessionTools(resolve7)]) {
+    for (const definition of [...remoteDiscoveryTools(resolve8), ...remoteSessionTools(resolve8)]) {
       toolContext.effect(() => tools.register(definition));
     }
   });
@@ -89635,7 +90042,7 @@ function installRemoteDiscoveryTools(ctx, resolve7) {
 // src/cli.ts
 import { stat as stat9 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -89726,7 +90133,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join15(directory, "device.json"))) {
+  if (!await exists3(join16(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -89771,7 +90178,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join15(directory, "device.json"))) {
+  if (!await exists3(join16(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
@@ -89813,7 +90220,7 @@ function resolveDependencies(input4) {
     stdout: input4.stdout ?? process.stdout,
     stderr: input4.stderr ?? process.stderr,
     now: input4.now ?? Date.now,
-    wait: input4.wait ?? ((milliseconds) => new Promise((resolve7) => setTimeout(resolve7, milliseconds))),
+    wait: input4.wait ?? ((milliseconds) => new Promise((resolve8) => setTimeout(resolve8, milliseconds))),
     renderQr: input4.renderQr ?? renderTerminalQr,
     createIdentityStore: input4.createIdentityStore ?? ((options) => new IdentityStore(options)),
     createHostApi: input4.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
@@ -90308,7 +90715,7 @@ function errorCode5(error62) {
   return "CONNECTION_FAILED";
 }
 function wait(milliseconds) {
-  return new Promise((resolve7) => setTimeout(resolve7, milliseconds));
+  return new Promise((resolve8) => setTimeout(resolve8, milliseconds));
 }
 
 // src/hmr-safe-settings.ts
@@ -90316,15 +90723,15 @@ var PUMP_KEY = Symbol.for("ds-harness-remote.hmr-safe-settings-pump");
 function createPump() {
   const queue = [];
   let wake;
-  let sleeping = new Promise((resolve7) => {
-    wake = resolve7;
+  let sleeping = new Promise((resolve8) => {
+    wake = resolve8;
   });
   void (async () => {
     for (; ; ) {
       if (queue.length === 0) {
         await sleeping;
-        sleeping = new Promise((resolve7) => {
-          wake = resolve7;
+        sleeping = new Promise((resolve8) => {
+          wake = resolve8;
         });
       }
       const job = queue.shift();
@@ -90338,8 +90745,8 @@ function createPump() {
   })();
   return {
     enqueue(run) {
-      return new Promise((resolve7, reject) => {
-        queue.push({ run, resolve: resolve7, reject });
+      return new Promise((resolve8, reject) => {
+        queue.push({ run, resolve: resolve8, reject });
         wake();
       });
     }
@@ -90415,18 +90822,18 @@ var PluginUpdateChecker = class {
    * before the mirror is consulted.
    */
   fetchLatestVersion() {
-    return new Promise((resolve7) => {
+    return new Promise((resolve8) => {
       let pending = DIST_TAG_URLS.length;
       let settled = false;
       const settle2 = (latest) => {
         if (settled) return;
         if (latest !== void 0) {
           settled = true;
-          resolve7(latest);
+          resolve8(latest);
           return;
         }
         pending -= 1;
-        if (pending === 0) resolve7(void 0);
+        if (pending === 0) resolve8(void 0);
       };
       if (pending === 0) {
         settle2(void 0);

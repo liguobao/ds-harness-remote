@@ -108,7 +108,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const t = (k: string) => k
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
@@ -184,7 +184,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -261,7 +261,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -332,7 +332,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -403,7 +403,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -474,7 +474,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -568,7 +568,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -644,7 +644,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()

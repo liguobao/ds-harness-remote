@@ -85,8 +85,8 @@ assert.match(
 )
 assert.match(
   patch,
-  /inject:\s*\[settings, typertGateway, commands\]/,
-  'root patch must require only the dsh-TUI command service; optional UI seams must not block activation',
+  /inject:\s*(?:-\s*webServer|\[.*?webServer.*?\])/,
+  'root patch must declare the webServer service for host control',
 )
 
 const rootHostEntry = readFileSync(join(root, 'index.js'), 'utf8')

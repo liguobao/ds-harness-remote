@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { ControlResult } from './control-result.js'
 import { resolveConfig, type Config, type ConfigInput, type ResolvedConfig } from './config.js'
@@ -16,6 +17,7 @@ import { ControlStatusStream } from './control-stream.js'
 import type { PluginUpdateSnapshot } from './update-check.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
+import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -25,6 +27,11 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpInstallResult?: {
+    backend: string
+    action: 'configured' | 'installed' | 'download_required'
+    downloadUrl?: string
+  }
 }
 
 export interface PluginAssociation {
@@ -103,6 +110,7 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.acp.set') return ok(await this.setAcp(payload))
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
+      if (endpoint === 'settings.acp.installOrConfigure') return ok(await this.installOrConfigureAcp(payload))
       if (endpoint === 'settings.logout') return ok(await this.logout())
       if (endpoint === 'host.authorization.set' && this.client !== undefined) {
         const value = record(payload)
@@ -361,6 +369,65 @@ export class PluginControlRuntime {
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
     return { ...await this.settingsView(), applies: 'live' }
   }
+
+  private async installOrConfigureAcp(payload: unknown): Promise<PluginSettingsView> {
+    if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    const value = record(payload)
+    const backend = value.backend
+    if (typeof backend !== 'string' || !isBuiltinAcpBackend(backend)) {
+      throw new ClientModeError('INVALID_MESSAGE', 'A valid built-in ACP backend is required.')
+    }
+    const outcome = await installOrConfigureBackend(backend)
+    if (outcome.action === 'download_required') {
+      const view = await this.settingsView()
+      return {
+        ...view,
+        acpInstallResult: {
+          backend,
+          action: 'download_required',
+          downloadUrl: outcome.downloadUrl,
+        },
+      }
+    }
+    const detected = outcome.detectedCommand
+    if (!detected) {
+      throw new ClientModeError('ACP_UNAVAILABLE', `Backend ${backend} could not be configured.`)
+    }
+    const defaultArgsMap: Record<string, string[]> = {
+      codex: ['app-server'],
+      cursor: ['acp'],
+      antigravity: ['--input-format', 'stream-json', '--output-format', 'stream-json'],
+      hermes: ['acp'],
+      opencode: ['acp'],
+      pi: [],
+      claude: [],
+    }
+    const defaultArgs = defaultArgsMap[backend] ?? ['acp']
+
+    const current = resolveConfig(this.settings.get())
+    const existing = current.acp?.backends.some(item => item.id === backend)
+    const backends = existing
+      ? (current.acp?.backends ?? []).map(item => item.id === backend ? { ...item, command: detected, enabled: true } : item)
+      : [...(current.acp?.backends ?? []), { id: backend, command: detected, enabled: true, args: defaultArgs }]
+
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...(backend === 'cursor' ? { cursor: { ...current.cursor, binary: detected, enabled: true } } : {}),
+      ...(backend === 'codex' ? { codex: { ...current.codex, binary: detected, enabled: true } } : {}),
+      acp: { enabled: true, backends },
+    })
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    const view = await this.settingsView()
+    return {
+      ...view,
+      applies: 'live',
+      acpInstallResult: {
+        backend,
+        action: outcome.action,
+        downloadUrl: outcome.downloadUrl,
+      },
+    }
+  }
   private async authorizeOwnedRole(
     serverUrl: string,
     sourceRole: 'host' | 'client',
@@ -465,13 +532,24 @@ export class PluginControlRuntime {
 }
 
 function backendCommandAvailable(backend: string, command: string): boolean {
-  const candidates = backend === 'codex' ? codexBinaryCandidates(command)
-    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(command) : [command]
-  return candidates.some(commandAvailable)
+  if (!command || typeof command !== 'string' || command.trim().length === 0) return false
+  const trimmed = command.trim()
+  if (defaultCheckExecutable(trimmed)) return true
+  const candidates = backend === 'codex' ? codexBinaryCandidates(trimmed)
+    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(trimmed) : [trimmed]
+  return candidates.some(candidate => defaultCheckExecutable(candidate) || commandAvailable(candidate))
 }
 
 function commandAvailable(command: string): boolean {
-  try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], {
+      stdio: 'ignore',
+      timeout: 5000,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function editableConfig(config: ResolvedConfig): Config {
