@@ -439,3 +439,29 @@ workspace/list -> 3 item(s)
 - **真正占流量的是大对象**：图片/文件，而不是文字。图片已经在客户端压到长边 1600 / JPEG q80
   （实测 3072×4096 的照片压成 196 KB、base64 约 300 KB）；文件走 `workspace.upload.v1` 分块，
   不经过消息流。
+
+## 2026-11-05 14:00 测试收尾（本轮验证到哪一步）
+
+**已验证（有日志/截图证据）**
+
+- 直连：LAN 直连建立、`transport.selected=lan`、Host 侧 `mode=LAN`、RTT 4–8ms
+- TURN：`/api/v1/turn/credentials` 返回 STUN+TURN，本地产出 `typ relay` 候选
+- 传输徽标：`LAN` / `中继` 两种都出现过并显示正确
+- 模型切换：`session/selectModel ok -> deepseek-official/deepseek-v4-pro`
+- 权限切换：`permission state: current preset danger-full-access (available: …)`
+  与 `permission switch -> read-only : preset read-only`
+- 工作区列表：`workspace/follow baseline -> 3 item(s)`
+- 历史图片拉字节：`history image ok sha256:e952d198… base64=303520`
+- 语音按住说话：`microphone permission granted=true`、
+  `voice recording started`、松手 `voice recording stopped bytes=46080 ms=1366`
+- 手机装机：PLU-AL10 已装 0.09.3，LAN 直连成功、新齿轮/文字大小/图片按钮均在
+
+**未验证（本轮受限于设备与窗口，非代码问题）**
+
+- 历史图片**渲染**：拉字节已确认，但界面上是否出现缩略图还没在真机目视确认
+  （0.09.1 改成渲染时查缓存的修法需要一次目视）
+- 文字大小四档的实际效果：需要进设置面板点一下再看
+- 响应式（PC 放大窗口）：需要手动拖窗口
+- 语音转写：主机 profile 未加载 speech 插件，`speech/transcribe` 无回执
+- 目录浏览 `directoryPicker/list`：端点已改对，未点开验证
+- 手机 hdc 频繁掉线（`tconn` 几分钟就断），多次实验被打断
