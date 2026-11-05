@@ -7,6 +7,8 @@ Android build 71.
 - Support DeepSeek Harness `0.2.2-rc.1`: remote session images load again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the newly added Trajectory raw results, automation editing and third-party plugin update surfaces work over Remote. Harness `0.2.1-rc.5` remains supported and validated.
 - Require Node.js `>=24.9`, matching Harness 0.2.2. The Linux installer now provisions Node.js 24.9.0.
 - Fix a Harness 0.2.2 reconnect loop caused by opening the forwarded Remote event stream without a calling owner Peer.
+- Inline the Host bundle's runtime dependencies, so installations that do not carry the package's runtime dependencies (local-path links, manual copies and generated installs) no longer fail to load with `Cannot find package 'ws'`.
+- Ship the browser/Desktop Host surface only: dsh-TUI integration is removed from this release and returns in a later version, so the plugin no longer registers a terminal `/remote` command or a terminal-only Host entry.
 - Preserve other plugins named `dsh-remote` when Remote starts. Only the owned `@dsh-remote/plugin` legacy name is disabled automatically; if an older local installation used the bare name, check its origin before disabling it manually.
 
 ### 中文
@@ -14,6 +16,8 @@ Android build 71.
 - 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约重新可用，CodeX/ACP 会话的实时状态更新适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用。同时保留并已验证 Harness `0.2.1-rc.5` 兼容。
 - 要求 Node.js `>=24.9`（与 Harness 0.2.2 一致）；Linux 安装器改为安装 Node.js 24.9.0。
 - 修复 Harness 0.2.2 上转发事件流因缺少调用 owner Peer 而触发 Desktop 客户端重连循环的问题。
+- Host bundle 内联运行时依赖；本地路径 link、手工复制或生成式安装等不携带包依赖的场景不再因 `Cannot find package 'ws'` 而加载失败。
+- 本版本仅发布浏览器/Desktop Host；移除 dsh-TUI 集成并在后续版本单独提供，因此不再注册终端 `/remote` 命令和终端专用 Host entry。
 - Remote 启动时不再自动禁用同名的第三方 `dsh-remote` 插件；只自动迁移自有的 `@dsh-remote/plugin` 旧名。若旧的本地安装使用裸名，请确认其来源后再手动禁用。
 
 

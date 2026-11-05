@@ -52,7 +52,7 @@ sudo systemctl is-enabled dsh-remote-web.service
 - 已有 Host 凭据时拒绝静默覆盖。换绑账号前，应停止原 Host 并通过官方入口退出登录，再使用新 Token。
 - 若已注册成功、随后服务启动失败，凭据仍保留；修复环境后不带 Token 重跑。
 - 服务带有规范化 `DSH_HOME` 归属标记。只允许更新匹配 home 的安装器管理服务；不同 home、无标记的旧服务和符号链接均不接管。
-- profile 的 Web 能力和服务归属在 Token 兑换之前预检查。`headless`、SDK、dsh-TUI 和无法确认的动态配置不自动生成 Web 服务；可设置 `DSH_REMOTE_AUTOSTART=0`，自行管理进程。
+- profile 的 Web 能力和服务归属在 Token 兑换之前预检查。`headless`、SDK 和终端类 profile（含 `dsh-tui`）不自动生成 Web 服务；可设置 `DSH_REMOTE_AUTOSTART=0`，自行管理进程。dsh-TUI 集成本身不在本版本内。
 - 仅启动/重启归属匹配的管理服务，不自动停止其他 DSH 进程。使用同一 home 的旧前台进程应先手动退出，避免连接抢占或端口冲突。
 - 不自动迁移、删除旧服务、runtime 或凭据，不提供自动回滚。引导安装中途失败的私有目录可能保留，便于检查。
 

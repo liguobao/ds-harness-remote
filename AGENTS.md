@@ -37,6 +37,35 @@ profile 安装、复制既有凭据）上完成激活、control/status 与 0.2.2
 待补齐，`$events` 在缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合上不可用（Desktop 客户端
 会重连循环）也尚未在插件侧做降级提示。
 
+## Host bundle load fix and dsh-TUI deferral (2026-11-05)
+
+`packages/plugin/dist/index.js` 曾以裸 ESM import 引用 `ws`（以及动态 import `qrcode`）。
+在只携带 bundle 文件、未安装包运行时依赖的安装方式（本地路径 link、手工复制包、解包后的
+GitHub/生成式安装等）中，DSH 加载 Host entry 会以 `Cannot find package 'ws'` 失败，插件无法
+激活；内联 `ws` 后同类安装会继续在 `@deepseek-ai/schemastery` 上失败。构建脚本现把全部
+运行时依赖（`ws`、`qrcode`、`schemastery` 及其闭包）内联进 Host bundle，仅保留
+`@deepseek-ai/dsh-client-connection`（Host 组合必须提供的 peer 单例）与可选
+`@roamhq/wrtc` 外部；`verify-dsh-plugin.mjs` 断言 Host bundle 的裸 import 只剩官方
+Connection peer，阻止运行时 npm 依赖重新进入 bundle。
+
+同一版本按用户要求移除 dsh-TUI 集成，下一版本单独提供：删除 `src/tui-command.ts` 与
+`index.ts` 的 TUI 激活分支，Host 激活只要求官方 `connection` 服务；两个 `cordis.patch.yml`
+只插入一个静态 Host entry（不再使用 `!!js` disabled 表达式与 `ds-harness-remote-tui` 行）；
+`dsh-plugin.json` 不再声明 `commands` 契约、`/remote` 命令与 `commands.invoke` 权限；
+installer helper 只接受唯一静态 Remote entry；`ds-harness-remote` CLI 保留为无 Desktop/Web
+时的账号入口，但不再提示 dsh-TUI。README（含 ja/zh）、兼容性、安装、设计文档与
+`docs/dsh-tui.md`（已删除）同步；`docs/TODO.md` 记录后续版本恢复项。旧 profile 中已保存
+的 `ds-harness-remote-tui` 行不会被自动启用，升级后由新 bundle patch 的单 entry 取代。
+
+验证：Plugin check、build、`verify-dsh-plugin.mjs` 与 `git diff --check` 通过；Plugin
+73 文件 / 529 tests（移除 2 条 dsh-TUI 生命周期测试）。同一构建在独立 DSH 0.2.2-rc.1 +
+Node 24.9 的三种安装形态上启动验证：pnpm tarball 安装、本地路径 link（插件目录没有任何
+node_modules）、手工复制包到 profile node_modules（不带依赖）均能激活 Host；对照旧 bundle
+在无依赖情形下以 `Cannot find package 'ws'` 失败。installer helper 的 preflight 逻辑以真实
+`--dump-config` 树验证单静态 entry 校验通过。未做真实 Desktop/Android APK、跨设备或
+install.sh 完整 token 注册验收；install.sh helper 直接 import 插件 entry 时仍依赖 profile
+内可解析的官方 peer（既有行为，不受本次内联影响）。
+
 ## Legacy loader ownership (2026-11-04, Issue #244)
 
 启动迁移仅自动禁用项目自有的 `@dsh-remote/plugin` 旧名；不再按裸名 `dsh-remote`
@@ -211,7 +240,7 @@ Desktop，探测超时关闭 stdout 后可能触发 `write EPIPE`。探测脚本
 
 当前仓库实现：
 
-- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口 + dsh-TUI `/remote` 管理命令；无用户可见的 Client 模式）
+- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口；dsh-TUI 集成自 0.6.3 起移除，计划下一版本单独提供；无用户可见的 Client 模式）
 - Android Client（账号授权 + Adaptive transport + v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote + 可选 CodeX Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
@@ -271,7 +300,7 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 
 | 模块 | 状态 | 主要剩余工作 |
 | --- | --- | --- |
-| Plugin Host | 账号密码/主机匹配码接入、dsh-TUI 无 browser connection 时默认开启 Host、GitHub/知乎二维码授权与可点击 URL、原生 `/remote` login/status/logout 与 Tab 补全、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop/dsh-TUI 跨机 E2E 已验证；无自定义 Harness 业务适配层 | v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
+| Plugin Host | 账号密码/主机匹配码接入、GitHub/知乎二维码授权与可点击 URL、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop 跨机 E2E 已验证；Host bundle 已内联运行时依赖，dsh-TUI 集成自 0.6.3 移除；无自定义 Harness 业务适配层 | 恢复 dsh-TUI 集成（下一版本）、v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
 | Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测拒绝 ApiProxy-only Host；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、断线重连恢复、页面级导航接口、长期稳定性 |
 | Android | 使用 v0.1.2+ Typert Remote 数据面，并直接接入可选 `codex.app.*`：账号登录注册、成员设备列表与 identity key 固定、Adaptive transport + Noise、capability 探测、Harness/CodeX Workspace 与 Session、远端目录选择与 CodeX Project 注册、工作区收藏与首页快捷链接（点击直达该工作区最近会话）、分页 History/live frame、模型/权限、文字/图片 Prompt、interrupt 与审批，以及跟随系统/英文/简体中文/日语/繁体中文/西语/德语/法语界面；启动时仅有一台设备且在线、已信任时自动进入其工作区列表，否则进入设备列表；会话链接与用户开启的上次会话恢复优先，返回设备列表不重复自动跳转；历史 rc.2/v0.1.2/CodeX 真机跨机 E2E、图片分块、重连和 WebRTC 已验证 | CodeX Project 新建跨设备 E2E、协议 conformance fixtures、长期稳定性与跨设备回归 |
 | VS Code | Extension 基础已实现：SecretStorage 身份/凭证、账号/扫码登录、Host 指纹固定、Adaptive transport + Noise、rc.2 ApiProxy / v0.1.2 Typert Remote Host→Workspace→Session 导航、Prompt、permission command 与编辑区会话面板 | Extension Host 跨机 E2E、实时流式更新、question 界面与重连恢复 |

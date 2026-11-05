@@ -63,7 +63,7 @@ interface CliRuntime {
   createHostApi: (serverUrl: string, store: ServerCredentialStore) => CliHostApi
 }
 
-/** TUI-friendly account bootstrap. Configuration remains owned by the DSH profile. */
+/** Headless account bootstrap. Configuration remains owned by the DSH profile. */
 export async function runCli(
   args: readonly string[] = process.argv.slice(2),
   dependencies: RemoteCliDependencies = {},
@@ -93,7 +93,7 @@ async function register(args: readonly string[], runtime: CliRuntime): Promise<n
   }
   const context = await hostContext(runtime)
   await context.api.authorizeHostWithCode(context.identity, args[0])
-  write(runtime.stdout, 'Remote Host registration complete. Restart dsh-tui to bring the Remote Host online.\n')
+  write(runtime.stdout, 'Remote Host registration complete. Restart the Harness instance to bring the Remote Host online.\n')
   return 0
 }
 
@@ -133,7 +133,7 @@ async function login(args: readonly string[], runtime: CliRuntime): Promise<numb
       continue
     }
     if (result.status === 'complete') {
-      write(runtime.stdout, `${authorizedMessage(result.authorization)} Restart dsh-tui to bring the Remote Host online.\n`)
+      write(runtime.stdout, `${authorizedMessage(result.authorization)} Restart the Harness instance to bring the Remote Host online.\n`)
       return 0
     }
     if (result.status === 'expired') break
@@ -151,12 +151,12 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
   const lines = [
     'Remote Host status',
     `Server: ${serverUrl}`,
-    'Host control: enabled (dsh-TUI default)',
+    'Host control: enabled',
   ]
 
   if (!await exists(join(directory, 'device.json'))) {
     lines.push('Device: not initialized', 'Authorization: logged out', 'Credential: unavailable')
-    write(runtime.stdout, `${lines.join('\n')}\n\nRun "ds-harness-remote login" or use "/remote login" in dsh-TUI.\n`)
+    write(runtime.stdout, `${lines.join('\n')}\n\nRun "ds-harness-remote login" to authorize this Host.\n`)
     return 0
   }
 
@@ -168,7 +168,7 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
   lines.push(`Device: ${identity.name} (${identity.deviceId})`)
   if (stored === undefined) {
     lines.push('Authorization: logged out', 'Credential: unavailable')
-    write(runtime.stdout, `${lines.join('\n')}\n\nRun "ds-harness-remote login" or use "/remote login" in dsh-TUI.\n`)
+    write(runtime.stdout, `${lines.join('\n')}\n\nRun "ds-harness-remote login" to authorize this Host.\n`)
     return 0
   }
 
@@ -179,7 +179,7 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
   try {
     await api.authenticate(identity)
     lines.push('Credential: ready')
-    lines.push('Presence: published while dsh-tui is running')
+    lines.push('Presence: published while the Harness process is running')
     write(runtime.stdout, `${lines.join('\n')}\n`)
     return 0
   } catch (error) {
@@ -215,7 +215,7 @@ async function logout(args: readonly string[], runtime: CliRuntime): Promise<num
   if (revokeFailure !== undefined) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`)
   }
-  write(runtime.stdout, 'Remote Host logged out and its local device identity was rotated. Restart dsh-tui.\n')
+  write(runtime.stdout, 'Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n')
   return 0
 }
 
@@ -253,11 +253,9 @@ function resolveDependencies(input: RemoteCliDependencies): CliRuntime {
 }
 
 export async function renderTerminalQr(url: string): Promise<string> {
-  // Keep the terminal-only renderer off the Host plugin startup path. The
-  // built-in compact renderer has only a one-module quiet zone and relies on
-  // half-height glyphs, which is difficult for phone cameras to recognize in
-  // some terminal profiles. Render square modules with an explicit standard
-  // four-module quiet zone instead.
+  // Keep the terminal-only renderer off the Host plugin startup path. Render
+  // square modules with an explicit standard four-module quiet zone so phone
+  // cameras recognize the code in narrow terminal profiles.
   const { default: QRCode } = await import('qrcode')
   const modules = QRCode.create(url, { errorCorrectionLevel: 'M' }).modules
   const width = modules.size + TERMINAL_QR_MARGIN * 2
@@ -273,32 +271,6 @@ export async function renderTerminalQr(url: string): Promise<string> {
     lines.push(line)
   }
   lines.push(...Array.from({ length: TERMINAL_QR_MARGIN }, () => quietLine))
-  return lines.join('\n')
-}
-
-/** Square terminal modules at half the row count for fullscreen TUI scenes. */
-export async function renderCompactTerminalQr(url: string): Promise<string> {
-  const { default: QRCode } = await import('qrcode')
-  const modules = QRCode.create(url, { errorCorrectionLevel: 'M' }).modules
-  const size = modules.size + TERMINAL_QR_MARGIN * 2
-  const lines: string[] = []
-  const isBlack = (row: number, column: number): boolean => {
-    const qrRow = row - TERMINAL_QR_MARGIN
-    const qrColumn = column - TERMINAL_QR_MARGIN
-    return qrRow >= 0 && qrRow < modules.size
-      && qrColumn >= 0 && qrColumn < modules.size
-      && modules.get(qrRow, qrColumn) === 1
-  }
-
-  for (let row = 0; row < size; row += 2) {
-    let line = '\u001B[30;47m'
-    for (let column = 0; column < size; column += 1) {
-      const top = isBlack(row, column)
-      const bottom = isBlack(row + 1, column)
-      line += top ? bottom ? '█' : '▀' : bottom ? '▄' : ' '
-    }
-    lines.push(`${line}\u001B[0m`)
-  }
   return lines.join('\n')
 }
 
@@ -334,10 +306,9 @@ function helpText(): string {
     '  ds-harness-remote status',
     '  ds-harness-remote logout',
     '',
-    'Inside dsh-TUI, use /remote login, /remote status, or /remote logout.',
     'login uses an available QR provider (preferring Zhihu). Use login list to see available providers.',
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
-    'Host configuration is not exposed by this CLI yet. Restart dsh-tui after login or logout.',
+    'Host configuration is not exposed by this CLI yet. Restart the Harness instance after login or logout.',
     '',
   ].join('\n')
 }

@@ -16,7 +16,7 @@
 
 验证：Plugin check、73 文件 / 531 tests、生产构建与 DSH bundle 校验通过；Android check 与 54 文件 / 520 tests 通过。另以独立 DSH 0.2.2-rc.1 + 本仓库开源自部署 Server + 已安装插件完成 Host 激活、Web UI 渲染、控制面/设置读写与远程工作区建立烟测。未做真实 Desktop/Android APK、跨设备加密 E2E 与 0.2.2 新 UI 的人工验收；新增 6 种官方 UI 语言的 Remote 文案仍待补齐。
 
-Remote Plugin 与 dsh-TUI 的适配基线是分开的。当前公开 dsh-TUI `0.17.0` 的主适配线是 `dsh-v0.2.1-rc.3`，因此本仓库不把 dsh-TUI `0.17.0` + 新 Harness 基线宣称为已完成 runtime 验收的组合。
+0.6.3 不包含 dsh-TUI 集成，将在后续版本单独适配。当前公开 dsh-TUI `0.17.0` 的主适配线是 `dsh-v0.2.1-rc.3`，因此本仓库不把 dsh-TUI 与当前 Harness 基线的组合宣称为已完成 runtime 验收。
 
 ## 当前兼容目标（2026-10-31）
 

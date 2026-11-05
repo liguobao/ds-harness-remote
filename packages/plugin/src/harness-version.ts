@@ -45,7 +45,7 @@ async function readHarnessManifestVersion(manifestPath: string): Promise<string 
  * Compatibility fallback for Harness builds whose host.describe still returns
  * the historical 0.0.1 placeholder.
  *
- * Both supported entrypoint layouts must be covered. A CLI/dsh-TUI entrypoint
+ * Both supported entrypoint layouts must be covered. A CLI entrypoint
  * sits below the @deepseek-ai/dsh package root, so only its ancestor chain is
  * worth walking. The 0.2.0 Desktop shell instead launches its own
  * `@deepseek-ai/dsh-desktop-host` entrypoint from inside `app.asar`, where the

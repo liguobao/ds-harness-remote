@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
@@ -20,10 +20,18 @@ assert.equal(componentManifest.version, manifest.version, 'root Component manife
 assert.equal(pluginComponentManifest.version, pluginManifest.version, 'npm Component manifest version must match package.json')
 assert.equal(componentManifest.facets?.host?.entry, 'index.js', 'root Component manifest must expose the GitHub Host entry')
 assert.equal(pluginComponentManifest.facets?.host?.entry, 'dist/index.js', 'npm Component manifest must expose the npm Host entry')
-assert.ok(
-  componentManifest.contributes?.commands?.some(command => command.id === 'ds-harness.remote'),
-  'root Component manifest must declare the /remote command',
-)
+for (const [label, component] of [['root', componentManifest], ['npm', pluginComponentManifest]]) {
+  assert.equal(
+    component.requires,
+    undefined,
+    `${label} Component manifest must not require terminal command contracts (dsh-TUI support is deferred)`,
+  )
+  assert.equal(
+    component.contributes?.commands,
+    undefined,
+    `${label} Component manifest must not declare the retired /remote command`,
+  )
+}
 assert.equal(pluginManifest.description, manifest.description, 'root and npm package descriptions must stay unified')
 assert.deepEqual(pluginManifest.keywords, manifest.keywords, 'root and npm package keywords must stay unified')
 assert.equal(pluginManifest.homepage, manifest.homepage, 'root and npm package homepages must stay unified')
@@ -43,7 +51,7 @@ assert.equal(manifest.main, './index.js', 'root package must expose a prebuilt H
 assert.equal(
   manifest.bin?.['ds-harness-remote'],
   './packages/plugin/bin/ds-harness-remote.js',
-  'root package must expose the TUI-compatible Remote CLI',
+  'root package must expose the Remote CLI',
 )
 assert.equal(manifest.bin?.remote, undefined, 'root package must not install a standalone remote executable')
 assert.equal(
@@ -89,6 +97,13 @@ assert.match(
   'root patch must declare the webServer service for host control',
 )
 
+assert.doesNotMatch(patch, /ds-harness-remote-tui/, 'root patch must not insert the retired dsh-TUI Host entry')
+assert.doesNotMatch(patch, /!!js/, 'root patch must stay static while dsh-TUI integration is deferred')
+
+const npmPatch = readFileSync(join(root, 'packages/plugin/cordis.patch.yml'), 'utf8')
+assert.doesNotMatch(npmPatch, /ds-harness-remote-tui/, 'npm patch must not insert the retired dsh-TUI Host entry')
+assert.doesNotMatch(npmPatch, /!!js/, 'npm patch must stay static while dsh-TUI integration is deferred')
+
 const rootHostEntry = readFileSync(join(root, 'index.js'), 'utf8')
 assert.match(rootHostEntry, /packages\/plugin\/dist\/index\.js/, 'root Host entry must forward to the committed bundle')
 
@@ -97,7 +112,34 @@ assert.match(publicTypes, /name:\s*'ds-harness-remote'/, 'public types must expo
 
 const hostBundle = readFileSync(join(root, 'packages/plugin/dist/index.js'), 'utf8')
 assert.doesNotMatch(hostBundle, /(?:from\s+|require\()['\"]@dsh-remote\//, 'Host bundle must not import unpublished workspace packages')
-assert.match(hostBundle, /name:\s*["']remote["']/, 'Host bundle must register the dsh-TUI /remote command')
+assert.doesNotMatch(
+  hostBundle,
+  /tuiScenes|tuiCommandTrees|ds-harness-remote-tui/,
+  'Host bundle must not reference dsh-TUI services or the retired terminal entry',
+)
+assert.doesNotMatch(
+  hostBundle,
+  /(?:from\s+|require\()["']ws["']/,
+  'Host bundle must inline its WebSocket dependency so a node_modules-free installation still loads',
+)
+assert.doesNotMatch(
+  hostBundle,
+  /(?:from\s+|require\()["']qrcode["']/,
+  'Host bundle must inline its terminal QR encoder',
+)
+assert.doesNotMatch(
+  hostBundle,
+  /(?:from\s+|require\()["']@deepseek-ai\/schemastery["']/,
+  'Host bundle must inline its config schema library so bundle-only installations load',
+)
+assert.deepEqual(
+  [...hostBundle.matchAll(/^import\s[^;]*?from\s+"([^".][^"]*)"/gm)]
+    .map(match => match[1])
+    .filter(specifier => !isBuiltin(specifier))
+    .filter(specifier => !specifier.startsWith('node:')),
+  ['@deepseek-ai/dsh-client-connection'],
+  'Host bundle must only leave the official Connection peer external; inline all other runtime packages so node_modules-free installs load',
+)
 assert.doesNotMatch(
   hostBundle,
   /\bsettingsNamespace\b/,

@@ -17,7 +17,7 @@ Desktop 复用 Harness 原生 UI；Android 提供适合移动端的工作区、�
 - 可选 CodeX App Server 和 Cursor / AGY / Pi / OpenCode / Claude ACP 后端，通过独立数据面展示其会话。
 - 后端支持范围内的只读工作区文件与交互终端；明确授权的本机开发服务预览。
 - Android 工作区收藏、最近会话快捷入口、跟随系统及英、简中、繁中、日、西、德、法语言与浅色/深色主题。
-- dsh-TUI Host 的原生 `/remote` 登录、状态、退出与二维码授权。
+- 终端二维码授权通过独立 CLI 提供；dsh-TUI Host 的原生 `/remote` 集成计划在后续版本单独提供。
 - 后端设置保存后热更新，工作区可用性由实际就绪状态决定。
 
 CodeX 默认开启、Cursor 默认关闭；其他 ACP 后端以 Host 配置和实际就绪状态为准。

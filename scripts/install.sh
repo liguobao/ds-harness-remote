@@ -154,22 +154,11 @@ function abort(message) { const error = new Error(message); error.installerSafe 
     }
   }
   walk(tree);
-  function normalizeExpression(source) {
-    if (typeof source !== 'string') return '';
-    // Ignore formatting whitespace, but never whitespace inside quoted literals.
-    return source.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\s+/g, part => /^\s/.test(part) ? '' : part);
-  }
-  const stock = "[...ctx.loader.entries()].some(entry => (entry.options.id === 'dsh-tui' || entry.options.name === '@deepseek-harness-tui/dsh-tui') && !entry.disabled )".replace(/\s/g,'');
-  const remotes = entries.filter(e => e.node.name === 'ds-harness-remote' && !e.off);
-  let candidates = remotes.filter(e => !e.uncertain);
-  let complementaryPair = false;
-  if (!candidates.length && remotes.length === 2) {
-    const ordinary = remotes.find(e => e.node.id === 'ds-harness-remote');
-    const tui = remotes.find(e => e.node.id === 'ds-harness-remote-tui');
-    if (ordinary && tui && !ordinary.ancestorUncertain && !tui.ancestorUncertain && ordinary.node.disabled instanceof Expression && tui.node.disabled instanceof Expression && normalizeExpression(ordinary.node.disabled.source) === stock && normalizeExpression(tui.node.disabled.source) === '!'+stock && JSON.stringify(ordinary.node.config) === JSON.stringify(tui.node.config)) { candidates = [ordinary]; complementaryPair = true; }
-  }
-  if (candidates.length !== 1 || (!complementaryPair && remotes.length !== 1)) abort('Remote configuration is missing, ambiguous or dynamically enabled');
-  const input = candidates[0].node.config || {};
+  // The bundle inserts exactly one static Host entry in this release (dsh-TUI
+  // integration is deferred, so no complementary terminal row exists).
+  const remotes = entries.filter(e => e.node.name === 'ds-harness-remote' && !e.off && !e.uncertain);
+  if (remotes.length !== 1) abort('Remote configuration is missing, ambiguous or dynamically enabled');
+  const input = remotes[0].node.config || {};
   function staticValue(value) { if(value instanceof Expression) abort('Dynamic Remote configuration is unsupported'); if(value && typeof value === 'object') Object.values(value).forEach(staticValue); }
   staticValue(input);
   const config = remote.resolveConfig(input);

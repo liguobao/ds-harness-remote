@@ -80,7 +80,7 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 | DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: DeepSeek Harness の Android クライアント。スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
 | ブラウザー拡張機能 | Chrome | アクセス入口のみ | ログイン済み Web の認可を独立したデバイス認証情報に交換し、オンラインの Host を一覧表示して同一オリジンの Remote Web を開きます。拡張機能自体に会話 UI はありません |
-| dsh-TUI | ターミナル専用 CLI | 対応 | Host として利用できます。[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。インストーラーが自動的に Web サービスを作成することはありません |
+| dsh-TUI | ターミナル専用 CLI | 予定 | このリリースには統合を含まず、後続バージョンで個別に提供します。インストーラーが自動的に Web サービスを作成することはありません |
 | Linux | クラウドサーバー | 対応 | [公式サイト](https://dsh.r2049.cn/)にログインすると、設定不要のワンコマンド無人インストールを利用できます。 |
 
 複数のクライアントから同じ Host に同時接続できます。RPC 呼び出しとストリームは接続ごとに分離されます。
@@ -98,10 +98,6 @@ DeepSeek Harness Desktop の **Extensions / Plugin management** を開き、npm 
 ### Linux ワンコマンドインストール
 
 [公式サイト](https://dsh.r2049.cn/)にログインし、ワンコマンドインストール用の認可コードを取得してインストールしてください。
-
-### dsh-TUI Host
-
-[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) を使ったターミナル Host のセットアップは、[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。
 
 ### ネイティブ Android クライアント
 
@@ -250,7 +246,7 @@ Remote プラグインをインストールしてログインした Harness イ�
 
 **対応する Harness のバージョンは？**
 
-現在の基準バージョンは `dsh-v0.2.1-rc.5` で、`0.2.0` rc.2 / rc.1 と互換性があります。[互換性ガイド](docs/compatibility.md)を参照してください。
+現在の基準バージョンは `dsh-v0.2.2-rc.1` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
 
 Host プラグイン、同梱の Remote クライアント、Android では、Harness `0.1.1-rc.2` の ApiProxy 対応を削除しました。公式の Typert Remote carrier を提供する Host を使用してください。ApiProxy のみを提供する Host や機能検出に対応しない旧 Host への接続は拒否され、フォールバックは行いません。
 
@@ -290,7 +286,6 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 
 - [プラグインガイド](packages/plugin/README.md)
 - [インストールガイド](docs/installation.md)
-- [dsh-TUI Remote ガイド](docs/dsh-tui.md)
 - [Codex Remote 技術ノート](docs/codex-remote.md)
 - [ACP Remote / Agent アダプターノート](docs/acp-remote.md)
 - [ドキュメント一覧](docs/README.md)
@@ -301,12 +296,12 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - [変更履歴](docs/CHANGELOG.md)
 - [プライバシーポリシー](docs/PRIVACY.md)
 - [Android ガイド](apps/android/README.md)
-- 現在の開発基準は `dsh-v0.2.1-rc.5` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
+- 現在の開発基準は `dsh-v0.2.2-rc.1` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
 
 ## 関連リンク
 
 - 関連プロジェクト: [DSH Go](https://github.com/ccch1mneyyy/dsh-go) — DeepSeek Harness をポケットに。スマートフォン上で直接実行でき、パソコンのリモート操作も可能です。Remote 連携に対応しています。
-- 関連プロジェクト: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — Remote 連携に対応しています。[dsh-TUI Remote ガイド](docs/dsh-tui.md)を参照してください。
+- 関連プロジェクト: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — ターミナル優先の Harness クライアントです。Remote 連携は後続バージョンで提供予定です。
 - 相互リンク: [LINUX DO](https://linux.do/)
 - 相互リンク: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
 

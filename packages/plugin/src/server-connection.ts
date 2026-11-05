@@ -208,7 +208,7 @@ export class HostServerConnection {
             ? 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused.'
             : code === 'SERVER_CREDENTIALS_BUSY'
               ? 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.'
-              : 'Host authorization failed. Run /remote login or authorize this Host again in Remote settings.')
+              : 'Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.')
         }
         if (code === 'DEVICE_REVOKED') {
           try {

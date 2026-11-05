@@ -130,7 +130,7 @@ Web token 不进入二维码、手机回调 URL 或日志，并且只能由发�
 
 插件 Remote 登录页在进入授权页面和 Server 切换时重新获取列表，按语言偏好优先选择
 已启用的知乎或 GitHub，其余条目保留服务端顺序，未启用的偏好不会阻挡其他提供商。
-命令行使用 `ds-harness-remote login list`，dsh-TUI 使用 `/remote login list` 查看可用条目，
+命令行使用 `ds-harness-remote login list` 查看可用条目，
 随后通过 `login <id>` 登录。未指定 ID 时优先选择可用的知乎，否则选择首个扫码提供商。
 
 新增 OAuth 需要在 Server 实现授权、回调与账号绑定，并在 `app/api/auth.py` 的
@@ -361,7 +361,7 @@ wss://dsh.r2049.cn/ws/v1/connect
 ```
 
 Host 在启动时从当前运行入口定位 `@deepseek-ai/dsh`
-运行包读取版本：CLI/dsh-TUI 入口位于该包根目录之下，沿入口祖先链查找；0.2.0 Desktop 由
+运行包读取版本：CLI 入口位于该包根目录之下，沿入口祖先链查找；0.2.0 Desktop 由
 `app.asar` 内的 `@deepseek-ai/dsh-desktop-host` 入口拉起、Harness 包是其兄弟目录，则按入口的
 模块作用域解析 `@deepseek-ai/dsh/package.json`。读取成功时，Host 在设备注册
 descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。读取都失败时省略字段，不能

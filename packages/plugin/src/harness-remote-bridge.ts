@@ -1280,5 +1280,5 @@ function remoteOwnedBundleRow(row: Record<string, unknown>, plugin: boolean): bo
   return !plugin && (!Array.isArray(row.rows)
     || row.rows.some(value => !isRecord(value) || remoteModule(value.moduleName))
     || (Array.isArray(row.overrides)
-      && row.overrides.some(value => remoteModule(value) || value === 'ds-harness-remote-tui')))
+      && row.overrides.some(value => remoteModule(value))))
 }

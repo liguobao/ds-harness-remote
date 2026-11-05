@@ -6,6 +6,8 @@
 
 - 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约恢复展示，CodeX/ACP 会话的实时状态适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用；Harness `0.2.1-rc.5` 继续可用。
 - 要求 Node.js `>=24.9`（与 Harness 0.2.2 一致）；Linux 安装器改为安装 Node.js 24.9.0。
+- Host bundle 内联运行时依赖，修复本地路径、手工复制等不携带包依赖的安装方式下 `Cannot find package 'ws'` 导致插件无法加载的问题。
+- 本版本移除 dsh-TUI 集成（终端 `/remote` 命令与终端专用 Host entry），后续版本单独提供。
 
 ### 修复
 
@@ -20,6 +22,8 @@
 
 - Support DeepSeek Harness `0.2.2-rc.1`: remote session images display again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the new Trajectory raw results, automation editing, and third-party plugin update surfaces work over Remote. Harness `0.2.1-rc.5` remains supported.
 - Require Node.js `>=24.9`, matching Harness 0.2.2. The Linux installer now provisions Node.js 24.9.0.
+- Inline the Host bundle's runtime dependencies, fixing `Cannot find package 'ws'` load failures in installations that do not carry the package's runtime dependencies (local-path links, manual copies, generated installs).
+- Remove dsh-TUI integration (the terminal `/remote` command and terminal-only Host entry) from this release; it returns in a later version.
 
 ### Fixes
 

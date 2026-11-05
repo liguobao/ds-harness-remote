@@ -52,7 +52,7 @@ Web binds only to `127.0.0.1`. The installer checks systemd process state, not e
 - Existing Host credentials are never silently replaced. Stop the original Host and sign out through official controls before changing accounts with a fresh token.
 - If registration succeeds but service startup fails, credentials remain. Repair the environment and rerun without a token.
 - Units carry a canonical `DSH_HOME` ownership marker. Only matching installer-managed units are updated. Different homes, unmarked legacy units and symlinks are not taken over.
-- Web capability and unit ownership are preflighted before token redemption. Headless, SDK, dsh-TUI and uncertain dynamic configurations do not get Web units; use `DSH_REMOTE_AUTOSTART=0` and manage those processes separately.
+- Web capability and unit ownership are preflighted before token redemption. Headless, SDK and terminal-only profiles (including `dsh-tui`) do not get Web units; use `DSH_REMOTE_AUTOSTART=0` and manage those processes separately. dsh-TUI integration itself is not part of this release.
 - Only matching managed services are started/restarted. Other DSH processes are not stopped automatically; exit old foreground processes using the same home to prevent connection replacement or port conflicts.
 - Legacy services, runtimes and credentials are not migrated or deleted. There is no automatic rollback; failed bootstrap directories may remain for inspection.
 

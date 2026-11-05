@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 describe('Remote CLI', () => {
-  it('authorizes the TUI Host through the selected OAuth QR provider', async () => {
+  it('authorizes the Host through the selected OAuth QR provider', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-${crypto.randomUUID()}`)
     directories.push(dshHome)
     const output = writer(true)
@@ -58,7 +58,7 @@ describe('Remote CLI', () => {
     expect(output.text).toContain('<terminal-qr>')
     expect(output.text).toContain(`Authorization URL: \u001B]8;;https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u0007https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890\u001B]8;;\u0007`)
     expect(output.text).toContain('Remote Host login complete for host@example.com.')
-    expect(output.text).toContain('Restart dsh-tui')
+    expect(output.text).toContain('Restart the Harness instance')
     expect(output.text).not.toContain('web-account-token-value')
     expect(output.text).not.toContain('access-token-value')
     expect(errors.text).toBe('')
@@ -165,11 +165,11 @@ describe('Remote CLI', () => {
       createHostApi: (serverUrl, store) => new HostServerApi(serverUrl, store, fetchMock),
     })).resolves.toBe(0)
 
-    expect(output.text).toContain('Host control: enabled (dsh-TUI default)')
+    expect(output.text).toContain('Host control: enabled')
     expect(output.text).toContain('Authorization: logged in (account)')
     expect(output.text).toContain('Account: status@example.com')
     expect(output.text).toContain('Credential: ready')
-    expect(output.text).toContain('Presence: published while dsh-tui is running')
+    expect(output.text).toContain('Presence: published while the Harness process is running')
     expect(fetchMock).not.toHaveBeenCalled()
     expect(output.text).not.toContain('access-token-value')
     expect(output.text).not.toContain('refresh-token-value')

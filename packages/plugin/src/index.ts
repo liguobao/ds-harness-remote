@@ -5,7 +5,6 @@ import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import { ClientModeRuntime, type HostConnectionHandle } from './client-runtime.js'
 import {
   Config,
-  DEFAULT_REMOTE_SERVER_URL,
   resolveConfig,
   type Config as ConfigShape,
   type ConfigInput,
@@ -26,11 +25,6 @@ import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
 import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './plugin-route-dispatcher.js'
 import { installRemoteDiscoveryTools } from './remote-tools.js'
-import {
-  installTuiRemoteCommand,
-  type TuiRemoteBinding,
-  type TuiRemoteTarget,
-} from './tui-command.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
 import {
@@ -123,21 +117,10 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (isLegacySettingsProvider(settings)) return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
-  // The scoped TUI entry is the normal activation path. Direct composition
-  // tests and older partial TUI profiles can still opt in by providing the
-  // command and scene registries explicitly.
-  const tuiEntry = entryId === 'ds-harness-remote-tui'
-  const tuiCommandsAvailable = ctx.get('commands', false) !== undefined
-    && (tuiEntry || ctx.get('tuiScenes', false) !== undefined)
-  const tuiBinding: TuiRemoteBinding | undefined = tuiCommandsAvailable ? {} : undefined
-  // The scoped TUI entry keeps command registration synchronous with Loader
-  // activation; optional scene/completion registries are soft capabilities.
-  if (tuiBinding !== undefined) installTuiRemoteCommand(ctx, () => tuiBinding.target)
-
-  // A terminal-only dsh-TUI profile has no browser `connection` service.
-  // A Gateway without a stream carrier still supports the Host
-  // control plane and `/remote` account commands. Desktop
-  // profiles still wait for one complete official Harness carrier.
+  // This release activates only the browser/Desktop Host surface: one official
+  // Harness `connection` service is required before the runtime starts. dsh-TUI
+  // support is deferred to a later release and no terminal-specific services
+  // are resolved here.
   const activateWhenCarrierReady = (runtimeContext: Context): void | Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
@@ -159,29 +142,21 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
       await disposePendingControl?.()
       disposePendingControl = undefined
-      await activate(activeContext, readConfig, entryId, tuiBinding)
+      await activate(activeContext, readConfig, entryId)
     }
-    if (
-      tuiCommandsAvailable
-      || new TypertGatewaySwitch(gateway).supportsCarrier()
-    ) {
+    if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext)
     }
     installPendingControl()
   }
 
-  if (tuiCommandsAvailable) {
-    ctx.inject(['settings', 'typertGateway'], activateWhenCarrierReady)
-  } else {
-    ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
-  }
+  ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
 }
 
 async function activate(
   ctx: Context,
   readConfig: () => ConfigInput,
   entryId: string,
-  tuiBinding?: TuiRemoteBinding,
 ): Promise<void> {
   const settings = ctx.get('settings') as SettingsServiceLike | undefined
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
@@ -189,12 +164,7 @@ async function activate(
   const webServer = ctx.get('webServer') as HostWebServerLike | undefined
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
-  const resolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
-  // dsh-TUI has no settings UI or browser connection. In that profile the
-  // QR-authorized Host is enabled against the hosted Server by default.
-  const config: ResolvedConfig = connection === undefined && resolvedConfig.serverUrl === undefined
-    ? { ...resolvedConfig, serverUrl: DEFAULT_REMOTE_SERVER_URL }
-    : resolvedConfig
+  const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
   const defaultIdentityDirectory = new IdentityStore().directory
   if (!config.enabled) {
     if (connection !== undefined) {
@@ -336,8 +306,6 @@ async function activate(
           clientServiceProvided = true
         }
       }
-      tuiTarget = { runtime, config: next }
-      if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
       return { client: clientRuntime, host: runtime }
     }
     replacement = operation()
@@ -350,8 +318,6 @@ async function activate(
 
   ctx.provide('dshRemote', runtime)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
-  let tuiTarget: TuiRemoteTarget = { runtime, config }
-  if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection!, webServer)
@@ -369,11 +335,10 @@ async function activate(
         }
       })()
       await startup
-      // Only the browser/Desktop connection surfaces the update notice; a
-      // headless dsh-TUI Host has no consumer, so it skips the registry calls.
+      // Only the browser/Desktop connection surfaces the update notice, so a
+      // Host composition without it skips the registry calls.
       if (connection !== undefined) updateChecker.start()
     } catch (error) {
-      if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
       await clientRuntime?.close()
       await runtime.close()
@@ -383,7 +348,6 @@ async function activate(
       closed = true
       updateChecker.stop()
       await replacement?.catch(() => undefined)
-      if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
       await clientRuntime?.close()
       await runtime.close()

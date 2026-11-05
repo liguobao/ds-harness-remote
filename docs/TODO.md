@@ -137,7 +137,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 同账号 membership、受保护 peer descriptor 与本地 pinned trust 双重授权
 - [x] Relay control、标准 Noise IK、counter/replay 拒绝与 opaque ciphertext
 - [x] Desktop Plugin Host runtime、Settings 配置和 GitHub/npm Bundle 入口
-- [x] dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI
+- [x] 历史：dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI（0.6.3 起移除该集成，后续版本恢复）
 - [x] 历史 Host ApiProxy bridge 与 switch（2026-10-25 已移除）
 - [x] Harness v0.1.2 alpha.1–rc.1 Typert Remote unary/stream/event carrier、固定 endpoint allowlist、加密 capability 探测；rc.2 ApiProxy 激活分支已移除
 - [x] Harness v0.1.5 rc.1 / v0.2.0 rc.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
@@ -154,10 +154,13 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P0：Plugin 可用链路
 
+- [ ] 在后续版本单独恢复 dsh-TUI 集成：终端专用 Host entry、`/remote login|status|logout` 与补全/场景，并重新完成 dsh-TUI 基线验收；本版本只发布浏览器/Desktop Host。
+- [ ] install.sh helper 直接 import 插件 entry，仍要求 profile 内可解析官方 peer（pnpm profile 缺少 `@deepseek-ai/dsh-client-connection` 时会失败，既有问题，与本次内联无关）；评估自带 installer 入口或在 preflight 前注入 profile 模块解析，并重做 Linux 干净机 Token 注册验收。
+
 - [ ] 单一安装入口实机回归：Linux root 干净 x64/arm64 上的 Node.js/DSH 引导、真实一次性 Token 注册、systemd 系统服务立即启动/重启自启及客户端在线确认；macOS 已有 CLI/Desktop launcher、desktop/web profile 选择和注册回归。模拟下载/systemctl 与回环 API 烟测不等于目标机验收；Windows 使用官方插件管理或命令，不维护专用脚本。
 
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
-- [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval
+- [x] 历史：在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval（0.6.3 起该集成暂时移除）
 - [x] 分别用 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 跑通双机 Workspace/Session/Prompt/approval E2E，并验证混合代际在 mutation 前拒绝
 - [ ] 核定旧版 Harness 的维护范围。逐项决定以下历史验收是否仍需执行。
 - [ ] 历史待验收 `dsh-v0.1.2-rc.1`：Desktop/dsh-TUI 跨机会话与长期稳定性。
