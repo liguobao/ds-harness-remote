@@ -250,13 +250,18 @@ currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"
 实测：3072×4096 拍成 `1200×1600 / 196 KB`，主机 `session/prompt ok`，Agent 直接在主机上
 `read_image` 读图分析，本地气泡也回显了缩略图。
 
-仍未做：历史里「主机侧已有的图片」回显——`user/message` 的 image block 只带
-`attachment.attachmentId`，需要再调 `session/attachment` 拉 base64，目前历史图片不显示。
+**历史图片回显（V0.07.2 补上）**：`user/message` 的 image block 只带
+`attachment.attachmentId`，客户端解析出 id 后调 `session/attachment` 拉 base64
+（`HarnessClient.sessionAttachment`），结果缓存到 `attachmentCache`，失败也记一笔免得反复问主机。
+踩的坑：历史是 `foldHistory()` 折出来的，不会触发 `session/event` 那条路，
+所以补水排程必须放在 `openSessionInternal` 折完历史之后；只挂在 `openSession` 上会漏掉
+「连上后自动打开的会话」。实测 `history image ok … base64=303520`（227 KB 原图）。
 
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.07.2 | 1000035 | 历史图片回显：session/attachment 拉字节并缓存 |
 | 0.07.0 | 1000033 | TURN 候选 + LAN/P2P/TURN 徽标 + 图片插入 |
 | 0.06.1 | 1000031 | LAN-only WebRTC 直连跑通（offer/answer/ice + RTCH 分块 + 回落中继） |
 | 0.05.1 | 1000029 | 设备卡副标题折行，版本号不再被省略号吃掉 |

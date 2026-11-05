@@ -233,6 +233,28 @@ export class HarnessAlphaClient {
     }
   }
 
+  /**
+   * 读历史图片字节：`session/attachment` 只允许读该会话日志引用过的附件，
+   * 返回标准 base64（主机会校验归属，不是通用文件读取）。
+   */
+  async sessionAttachment(sessionId: string, attachmentId: string): Promise<string> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'attachmentId': attachmentId
+    };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/attachment', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    if (root === undefined) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid attachment result.');
+    }
+    const data: string = jsonStr(root, 'data', '');
+    if (data.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an empty attachment.');
+    }
+    return data;
+  }
+
   async sessionCancel(sessionId: string): Promise<void> {
     const request: Record<string, Object> = { 'sessionId': sessionId };
     const args: Record<string, Object> = { 'request': request };

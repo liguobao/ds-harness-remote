@@ -70,8 +70,10 @@ export class ChatItem {
   noticeKind: string = '';
   /** notice 上的操作按钮要执行的斜杠命令（例如 '/compact'），空表示没有按钮。 */
   actionCommand: string = '';
-  /** 用户消息里带的图片（标准 base64，本地回显用；历史里的图片另走附件读取）。 */
+  /** 用户消息里带的图片（标准 base64）；本地刚发的直接用，历史的按 attachmentId 拉。 */
   images: string[] = [];
+  /** 历史图片的附件 id：拿到字节前先占位，下拉时逐张补。 */
+  imageAttachmentIds: string[] = [];
 }
 
 /**
@@ -92,6 +94,12 @@ export class AppRuntime {
   private rtcBridge: RtcBridge | undefined = undefined;
   /** 这次连接最终用的数据面：'' | 'relay' | 'lan' | 'p2p' | 'turn'。 */
   transportLabel: string = '';
+  /** 历史图片字节缓存：attachmentId -> base64（'' 表示取失败，别反复打主机）。 */
+  private attachmentCache: Map<string, string> = new Map<string, string>();
+  /** 已经尝试补过的附件，避免 hydrate 死循环。 */
+  private fetchedAttachments: Map<string, string> = new Map<string, string>();
+  /** 历史图片补水已排程（历史是异步帧回来的，不能在 openSession 里只跑一次）。 */
+  private imageHydrateScheduled: boolean = false;
   /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
   private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
   private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
@@ -645,6 +653,7 @@ export class AppRuntime {
         }
       }
       await this.openSessionInternal(harness, sessionId, title);
+      this.hydrateHistoryImages().catch(() => undefined);
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
@@ -1154,6 +1163,103 @@ export class AppRuntime {
       this.errorMsg = errorMessage(error);
       this.generating = false;
       this.notify();
+    }
+  }
+
+  /** 下一个 tick 再补水，避免每个事件都触发一轮 RPC。 */
+  private scheduleImageHydration(): void {
+    if (this.imageHydrateScheduled) {
+      return;
+    }
+    let needed: boolean = false;
+    for (const item of this.messages) {
+      if (item.kind !== 'user') {
+        continue;
+      }
+      for (const id of item.imageAttachmentIds) {
+        if (!this.fetchedAttachments.has(id)) {
+          needed = true;
+          break;
+        }
+      }
+      if (needed) {
+        break;
+      }
+    }
+    if (!needed) {
+      return;
+    }
+    this.imageHydrateScheduled = true;
+    setTimeout(() => {
+      this.imageHydrateScheduled = false;
+      this.hydrateHistoryImages().catch(() => undefined);
+    }, 60);
+  }
+
+  /**
+   * 历史图片按需补字节：`user/message` 只带 attachmentId，
+   * 逐张调 `session/attachment` 拉回 base64 填进对应气泡（失败就标记，别反复问主机）。
+   */
+  private async hydrateHistoryImages(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    for (let guard = 0; guard < 24; guard += 1) {
+      let attachmentId: string = '';
+      for (const item of this.messages) {
+        if (item.kind !== 'user' || item.imageAttachmentIds.length === 0) {
+          continue;
+        }
+        for (const id of item.imageAttachmentIds) {
+          if (!this.fetchedAttachments.has(id)) {
+            attachmentId = id;
+            break;
+          }
+        }
+        if (attachmentId.length > 0) {
+          break;
+        }
+      }
+      if (attachmentId.length === 0) {
+        return;
+      }
+      this.fetchedAttachments.set(attachmentId, '');
+      let body: string = '';
+      const cached: string | undefined = this.attachmentCache.get(attachmentId);
+      if (cached !== undefined) {
+        body = cached;
+      } else {
+        try {
+          body = await harness.sessionAttachment(sessionId, attachmentId);
+          this.attachmentCache.set(attachmentId, body);
+        } catch (error) {
+          logWarn('history image ' + attachmentId + ' failed: ' + errorMessage(error));
+          this.attachmentCache.set(attachmentId, '');
+        }
+      }
+      if (body.length === 0) {
+        continue;
+      }
+      logInfo('history image ok ' + attachmentId.substring(0, 20) + ' base64=' + body.length);
+      const next: ChatItem[] = this.messages.slice();
+      let changed: boolean = false;
+      for (let i = 0; i < next.length; i += 1) {
+        const item: ChatItem = next[i];
+        if (!item.imageAttachmentIds.includes(attachmentId) || item.images.includes(body)) {
+          continue;
+        }
+        const updated: ChatItem = cloneItem(item);
+        updated.images = updated.images.concat([body]);
+        updated.rev += 1;
+        next[i] = updated;
+        changed = true;
+      }
+      if (changed) {
+        this.messages = next;
+        this.notify();
+      }
     }
   }
 
@@ -1803,6 +1909,8 @@ export class AppRuntime {
     }
     this.messages = foldHistory(page.entries);
     this.rememberHistory(sessionId, this.messages);
+    // 历史里的图片只有 attachmentId，这里排程补水（自动打开的会话也走这条）
+    this.scheduleImageHydration();
     let turnOpen: boolean = false;
     for (const entry of page.entries) {
       if (entry.event.type === 'turn/start') {
@@ -2001,6 +2109,9 @@ export class AppRuntime {
       return;
     }
     this.messages = applySessionEvent(this.messages, event);
+    if (event.type === 'user/message' || event.type === 'turn/end') {
+      this.scheduleImageHydration();
+    }
     if (event.type === 'turn/start') {
       this.generating = true;
     } else if (event.type === 'turn/end') {
@@ -2208,6 +2319,7 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.noticeKind = item.noticeKind;
   copy.actionCommand = item.actionCommand;
   copy.images = item.images.slice();
+  copy.imageAttachmentIds = item.imageAttachmentIds.slice();
   return copy;
 }
 
@@ -2391,7 +2503,8 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   }
   const id: string = messageIdOf(data);
   const text: string = messageTextOf(data);
-  if (!hasVisibleText(text)) {
+  const attachmentIds: string[] = imageAttachmentIdsOf(data);
+  if (!hasVisibleText(text) && attachmentIds.length === 0) {
     return items;
   }
   const rpcId: string = messageRequestRpcId(data);
@@ -2404,6 +2517,9 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
         settled.id = id;
         settled.text = text;
         settled.requestRpcId = rpcId;
+        if (attachmentIds.length > 0) {
+          settled.imageAttachmentIds = attachmentIds;
+        }
         if (time > 0) {
           settled.timestamp = time;
         }
@@ -2424,6 +2540,7 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   message.role = 'user';
   message.text = text;
   message.requestRpcId = rpcId;
+  message.imageAttachmentIds = attachmentIds;
   message.timestamp = time > 0 ? time : Date.now();
   next.push(message);
   return next;
@@ -2765,6 +2882,31 @@ function collectTextBlocks(value: Object | undefined, blockType: string, parts: 
       parts.push(text);
     }
   }
+}
+
+/** 从 user/message 的 content 里挑出图片附件 id（历史回显用；本地刚发的没有 id）。 */
+function imageAttachmentIdsOf(data: Record<string, Object>): string[] {
+  const message: Record<string, Object> = messageRecord(data);
+  const blocks: Object[] | undefined = asArray(message['content']);
+  const out: string[] = [];
+  if (blocks === undefined) {
+    return out;
+  }
+  for (const block of blocks) {
+    const record: Record<string, Object> | undefined = asRecord(block);
+    if (record === undefined || jsonStr(record, 'type', '') !== 'image') {
+      continue;
+    }
+    const attachment: Record<string, Object> | undefined = asRecord(record['attachment']);
+    if (attachment === undefined) {
+      continue;
+    }
+    const attachmentId: string = jsonStr(attachment, 'attachmentId', '');
+    if (attachmentId.length > 0 && !out.includes(attachmentId)) {
+      out.push(attachmentId);
+    }
+  }
+  return out;
 }
 
 function isHumanUserMessage(data: Record<string, Object>): boolean {
