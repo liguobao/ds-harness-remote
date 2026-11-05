@@ -1201,12 +1201,31 @@ struct Index {
   @Builder
   RootStack() {
     Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .radialGradient({ center: ['50%', '0%'], radius: '70%',
-          colors: [['rgba(77,107,254,0.10)', 0], ['rgba(77,107,254,0)', 1]] })
-        .hitTestBehavior(HitTestMode.None)
+      // 背景：顶部一层品牌蓝，底部再压一层青色光晕。
+      // 底部这层是给输入坞玻璃「有颜色可透」用的——背后是纯白的话，材质再厚也透不出光感。
+      Stack() {
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({ center: ['50%', '0%'], radius: '70%',
+            colors: [[this.isDarkUi ? 'rgba(77,107,254,0.18)' : 'rgba(77,107,254,0.10)', 0],
+              ['rgba(77,107,254,0)', 1]] })
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({ center: ['50%', '100%'], radius: '58%',
+            colors: [[this.isDarkUi ? 'rgba(34,211,238,0.26)' : 'rgba(34,211,238,0.24)', 0],
+              ['rgba(34,211,238,0)', 1]] })
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({ center: ['18%', '88%'], radius: '42%',
+            colors: [[this.isDarkUi ? 'rgba(147,97,255,0.18)' : 'rgba(147,97,255,0.12)', 0],
+              ['rgba(147,97,255,0)', 1]] })
+      }
+      .width('100%')
+      .height('100%')
+      .hitTestBehavior(HitTestMode.None)
       Column() {
         if (this.phase === PHASE_BOOT) {
           this.BootScreen()
@@ -3160,7 +3179,7 @@ struct Index {
           })
           .border({ width: 1,
             color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
-          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.52)')
+          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
           .shadow({ radius: 12,
             color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
             offsetX: 0, offsetY: 5 })
@@ -3178,7 +3197,7 @@ struct Index {
               : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
             .constraintSize({ minHeight: 46, maxHeight: 132 })
-            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.52)')
+            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
             .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
               colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
               adaptiveColor: AdaptiveColor.DEFAULT,
