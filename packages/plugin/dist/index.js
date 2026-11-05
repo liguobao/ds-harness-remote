@@ -56277,6 +56277,34 @@ function parseWireJson(input4) {
   }
 }
 
+// ../protocol/dist/close-semantics.js
+var SERVER_SHUTDOWN_REASON = "server shutdown";
+var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
+var HEARTBEAT_TIMEOUT_CLOSE_CODE = 4009;
+var HEARTBEAT_TIMEOUT_REASON = "heartbeat timeout";
+var HEARTBEAT_CONNECTION_FAILED_REASON = "CONNECTION_FAILED";
+var TRANSIENT_CONTROL_CLOSE_CODES = [1e3, 1001, 1006, 1011, 1012, 1013];
+function normalizeReason(reason) {
+  return typeof reason === "string" ? reason.trim() : "";
+}
+function isServerShutdownClose(code, reason) {
+  return SERVER_SHUTDOWN_CLOSE_CODES.includes(code) && normalizeReason(reason) === SERVER_SHUTDOWN_REASON;
+}
+function isHeartbeatTimeoutClose(code, reason) {
+  return code === HEARTBEAT_TIMEOUT_CLOSE_CODE && normalizeReason(reason) === HEARTBEAT_TIMEOUT_REASON || code === 4001 && normalizeReason(reason) === HEARTBEAT_CONNECTION_FAILED_REASON;
+}
+function classifyControlClose(code, reason) {
+  const serverShutdown = isServerShutdownClose(code, reason);
+  const heartbeatTimeout = isHeartbeatTimeoutClose(code, reason);
+  const replaced = code === 4003;
+  return {
+    serverShutdown,
+    heartbeatTimeout,
+    retryable: serverShutdown || heartbeatTimeout || TRANSIENT_CONTROL_CLOSE_CODES.includes(code),
+    replaced
+  };
+}
+
 // ../protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
@@ -61789,6 +61817,7 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     const established = this.connectedAt !== void 0;
     this.controlReady = false;
+    this.recoveryAttempt = 0;
     this.lease?.stop();
     this.lease = void 0;
     this.recoveryTicket = void 0;
@@ -61835,20 +61864,18 @@ var AdaptiveTransport = class extends BaseTransport {
   }
 };
 function adaptiveControlCloseError(event) {
-  const heartbeatTimeout = event.code === 4001 && (event.reason === "CONNECTION_FAILED" || event.reason === "server shutdown") || event.code === 4009;
+  const serverShutdown = isServerShutdownClose(event.code, event.reason);
+  const heartbeatTimeout = isHeartbeatTimeoutClose(event.code, event.reason);
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
-    retryable: heartbeatTimeout || event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
+    retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code)
   });
 }
-function recoveryDelayMs(attempt, diagnostic) {
-  if (attempt === 0) {
-    return diagnostic.closeCode === 4001 && diagnostic.closeReason === "server shutdown" ? Math.random() * 15e3 : 0;
-  }
-  const step = Math.min(attempt + 1, 4);
-  return Math.min(15e3, 1e3 * 2 ** step) * (0.8 + Math.random() * 0.4);
+var CONTROL_RECOVERY_MAX_DELAY_MS = 15e3;
+function recoveryDelayMs(_attempt, _diagnostic) {
+  return Math.random() * CONTROL_RECOVERY_MAX_DELAY_MS;
 }
 function isObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69586,16 +69613,15 @@ var ClientReconnect = class {
     });
   }
   async run(connect4, pending) {
-    let delay = this.config.initialDelayMs;
     while (!pending.signal.aborted) {
-      const jitter = delay * this.config.jitter * (Math.random() * 2 - 1);
+      const delay = Math.random() * this.config.maxDelayMs;
       await new Promise((resolve8) => {
         const finish = () => {
           clearTimeout(timer2);
           pending.signal.removeEventListener("abort", finish);
           resolve8();
         };
-        const timer2 = setTimeout(finish, Math.max(0, delay + jitter));
+        const timer2 = setTimeout(finish, delay);
         pending.signal.addEventListener("abort", finish, { once: true });
       });
       if (pending.signal.aborted) return;
@@ -69605,7 +69631,6 @@ var ClientReconnect = class {
       } catch (error62) {
         if (!canReconnect(error62)) return;
       }
-      delay = Math.min(this.config.maxDelayMs, delay * 2);
     }
   }
 };
@@ -87372,12 +87397,10 @@ var HostServerConnection = class {
     });
   }
   async run() {
-    let delayMs = this.config.reconnect.initialDelayMs;
     this.authRecoveryAttempted = false;
     while (!this.stopped) {
       try {
         await this.connectOnce();
-        delayMs = this.config.reconnect.initialDelayMs;
       } catch (error62) {
         if (this.stopped) return;
         const code = errorCode4(error62);
@@ -87412,17 +87435,14 @@ var HostServerConnection = class {
       if (this.stopped) return;
       if (this.reconnectRequested) {
         this.reconnectRequested = false;
-        delayMs = this.config.reconnect.initialDelayMs;
         continue;
       }
       if (!this.config.reconnect.enabled) return;
-      await this.waitBeforeRetry(delayMs);
+      await this.waitBeforeRetry();
       if (this.reconnectRequested) {
         this.reconnectRequested = false;
-        delayMs = this.config.reconnect.initialDelayMs;
         continue;
       }
-      delayMs = Math.min(this.config.reconnect.maxDelayMs, delayMs * 2);
     }
   }
   async connectOnce() {
@@ -87516,7 +87536,8 @@ var HostServerConnection = class {
       };
       socket.onclose = (event) => {
         if (this.socket !== socket) return;
-        retainOnClose = [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code) || event.code === 4009 && event.reason === "server shutdown" || event.code === 4001 && ["server shutdown", "CONNECTION_FAILED"].includes(event.reason);
+        const closeSemantics = classifyControlClose(event.code, event.reason);
+        retainOnClose = [1e3, 1001].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
         const close = async () => {
           await messageQueue.catch(() => void 0);
           if (this.stopped) {
@@ -88173,9 +88194,8 @@ var HostServerConnection = class {
       tunnel.noise.destroy();
     }
   }
-  waitBeforeRetry(baseDelay) {
-    const spread = baseDelay * this.config.reconnect.jitter;
-    const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2));
+  waitBeforeRetry() {
+    const delay = Math.round(Math.random() * this.config.reconnect.maxDelayMs);
     return new Promise((resolve8) => {
       const timer2 = setTimeout(() => {
         this.retryWake = void 0;
