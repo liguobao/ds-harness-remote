@@ -110,9 +110,22 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
   4. 失败回退 relay（现有路径保留），并把「上次成功传输方式」记住
 - **风险**：ArkWeb 的 NAT/局域网可达性未验证（自检是自环）；后台挂起会断 DC；DC 单帧建议 <256KB
 
+## 2026-11-05 上午进度（V0.04.6，连接提速收尾）
+
+- `ae3934a` 已把「进入主机连接」拆成阶段进度（读取主机信息 / 检查在线 / Noise 握手 / 读取能力 / 订阅事件）
+- 本次继续补完同一件事：中继建连**预热**与 REST 查询并行，并把两处边角堵上
+  - 预热中的 socket 若因「设备不在线」「用户取消」而放弃，交给 `teardownConnection()` 关掉
+    （新增字段 `AppRuntime.pendingRelay`，交给 `SecureTransport` 后置空，避免漏 socket）
+  - REST 期间凭证轮换过（`accessToken` 变了）就**重建**中继再握手，不再拿旧 token 的半开连接
+- 构建：`devecocli` 现在在 `~/.deveco/bin/devecocli`（不在 PATH 里）；`deveco` 是另一个 AI CLI，别混
+- 装机自检（`127.0.0.1:40601` QXS-W10）：0.04.6 安装、启动、WebRTC 自检三项全过
+  （`sdp exchanged → dc open → hello-from-webrtc`）
+- 产物：`incoming/dshremote-v0.04.6-1000024.hap`；**还没在手机 PLU-AL10 上验连接阶段文案**
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.04.6 | 1000024 | 中继预热与 REST 并行；放弃/令牌轮换时正确重建或关闭通道 |
 | 0.03.2 | 1000010 | 记住上次连通的中继节点 |
 | 0.03.1 | 1000009 | 光感坞、语音、图片、折叠、双语、能力声明补全 |

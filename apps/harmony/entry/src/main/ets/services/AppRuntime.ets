@@ -79,6 +79,8 @@ export class AppRuntime {
   private core: RemoteClientCore | undefined = undefined;
   private harness: HarnessAlphaClient | undefined = undefined;
   private unsubscribeClose: (() => void) | undefined = undefined;
+  /** 预热中的中继通道：还没交给 SecureTransport/Core 就失败时由 teardown 负责关掉，否则会漏一条 socket。 */
+  private pendingRelay: RelayTransport | undefined = undefined;
   /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
   private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
   private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
@@ -370,7 +372,19 @@ export class AppRuntime {
       if (config === undefined || identity === undefined || credentials === undefined) {
         throw new Error('尚未登录');
       }
+      // 先把中继/控制通道的建连预热起来，和下面的 REST 查询并行跑：
+      // 二者互不依赖（RelayTransport 只需要 deviceId，身份公钥是给 Noise 用的）。
+      const relayOptions: RelayTransportOptions = new RelayTransportOptions();
+      relayOptions.deviceId = identity.deviceId;
+      relayOptions.accessToken = credentials.accessToken;
+      relayOptions.targetDeviceId = deviceId;
+      let relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
+      this.pendingRelay = relay;
+      const tokenFresh: boolean = credentials.accessTokenExpiresAt - Date.now() > 120000;
       this.setConnectStage('读取主机信息…');
+      const relayWarm: Promise<boolean> = tokenFresh
+        ? relay.connect().then(() => true).catch(() => false)
+        : Promise.resolve(false);
       const host: AuthorizedPeerDevice = await this.deviceForWithRetry(deviceId);
       if (!host.presenceKnown) {
         this.setConnectStage('检查主机在线状态…');
@@ -385,12 +399,20 @@ export class AppRuntime {
       // ensureApi() may have renewed the credentials above: the relay handshake must use
       // the current access token, not the one captured before the renewal.
       const current: TokenPair | undefined = this.credentials;
-      const relayOptions: RelayTransportOptions = new RelayTransportOptions();
-      relayOptions.deviceId = identity.deviceId;
-      relayOptions.accessToken = current !== undefined ? current.accessToken : credentials.accessToken;
-      relayOptions.targetDeviceId = host.deviceId;
-      const relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
+      const warmed: boolean = await relayWarm;
+      const rotated: boolean = current !== undefined && current.accessToken !== credentials.accessToken;
+      if (!warmed || rotated) {
+        // 预热失败，或凭证在 REST 期间轮换过（旧 token 的 socket 不能拿去握手）就重建一条
+        if (warmed) {
+          relay.close();
+        }
+        relayOptions.accessToken = current !== undefined ? current.accessToken : credentials.accessToken;
+        relay = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
+        this.pendingRelay = relay;
+      }
       const secure: SecureTransport = new SecureTransport(relay, identity, host, pinnedHostKey);
+      // 通道所有权交给 SecureTransport → Core，之后由 teardownConnection 关
+      this.pendingRelay = undefined;
       const core: RemoteClientCore = new RemoteClientCore(secure, 45000);
       this.core = core;
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
@@ -1781,6 +1803,11 @@ export class AppRuntime {
     }
     const core: RemoteClientCore | undefined = this.core;
     this.core = undefined;
+    const pending: RelayTransport | undefined = this.pendingRelay;
+    this.pendingRelay = undefined;
+    if (pending !== undefined) {
+      pending.close();
+    }
     const harness: HarnessAlphaClient | undefined = this.harness;
     this.harness = undefined;
     this.connectedHostName = '';
