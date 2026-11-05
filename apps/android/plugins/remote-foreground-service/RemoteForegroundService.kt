@@ -231,8 +231,8 @@ class RemoteForegroundService : Service() {
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(applicationInfo.icon)
-          .setContentTitle("${getString(R.string.app_name)} · $status")
-          .setContentText("[${task.badge}] ${task.title}")
+          .setContentTitle(status)
+          .setContentText(task.title.ifBlank { getString(R.string.app_name) })
           .setCustomContentView(collapsedViews)
           .setCustomBigContentView(expandedViews)
           .setStyle(NotificationCompat.DecoratedCustomViewStyle())
@@ -241,6 +241,8 @@ class RemoteForegroundService : Service() {
           .setOngoing(true)
           .setOnlyAlertOnce(true)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          .setGroup(LIVE_GROUP)
+          .setGroupSummary(false)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (task.updatedAtMs > 0) {
@@ -299,6 +301,8 @@ class RemoteForegroundService : Service() {
     private const val EXTRA_RESULT = "result"
     private const val CHANNEL_ID = "remote_connection"
     private const val LIVE_CHANNEL_ID = "live_tasks"
+    private const val LIVE_GROUP = "dsh_remote_live_task"
+    private const val TASK_GROUP = "dsh_remote_task_alerts"
     private const val NOTIFICATION_ID = 7401
     private var running: RemoteForegroundService? = null
     private var currentLiveTask: LiveTaskData? = null
@@ -339,6 +343,7 @@ class RemoteForegroundService : Service() {
       val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
       val notification = NotificationCompat.Builder(context, channel).setSmallIcon(context.applicationInfo.icon)
         .setContentTitle(title).setContentText(body).setContentIntent(pending).setAutoCancel(true)
+        .setGroup(TASK_GROUP).setGroupSummary(false)
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
       try {manager.notify("remote_task", id, notification)} catch (_: SecurityException) { }
     }
