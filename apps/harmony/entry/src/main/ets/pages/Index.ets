@@ -414,6 +414,9 @@ struct Index {
       parts.push(part);
     }
     this.runtime.sendPrompt(text, parts);
+    // 发送后输入坞会变矮，立刻把视图钉回最新一条，避免最后一行被坞/候选条压住
+    this.stickToBottom = true;
+    this.scrollChatToBottom();
   }
 
   /** 从系统相册选图；选完先压再进待发队列。 */
@@ -2941,8 +2944,9 @@ struct Index {
       .layoutWeight(1)
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
-      // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面
-      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 24 : 152 })
+      // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面；
+      // 键盘弹起时胶囊行收起，但仍要留够输入坞（约 46 + 16）的高度
+      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 92 : 132 })
       // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
       .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
       .scrollBarWidth(this.isLandscape ? 6 : 3)
