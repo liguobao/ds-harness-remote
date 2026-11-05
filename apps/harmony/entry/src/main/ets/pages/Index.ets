@@ -88,6 +88,10 @@ struct Index {
   @State profilesList: SavedProfile[] = [];
   /** 「更多」面板（替代系统菜单，自己控制对比度）。 */
   @State showMoreMenu: boolean = false;
+  /** 服务器切换面板。 */
+  @State showServerSwitch: boolean = false;
+  /** 按下中的服务器行 key，用来做明显的按压反馈。 */
+  @State pressedChoiceKey: string = '';
   /** 官方服务器固定地址，切换时直接可选，不用手输。 */
   private static readonly OFFICIAL_SERVER: string = 'https://dsh.r2049.cn';
   @State textScaleValue: number = 1;
@@ -470,52 +474,73 @@ struct Index {
 
   /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
   private openAccountSwitcher(): void {
-    const sheets: SheetInfo[] = [];
-    for (const profile of this.profilesList) {
-      const at: number = profile.email.indexOf('@');
-      const short: string = at > 0 ? profile.email.substring(0, at) : profile.email;
-      const active: boolean = profile.baseUrl === this.runtime.serverUrl
-        && profile.email === this.runtime.email;
-      const host: string = serverHostLabel(profile.baseUrl);
-      const title: string = (active ? '✓ ' : '') + short + ' · ' + host;
-      sheets.push({
-        title: title,
-        action: () => {
-          if (!active) {
-            this.runtime.switchProfile(profile);
-          }
-        }
-      });
-    }
-    if (sheets.length === 0) {
-      return;
-    }
-    // 固定两个常用出口：官方（公网/中转）与本地（局域网直连）
-    const officialSaved: SavedProfile | undefined = this.findProfile('https://dsh.r2049.cn');
-    sheets.push({
-      title: (officialSaved !== undefined ? '✓ ' : '') + this.tr('官方服务器') + ' · dsh.r2049.cn',
-      action: () => {
-        if (officialSaved !== undefined) {
-          this.runtime.switchProfile(officialSaved);
-        } else {
-          this.prefillAndLogout('https://dsh.r2049.cn');
-        }
-      }
-    });
-    sheets.push({
-      title: this.tr('登录其他服务器…'),
-      action: () => {
-        this.runtime.logout();
-      }
-    });
-    ActionSheet.show({
-      title: this.tr('切换服务器'),
-      message: this.tr('已保存的登录态，点一下就切（无需重新输密码）'),
-      sheets: sheets
-    });
+    this.showMoreMenu = false;
+    this.showServerSwitch = true;
   }
 
-  /** 在已保存登录态里按服务器找一条。 */
+  /** 服务器候选：已保存的登录态 + 内置的官方/本地出口（去重）。 */
+  private serverChoices(): ServerChoice[] {
+    const out: ServerChoice[] = [];
+    const currentUrl: string = this.runtime.serverUrl;
+    const currentEmail: string = this.runtime.email;
+    const push = (url: string, email: string, profile: SavedProfile | undefined): void => {
+      const emailFull: string = email;
+      for (const existing of out) {
+        // 同一个服务器只留一条（先入为主的是已保存的登录态）
+        if (existing.url === url) {
+          return;
+        }
+      }
+      const choice: ServerChoice = new ServerChoice();
+      choice.url = url;
+      choice.account = this.shortEmail(emailFull);
+      choice.accountFull = emailFull;
+      choice.profile = profile;
+      choice.host = serverHostLabel(url);
+      choice.label = this.serverTag(url);
+      choice.active = url === currentUrl && emailFull === currentEmail;
+      out.push(choice);
+    };
+    for (const profile of this.profilesList) {
+      push(profile.baseUrl, profile.email, profile);
+    }
+    push('https://dsh.r2049.cn', '', undefined);
+    push('http://192.168.11.128:8080', '', undefined);
+    return out;
+  }
+
+  /** 服务器短标签：官方 / 本地 / 自定义。 */
+  private serverTag(url: string): string {
+    if (url.indexOf('dsh.r2049.cn') >= 0) {
+      return this.tr('官方服务器');
+    }
+    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
+      return this.tr('本地服务器');
+    }
+    return this.tr('自定义服务器');
+  }
+
+  /** 邮箱只留前缀并截断，避免长数字串撑行。 */
+  private shortEmail(email: string): string {
+    const at: number = email.indexOf('@');
+    const head: string = at > 0 ? email.substring(0, at) : email;
+    return head.length > 16 ? head.substring(0, 16) + '…' : head;
+  }
+
+  /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
+  private chooseServerChoice(choice: ServerChoice): void {
+    this.showServerSwitch = false;
+    const profile: SavedProfile | undefined = choice.profile;
+    if (profile !== undefined) {
+      if (!choice.active) {
+        this.runtime.switchProfile(profile);
+      }
+      return;
+    }
+    this.prefillAndLogout(choice.url);
+  }
+
+  /** 在已保存登录态里按服务器找一条。 */  /** 在已保存登录态里按服务器找一条。 */
   private findProfile(baseUrl: string): SavedProfile | undefined {
     for (const profile of this.profilesList) {
       if (profile.baseUrl === baseUrl) {
@@ -1185,6 +1210,9 @@ struct Index {
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
       }
+      if (this.showServerSwitch) {
+        this.ServerSwitchOverlay()
+      }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
       }
@@ -1269,6 +1297,140 @@ struct Index {
     .shadow({ radius: 20, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
     .margin({ bottom: 92 })
     .hitTestBehavior(HitTestMode.None)
+  }
+
+  /**
+   * 服务器切换面板：自绘列表，选中项有明确的三重反馈
+   * （左侧青色竖条 + 高亮底 + 右侧 ✓），按下时行底色再压暗一档。
+   */
+  @Builder
+  ServerSwitchOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showServerSwitch = false;
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 2 }) {
+            Text(this.tr('切换服务器'))
+              .fontSize(17)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+            Text(this.tr('点一下即切换，不用重输密码'))
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.showServerSwitch = false;
+            })
+        }
+        .width('100%')
+        .padding({ bottom: 4 })
+        Scroll() {
+          Column({ space: 10 }) {
+            ForEach(this.serverChoices(), (choice: ServerChoice) => {
+          Row({ space: 12 }) {
+            // 单选指示：选中填满青色并带内圈白点
+            Stack() {
+              Column()
+                .width(18)
+                .height(18)
+                .borderRadius(9)
+                .border({ width: 2, color: choice.active ? '#22D3EE' : this.pal().borderStrong })
+              if (choice.active) {
+                Column()
+                  .width(9)
+                  .height(9)
+                  .borderRadius(4.5)
+                  .backgroundColor('#22D3EE')
+              }
+            }
+            .width(18)
+            .height(18)
+            Column({ space: 3 }) {
+              Text(choice.label)
+                .fontSize(14)
+                .fontWeight(choice.active ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.pal().text)
+                .width('100%')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(choice.account.length > 0 ? choice.host + ' · ' + choice.account : choice.host)
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            Text(choice.active ? '✓' : '›')
+              .fontSize(choice.active ? 17 : 15)
+              .fontColor(choice.active ? '#22D3EE' : this.pal().text3)
+          }
+          .width('100%')
+          .padding({ top: 12, bottom: 12, left: 14, right: 14 })
+          .backgroundColor(choice.active
+            ? 'rgba(34,211,238,0.14)'
+            : (this.pressedChoiceKey === choice.url + '|' + choice.account ? this.pal().inputBg : this.pal().card))
+          .borderRadius(14)
+          .border({
+            width: choice.active ? 1.5 : 1,
+            color: choice.active ? 'rgba(34,211,238,0.75)' : this.pal().border
+          })
+          .onTouch((event: TouchEvent) => {
+            const key: string = choice.url + '|' + choice.account;
+            if (event.type === TouchType.Down) {
+              this.pressedChoiceKey = key;
+            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+              this.pressedChoiceKey = '';
+            }
+          })
+          .onClick(() => {
+            this.chooseServerChoice(choice);
+          })
+            }, (choice: ServerChoice) => 'sv-' + choice.url + '|' + choice.account)
+          }
+          .width('100%')
+        }
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 460 })
+        .width('100%')
+        Text(this.tr('登录其他服务器…'))
+          .fontSize(13)
+          .fontColor(this.pal().text2)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 12, bottom: 12 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(14)
+          .onClick(() => {
+            this.showServerSwitch = false;
+            this.runtime.logout();
+          })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 480 })
+      .padding({ left: 20, right: 20, top: 18, bottom: 24 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: 1, color: this.pal().border })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /**
@@ -2130,12 +2292,12 @@ struct Index {
             })
         } else {
           Text(this.displayNameFor(device).length > 0 ? this.displayNameFor(device) : device.deviceId)
-            .fontSize(16)
+            .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.pal().text)
-            // 窄屏（手机）上两行会把 «DESKTOP-R5BVQJJ» 拆成 «DESKT / OP-…»，
-            // 看着像名字缺了一半：固定一行省略，长按弹完整名字。
-            .maxLines(1)
+            // 手机上名字列只有 ~150vp，16sp 单行会把 DESKTOP-R5BVQJJ 截成 DESKTOP-...；
+            // 放宽到两行、字号降一档，短名字仍是一行，长名字能看全。
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .onHover((isHover: boolean) => {
               const name: string = this.displayNameFor(device);
@@ -4578,6 +4740,19 @@ function decodeBase64Image(base64: string): Promise<PixelMap> {
   const bytes: Uint8Array = new util.Base64Helper().decodeSync(base64);
   const source: image.ImageSource = image.createImageSource(bytes.buffer as ArrayBuffer);
   return source.createPixelMap();
+}
+
+/** 服务器切换面板的一行。 */
+class ServerChoice {
+  url: string = '';
+  /** 显示用的短账号（截断过）。 */
+  account: string = '';
+  /** 完整账号，用来判定「是不是当前这条」。 */
+  accountFull: string = '';
+  label: string = '';
+  host: string = '';
+  active: boolean = false;
+  profile: SavedProfile | undefined = undefined;
 }
 
 /** 设置面板里的一项主题选择。 */

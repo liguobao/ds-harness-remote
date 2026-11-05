@@ -217,6 +217,9 @@ function buildEnglish(): Map<string, string> {
   map.set('常用', 'Presets');
   map.set('本地', 'Local');
   map.set('官方服务器', 'Official server');
+  map.set('本地服务器', 'Local server');
+  map.set('自定义服务器', 'Custom server');
+  map.set('点一下即切换，不用重输密码', 'Tap to switch — no password needed');
   map.set('登录其他服务器…', 'Sign in to another server…');
   map.set('已保存的登录态，点一下就切（无需重新输密码）',
     'Saved sign-ins — tap one to switch, no password needed');
