@@ -728,7 +728,9 @@ struct Index {
     if (this.isWideLayout()) {
       return Math.max(this.bottomInset, 56);
     }
-    return this.bottomInset > 0 ? this.bottomInset + 6 : 16;
+    // 手机上系统报的导航区高度常常是 50vp 往上（含手势区），按它留白会空一大条，
+    // 这里只让出导航条本身的可视高度，多留 8vp 呼吸位。
+    return 8;
   }
 
   /** 设备页内容列宽：按断点给（手机满宽 / 平板 1040 / 2in1 1200），都居中。 */
@@ -3277,7 +3279,7 @@ struct Index {
       }
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
-      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .padding({ left: 12, right: 12, top: 8, bottom: 0 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
