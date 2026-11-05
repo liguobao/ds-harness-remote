@@ -98710,7 +98710,10 @@ var SESSION_PROJECTION_WHITELIST = /* @__PURE__ */ new Set([
   "data",
   "view",
   "sessionStats",
-  "tokenUsage"
+  "tokenUsage",
+  "subagentCatalog",
+  "subagent",
+  "subagentTiming"
 ]);
 var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
