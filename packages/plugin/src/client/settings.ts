@@ -41,8 +41,14 @@ export function createRemotePluginOptions(React: ClientReact) {
     view?: 'summary' | 'page'
   }): unknown {
     const { t } = props
+    const subscribeStatus = typeof props.statusFeed?.subscribe === 'function'
+      ? props.statusFeed.subscribe
+      : () => () => {}
+    const getStatusSnapshot = typeof props.statusFeed?.getSnapshot === 'function'
+      ? props.statusFeed.getSnapshot
+      : () => undefined
     const modeStatus = React.useSyncExternalStore(
-      props.statusFeed.subscribe, props.statusFeed.getSnapshot, props.statusFeed.getSnapshot,
+      subscribeStatus, getStatusSnapshot, getStatusSnapshot,
     )
     const [open, setOpen] = React.useState(props.view === 'page')
     const [serverUrl, setServerUrl] = React.useState('')

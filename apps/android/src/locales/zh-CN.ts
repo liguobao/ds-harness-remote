@@ -130,6 +130,9 @@ const zhCN = {
     toolUnavailable: "详情暂时不可用，请重试",
     taskEnded: "任务已结束，点此查看结果",
     taskInput: "需要你确认，点此打开对话",
+    liveTaskRunning: '运行中',
+    liveTaskWaiting: '待确认',
+    liveTaskDefaultTitle: 'Remote 对话',
   },
   tools: {
     download: '保存到手机',

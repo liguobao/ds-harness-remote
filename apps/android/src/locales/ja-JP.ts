@@ -132,6 +132,9 @@ const jaJP = {
     toolUnavailable: "詳細を取得できません。もう一度お試しください。",
     taskEnded: "タスクが終了しました。タップして結果を表示します。",
     taskInput: "あなたの確認が必要です。タップして会話を開きます。",
+    liveTaskRunning: '実行中',
+    liveTaskWaiting: '確認待ち',
+    liveTaskDefaultTitle: 'Remote セッション',
   },
   tools: {
     download: "携帯電話に保存",
