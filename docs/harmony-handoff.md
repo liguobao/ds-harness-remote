@@ -327,10 +327,30 @@ permission switch -> danger-full-access : preset danger-full-access
 面板现在：打开齿轮时 `refreshPermissionState()` 读一次当前值+可选项，chip 按主机真实清单渲染并高亮当前档；
 `permission/preset` 事件也会同步权威值。
 
+## 2026-11-05 13:10（修工作区/目录浏览端点，V0.08.6）
+
+对照插件 `HARNESS_REMOTE_ALLOWLIST`（`ds-harness-remote/dist/index.js` 里那份）逐个核了一遍，
+发现客户端有三个端点压根不在白名单里，所以「工作区列表」「目录浏览」「斜杠命令清单」一直点了没反应：
+
+| 客户端原来调 | 白名单里实际有的 | 参数形状 |
+|---|---|---|
+| `workspace/list` | **`workspace/follow`**（首帧 `{type:'baseline', value:{items:[…]}}`） | 取到 baseline 立刻关流 |
+| `host/listDirectory` | **`directoryPicker/list`** | 裸 `{path}`，不是 `{request:{path}}` |
+| `commands/list` 带 `{request:{sessionId}}` | `commands/list` | 裸 `{agentId: sessionId}`，返回**数组**本身 |
+
+顺带把 `commands/execute`（上一轮）和 `commands/list` 统一成 DSH descriptor 的传参方式：
+`agentId` + 裸字段，不再包 `request` 外壳。
+
+**未完成验证**：改完之后用户在 App 里正在跑会话（`测试内容询问` 13:07 起），我没敢再点 UI；
+hilog 缓冲区也已被冲掉（只剩 5 行），所以这三处需要下次安静的时候再实测一轮：
+连上主机后看 `workspace/follow baseline -> N item(s)`、打开文件浏览看目录是否出来、
+输入 `/` 看候选是否来自主机而不是内置兜底。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.08.6 | 1000043 | 工作区/目录/命令清单改用白名单端点（follow、directoryPicker、agentId） |
 | 0.08.4 | 1000041 | 修 commands/execute 参数与回执解析；权限切换改走 /permission |
 | 0.08.1 | 1000038 | 等 answer 预算 12s→16s；回落中继后忽略迟到信令 |
 | 0.08.0 | 1000037 | 齿轮面板 + 修模型切换（modelCatalog 无参） |

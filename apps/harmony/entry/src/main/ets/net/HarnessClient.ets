@@ -263,9 +263,9 @@ export class HarnessAlphaClient {
 
   /** 列目录；兼容 entries/items 与 isDirectory/type 两种字段形状。 */
   async listDirectory(path: string): Promise<DirectoryEntry[]> {
-    const request: Record<string, Object> = { 'path': path };
-    const args: Record<string, Object> = { 'request': request };
-    const value: Object = await this.callValue('host/listDirectory', args);
+    // 主机侧对应的是 directoryPicker/list，参数是裸 path（不是 {request:{path}}）
+    const args: Record<string, Object> = { 'path': path };
+    const value: Object = await this.callValue('directoryPicker/list', args);
     const root: Record<string, Object> | undefined = asRecord(value);
     let items: Object[] | undefined = root !== undefined ? asArray(root['entries']) : undefined;
     if (items === undefined && root !== undefined) {
@@ -326,13 +326,48 @@ export class HarnessAlphaClient {
     logInfo('workspace/delete ok');
   }
 
-  /** 列出 Host 上的工作区。 */
+  /**
+   * 列出 Host 上的工作区。
+   *
+   * 主机没有 `workspace/list`（不在 Remote allowlist 里），目录来自
+   * `workspace/follow` 的第一帧 baseline（`{type:'baseline', value:{items:[…]}}`），
+   * 取到就立刻关掉这条流。
+   */
   async workspaceList(): Promise<HarnessWorkspace[]> {
-    const request: Record<string, Object> = {};
-    const args: Record<string, Object> = { 'request': request };
-    const value: Object = await this.callValue('workspace/list', args);
-    const root: Record<string, Object> | undefined = asRecord(value);
-    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    let items: Object[] | undefined = undefined;
+    let firstFrame: ((value: Object) => void) | undefined = undefined;
+    const first: Promise<Object> = new Promise<Object>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The workspace baseline did not arrive in time.'));
+      }, 15000);
+      firstFrame = (value: Object): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+    });
+    const onFrame: (value: Object) => void = (value: Object) => {
+      const cb = firstFrame;
+      if (cb !== undefined) {
+        firstFrame = undefined;
+        cb(value);
+      }
+    };
+    const handler: StreamHandler = new StreamHandler();
+    handler.onFrame = onFrame;
+    handler.onClosed = () => {
+      return;
+    };
+    const emptyArgs: Record<string, Object> = {};
+    const stream: RemoteGatewayStream = await this.gateway.open('workspace/follow', emptyArgs, handler);
+    try {
+      const frame: Record<string, Object> | undefined = asRecord(await first);
+      const baseline: Record<string, Object> | undefined =
+        frame !== undefined ? asRecord(frame['value']) : undefined;
+      items = baseline !== undefined ? asArray(baseline['items']) : undefined;
+      logInfo('workspace/follow baseline -> ' + (items !== undefined ? items.length : 0) + ' item(s)');
+    } finally {
+      stream.close(false);
+    }
     const out: HarnessWorkspace[] = [];
     if (items !== undefined) {
       for (const item of items) {
@@ -357,14 +392,13 @@ export class HarnessAlphaClient {
 
   /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */
   async commandsList(sessionId: string): Promise<Record<string, Object>[]> {
-    const request: Record<string, Object> = {};
-    if (sessionId.length > 0) {
-      request['sessionId'] = sessionId;
-    }
-    const args: Record<string, Object> = { 'request': request };
+    // commands/list 同样按 agentId 传参，且返回的是数组本身（不是 {items}）
+    const args: Record<string, Object> = { 'agentId': sessionId };
     const value: Object = await this.callValue('commands/list', args);
+    const direct: Object[] | undefined = asArray(value);
     const root: Record<string, Object> | undefined = asRecord(value);
-    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const items: Object[] | undefined = direct !== undefined ? direct
+      : (root !== undefined ? asArray(root['items']) : undefined);
     const out: Record<string, Object>[] = [];
     if (items !== undefined) {
       for (const item of items) {
