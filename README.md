@@ -126,7 +126,7 @@ After installing the ds-harness-remote plugin in DSH Go on your phone, you can a
 
 By default, Remote uses this project's hosted Server at [https://dsh.r2049.cn](https://dsh.r2049.cn).
 
-For self-hosting, use the repository's [minimal Server](apps/server/README.md). The current version includes P2P coordination and a Relay Server, but does not provide the full hosted Remote Web experience.
+For self-hosting, use the repository's [minimal Server](apps/server/README.md). The current version includes WebRTC LAN/P2P/TURN coordination (TURN requires your own coturn deployment) and an encrypted Relay Server, but does not provide the full hosted Remote Web experience.
 
 ## Screenshots
 

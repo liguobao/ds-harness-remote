@@ -352,6 +352,9 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 ## 最小自部署 Server
 
 - [x] 环境变量单账号、登录/状态页、持久化设备凭据、Control/加密 Relay 转发
+- [x] WebRTC signaling 转发、`transport.selected`（LAN/P2P/TURN/Relay）与 ICE 上限
+- [x] `GET /api/v1/turn/credentials` 短期 STUN/TURN credential（coturn REST API，可配置 TTL）
+- [ ] 真实 coturn 部署与 LAN/P2P/TURN 跨机验收（含严格 NAT、UDP 受限网络与 relay fallback）
 - [ ] 完成 Docker 镜像构建与容器启动验收。记录健康检查和凭据持久化结果。
 - [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
 

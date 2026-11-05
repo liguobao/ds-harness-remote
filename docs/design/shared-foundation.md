@@ -34,7 +34,7 @@ Plugin 刷新凭据使用跨进程目录锁和锁内重读，不按时间强行�
 
 Noise IK 绑定双方 identity、Host/Client、connectionId；业务只进入认证后的加密 channel。
 AEAD counter、target、连接状态和消息限额共同执行 fail-closed 校验。
-Server 可见路由与设备/连接元数据，不读取 Relay 业务明文。最小 Server Relay-only，不提供 WebRTC/TURN。
+Server 可见路由与设备/连接元数据，不读取 Relay 业务明文。最小 Server 可配置 WebRTC signaling/TURN credential 与加密 Relay，不实现独立 Relay attach/resume。
 
 完整 transport 选路使用 LAN / P2P / TURN / Relay；STUN/TURN、ICE、signaling 和 werift/Android 原生互操作已有验证。
 网络切换、代理、休眠唤醒、rekey 与长期稳定性仍有独立待办，不能由基础互操作推断全部环境可用。
