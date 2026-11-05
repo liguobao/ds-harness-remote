@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Modal,
@@ -8,11 +9,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native'
 import Svg, { Circle, Path } from 'react-native-svg'
-import { ChevronDown, ChevronRight, ChevronUp, Layers, Users, X } from 'lucide-react-native'
+import { ChevronDown, ChevronRight, ChevronUp, Layers, Square, Users, X } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import * as theme from '../../ui/theme'
@@ -211,13 +213,95 @@ export const AgentStatusGlyph = memo(function AgentStatusGlyph({
   )
 })
 
+/** A subagent can only receive live controls when it is not a one-shot / external runner. */
+export function isContinuableSubagent(item: RemoteSession): boolean {
+  const mode = (item as RemoteSession & { mode?: string }).mode
+  return mode !== 'one-shot' && mode !== 'external'
+}
+
+/** Compact inline "append instruction" row rendered under a controllable subagent. */
+export function SubagentPromptInput({
+  value,
+  onChangeText,
+  onSend,
+  onCancel,
+  busy,
+  testID = 'subagent-prompt-input',
+}: {
+  value: string
+  onChangeText: (text: string) => void
+  onSend: (event?: { stopPropagation?: () => void }) => void
+  onCancel: (event?: { stopPropagation?: () => void }) => void
+  busy: boolean
+  testID?: string
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createCardStyles)
+  const copy = strings.sessionActivity
+  const sendDisabled = busy || value.trim().length === 0
+  const handleSend = (event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    if (sendDisabled) return
+    onSend(event)
+  }
+  const handleCancel = (event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    if (busy) return
+    onCancel(event)
+  }
+  return (
+    <View style={styles.promptRow} testID={testID}>
+      <TextInput
+        style={styles.promptTextInput}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={copy.promptSubagentPlaceholder}
+        placeholderTextColor={colors.muted}
+        editable={!busy}
+        testID={`${testID}-field`}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.promptSubagentSend}
+        disabled={sendDisabled}
+        onPress={handleSend}
+        style={({ pressed }) => [styles.promptBtn, styles.promptSendBtn, pressed && styles.promptBtnPressed]}
+        testID={`${testID}-send`}
+      >
+        {busy ? (
+          <View testID={`${testID}-send-spinner`}>
+            <ActivityIndicator size={12} color={colors.primary} />
+          </View>
+        ) : (
+          <Text style={styles.promptSendText}>{copy.promptSubagentSend}</Text>
+        )}
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.promptSubagentCancel}
+        disabled={busy}
+        onPress={handleCancel}
+        style={({ pressed }) => [styles.promptBtn, pressed && styles.promptBtnPressed]}
+        testID={`${testID}-cancel`}
+      >
+        <Text style={styles.promptCancelText}>{copy.promptSubagentCancel}</Text>
+      </Pressable>
+    </View>
+  )
+}
+
 export interface SubagentsCardProps {
   sessions: readonly RemoteSession[]
+  parentSessionId?: string
   expanded?: boolean
   onToggle?: () => void
   defaultExpanded?: boolean
   maxHeight?: number
   onOpen?: (session: RemoteSession) => void
+  onStop?: (childSession: RemoteSession) => Promise<boolean | void>
+  onPrompt?: (childSession: RemoteSession, text: string) => Promise<boolean | void>
+  busyAction?: string
+  canControl?: boolean
   testID?: string
 }
 
@@ -229,11 +313,16 @@ export interface SubagentsCardProps {
  */
 export const SubagentsCard = memo(function SubagentsCard({
   sessions,
+  parentSessionId,
   expanded,
   onToggle,
   defaultExpanded = false,
   maxHeight,
   onOpen,
+  onStop,
+  onPrompt,
+  busyAction,
+  canControl,
   testID = 'subagents-card',
 }: SubagentsCardProps) {
   const { colors } = useTheme()
@@ -242,14 +331,51 @@ export const SubagentsCard = memo(function SubagentsCard({
   const { height } = useWindowDimensions()
 
   const [internalOpen, setInternalOpen] = useState(defaultExpanded)
+  const [promptFor, setPromptFor] = useState<string | null>(null)
+  const [promptText, setPromptText] = useState('')
   const isControlled = expanded !== undefined
   const isOpen = isControlled ? expanded : internalOpen
+
+  useEffect(() => {
+    setPromptFor(null)
+    setPromptText('')
+  }, [parentSessionId])
 
   const handleToggle = () => {
     if (!isControlled) {
       setInternalOpen(prev => !prev)
     }
     onToggle?.()
+  }
+
+  const handleStop = (item: RemoteSession, stopping: boolean, event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    if (stopping) return
+    void onStop?.(item)
+  }
+  const handlePromptToggle = (item: RemoteSession, event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    setPromptFor(promptFor === item.sessionId ? null : item.sessionId)
+    setPromptText('')
+  }
+  const handlePromptCancel = (event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    setPromptFor(null)
+    setPromptText('')
+  }
+  const handlePromptSend = async (item: RemoteSession, event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.()
+    const text = promptText
+    let result: boolean | void
+    try {
+      result = await onPrompt?.(item, text)
+    } catch {
+      result = false
+    }
+    if (result !== false) {
+      setPromptFor(null)
+      setPromptText('')
+    }
   }
 
   if (!sessions || sessions.length === 0) return null
@@ -305,30 +431,81 @@ export const SubagentsCard = memo(function SubagentsCard({
               const isRunning = item.running === true
               const glyphStatus = isRunning ? 'running' : 'idle'
               const stateLabel = isRunning ? strings.status.running : strings.sessions.child
+              const controllable = canControl === true && isContinuableSubagent(item)
+              const stopping = busyAction === `subagent:stop:${item.sessionId}`
+              const prompting = busyAction === `subagent:prompt:${item.sessionId}`
+              const promptOpen = controllable && promptFor === item.sessionId
 
               return (
-                <Pressable
-                  key={item.sessionId}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${role} ${parsed.task} · ${stateLabel}`}
-                  onPress={() => onOpen?.(item)}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                  testID={`${testID}-item-${index}`}
-                >
-                  <View style={styles.glyphWrap}>
-                    <AgentStatusGlyph status={glyphStatus} colors={colors} />
-                  </View>
-                  <View style={styles.rowCopy}>
-                    <View style={styles.rowTitleLine}>
-                      <Text style={styles.rowRole} numberOfLines={1}>{role}</Text>
-                      <Text style={isRunning ? styles.statusRunning : styles.statusIdle}>{stateLabel}</Text>
+                <View key={item.sessionId} style={styles.subagentItem} testID={`${testID}-item-${index}`}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${role} ${parsed.task} · ${stateLabel}`}
+                    onPress={() => onOpen?.(item)}
+                    style={({ pressed }) => [styles.row, styles.subagentRow, pressed && styles.rowPressed]}
+                    testID={`${testID}-open-${index}`}
+                  >
+                    <View style={styles.glyphWrap}>
+                      <AgentStatusGlyph status={glyphStatus} colors={colors} />
                     </View>
-                    {parsed.task.length > 0 && (
-                      <Text style={styles.rowTask} numberOfLines={2}>{parsed.task}</Text>
-                    )}
-                  </View>
-                  <ChevronRight size={15} color={colors.subtle ?? colors.muted} />
-                </Pressable>
+                    <View style={styles.rowCopy}>
+                      <View style={styles.rowTitleLine}>
+                        <Text style={styles.rowRole} numberOfLines={1}>{role}</Text>
+                        <Text style={isRunning ? styles.statusRunning : styles.statusIdle}>{stateLabel}</Text>
+                      </View>
+                      {parsed.task.length > 0 && (
+                        <Text style={styles.rowTask} numberOfLines={2}>{parsed.task}</Text>
+                      )}
+                    </View>
+                    <ChevronRight size={15} color={colors.subtle ?? colors.muted} />
+                  </Pressable>
+
+                  {controllable && (
+                    <View style={styles.controlRow} testID={`${testID}-controls-${index}`}>
+                      {isRunning && (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={stopping ? copy.stoppingSubagent : copy.stopSubagent}
+                          disabled={stopping}
+                          onPress={(event) => handleStop(item, stopping, event)}
+                          style={({ pressed }) => [styles.controlBtn, styles.controlBtnDanger, pressed && styles.controlBtnPressed]}
+                          testID={`${testID}-stop-${index}`}
+                        >
+                          {stopping ? (
+                            <View testID={`${testID}-stop-spinner-${index}`}>
+                              <ActivityIndicator size={12} color={colors.danger ?? '#EF4444'} />
+                            </View>
+                          ) : (
+                            <Square size={12} color={colors.danger ?? '#EF4444'} fill={colors.danger ?? '#EF4444'} />
+                          )}
+                          <Text style={[styles.controlBtnText, stopping && styles.controlBtnTextMuted]}>
+                            {stopping ? copy.stoppingSubagent : copy.stopSubagent}
+                          </Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={copy.promptSubagent}
+                        onPress={(event) => handlePromptToggle(item, event)}
+                        style={({ pressed }) => [styles.controlBtn, pressed && styles.controlBtnPressed]}
+                        testID={`${testID}-prompt-${index}`}
+                      >
+                        <Text style={styles.controlBtnText}>{copy.promptSubagent}</Text>
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {promptOpen && (
+                    <SubagentPromptInput
+                      value={promptText}
+                      onChangeText={setPromptText}
+                      onSend={(event) => handlePromptSend(item, event)}
+                      onCancel={handlePromptCancel}
+                      busy={prompting}
+                      testID={`${testID}-prompt-input-${index}`}
+                    />
+                  )}
+                </View>
               )
             })}
           </ScrollView>
@@ -797,5 +974,87 @@ const createCardStyles = (colors: ThemeColors) =>
     },
     errorText: {
       color: colors.danger ?? '#EF4444',
+    },
+    subagentItem: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+    },
+    subagentRow: {
+      borderBottomWidth: 0,
+    },
+    controlRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      paddingLeft: 28,
+      paddingRight: spacing.sm,
+      paddingBottom: spacing.xs,
+    },
+    controlBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xxs,
+      minHeight: 30,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surfaceStrong,
+    },
+    controlBtnDanger: {
+      backgroundColor: colors.dangerSoft,
+    },
+    controlBtnPressed: {
+      opacity: 0.65,
+    },
+    controlBtnText: {
+      ...typography.caption,
+      color: colors.ink,
+    },
+    controlBtnTextMuted: {
+      color: colors.muted,
+    },
+    promptRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      paddingBottom: spacing.xs,
+      paddingTop: 2,
+    },
+    promptTextInput: {
+      flex: 1,
+      minHeight: 34,
+      maxHeight: 88,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      backgroundColor: colors.surface,
+      ...typography.small,
+      color: colors.ink,
+    },
+    promptBtn: {
+      minHeight: 32,
+      paddingHorizontal: spacing.sm,
+      borderRadius: radius.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceStrong,
+    },
+    promptSendBtn: {
+      backgroundColor: colors.primarySoft,
+    },
+    promptBtnPressed: {
+      opacity: 0.65,
+    },
+    promptSendText: {
+      ...typography.caption,
+      color: colors.primary,
+    },
+    promptCancelText: {
+      ...typography.caption,
+      color: colors.muted,
     },
   })

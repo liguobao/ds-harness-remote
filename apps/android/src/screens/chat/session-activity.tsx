@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, Flag, PauseCircle } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import type { BackgroundJob } from '../../services/session-tools'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
-import { requireSessionTools } from '../../state/store'
+import { requireSessionTools, useAppStore } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
 import { useTheme } from '../../ui/theme-context'
@@ -12,6 +12,13 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import { TaskProgressChecklist, type TodoItem } from './task-progress-checklist'
 import { BackgroundJobsCard } from './background-jobs-card'
 import { AgentTeamCard, SubagentsCard } from './agents'
+
+/** Live-control slice supplied by the app store for Harness subagents. */
+interface SubagentStoreSlice {
+  busyAction?: string
+  interruptSubagent: (childSessionId: string, parentSessionId: string) => Promise<boolean | void>
+  promptSubagent: (childSessionId: string, text: string, parentSessionId: string) => Promise<boolean | void>
+}
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 type Todo = { content: string; status: 'pending' | 'in_progress' | 'completed' }
@@ -50,6 +57,8 @@ export function SessionActivityDock({
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const copy = strings.sessionActivity
+  const store = useAppStore() as unknown as SubagentStoreSlice
+  const canControl = session.backend === undefined || session.backend === 'harness'
   const values = session.projections?.values
   const todos = todosFrom(values?.todos)
   const projection = record(values?.goal) ? values.goal : undefined
@@ -131,10 +140,15 @@ export function SessionActivityDock({
     {childSessions && childSessions.length > 0 && (
       <SubagentsCard
         sessions={childSessions}
+        parentSessionId={session.sessionId}
         expanded={expanded === 'subagents'}
         onToggle={() => toggle('subagents')}
         onOpen={onOpenSession}
         maxHeight={detailsHeight}
+        canControl={canControl}
+        onStop={child => store.interruptSubagent(child.sessionId, session.sessionId)}
+        onPrompt={(child, text) => store.promptSubagent(child.sessionId, text, session.sessionId)}
+        busyAction={store.busyAction}
       />
     )}
     {teamState !== undefined && teamState.members && teamState.members.length > 0 && (
