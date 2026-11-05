@@ -106,6 +106,9 @@ struct Index {
   @State foldState: FoldState = 'expanded';
   /** 键盘是否弹起：弹起时收起语境胶囊、收窄列表底部留白。 */
   @State keyboardVisible: boolean = false;
+  /** 切换服务器中（与 runtime 同步），用于设备页的即时提示与防重复点击。 */
+  @State switchingServer: boolean = false;
+  @State switchingTo: string = '';
   /** 提示词面板（本地提示词库）。 */
   @State promptPanelOpen: boolean = false;
   /** 执行轨迹面板：把本次会话里的工具调用按顺序列成时间线。 */
@@ -456,6 +459,8 @@ struct Index {
       this.lastSyncedSessionId = this.currentSessionId;
       this.promptInput = this.runtime.draftOf(this.currentSessionId);
     }
+    this.switchingServer = this.runtime.switchingServer;
+    this.switchingTo = this.runtime.switchingTo;
     this.connectedHostName = this.runtime.connectedHostName;
     this.connectedDeviceId = this.runtime.connectedDeviceId;
     this.deviceAliases = this.runtime.deviceAliases;
@@ -738,6 +743,9 @@ struct Index {
 
   /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
   private chooseServerChoice(choice: ServerChoice): void {
+    if (this.switchingServer) {
+      return;
+    }
     this.showServerSwitch = false;
     const profile: SavedProfile | undefined = choice.profile;
     if (profile !== undefined) {
@@ -2643,9 +2651,14 @@ struct Index {
             .width(18)
             .height(18)
             .color('#22D3EE')
-          Text(this.tr('正在刷新设备…'))
+          Text(this.switchingServer && this.switchingTo.length > 0
+            ? this.tr('正在切换服务器…') + ' ' + serverHostLabel(this.switchingTo)
+            : this.tr('正在刷新设备…'))
             .fontSize(13)
             .fontColor(this.pal().text2)
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .padding({ left: 20, right: 20, bottom: 8 })
       }

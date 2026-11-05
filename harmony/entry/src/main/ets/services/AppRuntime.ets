@@ -208,6 +208,9 @@ export class AppRuntime {
   /** 本地提示词库。 */
   prompts: string[] = [];
   /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
+  /** 切换服务器时用的独立锁：不再共用 busy，避免别处的 busy 把切换挡回去。 */
+  switchingServer: boolean = false;
+  switchingTo: string = '';
   notificationsEnabled: boolean = true;
   appBackground: boolean = false;
   /** 文件预览：主机上某个文本文件的内容。 */
@@ -986,41 +989,53 @@ export class AppRuntime {
 
   /** 切换到一个已保存的服务器/账号：不需要重新输密码。 */
   async switchProfile(profile: SavedProfile): Promise<void> {
-    if (this.busy) {
+    if (this.switchingServer) {
       return;
     }
-    this.busy = true;
+    this.switchingServer = true;
+    this.switchingTo = profile.baseUrl;
     this.errorMsg = '';
+    // 先把内存状态切过去，界面立刻有反应；落盘、旧连接清理都放到后面
+    const config: StoredServerConfig = new StoredServerConfig();
+    config.baseUrl = profile.baseUrl;
+    config.email = profile.email;
+    const tokens: TokenPair = new TokenPair();
+    tokens.accessToken = profile.accessToken;
+    tokens.accessTokenExpiresAt = profile.accessTokenExpiresAt;
+    tokens.refreshToken = profile.refreshToken;
+    tokens.refreshTokenExpiresAt = profile.refreshTokenExpiresAt;
+    this.config = config;
+    this.credentials = tokens;
+    this.serverUrl = config.baseUrl;
+    this.email = config.email;
+    this.phase = PHASE_DEVICES;
+    this.devices = [];
+    this.busy = true;
     this.notify();
+    // 旧连接是同步拆的（关闭 WS、销毁 core），丢到下一帧别挡点击响应
+    setTimeout(() => {
+      try {
+        this.teardownConnection();
+        this.clearReconnectTimer();
+      } catch (error) {
+        logWarn('teardown on switch failed: ' + errorMessage(error));
+      }
+    }, 0);
     try {
-      this.teardownConnection();
-      this.clearReconnectTimer();
-      const config: StoredServerConfig = new StoredServerConfig();
-      config.baseUrl = profile.baseUrl;
-      config.email = profile.email;
-      const tokens: TokenPair = new TokenPair();
-      tokens.accessToken = profile.accessToken;
-      tokens.accessTokenExpiresAt = profile.accessTokenExpiresAt;
-      tokens.refreshToken = profile.refreshToken;
-      tokens.refreshTokenExpiresAt = profile.refreshTokenExpiresAt;
       await this.store.saveConfig(config);
       await this.store.saveCredentials(tokens);
-      this.config = config;
-      this.credentials = tokens;
-      this.serverUrl = config.baseUrl;
-      this.email = config.email;
       const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
       this.identity = identity;
-      this.phase = PHASE_DEVICES;
-      this.busy = false;
+      this.notify();
       await this.rememberProfile();
-      this.notify();
-      await this.refreshDevices();
     } catch (error) {
-      this.busy = false;
       this.errorMsg = errorMessage(error);
-      this.notify();
     }
+    this.switchingServer = false;
+    this.switchingTo = '';
+    this.notify();
+    // 设备列表单独刷新：失败只影响列表，不会把整个切换判死
+    this.refreshDevices().catch(() => undefined);
   }
 
   /** 删掉一套保存的登录态（不影响服务端注册）。 */
