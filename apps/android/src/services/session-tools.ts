@@ -234,7 +234,7 @@ export class HarnessSessionTools implements SessionTools {
 
 /** ACP workspace/terminal carrier. The Host keeps the same path and ownership checks. */
 export class AcpSessionTools implements SessionTools {
-  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity' | 'pi' | 'opencode') {}
+  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes') {}
   private call<T>(sessionId: string, endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const nativeId = sessionId.replace(/^\w+:/u, '')
     const scope = `${this.backend === 'antigravity' ? 'acp' : this.backend}:${nativeId}`

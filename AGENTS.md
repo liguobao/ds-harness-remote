@@ -1,5 +1,17 @@
 # Repository Guide for Agents
 
+## Claude / Hermes direct workspace tools (2026-11-05)
+
+Claude 与 Hermes 的 Desktop/Android 直接 Files/Terminal 已接入现有 ACP workspace tools。
+Desktop 不再拦截文件调用及终端/文件变化流；Android 使用对应后端客户端与 session scope，
+开放工具入口与 Markdown 文件链接。Host 继续以可信 cwd、连接归属、路径 containment、
+终端 enabled 设置及设备/attachment 归属校验授权，不增加通用 exec 或文件写入端点。
+Claude 图片输入仍未开放。Plugin/Android check、相关 33 tests、生产 Plugin bundle 与
+Android Hermes export、DSH bundle 校验通过；文件监听测试复验时 Antigravity 场景
+偶发超时，单独重跑通过。`verify-packed-webrtc.mjs` 在本机 isolated 安装下因
+Schemastery 的 `@standard-schema/spec` closure 校验失败（既有边界）；Host bundle 重建
+存在本机依赖展开顺序差异。真实 Desktop/Android、APK 与跨设备 E2E 尚待验收。
+
 ## Self-hosted WebRTC/TURN connection support (2026-11-05)
 
 `apps/server` 从 Relay-only 扩展为可选的 WebRTC 四路协调：`hello.ack` 按 Client 声明与部署配置返回 `transport.lan/p2p/turn/relay` 交集；转发 `signal.offer|answer|ice`（按 connection/角色/阶段校验，每连接 ICE 上限 256，安全通道建立后忽略迟到信令；未声明 WebRTC 的 Host 不接收 offer，Client 自然超时回落 Relay），转发 `transport.selected`（含旧 Host 的 `lan -> p2p` 降级，并容忍 responder 侧 selection 而不丢 link），并新增 `GET /api/v1/turn/credentials`，仅向正在建立的连接双方按 coturn REST API 签发短期 STUN/TURN credential（`DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` / `DSH_SERVER_TURN_TTL_SECONDS`）。TURN capability 仅在 URL 与 secret 同时配置时宣告，二者不齐全时启动失败；未配置 ICE 时保持原 Relay-only 行为。Server 仍只转发密文、不解密；未实现独立 Relay attach/resume、多账号、主机匹配码、OAuth/Browser 授权与 Admin。验证：Server check、新增 8 条 WebRTC/TURN 用例与全量 test 通过；容器镜像构建后经真实 REST/WS 冒烟验证 capability、signaling、selection 与 TURN HMAC；用户已在自建环境完成公网 P2P 实测。未做 coturn/TURN 跨机与长期连接验收。
@@ -695,7 +707,7 @@ Cursor/Claude 使用共享 session model state 读取现代 configOptions 或 le
 因此与 Pi 共用隔离 wrapper，每个会话独立进程（最多 30 个活动会话）。Claude 保持其
 每会话状态及重复 load 去重；恢复 Prompt 前加载 catalog 确认的 cwd，准备期间取消与
 重试按任务身份隔离。Desktop/Android 增加 Claude 工作区/历史/文字会话及模型入口，
-显示名为 Claude，后端 ID 为 claude；不开通图片及 Files/Terminal，不扩展 Harness/Codex RPC。
+显示名为 Claude，后端 ID 为 claude；不开通 Claude 图片；Claude/Hermes Files/Terminal 复用共享工作区桥接，不扩展 Harness/Codex RPC。
 
 本轮真实 `claude-agent-acp@0.93.0` 模型烟测读取 5 个选项并确认切换（未发送 Prompt）。
 Cursor `2026.10.16-e3cb207` 在本机初始化超时，真实 CLI 模型切换未验收；不将模拟

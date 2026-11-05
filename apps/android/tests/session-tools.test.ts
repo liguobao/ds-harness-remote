@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway, type RemoteClientCore } from '@dsh-remote/client-core'
 import { sessionPermissions } from '../src/services/session-permissions'
 import type { RemoteSession } from '../src/types'
-import { HarnessSessionTools, OFFICE_PREVIEW_MAX_RESPONSE_BYTES, OFFICE_PREVIEW_TIMEOUT_MS } from '../src/services/session-tools'
+import { AcpSessionTools, HarnessSessionTools, OFFICE_PREVIEW_MAX_RESPONSE_BYTES, OFFICE_PREVIEW_TIMEOUT_MS } from '../src/services/session-tools'
 
 function setup(value: unknown) {
   const rpc = vi.fn(async (..._args: unknown[]) => ({ ok: true, value }))
@@ -143,4 +143,13 @@ describe('permission projection versions', () => {
     ])
   }, 15000)
 
+})
+
+it.each(['claude', 'hermes'] as const)('%s uses its own scope for files and terminal operations', async backend => {
+  const workspaceToolCall = vi.fn(async () => ({}))
+  const tools = new AcpSessionTools({ workspaceToolCall } as unknown as import('@dsh-remote/client-core').AgentAcpClient, backend)
+  await tools.listFiles(`${backend}:saved`, '.')
+  expect(workspaceToolCall).toHaveBeenLastCalledWith('saved', backend, 'workspaceFiles/list', { workspaceFileScopeId: `${backend}:saved`, path: '.' }, undefined)
+  await tools.createTerminal(`${backend}:saved`, 'term', 80, 24)
+  expect(workspaceToolCall).toHaveBeenLastCalledWith('saved', backend, 'terminal/create', { agentId: `${backend}:saved`, request: { id: 'term', cols: 80, rows: 24 } }, undefined)
 })

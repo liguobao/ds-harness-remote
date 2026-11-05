@@ -1149,3 +1149,18 @@ describe('AcpVirtualHarness', () => {
     }
   })
 })
+
+it.each(['claude', 'hermes'] as const)('%s routes direct files and terminal streams through ACP tools', async backend => {
+  const client = { ...fakeAcp(), workspaceToolCall: vi.fn(async () => ({ entries: [] })) }
+  const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
+  const signal = new AbortController().signal
+  const scope = `${backend}:saved`
+  try {
+    const args = { workspaceFileScopeId: scope, path: '.' }
+    expect(await target.dispatch('workspaceFiles/list', { args }, signal)).toMatchObject({ ok: true })
+    expect(client.workspaceToolCall).toHaveBeenCalledWith('saved', backend, 'workspaceFiles/list', args, signal)
+    await target.open('terminal/follow', { args: { agentId: scope, id: 'term', attachmentId: 'attachment' } }, signal)
+    expect(client.openStream).toHaveBeenLastCalledWith('saved', expect.any(Function), expect.any(Function), signal,
+      { backend, endpoint: 'terminal/follow', args: { agentId: scope, id: 'term', attachmentId: 'attachment' } })
+  } finally { await target.close() }
+})

@@ -33,7 +33,7 @@ Pi 工作区使用 `pi:cwd:`，会话展示使用 `pi:`，需要 `agent.acp.pi.v
 
 Host 注册后端 ID 为 `claude`，默认关闭，默认命令为 `claude-agent-acp`、参数为空。使用 [Claude ACP adapter](https://github.com/zed-industries/claude-agent-acp)，需用户在 Host 自行安装并完成 Claude 本机授权；Remote 不自动安装、不发起登录，也不发送 Cursor 专属 `cursor_login` 认证。`claude` CLI 本身不是 ACP 服务，不能配置为 `claude acp`。
 
-Host 的 `acp.backends` 可配置 `{ "id": "claude", "enabled": true, "command": "claude-agent-acp", "args": [] }`，也可指定绝对命令路径与 `cwd`。Host 已接通独立 ACP gateway 的初始化、会话、文字 Prompt、中断、上游 catalog 与有界历史恢复，复用连接归属、单次审批和热重配边界；Desktop/Android 已接入 Claude 工作区、历史、文字会话与模型选择，模型与 effort 仅来自上游 catalog 并等待切换确认。工作区前缀为 `claude:cwd:`，会话前缀为 `claude:`；所有投影仅保留内存。不开放图片输入或直接 Files/Terminal 访问；独立 Remote Web、APK/真机及加密跨设备 E2E 仍待验收。
+Host 的 `acp.backends` 可配置 `{ "id": "claude", "enabled": true, "command": "claude-agent-acp", "args": [] }`，也可指定绝对命令路径与 `cwd`。Host 已接通独立 ACP gateway 的初始化、会话、文字 Prompt、中断、上游 catalog 与有界历史恢复，复用连接归属、单次审批和热重配边界；Desktop/Android 已接入 Claude 工作区、历史、文字会话与模型选择，模型与 effort 仅来自上游 catalog 并等待切换确认。工作区前缀为 `claude:cwd:`，会话前缀为 `claude:`；所有投影仅保留内存。支持直接 Files/Terminal 访问，复用 Host 工作区路径隔离与终端权限设置；Claude 图片输入暂不支持；独立 Remote Web、APK/真机及加密跨设备 E2E 仍待验收。
 
 本机真实接入烟测：使用 `@agentclientprotocol/claude-agent-acp@0.91.0` 及已有 OpenAI 兼容 provider 的同一凭据与 `gpt-6-sol`。该端点实测也支持 Anthropic `/v1/messages`（HTTP 200）；不是把 OpenAI Responses 直接传给 Claude SDK，也未增加协议转换代理。仅在测试子进程设置 `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`（去掉末尾 `/v1`）和 `ANTHROPIC_MODEL`，各默认模型同样映射至该模型；使用隔离临时工作目录与 `CLAUDE_CONFIG_DIR`，不修改已有用户配置。真实 `ClaudeAcpClient` 初始化、新建会话及文字 Prompt 完成，收到一个文本 chunk（2 字符）、`end_turn`；未调用工具或触发权限请求。该结果验证 Claude Agent SDK/ACP 运行时搭配兼容端点，不代表调用的是 Anthropic Claude 模型，也不代表 Remote Gateway/加密传输、工具审批、中断或历史已完成 E2E。
 
@@ -143,3 +143,5 @@ Host 决定工作目录与会话归属；capability 表示协议支持，`worksp
 - [Codex Remote 技术说明](codex-remote.md)：App Server、Project authority 与投影。
 - [Plugin 功能设计](design/plugin/functional-design.md)：共享认证、工具、配置与恢复。
 - [Remote Protocol](protocol.md)：线协议、capability、scope 和限额的权威来源。
+
+Claude 与 Hermes 的直接 Files/Terminal 均复用 Host 共享 ACP workspace tools，受可信工作目录、连接归属、路径隔离与终端开关约束；这与 Agent 自身执行工具相互独立。

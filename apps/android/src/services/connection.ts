@@ -282,8 +282,8 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('cursor:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'cursor')
     if (sessionId?.startsWith('pi:')) return new AcpSessionTools(this.requirePi(), 'pi')
     if (sessionId?.startsWith('antigravity:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'antigravity')
-    if (sessionId?.startsWith('claude:')) throw new Error('Claude workspace tools are not available.')
-    if (sessionId?.startsWith('hermes:')) throw new Error('Hermes workspace tools are not available.')
+    if (sessionId?.startsWith('claude:')) return new AcpSessionTools(this.requireClaude(), 'claude')
+    if (sessionId?.startsWith('hermes:')) return new AcpSessionTools(this.requireHermes(), 'hermes')
     if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools

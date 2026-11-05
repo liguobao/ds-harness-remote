@@ -372,10 +372,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     // 2. Safe external web URLs (http, https, mailto, www.*)
     if (openSafeExternalUrl(href)) return
 
-    // 3. Workspace file navigation remains unavailable on the Claude and Hermes backends
-    if (session?.backend === 'claude' || session?.backend === 'hermes') return
-
-    // 4. Workspace file link
+    // 3. Workspace file link
     const path = markdownFilePath(href)
     if (path === undefined) return
     setFileLinkPath(path)
@@ -868,7 +865,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
         workspaceLabel={workspaceLabel} modeLabel={modeLabel}
         supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}
-        toolsAvailable={connected && session.backend !== 'claude' && session.backend !== 'hermes'}
+        toolsAvailable={connected}
         permissionsAvailable={permissions !== undefined} permissionSelecting={permissionSelecting}
         permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
         permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}

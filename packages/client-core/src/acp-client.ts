@@ -16,7 +16,7 @@ import {
 import type { RemoteClientCore } from './index.js'
 import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
-export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | (string & {})
+export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
 
 /**
  * `session/prompt` blocks until the upstream turn finishes. Keep this well above
@@ -103,7 +103,7 @@ export class AgentAcpClient {
     return this.call('dsh/selectPermission', { sessionId, backend, preset }, signal)
   }
 
-  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     return this.call('dsh/toolCall', { sessionId, backend, endpoint, args }, signal)
   }
 

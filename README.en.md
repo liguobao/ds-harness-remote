@@ -185,8 +185,8 @@ Supported backends:
 - **Pi Agent (experimental)** — install `@earendil-works/pi-coding-agent` and `pi-acp` on the Host, configure Pi's provider locally; Remote automatically detects and initializes Pi unless explicitly disabled in Remote settings. The workspace is available only after ACP initialization succeeds. Uses the separate ACP data plane. Tools run with Host-user permissions; per-tool confirmation requires a Pi extension and is not enabled by default.
 
 - **OpenCode** — connected through `opencode acp`, with workspace discovery and history recovery. Host startup checks the CLI's supported options, accepting both native-listener and stdio-only ACP builds. Native session archiving on Desktop/Android requires the authenticated loopback API; builds without it report archiving unavailable. Archive state is saved by OpenCode; history is retained. Unarchive is not yet exposed.
-- **Claude** — uses a locally authorized `claude-agent-acp` on the Host; enable it in Remote settings. Desktop/Android support workspaces, history, text prompts and approvals. Image input and direct Files/Terminal access are not available.
-- **Hermes** — runs Nous Research's Hermes Agent through its own ACP server (`hermes acp`); opt-in in Remote settings. Desktop/Android support workspaces, history, streamed thinking and tool output, text and multimodal image prompts, approvals and model selection. Direct Files/Terminal access is not available.
+- **Claude** — uses a locally authorized `claude-agent-acp` on the Host; enable it in Remote settings. Desktop/Android support workspaces, history, text prompts and approvals. Direct Files/Terminal access is supported. Image input is not available.
+- **Hermes** — runs Nous Research's Hermes Agent through its own ACP server (`hermes acp`); opt-in in Remote settings. Desktop/Android support workspaces, history, streamed thinking and tool output, text and multimodal image prompts, approvals and model selection. Direct Files/Terminal access is supported.
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
 

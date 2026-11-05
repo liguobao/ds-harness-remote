@@ -108,7 +108,7 @@ export interface AcpClientLike {
   sessionModels?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<AcpSessionModels>
   selectModel?(sessionId: string, backend: AcpCatalogBackend, selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
   selectPermission?(sessionId: string, backend: AcpCatalogBackend, preset: string, signal?: AbortSignal): Promise<unknown>
-  workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
+  workspaceToolCall?(sessionId: string, backend: AcpCatalogBackend, endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
     mode?: "agent" | "plan" | "ask",

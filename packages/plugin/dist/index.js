@@ -67459,7 +67459,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     try {
       const args = carrierArgs(payload);
       if (ACP_TOOL_CALL_ENDPOINTS.some((item) => item === endpoint)) {
-        if (this.backend === "claude" || this.backend === "hermes" || !this.client.workspaceToolCall) return business(failure2("method-not-found", "The Host does not support ACP workspace tools."));
+        if (!this.client.workspaceToolCall) return business(failure2("method-not-found", "The Host does not support ACP workspace tools."));
         const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
         return business(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint, args, signal));
       }
@@ -67565,7 +67565,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async open(endpoint, payload, signal) {
     const args = carrierArgs(payload);
     if (ACP_TOOL_STREAM_ENDPOINTS.some((item) => item === endpoint)) {
-      if (this.backend === "claude" || this.backend === "hermes") throw new Error(`${acpBackendLabel(this.backend)} workspace tools are not available.`);
       const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
       const queue = new AsyncValueQueue(signal);
       const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), (frame) => {

@@ -182,8 +182,8 @@ Host はローカルの ACP 対応 Agent を起動し、ds-harness-remote を通
 - **Antigravity (AGY)** — stream-json CLI を ACP ゲートウェイに接続するアダプターを使用します。
 - **Pi Agent（実験的）** — Host に `@earendil-works/pi-coding-agent` と `pi-acp` をインストールし、Pi のプロバイダーをローカルで設定してください。Remote 設定で明示的に無効化しない限り、Pi を自動検出して初期化します。ワークスペースは ACP の初期化に成功した場合にのみ利用できます。独立した ACP データプレーンを使用します。ツールは Host ユーザーの権限で実行されます。ツールごとの確認には Pi 拡張機能が必要で、デフォルトでは有効ではありません。
 - **OpenCode** — `opencode acp` を通じて接続し、ワークスペースの検出と履歴の復元に対応します。Host 起動時に CLI の対応オプションを確認し、ネイティブリスナー方式と stdio 専用方式の両方の ACP ビルドに対応します。Desktop／Android からのネイティブなセッションアーカイブには、認証付きループバック API が必要です。非対応ビルドではアーカイブを利用できないことを通知します。アーカイブ状態は OpenCode が保存し、履歴は保持されます。アーカイブ解除はまだ提供していません。
-- **Claude** — Host 上でローカル認証済みの `claude-agent-acp` を使用します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、テキストプロンプト、承認に対応します。画像入力と Files／Terminal への直接アクセスは利用できません。
-- **Hermes** — Hermes Agent 自身の ACP サーバー（`hermes acp`）を通じて接続します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、思考とツール出力のストリーミング、テキストプロンプト、承認、モデル選択に対応します。画像入力と Files／Terminal への直接アクセスは利用できません。
+- **Claude** — Host 上でローカル認証済みの `claude-agent-acp` を使用します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、テキストプロンプト、承認に対応します。Files／Terminal への直接アクセスに対応します。画像入力は利用できません。
+- **Hermes** — Hermes Agent 自身の ACP サーバー（`hermes acp`）を通じて接続します。Remote 設定で有効にしてください。Desktop／Android でワークスペース、履歴、思考とツール出力のストリーミング、テキストプロンプト、承認、モデル選択に対応します。画像入力と Files／Terminal への直接アクセスに対応します。
 
 セットアップとアダプター開発については、[Agent ワークスペース連携ガイド](docs/acp-integration.md)を参照してください。
 

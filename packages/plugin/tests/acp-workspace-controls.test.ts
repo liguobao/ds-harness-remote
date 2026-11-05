@@ -75,7 +75,7 @@ it('ACP reconfiguration stops changed backends despite failed cleanup and retrie
 })
 
 it('ACP tools enforce session authority, containment, terminal ownership and stream closure', async () => {
-  await runScenarios((['cursor', 'antigravity', 'pi', 'opencode'] as const).map(backend => ({ name: backend, run: async () => {
+  await runScenarios((['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const).map(backend => ({ name: backend, run: async () => {
     const prefix = backend === 'antigravity' ? 'acp' : backend
     const scope = `${prefix}:native-1`
     const otherScope = `${prefix}:other`

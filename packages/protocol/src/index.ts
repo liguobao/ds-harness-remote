@@ -825,13 +825,13 @@ export interface AgentAcpRespondParams {
 export type AcpWorkspaceToolCallEndpoint = 'workspaceFiles/list' | 'workspaceFiles/stat' | 'workspaceFiles/read' | 'workspaceFiles/readBytes' | 'workspaceFiles/readAll'
   | 'terminal/environment' | 'terminal/shells' | 'terminal/list' | 'terminal/create' | 'terminal/write' | 'terminal/resize' | 'terminal/rename' | 'terminal/close'
 export type AcpWorkspaceToolStreamEndpoint = 'workspaceFiles/changes' | 'terminal/follow' | 'terminal/retain'
-export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
+export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
 export interface AcpModelParams { sessionId: string; backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' }
 export interface AcpModelSelectionParams extends AcpModelParams { model: string; reasoningEffort?: string }
 export interface AgentAcpStreamOpenParams {
   streamId: string
   sessionId: string
-  tool?: { backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
+  tool?: { backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
 }
 
 export interface AgentAcpStreamCloseParams {
