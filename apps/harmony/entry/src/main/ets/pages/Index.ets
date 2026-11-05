@@ -699,6 +699,28 @@ struct Index {
     this.settleDrawer(false);
   }
 
+  /**
+   * 顶部安全区：手机/平板有系统状态栏，直接用系统给的高度；
+   * 只有 2in1 全屏这种读不到状态栏（=0）的情况才兜底，避免标题被窗口标题栏压住。
+   */
+  private topSafePadding(): number {
+    if (this.topInset > 0) {
+      return this.topInset;
+    }
+    return this.isWideLayout() ? 44 : 12;
+  }
+
+  /**
+   * 底部安全区：手机只让出导航条，别留多余空白；2in1 全屏底部是系统 Dock，
+   * 要多让一些，否则账号行会被 Dock 压掉。
+   */
+  private bottomSafePadding(): number {
+    if (this.isWideLayout()) {
+      return Math.max(this.bottomInset, 56);
+    }
+    return this.bottomInset > 0 ? this.bottomInset + 6 : 16;
+  }
+
   /** 设备页内容列宽：按断点给（手机满宽 / 平板 1040 / 2in1 1200），都居中。 */
   private deviceColumnWidth(): number {
     return contentColumnWidth(this.breakpoint, this.windowWidthVp);
@@ -1254,8 +1276,7 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(this.pal().bg)
-    // 顶部留一点兜底：2in1 全屏时系统状态栏高度是 0，但窗口自己那条标题栏还在
-    .padding({ top: Math.max(this.topInset, 44), bottom: Math.max(this.bottomInset, 64) })
+    .padding({ top: this.topSafePadding(), bottom: this.bottomSafePadding() })
     .onAppear(() => {
       this.measureInsets();
     })
@@ -2418,6 +2439,7 @@ struct Index {
       .width('100%')
       // 宽屏双列：一列会留出大片空白，两列更像桌面端的主机面板
       .lanes(deviceColumns(this.breakpoint, this.devices.length))
+      // 列表按内容高度（多台时滚动），剩下的空间交给下面的小人居中，别让她贴底
       .constraintSize({ maxHeight: 560 })
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
@@ -2427,7 +2449,7 @@ struct Index {
           this.MaidMascot()
         }
         .width('100%')
-        .height(214)
+        .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       }
       if (this.isWideLayout()) {
