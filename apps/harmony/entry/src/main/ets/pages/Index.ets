@@ -1423,7 +1423,9 @@ struct Index {
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.pal().text)
-            .maxLines(2)
+            // 窄屏（手机）上两行会把 «DESKTOP-R5BVQJJ» 拆成 «DESKT / OP-…»，
+            // 看着像名字缺了一半：固定一行省略，长按弹完整名字。
+            .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .onHover((isHover: boolean) => {
               const name: string = this.displayNameFor(device);
@@ -2590,7 +2592,63 @@ struct Index {
       this.ApprovalRow(item)
     } else if (item.kind === 'question') {
       this.QuestionRow(item)
+    } else if (item.kind === 'notice') {
+      this.NoticeRow(item)
     }
+  }
+
+  /**
+   * 失败/提醒行：上下文超窗、输出截断、主机拒绝等。
+   * 以前这些在手机上完全看不到（turn/end 的 reason 被丢掉），现在固定占一行。
+   */
+  @Builder
+  NoticeRow(item: ChatItem) {
+    Row() {
+      Row() {
+        Column({ space: 6 }) {
+          Row({ space: 6 }) {
+            Text(item.noticeKind === 'error' ? '⚠' : '!')
+              .fontSize(13)
+              .fontColor(item.noticeKind === 'error' ? '#F85749' : '#F0A020')
+            Text(this.tr(item.text))
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(item.noticeKind === 'error' ? '#F85749' : '#C88418')
+              .textAlign(TextAlign.Start)
+              .layoutWeight(1)
+          }
+          .alignItems(VerticalAlign.Top)
+          if (item.reason.length > 0) {
+            Text(this.tr(item.reason))
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+              .textAlign(TextAlign.Start)
+          }
+          if (item.actionCommand.length > 0) {
+            Button(this.tr('压缩上下文'))
+              .height(30)
+              .fontSize(12)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor(this.pal().chip)
+              .fontColor(this.pal().text)
+              .borderRadius(15)
+              .enabled(!this.generating && !this.busy)
+              .onClick(() => {
+                this.runtime.sendPrompt(item.actionCommand);
+              })
+          }
+        }
+        .padding({ top: 10, bottom: 10, left: 14, right: 14 })
+        .backgroundColor(this.pal().inputBg)
+        .borderRadius(14)
+        .border({ width: 1, color: item.noticeKind === 'error' ? 'rgba(248,87,73,0.35)' : 'rgba(240,160,32,0.35)' })
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('88%')
+      .constraintSize({ maxWidth: 780 })
+      .justifyContent(FlexAlign.Start)
+    }
+    .width('100%')
   }
 
   /** 轻量 Markdown 渲染：代码块、标题、行内代码与粗体标记不再裸露。 */

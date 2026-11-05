@@ -78,7 +78,9 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
   - `session/selectPermission` → 本版 DSH 没有这个端点，权限预设只能在创建会话时给
 - 已装插件是 npm `ds-harness-remote@0.6.0`，其 `HARNESS_REMOTE_ALLOWLIST` 只放行标准端点；
   仓库 `packages/plugin` 也没加这三个，所以工作区列表/目录浏览/权限切换目前的实际表现是「点了没反应」
-- 装机手机（PLU-AL10，`192.168.3.160:33571`）会掉线，无线调试端口每次重开都变
+- 装机手机（PLU-AL10）会掉线，无线调试端口每次重开都变（2026-11-05 09:2x 用的是
+  `192.168.11.110:37695`，十分钟后就 Connect failed 了）；`hdc kill` 之后必须 `hdc start -r`
+  才能再 `tconn`，否则所有连接都报 `[Fail]Connect failed`
 - **更正（2026-11-05）**：`127.0.0.1:40601`（QXS-W10）**是已登录状态**，
   设备页能看到 `DESKTOP-R5BVQJJ`（win32 · 主机 0.2.1-rc.5）和 `localhost`（linux · 主机 0.2.0-rc.2）
   两台在线主机，所以设备页 / 连接页 / 阶段进度都能在这台机器上验。窗口 bounds 是 `[430,295][2520,1689]`；
@@ -138,10 +140,32 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
   （`sdp exchanged → dc open → hello-from-webrtc`）
 - 产物：`incoming/dshremote-v0.04.6-1000024.hap`；**还没在手机 PLU-AL10 上验连接阶段文案**
 
+## 2026-11-05 上午（续）：失败轮提示（V0.04.9）
+
+用户报「上下文超限之后手机端没有提示」。根因（已核到源头）：客户端以前对
+`turn/end` 只做 `settleTurn()`，把 `reason` 整个丢掉；DSH 的失败轮正是
+`turn/end{reason:{kind:'error',error:{code,message}}}`，上下文超窗的 code 是
+`CONTEXT_WINDOW_EXCEEDED`（见 `@deepseek-ai/dsh-llm` 的 `CONTEXT_WINDOW_EXCEEDED_CODE`）。
+所以主机明明报了原因，手机上一条都不显示。
+
+- 新增聊天里的 `notice` 行（`ChatItem.kind='notice'` + `noticeKind`/`actionCommand`）：
+  - 上下文超窗 → 红框「上下文已超出模型窗口，这一轮没有执行」+ 提示 + 一个「压缩上下文」按钮（发 `/compact`）
+  - 其它失败 → 红框「本轮失败」+ `code · message`
+  - `max-tokens` → 黄框「本轮输出达到模型上限」
+- `appendTurnFailure()` 同时认三种 reason 形态：`{kind:'error',error}`（DSH 原生）、
+  `{kind:'error',failure}`（pi 后端，插件里就是这个名字）、裸字符串 `'error'`/`'failed'`
+- `stream/closed{reason:'failed'}` 也不再静默：除传输层断开（TRANSPORT_CLOSED/CLIENT_CLOSED/
+  CONNECTION_FAILED）外都补一条提示，再走原来的重连
+- `friendlyCode` 补 `CONTEXT_WINDOW_EXCEEDED` → 「上下文已超出模型窗口，请先压缩上下文（/compact）再试」
+- 顺手：设备卡名字改单行省略（手机上原本把 DESKTOP-R5BVQJJ 拆成 «DESKT / OP-…»，长按仍可看全名）
+- 逻辑用 7 条决策表跑过（上下文超窗/pi 失败/裸字符串/正常结束/max-tokens/英文超窗文本/去重），全部符合预期
+- **未验证**：真机上看到这条提示——需要一个「真实失败轮」，而当前连不上主机（见下面中继 4008）
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.04.9 | 1000027 | 失败轮提示（上下文超窗/max-tokens/主机拒绝）+ 设备名单行 |
 | 0.04.8 | 1000026 | 中继 attach 只打服务端指定节点（票据绑节点，候选轮换必被拒） |
 | 0.04.7 | 1000025 | 聊天页/会话面板文案进 I18n，补 68 条英文；日期格式按语言换序 |
 | 0.04.6 | 1000024 | 中继预热与 REST 并行；放弃/令牌轮换时正确重建或关闭通道 |

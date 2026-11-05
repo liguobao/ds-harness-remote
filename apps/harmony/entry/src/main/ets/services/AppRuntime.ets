@@ -65,6 +65,10 @@ export class ChatItem {
   /** 该消息对应的事件序号，用于「从这里分叉」。 */
   seq: number = 0;
   rev: number = 0;
+  /** kind === 'notice' 时的提示级别：'' 普通 | 'warn' 需要用户处理 | 'error' 失败。 */
+  noticeKind: string = '';
+  /** notice 上的操作按钮要执行的斜杠命令（例如 '/compact'），空表示没有按钮。 */
+  actionCommand: string = '';
 }
 
 /**
@@ -1931,6 +1935,24 @@ export class AppRuntime {
       return;
     }
     if (type === 'stream/closed') {
+      const reason: string = jsonStr(payload, 'reason', '');
+      const failure: Record<string, Object> | undefined = asRecord(payload['error']);
+      const code: string = failure !== undefined ? jsonStr(failure, 'code', '') : '';
+      const message: string = failure !== undefined ? jsonStr(failure, 'message', '') : '';
+      // 传输层自己断的（TRANSPORT_CLOSED/CLIENT_CLOSED）交给重连提示，别在聊天里再糊一条；
+      // 业务失败（上下文超窗、提示被主机拒绝等）以前是彻底静默的，这里必须说出来。
+      const transportLevel: boolean = code === 'TRANSPORT_CLOSED' || code === 'CLIENT_CLOSED'
+        || code === 'CONNECTION_FAILED';
+      if (reason === 'failed' && !transportLevel && message.length > 0) {
+        if (looksLikeContextOverflow(code, message)) {
+          this.messages = appendNotice(this.messages, 'stream:context',
+            '上下文已超出模型窗口，这一轮没有执行',
+            'error', '先压缩上下文（/compact）再重新发送，或新开一个会话', '/compact', Date.now());
+        } else {
+          this.messages = appendNotice(this.messages, 'stream:error:' + code, '本轮失败',
+            'error', code.length > 0 ? code + ' · ' + message : message, '', Date.now());
+        }
+      }
       this.handleDisconnect();
     }
   }
@@ -2085,6 +2107,10 @@ function friendlyCode(code: string, fallback: string): string {
   if (code === 'RATE_LIMITED') {
     return '请求过于频繁，请稍后再试';
   }
+  if (code === 'CONTEXT_WINDOW_EXCEEDED' || code === 'CONTEXT_LENGTH_EXCEEDED'
+    || code === 'CONTEXT_OVERFLOW') {
+    return '上下文已超出模型窗口，请先压缩上下文（/compact）再试';
+  }
   if (code === 'DEVICE_NOT_FOUND') {
     return '设备不存在';
   }
@@ -2152,6 +2178,8 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.questions = item.questions.slice();
   copy.questionOutcome = item.questionOutcome;
   copy.rev = item.rev;
+  copy.noticeKind = item.noticeKind;
+  copy.actionCommand = item.actionCommand;
   return copy;
 }
 
@@ -2183,8 +2211,13 @@ function applySessionEvent(items: ChatItem[], event: HarnessSessionEvent): ChatI
 
 function applySessionEventInner(items: ChatItem[], event: HarnessSessionEvent): ChatItem[] {
   const data: Record<string, Object> = event.data;
-  if (event.type === 'turn/start' || event.type === 'turn/end') {
+  if (event.type === 'turn/start') {
     return settleTurn(items);
+  }
+  if (event.type === 'turn/end') {
+    // 失败的一轮必须让用户看见：turn/end 的 reason.kind === 'error' 带着结构化失败
+    // （上下文超窗就是 code=CONTEXT_WINDOW_EXCEEDED），以前这里只 settleTurn，手机上什么都没有。
+    return appendTurnFailure(settleTurn(items), data, event.time);
   }
   if (event.type === 'user/message') {
     return addUserMessage(items, data, event.time);
@@ -2241,6 +2274,87 @@ function settleTurn(items: ChatItem[]): ChatItem[] {
     }
   }
   return changed ? next : items;
+}
+
+/**
+ * 把 turn/end 的结束原因摊成一条可见提示。
+ *
+ * DSH 的失败轮是 `turn/end{reason:{kind:'error',error:{message,code}}}`；上下文超窗的
+ * code 是 `CONTEXT_WINDOW_EXCEEDED`（见 @deepseek-ai/dsh-llm）。以前客户端只做 settleTurn，
+ * 于是「上下文超限」在手机上完全静默——这条提示补的就是那个洞。
+ */
+function appendTurnFailure(items: ChatItem[], data: Record<string, Object>, time: number): ChatItem[] {
+  // reason 有几种历史形态：{kind:'error', error:{code,message}}（DSH 原生）、
+  // {kind:'error', failure:{...}}（pi 后端）、以及裸字符串 'error' / 'failed'。
+  const raw: Object | undefined = data['reason'];
+  let kind: string = '';
+  let failure: Record<string, Object> | undefined = undefined;
+  const reason: Record<string, Object> | undefined = asRecord(raw);
+  if (reason !== undefined) {
+    kind = jsonStr(reason, 'kind', '');
+    failure = asRecord(reason['error']);
+    if (failure === undefined) {
+      failure = asRecord(reason['failure']);
+    }
+  } else if (typeof raw === 'string') {
+    kind = raw;
+  }
+  if (kind === 'max-tokens') {
+    return appendNotice(items, 'turn-end:max-tokens', '本轮输出达到模型上限，内容被截断',
+      'warn', '输出达到上限，可以让我继续或拆小一点', '', time);
+  }
+  if (kind !== 'error' && kind !== 'failed') {
+    return items;
+  }
+  const code: string = failure !== undefined ? jsonStr(failure, 'code', '') : '';
+  const message: string = failure !== undefined ? jsonStr(failure, 'message', '') : '';
+  if (code.length === 0 && message.length === 0) {
+    // 只有裸字符串 reason：至少让用户知道这一轮挂了，别静默
+    return appendNotice(items, 'turn-end:bare', '本轮失败', 'error', '主机没有给出失败原因',
+      '', time);
+  }
+  if (looksLikeContextOverflow(code, message)) {
+    return appendNotice(items, 'turn-end:context', '上下文已超出模型窗口，这一轮没有执行',
+      'error', '先压缩上下文（/compact）再重新发送，或新开一个会话', '/compact', time);
+  }
+  const detail: string = message.length > 0 ? message : (code.length > 0 ? code : '未知原因');
+  const hint: string = code.length > 0 ? code + ' · ' + detail : detail;
+  return appendNotice(items, 'turn-end:error:' + code, '本轮失败', 'error', hint, '', time);
+}
+
+/** 上下文超窗的判据：结构化 code 与会话里常见的英文原文，两头都认。 */
+function looksLikeContextOverflow(code: string, message: string): boolean {
+  const upper: string = code.toUpperCase();
+  if (upper === 'CONTEXT_WINDOW_EXCEEDED' || upper === 'CONTEXT_LENGTH_EXCEEDED'
+    || upper === 'CONTEXT_OVERFLOW') {
+    return true;
+  }
+  const text: string = message.toLowerCase();
+  return text.indexOf('context_length') >= 0 || text.indexOf('context length') >= 0
+    || text.indexOf('context window') >= 0 || text.indexOf('maximum context') >= 0
+    || text.indexOf('too long for this model') >= 0 || message.indexOf('上下文超') >= 0;
+}
+
+/** 追加一条 notice；同一 id 连续出现时只保留一条，避免重连/重放把聊天刷满。 */
+function appendNotice(items: ChatItem[], dedupeKey: string, text: string, noticeKind: string,
+  hint: string, actionCommand: string, time: number): ChatItem[] {
+  for (let i = items.length - 1; i >= 0 && i >= items.length - 3; i--) {
+    const item: ChatItem = items[i];
+    if (item.kind === 'notice' && item.id === dedupeKey) {
+      return items;
+    }
+  }
+  const created: ChatItem = new ChatItem();
+  created.id = dedupeKey;
+  created.kind = 'notice';
+  created.text = text;
+  created.reason = hint;
+  created.noticeKind = noticeKind;
+  created.actionCommand = actionCommand;
+  created.timestamp = time > 0 ? time : Date.now();
+  const next: ChatItem[] = items.slice();
+  next.push(created);
+  return next;
 }
 
 function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: number): ChatItem[] {

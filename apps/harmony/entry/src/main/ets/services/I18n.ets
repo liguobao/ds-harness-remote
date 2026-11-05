@@ -188,6 +188,18 @@ function buildEnglish(): Map<string, string> {
   map.set('复制失败，可长按链接手动复制', 'Copy failed — long-press the link to copy it');
   map.set('重置设备身份', 'Reset device identity');
   map.set('重置', 'Reset');
+  // —— 失败提示（上下文超窗等）——
+  map.set('上下文已超出模型窗口，这一轮没有执行',
+    'The context exceeded the model window, so this turn did not run');
+  map.set('先压缩上下文（/compact）再重新发送，或新开一个会话',
+    'Compact the context (/compact) and send again, or start a new session');
+  map.set('压缩上下文', 'Compact context');
+  map.set('本轮输出达到模型上限，内容被截断', 'This turn hit the output ceiling and was truncated');
+  map.set('输出达到上限，可以让我继续或拆小一点',
+    'Output was capped — ask me to continue, or split the task');
+  map.set('本轮失败', 'Turn failed');
+  map.set('未知原因', 'unknown reason');
+  map.set('主机没有给出失败原因', 'the host gave no failure reason');
   return map;
 }
 
