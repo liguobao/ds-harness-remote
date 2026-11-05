@@ -1,5 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import { notificationManager } from '@kit.NotificationKit';
 import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
@@ -206,6 +207,9 @@ export class AppRuntime {
   drafts: Record<string, string> = {};
   /** 本地提示词库。 */
   prompts: string[] = [];
+  /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
+  notificationsEnabled: boolean = true;
+  appBackground: boolean = false;
   /** 文件预览：主机上某个文本文件的内容。 */
   filePreviewPath: string = '';
   filePreviewText: string = '';
@@ -694,6 +698,41 @@ export class AppRuntime {
     }
     const sessionId: string = this.currentSessionId;
     return harness.readFileBase64(sessionId, path);
+  }
+
+  /** 申请通知权限（用户第一次开启开关时调）。 */
+  async requestNotificationPermission(context: common.UIAbilityContext): Promise<boolean> {
+    try {
+      const granted: boolean = await notificationManager.isNotificationEnabled();
+      if (granted) {
+        return true;
+      }
+      await notificationManager.requestEnableNotification(context);
+      return await notificationManager.isNotificationEnabled();
+    } catch (error) {
+      logWarn('notification permission failed: ' + errorMessage(error));
+      return false;
+    }
+  }
+
+  /** 发一条完成通知；App 在前台或开关关闭时什么也不做。 */
+  private publishCompletionNotice(title: string, text: string): void {
+    if (!this.notificationsEnabled || !this.appBackground) {
+      return;
+    }
+    const request: notificationManager.NotificationRequest = {
+      id: 101,
+      content: {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: {
+          title: title,
+          text: text
+        }
+      }
+    };
+    notificationManager.publish(request).catch((error: Error) => {
+      logWarn('publish notification failed: ' + errorMessage(error));
+    });
   }
 
   /** 预览主机上的文本文件：走 workspaceFiles/readBytes，base64 解码成 UTF-8。 */
@@ -2502,6 +2541,8 @@ export class AppRuntime {
       this.generating = false;
       // 一轮结束后刷新上下文占用（不阻塞 UI）。
       this.refreshProjections().catch(() => undefined);
+      // 后台时给一条完成提醒；前台不打扰
+      this.publishCompletionNotice('DSH 远程', '「' + (this.currentSessionTitle.length > 0 ? this.currentSessionTitle : '当前会话') + '」这一轮已完成');
     }
     this.notify();
   }

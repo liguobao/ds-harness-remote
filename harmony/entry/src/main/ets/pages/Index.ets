@@ -241,6 +241,14 @@ struct Index {
     }
   }
 
+  onPageShow(): void {
+    this.runtime.appBackground = false;
+  }
+
+  onPageHide(): void {
+    this.runtime.appBackground = true;
+  }
+
   private measureInsets(): void {
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
       this.mainWindow = win;
@@ -1683,6 +1691,20 @@ struct Index {
                 .fontColor(this.pal().text3)
                 .width('100%')
                 .padding({ left: 4 })
+              this.SettingsRow(this.tr('完成通知'),
+                this.runtime.notificationsEnabled ? this.tr('开') : this.tr('关'), false, () => {
+                  const next: boolean = !this.runtime.notificationsEnabled;
+                  this.runtime.notificationsEnabled = next;
+                  if (next) {
+                    const ability: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+                    this.runtime.requestNotificationPermission(ability).then((granted: boolean) => {
+                      if (!granted) {
+                        promptAction.showToast({ message: this.tr('系统通知权限未开启') });
+                      }
+                    }).catch(() => undefined);
+                  }
+                  this.runtime.notify();
+                })
               this.SettingsRow(this.tr('外观'), this.themeLabel(this.themeMode), false, () => {
                 this.openChoice('theme');
               })
