@@ -111,6 +111,8 @@ struct Index {
   @State trajectoryOpen: boolean = false;
   /** 新建工作区面板。 */
   @State workspaceCreateOpen: boolean = false;
+  /** 文本文件预览面板。 */
+  @State filePreviewOpen: boolean = false;
   @State workspacePathInput: string = '';
   @State workspaceNameDraft: string = '';
   @State promptDraftInput: string = '';
@@ -1325,6 +1327,9 @@ struct Index {
       }
       if (this.workspaceCreateOpen) {
         this.WorkspaceCreateOverlay()
+      }
+      if (this.filePreviewOpen) {
+        this.FilePreviewOverlay()
       }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
@@ -3734,9 +3739,13 @@ struct Index {
               .width('100%')
               .padding({ left: 14, right: 14, top: 10, bottom: 10 })
               .onClick(() => {
+                const full: string = entry.path.length > 0 ? entry.path : (this.browsePath + '/' + entry.name);
                 if (entry.isDirectory) {
-                  this.runtime.browseDirectory(entry.path.length > 0 ? entry.path : (this.browsePath + '/' + entry.name));
+                  this.runtime.browseDirectory(full);
+                  return;
                 }
+                this.filePreviewOpen = true;
+                this.runtime.previewFile(full);
               })
             }
           }, (entry: DirectoryEntry) => entry.path.length > 0 ? entry.path : entry.name)
@@ -4744,6 +4753,89 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 文本文件预览：主机上读回来直接显示，二进制给提示。 */
+  @Builder
+  FilePreviewOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.filePreviewOpen = false;
+        })
+      Column({ space: 8 }) {
+        Row({ space: 10 }) {
+          Column({ space: 2 }) {
+            Text(this.runtime.filePreviewPath.substring(this.runtime.filePreviewPath.lastIndexOf('/') + 1))
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.pal().text)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.runtime.filePreviewPath)
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Text('关闭')
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text3)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(9)
+            .onClick(() => {
+              this.filePreviewOpen = false;
+            })
+        }
+        .width('100%')
+
+        if (this.runtime.filePreviewLoading) {
+          Row({ space: 8 }) {
+            LoadingProgress()
+              .width(16)
+              .height(16)
+              .color('#22D3EE')
+            Text(this.tr('读取中…'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+          }
+          .padding({ top: 12, bottom: 12 })
+        } else if (this.runtime.filePreviewError.length > 0) {
+          Text(this.runtime.filePreviewError)
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .padding({ top: 12, bottom: 12 })
+        } else {
+          Scroll() {
+            Text(this.runtime.filePreviewText)
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text)
+              .fontFamily('monospace')
+              .width('100%')
+              .textAlign(TextAlign.Start)
+              .copyOption(CopyOptions.LocalDevice)
+          }
+          .width('100%')
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Auto)
+          .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 420 })
+        }
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 620 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 20 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */

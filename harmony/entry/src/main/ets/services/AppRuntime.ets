@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
@@ -205,6 +206,11 @@ export class AppRuntime {
   drafts: Record<string, string> = {};
   /** 本地提示词库。 */
   prompts: string[] = [];
+  /** 文件预览：主机上某个文本文件的内容。 */
+  filePreviewPath: string = '';
+  filePreviewText: string = '';
+  filePreviewError: string = '';
+  filePreviewLoading: boolean = false;
   /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
   languageMode: number = 0;
   /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
@@ -688,6 +694,50 @@ export class AppRuntime {
     }
     const sessionId: string = this.currentSessionId;
     return harness.readFileBase64(sessionId, path);
+  }
+
+  /** 预览主机上的文本文件：走 workspaceFiles/readBytes，base64 解码成 UTF-8。 */
+  async previewFile(path: string): Promise<void> {
+    this.filePreviewPath = path;
+    this.filePreviewText = '';
+    this.filePreviewError = '';
+    this.filePreviewLoading = true;
+    this.notify();
+    try {
+      const base64: string = await this.readImageBase64(path);
+      if (base64.length === 0) {
+        this.filePreviewError = '主机返回了空内容';
+        this.filePreviewLoading = false;
+        this.notify();
+        return;
+      }
+      const helper: util.Base64Helper = new util.Base64Helper();
+      const bytes: Uint8Array = helper.decodeSync(base64);
+      // 二进制文件会解出大量 NUL，直接给个提示，别把乱码糊到屏幕上
+      let nulCount: number = 0;
+      const probe: number = Math.min(bytes.length, 4096);
+      for (let i = 0; i < probe; i++) {
+        if (bytes[i] === 0) {
+          nulCount++;
+        }
+      }
+      if (probe > 0 && nulCount * 20 > probe) {
+        this.filePreviewError = '这是一个二进制文件，暂不支持预览';
+        this.filePreviewLoading = false;
+        this.notify();
+        return;
+      }
+      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+      let text: string = decoder.decodeToString(bytes);
+      if (text.length > 200000) {
+        text = text.substring(0, 200000) + '\n\n…（内容超过 20 万字符，已截断）';
+      }
+      this.filePreviewText = text;
+    } catch (error) {
+      this.filePreviewError = errorMessage(error);
+    }
+    this.filePreviewLoading = false;
+    this.notify();
   }
 
   /** 把一段录音（WAV base64）交给主机转写，返回文本；未连接或失败时抛错。 */
