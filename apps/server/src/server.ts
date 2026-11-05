@@ -227,6 +227,7 @@ export function createRemoteServer(config: Config) {
       const asset = assets.get(name)
       if (!asset) throw new ApiError('METHOD_NOT_FOUND', 404)
       const contentType = name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.png') ? 'image/png' : name.endsWith('.webp') ? 'image/webp' : 'text/html; charset=utf-8'
+      if (!staticAsset) res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Content-Type', contentType)
       res.end(asset); return
     }
@@ -281,6 +282,13 @@ export function createRemoteServer(config: Config) {
         return item
       })
       json(res, 200, { items, nextCursor: null }); return
+    }
+    const renameMatch = /^\/api\/v1\/devices\/([^/]+)\/name$/.exec(path)
+    if (method === 'POST' && renameMatch) {
+      accountAuth(req)
+      const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(await body(req))
+      store.rename(renameMatch[1]!, name)
+      json(res, 200, descriptor(store.get(renameMatch[1]!))); return
     }
     const match = /^\/api\/v1\/devices\/([^/]+)(\/presence)?$/.exec(path)
     if (method === 'GET' && match) {

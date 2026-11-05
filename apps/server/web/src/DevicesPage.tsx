@@ -1,5 +1,5 @@
 // Simplified upstream HostsPage + product AppHeader. No remote/open/admin actions.
-import { Alert, Button, Card, Empty, Layout, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, Layout, Modal, Space, Table, Tag, Typography } from 'antd'
 import { GithubOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
@@ -13,12 +13,24 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
   const [loggingOut, setLoggingOut] = useState(false)
   const [error, setError] = useState('')
   const [updated, setUpdated] = useState('')
+  const [renaming, setRenaming] = useState<Device>()
+  const [newName, setNewName] = useState('')
+  const [savingName, setSavingName] = useState(false)
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try { const data = await api<DeviceList>('/account/devices'); setResult(data); setUpdated(new Date().toLocaleTimeString('zh-CN')) }
     catch (err) { if (err instanceof RequestError && err.status === 401) onSignedOut(); else setError(err instanceof Error ? err.message : '加载失败，请重试。') }
     finally { setLoading(false) }
   }, [onSignedOut])
+  async function submitRename() {
+    if (!renaming) return
+    const name = newName.trim()
+    if (!name) { setError('设备名称不能为空'); return }
+    setSavingName(true); setError('')
+    try { await api(`/devices/${encodeURIComponent(renaming.deviceId)}/name`, { name }); setRenaming(undefined); await load() }
+    catch (err) { setError(err instanceof Error ? err.message : '改名失败，请重试。') }
+    finally { setSavingName(false) }
+  }
   useEffect(() => { void load() }, [load])
   async function logout() {
     setLoggingOut(true)
@@ -34,6 +46,7 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
     { title: '系统', dataIndex: 'platform', key: 'platform', render: (platform: string) => ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux', android: 'Android' })[platform] ?? platform },
     { title: '插件版本', dataIndex: 'clientVersion', key: 'clientVersion' },
     { title: 'Harness 版本', dataIndex: 'harnessVersion', key: 'harnessVersion', render: (value?: string) => value || '—' },
+    { title: '操作', key: 'actions', render: (_: unknown, d: Device) => <Button size="small" onClick={() => { setRenaming(d); setNewName(d.name) }}>改名</Button> },
   ]
   return <>
     <Layout.Header className="topbar product-topbar"><div className="topbar-inner"><div className="topbar-brand-group is-product"><a className="topbar-brand" href="/" aria-label="返回首页"><img className="topbar-brand-mark" src="/brand-whale.webp" alt="" width="40" height="40" /><span className="topbar-brand-copy"><Title level={3}>DeepSeek Harness Remote</Title><small>安全远程访问</small></span></a></div><div className="topbar-actions"><a className="topbar-github-link product-github-link" href="https://github.com/liguobao/dsh-harness-remote" target="_blank" rel="noreferrer" aria-label="GitHub"><GithubOutlined /> GitHub</a><ThemeToggle /><Button type="text" loading={loggingOut} onClick={() => void logout()}>退出登录</Button></div></div></Layout.Header>
@@ -48,5 +61,8 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
         {updated && <Paragraph className="selfhost-caption" type="secondary">更新于 {updated}</Paragraph>}
       </div></div></div>
     </Layout.Content><SiteFooter />
+    <Modal title="修改设备名称" open={!!renaming} confirmLoading={savingName} onOk={() => void submitRename()} onCancel={() => setRenaming(undefined)} okText="保存" cancelText="取消">
+      <Input value={newName} onChange={event => setNewName(event.target.value)} maxLength={80} placeholder="请输入新的设备名称" onPressEnter={() => void submitRename()} />
+    </Modal>
   </>
 }
