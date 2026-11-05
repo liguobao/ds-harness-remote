@@ -61,11 +61,12 @@
         android:textColor="#99000000"
         android:textSize="13sp" />
 
-    <!-- Status row: indicator dot + status text -->
+    <!-- Status row: indicator dot + status text, aligned with the title text column -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
+        android:layout_marginStart="22dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
