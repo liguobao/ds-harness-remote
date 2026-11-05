@@ -1489,6 +1489,7 @@ function config(): ResolvedConfig {
     forceRelay: false,
     rotatePinnedPeerKey: false,
     logLevel: 'error',
+    liteMode: false,
     reconnect: { enabled: true, initialDelayMs: 100, maxDelayMs: 1_000, jitter: 0 },
     codex: { enabled: false, binary: 'codex' },
     cursor: { enabled: false, binary: 'agent' },
