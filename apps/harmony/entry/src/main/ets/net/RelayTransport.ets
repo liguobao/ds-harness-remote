@@ -84,15 +84,55 @@ function withHost(endpoint: string, host: string): string {
   return match[1] + host + match[3];
 }
 
-/** 把中继的关闭码翻译成一句人话，原始 code/reason 仍然带着，方便报障。 */
-export function describeAttachFailure(code: number, reason: string): string {
+/** attach 失败的具体原因（带「是否值得重试」），供上层决定要不要换票重来。 */
+export class RelayAttachError extends Error {
+  retryable: boolean = true;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.retryable = retryable;
+  }
+}
+
+/** attach 失败的判词：一句人话 + 还值不值得重试。 */
+export class AttachVerdict {
+  message: string = '';
+  /** false = 再重试也是同样结果（票据/声明对不上），别再烧重试。 */
+  retryable: boolean = true;
+}
+
+/**
+ * 把中继的关闭码翻译成一句人话。
+ *
+ * 注意 4008 是一个大桶：`relay capacity reached`（节点满）和
+ * `invalid relay ticket claims`（票据与这条连接对不上）都报 4008，
+ * 以前一律说成「没有可用容量」，看日志的人会被带偏。
+ */
+export function describeAttachFailure(code: number, reason: string): AttachVerdict {
+  const verdict: AttachVerdict = new AttachVerdict();
+  const text: string = reason.toLowerCase();
   if (code === 4008) {
-    return '中继当前没有可用容量（4008 ' + reason + '），请稍后重试或让主机侧重启中继';
+    if (text.indexOf('capacity') >= 0) {
+      verdict.message = '中继节点已满（4008 ' + reason + '），稍后重试；持续这样需要服务端给中继扩容';
+      verdict.retryable = true;
+      return verdict;
+    }
+    if (text.indexOf('ticket') >= 0 || text.indexOf('claim') >= 0) {
+      verdict.message = '中继票据校验失败（4008 ' + reason + '）：票据和这条连接对不上，重连一次即可';
+      verdict.retryable = false;
+      return verdict;
+    }
+    verdict.message = '中继拒绝了这次连接（4008 ' + reason + '）';
+    verdict.retryable = false;
+    return verdict;
   }
   if (code === 4001 || code === 4003) {
-    return '中继拒绝了这次连接（' + code + ' ' + reason + '），票据可能已失效，重试即可';
+    verdict.message = '中继票据已失效（' + code + ' ' + reason + '），重新连接即可';
+    verdict.retryable = false;
+    return verdict;
   }
-  return '中继连接失败（' + code + ' ' + reason + '）';
+  verdict.message = '中继连接失败（' + code + ' ' + reason + '）';
+  return verdict;
 }
 
 export class RelayConnectionInfo {
@@ -364,6 +404,12 @@ export class RelayTransport {
           // 把底层原因带出来，否则线上只能看到笼统的 attach failed
           const detail: string = e instanceof Error ? e.message : String(e);
           logError('relay data attach failed: ' + detail);
+          if (e instanceof RelayAttachError && !e.retryable) {
+            // 票据/声明对不上那种，换票重试还是同样的结果：直接报给用户
+            logWarn('relay attach 不可重试，放弃重试：' + detail);
+            this.fail(new Error('relay data attach failed: ' + detail));
+            return;
+          }
           this.retryWithFreshTicket(detail);
         });
     } else {
@@ -513,7 +559,8 @@ export class RelayTransport {
         logWarn('relay data socket closed code=' + value.code + ' reason=' + value.reason
           + ' ready=' + this.dataReady);
         if (!this.dataReady) {
-          reject(new Error(describeAttachFailure(value.code, value.reason)));
+          const verdict: AttachVerdict = describeAttachFailure(value.code, value.reason);
+          reject(new RelayAttachError(verdict.message, verdict.retryable));
         } else {
           this.fail(new Error('Relay data socket closed'));
         }
