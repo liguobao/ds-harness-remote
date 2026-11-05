@@ -51,26 +51,6 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
-## 目录
-
-- [一次连接，随时可用](#一次连接随时可用)
-- [主要特性](#主要特性)
-- [支持的客户端](#支持的客户端)
-- [安装](#安装)
-- [快速开始](#快速开始)
-- [界面截图](#界面截图)
-- [工作方式](#工作方式)
-- [实验性 ACP 工作区](#实验性-acp-工作区)
-- [端到端加密](#端到端加密)
-- [网络与传输](#网络与传输)
-- [安全边界](#安全边界)
-- [常见问题](#常见问题)
-- [文档](#文档)
-- [友情链接](#友情链接)
-- [Star History](#star-history)
-- [项目声明与商标](#项目声明与商标)
-- [License](#license)
-
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
@@ -82,7 +62,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
 | 浏览器扩展 | Chrome | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
 | dsh-TUI | 纯终端 CLI | 计划中 | 本版本不包含该集成，将在后续版本单独提供；安装脚本不会为它自动创建 Web 服务 |
-| Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后可一条命令全程无操作安装，无需任何配置。
+| Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后一键安装。
 
 多个客户端可以同时连接同一个 Host，RPC 与数据流按连接隔离。
 
@@ -146,8 +126,6 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。
 
-界面默认跟随系统，支持英文、简体中文、日语、繁体中文、西语、德语、法语；语言设置点击「More ...」可展开全部语言。详细使用见 [Android 说明](apps/android/README.md)。
-
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
   <img src="docs/images/image-msg.jpg" alt="从 Android 客户端发送图片 Prompt" width="30%">
@@ -172,7 +150,7 @@ Harness 主机无需开放公网监听端口。只要能够访问互联网，就
 
 它将客户端切换到所选 Host 的 Harness 原生 API，因此原有 Workspace、工具和权限流程都保留在该电脑上。
 
-Host 当前注册的全部设置分区也可以通过 Harness 官方设置 API 在远端配置，大部分插件配置均已得到完整支持。
+你也可以远程修改主机上的 Harness 和插件设置；可编辑的选项取决于 Harness 和各插件通过官方设置接口开放的配置项。
 
 ## 实验性 ACP 工作区
 
@@ -180,13 +158,15 @@ Host 启动本机支持ACP 的Agent，通过ds-harness-remote 通道传递 Promp
 
 当前已支持：
 
-- **Codex**：通过独立的 App Server 接口接入，使用同一工作区入口。
+- **Codex**：通过 App Server 接入，使用统一工作区入口。
 - **Cursor**：通过 CLI 的 ACP 接口接入。
-- **Antigravity（AGY）**：将 CLI 的 stream-json 接口适配到 ACP gateway。
-- **Pi Agent（实验性）**：在 Host 安装 `@earendil-works/pi-coding-agent` 与 `pi-acp`，配置 Pi 本机模型服务后，Remote 默认自动检测并初始化，ACP 初始化成功才开放工作区；可在 Remote 设置中明确关闭，使用独立 ACP 数据面。工具按 Host 用户权限执行，逐工具确认需要 Pi 扩展，默认不会自动启用。
-- **OpenCode** — 通过 `opencode acp` 接入，支持工作区发现和历史恢复。Host 启动时检查 CLI 支持的参数，兼容带原生监听器与纯 stdio 的 ACP 构建。Desktop/Android 原生会话归档要求认证 loopback API；不提供该接口的版本会明确报告归档不可用。归档状态由 OpenCode 保存，历史保留；暂不提供恢复归档入口。
-- **Claude** — 使用 Host 本机已授权的 `claude-agent-acp`，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、文字消息及审批，支持直接 Files/Terminal 访问，暂不支持图片输入。
-- **Hermes** — 通过 Hermes Agent 自带的 ACP 服务端（`hermes acp`）接入，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、流式思考与工具输出、文字与多模态图片消息、审批及模型选择，支持直接 Files/Terminal 访问。
+- **Antigravity（AGY）**：通过 CLI 的 stream-json 接口适配接入。
+- **Pi Agent（实验性）**：安装并配置 Pi 与 `pi-acp` 后自动检测，可在设置中关闭；工具按主机用户权限执行，默认无逐工具确认。
+- **OpenCode**：通过 `opencode acp` 接入，支持工作区与历史；会话归档需版本提供认证 API，暂不支持恢复归档。
+- **Claude**：通过本机已授权的 `claude-agent-acp` 接入，需在设置中开启；支持文字与审批，暂不支持图片。
+- **Hermes**：通过 `hermes acp` 接入，需在设置中开启；支持文字、图片、流式输出、审批与模型选择。
+
+Claude 和 Hermes 均支持直接 Files/Terminal 访问，复用 Host 的工作区路径隔离与终端权限设置。
 
 配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-integration.md)。
 

@@ -171,7 +171,7 @@ The Harness Host does not need a public listening port. Connect from anywhere wi
 
 The client switches to the selected Host’s native Harness API, keeping the original workspaces, tools, and permission flows on that computer.
 
-Every settings namespace registered by the Host can also be configured remotely through the official Harness settings API, with full support for most plugin settings.
+You can also edit Harness and plugin settings on the remote host. Available options depend on which settings Harness and each plugin expose through the official settings API.
 
 ## Experimental ACP workspaces
 
@@ -179,14 +179,15 @@ The Host runs local ACP-capable Agents and forwards prompts, streamed replies, a
 
 Supported backends:
 
-- **Codex** — connected through its independent App Server interface, with the same workspace entry.
-- **Cursor** — connected through the CLI's ACP interface.
-- **Antigravity (AGY)** — its stream-json CLI is adapted to the ACP gateway.
-- **Pi Agent (experimental)** — install `@earendil-works/pi-coding-agent` and `pi-acp` on the Host, configure Pi's provider locally; Remote automatically detects and initializes Pi unless explicitly disabled in Remote settings. The workspace is available only after ACP initialization succeeds. Uses the separate ACP data plane. Tools run with Host-user permissions; per-tool confirmation requires a Pi extension and is not enabled by default.
+- **Codex** — connects through App Server, using the shared workspace entry.
+- **Cursor** — connects through the CLI's ACP interface.
+- **Antigravity (AGY)** — connects through an adapter for its stream-json CLI.
+- **Pi Agent (experimental)** — automatically detected after installing and configuring Pi and `pi-acp`; can be disabled in settings. Tools run with Host-user permissions, without per-tool confirmation by default.
+- **OpenCode** — connects through `opencode acp`, with workspaces and history. Session archiving requires a build with the authenticated API; unarchive is not yet available.
+- **Claude** — connects through a locally authorized `claude-agent-acp`; enable it in settings. Supports text and approvals; images are not yet supported.
+- **Hermes** — connects through `hermes acp`; enable it in settings. Supports text, images, streamed output, approvals, and model selection.
 
-- **OpenCode** — connected through `opencode acp`, with workspace discovery and history recovery. Host startup checks the CLI's supported options, accepting both native-listener and stdio-only ACP builds. Native session archiving on Desktop/Android requires the authenticated loopback API; builds without it report archiving unavailable. Archive state is saved by OpenCode; history is retained. Unarchive is not yet exposed.
-- **Claude** — uses a locally authorized `claude-agent-acp` on the Host; enable it in Remote settings. Desktop/Android support workspaces, history, text prompts and approvals. Direct Files/Terminal access is supported. Image input is not available.
-- **Hermes** — runs Nous Research's Hermes Agent through its own ACP server (`hermes acp`); opt-in in Remote settings. Desktop/Android support workspaces, history, streamed thinking and tool output, text and multimodal image prompts, approvals and model selection. Direct Files/Terminal access is supported.
+Claude and Hermes also support direct file and terminal access, subject to the Host's workspace boundaries and terminal settings.
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
 
