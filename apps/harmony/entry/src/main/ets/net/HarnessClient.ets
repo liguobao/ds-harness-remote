@@ -357,8 +357,10 @@ export class HarnessAlphaClient {
     handler.onClosed = () => {
       return;
     };
+    // 流的 payload 走 Typert 信封 {args:{…}}（和 session/follow 一致）；workspace/follow 无参数
     const emptyArgs: Record<string, Object> = {};
-    const stream: RemoteGatewayStream = await this.gateway.open('workspace/follow', emptyArgs, handler);
+    const payload: Record<string, Object> = { 'args': emptyArgs };
+    const stream: RemoteGatewayStream = await this.gateway.open('workspace/follow', payload, handler);
     try {
       const frame: Record<string, Object> | undefined = asRecord(await first);
       const baseline: Record<string, Object> | undefined =

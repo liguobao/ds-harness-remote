@@ -1803,18 +1803,24 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        Image($r('app.media.ic_settings'))
-          .width(38)
-          .height(38)
-          .objectFit(ImageFit.CENTER)
-          .fillColor(this.pal().text2)
-          .onClick(() => {
-            if (!this.runtime.modelCatalogLoaded) {
-              this.runtime.refreshModelCatalog();
-            }
-            this.runtime.refreshPermissionState();
-            this.showSessionPanel = true;
-          })
+        // 齿轮：图标本体放大到 24，外面套 40 的点击区（原来 38 的框里只画 20，看着太小）
+        Row() {
+          Image($r('app.media.ic_settings'))
+            .width(24)
+            .height(24)
+            .fillColor(this.pal().text2)
+        }
+        .width(40)
+        .height(40)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          if (!this.runtime.modelCatalogLoaded) {
+            this.runtime.refreshModelCatalog();
+          }
+          this.runtime.refreshPermissionState();
+          this.showSessionPanel = true;
+        })
         Text('＋')
           .fontSize(22)
           .fontWeight(FontWeight.Medium)

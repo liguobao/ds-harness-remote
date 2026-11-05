@@ -346,10 +346,28 @@ hilog 缓冲区也已被冲掉（只剩 5 行），所以这三处需要下次�
 连上主机后看 `workspace/follow baseline -> N item(s)`、打开文件浏览看目录是否出来、
 输入 `/` 看候选是否来自主机而不是内置兜底。
 
+## 2026-11-05 13:20（工作区链路打通 + 齿轮放大，V0.08.8）
+
+**workspace/follow 的 payload 要 Typert 信封**：直接发 `{}` 主机回
+`The Host could not complete the request.`；改成 `{args:{}}` 立刻正常：
+
+```
+workspace/follow baseline -> 3 item(s)
+workspace/list -> 3 item(s)
+```
+
+（和 session/follow 的 `{args:{request}}` 同一套规矩：流的 payload 必须包 `args`。）
+
+用户反馈「齿轮太小」：图标本体 20 → 24，外面套 40×40 点击区（原来是 38 的框里画 20）。
+
+**待验证**（用户当时在浏览器里用 App/网页，窗口层级一直把 App 顶下去，没敢继续点）：
+目录浏览（`directoryPicker/list` 是否返回内容）、斜杠命令候选是否来自主机。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.08.8 | 1000045 | 齿轮图标放大到 24（点击区 40） |
 | 0.08.6 | 1000043 | 工作区/目录/命令清单改用白名单端点（follow、directoryPicker、agentId） |
 | 0.08.4 | 1000041 | 修 commands/execute 参数与回执解析；权限切换改走 /permission |
 | 0.08.1 | 1000038 | 等 answer 预算 12s→16s；回落中继后忽略迟到信令 |
