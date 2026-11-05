@@ -128,10 +128,68 @@
   }
 
   // ---------- peer / channel ----------
+  // 用 getStats 里的 candidate-pair 判定实际走的路径
+  // 规则照 docs/protocol.md §14：本端或对端是 relay → turn；任一端是私网/链路本地 → lan；其余 p2p
+  function classifyCandidate(candidate) {
+    if (!candidate) { return ''; }
+    var type = String(candidate.candidateType || '');
+    if (type === 'relay') { return 'turn'; }
+    var addr = String(candidate.address || candidate.ip || '');
+    if (isPrivateAddress(addr)) { return 'lan'; }
+    return 'p2p';
+  }
+  function isPrivateAddress(addr) {
+    if (!addr) { return false; }
+    if (addr.indexOf('192.168.') === 0 || addr.indexOf('10.') === 0) { return true; }
+    if (addr.indexOf('172.') === 0) {
+      var parts = addr.split('.');
+      var second = parseInt(parts[1], 10);
+      if (second >= 16 && second <= 31) { return true; }
+    }
+    if (addr.indexOf('169.254.') === 0 || addr.indexOf('127.') === 0) { return true; }
+    if (addr.indexOf('fe80:') === 0 || addr === '::1') { return true; }
+    return false;
+  }
+  function detectTransport(peer) {
+    if (!peer || typeof peer.getStats !== 'function') { return 'lan'; }
+    return peer.getStats().then(function (report) {
+      var pairs = [];
+      var byId = {};
+      report.forEach(function (entry) { byId[entry.id] = entry; });
+      report.forEach(function (entry) {
+        if (entry.type === 'candidate-pair' && (entry.selected === true || entry.nominated === true)) {
+          pairs.push(entry);
+        }
+      });
+      if (pairs.length === 0) {
+        report.forEach(function (entry) { if (entry.type === 'transport' && entry.selectedCandidatePairId) { pairs.push(byId[entry.selectedCandidatePairId]); } });
+      }
+      for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i];
+        if (!pair) { continue; }
+        var local = byId[pair.localCandidateId];
+        var remote = byId[pair.remoteCandidateId];
+        var localKind = classifyCandidate(local);
+        var remoteKind = classifyCandidate(remote);
+        if (localKind === 'turn' || remoteKind === 'turn') { return 'turn'; }
+        if (localKind === 'lan' || remoteKind === 'lan') { return 'lan'; }
+        return 'p2p';
+      }
+      return 'lan';
+    }).catch(function () { return 'lan'; });
+  }
+
   function attachChannel(channel) {
     dc = channel;
     dc.binaryType = 'arraybuffer';
-    dc.onopen = function () { log('dc open label=' + dc.label); call('onDataOpen', '1'); };
+    dc.onopen = function () {
+      log('dc open label=' + dc.label);
+      detectTransport(pc).then(function (kind) {
+        log('selected transport=' + kind);
+        call('onTransport', kind);
+      });
+      call('onDataOpen', '1');
+    };
     dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
     dc.onerror = function (e) { log('dc error ' + (e && e.message ? e.message : e)); call('onError', 'data channel error'); };
     dc.onmessage = function (event) {
@@ -163,7 +221,13 @@
     try {
       if (iceJson) {
         var parsed = JSON.parse(iceJson);
-        if (Object.prototype.toString.call(parsed) === '[object Array]') { cfg = { iceServers: parsed }; }
+        if (Object.prototype.toString.call(parsed) === '[object Array]') {
+          cfg = { iceServers: parsed };
+        } else if (parsed && Object.prototype.toString.call(parsed.iceServers) === '[object Array]') {
+          cfg = { iceServers: parsed.iceServers };   // 服务端 /turn/credentials 的形状
+        }
+        log('ice servers: ' + (cfg.iceServers ? cfg.iceServers.length : 0)
+          + ' urls=' + (cfg.iceServers || []).map(function (s) { return String(s.urls); }).join(','));
       }
     } catch (e) { log('ice parse failed ' + e); }
     pc = new PC(cfg);

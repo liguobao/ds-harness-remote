@@ -11,6 +11,8 @@ import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import { VoiceRecorder } from '../services/VoiceInput';
+import { PickedImage, pickImages } from '../services/ImagePicker';
+import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
@@ -55,6 +57,12 @@ struct Index {
   @State sessionSearchActive: boolean = false;
   /** 上下文占用百分比，0 表示未知。 */
   @State contextPercent: number = 0;
+  /** 这条连接的数据面：'' | 'lan' | 'p2p' | 'turn' | 'relay'。 */
+  @State connectedTransport: string = '';
+  /** 已选好、还没发出去的图片。 */
+  @State pendingImages: PickedImage[] = [];
+  /** 正在取图/压缩。 */
+  @State pickingImages: boolean = false;
   @State connectStage: string = '';
   /** 斜杠命令候选。 */
   @State slashCommands: SlashCommand[] = [];
@@ -211,6 +219,7 @@ struct Index {
     this.currentSessionTitle = this.runtime.currentSessionTitle;
     this.infoMsg = '';
     this.contextPercent = this.runtime.contextPercent;
+    this.connectedTransport = this.runtime.transportLabel;
     this.connectStage = this.runtime.connectStage;
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
@@ -280,8 +289,46 @@ struct Index {
 
   private sendTap(): void {
     const text: string = this.promptInput;
+    const picked: PickedImage[] = this.pendingImages;
+    if (text.trim().length === 0 && picked.length === 0) {
+      return;
+    }
     this.promptInput = '';
-    this.runtime.sendPrompt(text);
+    this.pendingImages = [];
+    const parts: PromptImagePart[] = [];
+    for (const image of picked) {
+      const part: PromptImagePart = new PromptImagePart();
+      part.mediaType = image.mediaType;
+      part.base64 = image.base64;
+      part.name = image.name;
+      parts.push(part);
+    }
+    this.runtime.sendPrompt(text, parts);
+  }
+
+  /** 从系统相册选图；选完先压再进待发队列。 */
+  private attachImage(): Promise<void> {
+    if (this.pickingImages) {
+      return Promise.resolve();
+    }
+    this.pickingImages = true;
+    const pick = pickImages(4);
+    return pick.then((picked: PickedImage[]) => {
+      this.pickingImages = false;
+      if (picked.length === 0) {
+        return;
+      }
+      this.pendingImages = this.pendingImages.concat(picked);
+    }).catch((error: Error) => {
+      this.pickingImages = false;
+      this.errorMsg = this.tr('图片读取失败：') + error.message;
+    });
+  }
+
+  private removePendingImage(index: number): void {
+    const next: PickedImage[] = this.pendingImages.slice();
+    next.splice(index, 1);
+    this.pendingImages = next;
   }
 
   /** Display name of a host device: user alias wins over the server-registered name. */
@@ -306,6 +353,31 @@ struct Index {
   }
 
   /** 权限预设的中文短标签。 */
+  /** 顶栏数据面徽标：LAN/P2P/TURN 是直连，Relay 是中继（中文界面显示「中继」）。 */
+  private transportBadgeText(): string {
+    if (this.connectedTransport === 'relay') {
+      return this.en() ? 'Relay' : '中继';
+    }
+    if (this.connectedTransport === 'lan') {
+      return 'LAN';
+    }
+    if (this.connectedTransport === 'p2p') {
+      return 'P2P';
+    }
+    if (this.connectedTransport === 'turn') {
+      return 'TURN';
+    }
+    return '';
+  }
+
+  private transportBadgeColor(): string {
+    return this.connectedTransport === 'relay' ? '#C88418' : '#1E9E6A';
+  }
+
+  private transportBadgeBg(): string {
+    return this.connectedTransport === 'relay' ? 'rgba(240,160,32,0.14)' : 'rgba(52,211,153,0.16)';
+  }
+
   private permissionLabel(): string {
     const preset: string = this.runtime.permissionPreset;
     if (preset === 'read-only') {
@@ -825,7 +897,7 @@ struct Index {
         .javaScriptProxy({
           object: this.rtc.proxyObject(),
           name: 'dshBridge',
-          methodList: ['onLog', 'onLocalSdp', 'onIce', 'onState', 'onIceState',
+          methodList: ['onLog', 'onLocalSdp', 'onIce', 'onState', 'onIceState', 'onTransport',
             'onDataOpen', 'onDataClosed', 'onDataBinary', 'onError'],
           controller: this.rtc.controller
         })
@@ -1696,6 +1768,15 @@ struct Index {
                   })
               }
               .alignItems(VerticalAlign.Center)
+              if (this.connectedTransport.length > 0) {
+                Text(this.transportBadgeText())
+                  .fontSize(9)
+                  .fontColor(this.transportBadgeColor())
+                  .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                  .backgroundColor(this.transportBadgeBg())
+                  .borderRadius(5)
+                  .margin({ left: 4 })
+              }
               if (this.contextPercent > 0) {
                 Text(this.contextPercent + '%')
                   .fontSize(10)
@@ -1925,7 +2006,71 @@ struct Index {
           .width('100%')
           .padding({ top: 4, bottom: 2 })
         }
+        if (this.pendingImages.length > 0) {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.pendingImages, (picked: PickedImage, index: number) => {
+                Stack({ alignContent: Alignment.TopEnd }) {
+                  if (picked.preview !== undefined) {
+                    Image(picked.preview)
+                      .width(56)
+                      .height(56)
+                      .borderRadius(10)
+                      .objectFit(ImageFit.Cover)
+                  } else {
+                    Column()
+                      .width(56)
+                      .height(56)
+                      .borderRadius(10)
+                      .backgroundColor(this.pal().chip)
+                  }
+                  Text('✕')
+                    .fontSize(11)
+                    .fontColor('#FFFFFF')
+                    .width(18)
+                    .height(18)
+                    .textAlign(TextAlign.Center)
+                    .backgroundColor('rgba(0,0,0,0.55)')
+                    .borderRadius(9)
+                    .onClick(() => {
+                      this.removePendingImage(index);
+                    })
+                }
+              }, (picked: PickedImage, index: number) => index + ':' + picked.bytes)
+            }
+            .padding({ left: 16, right: 16 })
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .padding({ top: 2, bottom: 2 })
+        }
         Row({ space: 10 }) {
+          // 图片：选相册里的图，压完挂在输入框上方，随下一次发送一起交给主机
+          Row() {
+            if (this.pickingImages) {
+              LoadingProgress()
+                .width(18)
+                .height(18)
+                .color('#22D3EE')
+            } else {
+              Image($r('app.media.ic_image'))
+                .width(20)
+                .height(20)
+                .fillColor(this.pal().text2)
+            }
+          }
+          .width(46)
+          .height(46)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(23)
+          .border({ width: 1,
+            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+          .onClick(() => {
+            this.attachImage();
+          })
           // 语音输入：点一下开始录，再点一下结束并转写；转写中显示 spinner。
           Row() {
             if (this.dictating) {
@@ -2568,11 +2713,27 @@ struct Index {
         // A definite-width inner row gives the bubble a hard wrap budget, so long
         // text lines break inside the gradient instead of overflowing it.
         Row() {
-          Column() {
-            Text(item.text)
-              .fontSize(15)
-              .fontColor('#FFFFFF')
-              .textAlign(TextAlign.Start)
+          Column({ space: 6 }) {
+            if (item.images.length > 0) {
+              Column({ space: 6 }) {
+                ForEach(item.images, (base64: string, index: number) => {
+                  Image(imageDataUri(base64))
+                    .width(168)
+                    .height(168)
+                    .borderRadius(10)
+                    .objectFit(ImageFit.Cover)
+                    .onClick(() => {
+                      this.openPreview(imageDataUri(base64));
+                    })
+                }, (base64: string, index: number) => index + ':' + base64.length)
+              }
+            }
+            if (item.text.length > 0) {
+              Text(item.text)
+                .fontSize(15)
+                .fontColor('#FFFFFF')
+                .textAlign(TextAlign.Start)
+            }
           }
           .padding({ top: 10, bottom: 10, left: 14, right: 14 })
           .linearGradient({ angle: 135, colors: [['#3D5CF6', 0], ['#2E7CF0', 0.6], ['#22D3EE', 1]] })
@@ -3550,6 +3711,11 @@ class MarkdownImageCache {
     this.failures.delete(key);
     this.pixels.delete(key);
   }
+}
+
+/** 本地图片以 data URI 交给 Image / 预览层，省掉一次 PixelMap 编解码。 */
+function imageDataUri(base64: string): string {
+  return base64.startsWith('data:') ? base64 : 'data:image/jpeg;base64,' + base64;
 }
 
 function isRemoteImage(src: string): boolean {

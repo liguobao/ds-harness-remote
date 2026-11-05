@@ -29,6 +29,10 @@ export class RelayTransportOptions {
    * 拿不到就直接回落 relay，不需要任何开关。
    */
   rtc: RtcBridge | undefined = undefined;
+  /** 取 ICE 配置（TURN/STUN）的回调；拿不到就退回 LAN-only。 */
+  fetchIceServers: ((connectionId: string) => Promise<string>) | undefined = undefined;
+  /** 等 ICE 配置最多等多久，超了就先 LAN-only 开协商。 */
+  iceFetchTimeoutMs: number = 2500;
   /** 等 signal.answer 的预算。 */
   webrtcSignalTimeoutMs: number = 12000;
   /** 收到 answer 之后等 DataChannel 打通的预算（ICE 连通性检查 + DTLS）。 */
@@ -180,6 +184,8 @@ export class RelayTransport {
   private rtcLocalCandidates: number = 0;
   /** 已经因为 WebRTC 失败回落过一次，避免来回抖。 */
   private rtcAttempted: boolean = false;
+  /** DataChannel 实际选中的路径：'lan' | 'p2p' | 'turn'。 */
+  private rtcTransport: string = '';
 
   constructor(url: string, options: RelayTransportOptions) {
     this.url = url;
@@ -280,6 +286,14 @@ export class RelayTransport {
     };
     this.sendControl('secure.handshake', payload);
     return Promise.resolve();
+  }
+
+  /** 'lan' | 'p2p' | 'turn' | 'relay'（未连上时为空串）。 */
+  transportKind(): string {
+    if (this.dataMode === 'lan') {
+      return this.rtcTransport.length > 0 ? this.rtcTransport : 'lan';
+    }
+    return this.dataMode;
   }
 
   connectionInfo(): RelayConnectionInfo {
@@ -489,7 +503,7 @@ export class RelayTransport {
     if (rtc === undefined || this.rtcAttempted) {
       return false;
     }
-    if (!rtc.beginOffer('[]')) {
+    if (!rtc.isReady()) {
       logInfo('webrtc: 桥还没就绪，直接走中继');
       return false;
     }
@@ -498,7 +512,44 @@ export class RelayTransport {
     if (connId === undefined) {
       return false;
     }
-    logInfo('webrtc: 开始 LAN 直连协商 conn=' + connId);
+    logInfo('webrtc: 准备协商 conn=' + connId);
+    // 先要 ICE 配置（TURN/STUN）；失败或太慢就 LAN-only，不能因为取票把连接卡住
+    let iceSettled: boolean = false;
+    const begin = (iceJson: string): void => {
+      if (iceSettled) {
+        return;
+      }
+      iceSettled = true;
+      this.beginRtc(iceJson.length > 0 ? iceJson : '[]');
+    };
+    const fetcher = this.options.fetchIceServers;
+    if (fetcher === undefined) {
+      begin('[]');
+    } else {
+      fetcher(connId)
+        .then((json: string) => begin(json))
+        .catch(() => begin('[]'));
+      setTimeout(() => {
+        if (!iceSettled) {
+          logWarn('webrtc: ICE 配置超时，先按 LAN-only 协商');
+        }
+        begin('[]');
+      }, this.options.iceFetchTimeoutMs);
+    }
+    return true;
+  }
+
+  /** 真正开始 RTC 协商：挂回调、开 offer、起信号超时。 */
+  private beginRtc(iceJson: string): void {
+    const rtc = this.options.rtc;
+    if (rtc === undefined || this.notifiedClosed) {
+      return;
+    }
+    if (!rtc.beginOffer(iceJson)) {
+      this.fallBackToRelay('桥拒绝开 offer');
+      return;
+    }
+    logInfo('webrtc: 已开 offer（ICE 配置 ' + (iceJson.length > 2 ? '有' : '空，LAN-only') + '）');
     this.rtcSignalTimer = setTimeout(() => {
       this.fallBackToRelay('没等到 signal.answer（' + this.options.webrtcSignalTimeoutMs + 'ms）');
     }, this.options.webrtcSignalTimeoutMs);
@@ -532,6 +583,11 @@ export class RelayTransport {
         logWarn('webrtc: signal.ice 发送失败');
       }
     };
+    rtc.onTransport = (kind: string) => {
+      if (kind.length > 0) {
+        this.rtcTransport = kind;
+      }
+    };
     rtc.onDataOpen = () => {
       this.rtcOpened();
     };
@@ -548,7 +604,6 @@ export class RelayTransport {
       logWarn('webrtc: 错误 ' + message);
       this.fallBackToRelay(message);
     };
-    return true;
   }
 
   /** DataChannel 打开：先发 transport.selected，再让 Noise 握手继续。 */
@@ -565,7 +620,9 @@ export class RelayTransport {
       rtc.onLocalSdp = undefined;
       // onIce 继续挂着：后续 trickle candidate 还要发
     }
-    this.finishConnect('lan');
+    const selected: string = this.rtcTransport.length > 0 ? this.rtcTransport : 'lan';
+    logInfo('webrtc: 数据面路径=' + selected);
+    this.finishConnect(selected);
   }
 
   /** WebRTC 没谈成：关掉 peer，回到中继数据面。 */

@@ -40,6 +40,13 @@ export class HarnessClientFrame {
 }
 
 /** One native Harness session event. */
+/** prompt 里的一段图片：data 是标准 base64 的原始字节。 */
+export class PromptImagePart {
+  mediaType: string = 'image/jpeg';
+  base64: string = '';
+  name: string = '';
+}
+
 export class HarnessSessionEvent {
   type: string = '';
   seq: number = 0;
@@ -184,9 +191,24 @@ export class HarnessAlphaClient {
    * mode='queue' 排在本轮之后，mode='steer' 立刻插话打断当前轮的下一步行动。
    */
   async sessionPrompt(sessionId: string, text: string, requestId: string,
-    mode: string = 'queue'): Promise<void> {
-    const block: Record<string, Object> = { 'type': 'text', 'text': text };
-    const content: Object[] = [block];
+    mode: string = 'queue', images: PromptImagePart[] = []): Promise<void> {
+    // 顺序照 DSH：图片在前、文字在后；空文字时只发图片（协议要求 content 至少一项）
+    const content: Object[] = [];
+    for (const image of images) {
+      const part: Record<string, Object> = {
+        'type': 'image',
+        'mediaType': image.mediaType,
+        'data': image.base64
+      };
+      if (image.name.length > 0) {
+        part['name'] = image.name;
+      }
+      content.push(part);
+    }
+    if (text.length > 0) {
+      const block: Record<string, Object> = { 'type': 'text', 'text': text };
+      content.push(block);
+    }
     const request: Record<string, Object> = {
       'requestId': requestId,
       'sessionId': sessionId,
@@ -194,7 +216,8 @@ export class HarnessAlphaClient {
       'content': content
     };
     const args: Record<string, Object> = { 'request': request };
-    logInfo('session/prompt -> ' + sessionId + ' len=' + text.length + ' mode=' + mode + ' req=' + requestId);
+    logInfo('session/prompt -> ' + sessionId + ' len=' + text.length + ' images=' + images.length
+      + ' mode=' + mode + ' req=' + requestId);
     try {
       await this.callValue('session/prompt', args);
       logInfo('session/prompt ok -> ' + sessionId);

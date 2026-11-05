@@ -7,7 +7,7 @@ import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HistoryPage } from '../net/HarnessClient';
+  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HistoryPage, PromptImagePart } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -70,6 +70,8 @@ export class ChatItem {
   noticeKind: string = '';
   /** notice 上的操作按钮要执行的斜杠命令（例如 '/compact'），空表示没有按钮。 */
   actionCommand: string = '';
+  /** 用户消息里带的图片（标准 base64，本地回显用；历史里的图片另走附件读取）。 */
+  images: string[] = [];
 }
 
 /**
@@ -88,7 +90,7 @@ export class AppRuntime {
   private pendingRelay: RelayTransport | undefined = undefined;
   /** ArkWeb 里的 WebRTC 桥（LAN 直连用），由页面在 aboutToAppear 时挂进来。 */
   private rtcBridge: RtcBridge | undefined = undefined;
-  /** 这次连接最终用的数据面：'' | 'relay' | 'lan'。 */
+  /** 这次连接最终用的数据面：'' | 'relay' | 'lan' | 'p2p' | 'turn'。 */
   transportLabel: string = '';
   /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
   private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
@@ -393,6 +395,10 @@ export class AppRuntime {
       relayOptions.accessToken = credentials.accessToken;
       relayOptions.targetDeviceId = deviceId;
       relayOptions.rtc = this.rtcBridge;
+      // WebRTC 要 TURN/STUN 配置时现取：接口要求 active connection，正好在 connect.accepted 之后
+      relayOptions.fetchIceServers = (connectionId: string): Promise<string> => {
+        return this.ensureApi().then((api: RemoteServerApi) => api.iceServersJson(connectionId));
+      };
       let relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
       this.pendingRelay = relay;
       const tokenFresh: boolean = credentials.accessTokenExpiresAt - Date.now() > 120000;
@@ -462,7 +468,8 @@ export class AppRuntime {
       // list is loaded afterwards so a slow host never keeps the user locked out.
       this.connectedHostName = host.name.length > 0 ? host.name : '远程主机';
       this.connectedDeviceId = host.deviceId;
-      logInfo('connected to host ' + host.deviceId);
+      this.transportLabel = relay.transportKind();
+      logInfo('connected to host ' + host.deviceId + ' transport=' + this.transportLabel);
       this.reconnectAttempt = 0;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
@@ -1101,9 +1108,9 @@ export class AppRuntime {
     }
   }
 
-  async sendPrompt(text: string): Promise<void> {
+  async sendPrompt(text: string, images: PromptImagePart[] = []): Promise<void> {
     const trimmed: string = text.trim();
-    if (trimmed.length === 0) {
+    if (trimmed.length === 0 && images.length === 0) {
       return;
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -1120,11 +1127,18 @@ export class AppRuntime {
     item.requestRpcId = requestId;
     item.sessionId = sessionId;
     item.timestamp = Date.now();
+    if (images.length > 0) {
+      const previews: string[] = [];
+      for (const image of images) {
+        previews.push(image.base64);
+      }
+      item.images = previews;
+    }
     const next: ChatItem[] = this.messages.slice();
     next.push(item);
     this.messages = next;
     // 以 / 开头且未生成中的单行输入，先按斜杠命令交给主机执行。
-    if (trimmed.startsWith('/') && !trimmed.includes('\n') && !this.generating) {
+    if (images.length === 0 && trimmed.startsWith('/') && !trimmed.includes('\n') && !this.generating) {
       const handled: boolean = await this.trySlashCommand(harness, sessionId, trimmed);
       if (handled) {
         return;
@@ -1134,7 +1148,8 @@ export class AppRuntime {
     this.errorMsg = '';
     this.notify();
     try {
-      await harness.sessionPrompt(sessionId, trimmed, requestId, this.steerMode ? 'steer' : 'queue');
+      await harness.sessionPrompt(sessionId, trimmed, requestId,
+        this.steerMode ? 'steer' : 'queue', images);
     } catch (error) {
       this.errorMsg = errorMessage(error);
       this.generating = false;
@@ -1827,6 +1842,7 @@ export class AppRuntime {
     this.harness = undefined;
     this.connectedHostName = '';
     this.connectedDeviceId = '';
+    this.transportLabel = '';
     this.currentSessionId = '';
     this.currentSessionTitle = '';
     this.sessions = [];
@@ -2191,6 +2207,7 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.rev = item.rev;
   copy.noticeKind = item.noticeKind;
   copy.actionCommand = item.actionCommand;
+  copy.images = item.images.slice();
   return copy;
 }
 

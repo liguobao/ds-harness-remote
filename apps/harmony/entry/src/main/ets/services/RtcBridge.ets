@@ -56,6 +56,14 @@ class RtcBridgeSink {
     }
   }
 
+  onTransport(kind: string): void {
+    logInfo('[webrtc] transport=' + kind);
+    const handler: ((value: string) => void) | undefined = RtcBridge.active!.onTransport;
+    if (handler !== undefined) {
+      handler(kind);
+    }
+  }
+
   onDataBinary(base64: string): void {
     const handler: ((value: string) => void) | undefined = RtcBridge.active!.onDataBinary;
     if (handler !== undefined) {
@@ -91,6 +99,8 @@ export class RtcBridge {
   onDataBinary: ((base64: string) => void) | undefined = undefined;
   onDataClosed: (() => void) | undefined = undefined;
   onError: ((message: string) => void) | undefined = undefined;
+  /** 实际选中的路径：'lan' | 'p2p' | 'turn'。 */
+  onTransport: ((kind: string) => void) | undefined = undefined;
 
   constructor() {
     RtcBridge.active = this;

@@ -230,10 +230,34 @@ currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"
 还没做（下一轮）：TURN 候选（当前只吃 host candidate，跨网段仍会回落 relay）、
 传输方式徽标（`transportLabel` 字段已备好但未显示）、后台挂起后 DC 重建、背压/分块实测。
 
+## 2026-11-05 中午（TURN + 传输徽标 + 图片插入，V0.07.0）
+
+一次做完三件事，都是真机/真主机验过的（QXS-W10 ↔ 本机主机，LAN）：
+
+**TURN 候选**：`connect.accepted` 之后先按 `connectionId` 取
+`GET /api/v1/turn/credentials`（2.5s 上限，取不到就 LAN-only），把 `{iceServers:[...]}`
+塞给 ArkWeb 的 `RTCPeerConnection`。实测拿到了 STUN+TURN，本地也真的产出了
+`typ relay 114.132.152.243:52094` 候选。跨网段时这才有戏（之前只有 host candidate）。
+
+**传输方式徽标**：DC 打开后用 `getStats()` 找 nominated candidate-pair，按协议 §14 的口径
+判定 `lan`/`p2p`/`turn`（relay → turn；任一端私网/链路本地 → lan；其余 p2p），
+`transport.selected` 按真实路径发，顶栏在会话标题右边显示一个小徽标。实测显示 `LAN`。
+
+**图片插入**：新 `services/ImagePicker.ets`（系统相册 picker → 长边缩到 1600 → JPEG q80 →
+标准 base64），输入坞左侧新增图片按钮，选完在输入框上方出缩略图条（可 ✕ 移除），
+发送时作为 `{type:'image', mediaType, data, name}` 拼进 `session/prompt.request.content`
+（协议 `PromptContentPart` 原生支持；`HarnessClient.sessionPrompt` 增加 images 参数）。
+实测：3072×4096 拍成 `1200×1600 / 196 KB`，主机 `session/prompt ok`，Agent 直接在主机上
+`read_image` 读图分析，本地气泡也回显了缩略图。
+
+仍未做：历史里「主机侧已有的图片」回显——`user/message` 的 image block 只带
+`attachment.attachmentId`，需要再调 `session/attachment` 拉 base64，目前历史图片不显示。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.07.0 | 1000033 | TURN 候选 + LAN/P2P/TURN 徽标 + 图片插入 |
 | 0.06.1 | 1000031 | LAN-only WebRTC 直连跑通（offer/answer/ice + RTCH 分块 + 回落中继） |
 | 0.05.1 | 1000029 | 设备卡副标题折行，版本号不再被省略号吃掉 |
 | 0.05.0 | 1000028 | 4008 措辞按 reason 分流（节点满 / 票据对不上），票据类不再重试 |
