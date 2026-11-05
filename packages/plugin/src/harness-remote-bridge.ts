@@ -1157,6 +1157,9 @@ const SESSION_PROJECTION_WHITELIST = new Set([
   'view',
   'sessionStats',
   'tokenUsage',
+  'subagentCatalog',
+  'subagent',
+  'subagentTiming',
 ])
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor'])

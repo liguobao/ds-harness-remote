@@ -17,7 +17,13 @@ import type { AppState } from './store-state'
 
 /** Prompt actions use the store's single connection/session runtime. */
 export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'respondApproval' | 'respondQuestion'> {
+  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'interruptSubagent' | 'promptSubagent' | 'respondApproval' | 'respondQuestion'> {
+  /** Resolve a subagent row from the selected session or the session list. */
+  const findSubagent = (childSessionId: string) => {
+    const selected = get().selectedSession
+    if (selected?.sessionId === childSessionId) return selected
+    return get().sessions.find(item => item.sessionId === childSessionId)
+  }
   return {
     async sendMessage(input, images = [], reuseRpcId) {
       if (get().busyAction?.startsWith('session:')) return 'rejected'
@@ -309,6 +315,70 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         set({ error: friendlyError(error) })
       } finally {
         set({ busyAction: undefined })
+      }
+    },
+
+    /**
+     * Interrupt a running subagent through its durable parent. The local
+     * `running: false` is only a short-lived reflection of an accepted Host
+     * interrupt; the authoritative child state still comes back over the
+     * session projections/history on the current connection generation.
+     */
+    async interruptSubagent(childSessionId, parentSessionId) {
+      // Only one subagent control operation may be in flight at a time.
+      if (get().busyAction?.startsWith('subagent:')) return false
+      const generation = runtime.connectionGeneration
+      if (get().connection.phase !== 'connected') return false
+      const parent = parentSessionId ?? findSubagent(childSessionId)?.parentSessionId
+      if (parent === undefined) return false
+      set({ busyAction: `subagent:stop:${childSessionId}`, error: undefined })
+      try {
+        await runtime.connection.requireProxy().subagentInterruptByParent(childSessionId, parent)
+        // A reconnect or a successor operation owns the state from here on.
+        if (generation !== runtime.connectionGeneration) return false
+        set(state => ({
+          sessions: state.sessions.map(item => item.sessionId === childSessionId ? { ...item, running: false } : item),
+          selectedSession: state.selectedSession?.sessionId === childSessionId
+            ? { ...state.selectedSession, running: false }
+            : state.selectedSession,
+          busyAction: undefined,
+        }))
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    /**
+     * Send a prompt to a subagent. A running child is steered, an idle child is
+     * queued. No permanent optimistic message is fabricated: the Host session
+     * state stream and the child's authoritative read-back are the single
+     * source of truth for what eventually appears in the timeline.
+     */
+    async promptSubagent(childSessionId, text, parentSessionId) {
+      const trimmed = text.trim()
+      if (trimmed.length === 0) return false
+      if (get().busyAction?.startsWith('subagent:')) return false
+      const generation = runtime.connectionGeneration
+      if (get().connection.phase !== 'connected') return false
+      const child = findSubagent(childSessionId)
+      const parent = parentSessionId ?? child?.parentSessionId
+      if (parent === undefined) return false
+      const delivery = child?.running === true ? 'steer' : 'queue'
+      set({ busyAction: `subagent:prompt:${childSessionId}`, error: undefined })
+      try {
+        await runtime.connection.requireProxy().subagentPrompt(childSessionId, parent, trimmed, delivery)
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined })
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
       }
     },
 

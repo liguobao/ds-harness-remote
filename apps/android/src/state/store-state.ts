@@ -173,6 +173,10 @@ export interface AppState {
   quoteChatMessage(text: string, sessionId?: string): void
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
+  /** Interrupt a running subagent through its durable parent session. */
+  interruptSubagent(childSessionId: string, parentSessionId?: string): Promise<boolean>
+  /** Prompt a subagent; delivery is chosen from its current running state. */
+  promptSubagent(childSessionId: string, text: string, parentSessionId?: string): Promise<boolean>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>

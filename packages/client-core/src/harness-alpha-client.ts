@@ -563,6 +563,47 @@ export class HarnessAlphaClient {
     if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the stop request.')
   }
 
+  /**
+   * Interrupt a running subagent through its durable parent session. The
+   * official carrier keeps the child resumable (`mode: 'continuable'`) so a
+   * later prompt can continue the same child rather than provisioning a new one.
+   */
+  async subagentInterruptByParent(childSessionId: string, parentSessionId: string): Promise<boolean> {
+    await this.callValue<{ accepted: true }>('subagents/interruptByParent', {
+      childSessionId,
+      parentSessionId,
+      mode: 'continuable',
+    })
+    return true
+  }
+
+  /**
+   * Send a prompt to a subagent through its durable parent. `delivery` decides
+   * whether the official carrier steers a running child or queues a new turn;
+   * the result only carries the accepted message id — the authoritative child
+   * state still arrives over the Host's session projection/history streams, so
+   * no permanent optimistic message is fabricated here.
+   */
+  async subagentPrompt(
+    childSessionId: string,
+    parentSessionId: string,
+    text: string,
+    delivery: 'queue' | 'steer',
+  ): Promise<{ messageId: string }> {
+    const timeZone = clientTimeZone()
+    const request = {
+      requestId: createRemoteId(),
+      parentSessionId,
+      childSessionId,
+      mode: 'continuable',
+      delivery,
+      content: [{ type: 'text' as const, text }],
+      ...(timeZone === undefined ? {} : { clientTimeZone: timeZone }),
+    }
+    const result = await this.callValue<{ messageId: string }>('subagents/prompt', { request })
+    return { messageId: result.messageId }
+  }
+
   async sessionAttachment(sessionId: string, attachmentId: string): Promise<{ attachment: unknown; data: string }> {
     const result = await this.callValue<{ attachment?: unknown; data?: string; mediaType?: string }>('session/attachment', {
       request: { sessionId, attachmentId },
