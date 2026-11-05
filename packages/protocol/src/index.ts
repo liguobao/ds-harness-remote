@@ -2,6 +2,34 @@ export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
+export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
+export const RELAY_RESUME_CAPABILITY = 'transport.relay.resume.v1'
+export const WEBRTC_LEASE_MS = 300_000
+import { SERVER_SHUTDOWN_REASON as SERVER_SHUTDOWN_REASON_NAME } from './close-semantics.js'
+export {
+  SERVER_SHUTDOWN_REASON,
+  SERVER_SHUTDOWN_CLOSE_CODES,
+  HEARTBEAT_TIMEOUT_CLOSE_CODE,
+  HEARTBEAT_TIMEOUT_REASON,
+  HEARTBEAT_CONNECTION_FAILED_REASON,
+  TRANSIENT_CONTROL_CLOSE_CODES,
+  TERMINAL_CONTROL_CLOSE_CODES,
+  isServerShutdownClose,
+  isHeartbeatTimeoutClose,
+  classifyControlClose,
+  type ControlCloseClassification,
+} from './close-semantics.js'
+/**
+ * WebSocket close code a Server uses when shutting down for restart.
+ *
+ * Deployments disagree on the code (`apps/server` sends 4009, the hosted
+ * Server sends 4001 and reserves 4009 for heartbeat expiry), so endpoints must
+ * classify with `isServerShutdownClose()` / `classifyControlClose()` and never
+ * by comparing the code alone.
+ */
+export const SERVER_SHUTDOWN_CLOSE_CODE = 4009
+/** Close reason paired with the shutdown code; this is the semantic key. */
+export const SERVER_SHUTDOWN_CLOSE_REASON: string = SERVER_SHUTDOWN_REASON_NAME
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
@@ -109,6 +137,9 @@ export const controlFrameTypes = [
   'signal.answer',
   'signal.ice',
   'transport.selected',
+  'connection.lease.request',
+  'connection.lease.ack',
+  'connection.lease.close',
   'ping',
   'pong',
   'error',
@@ -320,6 +351,7 @@ export interface ControlFrameByteLimits {
 }
 
 export interface HelloPayload {
+  recoveryTickets?: string[]
   role: 'host' | 'client'
   deviceId: string
   accessToken: string
@@ -351,6 +383,8 @@ export interface ConnectRequestPayload {
 }
 
 export interface ConnectIncomingPayload {
+  relayRecoveryTicket?: string
+  recoveryTicket?: string
   connectionId: string
   clientDeviceId: string
   clientIdentityKey: string
@@ -364,6 +398,8 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
+  relayRecoveryTicket?: string
+  recoveryTicket?: string
   connectionId: string
   /** Optional independent Relay data-plane assignment. */
   relayEndpoint?: string
@@ -514,7 +550,7 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | (string & {})
+export type AcpBackend = 'cursor' | 'claude' | 'opencode' | 'pi' | 'hermes' | 'antigravity' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
 export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
 export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
@@ -789,13 +825,13 @@ export interface AgentAcpRespondParams {
 export type AcpWorkspaceToolCallEndpoint = 'workspaceFiles/list' | 'workspaceFiles/stat' | 'workspaceFiles/read' | 'workspaceFiles/readBytes' | 'workspaceFiles/readAll'
   | 'terminal/environment' | 'terminal/shells' | 'terminal/list' | 'terminal/create' | 'terminal/write' | 'terminal/resize' | 'terminal/rename' | 'terminal/close'
 export type AcpWorkspaceToolStreamEndpoint = 'workspaceFiles/changes' | 'terminal/follow' | 'terminal/retain'
-export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
+export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
 export interface AcpModelParams { sessionId: string; backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' }
 export interface AcpModelSelectionParams extends AcpModelParams { model: string; reasoningEffort?: string }
 export interface AgentAcpStreamOpenParams {
   streamId: string
   sessionId: string
-  tool?: { backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
+  tool?: { backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
 }
 
 export interface AgentAcpStreamCloseParams {
@@ -986,6 +1022,7 @@ const MAX_WORKSPACE_TYPE_ENTRIES = MAX_REMOTE_WORKSPACE_TYPE_ENTRIES
 const MAX_PREFERRED_TRANSPORT_ENTRIES = selectedTransports.length
 
 export const helloPayloadSchema = z.object({
+  recoveryTickets: z.array(z.string().min(1).max(4096)).max(64).optional(),
   role: z.enum(['host', 'client']),
   deviceId: z.string().min(1),
   accessToken: z.string().min(1),
@@ -1050,6 +1087,8 @@ export const connectRequestPayloadSchema = z.object({
 })
 
 export const connectIncomingPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   clientDeviceId: z.string().min(1),
   clientIdentityKey: identityKeySchema,
@@ -1064,6 +1103,8 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   relayEndpoint: z.string().url().optional(),
   relayTicket: z.string().min(1).optional(),
@@ -1112,6 +1153,9 @@ export const transportSelectedPayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
   transport: selectedTransportEnum,
+  /** Relay hostname the initiator actually used when transport is "turn"
+   *  (best-effort, from ICE stats; absent for other transports). */
+  turnNode: z.string().min(1).max(253).optional(),
 })
 
 export const pingPongPayloadSchema = z.object({
@@ -1124,6 +1168,16 @@ export const controlErrorPayloadSchema = z.object({
   retryable: z.boolean().optional(),
   connectionId: z.string().min(1).optional(),
 })
+
+export const connectionLeaseRequestSchema = z.object({
+  connectionId: z.string().min(1).max(128),
+  requestId: z.string().min(1).max(128),
+  ticket: z.string().min(1).max(4096),
+})
+export const connectionLeaseAckSchema = connectionLeaseRequestSchema.extend({
+  leaseMs: z.literal(WEBRTC_LEASE_MS),
+})
+export type ConnectionLeaseAck = z.infer<typeof connectionLeaseAckSchema>
 
 const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'hello': helloPayloadSchema,
@@ -1138,6 +1192,9 @@ const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'signal.answer': signalPayloadSchema,
   'signal.ice': signalIcePayloadSchema,
   'transport.selected': transportSelectedPayloadSchema,
+  'connection.lease.request': connectionLeaseRequestSchema,
+  'connection.lease.ack': connectionLeaseAckSchema,
+  'connection.lease.close': z.object({ connectionId: z.string().min(1).max(128) }),
   'ping': pingPongPayloadSchema,
   'pong': pingPongPayloadSchema,
   'error': controlErrorPayloadSchema,

@@ -118,6 +118,12 @@ struct Index {
   @State providerId: string = '';
   private providersRequested: boolean = false;
   @State showSessions: boolean = false;
+  /** 竖屏会话抽屉的跟手进度：0 全收起，1 全展开（手势拖动直接改这个值）。 */
+  @State drawerOpen: number = 0;
+  private drawerCloseTimer: number = -1;
+  /** 本次拖动的起点进度，以及它是不是从聊天页发起的（两个地方各有一把手势）。 */
+  private drawerDragBase: number = 0;
+  private drawerDragFromChat: boolean = false;
   @State topInset: number = 0;
   @State bottomInset: number = 0;
   @State isLandscape: boolean = false;
@@ -610,6 +616,49 @@ struct Index {
   }
 
   /** 左侧会话栏宽度：宽窗口下按比例放宽，窄窗口保持 300。 */
+  /** 竖屏抽屉宽度（屏宽 82%），跟手位移按它换算。 */
+  private drawerWidthVp(): number {
+    const w: number = this.windowWidthVp > 0 ? this.windowWidthVp : 360;
+    return Math.round(w * 0.82);
+  }
+
+  /** 松手后归位：过阈值就滑到底，否则弹回并卸载。 */
+  private settleDrawer(open: boolean): void {
+    if (this.drawerCloseTimer >= 0) {
+      clearTimeout(this.drawerCloseTimer);
+      this.drawerCloseTimer = -1;
+    }
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.Friction }, () => {
+      this.drawerOpen = open ? 1 : 0;
+    });
+    if (!open) {
+      this.drawerCloseTimer = setTimeout(() => {
+        this.showSessions = false;
+        this.drawerCloseTimer = -1;
+      }, 230);
+    }
+  }
+
+  /** 点按钮/手势完成后展开抽屉。 */
+  private openDrawer(): void {
+    if (this.showSessions && this.drawerOpen >= 1) {
+      return;
+    }
+    if (this.drawerCloseTimer >= 0) {
+      clearTimeout(this.drawerCloseTimer);
+      this.drawerCloseTimer = -1;
+    }
+    this.showSessions = true;
+    this.drawerOpen = 0;
+    this.getUIContext().animateTo({ duration: 240, curve: Curve.Friction }, () => {
+      this.drawerOpen = 1;
+    });
+  }
+
+  private closeDrawer(): void {
+    this.settleDrawer(false);
+  }
+
   private listPanelWidth(): number {
     const w: number = this.windowWidthVp;
     if (w <= 0) {
@@ -2703,11 +2752,12 @@ struct Index {
         })
         this.TopIcon($r('app.media.ic_plus'), () => {
           this.showSessions = false;
+          this.drawerOpen = 0;
           this.runtime.createNewSession();
         })
         if (!this.isLandscape) {
           this.TopIcon($r('app.media.ic_menu'), () => {
-            this.showSessions = true;
+            this.openDrawer();
             this.runtime.loadWorkspaces();
           })
         }
@@ -2822,16 +2872,41 @@ struct Index {
     .width('100%')
     .height('100%')
     .constraintSize({ maxWidth: this.chatMaxWidth() })
-    // 右往左横滑唤出会话列表（竖屏时列表就是从右边滑进来的那个抽屉）
+    // 右往左横滑：抽屉跟着手指走，松手后按位置决定展开还是弹回
     .gesture(
-      PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
-        .onActionEnd((event: GestureEvent) => {
+      PanGesture({ direction: PanDirection.Horizontal, distance: 8 })
+        .onActionStart(() => {
           if (this.isLandscape || this.showSessions) {
+            this.drawerDragFromChat = false;
             return;
           }
-          if (event.offsetX <= -70) {
+          this.drawerDragFromChat = true;
+          this.drawerDragBase = 0;
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          if (!this.drawerDragFromChat || event.offsetX >= 0) {
+            return;
+          }
+          const width: number = this.drawerWidthVp();
+          const progress: number = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
+          if (progress <= 0) {
+            return;
+          }
+          if (!this.showSessions) {
             this.showSessions = true;
+          }
+          this.drawerOpen = progress;
+        })
+        .onActionEnd(() => {
+          if (!this.drawerDragFromChat) {
+            return;
+          }
+          this.drawerDragFromChat = false;
+          if (this.drawerOpen > 0.32) {
+            this.settleDrawer(true);
             this.runtime.loadWorkspaces();
+          } else {
+            this.settleDrawer(false);
           }
         })
     )
@@ -2968,21 +3043,22 @@ struct Index {
           .onClick(() => {
             this.attachImage();
           })
-          // 输入框自己就是一块玻璃；触摸事件走它自己，父级容器收不到
-          TextInput({ text: this.promptInput,
+          // 输入框自己就是一块玻璃；换行靠回车，高度随内容长到 5 行再内部滚动
+          TextArea({ text: this.promptInput,
             placeholder: this.generating ? this.tr('正在生成，可插话…')
               : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
-            .height(46)
+            .constraintSize({ minHeight: 46, maxHeight: 132 })
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
             .fontColor(this.pal().text)
             .fontSize(this.fs(15))
+            .lineHeight(this.fs(22))
             .placeholderColor(this.pal().text3)
             .caretColor('#22D3EE')
             .borderRadius(23)
             .border({ width: 1,
               color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
-            .padding({ left: 18, right: 18 })
+            .padding({ left: 18, right: 18, top: 12, bottom: 12 })
             .clip(true)
             // 生成中保持可输入：否则「插话」无从谈起。
             .enabled(true)
@@ -2991,9 +3067,6 @@ struct Index {
               if (value === '/' && this.slashCommands.length === 0) {
                 this.runtime.loadSlashCommands();
               }
-            })
-            .onSubmit(() => {
-              this.sendTap();
             })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
@@ -3100,7 +3173,7 @@ struct Index {
           .borderRadius(15)
           .border({ width: 1, color: 'rgba(34,211,238,0.30)' })
           .onClick(() => {
-            this.showSessions = false;
+            this.closeDrawer();
             this.runtime.createNewSession();
           })
       }
@@ -3299,7 +3372,7 @@ struct Index {
               color: session.sessionId === this.currentSessionId
                 ? 'rgba(77,107,254,0.40)' : this.pal().border })
             .onClick(() => {
-              this.showSessions = false;
+              this.closeDrawer();
               this.runtime.openSession(session.sessionId);
             })
             .gesture(LongPressGesture().onAction(() => {
@@ -3786,26 +3859,34 @@ struct Index {
         .width('100%')
         .height('100%')
         .backgroundColor(this.pal().backdrop)
+        .opacity(this.drawerOpen)
         .onClick(() => {
-          this.showSessions = false;
+          this.closeDrawer();
         })
       Column() {
         this.SessionsPanelBody()
       }
-      .width('82%')
+      .width(this.drawerWidthVp())
       .height('100%')
       .backgroundColor(this.pal().panel)
       .border({ width: { left: 0.5 }, color: this.pal().borderStrong })
-      // 抽屉自右侧滑入；在面板上往右推回即收起，和滑出来时同一个方向
-      .transition(TransitionEffect.translate({ x: 320 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 220, curve: Curve.Friction }))
+      // 位移完全由手势进度决定：拉多少露多少，松手才补齐或弹回
+      .translate({ x: (1 - this.drawerOpen) * this.drawerWidthVp() })
       .gesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
-          .onActionEnd((event: GestureEvent) => {
-            if (event.offsetX >= 70) {
-              this.showSessions = false;
+        PanGesture({ direction: PanDirection.Horizontal, distance: 8 })
+          .onActionStart(() => {
+            this.drawerDragBase = this.drawerOpen;
+            this.drawerDragFromChat = false;
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            if (this.drawerDragFromChat) {
+              return;
             }
+            const width: number = this.drawerWidthVp();
+            this.drawerOpen = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
+          })
+          .onActionEnd(() => {
+            this.settleDrawer(this.drawerOpen >= 0.55);
           })
       )
     }

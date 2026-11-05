@@ -46,6 +46,9 @@ const validPayloads: Record<string, unknown> = {
   'signal.answer': { connectionId: 'conn-1', targetDeviceId: 'host-1', sdp: 'v=0...' },
   'signal.ice': { connectionId: 'conn-1', targetDeviceId: 'host-1', candidate: { candidate: 'candidate:1' } },
   'transport.selected': { connectionId: 'conn-1', targetDeviceId: 'host-1', transport: 'relay' },
+  'connection.lease.request': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket' },
+  'connection.lease.ack': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket', leaseMs: 300000 },
+  'connection.lease.close': { connectionId: 'conn-1' },
   'ping': { nonce: 'nonce-1' },
   'pong': { nonce: 'nonce-1' },
   'error': { code: 'ERROR', message: 'Something failed' },
@@ -536,6 +539,16 @@ describe('transport.selected payload rejection', () => {
     })).payload).toMatchObject({ transport: 'lan' })
   })
 
+  it('preserves the optional TURN node diagnostic', () => {
+    expect(parseControlFrame(makeFrame('transport.selected', {
+      ...valid,
+      transport: 'turn',
+      turnNode: 'turn.example.com:3478',
+    })).payload).toMatchObject({ transport: 'turn', turnNode: 'turn.example.com:3478' })
+    expect(parseControlFrame(makeFrame('transport.selected', { ...valid })).payload)
+      .not.toHaveProperty('turnNode')
+  })
+
   it('rejects invalid selected transport payloads', async () => {
     await runScenarios([
       {
@@ -582,6 +595,34 @@ describe('transport.selected payload rejection', () => {
         run: () => {
           const { transport, ...noTransport } = valid
           expect(() => parseControlFrame(makeFrame('transport.selected', noTransport))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty turnNode',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                transport: 'turn',
+                turnNode: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects oversized turnNode',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                transport: 'turn',
+                turnNode: 'a'.repeat(254),
+              }),
+            ),
+          ).toThrow()
         },
       },
     ])
@@ -655,7 +696,7 @@ describe('golden vectors', () => {
       'hello', 'hello.ack', 'connect.request', 'connect.incoming',
       'connect.accepted', 'connect.rejected', 'secure.handshake',
       'relay', 'signal.offer', 'signal.answer', 'signal.ice',
-      'transport.selected', 'ping', 'pong', 'error',
+      'transport.selected', 'connection.lease.request', 'connection.lease.ack', 'connection.lease.close', 'ping', 'pong', 'error',
     ]
     expect([...expected].sort()).toEqual([...Array.from(controlFrameTypes)].sort())
   })
