@@ -107,6 +107,8 @@ struct Index {
   @State keyboardVisible: boolean = false;
   /** 提示词面板（本地提示词库）。 */
   @State promptPanelOpen: boolean = false;
+  /** 执行轨迹面板：把本次会话里的工具调用按顺序列成时间线。 */
+  @State trajectoryOpen: boolean = false;
   @State promptDraftInput: string = '';
   /** 上一次同步到的会话 id，用来判断「切了会话」并搬运草稿。 */
   private lastSyncedSessionId: string = '';
@@ -1314,6 +1316,9 @@ struct Index {
       if (this.promptPanelOpen) {
         this.PromptPanelOverlay()
       }
+      if (this.trajectoryOpen) {
+        this.TrajectoryOverlay()
+      }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
       }
@@ -1537,6 +1542,23 @@ struct Index {
         .onClick(() => {
           this.showMoreMenu = false;
           this.openAccountSwitcher();
+        })
+        Row({ space: 8 }) {
+          Text('⌁')
+            .fontSize(15)
+            .fontColor('#22D3EE')
+          Text(this.tr('执行轨迹'))
+            .fontSize(15)
+            .fontColor(this.pal().text)
+        }
+        .width('100%')
+        .padding({ top: 14, bottom: 14, left: 16, right: 16 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .onClick(() => {
+          this.showMoreMenu = false;
+          this.trajectoryOpen = true;
         })
         Text(this.tr('退出登录'))
           .fontSize(15)
@@ -4635,6 +4657,14 @@ struct Index {
         }
       }
     ];
+    sheets.push({
+      title: this.tr('引用到输入框'),
+      action: () => {
+        const quoted: string = item.text.split('\n').map((line: string) => '> ' + line).join('\n') + '\n\n';
+        this.promptInput = quoted + this.promptInput;
+        this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+      }
+    });
     if (canFork) {
       sheets.push({
         title: this.tr('从这里分叉'),
@@ -4694,6 +4724,130 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 轨迹条目：只挑工具调用，按 seq 升序。 */
+  private trajectoryItems(): ChatItem[] {
+    const out: ChatItem[] = [];
+    for (const item of this.messages) {
+      if (item.kind === 'tool') {
+        out.push(item);
+      }
+    }
+    out.sort((a: ChatItem, b: ChatItem) => a.seq - b.seq);
+    return out;
+  }
+
+  /** 执行轨迹：整个会话的工具调用时间线，点开可看完整参数。 */
+  @Builder
+  TrajectoryOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.trajectoryOpen = false;
+        })
+      Column({ space: 8 }) {
+        Row() {
+          Text(this.tr('执行轨迹'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Text(' ' + this.trajectoryItems().length + '')
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text3)
+          Blank()
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.trajectoryOpen = false;
+            })
+        }
+        .width('100%')
+        .padding({ bottom: 4 })
+
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.trajectoryItems(), (item: ChatItem) => {
+              Row({ space: 10 }) {
+                Column()
+                  .width(2)
+                  .height(34)
+                  .borderRadius(1)
+                  .backgroundColor(item.toolState === 'failed'
+                    ? 'rgba(248,87,73,0.55)' : this.pal().border)
+                Column({ space: 3 }) {
+                  Row({ space: 6 }) {
+                    Text(item.toolName.length > 0 ? item.toolName : this.tr('工具'))
+                      .fontSize(this.fs(13))
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(this.pal().text)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(item.toolState === 'failed' ? this.tr('失败')
+                      : (item.toolState === 'running' ? this.tr('运行中') : this.tr('完成')))
+                      .fontSize(this.fs(10))
+                      .fontColor(item.toolState === 'failed' ? '#F85749'
+                        : (item.toolState === 'running' ? '#22D3EE' : this.pal().text3))
+                  }
+                  .width('100%')
+                  if (item.summary.length > 0) {
+                    Text(item.summary)
+                      .fontSize(this.fs(11))
+                      .fontColor(this.pal().text2)
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  if (item.text.length > 0) {
+                    Text(item.text)
+                      .fontSize(this.fs(10))
+                      .fontColor(this.pal().text3)
+                      .fontFamily('monospace')
+                      .maxLines(3)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+            }, (item: ChatItem) => 'traj-' + item.id + '-' + item.rev)
+            if (this.trajectoryItems().length === 0) {
+              Text(this.tr('本次会话还没有工具调用'))
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .padding({ top: 12, bottom: 12 })
+            }
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 420 })
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 560 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 340 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 本地提示词库：点一条就填进输入框，也可以就地增删。 */
