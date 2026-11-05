@@ -5,9 +5,31 @@ import { z } from 'zod'
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
 export const RELAY_RESUME_CAPABILITY = 'transport.relay.resume.v1'
 export const WEBRTC_LEASE_MS = 300_000
-/** WebSocket close code used when a Server is shutting down for restart. */
+import { SERVER_SHUTDOWN_REASON as SERVER_SHUTDOWN_REASON_NAME } from './close-semantics.js'
+export {
+  SERVER_SHUTDOWN_REASON,
+  SERVER_SHUTDOWN_CLOSE_CODES,
+  HEARTBEAT_TIMEOUT_CLOSE_CODE,
+  HEARTBEAT_TIMEOUT_REASON,
+  HEARTBEAT_CONNECTION_FAILED_REASON,
+  TRANSIENT_CONTROL_CLOSE_CODES,
+  TERMINAL_CONTROL_CLOSE_CODES,
+  isServerShutdownClose,
+  isHeartbeatTimeoutClose,
+  classifyControlClose,
+  type ControlCloseClassification,
+} from './close-semantics.js'
+/**
+ * WebSocket close code a Server uses when shutting down for restart.
+ *
+ * Deployments disagree on the code (`apps/server` sends 4009, the hosted
+ * Server sends 4001 and reserves 4009 for heartbeat expiry), so endpoints must
+ * classify with `isServerShutdownClose()` / `classifyControlClose()` and never
+ * by comparing the code alone.
+ */
 export const SERVER_SHUTDOWN_CLOSE_CODE = 4009
-export const SERVER_SHUTDOWN_CLOSE_REASON = 'server shutdown'
+/** Close reason paired with the shutdown code; this is the semantic key. */
+export const SERVER_SHUTDOWN_CLOSE_REASON: string = SERVER_SHUTDOWN_REASON_NAME
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
