@@ -8,8 +8,67 @@ import { z } from 'zod'
 import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
+import { Logger, type LogLevel } from './logger.js'
+import {
+  FORCE_TERMINATE_GRACE_MS_RANGE,
+  HEARTBEAT_DISCONNECT_MS_MAX,
+  HELLO_TIMEOUT_MS_RANGE,
+  HEARTBEAT_INTERVAL_MS_RANGE,
+  normalizeForceTerminateGraceMs,
+  normalizeGatewayOptions,
+  normalizeHeartbeatDisconnectMs,
+  normalizeHeartbeatIntervalMs,
+  normalizeHelloTimeoutMs,
+} from './config.js'
 
-export interface Config { account: string; password: string; dataFile: string; publicUrl: string; trustedProxyIps?: readonly string[] }
+export interface Config {
+  account: string
+  password: string
+  dataFile: string
+  publicUrl: string
+  trustedProxyIps?: readonly string[]
+  helloTimeoutMs?: number
+  heartbeatIntervalMs?: number
+  heartbeatDisconnectMs?: number
+  forceTerminateGraceMs?: number
+  logLevel?: LogLevel
+}
+
+/**
+ * Timing configuration is normalized in one place (`config.ts`) so the CLI and
+ * programmatic callers share the same bounds and fallbacks. These wrappers keep
+ * the env-var parsing API used by `main.ts` and the tests, and never echo the
+ * offending input in their warnings.
+ */
+export function parseHelloTimeout(val: string | undefined): number {
+  return normalizeHelloTimeoutMs(val)
+}
+
+export function parseHeartbeatInterval(val: string | undefined): number {
+  return normalizeHeartbeatIntervalMs(val)
+}
+
+export function parseHeartbeatDisconnect(val: string | undefined, heartbeatIntervalMs: number = HEARTBEAT_INTERVAL_MS_RANGE.fallback): number {
+  return normalizeHeartbeatDisconnectMs(val, heartbeatIntervalMs)
+}
+
+export function parseForceTerminateGrace(val: string | undefined): number {
+  return normalizeForceTerminateGraceMs(val)
+}
+
+export {
+  normalizeGatewayOptions,
+  normalizeHelloTimeoutMs,
+  normalizeHeartbeatIntervalMs,
+  normalizeHeartbeatDisconnectMs,
+  normalizeForceTerminateGraceMs,
+  HELLO_TIMEOUT_MS_RANGE,
+  HEARTBEAT_INTERVAL_MS_RANGE,
+  HEARTBEAT_DISCONNECT_MS_MAX,
+  FORCE_TERMINATE_GRACE_MS_RANGE,
+}
+export type { GatewayTimingOptions, NormalizedGatewayOptions } from './config.js'
+
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
 const publicDir = fileURLToPath(new URL('../dist/public/', import.meta.url))
 function readAssets(): Map<string, Buffer> {
@@ -132,7 +191,20 @@ export function createRemoteServer(config: Config) {
       json(res, e.status, { error: { code: e.code, message: e.code, requestId: randomUUID(), retryable: e.status === 429 || e.status >= 500 } })
     })
   })
-  const gateway = new Gateway(server, store, url.origin)
+  const logger = new Logger('server', config.logLevel ?? 'info')
+  // Normalize at this boundary as well: a programmatic caller may pass NaN,
+  // Infinity or a negative value straight through the Config object.
+  const timing = normalizeGatewayOptions({
+    helloTimeoutMs: config.helloTimeoutMs,
+    heartbeatIntervalMs: config.heartbeatIntervalMs,
+    heartbeatDisconnectMs: config.heartbeatDisconnectMs,
+    forceTerminateGraceMs: config.forceTerminateGraceMs,
+  })
+  const gateway = new Gateway(server, store, url.origin, {
+    ...timing,
+    logLevel: config.logLevel,
+    logger: logger.child('gateway'),
+  })
   function descriptor(d: ReturnType<Store['get']>) {
     return { ...d.descriptor, membershipId: `account:${hash(store.account).slice(0, 16)}`, online: gateway.peers.has(d.descriptor.deviceId), lastSeenAt: d.lastSeenAt }
   }
@@ -204,7 +276,7 @@ export function createRemoteServer(config: Config) {
     }
     throw new ApiError('METHOD_NOT_FOUND', 404)
   }
-  return { server, store, gateway, close: async () => { gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
+  return { server, store, gateway, logger, close: async () => { gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value))
