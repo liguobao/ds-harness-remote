@@ -200,6 +200,7 @@ interface PluginSettings {
   remoteTools?: { enabled?: boolean }
   forceRelay?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
+  liteMode?: boolean
   reconnect?: boolean | {
     enabled?: boolean
     initialDelayMs?: number

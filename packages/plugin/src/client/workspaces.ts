@@ -28,8 +28,61 @@ import type {
   SidebarEntryStyle,
 } from './types.js'
 
+function createLiteModeSwitch(React: ClientReact) {
+  return function LiteModeSwitch(props: { control: <T>(endpoint: string, payload?: unknown) => Promise<T>; t: Translate }) {
+    const [enabled, setEnabled] = React.useState(false)
+    const [busy, setBusy] = React.useState(false)
+    const [showHint, setShowHint] = React.useState(false)
+    React.useEffect(() => {
+      props.control<PluginSettingsView>('settings.get')
+        .then(view => setEnabled(view.config.liteMode === true))
+        .catch(() => undefined)
+    }, [props.control])
+    const toggle = async (next: boolean) => {
+      setEnabled(next)
+      setBusy(true)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.lite.set', { enabled: next })
+        setEnabled(view.config.liteMode === true)
+      } catch {
+        setEnabled(!next)
+      } finally {
+        setBusy(false)
+      }
+    }
+    const hint = props.t('liteModeHint')
+    return React.createElement('div', {
+      className: 'dshRemoteHostControlToggle',
+      style: { marginLeft: '14px', position: 'relative' },
+    },
+      React.createElement('span', { title: hint, style: { cursor: 'help' } }, props.t('liteMode')),
+      React.createElement('button', {
+        type: 'button',
+        title: hint,
+        'aria-label': hint,
+        onClick: () => setShowHint(!showHint),
+        style: { width: '14px', height: '14px', borderRadius: '50%', border: '1px solid currentColor', background: 'transparent', color: 'inherit', fontSize: '10px', lineHeight: '12px', padding: '0', cursor: 'pointer', opacity: 0.65, fontFamily: 'inherit' },
+      }, '?'),
+      React.createElement('input', {
+        type: 'checkbox',
+        role: 'switch',
+        checked: enabled,
+        disabled: busy,
+        'aria-label': props.t('liteMode'),
+        onChange: (event: Event) => void toggle((event.target as HTMLInputElement).checked),
+      }),
+      showHint
+        ? React.createElement('div', {
+          style: { position: 'absolute', top: '100%', left: '0', zIndex: 30, marginTop: '6px', width: '280px', padding: '8px 10px', borderRadius: '6px', background: 'rgba(24,24,28,0.94)', color: '#fff', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', boxShadow: '0 4px 16px rgba(0,0,0,0.28)', whiteSpace: 'normal' },
+        }, hint)
+        : null,
+    )
+  }
+}
+
 export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const ServerNotice = createServerNotice(React)
+  const LiteModeSwitch = createLiteModeSwitch(React)
   const RemoteProgressView = createRemoteProgressView(React)
 
   /**
@@ -1347,6 +1400,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         checked: status.host?.authorized === true,
                         onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                       })) : null,
+                    React.createElement(LiteModeSwitch, { control: props.control, t }),
                     connectedMenu)),
                 React.createElement('div', {
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
