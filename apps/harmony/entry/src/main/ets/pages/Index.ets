@@ -1,4 +1,4 @@
-import { UIContext, window, promptAction } from '@kit.ArkUI';
+import { KeyboardAvoidMode, UIContext, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
@@ -156,6 +156,7 @@ struct Index {
   /** 列表下方陪伴小人的呼吸状态（由定时器来回切）。 */
   @State maidBob: boolean = false;
   private maidTimer: number = -1;
+  private dockLightHideTimer: number = -1;
   /** 录音已停止、等主机转写。 */
   /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
   @State expandedRuns: string[] = [];
@@ -168,6 +169,8 @@ struct Index {
     };
     // 把隐藏 Web 里的 WebRTC 桥交给运行时：连接时若它已就绪就走 LAN 直连，否则走中继
     this.runtime.attachRtcBridge(this.rtc);
+    // 键盘避让用 resize：pan 会把整个页面往上推，顶栏整条被顶出屏幕
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.runtime.bootstrap(getContext(this));
     // 陪伴小人：每 2 秒翻身一次，配合 .animation 就是来回呼吸
     this.maidTimer = setInterval(() => {
@@ -2765,6 +2768,13 @@ struct Index {
       .width('100%')
       .height(56)
       .padding({ left: 12, right: 12 })
+      // 顶栏横条：毛玻璃压住滚过来的消息，内容不硬切
+      .backgroundColor(this.isDarkUi ? 'rgba(18,22,34,0.72)' : 'rgba(247,249,255,0.76)')
+      .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+        colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+        adaptiveColor: AdaptiveColor.DEFAULT,
+        blurOptions: { grayscale: [0, 24] }
+      })
       Column()
         .width('100%')
         .height(0.5)
@@ -2837,6 +2847,44 @@ struct Index {
       .onReachEnd(() => {
         this.stickToBottom = true;
       })
+      // 右往左横滑唤出会话抽屉：手势只挂在消息区，输入坞的触摸不再被抢
+      .gesture(
+        PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+          .onActionStart(() => {
+            if (this.isLandscape || this.showSessions) {
+              this.drawerDragFromChat = false;
+              return;
+            }
+            this.drawerDragFromChat = true;
+            this.drawerDragBase = 0;
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            if (!this.drawerDragFromChat || event.offsetX >= 0) {
+              return;
+            }
+            const width: number = this.drawerWidthVp();
+            const progress: number = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
+            if (progress <= 0) {
+              return;
+            }
+            if (!this.showSessions) {
+              this.showSessions = true;
+            }
+            this.drawerOpen = progress;
+          })
+          .onActionEnd(() => {
+            if (!this.drawerDragFromChat) {
+              return;
+            }
+            this.drawerDragFromChat = false;
+            if (this.drawerOpen > 0.32) {
+              this.settleDrawer(true);
+              this.runtime.loadWorkspaces();
+            } else {
+              this.settleDrawer(false);
+            }
+          })
+      )
       }
       .width('100%')
       .height('100%')
@@ -2872,44 +2920,6 @@ struct Index {
     .width('100%')
     .height('100%')
     .constraintSize({ maxWidth: this.chatMaxWidth() })
-    // 右往左横滑：抽屉跟着手指走，松手后按位置决定展开还是弹回
-    .gesture(
-      PanGesture({ direction: PanDirection.Horizontal, distance: 8 })
-        .onActionStart(() => {
-          if (this.isLandscape || this.showSessions) {
-            this.drawerDragFromChat = false;
-            return;
-          }
-          this.drawerDragFromChat = true;
-          this.drawerDragBase = 0;
-        })
-        .onActionUpdate((event: GestureEvent) => {
-          if (!this.drawerDragFromChat || event.offsetX >= 0) {
-            return;
-          }
-          const width: number = this.drawerWidthVp();
-          const progress: number = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
-          if (progress <= 0) {
-            return;
-          }
-          if (!this.showSessions) {
-            this.showSessions = true;
-          }
-          this.drawerOpen = progress;
-        })
-        .onActionEnd(() => {
-          if (!this.drawerDragFromChat) {
-            return;
-          }
-          this.drawerDragFromChat = false;
-          if (this.drawerOpen > 0.32) {
-            this.settleDrawer(true);
-            this.runtime.loadWorkspaces();
-          } else {
-            this.settleDrawer(false);
-          }
-        })
-    )
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
@@ -3148,7 +3158,14 @@ struct Index {
       .width('100%')
     }
     .width('100%')
-    .padding({ left: 12, right: 12, bottom: 18 })
+    .padding({ left: 12, right: 12, top: 10, bottom: 18 })
+    // 底栏横条：整条玻璃做底衬，按钮各是一块更亮的玻璃浮在上面
+    .backgroundColor(this.isDarkUi ? 'rgba(18,22,34,0.72)' : 'rgba(247,249,255,0.78)')
+    .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+      colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+      adaptiveColor: AdaptiveColor.DEFAULT,
+      blurOptions: { grayscale: [0, 24] }
+    })
   }
 
   /** Shared sessions list (header + rows); wrapped by the overlay or the landscape pane. */
@@ -4089,7 +4106,14 @@ struct Index {
       this.fadeDockLight(true);
       return;
     }
-    this.fadeDockLight(false);
+    // 抬手或被父级手势打断时先留一帧，别一按就灭
+    if (this.dockLightHideTimer >= 0) {
+      clearTimeout(this.dockLightHideTimer);
+    }
+    this.dockLightHideTimer = setTimeout(() => {
+      this.dockLightHideTimer = -1;
+      this.fadeDockLight(false);
+    }, 260);
   }
 
   /** 鼠标悬停也用同一套光斑，桌面/2in1 上鼠标划过就能看到。 */
@@ -4106,6 +4130,10 @@ struct Index {
   }
 
   private fadeDockLight(visible: boolean): void {
+    if (visible && this.dockLightHideTimer >= 0) {
+      clearTimeout(this.dockLightHideTimer);
+      this.dockLightHideTimer = -1;
+    }
     const target: number = visible ? 1 : 0;
     if (this.dockLightOpacity === target) {
       return;
