@@ -233,7 +233,17 @@ struct Index {
         this.applyWindowSize(size);
       });
       win.on('keyboardHeightChange', (height: number) => {
-        this.keyboardVisible = height > 0;
+        const shown: boolean = height > 0;
+        if (shown === this.keyboardVisible) {
+          return;
+        }
+        this.keyboardVisible = shown;
+        // 键盘把可视区压矮后，列表要跟着滚到底，内容整体上移，而不是被输入坞压住
+        if (this.stickToBottom) {
+          setTimeout(() => {
+            this.scrollChatToBottom();
+          }, 80);
+        }
       });
     }).catch(() => {
       this.topInset = 0;
@@ -2965,7 +2975,7 @@ struct Index {
       .constraintSize({ maxWidth: this.chatMaxWidth() })
       // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面；
       // 键盘弹起时胶囊行收起，但仍要留够输入坞（约 46 + 16）的高度
-      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 92 : 132 })
+      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 74 : 132 })
       // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
       .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
       .scrollBarWidth(this.isLandscape ? 6 : 3)
@@ -3215,6 +3225,13 @@ struct Index {
             .clip(true)
             // 生成中保持可输入：否则「插话」无从谈起。
             .enabled(true)
+            .onFocus(() => {
+              if (this.stickToBottom) {
+                setTimeout(() => {
+                  this.scrollChatToBottom();
+                }, 80);
+              }
+            })
             .onChange((value: string) => {
               this.promptInput = value;
               if (value === '/' && this.slashCommands.length === 0) {
