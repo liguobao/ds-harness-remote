@@ -73,8 +73,25 @@ Open <http://localhost:8080>. Set the same Server URL on your Host and Client, t
 | `DSH_SERVER_HOST` | Listen / port-binding address; default `127.0.0.1`, use `0.0.0.0` for LAN access |
 | `DSH_SERVER_PORT` | Default `8080` |
 | `DSH_SERVER_DATA_FILE` | Default `data/state.json`, relative to the working directory |
+| `DSH_SERVER_TRUSTED_PROXY_IPS` | Comma-separated trusted reverse-proxy peer IPs; empty (default) disables forwarded-IP handling |
 
 For public access, use an HTTPS reverse proxy and set `DSH_SERVER_PUBLIC_URL` to your domain. The proxy must support WebSocket Upgrade at `/ws/v1/connect` with an idle timeout above 75 seconds.
+
+### Rate limiting behind a reverse proxy
+
+By default the Server rate-limits by the socket peer IP and ignores `X-Forwarded-For`. Behind a reverse proxy every connection comes from the proxy, so all clients share one 240/min API limit and one 20/min login limit. Set `DSH_SERVER_TRUSTED_PROXY_IPS` to a comma-separated list of proxy peer IPs to restore per-client limits:
+
+```dotenv
+DSH_SERVER_TRUSTED_PROXY_IPS=172.18.0.2,2001:db8::2
+```
+
+Only bare IPv4 and IPv6 literals are accepted. Ports (`10.0.0.1:8080`), CIDR ranges (`10.0.0.0/8`) and hostnames make the Server fail at startup; no private network is trusted implicitly. IPv4-mapped IPv6 (`::ffff:127.0.0.1`) is normalized to `127.0.0.1`, so either form matches the same entry.
+
+A request from a trusted peer must carry exactly one `X-Forwarded-For` header whose value is a single IP literal. A missing or duplicate header, a comma-separated list, an `IP:port` value or a hostname is rejected with HTTP 400 `INVALID_MESSAGE`. Requests from any other peer always use their socket IP, so a client cannot spoof a different address by sending the header itself.
+
+The trusted proxy must **overwrite** `X-Forwarded-For` with the real client IP (do not append to or pass through a client-supplied value), and the Server port must not be reachable directly from the public internet, or the trust boundary is bypassed. In Docker the trusted IP is the proxy's address **as seen from the Server container** (check `docker network inspect <network>`), not `127.0.0.1`: inside the container that address is the Server itself. WebSocket upgrades and clients sharing one public NAT IP still share a per-IP limit.
+
+Apply the change with `docker compose up -d --force-recreate server`; `docker compose restart` does not reload environment variables.
 
 ## Features
 

@@ -3,12 +3,13 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 
-export interface Config { account: string; password: string; dataFile: string; publicUrl: string }
+export interface Config { account: string; password: string; dataFile: string; publicUrl: string; trustedProxyIps?: readonly string[] }
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
 const publicDir = fileURLToPath(new URL('../dist/public/', import.meta.url))
 function readAssets(): Map<string, Buffer> {
@@ -33,10 +34,67 @@ async function body(req: IncomingMessage): Promise<unknown> {
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new ApiError('INVALID_MESSAGE') }
 }
+/**
+ * Normalize one bare IPv4/IPv6 literal to a single canonical form. IPv4-mapped
+ * IPv6 addresses (e.g. ::ffff:127.0.0.1) collapse to plain IPv4, so a peer
+ * observed through a dual-stack socket and a config entry compare equal.
+ * Returns null for anything that is not a single IP literal: hostnames, ports,
+ * CIDR ranges, comma-separated lists, bracketed hosts and zone identifiers.
+ */
+export function normalizeIp(value: string): string | null {
+  const family = isIP(value)
+  if (family === 4) return value.toLowerCase()
+  if (family !== 6) return null
+  let canonical: string
+  try {
+    canonical = new URL(`http://[${value}]/`).hostname.slice(1, -1)
+  } catch { return null }
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical)
+  if (!mapped) return canonical
+  const high = Number.parseInt(mapped[1]!, 16), low = Number.parseInt(mapped[2]!, 16)
+  return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`
+}
+/** Validate and normalize the trusted proxy list at startup. Empty means disabled. */
+export function normalizeTrustedProxyIps(values: readonly string[] = []): ReadonlySet<string> {
+  const result = new Set<string>()
+  for (const raw of values) {
+    const value = raw.trim()
+    const normalized = value === '' ? null : normalizeIp(value)
+    if (normalized === null) throw new Error(`Invalid DSH_SERVER_TRUSTED_PROXY_IPS entry "${raw}": expected a bare IPv4/IPv6 address (no port, CIDR or hostname).`)
+    result.add(normalized)
+  }
+  return result
+}
+function readSingleForwardedFor(req: IncomingMessage): string {
+  let value: string | undefined
+  let count = 0
+  const raw = req.rawHeaders
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    if (raw[i]!.toLowerCase() !== 'x-forwarded-for') continue
+    count++
+    value = raw[i + 1]
+  }
+  if (count !== 1) throw new ApiError('INVALID_MESSAGE')
+  return value!
+}
+/**
+ * Resolve the address used for rate limiting. X-Forwarded-For is honored only
+ * when the socket peer is a configured trusted proxy; that peer must send one
+ * header holding exactly one IP literal, otherwise the request is rejected.
+ */
+export function clientAddress(req: IncomingMessage, trustedProxyIps: ReadonlySet<string>): string {
+  const peer = normalizeIp(req.socket.remoteAddress ?? '')
+  if (peer === null) throw new ApiError('INVALID_MESSAGE')
+  if (!trustedProxyIps.has(peer)) return peer
+  const forwarded = normalizeIp(readSingleForwardedFor(req))
+  if (forwarded === null) throw new ApiError('INVALID_MESSAGE')
+  return forwarded
+}
 export function createRemoteServer(config: Config) {
   if (!config.account.trim() || config.password.length < 12) throw new Error('DSH_SERVER_ACCOUNT and DSH_SERVER_PASSWORD (at least 12 characters) are required.')
   const url = new URL(config.publicUrl)
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('DSH_SERVER_PUBLIC_URL must be an HTTP(S) origin.')
+  const trustedProxyIps = normalizeTrustedProxyIps(config.trustedProxyIps)
   const store = new Store(config.dataFile, config.account.trim(), config.password)
   const assets = readAssets()
   const sessions = new Map<string, number>()
@@ -93,9 +151,10 @@ export function createRemoteServer(config: Config) {
       res.end(asset); return
     }
     if (method === 'GET' && (path === '/health' || path === '/healthz' || path === '/ready')) { json(res, 200, { status: 'ok' }); return }
-    rate(`api:${req.socket.remoteAddress ?? ''}`, 240)
+    const client = clientAddress(req, trustedProxyIps)
+    rate(`api:${client}`, 240)
     if (method === 'POST' && path === '/api/v1/auth/login') {
-      rate(`login:${req.socket.remoteAddress ?? ''}`, 20)
+      rate(`login:${client}`, 20)
       const credentials = loginSchema.parse(await body(req))
       if (!equal(credentials.email.trim(), store.account) || !equal(credentials.password, config.password)) throw new ApiError('AUTH_INVALID', 401)
       for (const [key, expires] of sessions) if (expires <= Date.now()) sessions.delete(key)

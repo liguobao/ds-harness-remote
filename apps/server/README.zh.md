@@ -73,8 +73,25 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_HOST` | 监听/端口映射地址，默认 `127.0.0.1`；局域网设为 `0.0.0.0` |
 | `DSH_SERVER_PORT` | 默认 `8080` |
 | `DSH_SERVER_DATA_FILE` | 默认 `data/state.json`，相对启动目录 |
+| `DSH_SERVER_TRUSTED_PROXY_IPS` | 受信任反向代理 peer IP 列表，逗号分隔；留空（默认）时忽略转发 IP |
 
 公网使用 HTTPS 反向代理，并将 `DSH_SERVER_PUBLIC_URL` 设为实际域名；代理需支持 `/ws/v1/connect` 的 WebSocket Upgrade，空闲超时大于 75 秒。
+
+### 反向代理下的限流
+
+默认按 socket peer IP 限流并忽略 `X-Forwarded-For`。使用反向代理时所有连接都来自代理，全部客户端会共用 240/min 的 API 限额和 20/min 的登录限额。将 `DSH_SERVER_TRUSTED_PROXY_IPS` 设为受信任代理 peer IP 的逗号分隔列表，即可按真实客户端 IP 分别限流：
+
+```dotenv
+DSH_SERVER_TRUSTED_PROXY_IPS=172.18.0.2,2001:db8::2
+```
+
+只接受纯 IPv4 / IPv6 字面量；端口（`10.0.0.1:8080`）、CIDR 网段（`10.0.0.0/8`）和域名会在启动时报错，也不会默认信任任何私网网段。IPv4-mapped IPv6（`::ffff:127.0.0.1`）会规范化为 `127.0.0.1`，两种写法匹配同一条配置。
+
+来自受信任 peer 的请求必须带且仅带一个 `X-Forwarded-For` 头，且值为单个 IP 字面量。缺失、重复、逗号分隔多 IP、`IP:port` 或域名都会返回 HTTP 400 `INVALID_MESSAGE`。其他 peer 的请求一律按 socket IP 处理，客户端无法自行伪造该头来冒充别的地址。
+
+受信任代理必须**覆盖** `X-Forwarded-For` 为真实客户端 IP（不要追加或透传客户端自带的值），并且 Server 端口不能直接暴露到公网，否则信任边界会被绕过。在 Docker 中应填写代理**在 Server 容器内看到的地址**（可用 `docker network inspect <网络名>` 查看），不是 `127.0.0.1`：容器内该地址是 Server 自身。WebSocket 连接和共享同一公网 NAT IP 的客户端仍按同一 IP 共享限额。
+
+修改后执行 `docker compose up -d --force-recreate server`；`docker compose restart` 不会重新加载环境变量。
 
 ## 功能
 
