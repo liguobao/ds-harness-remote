@@ -1,5 +1,9 @@
 # Repository Guide for Agents
 
+## Self-hosted WebRTC/TURN connection support (2026-11-05)
+
+`apps/server` 从 Relay-only 扩展为可选的 WebRTC 四路协调：`hello.ack` 按 Client 声明与部署配置返回 `transport.lan/p2p/turn/relay` 交集；转发 `signal.offer|answer|ice`（按 connection/角色/阶段校验，每连接 ICE 上限 256，安全通道建立后忽略迟到信令；未声明 WebRTC 的 Host 不接收 offer，Client 自然超时回落 Relay），转发 `transport.selected`（含旧 Host 的 `lan -> p2p` 降级，并容忍 responder 侧 selection 而不丢 link），并新增 `GET /api/v1/turn/credentials`，仅向正在建立的连接双方按 coturn REST API 签发短期 STUN/TURN credential（`DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` / `DSH_SERVER_TURN_TTL_SECONDS`）。TURN capability 仅在 URL 与 secret 同时配置时宣告，二者不齐全时启动失败；未配置 ICE 时保持原 Relay-only 行为。Server 仍只转发密文、不解密；未实现独立 Relay attach/resume、多账号、主机匹配码、OAuth/Browser 授权与 Admin。验证：Server check、新增 8 条 WebRTC/TURN 用例与全量 test 通过；容器镜像构建后经真实 REST/WS 冒烟验证 capability、signaling、selection 与 TURN HMAC；用户已在自建环境完成公网 P2P 实测。未做 coturn/TURN 跨机与长期连接验收。
+
 ## Harness 0.2.2 compatibility (2026-11-05)
 
 开发基线升级到 `dsh-v0.2.2-rc.1`，随附 Cordis `4.1.0`、Loader `1.1.0`、Include `1.1.0`
@@ -244,7 +248,7 @@ Desktop，探测超时关闭 stdout 后可能触发 `write EPIPE`。探测脚本
 - Android Client（账号授权 + Adaptive transport + v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote + 可选 CodeX Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
-- 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding/opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
+- 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding、WebRTC signaling/TURN credential 协调与 opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
 - 依赖外部 Server 的 Mock Host/Smoke Client
 - Server 设计与跨仓库协议契约
 
@@ -263,7 +267,7 @@ apps/
   android/             React Native / Expo Android Client（账号授权 + Typert/CodeX Remote tunnel）
   vscode/              VS Code Extension Client（Host 列表、加密连接与远程会话）
   browser/             Chrome/Edge MV3 入口（Web 授权换取独立凭证 + 在线 Host + 打开 Remote Web）
-  server/              开源自部署 Server（单账号 Relay、登录/设备状态页、Docker 部署）
+  server/              开源自部署 Server（单账号 WebRTC/Relay、登录/设备状态页、Docker 部署）
 packages/
   plugin/              Host runtime、Remote 工作区入口与原生 API 代理
   protocol/            Remote/Control frame 类型和运行时校验
@@ -313,7 +317,7 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 | Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
 | Mock Host | 旧 Android Remote RPC 联调工具，当前冻结 | 若恢复 Android 再迁移或替换 |
 | Desktop | Host 设置、Remote 工作区模态框、远程 Header、连接链路与加密状态已接入 Harness Web UI，Host status 由 loopback SSE 推送（无固定间隔的 status 轮询），原生窗口跨机 E2E 已验证 | 多窗口、休眠/唤醒和代理网络回归 |
-| 开源自部署 Server | `apps/server` 已实现单账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN | Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
+| 开源自部署 Server | `apps/server` 已实现单账号授权、设备凭据持久化与刷新、Control/Noise 握手转发、WebRTC signaling 与短期 TURN credential 协调、加密 Relay、Web 登录与设备状态页；提供 Dockerfile/Compose；单进程，不提供 Remote Web 会话界面、独立 Relay attach/resume 或 Admin | Docker 实际构建与启动验证、真实 coturn/WebRTC 与 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
 | 完整 Server/Remote Web/Admin | 独立 Server 仓库已有实现，REST、Control WebSocket、Relay、Signaling 与 conformance fixture 跨仓库联调已完成 | 完整站点 runtime 变更在独立 Server 仓库完成，并同步跨仓库契约 |
 
 完整任务和优先级以 `docs/TODO.md` 为准。不得把 TODO 中的目标能力描述成已经完成。

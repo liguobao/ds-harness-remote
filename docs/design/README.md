@@ -28,7 +28,7 @@
 - Android：账号授权、Host / Workspace / Session / Chat、图片 Prompt、历史恢复、工作区快捷入口，以及按后端能力接入的会话工具。
 - VS Code：账号授权、Host 信任固定、Harness 工作区/会话导航、Prompt 与基础审批；实时更新和恢复仍有待办。
 - Browser 扩展：只换取独立设备凭据、显示在线 Host、打开同源 Remote Web。
-- `apps/server`：可自部署的单账号、文件持久化、Relay-only Server，提供登录与设备状态页和 Docker 部署入口。
+- `apps/server`：可自部署的单账号、文件持久化 Server，支持可配置的 WebRTC LAN/P2P/TURN 与加密 Relay，提供登录与设备状态页和 Docker 部署入口。
 - 完整多账号 Server、Remote Web 会话 UI、Admin 及其数据库、队列和部署基础设施由独立仓库实现。
 
 ## 数据面与领域

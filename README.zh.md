@@ -126,7 +126,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 默认使用本项目提供的[https://dsh.r2049.cn](https://dsh.r2049.cn)托管 Remote Server。
 
-自建托管Server可使用仓库内的[最小 Server](apps/server/README.zh.md)，当前版本已包含P2P协调、Relay Server 等功能，暂不支持托管Remote Web的完整功能。
+自建托管Server可使用仓库内的[最小 Server](apps/server/README.zh.md)，当前版本已包含 WebRTC LAN/P2P/TURN 连接协调（TURN 需自行部署 coturn）与加密 Relay Server 等功能，暂不支持托管Remote Web的完整功能。
 
 ## 界面截图
 

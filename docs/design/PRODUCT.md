@@ -26,7 +26,7 @@ CodeX 默认开启、Cursor 默认关闭；其他 ACP 后端以 Host 配置和�
 ## 仓库边界
 
 本仓库实现 Plugin、Android、VS Code、Browser Launcher、共享包、最小自部署 Server 和互操作工具。
-最小 Server 是单账号、文件持久化、Relay-only 实现，不提供 Remote Web 会话界面或 WebRTC/TURN。
+最小 Server 是单账号、文件持久化实现，可配置 WebRTC LAN/P2P/TURN 与加密 Relay，不提供 Remote Web 会话界面、独立 Relay attach/resume 或多账号。
 完整多账号 Server、Remote Web、Admin 与其基础设施在独立仓库维护。
 
 CodeX 和 ACP 只在 Client 内存中投影 Workspace / Session / Chat，不写 DSH SessionStore、Workspace 数据库或 Harness 日志。

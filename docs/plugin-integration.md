@@ -491,4 +491,4 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 
 ## 最小自部署 Server
 
-本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情、Control、WebRTC signaling/TURN credential 与 Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`；WebRTC 的 STUN/TURN 由 `DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` 配置，留空时保持 Relay-only。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。

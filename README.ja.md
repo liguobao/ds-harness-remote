@@ -124,7 +124,7 @@ DeepSeek Harness Desktop の **Extensions / Plugin management** を開き、npm 
 
 デフォルトでは、本プロジェクトが運営する Server [https://dsh.r2049.cn](https://dsh.r2049.cn) を使用します。
 
-セルフホスティングには、このリポジトリの[最小構成 Server](apps/server/README.md) を利用できます。現在のバージョンには P2P 接続調整と Relay Server が含まれますが、ホスト型 Remote Web の全機能は提供しません。
+セルフホスティングには、このリポジトリの[最小構成 Server](apps/server/README.md) を利用できます。現在のバージョンには WebRTC の LAN/P2P/TURN 接続調整（TURN は別途 coturn のデプロイが必要）と暗号化 Relay Server が含まれますが、ホスト型 Remote Web の全機能は提供しません。
 
 ## スクリーンショット
 

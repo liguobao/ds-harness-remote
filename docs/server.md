@@ -8,7 +8,7 @@
 
 本文保留完整 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现最小自部署版本，其运行方式与支持的 API 见 [最小 Server 说明](../apps/server/README.zh.md)。
 
-最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量单账号和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
+最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量单账号和 JSON 文件持久化，支持 Control/Noise handshake forwarding、WebRTC signaling 转发、短期 TURN credential 与 opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
 
 ## 1. 定位
 
