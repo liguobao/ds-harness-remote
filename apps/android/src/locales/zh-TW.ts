@@ -462,6 +462,8 @@ const zhTW = {
     goal: "目標",
     jobs: "背景工作",
     backgroundJobs: "背景工作",
+    subagents: "子任務",
+    team: "智能體團隊",
     viewJobs: "查看背景工作",
     noJobs: "尚無背景工作",
     loading: "載入中…",

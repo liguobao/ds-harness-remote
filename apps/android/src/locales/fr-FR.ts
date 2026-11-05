@@ -455,6 +455,8 @@ const frFR = {
     goal: "Objectif",
     jobs: "Tâches en arrière-plan",
     backgroundJobs: "Tâches en arrière-plan",
+    subagents: "Sous-agents",
+    team: "Équipe d'agents",
     viewJobs: "Voir les tâches en arrière-plan",
     noJobs: "Aucune tâche en arrière-plan",
     loading: "Chargement…",

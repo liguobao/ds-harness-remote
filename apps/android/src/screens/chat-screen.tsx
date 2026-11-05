@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, FileText, Layers, ListTree, Menu, MessageSquare, RefreshCw, Users, X } from 'lucide-react-native'
+import { ArrowDown, ArrowLeft, FileText, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -58,7 +58,6 @@ import {
 } from './chat-files'
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
-import { ChildAgentPanel, TeamAgentPanel } from './chat/agents'
 import { ChatComposer } from './chat/composer'
 import {
   ChatImages,
@@ -152,8 +151,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const setDraft = (value: string) => updateBrowseEntry(memoryScope, session?.sessionId ?? '', {draft: value})
   const [trajectory, setTrajectory] = useState(false)
   const [composingDuringRun, setComposingDuringRun] = useState(false)
-  const [subagentsOpen, setSubagentsOpen] = useState(false)
-  const [teamOpen, setTeamOpen] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
@@ -266,7 +263,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const { visibleMessages, visibleSections, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
-    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen || teamOpen || sessionInfoOpen
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
   const { listRef, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
     onScrollBeginDrag, onMomentumScrollBegin } = useChatScroll({
@@ -345,8 +342,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const onBackRef = useRef(backFromChat)
   onBackRef.current = backFromChat
   useChatBackHandler(composerInputRef, () => onBackRef.current(), [
-    { open: subagentsOpen, close: () => setSubagentsOpen(false) },
-    { open: teamOpen, close: () => setTeamOpen(false) },
     { open: plusMenuOpen, close: () => { Keyboard.dismiss(); setPlusMenuOpen(false) } },
     { open: modelPickerOpen, close: () => setModelPickerOpen(false) },
     { open: modePickerOpen, close: () => setModePickerOpen(false) },
@@ -669,17 +664,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           <IconButton label={trajectory ? strings.trajectory.close : strings.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
-          {childSessions.length > 0 && (
-            <IconButton label={strings.chat.subagentsTitle(childSessions.length)}
-              icon={Layers} dense tint={childSessions.some(item => item.running) ? colors.primary : undefined}
-              onPress={() => { Keyboard.dismiss(); setMentionType(null); setSubagentsOpen(true) }} />
-          )}
-          {teamState !== undefined && teamState.members.length > 0 && (
-            <IconButton label={strings.chat.teamTitle(teamState.members.length)}
-              icon={Users} dense tint={teamState.members.some(item =>
-                item.phase === 'active' && sessions.find(row => row.sessionId === item.id)?.running === true) ? colors.primary : undefined}
-              onPress={() => { Keyboard.dismiss(); setMentionType(null); setTeamOpen(true) }} />
-          )}
           <IconButton label={strings.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={strings.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
@@ -792,7 +776,16 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
       <View style={styles.composerWrap}>
         <View style={[styles.composerInner, readableColumn]}>
-        {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal)) && <SessionActivityDock key={`${memoryKey}:${chatImageConnectionGeneration()}`} session={session} />}
+        {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
+          <SessionActivityDock
+            key={`${memoryKey}:${chatImageConnectionGeneration()}`}
+            session={session}
+            childSessions={childSessions}
+            teamState={teamState}
+            sessions={sessions}
+            onOpenSession={targetSession => void openSession(targetSession)}
+          />
+        )}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
         {images.length > 0 && (
@@ -882,11 +875,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
-      <ChildAgentPanel visible={subagentsOpen} sessions={childSessions} onClose={() => setSubagentsOpen(false)}
-        onOpen={session => { setSubagentsOpen(false); void openSession(session) }} />
-      <TeamAgentPanel visible={teamOpen} members={teamState?.members ?? []} tasks={teamState?.tasks ?? []}
-        sessions={sessions} onClose={() => setTeamOpen(false)}
-        onOpen={session => { setTeamOpen(false); void openSession(session) }} />
       {sessionInfoOpen && <SessionInfo
         key={`${hostId}:${session.sessionId}`}
         session={session}
