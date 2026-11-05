@@ -44,7 +44,7 @@ function createTestHarness() {
       return [stateSlots[slot], setState]
     },
     useSyncExternalStore(subscribe: any, getSnapshot: any) {
-      return getSnapshot()
+      return typeof getSnapshot === 'function' ? getSnapshot() : undefined
     },
   }
 
