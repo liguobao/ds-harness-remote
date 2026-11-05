@@ -50,6 +50,10 @@ class RtcBridgeSink {
 
   onDataClosed(flag: string): void {
     logWarn('[webrtc] data channel closed');
+    const handler: (() => void) | undefined = RtcBridge.active!.onDataClosed;
+    if (handler !== undefined) {
+      handler();
+    }
   }
 
   onDataBinary(base64: string): void {
@@ -61,6 +65,10 @@ class RtcBridgeSink {
 
   onError(message: string): void {
     logWarn('[webrtc] error: ' + message);
+    const handler: ((value: string) => void) | undefined = RtcBridge.active!.onError;
+    if (handler !== undefined) {
+      handler(message);
+    }
   }
 }
 
@@ -73,18 +81,45 @@ export class RtcBridge {
   private started: boolean = false;
   /** 自检结果，界面/日志可读。 */
   selfTestPassed: boolean = false;
+  /** 页面加载完成、window.dshRtc 可用。 */
+  private pageReady: boolean = false;
 
   /** 信令回调：由连接层挂上去。 */
   onLocalSdp: ((description: string) => void) | undefined = undefined;
   onIce: ((candidate: string) => void) | undefined = undefined;
   onDataOpen: (() => void) | undefined = undefined;
   onDataBinary: ((base64: string) => void) | undefined = undefined;
+  onDataClosed: (() => void) | undefined = undefined;
+  onError: ((message: string) => void) | undefined = undefined;
 
   constructor() {
     RtcBridge.active = this;
   }
 
-  /** 作为 Initiator：带 ICE 配置开 offer（配置为 connect.accepted / turn/credentials 拿到的 JSON）。 */
+  /** 页面 onPageEnd 时调用：之后才允许发起协商。 */
+  markReady(): void {
+    this.pageReady = true;
+    this.started = false;
+    logInfo('[webrtc] bridge page ready');
+  }
+
+  isReady(): boolean {
+    return this.pageReady;
+  }
+
+  /**
+   * 作为 Initiator 开 offer（LAN-only：ICE 配置传空数组，只吃本地候选）。
+   * 返回 false 表示桥还没就绪，调用方应直接走中继，别白等超时。
+   */
+  beginOffer(iceServersJson: string): boolean {
+    if (!this.pageReady) {
+      return false;
+    }
+    this.run('window.dshRtc && window.dshRtc.startOffer(' + JSON.stringify(iceServersJson) + ');');
+    return true;
+  }
+
+  /** 兼容旧调用点：无条件开 offer。 */
   startOffer(iceServersJson: string): void {
     this.run('window.dshRtc && window.dshRtc.startOffer(' + JSON.stringify(iceServersJson) + ');');
   }

@@ -13,6 +13,7 @@ import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../pr
 import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
 import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
+import { RtcBridge } from './RtcBridge';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -85,6 +86,10 @@ export class AppRuntime {
   private unsubscribeClose: (() => void) | undefined = undefined;
   /** 预热中的中继通道：还没交给 SecureTransport/Core 就失败时由 teardown 负责关掉，否则会漏一条 socket。 */
   private pendingRelay: RelayTransport | undefined = undefined;
+  /** ArkWeb 里的 WebRTC 桥（LAN 直连用），由页面在 aboutToAppear 时挂进来。 */
+  private rtcBridge: RtcBridge | undefined = undefined;
+  /** 这次连接最终用的数据面：'' | 'relay' | 'lan'。 */
+  transportLabel: string = '';
   /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
   private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
   private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
@@ -360,6 +365,11 @@ export class AppRuntime {
     this.notify();
   }
 
+  /** 页面把 WebRTC 桥交给运行时；没挂上时连接一律走中继。 */
+  attachRtcBridge(bridge: RtcBridge): void {
+    this.rtcBridge = bridge;
+  }
+
   async connectDevice(deviceId: string): Promise<void> {
     if (this.phase !== PHASE_DEVICES) {
       return;
@@ -382,6 +392,7 @@ export class AppRuntime {
       relayOptions.deviceId = identity.deviceId;
       relayOptions.accessToken = credentials.accessToken;
       relayOptions.targetDeviceId = deviceId;
+      relayOptions.rtc = this.rtcBridge;
       let relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
       this.pendingRelay = relay;
       const tokenFresh: boolean = credentials.accessTokenExpiresAt - Date.now() > 120000;

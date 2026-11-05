@@ -3,6 +3,7 @@ import { buildControlFrameJson, buildRelayDataFrameJson, PROTOCOL_VERSION } from
 import { parseFrame, jsonStr, jsonNum, jsonValue, jsonStrArr, ParsedFrame } from '../protocol/Types';
 import { toBase64Url, fromBase64Url } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
+import { RtcBridge } from '../services/RtcBridge';
 
 export class RelayTransportOptions {
   deviceId: string = '';
@@ -23,6 +24,15 @@ export class RelayTransportOptions {
   handshakeTimeoutMs: number = 60000;
   /** 中继容量会抖一下，快速补两次就够了；真被拒就别让用户干等。 */
   attachRetryDelaysMs: number[] = [1200, 2500];
+  /**
+   * LAN-only 直连（实验）：ArkWeb 里的 DataChannel 顶替中继数据面。
+   * 拿不到就直接回落 relay，不需要任何开关。
+   */
+  rtc: RtcBridge | undefined = undefined;
+  /** 等 signal.answer 的预算。 */
+  webrtcSignalTimeoutMs: number = 12000;
+  /** 收到 answer 之后等 DataChannel 打通的预算（ICE 连通性检查 + DTLS）。 */
+  webrtcConnectTimeoutMs: number = 25000;
 }
 
 /**
@@ -163,6 +173,13 @@ export class RelayTransport {
   private dataAttachReject: ((err: Error) => void) | undefined = undefined;
   private dataReady: boolean = false;
   private notifiedClosed: boolean = false;
+  /** '' 未定 | 'relay' | 'lan' —— 决定数据帧往哪条路走。 */
+  private dataMode: string = '';
+  private rtcSignalTimer: number = -1;
+  private rtcConnectTimer: number = -1;
+  private rtcLocalCandidates: number = 0;
+  /** 已经因为 WebRTC 失败回落过一次，避免来回抖。 */
+  private rtcAttempted: boolean = false;
 
   constructor(url: string, options: RelayTransportOptions) {
     this.url = url;
@@ -212,6 +229,16 @@ export class RelayTransport {
   }
 
   send(data: Uint8Array): Promise<void> {
+    if (this.dataMode === 'lan') {
+      // 直连数据面：Noise 密文直接进 DataChannel（分块在页面里做）
+      const rtc = this.options.rtc;
+      if (rtc === undefined) {
+        throw new Error('webrtc bridge is gone');
+      }
+      this.relayCounter += 1;
+      rtc.send(toBase64Url(data));
+      return Promise.resolve();
+    }
     const connId = this.connectionId;
     if (connId === undefined) {
       throw new Error('relay connection has not been authorized');
@@ -330,6 +357,32 @@ export class RelayTransport {
         this.fail(new Error(message));
         return;
       }
+      // WebRTC 信令只在 Control WS 上（协议 §14）
+      if (frame.type === 'signal.answer') {
+        const payload = frame.payload;
+        const sdp: string = jsonStr(payload, 'sdp', '');
+        const rtc = this.options.rtc;
+        if (rtc !== undefined && sdp.length > 0) {
+          logInfo('webrtc: signal.answer 收到 len=' + sdp.length + '，等 DataChannel');
+          this.clearRtcSignalTimer();
+          if (this.rtcConnectTimer === -1) {
+            this.rtcConnectTimer = setTimeout(() => {
+              this.fallBackToRelay('DataChannel 没打通（' + this.options.webrtcConnectTimeoutMs + 'ms）');
+            }, this.options.webrtcConnectTimeoutMs);
+          }
+          rtc.applyAnswer(sdp);
+        }
+        return;
+      }
+      if (frame.type === 'signal.ice') {
+        const payload = frame.payload;
+        const candidate: Object | undefined = payload['candidate'];
+        const rtc = this.options.rtc;
+        if (rtc !== undefined && candidate !== undefined && candidate !== null) {
+          rtc.addRemoteIce(JSON.stringify(candidate));
+        }
+        return;
+      }
       if (frame.type === 'relay') {
         if (this.dataSocket !== undefined) {
           return;
@@ -395,25 +448,162 @@ export class RelayTransport {
         this.relayCandidates = buildRelayCandidates(relayEndpoint);
         logInfo('relay candidates (仅排障参考，票据不通用): ' + this.relayCandidates.join(' , '));
       }
-      this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
-        .then(() => {
-          this.attachAttempt = 0;
-          this.finishConnect();
-        })
-        .catch((e: Error) => {
-          // 把底层原因带出来，否则线上只能看到笼统的 attach failed
-          const detail: string = e instanceof Error ? e.message : String(e);
-          logError('relay data attach failed: ' + detail);
-          if (e instanceof RelayAttachError && !e.retryable) {
-            // 票据/声明对不上那种，换票重试还是同样的结果：直接报给用户
-            logWarn('relay attach 不可重试，放弃重试：' + detail);
-            this.fail(new Error('relay data attach failed: ' + detail));
-            return;
-          }
-          this.retryWithFreshTicket(detail);
-        });
+      // 先试 LAN 直连：成功就不用中继的数据面（中继节点满容量时这是唯一活路）
+      if (this.startRtcAttempt()) {
+        return;
+      }
+      this.attachRelayData(relayEndpoint, relayTicket, relayEpoch);
     } else {
-      this.finishConnect();
+      this.finishConnect('relay');
+    }
+  }
+
+  /** 走中继数据面（原有的 attach + 换票重试逻辑）。 */
+  private attachRelayData(relayEndpoint: string, relayTicket: string, relayEpoch: number): void {
+    this.dataMode = 'relay';
+    this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
+      .then(() => {
+        this.attachAttempt = 0;
+        this.finishConnect('relay');
+      })
+      .catch((e: Error) => {
+        // 把底层原因带出来，否则线上只能看到笼统的 attach failed
+        const detail: string = e instanceof Error ? e.message : String(e);
+        logError('relay data attach failed: ' + detail);
+        if (e instanceof RelayAttachError && !e.retryable) {
+          // 票据/声明对不上那种，换票重试还是同样的结果：直接报给用户
+          logWarn('relay attach 不可重试，放弃重试：' + detail);
+          this.fail(new Error('relay data attach failed: ' + detail));
+          return;
+        }
+        this.retryWithFreshTicket(detail);
+      });
+  }
+
+  /**
+   * LAN-only WebRTC：让 ArkWeb 里的 peer 开 offer，信令走 Control WS。
+   * 任何一步失败都由超时或 onError 兜底回落到中继。
+   */
+  private startRtcAttempt(): boolean {
+    const rtc = this.options.rtc;
+    if (rtc === undefined || this.rtcAttempted) {
+      return false;
+    }
+    if (!rtc.beginOffer('[]')) {
+      logInfo('webrtc: 桥还没就绪，直接走中继');
+      return false;
+    }
+    this.rtcAttempted = true;
+    const connId = this.connectionId;
+    if (connId === undefined) {
+      return false;
+    }
+    logInfo('webrtc: 开始 LAN 直连协商 conn=' + connId);
+    this.rtcSignalTimer = setTimeout(() => {
+      this.fallBackToRelay('没等到 signal.answer（' + this.options.webrtcSignalTimeoutMs + 'ms）');
+    }, this.options.webrtcSignalTimeoutMs);
+    rtc.onLocalSdp = (sdp: string) => {
+      try {
+        const payload: Record<string, Object> = {
+          'connectionId': this.connectionId !== undefined ? this.connectionId : '',
+          'targetDeviceId': this.options.targetDeviceId,
+          'sdp': sdp
+        };
+        this.sendControl('signal.offer', payload);
+        logInfo('webrtc: signal.offer sent len=' + sdp.length);
+      } catch (e) {
+        this.fallBackToRelay('signal.offer 发送失败');
+      }
+    };
+    rtc.onIce = (candidateJson: string) => {
+      try {
+        const candidate: Object = JSON.parse(candidateJson) as Object;
+        const payload: Record<string, Object> = {
+          'connectionId': this.connectionId !== undefined ? this.connectionId : '',
+          'targetDeviceId': this.options.targetDeviceId,
+          'candidate': candidate
+        };
+        this.sendControl('signal.ice', payload);
+        this.rtcLocalCandidates += 1;
+        if (this.rtcLocalCandidates === 1) {
+          logInfo('webrtc: 首个 local candidate 已发出');
+        }
+      } catch (e) {
+        logWarn('webrtc: signal.ice 发送失败');
+      }
+    };
+    rtc.onDataOpen = () => {
+      this.rtcOpened();
+    };
+    rtc.onDataBinary = (base64: string) => {
+      if (this.dataMode !== 'lan') {
+        return;
+      }
+      const cb = this.onMessage;
+      if (cb !== undefined) {
+        cb(fromBase64Url(base64));
+      }
+    };
+    rtc.onError = (message: string) => {
+      logWarn('webrtc: 错误 ' + message);
+      this.fallBackToRelay(message);
+    };
+    return true;
+  }
+
+  /** DataChannel 打开：先发 transport.selected，再让 Noise 握手继续。 */
+  private rtcOpened(): void {
+    if (this.dataMode === 'lan') {
+      return;
+    }
+    this.clearRtcTimer();
+    this.dataMode = 'lan';
+    this.dataReady = true;
+    // transport.selected 由 finishConnect('lan') 统一发，别发两遍
+    const rtc = this.options.rtc;
+    if (rtc !== undefined) {
+      rtc.onLocalSdp = undefined;
+      // onIce 继续挂着：后续 trickle candidate 还要发
+    }
+    this.finishConnect('lan');
+  }
+
+  /** WebRTC 没谈成：关掉 peer，回到中继数据面。 */
+  private fallBackToRelay(reason: string): void {
+    if (this.dataMode === 'lan' || this.notifiedClosed) {
+      return;
+    }
+    if (this.dataMode === 'relay' && this.dataReady) {
+      return;
+    }
+    this.clearRtcTimer();
+    const rtc = this.options.rtc;
+    if (rtc !== undefined) {
+      rtc.onLocalSdp = undefined;
+      rtc.onIce = undefined;
+      rtc.onDataOpen = undefined;
+      rtc.onDataBinary = undefined;
+      rtc.onError = undefined;
+      rtc.closeAll();
+    }
+    logWarn('webrtc: 回落中继（' + reason + '），重新要票');
+    this.dataMode = '';
+    // 重新走一次 connect.request：旧票据可能已经被这次协商占掉
+    this.retryWithFreshTicket('webrtc fallback: ' + reason);
+  }
+
+  private clearRtcTimer(): void {
+    this.clearRtcSignalTimer();
+    if (this.rtcConnectTimer !== -1) {
+      clearTimeout(this.rtcConnectTimer);
+      this.rtcConnectTimer = -1;
+    }
+  }
+
+  private clearRtcSignalTimer(): void {
+    if (this.rtcSignalTimer !== -1) {
+      clearTimeout(this.rtcSignalTimer);
+      this.rtcSignalTimer = -1;
     }
   }
 
@@ -614,7 +804,7 @@ export class RelayTransport {
     this.notifyClosed();
   }
 
-  private finishConnect(): void {
+  private finishConnect(mode: string): void {
     this.clearHandshakeTimer();
     // 主机只有在收到 transport.selected 之后才会 resumePendingHandshake（启动 Noise responder），
     // 少这一帧时客户端会一直等 msg2，最终表现为“安全握手超时”。
@@ -624,10 +814,10 @@ export class RelayTransport {
         const selected: Record<string, Object> = {
           'connectionId': connId,
           'targetDeviceId': this.options.targetDeviceId,
-          'transport': 'relay'
+          'transport': mode
         };
         this.sendControl('transport.selected', selected);
-        logInfo('transport.selected sent transport=relay conn=' + connId);
+        logInfo('transport.selected sent transport=' + mode + ' conn=' + connId);
       } catch (e) {
         logWarn('transport.selected send failed');
       }
@@ -677,6 +867,14 @@ export class RelayTransport {
   }
 
   private closeInternal(): void {
+    this.clearRtcTimer();
+    if (this.dataMode === 'lan') {
+      const rtc = this.options.rtc;
+      if (rtc !== undefined) {
+        rtc.closeAll();
+      }
+    }
+    this.dataMode = '';
     const ds = this.dataSocket;
     this.dataSocket = undefined;
     this.dataReady = false;

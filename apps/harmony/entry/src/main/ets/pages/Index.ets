@@ -8,7 +8,7 @@ import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
-import { OAuthProvider } from '../net/ServerApi';
+import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import { VoiceRecorder } from '../services/VoiceInput';
 import { RtcBridge } from '../services/RtcBridge';
@@ -126,6 +126,8 @@ struct Index {
     this.runtime.onUiUpdate = () => {
       this.syncFromRuntime();
     };
+    // 把隐藏 Web 里的 WebRTC 桥交给运行时：连接时若它已就绪就走 LAN 直连，否则走中继
+    this.runtime.attachRtcBridge(this.rtc);
     this.runtime.bootstrap(getContext(this));
   }
 
@@ -828,6 +830,7 @@ struct Index {
           controller: this.rtc.controller
         })
         .onPageEnd(() => {
+          this.rtc.markReady();
           this.rtc.startSelfTest();
         })
         .width(1)
@@ -1363,7 +1366,8 @@ struct Index {
             .fontColor(this.pal().text2)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(serverHostLabel(this.accountServer))
+          // 版本号跟在服务器域名后面，报障时一眼能报出装的是哪一版
+          Text(serverHostLabel(this.accountServer) + ' · v' + appVersion())
             .fontSize(10)
             .fontColor(this.pal().text3)
             .maxLines(1)

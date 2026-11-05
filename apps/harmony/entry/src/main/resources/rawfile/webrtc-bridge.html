@@ -9,15 +9,247 @@
 <body>
 <script>
 // ============================================================
-// DSH Remote · ArkWeb ↔ WebRTC 桥（自检版）
-// 目的：先证明 ArkWeb 里能 new RTCPeerConnection、能建 DataChannel、
-// 能把事件回传给 ArkTS。真正的信令（signal.offer/answer/ice）由 ArkTS 转发。
+// DSH Remote · ArkWeb ↔ WebRTC 桥
+//
+// ArkTS 侧（RtcBridge.ets）用 runJavaScript 调 dshRtc.*；页面用 window.dshBridge.* 回传。
+// 信令仍由 ArkTS 走 Control WS（signal.offer/answer/ice），本页只管 peer 与 DataChannel。
+//
+// 分块照抄仓库 packages/webrtc/src/rtc-chunking.ts 的 RTCH 格式（Host 那侧用同一套）：
+//   [0..4) magic "RTCH" | [4..8) messageId u32 | [8..10) index u16 | [10..12) total u16 | payload
+// 负载 8 KiB，单条消息上限 4 MiB。大帧不分块会被 SCTP 慢启动卡住，接收方向也必须能还原。
+//
+// base64url：与 ArkTS crypto/Bytes.ets 的字母表一致，省掉跨端转码分叉。
 // ============================================================
 (function () {
+  var CHUNK_MAGIC = 'RTCH';
+  var CHUNK_HEADER_BYTES = 12;
+  var CHUNK_PAYLOAD_BYTES = 8 * 1024;
+  var CHUNK_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
+  var DC_LABEL = 'dsh';
+
+  var pc = null;
+  var dc = null;
+  var pendingCandidates = [];
+  var nextMessageId = 1;
+  var assemblies = Object.create(null);
+
   function log(msg) {
     try { if (window.dshBridge && window.dshBridge.onLog) { window.dshBridge.onLog(String(msg)); } } catch (e) {}
   }
+  function call(name, arg) {
+    try {
+      if (window.dshBridge && typeof window.dshBridge[name] === 'function') {
+        window.dshBridge[name](arg === undefined ? '' : String(arg));
+      }
+    } catch (e) { log('callback ' + name + ' failed: ' + e); }
+  }
 
+  // ---------- base64url ----------
+  function bytesToB64Url(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i]); }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64UrlToBytes(text) {
+    var b64 = String(text).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) { b64 += '='; }
+    var raw = atob(b64);
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+    return out;
+  }
+
+  // ---------- RTCH 分块 ----------
+  function isChunk(bytes) {
+    if (bytes.byteLength < CHUNK_MAGIC.length) { return false; }
+    for (var i = 0; i < CHUNK_MAGIC.length; i++) {
+      if (bytes[i] !== CHUNK_MAGIC.charCodeAt(i)) { return false; }
+    }
+    return true;
+  }
+  function encodeChunks(bytes) {
+    if (bytes.byteLength <= CHUNK_PAYLOAD_BYTES) { return [bytes]; }
+    if (bytes.byteLength > CHUNK_MAX_MESSAGE_BYTES) { throw new Error('message exceeds 4 MiB'); }
+    var total = Math.ceil(bytes.byteLength / CHUNK_PAYLOAD_BYTES);
+    var id = nextMessageId;
+    nextMessageId = nextMessageId >= 0xffffffff ? 1 : nextMessageId + 1;
+    var frames = [];
+    for (var index = 0; index < total; index++) {
+      var start = index * CHUNK_PAYLOAD_BYTES;
+      var end = Math.min(bytes.byteLength, start + CHUNK_PAYLOAD_BYTES);
+      var frame = new Uint8Array(CHUNK_HEADER_BYTES + (end - start));
+      for (var m = 0; m < CHUNK_MAGIC.length; m++) { frame[m] = CHUNK_MAGIC.charCodeAt(m); }
+      var view = new DataView(frame.buffer);
+      view.setUint32(4, id);
+      view.setUint16(8, index);
+      view.setUint16(10, total);
+      frame.set(bytes.subarray(start, end), CHUNK_HEADER_BYTES);
+      frames.push(frame);
+    }
+    return frames;
+  }
+  function decodeChunk(bytes) {
+    if (!isChunk(bytes)) {
+      if (bytes.byteLength > CHUNK_MAX_MESSAGE_BYTES) { throw new Error('message exceeds 4 MiB'); }
+      return bytes;
+    }
+    if (bytes.byteLength < CHUNK_HEADER_BYTES) { throw new Error('chunk header invalid'); }
+    var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    var id = view.getUint32(4);
+    var index = view.getUint16(8);
+    var total = view.getUint16(10);
+    if (id === 0 || total < 2 || index >= total) { throw new Error('chunk metadata invalid'); }
+    var piece = bytes.subarray(CHUNK_HEADER_BYTES);
+    var entry = assemblies[id];
+    if (entry === undefined) {
+      if (index !== 0) { throw new Error('chunk sequence invalid'); }
+      entry = { total: total, chunks: [], bytes: 0 };
+      assemblies[id] = entry;
+    }
+    if (entry.total !== total || index !== entry.chunks.length) {
+      delete assemblies[id];
+      throw new Error('chunk sequence invalid');
+    }
+    entry.chunks.push(Uint8Array.from(piece));
+    entry.bytes += piece.byteLength;
+    if (entry.bytes > CHUNK_MAX_MESSAGE_BYTES) {
+      delete assemblies[id];
+      throw new Error('message exceeds 4 MiB');
+    }
+    if (entry.chunks.length < total) { return undefined; }
+    var out = new Uint8Array(entry.bytes);
+    var offset = 0;
+    for (var i = 0; i < entry.chunks.length; i++) {
+      out.set(entry.chunks[i], offset);
+      offset += entry.chunks[i].byteLength;
+    }
+    delete assemblies[id];
+    return out;
+  }
+
+  // ---------- peer / channel ----------
+  function attachChannel(channel) {
+    dc = channel;
+    dc.binaryType = 'arraybuffer';
+    dc.onopen = function () { log('dc open label=' + dc.label); call('onDataOpen', '1'); };
+    dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
+    dc.onerror = function (e) { log('dc error ' + (e && e.message ? e.message : e)); call('onError', 'data channel error'); };
+    dc.onmessage = function (event) {
+      try {
+        var data = event.data;
+        var bytes = null;
+        if (data instanceof ArrayBuffer) {
+          bytes = new Uint8Array(data);
+        } else if (ArrayBuffer.isView(data)) {
+          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        } else {
+          log('dc message of unexpected type ' + typeof data);
+          return;
+        }
+        var whole = decodeChunk(bytes);
+        if (whole === undefined) { return; }
+        call('onDataBinary', bytesToB64Url(whole));
+      } catch (e) {
+        log('dc receive failed ' + (e && e.message ? e.message : e));
+      }
+    };
+  }
+
+  function ensurePc(iceJson) {
+    var PC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    if (!PC) { throw new Error('no RTCPeerConnection in this webview'); }
+    if (pc) { return pc; }
+    var cfg = { iceServers: [] };
+    try {
+      if (iceJson) {
+        var parsed = JSON.parse(iceJson);
+        if (Object.prototype.toString.call(parsed) === '[object Array]') { cfg = { iceServers: parsed }; }
+      }
+    } catch (e) { log('ice parse failed ' + e); }
+    pc = new PC(cfg);
+    pc.onicecandidate = function (e) {
+      if (!e.candidate || !e.candidate.candidate) { log('ice gathering finished'); return; }
+      var c = e.candidate;
+      var out = { candidate: c.candidate };
+      if (c.sdpMid !== null && c.sdpMid !== undefined) { out.sdpMid = c.sdpMid; }
+      if (c.sdpMLineIndex !== null && c.sdpMLineIndex !== undefined) { out.sdpMLineIndex = c.sdpMLineIndex; }
+      if (c.usernameFragment) { out.usernameFragment = c.usernameFragment; }
+      log('local candidate ' + String(c.type || '?') + ' ' + String(c.candidate).slice(0, 96));
+      call('onIce', JSON.stringify(out));
+    };
+    pc.onconnectionstatechange = function () { call('onState', String(pc.connectionState)); };
+    pc.oniceconnectionstatechange = function () { call('onIceState', String(pc.iceConnectionState)); };
+    pc.ondatachannel = function (event) { attachChannel(event.channel); };
+    return pc;
+  }
+
+  function flushCandidates() {
+    if (!pc || pendingCandidates.length === 0) { return; }
+    var list = pendingCandidates;
+    pendingCandidates = [];
+    list.forEach(function (candidate) {
+      try { pc.addIceCandidate(candidate).catch(function (e) { log('candidate rejected ' + e); }); }
+      catch (e) { log('candidate rejected ' + e); }
+    });
+  }
+
+  // Client 是 offer 侧：先建 DC，再 createOffer
+  function startOffer(iceJson) {
+    try {
+      closeAll();
+      var p = ensurePc(iceJson);
+      attachChannel(p.createDataChannel(DC_LABEL, { ordered: true }));
+      p.createOffer()
+        .then(function (offer) { return p.setLocalDescription(offer); })
+        .then(function () {
+          log('offer created');
+          call('onLocalSdp', String(p.localDescription.sdp));
+        })
+        .catch(function (err) { log('createOffer failed ' + err); call('onError', 'createOffer failed'); });
+    } catch (e) {
+      log('startOffer failed ' + e);
+      call('onError', 'startOffer failed');
+    }
+  }
+
+  function applyAnswer(sdp) {
+    if (!pc) { call('onError', 'applyAnswer before startOffer'); return; }
+    pc.setRemoteDescription({ type: 'answer', sdp: String(sdp) })
+      .then(function () { log('answer applied'); flushCandidates(); })
+      .catch(function (err) { log('applyAnswer failed ' + err); call('onError', 'applyAnswer failed'); });
+  }
+
+  function addRemoteIce(candidateJson) {
+    if (!pc) { log('addRemoteIce before startOffer'); return; }
+    var candidate = null;
+    try { candidate = JSON.parse(candidateJson); } catch (e) { log('candidate parse failed ' + e); return; }
+    if (!pc.remoteDescription) { pendingCandidates.push(candidate); return; }
+    pc.addIceCandidate(candidate).catch(function (e) { log('addIceCandidate failed ' + e); });
+  }
+
+  function send(b64) {
+    if (!dc || dc.readyState !== 'open') { return 'nodc'; }
+    try {
+      var frames = encodeChunks(b64UrlToBytes(b64));
+      for (var i = 0; i < frames.length; i++) { dc.send(frames[i].buffer); }
+      return 'ok';
+    } catch (e) { return 'error:' + e; }
+  }
+
+  function closeAll() {
+    pendingCandidates = [];
+    assemblies = Object.create(null);
+    if (dc) {
+      try { dc.onmessage = null; dc.onopen = null; dc.onclose = null; dc.onerror = null; dc.close(); } catch (e) {}
+      dc = null;
+    }
+    if (pc) {
+      try { pc.onicecandidate = null; pc.ondatachannel = null; pc.close(); } catch (e) {}
+      pc = null;
+    }
+  }
+
+  // ---------- 能力自检与网络探测（判断 ArkWeb 是否具备 WebRTC）----------
   function env() {
     var out = {
       hasRtcPeer: typeof RTCPeerConnection === 'function',
@@ -29,7 +261,6 @@
     return out;
   }
 
-  // 网络可达性：ArkWeb 的渲染进程能不能访问本机/LAN（决定 ICE 能否用主机候选）
   function netTest() {
     var targets = ['https://dsh.r2049.cn/health', 'http://127.0.0.1:3080/'];
     targets.forEach(function (u) {
@@ -40,11 +271,9 @@
     });
   }
 
-  // 本机自环：两个 PeerConnection 互连，走 host candidate（不依赖服务端）
   function selfTest() {
     env();
-    var PC = (typeof RTCPeerConnection === 'function') ? RTCPeerConnection
-           : (typeof webkitRTCPeerConnection === 'function' ? webkitRTCPeerConnection : null);
+    var PC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
     if (!PC) { log('selftest: no RTCPeerConnection'); return; }
     var a = new PC({ iceServers: [] });
     var b = new PC({ iceServers: [] });
@@ -53,13 +282,18 @@
     b.onicecandidate = function (e) { if (e.candidate) { try { a.addIceCandidate(e.candidate); } catch (err) {} } };
     b.ondatachannel = function (e) {
       var rx = e.channel;
-      rx.onmessage = function (m) { log('selftest: got "' + m.data + '"'); done = true; try { rx.close(); a.close(); b.close(); } catch (err) {} };
+      rx.onmessage = function (m) {
+        log('selftest: got "' + m.data + '"');
+        done = true;
+        try { rx.close(); a.close(); b.close(); } catch (err) {}
+      };
     };
-    var dc = a.createDataChannel('dsh', { ordered: true });
-    dc.onopen = function () { log('selftest: dc open'); try { dc.send('hello-from-webrtc'); } catch (err) { log('selftest: send failed ' + err); } };
+    var dcSelf = a.createDataChannel('dsh', { ordered: true });
+    dcSelf.onopen = function () { log('selftest: dc open'); try { dcSelf.send('hello-from-webrtc'); } catch (err) { log('selftest: send failed ' + err); } };
     a.createOffer().then(function (offer) {
       return a.setLocalDescription(offer);
     }).then(function () {
+      log('selftest: sdp exchanged');
       return b.setRemoteDescription(a.localDescription);
     }).then(function () {
       return b.createAnswer();
@@ -67,87 +301,8 @@
       return b.setLocalDescription(answer);
     }).then(function () {
       return a.setRemoteDescription(b.localDescription);
-    }).then(function () {
-      log('selftest: sdp exchanged');
-    }).catch(function (err) {
-      log('selftest: failed ' + err);
-    });
+    }).catch(function (err) { log('selftest: failed ' + err); });
     setTimeout(function () { if (!done) { log('selftest: timeout(6s)'); } }, 6000);
-  }
-
-  // ---------- 真实协商用的对外 API（由 ArkTS 通过 runJavaScript 调用） ----------
-  var pc = null, dc = null;
-
-  function call(name, arg) {
-    try {
-      if (window.dshBridge && typeof window.dshBridge[name] === 'function') {
-        window.dshBridge[name](arg === undefined ? '' : String(arg));
-      }
-    } catch (e) { log('callback ' + name + ' failed: ' + e); }
-  }
-
-  function ensurePc(iceJson) {
-    if (pc) { return pc; }
-    var PC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-    var cfg = { iceServers: [] };
-    try { if (iceJson) { cfg = JSON.parse(iceJson); } } catch (e) { log('ice parse failed'); }
-    pc = new PC(cfg);
-    pc.onicecandidate = function (e) {
-      if (e.candidate && e.candidate.candidate) { call('onIce', JSON.stringify(e.candidate)); }
-    };
-    pc.onconnectionstatechange = function () { call('onState', pc.connectionState); };
-    pc.oniceconnectionstatechange = function () { call('onIceState', pc.iceConnectionState); };
-    return pc;
-  }
-
-  // 角色：Client 是 offer 侧；先建 DC 再建 offer
-  function startOffer(iceJson) {
-    var p = ensurePc(iceJson);
-    dc = p.createDataChannel('dsh', { ordered: true });
-    dc.binaryType = 'arraybuffer';
-    dc.onopen = function () { call('onDataOpen', '1'); };
-    dc.onclose = function () { call('onDataClosed', '1'); };
-    dc.onmessage = function (m) {
-      if (typeof m.data === 'string') { call('onDataText', m.data); return; }
-      var bytes = new Uint8Array(m.data), bin = '';
-      for (var i = 0; i < bytes.length; i++) { bin += String.fromCharCode(bytes[i]); }
-      call('onDataBinary', btoa(bin));
-    };
-    p.createOffer().then(function (o) { return p.setLocalDescription(o); })
-      .then(function () { call('onLocalSdp', JSON.stringify({ type: p.localDescription.type, sdp: p.localDescription.sdp })); })
-      .catch(function (err) { call('onError', 'offer failed: ' + err); });
-  }
-
-  // 收到 Host 的 answer
-  function applyAnswer(sdpJson) {
-    if (!pc) { call('onError', 'applyAnswer before startOffer'); return; }
-    var desc = JSON.parse(sdpJson);
-    pc.setRemoteDescription(new RTCSessionDescription(desc))
-      .then(function () { call('onRemoteApplied', desc.type); })
-      .catch(function (err) { call('onError', 'applyAnswer failed: ' + err); });
-  }
-
-  function addRemoteIce(candidateJson) {
-    if (!pc) { return; }
-    try {
-      var c = JSON.parse(candidateJson);
-      pc.addIceCandidate(new RTCIceCandidate(c)).catch(function (err) { log('addIce failed ' + err); });
-    } catch (e) { log('addRemoteIce parse failed'); }
-  }
-
-  function send(b64) {
-    if (!dc || dc.readyState !== 'open') { return 'nodc'; }
-    try {
-      var bin = atob(b64), bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
-      dc.send(bytes.buffer);
-      return 'ok';
-    } catch (e) { return 'error:' + e; }
-  }
-
-  function closeAll() {
-    try { if (dc) { dc.close(); } if (pc) { pc.close(); } } catch (e) {}
-    dc = null; pc = null;
   }
 
   window.dshRtc = {
@@ -157,7 +312,9 @@
     addRemoteIce: addRemoteIce,
     send: send,
     close: closeAll,
-    state: function () { return JSON.stringify({ pc: pc ? pc.connectionState : 'none', dc: dc ? dc.readyState : 'none' }); }
+    state: function () {
+      return JSON.stringify({ pc: pc ? pc.connectionState : 'none', dc: dc ? dc.readyState : 'none' });
+    }
   };
 
   window.__dshSelfTest = selfTest;

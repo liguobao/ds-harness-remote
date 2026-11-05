@@ -189,10 +189,52 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
 
 WebRTC 可行性/收益评估另见 `docs/harmony-webrtc-assessment.md`。
 
+## 2026-11-05 上午（LAN-only 直连落地，V0.06.1）
+
+用户要求先做 LAN-only，已经把「鸿蒙客户端 initiator」这一侧接通，**真机/真主机跑通**：
+
+```
+webrtc: 开始 LAN 直连协商 conn=01a1a987…
+[webrtc] local candidate host … 192.168.11.123 46924 typ host
+webrtc: signal.offer sent len=458
+ctl frame type=signal.ice ×7 / type=signal.answer   ← Host 回答案
+[webrtc] answer applied → ice state=connected（80ms）→ connection state=connected
+[webrtc] dc open label=dsh → transport.selected sent transport=lan
+noise: handshake complete → host features → connected to host
+```
+
+Host 侧日志同一连接：`webrtc data channel ready {"transport":"LAN"}`、
+`rtcSelectedPath.transport=lan, localCandidateType=host, remoteCandidateType=host,
+currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"}`。
+连接后聊天页正常实时收流（截图见 `incoming/shots`），说明数据面真的走 DC。
+
+实现要点（改动文件）：
+
+- `resources/rawfile/webrtc-bridge.html`：真信令（offer/answer/ice）+ **RTCH 分块**（magic `RTCH`、
+  8 KiB 负载、4 MiB 上限，与 `packages/webrtc/src/rtc-chunking.ts` 一致）+ base64url 跨端编码
+- `services/RtcBridge.ets`：`markReady()`/`beginOffer()`（桥没就绪就直接走中继，别白等超时）、
+  `onDataClosed`/`onError` 回调
+- `net/RelayTransport.ets`：`connect.accepted` 后先试 RTC；`signal.answer`/`signal.ice` 只在
+  **Control WS**（协议 §14，别放到数据面 socket 上，我第一次就放错了，白排查一轮）；
+  `transport.selected` 先发再进 Noise；两段超时（等 answer 12s / 等 DC 25s）；
+  `send()` 在 `dataMode==='lan'` 时走 DC；失败 → `fallBackToRelay()` 重新要票走中继
+- `services/AppRuntime.ets` + `pages/Index.ets`：页面 `onPageEnd` 把桥交给运行时（`attachRtcBridge`）
+
+坑与注意：
+
+- 信号帧只在 Control WS 上；数据面 socket 永远收不到 `signal.*`
+- 同一个 `transport.selected` 只发一次（`rtcOpened` 与 `finishConnect` 都发过一次，已合并）
+- Host 的 `webrtcFallbackTimeoutMs` 是 12s，我们的等 answer 预算要 ≤ 它，否则 Host 先放弃了
+- Noise 握手仍走 `secure.handshake` 控制帧，只有密文改走 DC——这一点没动，也不需要动
+
+还没做（下一轮）：TURN 候选（当前只吃 host candidate，跨网段仍会回落 relay）、
+传输方式徽标（`transportLabel` 字段已备好但未显示）、后台挂起后 DC 重建、背压/分块实测。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.06.1 | 1000031 | LAN-only WebRTC 直连跑通（offer/answer/ice + RTCH 分块 + 回落中继） |
 | 0.05.1 | 1000029 | 设备卡副标题折行，版本号不再被省略号吃掉 |
 | 0.05.0 | 1000028 | 4008 措辞按 reason 分流（节点满 / 票据对不上），票据类不再重试 |
 | 0.04.9 | 1000027 | 失败轮提示（上下文超窗/max-tokens/主机拒绝）+ 设备名单行 |
