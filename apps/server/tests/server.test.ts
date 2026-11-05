@@ -28,6 +28,7 @@ import {
   type LogEntry,
 } from '../src/logger.js'
 import { MAX_ICE_CANDIDATES_PER_CONNECTION } from '../src/gateway.js'
+import { parseIceConfig } from '../src/ice.js'
 
 const account = 'owner@example.com', password = 'local-test-password'
 let app: ReturnType<typeof createRemoteServer>, dir: string, base: string, accountToken: string
@@ -494,6 +495,81 @@ describe('webrtc signaling and TURN credentials', () => {
 
     await handshake(ctx)
     expect((await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.c.accessToken)).status).toBe(404)
+  })
+
+  it('issues configured static TURN credentials', async () => {
+    await app.close()
+    await start(password, [], {
+      ice: {
+        stunUrls: [],
+        turnUrls: ['turn:turn.example.test:3478'],
+        turnSecret: undefined,
+        turnUsername: 'remote',
+        turnPassword: 'static-turn-password',
+        turnTtlSeconds: 120,
+      },
+    })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+    const ctx = await connection({ hostCapabilities: fullCapabilities, clientCapabilities: fullCapabilities })
+    const result = await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.c.accessToken)
+    expect(result.status).toBe(200)
+    expect(result.data.iceServers).toEqual([{ urls: 'turn:turn.example.test:3478', username: 'remote', credential: 'static-turn-password' }])
+  })
+
+  it('rejects partial TURN credential configuration at startup', async () => {
+    await runScenarios([
+      {
+        name: 'urls without any credential source',
+        run: () => {
+          expect(() => parseIceConfig({ DSH_SERVER_TURN_URLS: 'turn:turn.example.test:3478' })).toThrow(/DSH_SERVER_TURN_URLS requires/)
+        },
+      },
+      {
+        name: 'secret together with static credentials',
+        run: () => {
+          expect(() => parseIceConfig({
+            DSH_SERVER_TURN_URLS: 'turn:turn.example.test:3478',
+            DSH_SERVER_TURN_SECRET: 'secret',
+            DSH_SERVER_TURN_USERNAME: 'remote',
+            DSH_SERVER_TURN_PASSWORD: 'password',
+          })).toThrow(/not both/)
+        },
+      },
+      {
+        name: 'static username without password',
+        run: () => {
+          expect(() => parseIceConfig({
+            DSH_SERVER_TURN_URLS: 'turn:turn.example.test:3478',
+            DSH_SERVER_TURN_USERNAME: 'remote',
+          })).toThrow(/together/)
+        },
+      },
+      {
+        name: 'static credentials without urls',
+        run: () => {
+          expect(() => parseIceConfig({
+            DSH_SERVER_TURN_USERNAME: 'remote',
+            DSH_SERVER_TURN_PASSWORD: 'password',
+          })).toThrow(/DSH_SERVER_TURN_URLS is required/)
+        },
+      },
+      {
+        name: 'secret without urls',
+        run: () => {
+          expect(() => parseIceConfig({ DSH_SERVER_TURN_SECRET: 'secret' })).toThrow(/DSH_SERVER_TURN_URLS is required/)
+        },
+      },
+      {
+        name: 'accepts a complete static pair',
+        run: () => {
+          expect(parseIceConfig({
+            DSH_SERVER_TURN_URLS: 'turn:turn.example.test:3478',
+            DSH_SERVER_TURN_USERNAME: 'remote',
+            DSH_SERVER_TURN_PASSWORD: 'password',
+          })).toMatchObject({ turnUsername: 'remote', turnPassword: 'password', turnSecret: undefined })
+        },
+      },
+    ])
   })
 
   it('does not issue TURN credentials before the host accepts the connection', async () => {

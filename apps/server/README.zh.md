@@ -75,9 +75,11 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_DATA_FILE` | 默认 `data/state.json`，相对启动目录 |
 | `DSH_SERVER_TRUSTED_PROXY_IPS` | 受信任反向代理 peer IP 列表，逗号分隔；留空（默认）时忽略转发 IP |
 | `DSH_SERVER_STUN_URLS` | 下发给 Host/Client 的 STUN URL，逗号分隔；留空（默认）时只使用 host candidate |
-| `DSH_SERVER_TURN_URLS` | TURN URL，逗号分隔；必须同时配置 `DSH_SERVER_TURN_SECRET` |
+| `DSH_SERVER_TURN_URLS` | TURN URL，逗号分隔；必须同时配置 `DSH_SERVER_TURN_SECRET` 或 `DSH_SERVER_TURN_USERNAME` + `DSH_SERVER_TURN_PASSWORD` |
 | `DSH_SERVER_TURN_SECRET` | coturn REST API 共享密钥；不会下发给客户端 |
-| `DSH_SERVER_TURN_TTL_SECONDS` | TURN credential 有效期秒数，60–3600，默认 `300` |
+| `DSH_SERVER_TURN_USERNAME` | 无法使用共享密钥的部署的静态 TURN 用户名；与 `DSH_SERVER_TURN_SECRET` 互斥 |
+| `DSH_SERVER_TURN_PASSWORD` | 静态 TURN 密码；必须与 `DSH_SERVER_TURN_USERNAME` 同时配置 |
+| `DSH_SERVER_TURN_TTL_SECONDS` | TURN credential 有效期秒数，60–3600，默认 `300`（仅对短期凭据生效） |
 
 公网使用 HTTPS 反向代理，并将 `DSH_SERVER_PUBLIC_URL` 设为实际域名；代理需支持 `/ws/v1/connect` 的 WebSocket Upgrade，空闲超时大于 75 秒。
 
@@ -91,6 +93,8 @@ Server 协调与托管 Server 相同的四条路径：`LAN -> P2P -> TURN -> Rel
 - WebRTC/TURN 不可用时客户端会自动回退到加密 Relay；`DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` 留空即保持原来的 Relay-only 行为。
 
 需要单独部署 coturn，配置 `use-auth-secret` 且 `static-auth-secret` 与 `DSH_SERVER_TURN_SECRET` 一致，开放 TURN 端口（通常为 3478/UDP、TCP 以及 relay 端口段），并让 STUN/TURN URL 指向 Host 与 Client 都能访问的地址。HTTPS 反向代理只需承载控制 WebSocket 与 REST API，WebRTC/TURN 流量不经过它。
+
+无法使用共享密钥的 TURN 部署可改设 `DSH_SERVER_TURN_USERNAME` + `DSH_SERVER_TURN_PASSWORD`（与 `DSH_SERVER_TURN_SECRET` 互斥，二者不可同时配置）；Server 会把静态凭据下发给连接参与方。优先使用 REST API 短期凭据——静态凭据在轮换前被所有连接共用。
 
 ### 反向代理下的限流
 
