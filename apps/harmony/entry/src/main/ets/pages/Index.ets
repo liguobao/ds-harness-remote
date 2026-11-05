@@ -428,9 +428,17 @@ struct Index {
       parts.push(part);
     }
     this.runtime.sendPrompt(text, parts);
-    // 发送后输入坞会变矮，立刻把视图钉回最新一条，避免最后一行被坞/候选条压住
+    // 发送后输入框会从多行缩回单行、坞跟着变矮。必须等这一帧布局落定再滚，
+    // 否则滚动是按旧高度算的，收回去之后新消息就矮到坞后面去了。
     this.stickToBottom = true;
-    this.scrollChatToBottom();
+    setTimeout(() => {
+      this.scrollChatToBottom();
+    }, 80);
+    setTimeout(() => {
+      if (this.stickToBottom) {
+        this.scrollChatToBottom();
+      }
+    }, 240);
   }
 
   /** 从系统相册选图；选完先压再进待发队列。 */
