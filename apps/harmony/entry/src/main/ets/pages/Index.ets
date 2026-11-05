@@ -458,13 +458,14 @@ struct Index {
     if (url.length === 0) {
       return this.tr('切换账号');
     }
+    const host: string = serverHostLabel(url);
     if (url.indexOf('dsh.r2049.cn') >= 0) {
-      return this.tr('官方') + ' ⇄';
+      return this.tr('官方') + ' · ' + host;
     }
     if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
-      return this.tr('本地') + ' ⇄';
+      return this.tr('本地') + ' · ' + host;
     }
-    return serverHostLabel(url) + ' ⇄';
+    return host;
   }
 
   /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
@@ -1934,7 +1935,8 @@ struct Index {
   @Builder
   DevicesScreen() {
     Column() {
-      Row({ space: 10 }) {
+      // 第一行只放标题与三个圆形按钮：标题永远有整行宽度，不会被胶囊挤掉
+      Row({ space: 8 }) {
         Column({ space: 6 }) {
           Text(this.tr('远程主机'))
             .fontSize(22)
@@ -1949,19 +1951,6 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        if (true) {
-          Button(this.accountSwitchLabel())
-            .height(32)
-            .fontSize(12)
-            .backgroundColor('rgba(34,211,238,0.12)')
-            .fontColor('#0E7490')
-            .borderRadius(16)
-            .border({ width: 1, color: 'rgba(34,211,238,0.45)' })
-            .constraintSize({ maxWidth: 190 })
-            .onClick(() => {
-              this.openAccountSwitcher();
-            })
-        }
         Button({ type: ButtonType.Circle }) {
           Image($r('app.media.ic_settings'))
             .width(18)
@@ -2003,6 +1992,36 @@ struct Index {
           this.showMoreMenu = true;
         })
       }
+      .width('100%')
+      // 第二行：当前服务器胶囊（自己一行，点开切换），不参与标题行竞争
+      Row() {
+        Row({ space: 6 }) {
+          Column()
+            .width(6)
+            .height(6)
+            .borderRadius(3)
+            .backgroundColor('#22D3EE')
+          Text(this.accountSwitchLabel())
+            .fontSize(12)
+            .fontColor(this.pal().text2)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text('⌄')
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+        }
+        .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+        .backgroundColor(this.pal().chip)
+        .borderRadius(12)
+        .border({ width: 1, color: this.pal().border })
+        .constraintSize({ maxWidth: 260 })
+        .onClick(() => {
+          this.openAccountSwitcher();
+        })
+        Blank()
+      }
+      .width('100%')
+      .padding({ top: 8 })
       .width('100%')
       .padding({ left: 20, right: 20, top: 16, bottom: 12 })
       if (this.busy) {
