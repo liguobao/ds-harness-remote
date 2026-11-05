@@ -103,6 +103,8 @@ struct Index {
   @State breakpoint: Breakpoint = 'sm';
   /** 折叠形态（展开 / 半折 / 折叠）；双折轴三折叠也归一到这三态。 */
   @State foldState: FoldState = 'expanded';
+  /** 键盘是否弹起：弹起时收起语境胶囊、收窄列表底部留白。 */
+  @State keyboardVisible: boolean = false;
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -229,6 +231,9 @@ struct Index {
       });
       win.on('windowSizeChange', (size: window.Size) => {
         this.applyWindowSize(size);
+      });
+      win.on('keyboardHeightChange', (height: number) => {
+        this.keyboardVisible = height > 0;
       });
     }).catch(() => {
       this.topInset = 0;
@@ -2734,7 +2739,7 @@ struct Index {
   @Builder
   ChatScreen() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Column() {
+      Column({ space: this.foldState === 'half' ? 10 : 0 }) {
       Row() {
         Text('‹')
           .fontSize(26)
@@ -2934,7 +2939,8 @@ struct Index {
       .layoutWeight(1)
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
-      .padding({ left: 16, right: 16, top: 8, bottom: 104 })
+      // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面
+      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 24 : 152 })
       // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
       .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
       .scrollBarWidth(this.isLandscape ? 6 : 3)
@@ -3017,7 +3023,17 @@ struct Index {
         .justifyContent(FlexAlign.Center)
         .margin({ bottom: 96 })
       }
-      this.ComposerDock()
+      // 半折悬停（桌面立着那种）：输入坞限制在下半屏，上半留给消息，中间那道间隔就是铰链
+      if (this.foldState === 'half') {
+        Column() {
+          this.ComposerDock()
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: Math.max(180, this.windowHeightVp * 0.42) })
+        .justifyContent(FlexAlign.End)
+      } else {
+        this.ComposerDock()
+      }
     }
     .width('100%')
     .height('100%')
@@ -3028,7 +3044,8 @@ struct Index {
   ComposerDock() {
     Column() {
       Column({ space: 8 }) {
-        if (this.contextPills().length > 0) {
+        // 键盘弹起时收起语境胶囊：它正好压在输入法候选条上方，会挡住半个候选框
+        if (!this.keyboardVisible && this.contextPills().length > 0) {
           Row({ space: 8 }) {
             ForEach(this.contextPills(), (pill: string) => {
               Text(pill)
@@ -3265,13 +3282,6 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
-    // 底栏横条：整条玻璃做底衬，按钮各是一块更亮的玻璃浮在上面
-    .backgroundColor(this.isDarkUi ? 'rgba(18,22,34,0.72)' : 'rgba(247,249,255,0.78)')
-    .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
-      colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-      adaptiveColor: AdaptiveColor.DEFAULT,
-      blurOptions: { grayscale: [0, 24] }
-    })
   }
 
   /** Shared sessions list (header + rows); wrapped by the overlay or the landscape pane. */
