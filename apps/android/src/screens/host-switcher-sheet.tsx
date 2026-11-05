@@ -23,7 +23,9 @@ export interface HostSwitcherSheetProps {
 /**
  * Bottom half-sheet that only lists remote Hosts. The dismiss target and the
  * sheet are siblings so Android's responder negotiation cannot swallow taps
- * on rows or the close button.
+ * on rows or the close button. Every row is a `GroupRow`, so the icon column,
+ * the label start, the inset separators and the right edge match the cards
+ * used elsewhere, and the trailing status text lands on one baseline.
  */
 export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts }: HostSwitcherSheetProps) {
   useAppStore(state => state.language)
@@ -44,21 +46,21 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   }, [visible, refreshDevices])
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.backdrop} pointerEvents="box-none">
+    <Modal visible={visible} transparent animationType='fade' onRequestClose={onClose} statusBarTranslucent>
+      <View style={styles.backdrop} pointerEvents='box-none'>
         <Pressable
-          accessibilityRole="button"
+          accessibilityRole='button'
           accessibilityLabel={strings.common.close}
-          pointerEvents="box-only"
+          pointerEvents='box-only'
           style={StyleSheet.absoluteFill}
           onPress={onClose}
         />
         <View
           style={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
-          pointerEvents="box-none"
+          pointerEvents='box-none'
         >
           <View style={styles.grabber} />
-          <View style={styles.header}>
+          <View style={styles.sheetHeader}>
             <Text style={styles.title} numberOfLines={1}>{strings.remoteHosts.switchTitle}</Text>
             <IconButton label={strings.common.close} icon={X} onPress={onClose} />
           </View>
@@ -76,55 +78,51 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                 : devices.map((device, index) => {
                     const isCurrent = selectedDevice?.deviceId === device.deviceId
                     const isConnected = isCurrent && connection.phase === 'connected'
-                    const PlatformIcon = platformIcon(device.platform)
+                    const Icon = platformIcon(device.platform)
                     const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
                     return (
-                      <Pressable
+                      <GroupRow
                         key={device.deviceId}
-                        accessibilityRole="button"
+                        first={index === 0}
+                        icon={Icon}
+                        label={device.name}
+                        detail={switcherDeviceSubtitle(device, strings.remoteHosts.remoteTag)}
+                        selected={isConnected}
+                        chevron={false}
                         accessibilityLabel={device.name}
-                        accessibilityState={{ selected: isCurrent }}
                         onPress={() => {
                           if (isConnected) onClose()
                           else onSelectDevice(device)
                         }}
-                        style={({ pressed }) => [
-                          styles.deviceRow,
-                          index > 0 && styles.deviceRowDivider,
-                          pressed && styles.deviceRowPressed,
-                        ]}
-                      >
-                        <View style={styles.deviceGlyph}>
-                          <PlatformIcon size={21} color={isConnected ? colors.primary : colors.ink} strokeWidth={1.8} />
-                        </View>
-                        <View style={styles.deviceRowCopy}>
-                          <Text style={[styles.deviceRowName, isConnected && styles.deviceRowNameConnected]} numberOfLines={1}>
-                            {device.name}
-                          </Text>
-                          <Text style={styles.deviceRowSubtitle} numberOfLines={1}>
-                            {switcherDeviceSubtitle(device, strings.remoteHosts.remoteTag)}
-                          </Text>
-                        </View>
-                        <View style={styles.statusRow}>
-                          <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                          <Text style={styles.statusText}>{status.label}</Text>
-                        </View>
-                        {isCurrent && <Check size={18} color={colors.primary} strokeWidth={2.2} />}
-                      </Pressable>
+                        accessory={
+                          // The 20dp check slot is reserved on every row, so the
+                          // online/offline text cannot drift between rows.
+                          <View style={styles.trailingGroup}>
+                            <View style={styles.statusRow}>
+                              <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                              <Text style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
+                            </View>
+                            <View style={styles.checkSlot}>
+                              {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                            </View>
+                          </View>
+                        }
+                      />
                     )
                   })}
             </GroupCard>
             <Text style={styles.hint}>{strings.remoteHosts.singleHostHint}</Text>
           </ScrollView>
-          <GroupCard>
-            <GroupRow
-              first
-              icon={SlidersHorizontal}
-              label={strings.remoteHosts.manageAction}
-              chevron
-              onPress={onManageHosts}
-            />
-          </GroupCard>
+          <View style={styles.bottomCard}>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={SlidersHorizontal}
+                label={strings.remoteHosts.manageAction}
+                onPress={onManageHosts}
+              />
+            </GroupCard>
+          </View>
         </View>
       </View>
     </Modal>
@@ -155,26 +153,20 @@ function createStyles(colors: ThemeColors) {
       borderTopLeftRadius: radius.xxl,
       borderTopRightRadius: radius.xxl,
       paddingTop: spacing.sm,
-      paddingHorizontal: spacing.lg,
       gap: spacing.md,
     },
     grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.subtle, opacity: 0.45, alignSelf: 'center' },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs, paddingHorizontal: spacing.lg },
     title: { ...type.heading, fontSize: 18, fontWeight: '700', color: colors.ink, flex: 1 },
     scroll: { flexGrow: 0, flexShrink: 1 },
-    scrollContent: { gap: spacing.md },
-    hint: { ...type.caption, color: colors.muted },
-    deviceRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-    deviceRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-    deviceRowPressed: { backgroundColor: colors.surfaceStrong },
-    deviceGlyph: { width: 24, alignItems: 'center', justifyContent: 'center' },
-    deviceRowCopy: { flex: 1, minWidth: 0, gap: 3 },
-    deviceRowName: { ...type.bodyStrong, color: colors.ink },
-    deviceRowNameConnected: { color: colors.primary },
-    deviceRowSubtitle: { ...type.small, color: colors.muted },
+    scrollContent: { gap: spacing.md, paddingHorizontal: spacing.lg },
+    hint: { ...type.caption, color: colors.muted, paddingHorizontal: spacing.md },
+    trailingGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-    statusDot: { width: 7, height: 7, borderRadius: 4 },
+    statusDot: { width: 6, height: 6, borderRadius: 3 },
     statusText: { ...type.caption, color: colors.muted },
+    checkSlot: { width: 20, alignItems: 'center', justifyContent: 'center' },
+    bottomCard: { paddingHorizontal: spacing.lg },
     emptyState: { paddingVertical: spacing.xl, paddingHorizontal: spacing.md, alignItems: 'center', gap: spacing.xs },
     emptyTitle: { ...type.bodyStrong, color: colors.ink, textAlign: 'center' },
     emptyBody: { ...type.small, color: colors.muted, textAlign: 'center' },

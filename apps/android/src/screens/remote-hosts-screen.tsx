@@ -1,5 +1,5 @@
 import { Alert, ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import { ChevronRight, Globe, History, RefreshCw, UserRound } from 'lucide-react-native'
+import { Globe, History, RefreshCw, UserRound } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
@@ -43,6 +43,26 @@ export function RemoteHostsScreen({
   const styles = useThemedStyles(createStyles)
   const { contentMaxWidth, landscape } = useResponsiveLayout()
 
+  const serverHost = serverHostLabel(config?.baseUrl)
+  const rawAccount = (account ?? config?.account ?? '').trim()
+  const displayAccount = rawAccount
+    ? (rawAccount.length > 20 && !rawAccount.includes('@')
+        ? `${rawAccount.slice(0, 8)}…${rawAccount.slice(-6)}`
+        : rawAccount)
+    : (serverHost || strings.settings.notSignedIn)
+  const accountSubtitle = [
+    loginMethodDisplayLabel(config?.loginMethod, strings),
+    serverHost,
+  ].filter(Boolean).join(' · ')
+
+  const handlePressDevice = (device: RemoteDevice) => {
+    const isCurrent = selectedDevice?.deviceId === device.deviceId
+    const isConnected = isCurrent && connection.phase === 'connected'
+    const canSwitch = device.trusted && device.online && !isConnected
+    if (canSwitch) onSelectDevice(device)
+    else onOpenDeviceDetail(device)
+  }
+
   const confirmSignOut = () => Alert.alert(
     strings.settings.signOutTitle,
     strings.settings.signOutBody,
@@ -56,7 +76,7 @@ export function RemoteHostsScreen({
     ],
   )
 
-  const openWebConsole = async () => {
+  const handleOpenWebConsole = async () => {
     if (!config?.baseUrl) return
     try {
       await Linking.openURL(config.baseUrl)
@@ -67,49 +87,51 @@ export function RemoteHostsScreen({
 
   return (
     <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar title={strings.remoteHosts.title} onBack={onBack} />}>
+      <BlurHeaderFrame
+        header={
+          <TopBar
+            title={strings.remoteHosts.title}
+            subtitle={strings.remoteHosts.subtitle}
+            onBack={onBack}
+            centered
+          />
+        }
+      >
         <Screen refreshing={refreshing} onRefresh={() => void refreshDevices()}>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
-            <Text style={styles.subtitle}>{strings.remoteHosts.subtitle}</Text>
-
             <SectionTitle>{strings.remoteHosts.sectionRemote}</SectionTitle>
             <GroupCard>
-              <View style={styles.accountRow}>
-                <View style={styles.accountIcon}>
-                  <UserRound size={21} color={colors.ink} strokeWidth={1.8} />
-                </View>
-                <View style={styles.accountCopy}>
-                  <Text style={styles.accountName} numberOfLines={2}>
-                    {account ?? config?.account ?? strings.settings.notSignedIn}
-                  </Text>
-                  <Text style={styles.accountMeta} numberOfLines={1}>
-                    {[
-                      loginMethodDisplayLabel(config?.loginMethod, strings),
-                      serverHostLabel(config?.baseUrl),
-                    ].filter(Boolean).join(' · ')}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.common.refresh}
-                  accessibilityState={{ disabled: refreshing }}
-                  disabled={refreshing}
-                  onPress={() => void refreshDevices()}
-                  style={({ pressed }) => [styles.refreshButton, pressed && styles.iconButtonPressed, refreshing && styles.disabled]}
-                >
-                  {refreshing
-                    ? <ActivityIndicator size="small" color={colors.primary} />
-                    : <RefreshCw size={17} color={colors.muted} strokeWidth={1.9} />}
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.remoteHosts.signOutShort}
-                  onPress={confirmSignOut}
-                  style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}
-                >
-                  <Text style={styles.signOutText}>{strings.remoteHosts.signOutShort}</Text>
-                </Pressable>
-              </View>
+              <GroupRow
+                first
+                icon={UserRound}
+                label={displayAccount}
+                detail={accountSubtitle}
+                chevron={false}
+                accessory={
+                  <View style={styles.accountActions}>
+                    <Pressable
+                      accessibilityRole='button'
+                      accessibilityLabel={strings.common.refresh}
+                      accessibilityState={{ disabled: refreshing }}
+                      disabled={refreshing}
+                      onPress={() => void refreshDevices()}
+                      style={({ pressed }) => [styles.refreshButton, pressed && styles.iconButtonPressed, refreshing && styles.disabled]}
+                    >
+                      {refreshing
+                        ? <ActivityIndicator size='small' color={colors.primary} />
+                        : <RefreshCw size={17} color={colors.muted} strokeWidth={1.9} />}
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      accessibilityLabel={strings.remoteHosts.signOutShort}
+                      onPress={confirmSignOut}
+                      style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}
+                    >
+                      <Text style={styles.signOutText}>{strings.remoteHosts.signOutShort}</Text>
+                    </Pressable>
+                  </View>
+                }
+              />
 
               {devices.length === 0
                 ? <View style={[styles.emptyBlock, styles.divider]}>
@@ -119,36 +141,28 @@ export function RemoteHostsScreen({
                 : devices.map(device => {
                     const isCurrent = selectedDevice?.deviceId === device.deviceId
                     const isConnected = isCurrent && connection.phase === 'connected'
-                    const PlatformIcon = platformIcon(device.platform)
+                    const Icon = platformIcon(device.platform)
                     const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
-                    const canSwitch = device.trusted && device.online && !isConnected
                     return (
-                      <Pressable
+                      <GroupRow
                         key={device.deviceId}
-                        accessibilityRole="button"
-                        accessibilityLabel={device.name}
-                        onPress={() => canSwitch ? onSelectDevice(device) : onOpenDeviceDetail(device)}
-                        style={({ pressed }) => [styles.deviceRow, styles.divider, pressed && styles.deviceRowPressed]}
-                      >
-                        <View style={styles.deviceGlyph}>
-                          <PlatformIcon size={21} color={isConnected ? colors.primary : colors.ink} strokeWidth={1.8} />
-                        </View>
-                        <View style={styles.deviceCopy}>
-                          <Text style={[styles.deviceName, isConnected && styles.deviceNameConnected]} numberOfLines={1}>
-                            {device.name}
-                          </Text>
-                          <Text style={styles.deviceSubtitle} numberOfLines={1}>{deviceVersionSubtitle(device)}</Text>
-                        </View>
-                        <View style={styles.statusRow}>
-                          <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                          <Text style={styles.statusText}>{status.label}</Text>
-                        </View>
-                        <ChevronRight size={18} color={colors.subtle} />
-                      </Pressable>
+                        icon={Icon}
+                        label={device.name}
+                        detail={deviceVersionSubtitle(device)}
+                        selected={isConnected}
+                        chevron
+                        onPress={() => handlePressDevice(device)}
+                        accessory={
+                          <View style={styles.statusInline}>
+                            <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                            <Text style={styles.statusText}>{status.label}</Text>
+                          </View>
+                        }
+                      />
                     )
                   })}
             </GroupCard>
-            <Text style={styles.note}>{strings.remoteHosts.singleHostShortHint}</Text>
+            <Text style={styles.singleHostNote}>{strings.remoteHosts.singleHostShortHint}</Text>
 
             <SectionTitle>{strings.remoteHosts.sectionOther}</SectionTitle>
             <GroupCard>
@@ -156,10 +170,8 @@ export function RemoteHostsScreen({
                 first
                 icon={Globe}
                 label={strings.remoteHosts.webConsole}
-                detail={serverHostLabel(config?.baseUrl) || undefined}
-                chevron
-                disabled={!config?.baseUrl}
-                onPress={() => void openWebConsole()}
+                detail={serverHost || undefined}
+                onPress={() => void handleOpenWebConsole()}
               />
             </GroupCard>
 
@@ -207,13 +219,8 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     contentColumn: { width: '100%', alignSelf: 'center' },
-    subtitle: { ...type.small, color: colors.muted, paddingTop: spacing.md, paddingBottom: spacing.xs },
-    note: { ...type.caption, color: colors.muted, marginTop: spacing.xs, paddingLeft: spacing.md },
-    accountRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-    accountIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
-    accountCopy: { flex: 1, minWidth: 0, gap: 3 },
-    accountName: { ...type.bodyStrong, color: colors.ink },
-    accountMeta: { ...type.small, color: colors.muted },
+    singleHostNote: { ...type.caption, color: colors.muted, marginTop: spacing.xs, paddingHorizontal: spacing.md },
+    accountActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     refreshButton: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceStrong },
     iconButtonPressed: { opacity: 0.6 },
     signOutButton: { minHeight: 32, paddingHorizontal: spacing.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
@@ -221,14 +228,7 @@ function createStyles(colors: ThemeColors) {
     signOutText: { ...type.smallStrong, color: colors.muted },
     disabled: { opacity: 0.5 },
     divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-    deviceRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-    deviceRowPressed: { backgroundColor: colors.surfaceStrong },
-    deviceGlyph: { width: 24, alignItems: 'center', justifyContent: 'center' },
-    deviceCopy: { flex: 1, minWidth: 0, gap: 3 },
-    deviceName: { ...type.bodyStrong, color: colors.ink },
-    deviceNameConnected: { color: colors.primary },
-    deviceSubtitle: { ...type.small, color: colors.muted },
-    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    statusInline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     statusDot: { width: 7, height: 7, borderRadius: 4 },
     statusText: { ...type.caption, color: colors.muted },
     emptyBlock: { paddingVertical: spacing.lg, paddingHorizontal: spacing.md, gap: spacing.xs },
