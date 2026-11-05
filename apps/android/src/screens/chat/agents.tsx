@@ -216,7 +216,10 @@ export const AgentStatusGlyph = memo(function AgentStatusGlyph({
 /** A subagent can only receive live controls when it is not a one-shot / external runner. */
 export function isContinuableSubagent(item: RemoteSession): boolean {
   const mode = (item as RemoteSession & { mode?: string }).mode
-  return mode !== 'one-shot' && mode !== 'external'
+  if (mode === 'one-shot' || mode === 'external') return false
+  const subagentProj = item.projections?.values?.subagent as { mode?: string } | undefined
+  if (subagentProj?.mode === 'one-shot') return false
+  return true
 }
 
 /** Compact inline "append instruction" row rendered under a controllable subagent. */
@@ -365,6 +368,7 @@ export const SubagentsCard = memo(function SubagentsCard({
   }
   const handlePromptSend = async (item: RemoteSession, event?: { stopPropagation?: () => void }) => {
     event?.stopPropagation?.()
+    const targetId = item.sessionId
     const text = promptText
     let result: boolean | void
     try {
@@ -373,8 +377,10 @@ export const SubagentsCard = memo(function SubagentsCard({
       result = false
     }
     if (result !== false) {
-      setPromptFor(null)
-      setPromptText('')
+      if (promptFor === targetId) {
+        setPromptFor(null)
+        setPromptText('')
+      }
     }
   }
 

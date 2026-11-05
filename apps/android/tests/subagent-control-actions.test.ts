@@ -127,6 +127,14 @@ describe('HarnessAlphaClient subagent control protocol', () => {
     await expect(alpha.subagentInterruptByParent('child', 'parent')).rejects.toThrow('child not running')
     call.mockRestore()
   })
+
+  it('rejects an interrupt response that did not accept the signal', async () => {
+    const call = vi.spyOn(RemoteTypertGateway.prototype, 'call')
+      .mockResolvedValue({ ok: true, value: { accepted: false } })
+    const alpha = new HarnessAlphaClient({} as RemoteClientCore)
+    await expect(alpha.subagentInterruptByParent('child', 'parent')).rejects.toThrow('The Host did not accept the subagent interrupt.')
+    call.mockRestore()
+  })
 })
 
 describe('interruptSubagent store action', () => {
@@ -152,6 +160,14 @@ describe('interruptSubagent store action', () => {
     await expect(f.actions.interruptSubagent('child', 'parent')).resolves.toBe(false)
     expect(f.get().error).toBe('host refused')
     expect(f.get().busyAction).toBeUndefined()
+  })
+
+  it('tolerates haptic failure without failing an accepted interrupt', async () => {
+    const f = fixture({ sessions: [child()] })
+    haptics.impactAsync.mockRejectedValueOnce(new Error('haptic failed'))
+    await expect(f.actions.interruptSubagent('child', 'parent')).resolves.toBe(true)
+    expect(f.get().error).toBeUndefined()
+    expect(f.get().sessions.find(s => s.sessionId === 'child')?.running).toBe(false)
   })
 
   it('rejects offline or unresolvable-parent interrupts without hitting the Host', async () => {

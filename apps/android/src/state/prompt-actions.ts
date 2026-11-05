@@ -325,29 +325,31 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
      * session projections/history on the current connection generation.
      */
     async interruptSubagent(childSessionId, parentSessionId) {
-      // Only one subagent control operation may be in flight at a time.
-      if (get().busyAction?.startsWith('subagent:')) return false
+      if (get().busyAction !== undefined) return false
       const generation = runtime.connectionGeneration
       if (get().connection.phase !== 'connected') return false
       const parent = parentSessionId ?? findSubagent(childSessionId)?.parentSessionId
       if (parent === undefined) return false
-      set({ busyAction: `subagent:stop:${childSessionId}`, error: undefined })
+      const busyMarker = `subagent:stop:${childSessionId}`
+      set({ busyAction: busyMarker, error: undefined })
       try {
         await runtime.connection.requireProxy().subagentInterruptByParent(childSessionId, parent)
-        // A reconnect or a successor operation owns the state from here on.
         if (generation !== runtime.connectionGeneration) return false
         set(state => ({
           sessions: state.sessions.map(item => item.sessionId === childSessionId ? { ...item, running: false } : item),
           selectedSession: state.selectedSession?.sessionId === childSessionId
             ? { ...state.selectedSession, running: false }
             : state.selectedSession,
-          busyAction: undefined,
+          busyAction: state.busyAction === busyMarker ? undefined : state.busyAction,
         }))
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
-        set({ busyAction: undefined, error: friendlyError(error) })
+        set(state => ({
+          busyAction: state.busyAction === busyMarker ? undefined : state.busyAction,
+          error: friendlyError(error),
+        }))
         return false
       }
     },
@@ -361,23 +363,29 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
     async promptSubagent(childSessionId, text, parentSessionId) {
       const trimmed = text.trim()
       if (trimmed.length === 0) return false
-      if (get().busyAction?.startsWith('subagent:')) return false
+      if (get().busyAction !== undefined) return false
       const generation = runtime.connectionGeneration
       if (get().connection.phase !== 'connected') return false
       const child = findSubagent(childSessionId)
       const parent = parentSessionId ?? child?.parentSessionId
       if (parent === undefined) return false
       const delivery = child?.running === true ? 'steer' : 'queue'
-      set({ busyAction: `subagent:prompt:${childSessionId}`, error: undefined })
+      const busyMarker = `subagent:prompt:${childSessionId}`
+      set({ busyAction: busyMarker, error: undefined })
       try {
         await runtime.connection.requireProxy().subagentPrompt(childSessionId, parent, trimmed, delivery)
         if (generation !== runtime.connectionGeneration) return false
-        set({ busyAction: undefined })
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        set(state => ({
+          busyAction: state.busyAction === busyMarker ? undefined : state.busyAction,
+        }))
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
-        set({ busyAction: undefined, error: friendlyError(error) })
+        set(state => ({
+          busyAction: state.busyAction === busyMarker ? undefined : state.busyAction,
+          error: friendlyError(error),
+        }))
         return false
       }
     },

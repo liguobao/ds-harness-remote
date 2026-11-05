@@ -244,6 +244,8 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
       expect(isContinuableSubagent({ mode: 'external' } as any)).toBe(false)
       expect(isContinuableSubagent({} as any)).toBe(true)
       expect(isContinuableSubagent({ mode: 'continuous' } as any)).toBe(true)
+      expect(isContinuableSubagent({ projections: { values: { subagent: { mode: 'one-shot' } } } } as any)).toBe(false)
+      expect(isContinuableSubagent({ projections: { values: { subagent: { mode: 'continuable' } } } } as any)).toBe(true)
     })
   })
 

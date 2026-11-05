@@ -569,11 +569,14 @@ export class HarnessAlphaClient {
    * later prompt can continue the same child rather than provisioning a new one.
    */
   async subagentInterruptByParent(childSessionId: string, parentSessionId: string): Promise<boolean> {
-    await this.callValue<{ accepted: true }>('subagents/interruptByParent', {
+    const result = await this.callValue<{ accepted: true }>('subagents/interruptByParent', {
       childSessionId,
       parentSessionId,
       mode: 'continuable',
     })
+    if (result?.accepted !== true) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the subagent interrupt.')
+    }
     return true
   }
 
@@ -601,6 +604,9 @@ export class HarnessAlphaClient {
       ...(timeZone === undefined ? {} : { clientTimeZone: timeZone }),
     }
     const result = await this.callValue<{ messageId: string }>('subagents/prompt', { request })
+    if (typeof result?.messageId !== 'string' || result.messageId.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid subagent prompt receipt.')
+    }
     return { messageId: result.messageId }
   }
 
