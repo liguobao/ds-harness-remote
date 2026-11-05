@@ -10,7 +10,6 @@ import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
-import { VoiceRecorder } from '../services/VoiceInput';
 import { PickedImage, pickImages } from '../services/ImagePicker';
 import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
@@ -23,7 +22,6 @@ import BuildProfile from 'BuildProfile';
 @Component
 struct Index {
   private runtime: AppRuntime = getAppRuntime();
-  private voice: VoiceRecorder = new VoiceRecorder();
   /** ArkWeb/WebRTC 桥：目前只跑能力自检，数据面仍走 relay。 */
   private rtc: RtcBridge = new RtcBridge();
   private images: MarkdownImageCache = new MarkdownImageCache();
@@ -77,12 +75,6 @@ struct Index {
   @State currentModelEffort: string = '';
   @State permissionPreset: string = '';
   /** 按住说话：波形条高度、计时、是否处于「上滑取消」区。 */
-  @State voiceBars: number[] = [];
-  @State voiceElapsedMs: number = 0;
-  @State voiceCancelHint: boolean = false;
-  private voiceTimer: number = -1;
-  private voiceStartY: number = 0;
-  private voiceCancel: boolean = false;
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
   @State profilesList: SavedProfile[] = [];
@@ -150,10 +142,7 @@ struct Index {
   @State dockLightX: number = 0;
   @State dockLightY: number = 0;
   @State dockLightOpacity: number = 0;
-  /** 正在录音（麦克风按钮变红点）。 */
-  @State recording: boolean = false;
   /** 录音已停止、等主机转写。 */
-  @State dictating: boolean = false;
   /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
   @State expandedRuns: string[] = [];
   private windowChromeDark: boolean = false;
@@ -456,7 +445,12 @@ struct Index {
     });
   }
 
-  /** 顶栏切换按钮的文案：只给「官方 / 本地 / 自定义」短标签，长邮箱不该出现在这里。 */
+  /** 会话名是否长到需要跑马灯（> 12 个字符才滚，短名字保持自然宽度）。 */
+  private titleNeedsMarquee(): boolean {
+    return this.currentSessionTitle.length > 12;
+  }
+
+  /** 当前服务器胶囊文案  /** 顶栏切换按钮的文案：只给「官方 / 本地 / 自定义」短标签，长邮箱不该出现在这里。 */
   private accountSwitchLabel(): string {
     const url: string = this.runtime.serverUrl;
     if (url.length === 0) {
@@ -985,129 +979,6 @@ struct Index {
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
-  // ===== 按住说话（输入法那种：按住出波纹条，松手转写，上滑取消） =====
-
-  private static readonly VOICE_BAR_COUNT: number = 22;
-
-  private beginVoiceHold(): void {
-    if (this.dictating || this.recording) {
-      return;
-    }
-    const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
-    const recorder: VoiceRecorder = this.voice;
-    this.errorMsg = '';
-    this.voiceCancel = false;
-    this.voiceCancelHint = false;
-    this.voiceElapsedMs = 0;
-    const bars: number[] = [];
-    for (let i = 0; i < Index.VOICE_BAR_COUNT; i += 1) {
-      bars.push(0.15);
-    }
-    this.voiceBars = bars;
-    VoiceRecorder.ensurePermission(context).then((granted: boolean) => {
-      if (!granted) {
-        this.errorMsg = this.tr('没有麦克风权限，去系统设置里允许后再试');
-        return;
-      }
-      return recorder.start().then(() => {
-        this.recording = true;
-        this.startVoiceMeter();
-      });
-    }).catch((error: Error) => {
-      this.recording = false;
-      this.errorMsg = this.tr('录音启动失败：') + errorMessage(error);
-    });
-  }
-
-  /** 50ms 一帧：把当前音量滚进波形条，顺便刷计时。 */
-  private startVoiceMeter(): void {
-    this.stopVoiceMeter();
-    this.voiceTimer = setInterval(() => {
-      if (!this.recording) {
-        return;
-      }
-      this.voiceElapsedMs = this.voice.elapsedMillis();
-      const level: number = this.voice.level();
-      const next: number[] = this.voiceBars.slice();
-      // 最新音量推到队尾，其它条左移，形成流动的波纹
-      for (let i = 0; i < next.length - 1; i += 1) {
-        next[i] = next[i + 1];
-      }
-      next[next.length - 1] = Math.max(0.12, Math.min(1, level));
-      this.voiceBars = next;
-    }, 50);
-  }
-
-  private stopVoiceMeter(): void {
-    if (this.voiceTimer !== -1) {
-      clearInterval(this.voiceTimer);
-      this.voiceTimer = -1;
-    }
-  }
-
-  /** 手指上滑超过 60vp 视为取消。 */
-  private trackVoiceMove(event: TouchEvent): void {
-    if (!this.recording || event.touches.length === 0) {
-      return;
-    }
-    const dy: number = event.touches[0].y - this.voiceStartY;
-    const cancel: boolean = dy < -60;
-    if (cancel !== this.voiceCancelHint) {
-      this.voiceCancelHint = cancel;
-    }
-  }
-
-  private endVoiceHold(): void {
-    if (!this.recording) {
-      this.stopVoiceMeter();
-      return;
-    }
-    this.stopVoiceMeter();
-    const cancelled: boolean = this.voiceCancelHint;
-    this.recording = false;
-    this.voiceCancelHint = false;
-    const recorder: VoiceRecorder = this.voice;
-    if (cancelled) {
-      recorder.cancel().then(() => {
-        this.voiceBars = [];
-      }).catch(() => {
-        this.voiceBars = [];
-      });
-      return;
-    }
-    this.dictating = true;
-    recorder.stop().then((audioBase64: string) => {
-      this.voiceBars = [];
-      if (audioBase64.length === 0) {
-        this.dictating = false;
-        this.errorMsg = this.tr('太短了，没听清');
-        return;
-      }
-      return this.runtime.transcribeVoice(audioBase64).then((text: string) => {
-        this.dictating = false;
-        if (text.length === 0) {
-          this.errorMsg = this.tr('没识别出内容');
-          return;
-        }
-        const head: string = this.promptInput.length > 0 && !this.promptInput.endsWith(' ') ? ' ' : '';
-        this.promptInput = this.promptInput + head + text;
-      });
-    }).catch((error: Error) => {
-      this.dictating = false;
-      this.voiceBars = [];
-      const detail: string = errorMessage(error);
-      console.error('voice transcribe failed: ' + detail);
-      // 主机没装语音插件时，与其显示一串 RPC 错误，不如直说怎么修
-      const lower: string = detail.toLowerCase();
-      if (lower.indexOf('not found') >= 0 || lower.indexOf('not allowed') >= 0
-        || lower.indexOf('unknown') >= 0 || lower.indexOf('method') >= 0) {
-        this.errorMsg = this.tr('主机未启用语音转写（缺 speech-to-text 插件），先用键盘输入');
-      } else {
-        this.errorMsg = this.tr('语音转写失败：') + detail;
-      }
-    });
-  }
-
   private devicesMenu(): MenuElement[] {
     const items: MenuElement[] = [
       {
@@ -1259,44 +1130,6 @@ struct Index {
     .onAppear(() => {
       this.measureInsets();
     })
-  }
-
-  /**
-   * 按住说话的浮层：波纹条 + 计时 + 松手/上滑提示。
-   * 位置贴着输入坞上方，不挡会话内容。
-   */
-  @Builder
-  VoiceHoldOverlay() {
-    Column({ space: 10 }) {
-      Row({ space: 3 }) {
-        ForEach(this.voiceBars, (bar: number, index: number) => {
-          Column()
-            .width(4)
-            .height(6 + bar * 30)
-            .borderRadius(2)
-            .backgroundColor(this.voiceCancelHint ? '#F85749' : '#22D3EE')
-            .opacity(0.55 + bar * 0.45)
-        }, (bar: number, index: number) => `bar-${index}`)
-      }
-      .height(40)
-      .alignItems(VerticalAlign.Center)
-      Row({ space: 8 }) {
-        Text((this.voiceElapsedMs / 1000).toFixed(1) + 's')
-          .fontSize(this.fs(12))
-          .fontColor(this.pal().text2)
-        Text(this.voiceCancelHint ? this.tr('松开取消') : this.tr('松开发送 · 上滑取消'))
-          .fontSize(this.fs(12))
-          .fontColor(this.voiceCancelHint ? '#F85749' : this.pal().text3)
-      }
-      .alignItems(VerticalAlign.Center)
-    }
-    .padding({ top: 14, bottom: 14, left: 22, right: 22 })
-    .backgroundColor(this.pal().panel)
-    .borderRadius(18)
-    .border({ width: 1, color: this.voiceCancelHint ? 'rgba(248,87,73,0.55)' : this.pal().border })
-    .shadow({ radius: 20, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
-    .margin({ bottom: 92 })
-    .hitTestBehavior(HitTestMode.None)
   }
 
   /**
@@ -1552,9 +1385,64 @@ struct Index {
             })
         }
         .width('100%')
+        Column({ space: 8 }) {
+          Text(this.tr('服务器'))
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          Row({ space: 8 }) {
+            Text(this.tr('切换服务器'))
+              .fontSize(13)
+              .fontColor(this.pal().text)
+              .layoutWeight(1)
+            Text('›')
+              .fontSize(15)
+              .fontColor(this.pal().text3)
+          }
+          .width('100%')
+          .padding({ top: 12, bottom: 12, left: 14, right: 14 })
+          .backgroundColor(this.pal().card)
+          .borderRadius(12)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.showSettings = false;
+            this.showServerSwitch = true;
+          })
+          Text(this.tr('退出登录'))
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 12 })
+            .backgroundColor('#E5484D')
+            .borderRadius(12)
+            .onClick(() => {
+              this.showSettings = false;
+              AlertDialog.show({
+                title: this.tr('退出登录'),
+                message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
+                autoCancel: true,
+                primaryButton: {
+                  value: this.tr('取消'),
+                  action: () => {
+                  }
+                },
+                secondaryButton: {
+                  value: this.tr('退出'),
+                  fontColor: '#F85749',
+                  action: () => {
+                    this.runtime.logout();
+                  }
+                }
+              });
+            })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
         if (this.profilesList.length > 0) {
           Column({ space: 8 }) {
-            Text(this.tr('服务器'))
+            Text(this.tr('已保存的登录'))
               .fontSize(12)
               .fontColor(this.pal().text3)
               .width('100%')
@@ -2140,19 +2028,6 @@ struct Index {
         .onClick(() => {
           this.runtime.refreshDevices();
         })
-        Button({ type: ButtonType.Circle }) {
-          Image($r('app.media.ic_more'))
-            .width(18)
-            .height(18)
-            .fillColor(this.pal().text2)
-        }
-        .width(32)
-        .height(32)
-        .backgroundColor(this.pal().chip)
-        .border({ width: 1, color: this.pal().borderStrong })
-        .onClick(() => {
-          this.showMoreMenu = true;
-        })
       }
       .width('100%')
       // 第二行：当前服务器胶囊（自己一行，点开切换），不参与标题行竞争
@@ -2259,19 +2134,26 @@ struct Index {
   @Builder
   DeviceCard(device: RemoteHostDevice) {
     Row({ space: 14 }) {
-      Column() {
-        Text(deviceAvatarLabel(device, this.displayNameFor(device)))
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(device.online ? '#34D399' : this.pal().text3)
+      // 主机头像：用电脑图形代替首字母圆圈（在线绿、离线灰）
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        Image($r('app.media.ic_host'))
+          .width(22)
+          .height(22)
+          .fillColor(device.online ? '#34D399' : this.pal().text3)
+        Column()
+          .width(9)
+          .height(9)
+          .borderRadius(4.5)
+          .backgroundColor(device.online ? '#34D399' : this.pal().text3)
+          .border({ width: 2, color: this.pal().card })
+          .margin({ right: 1, bottom: 1 })
       }
-        .width(40)
-        .height(40)
-        .borderRadius(20)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-        .backgroundColor(device.online ? 'rgba(52,211,153,0.12)' : this.pal().chip)
-        .border({ width: 1, color: device.online ? 'rgba(52,211,153,0.30)' : this.pal().border })
+      .width(44)
+      .height(44)
+      .padding(6)
+      .backgroundColor(device.online ? 'rgba(52,211,153,0.10)' : this.pal().chip)
+      .borderRadius(12)
+      .border({ width: 1, color: device.online ? 'rgba(52,211,153,0.28)' : this.pal().border })
       Column({ space: 4 }) {
         if (this.renamingDeviceId === device.deviceId) {
           TextInput({ text: this.renameInput, placeholder: this.tr('输入主机名称') })
@@ -2521,12 +2403,13 @@ struct Index {
                   .height(6)
                   .borderRadius(3)
                   .backgroundColor(this.connectionDotColor())
+                // 会话名过长时用 TextOverflow.MARQUEE 自己滚，不再硬截成「…」
                 Text(this.generating ? this.tr('正在生成…') : this.currentSessionTitle)
                   .fontSize(12)
-                .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
+                  .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
                   .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .constraintSize({ maxWidth: 150 })
+                  .textOverflow({ overflow: TextOverflow.MARQUEE })
+                  .constraintSize({ maxWidth: 190 })
                   .onClick(() => {
                     if (!this.generating && this.currentSessionId.length > 0) {
                       this.sessionTitleInput = this.currentSessionTitle;
@@ -2706,9 +2589,6 @@ struct Index {
         .justifyContent(FlexAlign.Center)
         .margin({ bottom: 96 })
       }
-      if (this.recording) {
-        this.VoiceHoldOverlay()
-      }
       this.ComposerDock()
     }
     .width('100%')
@@ -2833,51 +2713,9 @@ struct Index {
           .onClick(() => {
             this.attachImage();
           })
-          // 语音输入：点一下开始录，再点一下结束并转写；转写中显示 spinner。
-          Row() {
-            if (this.dictating) {
-              LoadingProgress()
-                .width(18)
-                .height(18)
-                .color('#22D3EE')
-            } else if (this.recording) {
-              Column()
-                .width(10)
-                .height(10)
-                .borderRadius(3)
-                .backgroundColor('#F85749')
-            } else {
-              Image($r('app.media.ic_mic'))
-                .width(20)
-                .height(20)
-                .fillColor(this.pal().text2)
-            }
-          }
-          .width(46)
-          .height(46)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(23)
-          .backgroundColor(this.recording ? 'rgba(248,87,73,0.16)'
-            : (this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)'))
-          .border({ width: 1,
-            color: this.recording ? 'rgba(248,87,73,0.55)'
-              : (this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)') })
-          .enabled(!this.dictating)
-          .onTouch((event: TouchEvent) => {
-            if (event.type === TouchType.Down) {
-              this.voiceStartY = event.touches.length > 0 ? event.touches[0].y : 0;
-              this.beginVoiceHold();
-            } else if (event.type === TouchType.Move) {
-              this.trackVoiceMove(event);
-            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-              this.endVoiceHold();
-            }
-          })
-          TextInput({ text: this.promptInput, placeholder: this.recording ? this.tr('正在听…')
-              : (this.dictating ? this.tr('正在转写…')
-                : (this.generating ? this.tr('正在生成，可插话…')
-                  : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')))) })
+          TextInput({ text: this.promptInput,
+            placeholder: this.generating ? this.tr('正在生成，可插话…')
+              : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
             .height(46)
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
