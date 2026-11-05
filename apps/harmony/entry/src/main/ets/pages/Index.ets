@@ -662,6 +662,15 @@ struct Index {
     this.settleDrawer(false);
   }
 
+  /** 小女仆的出场条件：窗口够高就出来，手机横屏（约 405vp）这种就不挤列表。 */
+  private showMascot(): boolean {
+    const h: number = this.windowHeightVp;
+    if (h <= 0) {
+      return !this.isLandscape;
+    }
+    return h >= 620;
+  }
+
   private listPanelWidth(): number {
     const w: number = this.windowWidthVp;
     if (w <= 0) {
@@ -2362,8 +2371,8 @@ struct Index {
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
-      // 列表下面这块一直是空的，放一只会呼吸的小女仆；横屏高度紧张时让位给列表
-      if (!this.isLandscape) {
+      // 列表下面这块一直是空的，放一只会呼吸的小女仆；纵向空间不够时让位给列表
+      if (this.showMascot()) {
         this.MaidMascot()
       }
       if (this.devices.length === 0 && !this.busy) {
@@ -2834,6 +2843,7 @@ struct Index {
       }
       .layoutWeight(1)
       .width('100%')
+      .constraintSize({ maxWidth: this.chatMaxWidth() })
       .padding({ left: 16, right: 16, top: 8, bottom: 104 })
       // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
       .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
@@ -2921,13 +2931,13 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .constraintSize({ maxWidth: this.chatMaxWidth() })
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
   @Builder
   ComposerDock() {
-    Column({ space: 8 }) {
+    Column() {
+      Column({ space: 8 }) {
         if (this.contextPills().length > 0) {
           Row({ space: 8 }) {
             ForEach(this.contextPills(), (pill: string) => {
@@ -3158,9 +3168,13 @@ struct Index {
       }
       // 这一层不再画玻璃：底板交给按钮行的每一块自己画，中间才断得开
       .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: this.chatMaxWidth() })
+      .padding({ left: 12, right: 12, top: 10, bottom: 18 })
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 10, bottom: 18 })
+    .alignItems(HorizontalAlign.Center)
     // 底栏横条：整条玻璃做底衬，按钮各是一块更亮的玻璃浮在上面
     .backgroundColor(this.isDarkUi ? 'rgba(18,22,34,0.72)' : 'rgba(247,249,255,0.78)')
     .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
