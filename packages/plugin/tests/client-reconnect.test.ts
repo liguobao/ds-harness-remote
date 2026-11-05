@@ -69,7 +69,7 @@ async function fixture(enabled = true) {
   runtime = new ClientModeRuntime(
     resolveConfig({ reconnect: enabled ? { initialDelayMs: 100, maxDelayMs: 1000, jitter: 0 } : false }),
     new IdentityStore({ directory }),
-    { bindIdentity: vi.fn(), revokeCurrentDevice: vi.fn(async () => undefined) } as unknown as ClientServerApi,
+    { bindIdentity: vi.fn(), revokeCurrentDevice: vi.fn(async () => undefined), authorizeWithAccount: vi.fn(async () => ({})) } as unknown as ClientServerApi,
     gateway, { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } as unknown as SafeLogger,
   )
   await runtime.start()
@@ -149,6 +149,26 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   f.remotes.at(-1)!.carrier.drop()
   await vi.advanceTimersByTimeAsync(1000)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 2 })
+})
+
+it.each(['close', 'retry'] as const)('exposes terminal client authorization on %s and clears it after switching back', async phase => {
+  const f = await fixture()
+  const rejection = Object.assign(new Error('credential rejected'), { code: 'AUTH_INVALID', retryable: false })
+  if (phase === 'retry') f.connect.mockRejectedValueOnce(rejection)
+  f.remotes[0]!.carrier.drop(phase === 'close' ? rejection : undefined)
+  if (phase === 'retry') expect(f.runtime.status()).not.toHaveProperty('clientAuthRequired')
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(f.runtime.status()).toMatchObject({ connected: false, clientAuthRequired: true, target: { deviceId: 'host-1' } })
+  expect(f.connect).toHaveBeenCalledTimes(phase === 'close' ? 1 : 2)
+  await expect(f.gateway.invoke({ namespace: 'session', method: 'list', args: {} })).rejects.toMatchObject({ code: 'remote/disconnected' })
+  if (phase === 'close') await f.runtime.setMode('local')
+  else {
+    await f.runtime.authorizeClientWithAccount('test@example.invalid', 'test')
+    expect(f.runtime.status()).not.toHaveProperty('clientAuthRequired')
+    await f.runtime.setMode('remote', 'host-1')
+    expect(f.runtime.status()).toMatchObject({ connected: true, target: { deviceId: 'host-1' } })
+  }
+  expect(f.runtime.status()).not.toHaveProperty('clientAuthRequired')
 })
 
 it('does not replay an approval whose old carrier send settles after recovery', async () => {

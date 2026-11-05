@@ -61875,7 +61875,10 @@ function adaptiveControlCloseError(event) {
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
-    code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
+    // Preserve the specific self-hosted authorization reasons so the Client
+    // runtime can surface a terminal reauthorization state instead of a generic
+    // transport loss (PR #285). Every other close keeps the shared semantics.
+    code: event.code === 4003 ? "CONNECTION_REPLACED" : event.code === 4001 && ["AUTH_INVALID", "TOKEN_EXPIRED", "DEVICE_REVOKED"].includes(reason) ? reason : "TRANSPORT_CLOSED",
     retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code)
   });
 }
@@ -75037,7 +75040,10 @@ var HostServerApi = class {
     const identity3 = this.requireIdentity();
     this.credentials = await this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity3.deviceId);
-      if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity3);
+      if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) {
+        if (this.role === "client") throw new ServerApiError("ACCOUNT_AUTH_REQUIRED", "Client sign-in is required.", false);
+        return this.register(identity3);
+      }
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 3e4) {
         return stored;
       }
@@ -75151,7 +75157,15 @@ var HostServerApi = class {
   }
   async request(path, init = {}) {
     const credentials = await this.authenticate();
-    return this.publicRequest(path, init, credentials.accessToken);
+    try {
+      return await this.publicRequest(path, init, credentials.accessToken);
+    } catch (error62) {
+      if (this.role !== "client" || this.identity?.deviceId !== credentials.deviceId || (init.method ?? "GET") !== "GET" || !(error62 instanceof ServerApiError) || error62.status !== 401 || error62.code !== "AUTH_INVALID" && error62.code !== "TOKEN_EXPIRED") throw error62;
+      init.signal?.throwIfAborted();
+      const next = await this.refreshCredentials(credentials.accessToken);
+      if (next.account !== credentials.account || this.identity?.deviceId !== credentials.deviceId) throw error62;
+      return this.publicRequest(path, init, next.accessToken);
+    }
   }
   async publicRequest(path, init, accessToken) {
     const controller = new AbortController();
@@ -76978,7 +76992,12 @@ var ClientModeRuntime = class {
     const lifetime = this.remoteLifetime.signal;
     const connectionSignal = signal === void 0 ? lifetime : AbortSignal.any([lifetime, signal]);
     connectionSignal.throwIfAborted();
-    const remote = await this.connection.connect(targetDeviceId, connectionSignal);
+    const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch((error62) => {
+      if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
+        this.noteClientAuthFailure(error62);
+      }
+      throw error62;
+    });
     if (connectionSignal.aborted || this.closed) {
       await remote.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
@@ -77017,6 +77036,12 @@ var ClientModeRuntime = class {
   featureProbePromises = /* @__PURE__ */ new WeakMap();
   recoverable;
   recoveryGeneration = 0;
+  clientAuthRequired = false;
+  noteClientAuthFailure(error62) {
+    if (error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && (error62.code === "AUTH_REQUIRED" || HOST_AUTHORIZATION_ERRORS.has(error62.code))) {
+      this.clientAuthRequired = true;
+    }
+  }
   sessionTools = new RemoteSessionTools((hostId, signal, query) => this.withToolRemote(hostId, signal, query));
   runSessionTool(operation, args, signal) {
     this.assertHostAuthorizationForDeviceDiscovery();
@@ -77071,6 +77096,7 @@ var ClientModeRuntime = class {
       ...targetStatus,
       connected: this.connected !== void 0,
       recoveryGeneration: this.recoveryGeneration,
+      ...this.clientAuthRequired && !this.connected && targetStatus.mode === "remote" ? { clientAuthRequired: true } : {},
       transport: this.connected?.client.getStats().mode ?? "Disconnected",
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ["relay"] : ["lan", "p2p", "turn", "relay"],
@@ -77163,6 +77189,7 @@ var ClientModeRuntime = class {
       authorization = await this.server.authorizeWithAccount(this.identity, email3, password);
     }
     await this.authorizeHostByDefault();
+    this.clientAuthRequired = false;
     this.logger.info("Client account authorized");
     return authorization;
   }
@@ -77177,7 +77204,10 @@ var ClientModeRuntime = class {
       return this.identity;
     });
     if (result.status === "complete") this.logger.info("Client account authorized with QR login");
-    if (result.status === "complete") await this.authorizeHostByDefault();
+    if (result.status === "complete") {
+      this.clientAuthRequired = false;
+      await this.authorizeHostByDefault();
+    }
     return result;
   }
   async clearClientAuthorization() {
@@ -77529,6 +77559,7 @@ var ClientModeRuntime = class {
     }
   }
   async leaveRemote() {
+    this.clientAuthRequired = false;
     this.beginSelection();
     this.sessionTools.invalidate();
     this.remoteLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection was closed."));
@@ -77573,6 +77604,7 @@ var ClientModeRuntime = class {
   }
   selectRemoteTarget(remote) {
     this.assertRemoteCompatible(remote);
+    this.clientAuthRequired = false;
     const target3 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target3);
     this.recoverable = remote;
@@ -77714,6 +77746,7 @@ var ClientModeRuntime = class {
       remote.client.close()
     ]);
     this.logger.warn("remote Harness transport closed", { targetDeviceId: shortId(remote.target.deviceId) });
+    if (!this.closed && this.gatewaySwitch.status().mode === "remote") this.noteClientAuthFailure(error62);
     if (!recover || this.closed) return;
     this.reconnect.start(async (signal) => {
       await cleanup;

@@ -821,7 +821,12 @@ function adaptiveControlCloseError(event: CloseEvent): Error {
     ? `${reason} (WebSocket ${event.code})`
     : `WebSocket closed with code ${event.code}`
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
-    code: event.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED',
+    // Preserve the specific self-hosted authorization reasons so the Client
+    // runtime can surface a terminal reauthorization state instead of a generic
+    // transport loss (PR #285). Every other close keeps the shared semantics.
+    code: event.code === 4003 ? 'CONNECTION_REPLACED'
+      : event.code === 4001 && ['AUTH_INVALID', 'TOKEN_EXPIRED', 'DEVICE_REVOKED'].includes(reason)
+        ? reason : 'TRANSPORT_CLOSED',
     retryable: serverShutdown || heartbeatTimeout
       || [1000, 1001, 1006, 1011, 1012, 1013].includes(event.code),
   })

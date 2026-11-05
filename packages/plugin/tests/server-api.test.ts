@@ -440,6 +440,35 @@ describe('HostServerApi', () => {
     await expect(api.authenticate(hostIdentity())).rejects.toMatchObject({ code: 'ACCOUNT_AUTH_REQUIRED', retryable: false })
   })
 
+  it('refreshes a server-rejected access token once for a read before requiring a login', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-read-refresh-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const store = new ServerCredentialStore(directory)
+    const url = 'https://example.invalid'
+    await store.save({ serverUrl: url, deviceId: identity.deviceId, authorizationMethod: 'account', ...tokens() })
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(errorJson('AUTH_INVALID', 'invalid access token', 401))
+      .mockResolvedValueOnce(json(tokens({ accessToken: 'replacement-access-token', refreshToken: 'replacement-refresh-token' })))
+      .mockResolvedValueOnce(json({ items: [] }))
+    const api = new ClientServerApi(url, store, fetchMock)
+    api.bindIdentity(identity)
+    await expect(api.listDevices()).resolves.toEqual([])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      '/api/v1/devices', '/api/v1/auth/refresh', '/api/v1/devices',
+    ])
+    expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get('Authorization')).toBe('Bearer replacement-access-token')
+    fetchMock.mockClear()
+      .mockResolvedValueOnce(errorJson('TOKEN_EXPIRED', 'expired access token', 401))
+      .mockResolvedValueOnce(json(tokens()))
+      .mockResolvedValueOnce(errorJson('AUTH_INVALID', 'still invalid', 401))
+    await expect(api.listDevices()).rejects.toMatchObject({ code: 'AUTH_INVALID' })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fetchMock.mockClear().mockResolvedValueOnce(errorJson('AUTH_INVALID', 'rejected', 401))
+    await expect(api.revokeCurrentDevice()).rejects.toMatchObject({ code: 'AUTH_INVALID' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves authorization for temporary and unclassified device-list failures', async () => {
     await runScenarios([
       { name: 'Server outage with misleading auth code', response: errorJson('AUTH_INVALID', 'unavailable', 503), code: 'CONNECTION_FAILED' },
@@ -462,7 +491,7 @@ describe('HostServerApi', () => {
       })
       const api = new ClientServerApi('https://dsh.r2049.cn', store, vi.fn(async () => {
         if (scenario.response instanceof Error) throw scenario.response
-        return scenario.response
+        return scenario.response.clone()
       }) as unknown as typeof fetch)
       api.bindIdentity(identity)
       await expect(api.listDevices()).rejects.toMatchObject({
