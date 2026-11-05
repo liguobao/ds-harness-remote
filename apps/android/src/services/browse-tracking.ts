@@ -100,7 +100,13 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
       break
     }
   }
-  summary = summary.replace(/\s+/gu, ' ').slice(0, 240)
+  summary = summary
+    .replace(/```[\s\S]*?```/gu, ' ')
+    .replace(/^\s{0,3}#{1,6}\s+/gmu, '')
+    .replace(/[`*_>#|]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 240)
 
   const badge = backendBadge(top.session.backend)
   const title = (typeof top.session.title === 'string' && top.session.title.trim().length > 0)
