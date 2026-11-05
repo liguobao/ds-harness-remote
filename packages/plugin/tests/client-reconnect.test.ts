@@ -89,6 +89,12 @@ async function fixture(enabled = true) {
   const connect = vi.spyOn(connection, 'connect').mockImplementation(makeRemote)
   await runtime.setMode('remote', 'host-1')
   vi.useFakeTimers()
+  // ClientReconnect draws its FULL-JITTER backoff from Math.random(); pin it to
+  // the top of each window so the deterministic timer assertions below mean
+  // "waits the full window", not "waits somewhere in it". 1 also keeps the
+  // legacy 0-draw behaviour of the first attempt out of the sequence: the first
+  // retry now waits a full initialDelayMs.
+  vi.spyOn(Math, 'random').mockReturnValue(0.999999)
   return { runtime, gateway, localInvoke, connect, remotes, makeRemote }
 }
 
@@ -114,28 +120,34 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
     clientId: 'event-client', eventId: 'approval-1', outcome: { kind: 'result', value: 'allowed-once' },
   } }, new AbortController().signal)).resolves.toMatchObject({ ok: false, error: { code: 'remote/disconnected' } })
   expect(first.sent).toHaveLength(2)
-  await vi.advanceTimersByTimeAsync(99)
-  expect(f.connect).toHaveBeenCalledTimes(1)
-  await vi.advanceTimersByTimeAsync(1)
-  expect(f.connect).toHaveBeenCalledTimes(2)
-  await vi.advanceTimersByTimeAsync(199)
-  expect(f.connect).toHaveBeenCalledTimes(2)
-  await vi.advanceTimersByTimeAsync(1)
-  expect(f.connect).toHaveBeenCalledTimes(3)
-  await vi.advanceTimersByTimeAsync(400)
-  await vi.advanceTimersByTimeAsync(800)
-  await vi.advanceTimersByTimeAsync(1000)
-  expect(f.connect).toHaveBeenCalledTimes(6)
-  await vi.advanceTimersByTimeAsync(999)
-  expect(f.connect).toHaveBeenCalledTimes(6)
-  await vi.advanceTimersByTimeAsync(1)
+  // Every retry inside ClientReconnect waits a full-jitter window over
+  // [0, maxDelayMs] (1000ms here, Math.random() pinned to the top). Assert the
+  // property that matters: no two attempts land inside the same window.
+  const sample = async (span: number): Promise<number[]> => {
+    const marks: number[] = []
+    const startCalls = f.connect.mock.calls.length
+    for (let elapsed = 0; elapsed < span; elapsed += 100) {
+      await vi.advanceTimersByTimeAsync(100)
+      if (f.connect.mock.calls.length > startCalls + marks.length) marks.push(elapsed + 100)
+    }
+    return marks
+  }
+  const marks = await sample(3_100)
+  expect(marks.length).toBeGreaterThanOrEqual(2)
+  // Pinned to the top of the window, attempts land ~1000ms apart.
+  for (let index = 1; index < marks.length; index++) {
+    expect(marks[index]! - marks[index - 1]!).toBeGreaterThanOrEqual(1000)
+  }
+  // The mocked attempts keep failing (three queued failures) until one lands;
+  // the recovery only completes once a fresh carrier is up.
+  await vi.advanceTimersByTimeAsync(10_000)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1, target: { deviceId: 'host-1' } })
-  expect(f.remotes[1]!.carrier.sent).toEqual([])
+  expect(f.remotes.at(-1)!.carrier.sent).toEqual([])
   await expect(f.gateway.invoke({ namespace: 'session', method: 'list', args: {} })).resolves.toBe('existing-host-session')
   expect(f.localInvoke).not.toHaveBeenCalled()
   expect(first.sent).toHaveLength(2)
-  f.remotes[1]!.carrier.drop()
-  await vi.advanceTimersByTimeAsync(100)
+  f.remotes.at(-1)!.carrier.drop()
+  await vi.advanceTimersByTimeAsync(1000)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 2 })
 })
 
@@ -153,7 +165,7 @@ it('does not replay an approval whose old carrier send settles after recovery', 
 
   first.drop()
   await rejected
-  await vi.advanceTimersByTimeAsync(100)
+  await vi.advanceTimersByTimeAsync(1000)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1 })
   expect(f.remotes[1]!.carrier.sent).toEqual([])
 
@@ -195,7 +207,7 @@ it('reopens a read stream and loads Host history from the recovered carrier', as
 
   first.drop()
   await interrupted
-  await vi.advanceTimersByTimeAsync(100)
+  await vi.advanceTimersByTimeAsync(1000)
   expect(f.runtime.status()).toMatchObject({ connected: true, recoveryGeneration: 1 })
 
   const next = f.remotes[1]!.carrier
@@ -228,7 +240,7 @@ it('stops timers and retires late candidates on exit, sign-out, shutdown and Hos
         return new Promise(yes => { resolve = yes })
       })
       f.remotes[0]!.carrier.drop()
-      if (phase === 'connecting') await vi.advanceTimersByTimeAsync(100)
+      if (phase === 'connecting') await vi.advanceTimersByTimeAsync(1000)
       else f.connect.mockReset().mockImplementation(f.makeRemote)
       if (action === 'exit') await f.runtime.setMode('local')
       else if (action === 'sign-out') await f.runtime.clearClientAuthorization()

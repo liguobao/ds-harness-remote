@@ -20,6 +20,8 @@ import {
   type SelectedTransport,
   type TransportSelectedPayload,
   type TransportStats,
+  isHeartbeatTimeoutClose,
+  isServerShutdownClose,
 } from '@dsh-remote/protocol'
 import { browserRtcFactory, type RtcIceServer, type RtcPeerConnectionFactory } from './rtc-adapter.js'
 import {
@@ -745,6 +747,11 @@ export class AdaptiveTransport extends BaseTransport {
     }
     const established = this.connectedAt !== undefined
     this.controlReady = false
+    // Start every new connection lifetime from a fresh backoff sequence; the
+    // counter is reset on a successful recovery hello too, but a terminal
+    // failure here must not inherit (or leak) a previous lifetime's attempt
+    // count when the transport is reused.
+    this.recoveryAttempt = 0
     this.lease?.stop()
     this.lease = undefined
     this.recoveryTicket = undefined
@@ -788,27 +795,44 @@ export class AdaptiveTransport extends BaseTransport {
 }
 
 function adaptiveControlCloseError(event: CloseEvent): Error {
-  // Self-hosted heartbeat expiry closes the socket without an error frame.
-  // 4001 also carries authorization failures, so only this exact reason retries.
-  const heartbeatTimeout = (event.code === 4001 && (event.reason === 'CONNECTION_FAILED' || event.reason === 'server shutdown')) || event.code === 4009
+  // Close semantics live in @dsh-remote/protocol: the reason string is the
+  // semantic key because deployments disagree on the code (self-hosted Server
+  // sends 4009/'server shutdown', the hosted Server closes with
+  // 4001/'server shutdown' and reserves 4009 for heartbeat expiry). Only an
+  // expected Server outage, a peer heartbeat expiry or a documented transient
+  // code is retryable; authorization, replacement, protocol and unknown
+  // application codes stay terminal, exactly as before this change.
+  const serverShutdown = isServerShutdownClose(event.code, event.reason)
+  const heartbeatTimeout = isHeartbeatTimeoutClose(event.code, event.reason)
   const reason = event.reason.trim().slice(0, 300)
   const detail = reason.length > 0
     ? `${reason} (WebSocket ${event.code})`
     : `WebSocket closed with code ${event.code}`
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     code: event.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED',
-    retryable: heartbeatTimeout || event.code === 1000 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013,
+    retryable: serverShutdown || heartbeatTimeout
+      || [1000, 1001, 1006, 1011, 1012, 1013].includes(event.code),
   })
 }
 
-export function recoveryDelayMs(attempt: number, diagnostic: AdaptiveDisconnectDiagnostic): number {
-  if (attempt === 0) {
-    return diagnostic.closeCode === 4001 && diagnostic.closeReason === 'server shutdown'
-      ? Math.random() * 15_000
-      : 0
-  }
-  const step = Math.min(attempt + 1, 4)
-  return Math.min(15_000, 1_000 * 2 ** step) * (0.8 + Math.random() * 0.4)
+/** Full-jitter window of every control-recovery attempt. */
+export const CONTROL_RECOVERY_MAX_DELAY_MS = 15_000
+
+/**
+ * Delay before the next control-recovery attempt.
+ *
+ * `attempt` is the index of the attempt *about to be scheduled*: 0 is the
+ * first retry after losing the control channel.
+ *
+ * Every disconnect backs off into the widest window (`[0, 15s]`, full jitter)
+ * and stays there: a short outage still recovers quickly on average, while a
+ * tight retry loop against a failing control plane is impossible. The Server
+ * restart reason is classified separately for session retention but no longer
+ * changes the delay, because a restart is already the worst case of the same
+ * window.
+ */
+export function recoveryDelayMs(_attempt: number, _diagnostic: AdaptiveDisconnectDiagnostic): number {
+  return Math.random() * CONTROL_RECOVERY_MAX_DELAY_MS
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

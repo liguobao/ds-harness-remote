@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   WEBRTC_RESUME_CAPABILITY,
   RELAY_RESUME_CAPABILITY,
+  classifyControlClose,
   type ConnectionLeaseAck,
   SecureMessageCodec,
   acceptNegotiatedCapabilities,
@@ -182,12 +183,10 @@ export class HostServerConnection {
   }
 
   private async run(): Promise<void> {
-    let delayMs = this.config.reconnect.initialDelayMs
     this.authRecoveryAttempted = false
     while (!this.stopped) {
       try {
         await this.connectOnce()
-        delayMs = this.config.reconnect.initialDelayMs
       } catch (error) {
         if (this.stopped) return
         const code = errorCode(error)
@@ -222,17 +221,18 @@ export class HostServerConnection {
       if (this.stopped) return
       if (this.reconnectRequested) {
         this.reconnectRequested = false
-        delayMs = this.config.reconnect.initialDelayMs
         continue
       }
       if (!this.config.reconnect.enabled) return
-      await this.waitBeforeRetry(delayMs)
+      // Every close, including the first, waits a full-jitter draw from
+      // [0, maxDelayMs]. A restarted Server therefore gets the whole fleet
+      // spread over the widest window, and an ordinary network drop cannot
+      // turn into a tight reconnect loop either.
+      await this.waitBeforeRetry()
       if (this.reconnectRequested) {
         this.reconnectRequested = false
-        delayMs = this.config.reconnect.initialDelayMs
         continue
       }
-      delayMs = Math.min(this.config.reconnect.maxDelayMs, delayMs * 2)
     }
   }
 
@@ -337,9 +337,13 @@ export class HostServerConnection {
       }
       socket.onclose = event => {
         if (this.socket !== socket) return
-        retainOnClose = [1000, 1001, 1006, 1011, 1012, 1013].includes(event.code)
-          || (event.code === 4009 && event.reason === 'server shutdown')
-          || (event.code === 4001 && ['server shutdown', 'CONNECTION_FAILED'].includes(event.reason))
+        const closeSemantics = classifyControlClose(event.code, event.reason)
+        // Retain authenticated tunnels only for an expected Server outage or a
+        // peer heartbeat expiry. Another instance replacing us (4003) and
+        // revocation (4004) must never retain; the reason string is the
+        // semantic key because deployments disagree on the shutdown code.
+        retainOnClose = [1000, 1001].includes(event.code)
+          || (closeSemantics.retryable && !closeSemantics.replaced)
         const close = async (): Promise<void> => {
           await messageQueue.catch(() => undefined)
           if (this.stopped) { finish(); return }
@@ -1082,9 +1086,13 @@ export class HostServerConnection {
     }
   }
 
-  private waitBeforeRetry(baseDelay: number): Promise<void> {
-    const spread = baseDelay * this.config.reconnect.jitter
-    const delay = Math.max(0, Math.round(baseDelay - spread + Math.random() * spread * 2))
+  private waitBeforeRetry(): Promise<void> {
+    // Full jitter over the configured maximum (AWS "full jitter"): every
+    // retry draws uniformly from [0, maxDelayMs], so the fleet spreads out
+    // even when the Server restarts. `reconnect.initialDelayMs` and
+    // `reconnect.jitter` remain accepted configuration but no longer shape
+    // the delay; only `maxDelayMs` bounds it.
+    const delay = Math.round(Math.random() * this.config.reconnect.maxDelayMs)
     return new Promise(resolve => {
       const timer = setTimeout(() => { this.retryWake = undefined; resolve() }, delay)
       this.retryWake = () => { clearTimeout(timer); resolve() }

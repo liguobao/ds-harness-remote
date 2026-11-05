@@ -1752,15 +1752,37 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 Control Channel heartbeat 默认 25 秒。75 秒未收到有效 pong 时，连接断开。
 Control ping/pong 的 nonce 可用于估计 Server RTT。
 
-开源自部署 Server 的心跳超时可能只发送 WebSocket close `4001` / `CONNECTION_FAILED`，
-不向超时的 peer 发送 `error` 帧。Client 将这一精确组合视为可重试的连接故障，重新进行
-授权与加密握手；不能重放业务请求。`4001` 也用于授权失败，因此不能仅按 close code
-重试；未知 reason 与 `4003`（连接被替换）仍须停止自动恢复。
+关闭语义以 **close reason 为准，close code 视为随实现版本变化的传输细节**。所有端点
+（Host plugin、WebRTC transport、Relay transport、各 App）必须按 (code, reason) 对分类，
+不得单独比较 close code；共享实现为 `packages/protocol/src/close-semantics.ts` 的
+`isServerShutdownClose()` / `isHeartbeatTimeoutClose()` / `classifyControlClose()`。
 
-Server 进程主动重启或优雅关闭时，开源自部署 Server 会发送 WebSocket close `4009` /
-`server shutdown`。该精确组合表示控制面暂时不可用；支持 lease 的新 Client/Host 可以在
-租约有效期内保留已认证的数据连接并后台恢复控制面。`4009` 的其他 reason 不属于该语义，
-不得据此恢复连接。
+- **Server 重启 / 优雅关闭**：reason 恒为 `server shutdown`。自部署 Server（`apps/server`）
+  发送 `4009`；完整 Server 目前发送 `4001`，其 `4009` 被保留给心跳超时，因此 Client /
+  Host 必须把 `4001`、`4009`、`1013` + `server shutdown` 视作同一语义。该语义表示控制面
+  暂时不可用：支持 lease 的 Client/Host 可以在租约有效期内保留已认证的数据连接并后台
+  恢复控制面；`4003`（连接被替换）与 `4004`（设备撤销）不得保留。
+- **心跳超时**：完整 Server 发送 `4009` / `heartbeat timeout`；兼容旧实现时 `4001` /
+  `CONNECTION_FAILED` 同义。这只说明对端不再应答（与网络分区不可区分），是可重试的
+  连接故障，可以像网络分区一样保留租约内的会话并重新授权/加密握手，不能重放业务请求，
+  **不得**据此判定 Server 重启。
+- 其余 reason 一律不属于以上两种语义：`4001` 的其他 reason 仍可能是授权失败，
+  `4008`（非法控制帧）、`4011`（协议版本不支持）、`4002`（凭据失效，走刷新流程）等仍须
+  停止自动恢复或走各自的专用流程；`4003`/`4004` 永不保留。未识别的 code 不做保留，
+  各端点按自身既有策略决定是否重连（WebRTC/Relay 传输视为终态，Host 控制面继续重连）。
+
+**重连退避**：任何掉线都必须退避，不得立即重试形成重连风暴。统一采用 **全抖动（AWS full
+jitter）**：第 n 次重试的等待恒为 `[0, cap]` 内的均匀随机值，`cap` 为该循环的最大延迟——
+Host 端 `reconnect.maxDelayMs`（默认 30s）、Client 载体重连同样是 `reconnect.maxDelayMs`、
+WebRTC/Relay 控制面固定 15s。首次与后续重试使用同一窗口，不再按 `server shutdown` 区分：
+重启本身就是最坏情况，同样落在该窗口内。默认 30s 是有意偏保守：每次重连都会触发认证与
+设备发现请求，宁可拉长持续宕机时的重试间隔，也不在 Server 刚恢复时制造请求洪峰。
+
+- 期望等待约为 `cap/2`，瞬时抖动（1 秒级）通常仍在 1 秒上下恢复，而持续失败的连接最多
+  每 `cap` 秒才探一次，不会形成重连风暴。
+- `reconnect.initialDelayMs` 与 `reconnect.jitter` 仍被接受（兼容既有配置），但不再参与
+  延迟计算；只有 `maxDelayMs` 决定上限。
+- 退避只决定“何时重连”，不改变 lease 的授权预算；退避期间的保留与恢复仍受 lease 约束。
 
 Control ping：
 

@@ -33,3 +33,15 @@ A recovering Host hello optionally includes `recoveryTickets` (maximum 64), only
 Rollout order may be Server first or endpoints first: optional capability intersection and per-connection tickets gate the feature, and no version-number inference is used. New Server + old Host/Client, old Server + new endpoints, and mixed old/new peers retain their existing lifetimes. The relay-only self-hosted Server and independent VS Code client do not advertise resume support. Server's integrated Expo Android/iOS client and Remote Web have the same lease contract; Remote's Desktop/Android clients use the shared transport. Existing Server-specific WebRTC budgets, presence feed and Relay attach fallback are retained during source synchronization.
 
 No new UI polling, TURN refresh/TTL change or per-heartbeat database write is added. Lease confirmation rechecks current authorization and open connection records; the Server writes a record when closing/replacing it. Host control reconnection retains configured backoff (default cap 30 seconds); shared Client and Web recovery use jitter with a 15-second nominal cap. Ordinary WebSocket heartbeat remains separate from the connection authorization lease.
+
+## Close semantics and retry jitter (2026-11-05)
+
+Retention decisions are classified by (close code, close reason) through `packages/protocol/src/close-semantics.ts`, never by a bare close code.
+
+- `server shutdown` is the only reason that means an expected Server outage: `apps/server` sends `4009`, the full Server currently sends `4001` (it reserves `4009` for heartbeat expiry), and `1013` is accepted as a transport alias, so all three codes are equivalent when paired with that reason.
+- `4009`/`heartbeat timeout` and `4001`/`CONNECTION_FAILED` mean the peer stopped answering. They are retryable and may retain the authenticated session, because a dead peer is indistinguishable from a network partition (which is retained anyway), but they never mean the Server restarted.
+- `4003` (replaced), `4004` (revoked), `4002` (credentials), `4008` (invalid frame) and `4011` (protocol) never retain.
+
+Every disconnect backs off; no path retries immediately. All three reconnect loops use full jitter over a single cap window, `[0, cap]`, for the first and every later attempt: Host and Client carrier reconnect use `reconnect.maxDelayMs` (default 30s), WebRTC/Relay control recovery uses 15s. A Server restart is no longer special-cased in the delay (it is the worst case of the same window), only in session retention. `reconnect.initialDelayMs` and `reconnect.jitter` remain accepted configuration but no longer shape the delay; only `maxDelayMs` bounds it.
+
+The WebRTC recovery attempt counter still advances on every scheduled attempt and resets on success and on terminal failure; it no longer changes the delay, and is kept so a future exponential schedule can reuse it.

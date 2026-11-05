@@ -22,16 +22,19 @@ export class ClientReconnect {
   }
 
   private async run(connect: (signal: AbortSignal) => Promise<void>, pending: AbortController): Promise<void> {
-    let delay = this.config.initialDelayMs
+    // Every retry, including the first, waits a full-jitter draw from
+    // [0, maxDelayMs]: a tight retry loop against a failing carrier is
+    // impossible, while a short blip still recovers quickly on average.
+    // `jitter` is not applied on top of full jitter.
     while (!pending.signal.aborted) {
-      const jitter = delay * this.config.jitter * (Math.random() * 2 - 1)
+      const delay = Math.random() * this.config.maxDelayMs
       await new Promise<void>(resolve => {
         const finish = () => {
           clearTimeout(timer)
           pending.signal.removeEventListener('abort', finish)
           resolve()
         }
-        const timer = setTimeout(finish, Math.max(0, delay + jitter))
+        const timer = setTimeout(finish, delay)
         pending.signal.addEventListener('abort', finish, { once: true })
       })
       if (pending.signal.aborted) return
@@ -41,7 +44,6 @@ export class ClientReconnect {
       } catch (error) {
         if (!canReconnect(error)) return
       }
-      delay = Math.min(this.config.maxDelayMs, delay * 2)
     }
   }
 }

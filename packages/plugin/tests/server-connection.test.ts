@@ -820,13 +820,18 @@ describe('HostServerConnection', () => {
   })
 
   it('retains confirmed RTC on recovery and falls back safely after a Server rollback', async () => {
-    await runScenarios(['supported Server', 'rolled-back Server', 'recovery rejected', 'legacy recovery rejected', 'expired access token', 'Server unavailable'].map(name => ({ name, run: async () => {
+    // Hosted Server shutdown closes with 4001/'server shutdown'; apps/server
+    // uses 4009. Both must retain because the reason string is the semantic
+    // key; the label only names the row.
+    await runScenarios(['supported Server', 'rolled-back Server', 'recovery rejected', 'legacy recovery rejected', 'expired access token', 'Server unavailable', '4009 shutdown', '4001 shutdown', '4009 heartbeat timeout'].map(name => ({ name, run: async () => {
     const sockets: FakeWebSocket[] = []
     const rtc = { close: vi.fn(async () => undefined) }
     const channel = { close: vi.fn(async () => undefined) }
     const cfg = config()
     const server = new HostServerConnection(
-      { ...cfg, forceRelay: false, reconnect: { ...cfg.reconnect, enabled: true, initialDelayMs: 100, maxDelayMs: 1000 } },
+      // Backoff draws from [0, maxDelayMs]; keep the window tight so the
+      // multi-step recovery scenario rows finish well inside the test timeout.
+      { ...cfg, forceRelay: false, reconnect: { ...cfg.reconnect, enabled: true, initialDelayMs: 20, maxDelayMs: 120 } },
       { schemaVersion: 1, deviceId: 'host-rtc', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
       { trustedPeer: vi.fn() } as unknown as IdentityStore,
       { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })), refreshCredentials: vi.fn(async () => undefined) } as unknown as HostServerApi,
@@ -848,7 +853,10 @@ describe('HostServerConnection', () => {
       await vi.waitFor(() => expect(server.isOnline()).toBe(true))
       const internals = server as unknown as { tunnels: Map<string, unknown> }
       internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
-      socket.close(1012, 'Server restart')
+      if (name === '4009 shutdown') socket.close(4009, 'server shutdown')
+      else if (name === '4001 shutdown') socket.close(4001, 'server shutdown')
+      else if (name === '4009 heartbeat timeout') socket.close(4009, 'heartbeat timeout')
+      else socket.close(1012, 'Server restart')
       await vi.waitFor(() => expect(sockets).toHaveLength(2))
       expect(rtc.close).not.toHaveBeenCalled()
       expect(channel.close).not.toHaveBeenCalled()
@@ -863,6 +871,8 @@ describe('HostServerConnection', () => {
       reconnect.open()
       expect(JSON.parse(reconnect.sent[0]!).payload.recoveryTickets).toEqual(['confirmed'])
       if (name === 'rolled-back Server' || name === 'recovery rejected' || name === 'legacy recovery rejected' || name === 'expired access token') {
+        // Keep each row's historical (code, reason) pair: 'legacy recovery
+        // rejected' is 4002 + a distinct reason, not a shutdown.
         next.close(name === 'rolled-back Server' ? 4008 : name === 'recovery rejected' ? 4012 : 4002, name === 'legacy recovery rejected' ? 'recovery authorization rejected' : 'rejected')
         await vi.waitFor(() => expect(sockets).toHaveLength(3))
         const legacy = sockets[2]!
@@ -886,6 +896,54 @@ describe('HostServerConnection', () => {
     }
     expect(rtc.close).toHaveBeenCalledOnce()
     expect(channel.close).toHaveBeenCalledOnce()
+    } })))
+  })
+
+  it('backs off the first reconnect after every close into the maxDelayMs window', async () => {
+    await runScenarios([
+      { name: '4001/server shutdown', code: 4001, reason: 'server shutdown' },
+      { name: '4009/server shutdown', code: 4009, reason: 'server shutdown' },
+      { name: '4009/heartbeat timeout', code: 4009, reason: 'heartbeat timeout' },
+      { name: '1006/network drop', code: 1006, reason: '' },
+    ].map(row => ({ name: row.name, run: async () => {
+      try {
+        const sockets: FakeWebSocket[] = []
+        const cfg = config()
+        const server = new HostServerConnection(
+          // Host reconnect config here is initial 100ms / max 400ms; every
+          // close now draws from the full [0, maxDelayMs] window, so the same
+          // 0.9 draw waits 360ms regardless of the close reason.
+          { ...cfg, forceRelay: false, reconnect: { ...cfg.reconnect, enabled: true, initialDelayMs: 100, maxDelayMs: 400, jitter: 0 } },
+          { schemaVersion: 1, deviceId: 'host-shutdown', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+          { trustedPeer: vi.fn() } as unknown as IdentityStore,
+          { baseUrl: 'https://dsh.r2049.cn', authenticate: vi.fn(async () => ({ accessToken: 'access-token' })) } as unknown as HostServerApi,
+          { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+          logger(), () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket }, async () => undefined,
+        )
+        const random = vi.spyOn(Math, 'random')
+        random.mockReturnValue(0.9)
+        try {
+          server.start()
+          await flush()
+          sockets[0]!.open()
+          sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-shutdown')))
+          await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+          sockets[0]!.close(row.code, row.reason)
+          // The close handler runs on a later turn; wait for the backoff draw,
+          // then assert no socket was created ahead of its timer.
+          await vi.waitFor(() => expect(random).toHaveBeenCalled())
+          expect(sockets).toHaveLength(1)
+          await new Promise(resolve => setTimeout(resolve, 200))
+          // 0.9 x 400ms = 360ms: still waiting at 200ms, connected by ~400ms.
+          expect(sockets).toHaveLength(1)
+          await vi.waitFor(() => expect(sockets).toHaveLength(2), { timeout: 2_000 })
+          expect(server.isOnline()).toBe(false)
+        } finally { await server.stop() }
+      } finally {
+        vi.useRealTimers()
+        vi.restoreAllMocks()
+        vi.unstubAllGlobals()
+      }
     } })))
   })
 
