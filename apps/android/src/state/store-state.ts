@@ -100,6 +100,12 @@ export interface AppState {
   previewImageUri?: string
   setPreviewImageUri(uri?: string): void
   transportPreference: TransportPreference
+  /**
+   * Until this timestamp, connections to the current host skip WebRTC and go
+   * straight to the relay data plane. Set when an established P2P path drops
+   * or WebRTC negotiation keeps failing; expires so 'auto' can retry P2P.
+   */
+  relayOnlyUntil?: number
   compactHistory: boolean
   setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference
