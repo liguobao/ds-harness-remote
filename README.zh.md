@@ -83,6 +83,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 | 浏览器扩展 | Chrome | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
 | dsh-TUI | 纯终端 CLI | 计划中 | 本版本不包含该集成，将在后续版本单独提供；安装脚本不会为它自动创建 Web 服务 |
 | Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后可一条命令全程无操作安装，无需任何配置。
+| Harmony&nbsp;7.* | 鸿蒙原生 App | 已支持 | 源码见 [apps/harmony](apps/harmony)，HarmonyOS 7.0（API 26）+ DevEco Studio 构建安装；支持账号授权登录、在线主机与设备改名、端到端加密、多会话、横屏双栏与深浅色主题 |
 
 多个客户端可以同时连接同一个 Host，RPC 与数据流按连接隔离。
 
