@@ -519,6 +519,15 @@ WebRTC DataChannel 建立后，Initiator 必须先发送 `transport.selected`，
 线协议值，双方声明 `transport.lan` capability 时必须端到端保留；Server 仅可为未声明该
 capability、仍只接受 `p2p | turn | relay` 的旧 RC2 Host 将 `lan` 兼容降级为 `p2p`。
 
+Initiator 的 `transport.selected` 可携带可选 `turnNode`（实际使用的 TURN relay 主机名，
+最长 253 字符，仅诊断用途），Server 转发时必须端到端保留，不得剥除。
+
+Responder 在自己的数据通道打开后也会上报一条 `transport.selected` 作为数据面通知。该上报
+以 Responder 本机的 ICE 路径为准，可能不在该链路协商出的传输集合内（例如链路只协商了
+`turn | relay`，而两端实际走 LAN）；Server 必须接受来自链路任一端的该帧，对不在协商集合内
+的上报按通知忽略，不得据此关闭连接或丢弃链路。Initiator（Client）的选择仍是绑定的权威
+来源，不在协商集合内时按协议拒绝。
+
 Host 必须要求 `authorization` 为 `account`，校验 identityKey 格式，并通过受 membership
 保护的设备详情接口确认 Client descriptor。本机已有相同 deviceId 但公钥不同则必须拒绝；
 验证通过后写入/更新本机 pinned peer，并把该 key 与 `connectionId` 绑定，才可返回

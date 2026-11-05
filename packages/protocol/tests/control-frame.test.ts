@@ -539,6 +539,16 @@ describe('transport.selected payload rejection', () => {
     })).payload).toMatchObject({ transport: 'lan' })
   })
 
+  it('preserves the optional TURN node diagnostic', () => {
+    expect(parseControlFrame(makeFrame('transport.selected', {
+      ...valid,
+      transport: 'turn',
+      turnNode: 'turn.example.com:3478',
+    })).payload).toMatchObject({ transport: 'turn', turnNode: 'turn.example.com:3478' })
+    expect(parseControlFrame(makeFrame('transport.selected', { ...valid })).payload)
+      .not.toHaveProperty('turnNode')
+  })
+
   it('rejects invalid selected transport payloads', async () => {
     await runScenarios([
       {
@@ -585,6 +595,34 @@ describe('transport.selected payload rejection', () => {
         run: () => {
           const { transport, ...noTransport } = valid
           expect(() => parseControlFrame(makeFrame('transport.selected', noTransport))).toThrow()
+        },
+      },
+      {
+        name: 'rejects empty turnNode',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                transport: 'turn',
+                turnNode: '',
+              }),
+            ),
+          ).toThrow()
+        },
+      },
+      {
+        name: 'rejects oversized turnNode',
+        run: () => {
+          expect(() =>
+            parseControlFrame(
+              makeFrame('transport.selected', {
+                ...valid,
+                transport: 'turn',
+                turnNode: 'a'.repeat(254),
+              }),
+            ),
+          ).toThrow()
         },
       },
     ])

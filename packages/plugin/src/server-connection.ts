@@ -834,6 +834,14 @@ export class HostServerConnection {
     // cannot bind replies to Relay while requests arrive over WebRTC.
     tunnel.transport = payload.transport
     tunnel.transportMode = tunnel.rtc.selectedPathMode()
+    if (payload.turnNode !== undefined) {
+      this.logger.info('client selected a turn relay', {
+        connectionId: shortId(tunnel.connectionId),
+        peerDeviceId: shortId(tunnel.peer.deviceId),
+        // Hostnames only: never echo arbitrary client-supplied text into logs.
+        turnNode: TURN_NODE_TEXT.test(payload.turnNode) ? payload.turnNode : '<invalid>',
+      })
+    }
     await this.resumePendingHandshake(tunnel)
   }
 
@@ -1325,6 +1333,9 @@ function requireObject(value: unknown): Record<string, unknown> {
 
 function objectValue(value: unknown, key: string): unknown { return requireObject(value)[key] }
 function shortId(value: string): string { return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}` }
+
+/** Client-reported TURN relay hostnames (IPv4/IPv6[:port]) may enter logs. */
+const TURN_NODE_TEXT = /^[A-Za-z0-9.[\]:-]+$/
 function asError(error: unknown): Error { return error instanceof Error ? error : new Error('Unknown Server connection error.') }
 function diagnosticReason(error: unknown): string {
   const message = asError(error).message.replace(/[\r\n]+/g, ' ').slice(0, 160)
