@@ -77716,7 +77716,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, rename as rename2, rm as rm3, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -77751,8 +77751,10 @@ var IdentityStore = class {
     this.directory = options.directory ?? join5(dshHome, "remote");
   }
   async loadOrCreate(deviceName) {
-    await mkdir3(this.directory, { recursive: true, mode: 448 });
-    await chmod2(this.directory, 448);
+    await ensureDirectory(this.directory);
+    return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
+  }
+  async loadOrCreateLocked(deviceName) {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
@@ -77762,10 +77764,15 @@ var IdentityStore = class {
     if (!hasDevice) {
       const keys = generateKeyPair();
       const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-      await atomicJsonWrite(devicePath, record11, 384);
       await atomicTextWrite(keyPath, `${keys.privateKey}
 `, 384);
+      await atomicJsonWrite(devicePath, record11, 384);
     }
+    const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    await removeStaleTemporaries(this.directory);
+    return identity3;
+  }
+  async readIdentity(devicePath, keyPath, deviceName) {
     await assertPrivateMode2(keyPath);
     try {
       let record11 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
@@ -77790,11 +77797,20 @@ var IdentityStore = class {
     if (this.identity === void 0) throw new Error("identity store has not been loaded");
     return this.identity;
   }
+  /**
+   * Replace the identity. Runs in the same lock domain as creation, so a reset
+   * can never interleave with another process's read-create-verify. The lock
+   * file lives outside `removeIdentityRecords`, so resetting cannot delete a
+   * lock another process holds — and cannot leave itself unprotected either.
+   */
   async reset(deviceName) {
-    await rm3(this.directory, { recursive: true, force: true });
-    this.identity = void 0;
-    this.peers.clear();
-    return this.loadOrCreate(deviceName);
+    await ensureDirectory(this.directory);
+    return withIdentityLock(this.directory, async () => {
+      this.identity = void 0;
+      this.peers.clear();
+      await removeIdentityRecords(this.directory);
+      return this.loadOrCreateLocked(deviceName);
+    });
   }
   listTrustedPeers() {
     return [...this.peers.values()].map((peer) => ({ ...peer }));
@@ -77887,6 +77903,104 @@ function isNodeError(error62) {
 }
 function safeErrorMessage(error62) {
   return error62 instanceof Error ? error62.message : "invalid identity data";
+}
+var LOCK_FILE_NAME = "device.lock";
+var LOCK_TIMEOUT_MS = 15e3;
+var LOCK_RETRY_INITIAL_MS = 20;
+var LOCK_RETRY_MAX_MS = 200;
+async function withIdentityLock(directory, operation) {
+  const lockPath = join5(directory, LOCK_FILE_NAME);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let delay = LOCK_RETRY_INITIAL_MS;
+  for (; ; ) {
+    try {
+      await writeFile2(lockPath, `${process.pid}
+`, { encoding: "utf8", mode: 384, flag: "wx" });
+      break;
+    } catch (error62) {
+      if (!await isLockContention(error62, lockPath)) throw error62;
+      if (await takeOverLockOfExitedOwner(lockPath)) continue;
+    }
+    if (Date.now() >= deadline) {
+      throw new IdentityInvalidError("device identity is locked by another process; stop other DSH instances and retry");
+    }
+    await new Promise((resolve8) => setTimeout(resolve8, delay));
+    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
+  }
+  try {
+    return await operation();
+  } finally {
+    await rm3(lockPath, { force: true });
+  }
+}
+async function isLockContention(error62, lockPath) {
+  if (!isNodeError(error62)) return false;
+  if (error62.code === "EEXIST") return true;
+  if (error62.code !== "EPERM" || process.platform !== "win32") return false;
+  return exists2(lockPath);
+}
+async function takeOverLockOfExitedOwner(lockPath) {
+  const record11 = await readLockRecord(lockPath);
+  if (record11 === void 0 || !ownerExited(record11)) return false;
+  const claimPath = `${lockPath}.takeover-${createHash5("sha256").update(record11).digest("hex").slice(0, 16)}`;
+  try {
+    await writeFile2(claimPath, `${process.pid}
+`, { encoding: "utf8", mode: 384, flag: "wx" });
+  } catch (error62) {
+    if (await isLockContention(error62, claimPath)) return false;
+    throw error62;
+  }
+  try {
+    if (await readLockRecord(lockPath) !== record11 || !ownerExited(record11)) return false;
+    await rm3(lockPath, { force: true });
+    return true;
+  } finally {
+    await rm3(claimPath, { force: true }).catch(() => void 0);
+  }
+}
+async function readLockRecord(lockPath) {
+  try {
+    return await readFile3(lockPath, "utf8");
+  } catch {
+    return void 0;
+  }
+}
+function ownerExited(record11) {
+  if (!/^\d+\n$/.test(record11)) return false;
+  const pid = Number(record11.trim());
+  if (pid === 0 || pid > 2147483647) return false;
+  if (pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error62) {
+    return isNodeError(error62) && error62.code === "ESRCH";
+  }
+}
+async function ensureDirectory(directory) {
+  await mkdir3(directory, { recursive: true, mode: 448 });
+  await chmod2(directory, 448);
+}
+async function removeIdentityRecords(directory) {
+  let entries;
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(entries.filter((name2) => !isLockArtifact(name2)).map((name2) => rm3(join5(directory, name2), { recursive: true, force: true })));
+}
+function isLockArtifact(name2) {
+  return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
+}
+async function removeStaleTemporaries(directory) {
+  let entries;
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  await Promise.all(entries.filter((name2) => name2.startsWith("device.json.") || name2.startsWith("device.key.")).filter((name2) => name2.endsWith(".tmp")).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 
 // src/control-stream.ts
@@ -78035,7 +78149,7 @@ var ControlStatusStream = class {
 // src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
-import { readdir, realpath, stat as stat3 } from "node:fs/promises";
+import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve } from "node:path";
 
@@ -79721,7 +79835,7 @@ var CodexRemoteDomain = class {
   }
   async listCodexDirectory(path) {
     const target3 = await this.resolveCodexDirectory(path);
-    const rows = await readdir(target3.path, { withFileTypes: true }).catch(() => void 0);
+    const rows = await readdir2(target3.path, { withFileTypes: true }).catch(() => void 0);
     if (rows === void 0) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
@@ -80882,7 +80996,7 @@ var IsolatedAcpClient = class {
 };
 
 // src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir2, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/remote-terminal-controller.ts
@@ -81561,7 +81675,7 @@ var WorkspaceBridge = class {
     const target3 = await this.safePath(root, path, endpoint === "workspaceFiles/list");
     try {
       if (endpoint === "workspaceFiles/list") {
-        const entries = await readdir2(target3, { withFileTypes: true });
+        const entries = await readdir3(target3, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
@@ -81830,7 +81944,7 @@ var AcpWorkspaceTools = class {
 
 // src/acp/gateway.ts
 import { randomUUID as randomUUID15 } from "node:crypto";
-import { readdir as readdir3, realpath as realpath5, stat as stat5 } from "node:fs/promises";
+import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
 import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve4 } from "node:path";
 
@@ -85482,7 +85596,7 @@ var AcpRemoteGateway = class {
     const home = homedir6();
     const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve4(target3));
-    const names = await readdir3(canonical);
+    const names = await readdir4(canonical);
     const entries = [];
     let truncated = false;
     for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
@@ -86507,7 +86621,7 @@ function redact(value, key = "") {
 // src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink } from "node:fs/promises";
+import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -86684,7 +86798,7 @@ var WorkspaceUploadHost = class {
     try {
       const root = await lstat2(upload.root);
       const temp = await lstat2(upload.temp);
-      if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink(upload.temp);
+      if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
   }
@@ -88437,7 +88551,7 @@ import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/p
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve7, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
-import { mkdir as mkdir4, readdir as readdir4, stat as stat7 } from "node:fs/promises";
+import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
 import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve6 } from "node:path";
 var MAX_ENTRIES = 500;
@@ -88452,7 +88566,7 @@ async function listRemoteDirectory(path, signal) {
   const home = resolve6(homedir8());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve6(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir4(target3, { withFileTypes: true });
+  const rows = await readdir5(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
