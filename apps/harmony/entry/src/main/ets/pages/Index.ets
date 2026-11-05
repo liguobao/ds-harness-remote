@@ -398,16 +398,73 @@ struct Index {
   }
 
   /** 权限预设的中文短标签。 */
-  /** 顶栏切换按钮的文案：当前账号（邮箱前缀）+ 服务器主机名。 */
-  private accountSwitchLabel(): string {
-    const email: string = this.runtime.email;
+  /** 底栏账号文案：邮箱只留 @ 前面且截到 18 字符，避免长数字串撑满一行。 */
+  private shortAccount(): string {
+    const email: string = this.accountEmail;
+    if (email.length === 0) {
+      return '';
+    }
     const at: number = email.indexOf('@');
-    const short: string = at > 0 ? email.substring(0, at) : email;
-    const server: string = serverHostLabel(this.runtime.serverUrl);
-    if (short.length === 0) {
+    const head: string = at > 0 ? email.substring(0, at) : email;
+    return head.length > 18 ? head.substring(0, 18) + '…' : head;
+  }
+
+  /** 设备卡的 ⋯ 菜单：改名、清除公钥固定（都收进来，省出名字的宽度）。 */
+  private openDeviceMenu(device: RemoteHostDevice): void {
+    const sheets: SheetInfo[] = [
+      {
+        title: this.tr('改名'),
+        action: () => {
+          this.beginRename(device);
+        }
+      }
+    ];
+    if (this.runtime.hasHostPin(device.deviceId)) {
+      sheets.push({
+        title: this.tr('清除公钥固定'),
+        action: () => {
+          AlertDialog.show({
+            title: this.tr('该主机已固定公钥'),
+            message: this.tr('主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
+              + '清除后下次连接将重新信任首次看到的公钥。'),
+            primaryButton: {
+              value: this.tr('取消'),
+              action: () => {
+              }
+            },
+            secondaryButton: {
+              value: this.tr('清除固定记录'),
+              fontColor: '#F85749',
+              action: () => {
+                this.runtime.forgetHostPin(device.deviceId);
+                this.errorMsg = '';
+                this.infoMsg = this.tr('已清除该主机的公钥固定记录');
+              }
+            }
+          });
+        }
+      });
+    }
+    ActionSheet.show({
+      title: device.name.length > 0 ? device.name : device.deviceId,
+      message: this.tr('主机操作'),
+      sheets: sheets
+    });
+  }
+
+  /** 顶栏切换按钮的文案：只给「官方 / 本地 / 自定义」短标签，长邮箱不该出现在这里。 */
+  private accountSwitchLabel(): string {
+    const url: string = this.runtime.serverUrl;
+    if (url.length === 0) {
       return this.tr('切换账号');
     }
-    return short + ' ⇄ ' + (server.length > 0 ? server : this.tr('服务器'));
+    if (url.indexOf('dsh.r2049.cn') >= 0) {
+      return this.tr('官方') + ' ⇄';
+    }
+    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
+      return this.tr('本地') + ' ⇄';
+    }
+    return serverHostLabel(url) + ' ⇄';
   }
 
   /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
@@ -1892,7 +1949,7 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        if (this.profilesList.length > 0) {
+        if (true) {
           Button(this.accountSwitchLabel())
             .height(32)
             .fontSize(12)
@@ -1905,16 +1962,19 @@ struct Index {
               this.openAccountSwitcher();
             })
         }
-        Button(this.themeLabel(this.themeMode))
-          .height(32)
-          .fontSize(13)
-          .backgroundColor(this.pal().chip)
-          .fontColor(this.pal().text2)
-          .borderRadius(16)
-          .border({ width: 1, color: this.pal().border })
-          .onClick(() => {
-            this.showSettings = true;
-          })
+        Button({ type: ButtonType.Circle }) {
+          Image($r('app.media.ic_settings'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text2)
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor(this.pal().chip)
+        .border({ width: 1, color: this.pal().borderStrong })
+        .onClick(() => {
+          this.showSettings = true;
+        })
         Button({ type: ButtonType.Circle }) {
           Image($r('app.media.ic_refresh'))
             .width(18)
@@ -1987,7 +2047,8 @@ struct Index {
         .backgroundColor(this.pal().border)
       Row({ space: 12 }) {
         Column({ space: 2 }) {
-          Text(this.accountEmail)
+          // 账号只显示邮箱前缀：google-110176351561077530156@… 那种长串会把整行吃掉
+          Text(this.shortAccount())
             .fontSize(12)
             .fontColor(this.pal().text2)
             .maxLines(1)
@@ -2118,45 +2179,16 @@ struct Index {
             })
         }
       } else {
-        Text(this.tr('改名'))
-          .fontSize(11)
+        Text('⋯')
+          .fontSize(15)
           .fontColor(this.pal().text2)
-          .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
           .backgroundColor(this.pal().chip)
           .borderRadius(13)
           .border({ width: 1, color: this.pal().borderStrong })
           .onClick(() => {
-            this.beginRename(device);
+            this.openDeviceMenu(device);
           })
-        if (this.runtime.hasHostPin(device.deviceId)) {
-          Text('🔑')
-            .fontSize(12)
-            .padding({ left: 6, right: 6, top: 5, bottom: 5 })
-            .backgroundColor(this.pal().chip)
-            .borderRadius(13)
-            .border({ width: 1, color: this.pal().borderStrong })
-            .onClick(() => {
-              AlertDialog.show({
-                title: this.tr('该主机已固定公钥'),
-                message: this.tr('主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
-                  + '清除后下次连接将重新信任首次看到的公钥。'),
-                primaryButton: {
-                  value: this.tr('取消'),
-                  action: () => {
-                  }
-                },
-                secondaryButton: {
-                  value: this.tr('清除固定记录'),
-                  fontColor: '#F85749',
-                  action: () => {
-                    this.runtime.forgetHostPin(device.deviceId);
-                    this.errorMsg = '';
-                    this.infoMsg = this.tr('已清除该主机的公钥固定记录');
-                  }
-                }
-              });
-            })
-        }
         if (device.online) {
           Text(this.tr('连接'))
             .fontSize(14)
