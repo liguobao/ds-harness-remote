@@ -6,7 +6,7 @@ interface ForegroundServiceModule {
   waitUntilStopped(lifetimeId: string): Promise<void>
   isIgnoringBatteryOptimizations?(): Promise<boolean>
   requestIgnoreBatteryOptimizations?(): Promise<boolean>
-  updateLiveTask?(hostId: string, sessionId: string, badge: string, title: string, statusText: string, isWaitingInput: boolean, updatedAtMs: number): Promise<void>
+  updateLiveTask?(hostId: string, sessionId: string, badge: string, title: string, statusText: string, isWaitingInput: boolean, updatedAtMs: number, summary: string): Promise<void>
   clearLiveTask?(): Promise<void>
 }
 
@@ -86,12 +86,13 @@ export const foregroundService = {
     statusText: string,
     isWaitingInput: boolean,
     updatedAtMs: number,
+    summary: string,
   ): Promise<void> {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
     try {
       const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
-      await native?.updateLiveTask?.(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs)
+      await native?.updateLiveTask?.(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
     } catch {
       // Best-effort live task update.
     }

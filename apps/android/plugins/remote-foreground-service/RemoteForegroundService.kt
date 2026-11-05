@@ -10,6 +10,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -21,6 +22,7 @@ import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.text.format.DateUtils
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
@@ -42,6 +44,7 @@ data class LiveTaskData(
   val statusText: String,
   val isWaitingInput: Boolean,
   val updatedAtMs: Long,
+  val summary: String = "",
 )
 
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
@@ -207,17 +210,23 @@ class RemoteForegroundService : Service() {
       }
       val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
       val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+      val titleColor = if (night) Color.WHITE else Color.parseColor("#1F1F1F")
+      val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
       try {
         val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
-          setImageViewResource(R.id.live_task_app_icon, applicationInfo.icon)
-          setTextViewText(R.id.live_task_app_name, getString(R.string.app_name))
           setImageViewResource(R.id.live_task_status_dot, dotRes)
           setTextViewText(R.id.live_task_status_text, status)
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
+          setTextColor(R.id.live_task_time, timeColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
+          setTextViewText(R.id.live_task_summary, task.summary)
+          setTextColor(R.id.live_task_summary, timeColor)
+          setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
           setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
         }
 
@@ -227,14 +236,15 @@ class RemoteForegroundService : Service() {
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
         }
 
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-          .setSmallIcon(applicationInfo.icon)
-          .setContentTitle("${getString(R.string.app_name)} · $status")
-          .setContentText("[${task.badge}] ${task.title}")
+          .setSmallIcon(R.mipmap.ic_launcher_foreground)
+          .setContentTitle(status)
+          .setContentText(task.title.ifBlank { getString(R.string.app_name) })
           .setCustomContentView(collapsedViews)
           .setCustomBigContentView(expandedViews)
           .setStyle(NotificationCompat.DecoratedCustomViewStyle())
@@ -243,6 +253,8 @@ class RemoteForegroundService : Service() {
           .setOngoing(true)
           .setOnlyAlertOnce(true)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          .setGroup(LIVE_GROUP)
+          .setGroupSummary(false)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (task.updatedAtMs > 0) {
@@ -256,7 +268,7 @@ class RemoteForegroundService : Service() {
     }
 
     return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(applicationInfo.icon)
+      .setSmallIcon(R.mipmap.ic_launcher_foreground)
       .setContentTitle(getString(R.string.app_name))
       .setContentText(when (connectionStatus) {
         "connected" -> "Remote connected"
@@ -301,6 +313,8 @@ class RemoteForegroundService : Service() {
     private const val EXTRA_RESULT = "result"
     private const val CHANNEL_ID = "remote_connection"
     private const val LIVE_CHANNEL_ID = "live_tasks"
+    private const val LIVE_GROUP = "dsh_remote_live_task"
+    private const val TASK_GROUP = "dsh_remote_task_alerts"
     private const val NOTIFICATION_ID = 7401
     private var running: RemoteForegroundService? = null
     private var currentLiveTask: LiveTaskData? = null
@@ -313,8 +327,9 @@ class RemoteForegroundService : Service() {
       statusText: String,
       isWaitingInput: Boolean,
       updatedAtMs: Long,
+      summary: String = "",
     ) {
-      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs)
+      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
       currentLiveTask = data
       val service = running ?: return
       service.liveTask = data
@@ -339,8 +354,9 @@ class RemoteForegroundService : Service() {
       val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       val id = (hostId + sessionId).hashCode() and 0x3fffffff
       val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(context.applicationInfo.icon)
+      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(R.mipmap.ic_launcher_foreground)
         .setContentTitle(title).setContentText(body).setContentIntent(pending).setAutoCancel(true)
+        .setGroup(TASK_GROUP).setGroupSummary(false)
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
       try {manager.notify("remote_task", id, notification)} catch (_: SecurityException) { }
     }

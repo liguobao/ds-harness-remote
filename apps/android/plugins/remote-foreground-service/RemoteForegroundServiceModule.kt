@@ -51,6 +51,7 @@ class RemoteForegroundServiceModule(
     statusText: String,
     isWaitingInput: Boolean,
     updatedAtMs: Double,
+    summary: String,
     promise: Promise,
   ) {
     context.runOnUiQueueThread {
@@ -59,8 +60,9 @@ class RemoteForegroundServiceModule(
         val boundedBadge = badge.take(10)
         val boundedStatus = statusText.take(50)
         val safeTime = if (updatedAtMs.isFinite() && updatedAtMs > 0) updatedAtMs.toLong() else 0L
+        val boundedSummary = summary.take(400)
         RemoteForegroundService.updateLiveTask(
-          hostId, sessionId, boundedBadge, boundedTitle, boundedStatus, isWaitingInput, safeTime
+          hostId, sessionId, boundedBadge, boundedTitle, boundedStatus, isWaitingInput, safeTime, boundedSummary
         )
         promise.resolve(null)
       } catch (e: Exception) {

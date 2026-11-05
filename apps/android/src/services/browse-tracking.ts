@@ -26,6 +26,7 @@ export interface LiveTaskSummary {
   statusText: string
   isWaitingInput: boolean
   updatedAtMs: number
+  summary: string
 }
 
 interface LiveTaskEvaluationState {
@@ -90,6 +91,23 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
   })
 
   const top = candidates[0]!
+  const sessionMessages = messagesMap[top.session.sessionId] ?? []
+  let summary = ''
+  for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
+    const item: any = sessionMessages[index]
+    if (item?.kind === 'message' && item.role === 'assistant' && typeof item.text === 'string' && item.text.trim().length > 0) {
+      summary = item.text.trim()
+      break
+    }
+  }
+  summary = summary
+    .replace(/```[\s\S]*?```/gu, ' ')
+    .replace(/^\s{0,3}#{1,6}\s+/gmu, '')
+    .replace(/[`*_>#|]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 240)
+
   const badge = backendBadge(top.session.backend)
   const title = (typeof top.session.title === 'string' && top.session.title.trim().length > 0)
     ? top.session.title.trim()
@@ -106,6 +124,7 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
     statusText,
     isWaitingInput: top.isWaitingInput,
     updatedAtMs: typeof top.updatedAt === 'number' && top.updatedAt > 0 ? top.updatedAt : 0,
+    summary,
   }
 }
 
@@ -174,6 +193,7 @@ export function startBrowseTracking(): () => void {
       st: liveTask.statusText,
       w: liveTask.isWaitingInput,
       u: liveTask.updatedAtMs,
+      m: liveTask.summary,
     })
 
     if (taskKey !== lastLiveTaskKey) {
@@ -188,6 +208,7 @@ export function startBrowseTracking(): () => void {
             liveTask!.statusText,
             liveTask!.isWaitingInput,
             liveTask!.updatedAtMs,
+            liveTask!.summary,
           )
         } else {
           await foregroundService.clearLiveTask()
