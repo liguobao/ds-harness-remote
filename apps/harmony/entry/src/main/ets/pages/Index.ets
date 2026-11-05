@@ -1,4 +1,4 @@
-import { KeyboardAvoidMode, UIContext, window, promptAction } from '@kit.ArkUI';
+import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
@@ -10,6 +10,9 @@ import { HarnessRemoteSession } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
+import {
+  Breakpoint, breakpointOf, contentColumnWidth, deviceColumns, isCompactWidth, isExpandedWidth, mascotVisible
+} from '../services/Adaptive';
 import { PickedImage, pickImages } from '../services/ImagePicker';
 import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
@@ -95,6 +98,10 @@ struct Index {
   /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
   @State windowWidthVp: number = 0;
   @State windowHeightVp: number = 0;
+  /** 当前窗口宽度落在哪个断点（xs/sm/md/lg/xl），布局判断统一走它。 */
+  @State breakpoint: Breakpoint = 'sm';
+  /** 折叠屏状态：展开后窗口会变宽，断点会跟着变，这里只做记录与兜底。 */
+  @State foldExpanded: boolean = true;
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -169,6 +176,7 @@ struct Index {
     };
     // 把隐藏 Web 里的 WebRTC 桥交给运行时：连接时若它已就绪就走 LAN 直连，否则走中继
     this.runtime.attachRtcBridge(this.rtc);
+    this.watchFoldStatus();
     // 键盘避让用 resize：pan 会把整个页面往上推，顶栏整条被顶出屏幕
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.runtime.bootstrap(getContext(this));
@@ -186,6 +194,24 @@ struct Index {
     if (this.mainWindow !== undefined) {
       this.mainWindow.off('avoidAreaChange');
       this.mainWindow.off('windowSizeChange');
+    }
+  }
+
+  /**
+   * 折叠屏适配：监听折叠状态。
+   * 折叠屏展开/折叠时窗口尺寸本来就会变化，断点会跟着更新；这里额外订阅状态，
+   * 一是为了在状态切换的瞬间就把断点刷新，二是留一个展开态标记给后续布局用。
+   */
+  private watchFoldStatus(): void {
+    try {
+      this.foldExpanded = display.getFoldStatus() !== display.FoldStatus.FOLD_STATUS_FOLDED;
+      display.on('foldStatusChange', (status: display.FoldStatus) => {
+        this.foldExpanded = status !== display.FoldStatus.FOLD_STATUS_FOLDED;
+        this.breakpoint = breakpointOf(this.windowWidthVp);
+      });
+    } catch (error) {
+      // 非折叠设备没有该能力，忽略即可
+      this.foldExpanded = true;
     }
   }
 
@@ -224,6 +250,7 @@ struct Index {
     this.isLandscape = rect.width > rect.height;
     this.windowWidthVp = ui.px2vp(rect.width);
     this.windowHeightVp = ui.px2vp(rect.height);
+    this.breakpoint = breakpointOf(this.windowWidthVp);
   }
 
   private applyWindowSize(size: window.Size): void {
@@ -231,6 +258,7 @@ struct Index {
     this.windowWidthVp = ui.px2vp(size.width);
     this.windowHeightVp = ui.px2vp(size.height);
     this.isLandscape = size.width > size.height;
+    this.breakpoint = breakpointOf(this.windowWidthVp);
   }
 
   /** Build identity shown in the UI, so an installed APK can be matched to a source revision. */
@@ -671,25 +699,19 @@ struct Index {
     this.settleDrawer(false);
   }
 
-  /** 设备页内容列宽：手机满宽，平板/PC 给到 1040 并居中，别缩成一条窄带。 */
+  /** 设备页内容列宽：按断点给（手机满宽 / 平板 1040 / 2in1 1200），都居中。 */
   private deviceColumnWidth(): number {
-    const w: number = this.windowWidthVp;
-    if (w <= 0) {
-      return 360;
-    }
-    if (w < 720) {
-      return w;
-    }
-    return Math.min(1040, w - 120);
+    return contentColumnWidth(this.breakpoint, this.windowWidthVp);
+  }
+
+  /** 宽屏判断统一入口，避免页面里到处散落 width >= 900 之类的魔法数。 */
+  private isWideLayout(): boolean {
+    return isExpandedWidth(this.breakpoint);
   }
 
   /** 小女仆的出场条件：窗口够高就出来，手机横屏（约 405vp）这种就不挤列表。 */
   private showMascot(): boolean {
-    const h: number = this.windowHeightVp;
-    if (h <= 0) {
-      return !this.isLandscape;
-    }
-    return h >= 620;
+    return mascotVisible(this.breakpoint, this.windowHeightVp);
   }
 
   private listPanelWidth(): number {
@@ -2334,7 +2356,7 @@ struct Index {
       }
       .width('100%')
       // 宽屏：标题留在顶部，下面的「胶囊 + 主机卡片 + 小人」作为一组垂直居中
-      if (this.windowWidthVp >= 900) {
+      if (this.isWideLayout()) {
         Blank()
       }
       // 第二行：当前服务器胶囊（自己一行，点开切换），不参与标题行竞争
@@ -2395,7 +2417,7 @@ struct Index {
       }
       .width('100%')
       // 宽屏双列：一列会留出大片空白，两列更像桌面端的主机面板
-      .lanes(this.windowWidthVp >= 1000 && this.devices.length > 1 ? 2 : 1)
+      .lanes(deviceColumns(this.breakpoint, this.devices.length))
       .constraintSize({ maxHeight: 560 })
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
@@ -2408,7 +2430,7 @@ struct Index {
         .height(214)
         .justifyContent(FlexAlign.Center)
       }
-      if (this.windowWidthVp >= 900) {
+      if (this.isWideLayout()) {
         Blank()
       }
       if (this.devices.length === 0 && !this.busy) {
