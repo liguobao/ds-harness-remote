@@ -61,6 +61,7 @@ export interface AdaptiveTransportOptions {
 export interface AdaptiveDisconnectDiagnostic {
   reason: 'control-closed' | 'control-error' | 'invalid-control-frame' | 'webrtc-closed'
   closeCode?: number
+  closeReason?: string
 }
 
 export interface AdaptiveConnectionDetails {
@@ -173,7 +174,7 @@ export class AdaptiveTransport extends BaseTransport {
         if (this.lifetime === lifetime && this.socket === socket) this.controlLost(new Error('Control socket failed'), { reason: 'control-error' })
       }
       socket.onclose = event => {
-        if (this.lifetime === lifetime && this.socket === socket) this.controlLost(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code })
+        if (this.lifetime === lifetime && this.socket === socket) this.controlLost(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code, closeReason: event.reason })
       }
     })
   }
@@ -541,7 +542,8 @@ export class AdaptiveTransport extends BaseTransport {
     clearTimeout(this.recoveryOpeningTimer)
     socket?.close()
     if (this.recoveryTimer !== undefined) return
-    const delay = this.recoveryAttempt++ === 0 ? 0 : Math.min(15_000, 1_000 * 2 ** Math.min(this.recoveryAttempt, 4)) * (0.8 + Math.random() * 0.4)
+    const delay = recoveryDelayMs(this.recoveryAttempt, diagnostic)
+    this.recoveryAttempt++
     this.recoveryTimer = setTimeout(() => {
       this.recoveryTimer = undefined
       void this.reopenControl()
@@ -572,7 +574,7 @@ export class AdaptiveTransport extends BaseTransport {
         if (this.socket === socket) this.controlLost(new Error('Control recovery failed'), { reason: 'control-error' })
       }
       socket.onclose = event => {
-        if (this.socket === socket) this.controlLost(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code })
+        if (this.socket === socket) this.controlLost(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code, closeReason: event.reason })
       }
     } catch (error) {
       if (this.lifetime !== lifetime) return
@@ -788,8 +790,7 @@ export class AdaptiveTransport extends BaseTransport {
 function adaptiveControlCloseError(event: CloseEvent): Error {
   // Self-hosted heartbeat expiry closes the socket without an error frame.
   // 4001 also carries authorization failures, so only this exact reason retries.
-  const heartbeatTimeout = (event.code === 4001 && event.reason === 'CONNECTION_FAILED')
-    || (event.code === 4009 && event.reason === 'server shutdown')
+  const heartbeatTimeout = (event.code === 4001 && (event.reason === 'CONNECTION_FAILED' || event.reason === 'server shutdown')) || event.code === 4009
   const reason = event.reason.trim().slice(0, 300)
   const detail = reason.length > 0
     ? `${reason} (WebSocket ${event.code})`
@@ -798,6 +799,16 @@ function adaptiveControlCloseError(event: CloseEvent): Error {
     code: event.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED',
     retryable: heartbeatTimeout || event.code === 1000 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013,
   })
+}
+
+export function recoveryDelayMs(attempt: number, diagnostic: AdaptiveDisconnectDiagnostic): number {
+  if (attempt === 0) {
+    return diagnostic.closeCode === 4001 && diagnostic.closeReason === 'server shutdown'
+      ? Math.random() * 15_000
+      : 0
+  }
+  const step = Math.min(attempt + 1, 4)
+  return Math.min(15_000, 1_000 * 2 ** step) * (0.8 + Math.random() * 0.4)
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

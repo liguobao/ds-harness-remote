@@ -310,7 +310,7 @@ describe('AdaptiveTransport capability negotiation', () => {
     await vi.waitFor(() => expect(rtc.channel.close).toHaveBeenCalledOnce())
     expect(rtc.pc.close).toHaveBeenCalledOnce()
     expect(transport.getStats().connected).toBe(false)
-    expect(disconnected).toHaveBeenCalledWith({ reason: 'control-closed', closeCode: 1012 })
+    expect(disconnected).toHaveBeenCalledWith({ reason: 'control-closed', closeCode: 1012, closeReason: 'Server restart' })
     expect(closed).toHaveBeenCalledOnce()
     await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
   })
@@ -426,7 +426,7 @@ describe('AdaptiveTransport capability negotiation', () => {
         expect(transport.getStats().connected).toBe(false)
         if (reason === 'local-close') expect(diagnostic).not.toHaveBeenCalled()
         else expect(diagnostic.mock.calls).toEqual([[{
-          reason, ...(reason === 'control-closed' ? { closeCode: 4003 } : {}),
+          reason, ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
         }]])
         socket.onclose?.({ code: 1006, reason: '' })
         expect(closed).toHaveBeenCalledOnce()
