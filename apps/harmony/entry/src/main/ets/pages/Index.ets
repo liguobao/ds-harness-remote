@@ -2999,12 +2999,6 @@ struct Index {
       .width('100%')
       .height('100%')
 
-      // 底部渐隐：消息滚到浮动坞下方时不硬切
-      Column()
-        .width('100%')
-        .height(96)
-        .linearGradient({ angle: 180, colors: [['rgba(0,0,0,0)', 0], [this.pal().bg, 1]] })
-        .hitTestBehavior(HitTestMode.None)
 
       if (!this.stickToBottom) {
         Row() {
