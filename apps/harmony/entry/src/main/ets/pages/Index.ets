@@ -2362,8 +2362,10 @@ struct Index {
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
-      // 列表下面这块一直是空的，放一只会呼吸的小女仆，安静但不呆板
-      this.MaidMascot()
+      // 列表下面这块一直是空的，放一只会呼吸的小女仆；横屏高度紧张时让位给列表
+      if (!this.isLandscape) {
+        this.MaidMascot()
+      }
       if (this.devices.length === 0 && !this.busy) {
         Text(this.tr('暂无远程主机，请先在服务器上注册主机设备'))
           .fontSize(13)
