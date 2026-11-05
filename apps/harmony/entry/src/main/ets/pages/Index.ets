@@ -82,6 +82,11 @@ struct Index {
   @State showMoreMenu: boolean = false;
   /** 服务器切换面板。 */
   @State showServerSwitch: boolean = false;
+  /** 通用设置的点选面板。 */
+  @State choiceOpen: boolean = false;
+  @State choiceKind: string = '';
+  /** 单台设备的操作面板（卡片 ⋯）。 */
+  @State deviceMenuId: string = '';
   /** 按下中的服务器行 key，用来做明显的按压反馈。 */
   @State pressedChoiceKey: string = '';
   /** 官方服务器固定地址，切换时直接可选，不用手输。 */
@@ -1081,6 +1086,12 @@ struct Index {
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
       }
+      if (this.choiceOpen) {
+        this.ChoiceSheetOverlay()
+      }
+      if (this.deviceMenuId.length > 0) {
+        this.DeviceMenuOverlay()
+      }
       if (this.showServerSwitch) {
         this.ServerSwitchOverlay()
       }
@@ -1261,6 +1272,9 @@ struct Index {
       .backgroundColor(this.pal().panel)
       .borderRadius({ topLeft: 20, topRight: 20 })
       .border({ width: 1, color: this.pal().border })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
     }
     .width('100%')
     .height('100%')
@@ -1369,241 +1383,430 @@ struct Index {
         .onClick(() => {
           this.showSettings = false;
         })
-      Column({ space: 14 }) {
+      Column() {
         Row() {
-          Text('设置')
+          Text(this.tr('设置'))
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text(this.tr('完成'))
+            .fontSize(13)
+            .fontColor('#22D3EE')
+            .padding({ left: 12, right: 4, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.showSettings = false;
+            })
+        }
+        .width('100%')
+        .padding({ bottom: 6 })
+        Scroll() {
+          Column({ space: 16 }) {
+            // —— 服务器 ——
+            Column({ space: 8 }) {
+              Text(this.tr('服务器'))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .padding({ left: 4 })
+              this.SettingsRow(this.tr('切换服务器'), this.currentServerSummary(), false, () => {
+                this.showSettings = false;
+                this.showServerSwitch = true;
+              })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            // —— 通用（低频，点开再选）——
+            Column({ space: 8 }) {
+              Text(this.tr('通用'))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .padding({ left: 4 })
+              this.SettingsRow(this.tr('外观'), this.themeLabel(this.themeMode), false, () => {
+                this.openChoice('theme');
+              })
+              this.SettingsRow(this.tr('文字大小'), this.textScaleLabel(), false, () => {
+                this.openChoice('scale');
+              })
+              this.SettingsRow(this.tr('语言'), this.languageLabel(), false, () => {
+                this.openChoice('language');
+              })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            // —— 危险操作放最后 ——
+            Column({ space: 8 }) {
+              Text(this.tr('账号'))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .padding({ left: 4 })
+              Text(this.tr('退出登录'))
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#FFFFFF')
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .padding({ top: 13, bottom: 13 })
+                .backgroundColor('#E5484D')
+                .borderRadius(12)
+                .onClick(() => {
+                  this.showSettings = false;
+                  AlertDialog.show({
+                    title: this.tr('退出登录'),
+                    message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
+                    autoCancel: true,
+                    primaryButton: {
+                      value: this.tr('取消'),
+                      action: () => {
+                      }
+                    },
+                    secondaryButton: {
+                      value: this.tr('退出'),
+                      fontColor: '#F85749',
+                      action: () => {
+                        this.runtime.logout();
+                      }
+                    }
+                  });
+                })
+              Text(this.buildTag())
+                .fontSize(10)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .padding({ top: 4 })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .padding({ bottom: 8 })
+        }
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.66 : 480 })
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 520 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 设置里的一行：左边标题、右边当前值 + 箭头。 */
+  @Builder
+  SettingsRow(title: string, value: string, danger: boolean, action: () => void) {
+    Row({ space: 10 }) {
+      Text(title)
+        .fontSize(14)
+        .fontColor(danger ? '#F85749' : this.pal().text)
+      Blank()
+      if (value.length > 0) {
+        Text(value)
+          .fontSize(12)
+          .fontColor(this.pal().text3)
+          .maxLines(1)
+          .constraintSize({ maxWidth: 170 })
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      Text('›')
+        .fontSize(15)
+        .fontColor(this.pal().text3)
+    }
+    .width('100%')
+    .padding({ top: 13, bottom: 13, left: 14, right: 14 })
+    .backgroundColor(this.pal().card)
+    .borderRadius(12)
+    .border({ width: 1, color: this.pal().border })
+    .onClick(() => {
+      action();
+    })
+  }
+
+  private currentServerSummary(): string {
+    return this.accountSwitchLabel();
+  }
+
+  private textScaleLabel(): string {
+    if (this.textScaleMode === 0) {
+      return this.tr('小') + ' 0.9×';
+    }
+    if (this.textScaleMode === 2) {
+      return this.tr('大') + ' 1.15×';
+    }
+    if (this.textScaleMode === 3) {
+      return this.tr('特大') + ' 1.3×';
+    }
+    return this.tr('标准') + ' 1.0×';
+  }
+
+  private languageLabel(): string {
+    if (this.languageMode === 1) {
+      return '中文';
+    }
+    if (this.languageMode === 2) {
+      return 'English';
+    }
+    return this.tr('跟随系统');
+  }
+
+  /** 打开通用设置的选择面板（外观 / 文字大小 / 语言）。 */
+  private openChoice(kind: string): void {
+    this.choiceKind = kind;
+    this.choiceOpen = true;
+  }
+
+  private choiceTitleText(): string {
+    if (this.choiceKind === 'theme') {
+      return this.tr('外观');
+    }
+    if (this.choiceKind === 'scale') {
+      return this.tr('文字大小');
+    }
+    return this.tr('语言');
+  }
+
+  private choiceItems(): ThemeChoice[] {
+    if (this.choiceKind === 'theme') {
+      return this.themeChoices();
+    }
+    if (this.choiceKind === 'scale') {
+      return this.textScaleChoices();
+    }
+    return this.languageChoices();
+  }
+
+  private choiceCurrentValue(): number {
+    if (this.choiceKind === 'theme') {
+      return this.themeMode;
+    }
+    if (this.choiceKind === 'scale') {
+      return this.textScaleMode;
+    }
+    return this.languageMode;
+  }
+
+  private applyChoice(value: number): void {
+    if (this.choiceKind === 'theme') {
+      this.runtime.setThemeMode(value);
+    } else if (this.choiceKind === 'scale') {
+      this.runtime.setTextScaleMode(value);
+    } else {
+      this.runtime.setLanguageMode(value);
+    }
+    this.choiceOpen = false;
+  }
+
+  /** 通用设置的点选面板（带弹出/收回动画）。 */
+  @Builder
+  ChoiceSheetOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.choiceOpen = false;
+        })
+      Column({ space: 8 }) {
+        Row() {
+          Text(this.choiceTitleText())
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
-          Text('完成')
-            .fontSize(13)
-            .fontColor('#22D3EE')
-            .padding({ left: 12, right: 4, top: 4, bottom: 4 })
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
             .onClick(() => {
-              this.showSettings = false;
+              this.choiceOpen = false;
             })
         }
         .width('100%')
-        Column({ space: 8 }) {
-          Text(this.tr('服务器'))
-            .fontSize(12)
-            .fontColor(this.pal().text3)
-            .width('100%')
-          Row({ space: 8 }) {
-            Text(this.tr('切换服务器'))
-              .fontSize(13)
-              .fontColor(this.pal().text)
-              .layoutWeight(1)
-            Text('›')
-              .fontSize(15)
-              .fontColor(this.pal().text3)
+        .padding({ bottom: 2 })
+        ForEach(this.choiceItems(), (choice: ThemeChoice) => {
+          Row({ space: 10 }) {
+            Column({ space: 2 }) {
+              Text(t(choice.label))
+                .fontSize(14)
+                .fontColor(this.pal().text)
+              Text(t(choice.hint))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            if (this.choiceCurrentValue() === choice.value) {
+              Text('✓')
+                .fontSize(16)
+                .fontColor('#22D3EE')
+            }
           }
           .width('100%')
           .padding({ top: 12, bottom: 12, left: 14, right: 14 })
+          .backgroundColor(this.choiceCurrentValue() === choice.value
+            ? 'rgba(34,211,238,0.14)' : this.pal().card)
+          .borderRadius(12)
+          .border({
+            width: this.choiceCurrentValue() === choice.value ? 1.5 : 1,
+            color: this.choiceCurrentValue() === choice.value
+              ? 'rgba(34,211,238,0.75)' : this.pal().border
+          })
+          .onClick(() => {
+            this.applyChoice(choice.value);
+          })
+        }, (choice: ThemeChoice) => 'choice-' + choice.value)
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 480 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 300 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 单台设备的能力菜单（卡片上的 ⋯）：行之间留间距、危险项单独标红。 */
+  @Builder
+  DeviceMenuOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.deviceMenuId = '';
+        })
+      Column({ space: 10 }) {
+        Column({ space: 3 }) {
+          Text(this.deviceMenuTitle())
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.tr('主机操作'))
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        Text(this.tr('改名'))
+          .fontSize(14)
+          .fontColor(this.pal().text)
+          .width('100%')
+          .padding({ top: 13, bottom: 13, left: 16 })
           .backgroundColor(this.pal().card)
           .borderRadius(12)
           .border({ width: 1, color: this.pal().border })
           .onClick(() => {
-            this.showSettings = false;
-            this.showServerSwitch = true;
+            const device: RemoteHostDevice | undefined = this.deviceById(this.deviceMenuId);
+            this.deviceMenuId = '';
+            if (device !== undefined) {
+              this.beginRename(device);
+            }
           })
-          Text(this.tr('退出登录'))
+        if (this.deviceMenuPinned()) {
+          Text(this.tr('清除公钥固定'))
             .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#FFFFFF')
+            .fontColor('#F85749')
             .width('100%')
-            .textAlign(TextAlign.Center)
-            .padding({ top: 12, bottom: 12 })
-            .backgroundColor('#E5484D')
+            .padding({ top: 13, bottom: 13, left: 16 })
+            .backgroundColor('rgba(248,87,73,0.10)')
             .borderRadius(12)
+            .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
             .onClick(() => {
-              this.showSettings = false;
-              AlertDialog.show({
-                title: this.tr('退出登录'),
-                message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
-                autoCancel: true,
-                primaryButton: {
-                  value: this.tr('取消'),
-                  action: () => {
-                  }
-                },
-                secondaryButton: {
-                  value: this.tr('退出'),
-                  fontColor: '#F85749',
-                  action: () => {
-                    this.runtime.logout();
-                  }
-                }
-              });
+              const id: string = this.deviceMenuId;
+              this.deviceMenuId = '';
+              this.confirmForgetPin(id);
             })
         }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        if (this.profilesList.length > 0) {
-          Column({ space: 8 }) {
-            Text(this.tr('已保存的登录'))
-              .fontSize(12)
-              .fontColor(this.pal().text3)
-              .width('100%')
-            ForEach(this.profilesList, (profile: SavedProfile) => {
-              Row({ space: 10 }) {
-                Column({ space: 2 }) {
-                  Text(profile.email)
-                    .fontSize(14)
-                    .fontColor(this.pal().text)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(profile.baseUrl)
-                    .fontSize(11)
-                    .fontColor(this.pal().text3)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-                if (profile.baseUrl === this.runtime.serverUrl && profile.email === this.runtime.email) {
-                  Text(this.tr('当前'))
-                    .fontSize(10)
-                    .fontColor('#22D3EE')
-                    .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                    .backgroundColor('rgba(34,211,238,0.12)')
-                    .borderRadius(8)
-                } else {
-                  Text(this.tr('切换'))
-                    .fontSize(11)
-                    .fontColor('#0B1220')
-                    .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-                    .backgroundColor('#22D3EE')
-                    .borderRadius(9)
-                    .onClick(() => {
-                      this.showSettings = false;
-                      this.runtime.switchProfile(profile);
-                    })
-                }
-              }
-              .width('100%')
-              .padding({ top: 9, bottom: 9, left: 14, right: 14 })
-              .backgroundColor(this.pal().card)
-              .borderRadius(12)
-              .border({ width: 1, color: this.pal().border })
-            }, (profile: SavedProfile) => profile.baseUrl + '|' + profile.email)
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-        }
-        Column({ space: 8 }) {
-          Text(this.tr('外观'))
-            .fontSize(12)
-            .fontColor(this.pal().text3)
-            .width('100%')
-          ForEach(this.themeChoices(), (choice: ThemeChoice) => {
-            Row({ space: 10 }) {
-              Column({ space: 2 }) {
-                Text(t(choice.label))
-                  .fontSize(15)
-                  .fontColor(this.pal().text)
-                Text(t(choice.hint))
-                  .fontSize(11)
-                  .fontColor(this.pal().text3)
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              Text(this.themeMode === choice.value ? '✓' : '')
-                .fontSize(15)
-                .fontColor('#22D3EE')
-            }
-            .width('100%')
-            .padding({ top: 11, bottom: 11, left: 14, right: 14 })
-            .backgroundColor(this.themeMode === choice.value ? this.pal().chip : this.pal().card)
-            .borderRadius(14)
-            .border({ width: 1, color: this.themeMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
-            .onClick(() => {
-              this.runtime.setThemeMode(choice.value);
-            })
-          }, (choice: ThemeChoice) => `theme-${choice.value}-${this.languageMode}`)
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        Column({ space: 8 }) {
-          Text(this.tr('文字大小'))
-            .fontSize(12)
-            .fontColor(this.pal().text3)
-            .width('100%')
-          Row({ space: 8 }) {
-            ForEach(this.textScaleChoices(), (choice: ThemeChoice) => {
-              Column({ space: 2 }) {
-                Text(t(choice.label))
-                  .fontSize(13)
-                  .fontColor(this.textScaleMode === choice.value ? '#0B1220' : this.pal().text)
-                Text(t(choice.hint))
-                  .fontSize(10)
-                  .fontColor(this.textScaleMode === choice.value ? '#0B1220' : this.pal().text3)
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Center)
-              .padding({ top: 8, bottom: 8 })
-              .backgroundColor(this.textScaleMode === choice.value ? '#22D3EE' : this.pal().card)
-              .borderRadius(12)
-              .border({ width: 1,
-                color: this.textScaleMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
-              .onClick(() => {
-                this.runtime.setTextScaleMode(choice.value);
-              })
-            }, (choice: ThemeChoice) => `scale-${choice.value}`)
-          }
-          .width('100%')
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        Column({ space: 8 }) {
-          Text(this.tr('语言'))
-            .fontSize(12)
-            .fontColor(this.pal().text3)
-            .width('100%')
-          ForEach(this.languageChoices(), (choice: ThemeChoice) => {
-            Row({ space: 10 }) {
-              Column({ space: 2 }) {
-                Text(t(choice.label))
-                  .fontSize(15)
-                  .fontColor(this.pal().text)
-                Text(t(choice.hint))
-                  .fontSize(11)
-                  .fontColor(this.pal().text3)
-              }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              Text(this.languageMode === choice.value ? '✓' : '')
-                .fontSize(15)
-                .fontColor('#22D3EE')
-            }
-            .width('100%')
-            .padding({ top: 11, bottom: 11, left: 14, right: 14 })
-            .backgroundColor(this.languageMode === choice.value ? this.pal().chip : this.pal().card)
-            .borderRadius(14)
-            .border({ width: 1,
-              color: this.languageMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
-            .onClick(() => {
-              this.runtime.setLanguageMode(choice.value);
-            })
-          }, (choice: ThemeChoice) => `lang-${choice.value}-${this.languageMode}`)
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        Text(this.buildTag())
-          .fontSize(10)
-          .fontColor(this.pal().text3)
+        Text(this.tr('取消'))
+          .fontSize(13)
+          .fontColor(this.pal().text2)
           .width('100%')
           .textAlign(TextAlign.Center)
+          .padding({ top: 12, bottom: 12 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(12)
+          .onClick(() => {
+            this.deviceMenuId = '';
+          })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 18, bottom: 26 })
+      .constraintSize({ maxWidth: 460 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
       .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 22, topRight: 22 })
+      .borderRadius({ topLeft: 20, topRight: 20 })
       .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 300 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
     }
     .width('100%')
     .height('100%')
+  }
+
+  private deviceMenuTitle(): string {
+    const device: RemoteHostDevice | undefined = this.deviceById(this.deviceMenuId);
+    if (device === undefined) {
+      return '';
+    }
+    const name: string = this.displayNameFor(device);
+    return name.length > 0 ? name : device.deviceId;
+  }
+
+  private deviceMenuPinned(): boolean {
+    return this.deviceMenuId.length > 0 && this.runtime.hasHostPin(this.deviceMenuId);
+  }
+
+  private deviceById(id: string): RemoteHostDevice | undefined {
+    for (const device of this.devices) {
+      if (device.deviceId === id) {
+        return device;
+      }
+    }
+    return undefined;
+  }
+
+  private confirmForgetPin(deviceId: string): void {
+    AlertDialog.show({
+      title: this.tr('该主机已固定公钥'),
+      message: this.tr('主机重置或更换后，本地固定的公钥会对不上，导致无法连接。\n'
+        + '清除后下次连接将重新信任首次看到的公钥。'),
+      primaryButton: {
+        value: this.tr('取消'),
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: this.tr('清除固定记录'),
+        fontColor: '#F85749',
+        action: () => {
+          this.runtime.forgetHostPin(deviceId);
+          this.errorMsg = '';
+          this.infoMsg = this.tr('已清除该主机的公钥固定记录');
+        }
+      }
+    });
   }
 
   @Builder
@@ -2250,7 +2453,7 @@ struct Index {
           .borderRadius(13)
           .border({ width: 1, color: this.pal().borderStrong })
           .onClick(() => {
-            this.openDeviceMenu(device);
+            this.deviceMenuId = device.deviceId;
           })
         if (device.online) {
           Text(this.tr('连接'))
@@ -2339,7 +2542,8 @@ struct Index {
           .height(38)
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            this.runtime.disconnectToDevices();
+            // 只是回列表，连接保留：同一台主机再进来不重新认证
+            this.runtime.keepAliveToDevices();
           })
         Column({ space: 2 }) {
           Text(this.connectedHostDisplay())
@@ -3319,7 +3523,7 @@ struct Index {
             .borderRadius(10)
             .onClick(() => {
               this.showSessionPanel = false;
-              this.runtime.disconnectToDevices();
+              this.runtime.disconnectAndClose();
             })
         }
         .width('100%')

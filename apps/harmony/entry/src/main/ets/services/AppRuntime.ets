@@ -112,6 +112,8 @@ export class AppRuntime {
   private pendingRelay: RelayTransport | undefined = undefined;
   /** ArkWeb 里的 WebRTC 桥（LAN 直连用），由页面在 aboutToAppear 时挂进来。 */
   private rtcBridge: RtcBridge | undefined = undefined;
+  /** 退回设备列表时保留连接的那台主机；空表示没有保活连接。 */
+  keepAliveDeviceId: string = '';
   /** 这次连接最终用的数据面：'' | 'relay' | 'lan' | 'p2p' | 'turn'。 */
   transportLabel: string = '';
   /** 历史图片字节缓存：attachmentId -> base64（'' 表示取失败，别反复打主机）。 */
@@ -440,6 +442,20 @@ export class AppRuntime {
     if (this.phase !== PHASE_DEVICES) {
       return;
     }
+    // 刚从这台主机的会话页退回来（连接还活着）：不重新认证，直接回聊天
+    if (this.keepAliveDeviceId === deviceId && this.core !== undefined && this.harness !== undefined) {
+      logInfo('reuse live connection to ' + deviceId);
+      this.phase = PHASE_CHAT;
+      this.errorMsg = '';
+      this.notify();
+      this.loadSessionsAfterConnect().catch(() => undefined);
+      return;
+    }
+    // 之前连着别的设备：先干净断开再连新的
+    if (this.core !== undefined) {
+      this.teardownConnection();
+      this.keepAliveDeviceId = '';
+    }
     this.connectCancelled = false;
     this.lastDeviceId = deviceId;
     this.phase = PHASE_CONNECTING;
@@ -574,6 +590,34 @@ export class AppRuntime {
     this.connectCancelled = true;
     this.connectStage = '';
     this.teardownConnection();
+    this.phase = PHASE_DEVICES;
+    this.notify();
+  }
+
+  /**
+   * 返回设备列表但**保持连接**：同一台主机再进去不重新认证、不重新握手。
+   * 真正的断开走 disconnectAndClose()。
+   */
+  keepAliveToDevices(): void {
+    if (this.phase !== PHASE_CHAT) {
+      return;
+    }
+    this.phase = PHASE_DEVICES;
+    this.keepAliveDeviceId = this.connectedDeviceId;
+    this.errorMsg = '';
+    this.notify();
+  }
+
+  /** 设备列表里「断开连接」用：真的拆掉会话。 */
+  disconnectAndClose(): void {
+    if (this.phase !== PHASE_CHAT && this.phase !== PHASE_DEVICES) {
+      return;
+    }
+    this.teardownConnection();
+    this.keepAliveDeviceId = '';
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.reconnectStatus = '';
     this.phase = PHASE_DEVICES;
     this.notify();
   }
@@ -2185,6 +2229,7 @@ export class AppRuntime {
     this.harness = undefined;
     this.connectedHostName = '';
     this.connectedDeviceId = '';
+    this.keepAliveDeviceId = '';
     this.transportLabel = '';
     this.currentSessionId = '';
     this.currentSessionTitle = '';
