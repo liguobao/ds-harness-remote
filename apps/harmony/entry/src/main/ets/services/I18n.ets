@@ -75,6 +75,7 @@ function buildEnglish(): Map<string, string> {
   map.set('改名', 'Rename');
   map.set('重试', 'Retry');
   // —— 设备页 ——
+  map.set('DSH主机列表', 'DSH hosts');
   map.set('远程主机', 'Remote hosts');
   map.set('在线', 'online');
   map.set('离线', 'offline');

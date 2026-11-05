@@ -2190,10 +2190,10 @@ struct Index {
   @Builder
   DevicesScreen() {
     Column() {
-      // 第一行只放标题与三个圆形按钮：标题永远有整行宽度，不会被胶囊挤掉
-      Row({ space: 8 }) {
+      // 第一行：标题压在整行正中，按钮独立浮在右侧，标题位置不再被按钮宽度带偏
+      Stack({ alignContent: Alignment.Center }) {
         Column({ space: 6 }) {
-          Text(this.tr('远程主机'))
+          Text(this.tr('DSH主机列表'))
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
@@ -2204,35 +2204,39 @@ struct Index {
             .borderRadius(2)
             .linearGradient({ angle: 90, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Button({ type: ButtonType.Circle }) {
-          Image($r('app.media.ic_settings'))
-            .width(18)
-            .height(18)
-            .fillColor(this.pal().text2)
+        .alignItems(HorizontalAlign.Center)
+        // 按钮组浮在右上角，宽度不参与标题居中计算
+        Row({ space: 8 }) {
+          Blank()
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_settings'))
+              .width(18)
+              .height(18)
+              .fillColor(this.pal().text2)
+          }
+          .width(32)
+          .height(32)
+          .backgroundColor(this.pal().chip)
+          .border({ width: 1, color: this.pal().borderStrong })
+          .onClick(() => {
+            this.showSettings = true;
+          })
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_refresh'))
+              .width(18)
+              .height(18)
+              .fillColor(this.pal().text2)
+          }
+          .width(32)
+          .height(32)
+          .backgroundColor(this.pal().chip)
+          .border({ width: 1, color: this.pal().borderStrong })
+          .enabled(!this.busy)
+          .onClick(() => {
+            this.runtime.refreshDevices();
+          })
         }
-        .width(32)
-        .height(32)
-        .backgroundColor(this.pal().chip)
-        .border({ width: 1, color: this.pal().borderStrong })
-        .onClick(() => {
-          this.showSettings = true;
-        })
-        Button({ type: ButtonType.Circle }) {
-          Image($r('app.media.ic_refresh'))
-            .width(18)
-            .height(18)
-            .fillColor(this.pal().text2)
-        }
-        .width(32)
-        .height(32)
-        .backgroundColor(this.pal().chip)
-        .border({ width: 1, color: this.pal().borderStrong })
-        .enabled(!this.busy)
-        .onClick(() => {
-          this.runtime.refreshDevices();
-        })
+        .width('100%')
       }
       .width('100%')
       // 第二行：当前服务器胶囊（自己一行，点开切换），不参与标题行竞争
@@ -2802,7 +2806,7 @@ struct Index {
     .constraintSize({ maxWidth: this.chatMaxWidth() })
   }
 
-  /** 底部输入坞：系统级光感玻璃（背景模糊 + 提饱和 + 半透内衬），浮在会话层之上。 */
+  /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
   @Builder
   ComposerDock() {
     Column({ space: 8 }) {
@@ -2893,7 +2897,8 @@ struct Index {
           .width('100%')
           .padding({ top: 2, bottom: 2 })
         }
-        Row({ space: 10 }) {
+        // 每颗控件各自一块玻璃，中间留缝断开，不再连成一整条
+        Row({ space: 12 }) {
           // 图片：选相册里的图，压完挂在输入框上方，随下一次发送一起交给主机
           Row() {
             if (this.pickingImages) {
@@ -2913,37 +2918,74 @@ struct Index {
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .borderRadius(23)
+          .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+            adaptiveColor: AdaptiveColor.DEFAULT,
+            blurOptions: { grayscale: [0, 24] }
+          })
           .border({ width: 1,
             color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
           .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+          .shadow({ radius: 12,
+            color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
+            offsetX: 0, offsetY: 5 })
           .onClick(() => {
             this.attachImage();
           })
-          TextInput({ text: this.promptInput,
-            placeholder: this.generating ? this.tr('正在生成，可插话…')
-              : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
-            .layoutWeight(1)
-            .height(46)
-            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
-            .fontColor(this.pal().text)
-            .fontSize(this.fs(15))
-            .placeholderColor(this.pal().text3)
-            .caretColor('#22D3EE')
-            .borderRadius(23)
-            .border({ width: 1,
-              color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
-            .padding({ left: 18, right: 18 })
-            // 生成中保持可输入：否则「插话」无从谈起。
-            .enabled(true)
-            .onChange((value: string) => {
-              this.promptInput = value;
-              if (value === '/' && this.slashCommands.length === 0) {
-                this.runtime.loadSlashCommands();
-              }
-            })
-            .onSubmit(() => {
-              this.sendTap();
-            })
+          // 输入框自己就是一块玻璃；光斑跟着触点在这块里走，不会漫到两边
+          Stack() {
+            TextInput({ text: this.promptInput,
+              placeholder: this.generating ? this.tr('正在生成，可插话…')
+                : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
+              .width('100%')
+              .height(46)
+              .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+              .fontColor(this.pal().text)
+              .fontSize(this.fs(15))
+              .placeholderColor(this.pal().text3)
+              .caretColor('#22D3EE')
+              .borderRadius(23)
+              .border({ width: 1,
+                color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+              .padding({ left: 18, right: 18 })
+              // 生成中保持可输入：否则「插话」无从谈起。
+              .enabled(true)
+              .onChange((value: string) => {
+                this.promptInput = value;
+                if (value === '/' && this.slashCommands.length === 0) {
+                  this.runtime.loadSlashCommands();
+                }
+              })
+              .onSubmit(() => {
+                this.sendTap();
+              })
+            // 跟手光斑：玻璃被指针「擦亮」的那块，坐标是这块输入框自己的局部坐标
+            Column()
+              .width('100%')
+              .height(46)
+              .borderRadius(23)
+              .radialGradient({
+                center: [this.dockLightX, this.dockLightY],
+                radius: 110,
+                colors: [
+                  ['rgba(255,255,255,0.55)', 0],
+                  ['rgba(255,255,255,0.16)', 0.5],
+                  ['rgba(255,255,255,0)', 1]
+                ]
+              })
+              .opacity(this.dockLightOpacity)
+              .hitTestBehavior(HitTestMode.None)
+          }
+          .layoutWeight(1)
+          .height(46)
+          .borderRadius(23)
+          .clip(true)
+          .onTouch((event: TouchEvent) => {
+            this.trackDockLight(event);
+          })
+          .onMouse((event: MouseEvent) => {
+            this.trackDockMouse(event);
+          })
           if (this.generating) {
             Text('■')
               .fontSize(this.fs(16))
@@ -2954,6 +2996,14 @@ struct Index {
               .backgroundColor('rgba(248,87,73,0.12)')
               .borderRadius(23)
               .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
+              .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
+                colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+                adaptiveColor: AdaptiveColor.DEFAULT,
+                blurOptions: { grayscale: [0, 24] }
+              })
+              .shadow({ radius: 12,
+                color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
+                offsetX: 0, offsetY: 5 })
               .onClick(() => {
                 this.runtime.stopGeneration();
               })
@@ -2967,7 +3017,7 @@ struct Index {
             .textAlign(TextAlign.Center)
             .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
             .borderRadius(23)
-            .shadow({ radius: 8, color: 'rgba(77,107,254,0.35)', offsetX: 0, offsetY: 2 })
+            .shadow({ radius: 12, color: 'rgba(77,107,254,0.45)', offsetX: 0, offsetY: 5 })
             .onClick(() => {
               this.sendTap();
             })
@@ -2994,35 +3044,8 @@ struct Index {
         }
         .width('100%')
       }
+      // 这一层不再画玻璃：底板交给按钮行的每一块自己画，中间才断得开
       .width('100%')
-      // 系统材质负责模糊和透光，内衬只留一点点白，避免糊成一块实心板
-      .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
-        // 必须跟 App 自己的深浅色走：SYSTEM 会照系统主题取材质，App 强制深色时会错成浅玻璃
-        colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.DEFAULT,
-        // 轻微去色偏（0–127），背景的杂色不会把玻璃染脏
-        blurOptions: { grayscale: [0, 24] }
-      })
-      .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)')
-      // 折光：跟随指针的光斑 + 顶部亮线 + 底部内阴影，都在 overlay 里，不占流内高度
-      .overlay(this.DockGlassOverlay(), { align: Alignment.Center })
-      .onTouch((event: TouchEvent) => {
-        this.trackDockLight(event);
-      })
-      .onMouse((event: MouseEvent) => {
-        this.trackDockMouse(event);
-      })
-      .borderRadius(30)
-      // 把光斑裁在玻璃里面，否则径向渐会漫到坞外面
-      .clip(true)
-      .border({ width: 1,
-        color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(31,45,90,0.10)' })
-      .shadow({
-        radius: 30,
-        color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.18)',
-        offsetX: 0,
-        offsetY: 12
-      })
     }
     .width('100%')
     .padding({ left: 12, right: 12, bottom: 18 })
@@ -4117,53 +4140,6 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-  }
-
-  /** 玻璃的「折光」层：跟手的光斑 + 顶上一条亮线 + 底下压一层内阴影。 */
-  @Builder
-  DockGlassOverlay() {
-    Stack() {
-      // 跟手光斑：玻璃被指针“擦亮”的那块
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(30)
-        .radialGradient({
-          center: [this.dockLightX, this.dockLightY],
-          radius: 150,
-          colors: [
-            ['rgba(255,255,255,0.55)', 0],
-            ['rgba(255,255,255,0.18)', 0.45],
-            ['rgba(255,255,255,0)', 1]
-          ]
-        })
-        .opacity(this.dockLightOpacity)
-        .hitTestBehavior(HitTestMode.None)
-      Column() {
-      Row()
-        .width('86%')
-        .height(1)
-        .linearGradient({ angle: 90, colors: [
-          ['rgba(255,255,255,0)', 0],
-          [this.isDarkUi ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.98)', 0.5],
-          ['rgba(255,255,255,0)', 1]
-        ] })
-      Blank()
-      Column()
-        .width('100%')
-        .height(22)
-        .linearGradient({ angle: 180, colors: [
-          ['rgba(0,0,0,0)', 0],
-          [this.isDarkUi ? 'rgba(0,0,0,0.22)' : 'rgba(31,45,90,0.06)', 1]
-        ] })
-        .borderRadius({ bottomLeft: 28, bottomRight: 28 })
-      }
-      .width('100%')
-      .height('100%')
-    }
-    .width('100%')
-    .height('100%')
-    .hitTestBehavior(HitTestMode.None)
   }
 
   /** 消息里的图片：远端链接直接交给 Image，主机本地路径走 workspaceFiles/readBytes。 */
