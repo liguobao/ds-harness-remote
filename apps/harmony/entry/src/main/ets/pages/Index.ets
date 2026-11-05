@@ -75,6 +75,12 @@ struct Index {
   @State currentModelProvider: string = '';
   @State currentModelEffort: string = '';
   @State permissionPreset: string = '';
+  /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
+  @State textScaleMode: number = 1;
+  @State textScaleValue: number = 1;
+  /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
+  @State windowWidthVp: number = 0;
+  @State windowHeightVp: number = 0;
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -148,6 +154,7 @@ struct Index {
   aboutToDisappear(): void {
     if (this.mainWindow !== undefined) {
       this.mainWindow.off('avoidAreaChange');
+      this.mainWindow.off('windowSizeChange');
     }
   }
 
@@ -157,6 +164,9 @@ struct Index {
       this.applyInsets(win);
       win.on('avoidAreaChange', () => {
         this.applyInsets(win);
+      });
+      win.on('windowSizeChange', (size: window.Size) => {
+        this.applyWindowSize(size);
       });
     }).catch(() => {
       this.topInset = 0;
@@ -172,6 +182,15 @@ struct Index {
     this.bottomInset = ui.px2vp(bottomPx);
     const rect: window.Rect = win.getWindowProperties().windowRect;
     this.isLandscape = rect.width > rect.height;
+    this.windowWidthVp = ui.px2vp(rect.width);
+    this.windowHeightVp = ui.px2vp(rect.height);
+  }
+
+  private applyWindowSize(size: window.Size): void {
+    const ui: UIContext = this.getUIContext();
+    this.windowWidthVp = ui.px2vp(size.width);
+    this.windowHeightVp = ui.px2vp(size.height);
+    this.isLandscape = size.width > size.height;
   }
 
   /** Build identity shown in the UI, so an installed APK can be matched to a source revision. */
@@ -232,6 +251,8 @@ struct Index {
     this.currentModelLabel = this.runtime.currentModelLabel;
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
+    this.textScaleMode = this.runtime.textScaleMode;
+    this.textScaleValue = this.runtime.textScale();
     this.permissionPreset = this.runtime.permissionPreset;
     this.permissionOptionsList = this.runtime.permissionOptions.slice();
     this.workspaces = this.runtime.workspaces;
@@ -363,6 +384,36 @@ struct Index {
   }
 
   /** 权限预设的中文短标签。 */
+  /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
+  private fs(base: number): number {
+    return Math.round(base * this.textScaleValue * 10) / 10;
+  }
+
+  /** 会话区内容最大宽度：窗口越宽放越宽，不再固定 880。 */
+  private chatMaxWidth(): number {
+    const w: number = this.windowWidthVp;
+    if (w <= 0) {
+      return 880;
+    }
+    if (w >= 1600) {
+      return 1180;
+    }
+    if (w >= 1200) {
+      return 1020;
+    }
+    return 880;
+  }
+
+  /** 左侧会话栏宽度：宽窗口下按比例放宽，窄窗口保持 300。 */
+  private listPanelWidth(): number {
+    const w: number = this.windowWidthVp;
+    if (w <= 0) {
+      return 300;
+    }
+    const computed: number = Math.round(w * 0.2);
+    return Math.max(260, Math.min(380, computed));
+  }
+
   /** 顶栏数据面徽标：LAN/P2P/TURN 是直连，Relay 是中继（中文界面显示「中继」）。 */
   private transportBadgeText(): string {
     if (this.connectedTransport === 'relay') {
@@ -527,6 +578,15 @@ struct Index {
       new ThemeChoice(LANG_SYSTEM, '跟随系统', '跟着系统的深浅色走'),
       new ThemeChoice(1, '浅色', '始终使用浅色界面'),
       new ThemeChoice(2, '深色', '始终使用深色界面')
+    ];
+  }
+
+  private textScaleChoices(): ThemeChoice[] {
+    return [
+      new ThemeChoice(0, '小', '0.9×'),
+      new ThemeChoice(1, '标准', '1.0×'),
+      new ThemeChoice(2, '大', '1.15×'),
+      new ThemeChoice(3, '特大', '1.3×')
     ];
   }
 
@@ -989,6 +1049,37 @@ struct Index {
               this.runtime.setThemeMode(choice.value);
             })
           }, (choice: ThemeChoice) => `theme-${choice.value}-${this.languageMode}`)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        Column({ space: 8 }) {
+          Text(this.tr('文字大小'))
+            .fontSize(12)
+            .fontColor(this.pal().text3)
+            .width('100%')
+          Row({ space: 8 }) {
+            ForEach(this.textScaleChoices(), (choice: ThemeChoice) => {
+              Column({ space: 2 }) {
+                Text(t(choice.label))
+                  .fontSize(13)
+                  .fontColor(this.textScaleMode === choice.value ? '#0B1220' : this.pal().text)
+                Text(t(choice.hint))
+                  .fontSize(10)
+                  .fontColor(this.textScaleMode === choice.value ? '#0B1220' : this.pal().text3)
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Center)
+              .padding({ top: 8, bottom: 8 })
+              .backgroundColor(this.textScaleMode === choice.value ? '#22D3EE' : this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1,
+                color: this.textScaleMode === choice.value ? 'rgba(34,211,238,0.55)' : this.pal().border })
+              .onClick(() => {
+                this.runtime.setTextScaleMode(choice.value);
+              })
+            }, (choice: ThemeChoice) => `scale-${choice.value}`)
+          }
+          .width('100%')
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
@@ -1956,7 +2047,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .constraintSize({ maxWidth: 880 })
+    .constraintSize({ maxWidth: this.chatMaxWidth() })
   }
 
   /** 底部输入坞：系统级光感玻璃（背景模糊 + 提饱和 + 半透内衬），浮在会话层之上。 */
@@ -1967,7 +2058,7 @@ struct Index {
           Row({ space: 8 }) {
             ForEach(this.contextPills(), (pill: string) => {
               Text(pill)
-                .fontSize(11)
+                .fontSize(this.fs(11))
                 .fontColor(this.pal().text2)
                 .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                 .backgroundColor(this.pal().card)
@@ -1986,11 +2077,11 @@ struct Index {
               ForEach(this.slashCommands, (command: SlashCommand) => {
                 Row({ space: 6 }) {
                   Text(command.name)
-                    .fontSize(12)
+                    .fontSize(this.fs(12))
                     .fontColor('#22D3EE')
                   if (command.description.length > 0) {
                     Text(command.description)
-                      .fontSize(11)
+                      .fontSize(this.fs(11))
                       .fontColor(this.pal().text3)
                       .maxLines(1)
                   }
@@ -2030,7 +2121,7 @@ struct Index {
                       .backgroundColor(this.pal().chip)
                   }
                   Text('✕')
-                    .fontSize(11)
+                    .fontSize(this.fs(11))
                     .fontColor('#FFFFFF')
                     .width(18)
                     .height(18)
@@ -2118,7 +2209,7 @@ struct Index {
             .height(46)
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
             .fontColor(this.pal().text)
-            .fontSize(15)
+            .fontSize(this.fs(15))
             .placeholderColor(this.pal().text3)
             .caretColor('#22D3EE')
             .borderRadius(23)
@@ -2138,7 +2229,7 @@ struct Index {
             })
           if (this.generating) {
             Text('■')
-              .fontSize(16)
+              .fontSize(this.fs(16))
               .fontColor('#F85749')
               .width(46)
               .height(46)
@@ -2151,7 +2242,7 @@ struct Index {
               })
           }
           Text('↑')
-            .fontSize(20)
+            .fontSize(this.fs(20))
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
             .width(46)
@@ -2226,16 +2317,16 @@ struct Index {
     Column() {
       Row() {
         Text('会话')
-          .fontSize(18)
+          .fontSize(this.fs(18))
           .fontWeight(FontWeight.Bold)
           .fontColor(this.pal().text)
         Text(`${this.sessions.length}`)
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontColor(this.pal().text3)
           .margin({ left: 6 })
         Blank()
         Text('＋ 新建')
-          .fontSize(13)
+          .fontSize(this.fs(13))
           .fontColor('#22D3EE')
           .padding({ left: 12, right: 12, top: 7, bottom: 7 })
           .backgroundColor('rgba(34,211,238,0.10)')
@@ -2252,7 +2343,7 @@ struct Index {
         TextInput({ text: this.sessionSearchInput, placeholder: this.tr('搜索会话…') })
           .layoutWeight(1)
           .height(36)
-          .fontSize(13)
+          .fontSize(this.fs(13))
           .backgroundColor(this.pal().inputBg)
           .fontColor(this.pal().text)
           .placeholderColor(this.pal().text3)
@@ -2273,7 +2364,7 @@ struct Index {
           })
         if (this.sessionSearchActive) {
           Text('清除')
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor(this.pal().text3)
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .backgroundColor(this.pal().inputBg)
@@ -2294,7 +2385,7 @@ struct Index {
           TextInput({ text: this.workspaceTitleInput, placeholder: this.tr('工作区名称') })
             .layoutWeight(1)
             .height(34)
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .backgroundColor(this.pal().inputBg)
             .fontColor(this.pal().text)
             .borderRadius(9)
@@ -2303,7 +2394,7 @@ struct Index {
               this.workspaceTitleInput = value;
             })
           Text('✓')
-            .fontSize(14)
+            .fontSize(this.fs(14))
             .fontColor('#34D399')
             .padding({ left: 8, right: 8 })
             .onClick(() => {
@@ -2318,7 +2409,7 @@ struct Index {
         Scroll() {
           Row({ space: 8 }) {
             Text('跟随当前会话')
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.selectedWorkspaceId.length === 0 ? '#22D3EE' : this.pal().text3)
               .padding({ left: 10, right: 10, top: 5, bottom: 5 })
               .backgroundColor(this.selectedWorkspaceId.length === 0
@@ -2331,7 +2422,7 @@ struct Index {
               })
             ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
               Text(workspace.title.length > 0 ? workspace.title : workspace.path)
-                .fontSize(11)
+                .fontSize(this.fs(11))
                 .maxLines(1)
                 .constraintSize({ maxWidth: 140 })
                 .fontColor(this.selectedWorkspaceId === workspace.workspaceId
@@ -2393,7 +2484,7 @@ struct Index {
             Column() {
             if (this.sessionGroupGap(index).length > 0) {
               Text(this.tr(this.sessionGroupGap(index)))
-                .fontSize(11)
+                .fontSize(this.fs(11))
                 .fontColor(this.pal().text3)
                 .width('100%')
                 .padding({ left: 4, top: index === 0 ? 0 : 10, bottom: 4 })
@@ -2406,14 +2497,14 @@ struct Index {
                 .backgroundColor(session.sessionId === this.currentSessionId ? '#4D6BFE' : this.pal().chip)
               Column({ space: 3 }) {
                 Text(formatSessionTitle(session))
-                  .fontSize(14)
+                  .fontSize(this.fs(14))
                   .fontWeight(session.sessionId === this.currentSessionId ? FontWeight.Medium : FontWeight.Normal)
                   .fontColor(session.sessionId === this.currentSessionId ? this.pal().text : this.pal().text2)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 Row({ space: 6 }) {
                   Text(formatSessionTime(session.updatedAt))
-                    .fontSize(11)
+                    .fontSize(this.fs(11))
                     .fontColor(this.pal().text2)
                   if (session.running) {
                     Row({ space: 3 }) {
@@ -2423,7 +2514,7 @@ struct Index {
                         .borderRadius(2)
                         .backgroundColor('#34D399')
                       Text('运行中')
-                        .fontSize(10)
+                        .fontSize(this.fs(10))
                         .fontColor('#34D399')
                     }
                   }
@@ -2476,7 +2567,7 @@ struct Index {
       Column() {
         Row({ space: 10 }) {
           Text('↑ 上级')
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor(this.pal().text2)
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .backgroundColor(this.pal().chip)
@@ -2485,13 +2576,13 @@ struct Index {
               this.runtime.browseUp();
             })
           Text(this.browsePath)
-            .fontSize(11)
+            .fontSize(this.fs(11))
             .fontColor(this.pal().text3)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
           Text('关闭')
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor(this.pal().text3)
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .onClick(() => {
@@ -2505,16 +2596,16 @@ struct Index {
             ListItem() {
               Row({ space: 10 }) {
                 Text(entry.isDirectory ? '📁' : '📄')
-                  .fontSize(14)
+                  .fontSize(this.fs(14))
                 Text(entry.name)
-                  .fontSize(13)
+                  .fontSize(this.fs(13))
                   .fontColor(this.pal().text)
                   .layoutWeight(1)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 if (!entry.isDirectory && entry.size > 0) {
                   Text(Math.round(entry.size / 1024) + ' KB')
-                    .fontSize(10)
+                    .fontSize(this.fs(10))
                     .fontColor(this.pal().text3)
                 }
               }
@@ -2560,11 +2651,11 @@ struct Index {
         Row() {
           Column({ space: 2 }) {
             Text(this.tr('会话设置'))
-              .fontSize(16)
+              .fontSize(this.fs(16))
               .fontWeight(FontWeight.Bold)
               .fontColor(this.pal().text)
             Text(this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('新会话'))
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2572,7 +2663,7 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           Text('✕')
-            .fontSize(15)
+            .fontSize(this.fs(15))
             .fontColor(this.pal().text3)
             .width(32)
             .height(32)
@@ -2588,10 +2679,10 @@ struct Index {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
             Text(this.tr('模型'))
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
             Text(this.modelSummary())
-              .fontSize(14)
+              .fontSize(this.fs(14))
               .fontColor(this.pal().text)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2599,7 +2690,7 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           Text(this.tr('更换'))
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor('#22D3EE')
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .backgroundColor('rgba(34,211,238,0.10)')
@@ -2617,14 +2708,14 @@ struct Index {
         if (this.currentModelEfforts().length > 0) {
           Column({ space: 6 }) {
             Text(this.tr('推理等级'))
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
               .width('100%')
             Scroll() {
               Row({ space: 8 }) {
                 ForEach(this.currentModelEfforts(), (effort: string) => {
                   Text(effort)
-                    .fontSize(11)
+                    .fontSize(this.fs(11))
                     .fontColor(effort === this.currentModelEffort ? '#0B1220' : this.pal().text2)
                     .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                     .backgroundColor(effort === this.currentModelEffort ? '#22D3EE' : this.pal().inputBg)
@@ -2647,13 +2738,13 @@ struct Index {
         // —— 权限 ——
         Column({ space: 6 }) {
           Text(this.tr('权限'))
-            .fontSize(11)
+            .fontSize(this.fs(11))
             .fontColor(this.pal().text3)
             .width('100%')
           Row({ space: 8 }) {
             ForEach(this.permissionChoices(), (preset: string) => {
               Text(this.permissionChoiceLabel(preset))
-                .fontSize(11)
+                .fontSize(this.fs(11))
                 .fontColor(preset === this.permissionPreset ? '#0B1220' : this.pal().text2)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                 .backgroundColor(preset === this.permissionPreset ? '#34D399' : this.pal().inputBg)
@@ -2673,16 +2764,16 @@ struct Index {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
             Text(this.tr('上下文'))
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
             Text(this.contextPercent > 0 ? `${this.contextPercent}%` : '—')
-              .fontSize(14)
+              .fontSize(this.fs(14))
               .fontColor(this.contextPercent >= 80 ? '#F85749' : this.pal().text)
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           Text(this.tr('压缩上下文'))
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor('#22D3EE')
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .backgroundColor('rgba(34,211,238,0.10)')
@@ -2699,10 +2790,10 @@ struct Index {
         Row({ space: 10 }) {
           Column({ space: 3 }) {
             Text(this.tr('连接'))
-              .fontSize(11)
+              .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
             Text(this.connectionSummary())
-              .fontSize(12)
+              .fontSize(this.fs(12))
               .fontColor(this.pal().text2)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2710,7 +2801,7 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           Text(this.tr('断开连接'))
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor('#F85749')
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .backgroundColor('rgba(248,87,73,0.10)')
@@ -2800,12 +2891,12 @@ struct Index {
       Column() {
         Row() {
           Text('选择模型')
-            .fontSize(16)
+            .fontSize(this.fs(16))
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
           Text('关闭')
-            .fontSize(13)
+            .fontSize(this.fs(13))
             .fontColor(this.pal().text3)
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
             .onClick(() => {
@@ -2817,14 +2908,14 @@ struct Index {
         if (this.pendingModel !== undefined) {
           Column({ space: 6 }) {
             Text('选择 ' + this.pendingModel!.name + ' 的推理等级')
-              .fontSize(12)
+              .fontSize(this.fs(12))
               .fontColor(this.pal().text2)
               .width('100%')
               .padding({ left: 18, right: 18 })
             Scroll() {
               Row({ space: 8 }) {
                 Text('默认')
-                  .fontSize(11)
+                  .fontSize(this.fs(11))
                   .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                   .backgroundColor(this.pal().inputBg)
                   .borderRadius(9)
@@ -2837,7 +2928,7 @@ struct Index {
                   })
                 ForEach(this.pendingModel!.efforts, (effort: string) => {
                   Text(effort)
-                    .fontSize(11)
+                    .fontSize(this.fs(11))
                     .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                     .backgroundColor('rgba(34,211,238,0.10)')
                     .borderRadius(9)
@@ -2861,7 +2952,7 @@ struct Index {
         }
         if (this.modelOptions.length === 0) {
           Text('模型目录为空：请确认主机已配置模型服务商')
-            .fontSize(13)
+            .fontSize(this.fs(13))
             .fontColor(this.pal().text3)
             .padding({ left: 18, right: 18, top: 8, bottom: 24 })
         } else {
@@ -2871,17 +2962,17 @@ struct Index {
                 Row({ space: 10 }) {
                   Column({ space: 2 }) {
                     Text(option.name.length > 0 ? option.name : option.model)
-                      .fontSize(14)
+                      .fontSize(this.fs(14))
                       .fontColor(this.pal().text)
                     Text(option.provider + ' · ' + option.model)
-                      .fontSize(11)
+                      .fontSize(this.fs(11))
                       .fontColor(this.pal().text3)
                   }
                   .alignItems(HorizontalAlign.Start)
                   .layoutWeight(1)
                   if (option.model === this.currentModelLabel) {
                     Text('当前')
-                      .fontSize(11)
+                      .fontSize(this.fs(11))
                       .fontColor('#22D3EE')
                       .padding({ left: 8, right: 8, top: 3, bottom: 3 })
                       .backgroundColor('rgba(34,211,238,0.12)')
@@ -2949,7 +3040,7 @@ struct Index {
     Column() {
       this.SessionsPanelBody()
     }
-    .width(300)
+    .width(this.listPanelWidth())
     .height('100%')
     .backgroundColor(this.pal().panel)
     .border({ width: { right: 0.5 }, color: this.pal().borderStrong })
@@ -2979,7 +3070,7 @@ struct Index {
             }
             if (item.text.length > 0) {
               Text(item.text)
-                .fontSize(15)
+                .fontSize(this.fs(15))
                 .fontColor('#FFFFFF')
                 .textAlign(TextAlign.Start)
             }
@@ -3024,10 +3115,10 @@ struct Index {
         Column({ space: 6 }) {
           Row({ space: 6 }) {
             Text(item.noticeKind === 'error' ? '⚠' : '!')
-              .fontSize(13)
+              .fontSize(this.fs(13))
               .fontColor(item.noticeKind === 'error' ? '#F85749' : '#F0A020')
             Text(this.tr(item.text))
-              .fontSize(13)
+              .fontSize(this.fs(13))
               .fontWeight(FontWeight.Medium)
               .fontColor(item.noticeKind === 'error' ? '#F85749' : '#C88418')
               .textAlign(TextAlign.Start)
@@ -3036,14 +3127,14 @@ struct Index {
           .alignItems(VerticalAlign.Top)
           if (item.reason.length > 0) {
             Text(this.tr(item.reason))
-              .fontSize(12)
+              .fontSize(this.fs(12))
               .fontColor(this.pal().text2)
               .textAlign(TextAlign.Start)
           }
           if (item.actionCommand.length > 0) {
             Button(this.tr('压缩上下文'))
               .height(30)
-              .fontSize(12)
+              .fontSize(this.fs(12))
               .padding({ left: 14, right: 14 })
               .backgroundColor(this.pal().chip)
               .fontColor(this.pal().text)
@@ -3076,7 +3167,7 @@ struct Index {
           this.MdImage(line)
         } else if (line.code) {
           Text(line.text)
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontFamily('monospace')
             .fontColor(this.pal().text2)
             .width('100%')
@@ -3088,10 +3179,10 @@ struct Index {
         } else if (line.bullet) {
           Row({ space: 6 }) {
             Text('·')
-              .fontSize(15)
+              .fontSize(this.fs(15))
               .fontColor(this.pal().text3)
             Text(line.text)
-              .fontSize(15)
+              .fontSize(this.fs(15))
               .fontColor(this.pal().text)
               .layoutWeight(1)
               .wordBreak(WordBreak.BREAK_ALL)
@@ -3100,7 +3191,7 @@ struct Index {
           .width('100%')
         } else if (line.linkUrl.length > 0) {
           Text(line.text)
-            .fontSize(15)
+            .fontSize(this.fs(15))
             .fontColor('#22D3EE')
             .decoration({ type: TextDecorationType.Underline, color: '#22D3EE' })
             .width('100%')
@@ -3280,7 +3371,7 @@ struct Index {
           Text(this.images.errorOf(this.previewSrc).length > 0
             ? this.tr('图片加载失败')
             : this.tr('图片加载中…'))
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor('rgba(255,255,255,0.75)')
         }
         .hitTestBehavior(HitTestMode.None)
@@ -3288,13 +3379,13 @@ struct Index {
       // 顶部：路径 + 关闭
       Row({ space: 10 }) {
         Text(this.previewSrc)
-          .fontSize(11)
+          .fontSize(this.fs(11))
           .fontColor('rgba(255,255,255,0.75)')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
         Text('关闭')
-          .fontSize(13)
+          .fontSize(this.fs(13))
           .fontColor('#FFFFFF')
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           .backgroundColor('rgba(255,255,255,0.18)')
@@ -3504,7 +3595,7 @@ struct Index {
         Column({ space: 6 }) {
           if (item.reasoning.length > 0) {
             Text(item.reasoning)
-              .fontSize(12)
+              .fontSize(this.fs(12))
               .fontColor(this.pal().text2)
               .maxLines(8)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -3520,7 +3611,7 @@ struct Index {
                 .height(14)
                 .color('#22D3EE')
               Text('正在思考…')
-                .fontSize(12)
+                .fontSize(this.fs(12))
                 .fontColor(this.pal().text2)
             }
           }
@@ -3552,21 +3643,21 @@ struct Index {
           .color('#22D3EE')
       } else if (item.toolState === 'failed') {
         Text('✕')
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontColor('#F85749')
       } else {
         Text('✓')
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontColor('#34D399')
       }
       Column({ space: 2 }) {
         Text(item.text)
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontWeight(FontWeight.Medium)
           .fontColor(this.pal().text2)
         if (item.summary.length > 0) {
           Text(item.summary)
-            .fontSize(11)
+            .fontSize(this.fs(11))
             .fontColor(this.pal().text3)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -3575,7 +3666,7 @@ struct Index {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       Text(item.rev === 1 ? this.tr('收起') : this.tr('展开'))
-        .fontSize(11)
+        .fontSize(this.fs(11))
         .fontColor('#22D3EE')
     }
     .width('100%')
@@ -3598,30 +3689,30 @@ struct Index {
           .color('#22D3EE')
       } else if (item.toolState === 'failed') {
         Text('✕')
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontColor('#F85749')
       } else {
         Text('✓')
-          .fontSize(12)
+          .fontSize(this.fs(12))
           .fontColor('#34D399')
       }
       Column({ space: 2 }) {
         Text(item.toolName)
-          .fontSize(13)
+          .fontSize(this.fs(13))
           .fontWeight(FontWeight.Medium)
           .fontColor(this.pal().text)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (item.summary.length > 0) {
           Text(item.summary)
-            .fontSize(12)
+            .fontSize(this.fs(12))
             .fontColor(this.pal().text2)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         if (item.text.length > 0) {
           Text(item.text)
-            .fontSize(11)
+            .fontSize(this.fs(11))
             .fontColor(this.pal().text2)
             .fontFamily('monospace')
             .maxLines(2)

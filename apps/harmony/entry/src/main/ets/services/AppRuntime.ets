@@ -193,6 +193,8 @@ export class AppRuntime {
   themeMode: number = 0;
   /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
   languageMode: number = 0;
+  /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
+  textScaleMode: number = 1;
   /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
   identityBlocked: boolean = false;
   /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
@@ -234,6 +236,30 @@ export class AppRuntime {
     const saving: Promise<void> = this.store.saveLanguageMode(mode);
     saving.catch((error: Error) => {
       logError('save languageMode failed: ' + errorMessage(error));
+    });
+    this.notify();
+  }
+
+  /** 文字大小倍数。 */
+  textScale(): number {
+    if (this.textScaleMode === 0) {
+      return 0.9;
+    }
+    if (this.textScaleMode === 2) {
+      return 1.15;
+    }
+    if (this.textScaleMode === 3) {
+      return 1.3;
+    }
+    return 1;
+  }
+
+  /** 持久化并应用新的文字大小档位。 */
+  setTextScaleMode(mode: number): void {
+    this.textScaleMode = mode;
+    const saving: Promise<void> = this.store.saveTextScale(mode);
+    saving.catch((error: Error) => {
+      logError('save textScale failed: ' + errorMessage(error));
     });
     this.notify();
   }
@@ -313,6 +339,7 @@ export class AppRuntime {
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
       this.languageMode = this.store.loadLanguageMode();
+      this.textScaleMode = this.store.loadTextScale();
       this.applyLanguage();
     } catch (error) {
       const text: string = errorMessage(error);
