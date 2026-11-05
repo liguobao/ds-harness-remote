@@ -213,6 +213,10 @@ function buildEnglish(): Map<string, string> {
   map.set('已保存的登录（一键进入）', 'Saved sign-ins (one tap)');
   map.set('进入', 'Enter');
   map.set('切换服务器', 'Switch server');
+  map.set('更多', 'More');
+  map.set('常用', 'Presets');
+  map.set('本地', 'Local');
+  map.set('官方服务器', 'Official server');
   map.set('登录其他服务器…', 'Sign in to another server…');
   map.set('已保存的登录态，点一下就切（无需重新输密码）',
     'Saved sign-ins — tap one to switch, no password needed');

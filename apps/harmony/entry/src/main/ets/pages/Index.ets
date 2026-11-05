@@ -86,6 +86,10 @@ struct Index {
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
   @State profilesList: SavedProfile[] = [];
+  /** 「更多」面板（替代系统菜单，自己控制对比度）。 */
+  @State showMoreMenu: boolean = false;
+  /** 官方服务器固定地址，切换时直接可选，不用手输。 */
+  private static readonly OFFICIAL_SERVER: string = 'https://dsh.r2049.cn';
   @State textScaleValue: number = 1;
   /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
   @State windowWidthVp: number = 0;
@@ -428,6 +432,18 @@ struct Index {
     if (sheets.length === 0) {
       return;
     }
+    // 固定两个常用出口：官方（公网/中转）与本地（局域网直连）
+    const officialSaved: SavedProfile | undefined = this.findProfile('https://dsh.r2049.cn');
+    sheets.push({
+      title: (officialSaved !== undefined ? '✓ ' : '') + this.tr('官方服务器') + ' · dsh.r2049.cn',
+      action: () => {
+        if (officialSaved !== undefined) {
+          this.runtime.switchProfile(officialSaved);
+        } else {
+          this.prefillAndLogout('https://dsh.r2049.cn');
+        }
+      }
+    });
     sheets.push({
       title: this.tr('登录其他服务器…'),
       action: () => {
@@ -439,6 +455,23 @@ struct Index {
       message: this.tr('已保存的登录态，点一下就切（无需重新输密码）'),
       sheets: sheets
     });
+  }
+
+  /** 在已保存登录态里按服务器找一条。 */
+  private findProfile(baseUrl: string): SavedProfile | undefined {
+    for (const profile of this.profilesList) {
+      if (profile.baseUrl === baseUrl) {
+        return profile;
+      }
+    }
+    return undefined;
+  }
+
+  /** 退出登录并把登录页的服务器地址预填成指定值（点击官方/本地切换时用）。 */
+  private prefillAndLogout(baseUrl: string): void {
+    this.serverInput = baseUrl;
+    this.fieldsPrefilled = true;
+    this.runtime.logout();
   }
 
   /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
@@ -1094,6 +1127,9 @@ struct Index {
       if (this.showSessions && !this.isLandscape) {
         this.SessionsOverlay()
       }
+      if (this.showMoreMenu) {
+        this.MoreMenuOverlay()
+      }
       if (this.showSessionPanel) {
         this.SessionPanelOverlay()
       }
@@ -1175,6 +1211,98 @@ struct Index {
     .shadow({ radius: 20, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
     .margin({ bottom: 92 })
     .hitTestBehavior(HitTestMode.None)
+  }
+
+  /**
+   * 设备页「更多」面板：系统菜单在深色/浅色下对比度不受控（退出登录看不清），
+   * 改成自己画：每行大字号 + 明确的底色，退出登录用红底白字。
+   */
+  @Builder
+  MoreMenuOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.showMoreMenu = false;
+        })
+      Column({ space: 10 }) {
+        Text(this.tr('更多'))
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.pal().text)
+          .width('100%')
+        Row({ space: 8 }) {
+          Text(this.tr('切换服务器'))
+            .fontSize(15)
+            .fontColor(this.pal().text)
+          Text(this.runtime.email.length > 0 ? this.runtime.email : '')
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+        .padding({ top: 14, bottom: 14, left: 16, right: 16 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .onClick(() => {
+          this.showMoreMenu = false;
+          this.openAccountSwitcher();
+        })
+        Text(this.tr('退出登录'))
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 14, bottom: 14 })
+          .backgroundColor('#E5484D')
+          .borderRadius(14)
+          .onClick(() => {
+            this.showMoreMenu = false;
+            AlertDialog.show({
+              title: this.tr('退出登录'),
+              message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
+              autoCancel: true,
+              primaryButton: {
+                value: this.tr('取消'),
+                action: () => {
+                }
+              },
+              secondaryButton: {
+                value: this.tr('退出'),
+                fontColor: '#F85749',
+                action: () => {
+                  this.runtime.logout();
+                }
+              }
+            });
+          })
+        Text(this.tr('取消'))
+          .fontSize(14)
+          .fontColor(this.pal().text2)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 12, bottom: 12 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(14)
+          .onClick(() => {
+            this.showMoreMenu = false;
+          })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 420 })
+      .padding({ left: 20, right: 20, top: 18, bottom: 26 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: 1, color: this.pal().border })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 设置面板：主题做成可选列表，不再靠一颗按钮循环切。 */
@@ -1473,6 +1601,33 @@ struct Index {
         .width('100%')
         .padding({ top: 4, bottom: 4 })
       }
+      Row({ space: 8 }) {
+        Text(this.tr('常用'))
+          .fontSize(11)
+          .fontColor(this.pal().text3)
+        Text('官方 ' + 'dsh.r2049.cn')
+          .fontSize(11)
+          .fontColor(this.serverInput.indexOf('dsh.r2049.cn') >= 0 ? '#0B1220' : this.pal().text2)
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .backgroundColor(this.serverInput.indexOf('dsh.r2049.cn') >= 0 ? '#22D3EE' : this.pal().chip)
+          .borderRadius(9)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.serverInput = 'https://dsh.r2049.cn';
+          })
+        Text(this.tr('本地') + ' 192.168.11.128')
+          .fontSize(11)
+          .fontColor(this.serverInput.indexOf('192.168.11.128') >= 0 ? '#0B1220' : this.pal().text2)
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .backgroundColor(this.serverInput.indexOf('192.168.11.128') >= 0 ? '#22D3EE' : this.pal().chip)
+          .borderRadius(9)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            this.serverInput = 'http://192.168.11.128:8080';
+          })
+      }
+      .width('100%')
+      .padding({ top: 2, bottom: 2 })
       TextInput({ text: this.serverInput, placeholder: this.tr('服务器地址（http://…）') })
         .height(48)
         .backgroundColor(this.pal().chip)
@@ -1784,7 +1939,9 @@ struct Index {
         .height(32)
         .backgroundColor(this.pal().chip)
         .border({ width: 1, color: this.pal().borderStrong })
-        .bindMenu(this.devicesMenu())
+        .onClick(() => {
+          this.showMoreMenu = true;
+        })
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 16, bottom: 12 })
