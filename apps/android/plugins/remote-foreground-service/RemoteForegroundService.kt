@@ -21,6 +21,7 @@ import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.Bundle
 import android.util.Log
+import android.text.format.DateUtils
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -163,11 +164,19 @@ class RemoteForegroundService : Service() {
   private fun formatRelativeTime(updatedAtMs: Long): String {
     if (updatedAtMs <= 0L) return ""
     val diffSec = maxOf(0L, (System.currentTimeMillis() - updatedAtMs) / 1000)
-    return when {
-      diffSec < 60 -> "刚刚"
-      diffSec < 3600 -> "${diffSec / 60} 分钟前"
-      diffSec < 86400 -> "${diffSec / 3600} 小时前"
-      else -> "${diffSec / 86400} 天前"
+    return try {
+      when {
+        diffSec < 60 -> getString(R.string.live_task_time_just_now)
+        diffSec < 3600 -> getString(R.string.live_task_time_minutes_ago, (diffSec / 60).toInt())
+        diffSec < 86400 -> getString(R.string.live_task_time_hours_ago, (diffSec / 3600).toInt())
+        else -> getString(R.string.live_task_time_days_ago, (diffSec / 86400).toInt())
+      }
+    } catch (_: Exception) {
+      DateUtils.getRelativeTimeSpanString(
+        updatedAtMs,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS
+      ).toString()
     }
   }
 
@@ -190,7 +199,11 @@ class RemoteForegroundService : Service() {
       )
 
       val status = if (task.statusText.isNotBlank()) task.statusText else {
-        if (task.isWaitingInput) "待确认" else "运行中"
+        try {
+          if (task.isWaitingInput) getString(R.string.live_task_status_waiting) else getString(R.string.live_task_status_running)
+        } catch (_: Exception) {
+          if (task.isWaitingInput) "Waiting" else "Running"
+        }
       }
       val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
       val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running

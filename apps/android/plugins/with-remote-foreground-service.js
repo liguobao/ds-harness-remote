@@ -11,6 +11,90 @@ const PACKAGE = 'io.github.liguobao.dshremote'
 const JAVA_PATH = PACKAGE.replaceAll('.', path.sep)
 const SOURCE_DIR = path.join(__dirname, 'remote-foreground-service')
 
+const stringLocales = {
+  'values': {
+    ask_agent_process_text: 'Ask Agent',
+    live_task_time_just_now: 'Just now',
+    live_task_time_minutes_ago: '%1$d min ago',
+    live_task_time_hours_ago: '%1$d hr ago',
+    live_task_time_days_ago: '%1$d d ago',
+    live_task_status_running: 'Running',
+    live_task_status_waiting: 'Waiting',
+  },
+  'values-zh': {
+    ask_agent_process_text: '询问智能体',
+    live_task_time_just_now: '刚刚',
+    live_task_time_minutes_ago: '%1$d 分钟前',
+    live_task_time_hours_ago: '%1$d 小时前',
+    live_task_time_days_ago: '%1$d 天前',
+    live_task_status_running: '运行中',
+    live_task_status_waiting: '待确认',
+  },
+  'values-zh-rCN': {
+    ask_agent_process_text: '询问智能体',
+    live_task_time_just_now: '刚刚',
+    live_task_time_minutes_ago: '%1$d 分钟前',
+    live_task_time_hours_ago: '%1$d 小时前',
+    live_task_time_days_ago: '%1$d 天前',
+    live_task_status_running: '运行中',
+    live_task_status_waiting: '待确认',
+  },
+  'values-zh-rTW': {
+    ask_agent_process_text: '詢問智慧體',
+    live_task_time_just_now: '剛剛',
+    live_task_time_minutes_ago: '%1$d 分鐘前',
+    live_task_time_hours_ago: '%1$d 小時前',
+    live_task_time_days_ago: '%1$d 天前',
+    live_task_status_running: '運行中',
+    live_task_status_waiting: '待確認',
+  },
+  'values-zh-rHK': {
+    ask_agent_process_text: '詢問智慧體',
+    live_task_time_just_now: '剛剛',
+    live_task_time_minutes_ago: '%1$d 分鐘前',
+    live_task_time_hours_ago: '%1$d 小時前',
+    live_task_time_days_ago: '%1$d 天前',
+    live_task_status_running: '運行中',
+    live_task_status_waiting: '待確認',
+  },
+  'values-ja': {
+    ask_agent_process_text: 'エージェントに質問',
+    live_task_time_just_now: 'たった今',
+    live_task_time_minutes_ago: '%1$d分前',
+    live_task_time_hours_ago: '%1$d時間前',
+    live_task_time_days_ago: '%1$d日前',
+    live_task_status_running: '実行中',
+    live_task_status_waiting: '確認待ち',
+  },
+  'values-es': {
+    ask_agent_process_text: 'Preguntar al agente',
+    live_task_time_just_now: 'Ahora mismo',
+    live_task_time_minutes_ago: 'Hace %1$d min',
+    live_task_time_hours_ago: 'Hace %1$d h',
+    live_task_time_days_ago: 'Hace %1$d d',
+    live_task_status_running: 'En ejecución',
+    live_task_status_waiting: 'Esperando',
+  },
+  'values-fr': {
+    ask_agent_process_text: "Demander à l\\\\'agent",
+    live_task_time_just_now: "À l\\\\'instant",
+    live_task_time_minutes_ago: 'Il y a %1$d min',
+    live_task_time_hours_ago: 'Il y a %1$d h',
+    live_task_time_days_ago: 'Il y a %1$d j',
+    live_task_status_running: 'En cours',
+    live_task_status_waiting: 'En attente',
+  },
+  'values-de': {
+    ask_agent_process_text: 'Agent fragen',
+    live_task_time_just_now: 'Gerade eben',
+    live_task_time_minutes_ago: 'Vor %1$d Min.',
+    live_task_time_hours_ago: 'Vor %1$d Std.',
+    live_task_time_days_ago: 'Vor %1$d T.',
+    live_task_status_running: 'Wird ausgeführt',
+    live_task_status_waiting: 'Wartend',
+  },
+}
+
 function withRemoteForegroundService(config) {
   config = withAndroidManifest(config, config => {
     const manifest = config.modResults.manifest
@@ -214,39 +298,30 @@ function withRemoteForegroundService(config) {
       }
       copyDir(srcResDir, resDir)
     }
-    const stringLocales = {
-      'values': 'Ask Agent',
-      'values-zh': '询问智能体',
-      'values-zh-rCN': '询问智能体',
-      'values-zh-rTW': '詢問智慧體',
-      'values-zh-rHK': '詢問智慧體',
-      'values-ja': 'エージェントに質問',
-      'values-es': 'Preguntar al agente',
-      'values-fr': "Demander à l\\'agent",
-      'values-de': 'Agent fragen',
-    }
 
-    for (const [folder, text] of Object.entries(stringLocales)) {
+    for (const [folder, stringsMap] of Object.entries(stringLocales)) {
       const targetDir = path.join(resDir, folder)
       fs.mkdirSync(targetDir, { recursive: true })
       const stringsFile = path.join(targetDir, 'strings.xml')
-      if (fs.existsSync(stringsFile)) {
-        let content = fs.readFileSync(stringsFile, 'utf8')
-        if (content.includes('name="ask_agent_process_text"')) {
-          content = content.replace(/<string name="ask_agent_process_text">.*?<\/string>/s, `<string name="ask_agent_process_text">${text}</string>`)
+      let content = fs.existsSync(stringsFile)
+        ? fs.readFileSync(stringsFile, 'utf8')
+        : '<resources>\n</resources>\n'
+      for (const [key, text] of Object.entries(stringsMap)) {
+        const regex = new RegExp(`<string name="${key}">.*?</string>`, 's')
+        if (regex.test(content)) {
+          content = content.replace(regex, () => `<string name="${key}">${text}</string>`)
         } else {
-          content = content.replace('</resources>', `  <string name="ask_agent_process_text">${text}</string>\n</resources>`)
+          content = content.replace('</resources>', () => `  <string name="${key}">${text}</string>\n</resources>`)
         }
-        fs.writeFileSync(stringsFile, content, 'utf8')
-      } else {
-        const content = `<resources>\n  <string name="ask_agent_process_text">${text}</string>\n</resources>\n`
-        fs.writeFileSync(stringsFile, content, 'utf8')
       }
+      fs.writeFileSync(stringsFile, content, 'utf8')
     }
 
     return config
   }])
 }
+
+withRemoteForegroundService.stringLocales = stringLocales
 
 module.exports = withRemoteForegroundService
 
