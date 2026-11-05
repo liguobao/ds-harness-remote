@@ -21,19 +21,25 @@ import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Bot,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   Clock,
   Puzzle,
   Folder,
   FolderOpen,
   FolderPlus,
+  Laptop,
   LayoutGrid,
+  Monitor,
   Plus,
   RefreshCw,
   Search,
+  Server,
+  Settings,
   Sliders,
   X,
 } from 'lucide-react-native'
@@ -42,7 +48,7 @@ import { useAppStore } from '../state/store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
 import { GroupCard, GroupRow, IconButton } from '../ui/components'
-import { brandGlowShadow, floatingShadow, radius, spacing, type } from '../ui/theme'
+import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { resolveSessionDisplayTitle } from './session-title'
@@ -124,6 +130,8 @@ export function HostSessionsDrawer({
   onNewSession,
   onOpenAutomationTasks,
   onOpenPlugins,
+  onOpenHostSwitcher,
+  onOpenSettings,
   inline = false,
   backLabel,
 }: {
@@ -134,12 +142,16 @@ export function HostSessionsDrawer({
   onNewSession?: () => Promise<void> | void
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
+  onOpenHostSwitcher?: () => void
+  onOpenSettings?: () => void
   inline?: boolean
   backLabel?: string
 }) {
   const language = useAppStore(state => state.language)
   const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
   const deviceName = useAppStore(state => state.selectedDevice?.name)
+  const platform = useAppStore(state => state.selectedDevice?.platform)
+  const connectionPhase = useAppStore(state => state.connection.phase)
   const sessions = useAppStore(state => state.sessions)
   const recentIds = useAppStore(state => state.currentWorkSessionIds)
   const availableBackends = useAppStore(state => [
@@ -314,8 +326,6 @@ export function HostSessionsDrawer({
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
 
-  const creatingSessionRef = useRef(false)
-  const lastNewSessionTimeRef = useRef(0)
   useEffect(() => {
     if (renameTarget) {
       setRenameDraft(renameTarget.currentTitle)
@@ -359,54 +369,6 @@ export function HostSessionsDrawer({
     })
     return () => cancelAnimationFrame(raf)
   }, [showConfigModal])
-
-  const handleNewSession = async () => {
-    const now = Date.now()
-    if (now - lastNewSessionTimeRef.current < 800) return
-    if (creatingSessionRef.current || busy !== undefined || !connected) return
-
-    creatingSessionRef.current = true
-    lastNewSessionTimeRef.current = now
-    try {
-      if (onNewSession) {
-        closeDrawer()
-        await onNewSession()
-        return
-      }
-
-      const isReusableBlank = (s: RemoteSession): boolean => {
-        if (s.blank === true) return true
-        if (s.blank === false) return false
-        const localMsgs = useAppStore.getState().messages[s.sessionId]
-        return Array.isArray(localMsgs) && localMsgs.length === 0
-      }
-
-      const isCurrentBlank = selected !== undefined && isReusableBlank(selected)
-      if (isCurrentBlank && (selected.backend ?? 'harness') === backend) {
-        closeDrawer()
-        return
-      }
-
-      const existingBlank = sessions.find((s: RemoteSession) =>
-        (s.backend ?? 'harness') === backend
-        && !archivedIds.includes(s.sessionId)
-        && isReusableBlank(s),
-      )
-      if (existingBlank) {
-        closeDrawer()
-        await onSelect(existingBlank)
-        return
-      }
-
-      const targetWs = workspaces.find((w: WorkspaceView) => (w.backend ?? 'harness') === backend)?.workspaceId ?? backendWorkspaces[0]?.workspaceId
-      const ok = await createSession(targetWs, backend)
-      if (ok) closeDrawer()
-    } catch {
-      // guard unhandled promise rejections
-    } finally {
-      creatingSessionRef.current = false
-    }
-  }
 
   const handleRefresh = async () => {
     if (refreshing || busy !== undefined || !connected) return
@@ -680,6 +642,35 @@ export function HostSessionsDrawer({
     </View>
   )
 
+  const hostStatusDotColor = connectionPhase === 'connected'
+    ? colors.success
+    : connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+      ? colors.warning
+      : colors.disabled
+  const hostStatusLabel = connectionPhase === 'connected'
+    ? strings.status.online
+    : connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+      ? strings.status.waiting
+      : strings.status.offline
+  const FooterHostIcon = platform === 'win32' ? Monitor : platform === 'linux' ? Server : Laptop
+  const hostFooterDeviceInfo = (
+    <>
+      <View style={styles.hostFooterIcon}>
+        <FooterHostIcon size={20} color={colors.ink} strokeWidth={1.8} />
+      </View>
+      <View style={styles.hostFooterInfo}>
+        <View style={styles.hostFooterNameRow}>
+          <Text numberOfLines={1} style={styles.hostFooterName}>{deviceName ?? strings.devices.title}</Text>
+          <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />
+        </View>
+        <View style={styles.hostFooterStatusRow}>
+          <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
+          <Text style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
+        </View>
+      </View>
+    </>
+  )
+
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
       {/* 当前主机 */}
@@ -690,6 +681,17 @@ export function HostSessionsDrawer({
           <Text style={styles.brandTitle} numberOfLines={1}>{deviceName ?? strings.devices.title}</Text>
         </Pressable>
         <View style={styles.brandRight}>
+          {onOpenHostSwitcher !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.remoteHosts.switchTitle}
+              onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
+              hitSlop={8}
+              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+            >
+              <ArrowLeftRight size={17} color={colors.ink} strokeWidth={1.9} />
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.common.refresh}
@@ -829,6 +831,7 @@ export function HostSessionsDrawer({
         ListEmptyComponent={groupsReady ? null : <ActivityIndicator color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
         keyExtractor={item => item.sessionId}
         keyboardShouldPersistTaps="handled"
+        style={styles.sectionList}
         contentContainerStyle={styles.listContainer}
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => {
@@ -1033,15 +1036,35 @@ export function HostSessionsDrawer({
         }}
       />
 
-      <View style={styles.newSessionFloat} pointerEvents="box-none">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={strings.sessions.newSession}
-          onPress={() => void handleNewSession()}
-          style={({ pressed }) => [styles.newSessionBtnRound, pressed && styles.pressedFade]}
-        >
-          <OfficialMenuIcons.newChat size={22} color={colors.onInverse} />
-        </Pressable>
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧唯一设置按钮 */}
+      <View style={styles.hostFooterBar}>
+        {onOpenHostSwitcher !== undefined ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
+            onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
+            style={({ pressed }) => [styles.hostFooterLeft, pressed && styles.pressedBg]}
+          >
+            {hostFooterDeviceInfo}
+          </Pressable>
+        ) : (
+          <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
+        )}
+        {onOpenSettings !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.settings.title}
+            onPress={() => {
+              Keyboard.dismiss()
+              if (!inline) closeDrawer()
+              onOpenSettings()
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+          >
+            <Settings size={18} color={colors.ink} strokeWidth={1.9} />
+          </Pressable>
+        )}
       </View>
 
       {/* 会话上下文操作浮层/菜单 */}
@@ -1388,23 +1411,11 @@ const createStyles = (colors: ThemeColors) =>
     iconBtn: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
 
-    // Floating black pill, as in the reference sidebar.
-    newSessionFloat: { position: 'absolute', right: spacing.lg, bottom: spacing.lg, zIndex: 20 },
-    newSessionBtnRound: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.inverse,
-      ...brandGlowShadow(colors),
-    },
-
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.md,
-      paddingHorizontal: spacing.md,
+      gap: 14,
+      paddingHorizontal: spacing.sm,
       height: 50,
       marginHorizontal: spacing.xs,
       borderRadius: radius.lg,
@@ -1437,7 +1448,38 @@ const createStyles = (colors: ThemeColors) =>
     },
     searchInput: { flex: 1, ...type.body, fontSize: 15, color: colors.ink, paddingVertical: 0 },
 
-    listContainer: { paddingBottom: 104 },
+    listContainer: { paddingBottom: spacing.xl },
+
+    // 底部常驻栏：左侧当前远程主机状态/切换入口，右侧唯一设置圆钮
+    hostFooterBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+      backgroundColor: colors.background,
+      paddingLeft: spacing.xs,
+      paddingRight: spacing.md,
+      paddingVertical: 10,
+    },
+    hostFooterLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: radius.lg,
+    },
+    hostFooterIcon: { width: 20, alignItems: 'center', justifyContent: 'center' },
+    hostFooterInfo: { flex: 1, minWidth: 0, gap: 2 },
+    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
+    hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
+    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
+    hostFooterStatusText: { ...type.caption, color: colors.muted },
+    sectionList: { flex: 1 },
 
     workspaceRow: {
       flexDirection: 'row',

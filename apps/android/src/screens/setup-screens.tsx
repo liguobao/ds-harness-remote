@@ -6,7 +6,7 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
@@ -988,12 +988,13 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onSwitchServer }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
   onAbout: () => void
   onDevices?: () => void
+  onRemoteHosts?: () => void
   onSwitchServer?: () => void
 }) {
   const insets = useSafeAreaInsets()
@@ -1023,6 +1024,9 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
+          )}
+          {onRemoteHosts !== undefined && (
+            <HomeMenuRow icon={SlidersHorizontal} label={zhCN.remoteHosts.title} onPress={onRemoteHosts} />
           )}
           {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
           <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />

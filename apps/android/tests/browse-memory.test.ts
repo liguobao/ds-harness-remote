@@ -1,5 +1,6 @@
 import { encryptFrame, decryptFrame, fromBase64Url } from '@dsh-remote/crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { RemoteSession, WorkspaceView } from '../src/types'
 
 const {files, keys} = vi.hoisted(() => ({files: new Map<string, string>(), keys: new Map<string, string>()}))
@@ -65,4 +66,62 @@ it('rejects tampered browsing-state ciphertext and leaves online history indepen
   const name='file:///app/remote-browse.enc', frame=JSON.parse(files.get(name)!)
   frame.ciphertext=frame.ciphertext.slice(0,-3)+'abc'; files.set(name,JSON.stringify(frame))
   const b=await load(); expect(b.useBrowseMemory.getState().error).toBeTruthy(); expect(b.useBrowseMemory.getState().entries).toEqual({})
+})
+
+it('defaults autoConnectHost to enabled, persists toggles and restores legacy snapshots', async () => {
+  const name = 'file:///app/remote-browse.enc', aad = 'dsh-remote-private-browse-v1'
+  const secret = () => fromBase64Url(keys.get('dshremote.browse-key.v1')!)
+  const read = (): any => JSON.parse(new TextDecoder().decode(
+    decryptFrame(secret(), JSON.parse(files.get(name)!), aad)))
+  const rewrite = (mutate: (data: any) => void): void => {
+    const data = read()
+    mutate(data)
+    files.set(name, JSON.stringify(encryptFrame(secret(), new TextEncoder().encode(JSON.stringify(data)), aad)))
+  }
+  await runScenarios([
+    {
+      name: 'a fresh install enables autoConnectHost',
+      run: async () => {
+        const a = await load()
+        expect(a.useBrowseMemory.getState().autoConnectHost).toBe(true)
+      },
+    },
+    {
+      name: 'browsePreference persists an off and on toggle across reloads',
+      run: async () => {
+        const a = await load()
+        a.browsePreference({ autoConnectHost: false })
+        await a.flushBrowseMemory()
+        expect(read().autoConnectHost).toBe(false)
+        const b = await load()
+        expect(b.useBrowseMemory.getState().autoConnectHost).toBe(false)
+        b.browsePreference({ autoConnectHost: true })
+        await b.flushBrowseMemory()
+        expect(read().autoConnectHost).toBe(true)
+        const c = await load()
+        expect(c.useBrowseMemory.getState().autoConnectHost).toBe(true)
+      },
+    },
+    {
+      name: 'an old encrypted snapshot without autoConnectHost stays enabled',
+      run: async () => {
+        const a = await load()
+        await a.flushBrowseMemory()
+        rewrite(data => { delete data.autoConnectHost })
+        const b = await load()
+        expect(b.useBrowseMemory.getState().autoConnectHost).toBe(true)
+      },
+    },
+    {
+      name: 'a non-boolean autoConnectHost value is rejected in favor of the default',
+      run: async () => {
+        const a = await load()
+        a.browsePreference({ autoConnectHost: false })
+        await a.flushBrowseMemory()
+        rewrite(data => { data.autoConnectHost = 'disabled' })
+        const b = await load()
+        expect(b.useBrowseMemory.getState().autoConnectHost).toBe(true)
+      },
+    },
+  ], () => { files.clear(); keys.clear() })
 })
