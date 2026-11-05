@@ -299,10 +299,39 @@ currentRoundTripTimeMs=4`、`authenticated peer channel ready {"transport":"LAN"
 - 修完实测：`数据面路径=lan`、`transport.selected sent transport=lan`、
   `connected to host … transport=lan`
 
+## 2026-11-05 13:05（修斜杠命令与权限切换，V0.08.4）
+
+查权限 chip 不生效时，挖出两个更底层的问题：
+
+**1. 斜杠命令一直是坏的。** `commands/execute` 的参数形状写错了：
+- 错：`{request: {sessionId, line}}`
+- 对：`{agentId: sessionId, line, submittedAttachments: []}`（DSH descriptor 里 `agentId` 是 lookup 传参，
+  `submittedAttachments` 必填）
+
+所以 `/compact`、`/permission` 这些以前全部报 `RPC parameters are invalid`，
+被 `trySlashCommand` 的兜底当普通消息发出去——等于命令从没生效过。
+
+**2. 回执文案在里层。** `commands/execute` 返回 `{commandId, result:{kind:'success'|'error', text?}}`，
+以前直接读顶层 `text`，永远拿到空串。现在统一走 `commandReplyText()`。
+
+**3. 运行期切权限根本没有 RPC。** session API 没有 `selectPermission`（只有 `session/create` 时能指定），
+DSH 运行期切换用的是内置命令 `/permission <preset>`（`@deepseek-ai/dsh-permission-presets` 注册）。
+客户端改成走命令通道，并从回执里学可选项：
+
+```
+permission state: current preset danger-full-access (available: read-only, workspace-write, danger-full-access)
+permission switch -> read-only : preset read-only
+permission switch -> danger-full-access : preset danger-full-access
+```
+
+面板现在：打开齿轮时 `refreshPermissionState()` 读一次当前值+可选项，chip 按主机真实清单渲染并高亮当前档；
+`permission/preset` 事件也会同步权威值。
+
 ## 版本历史
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.08.4 | 1000041 | 修 commands/execute 参数与回执解析；权限切换改走 /permission |
 | 0.08.1 | 1000038 | 等 answer 预算 12s→16s；回落中继后忽略迟到信令 |
 | 0.08.0 | 1000037 | 齿轮面板 + 修模型切换（modelCatalog 无参） |
 | 0.07.2 | 1000035 | 历史图片回显：session/attachment 拉字节并缓存 |

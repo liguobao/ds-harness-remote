@@ -74,6 +74,8 @@ struct Index {
   @State currentModelLabel: string = '';
   @State currentModelProvider: string = '';
   @State currentModelEffort: string = '';
+  @State permissionPreset: string = '';
+  @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
   @State selectedWorkspaceId: string = '';
@@ -230,6 +232,8 @@ struct Index {
     this.currentModelLabel = this.runtime.currentModelLabel;
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
+    this.permissionPreset = this.runtime.permissionPreset;
+    this.permissionOptionsList = this.runtime.permissionOptions.slice();
     this.workspaces = this.runtime.workspaces;
     this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
     this.browsePath = this.runtime.browsePath;
@@ -1808,6 +1812,7 @@ struct Index {
             if (!this.runtime.modelCatalogLoaded) {
               this.runtime.refreshModelCatalog();
             }
+            this.runtime.refreshPermissionState();
             this.showSessionPanel = true;
           })
         Text('＋')
@@ -2643,9 +2648,9 @@ struct Index {
             ForEach(this.permissionChoices(), (preset: string) => {
               Text(this.permissionChoiceLabel(preset))
                 .fontSize(11)
-                .fontColor(preset === this.runtime.permissionPreset ? '#0B1220' : this.pal().text2)
+                .fontColor(preset === this.permissionPreset ? '#0B1220' : this.pal().text2)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .backgroundColor(preset === this.runtime.permissionPreset ? '#34D399' : this.pal().inputBg)
+                .backgroundColor(preset === this.permissionPreset ? '#34D399' : this.pal().inputBg)
                 .borderRadius(10)
                 .border({ width: 1, color: this.pal().border })
                 .onClick(() => {
@@ -2744,7 +2749,11 @@ struct Index {
     return [];
   }
 
+  /** 主机报告的预设清单优先；没读到就退回内置三项。 */
   private permissionChoices(): string[] {
+    if (this.permissionOptionsList.length > 0) {
+      return this.permissionOptionsList;
+    }
     return ['read-only', 'workspace-write', 'danger-full-access'];
   }
 
@@ -2755,7 +2764,10 @@ struct Index {
     if (preset === 'workspace-write') {
       return this.tr('可写');
     }
-    return this.tr('完全');
+    if (preset === 'danger-full-access') {
+      return this.tr('完全');
+    }
+    return preset;
   }
 
   /** 面板里的连接行：主机 + 数据面。 */

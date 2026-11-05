@@ -381,9 +381,20 @@ export class HarnessAlphaClient {
    * 执行一条斜杠命令。
    * 主机不识别时返回 undefined，调用方应回退成普通 prompt 发送。
    */
+  /**
+   * 执行一条斜杠命令。
+   *
+   * 参数形状按 DSH 的 commands/execute descriptor：`agentId`（= SessionId，lookup 传参）、
+   * `line`、以及必填的 `submittedAttachments`（空数组）。以前包成 {request:{sessionId,line}}
+   * 会被判 "RPC parameters are invalid"，于是 /compact、/permission 全都静默回退成普通消息。
+   */
   async commandsExecute(sessionId: string, line: string): Promise<Record<string, Object> | undefined> {
-    const request: Record<string, Object> = { 'sessionId': sessionId, 'line': line };
-    const args: Record<string, Object> = { 'request': request };
+    const attachments: Object[] = [];
+    const args: Record<string, Object> = {
+      'agentId': sessionId,
+      'line': line,
+      'submittedAttachments': attachments
+    };
     const value: Object = await this.callValue('commands/execute', args);
     logInfo('commands/execute ok: ' + line.split(' ')[0]);
     return asRecord(value);

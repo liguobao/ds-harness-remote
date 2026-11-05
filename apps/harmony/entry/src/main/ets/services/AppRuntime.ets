@@ -80,6 +80,18 @@ export class ChatItem {
  * Application state machine: login -> devices -> connect -> chat.
  * The UI subscribes via `onUiUpdate` and copies the public fields into @State.
  */
+/** commands/execute 的回执是 `{commandId, result:{kind,text}}`，文案在里层。 */
+function commandReplyText(result: Record<string, Object> | undefined): string {
+  if (result === undefined) {
+    return '';
+  }
+  const inner: Record<string, Object> | undefined = asRecord(result['result']);
+  if (inner !== undefined) {
+    return jsonStr(inner, 'text', '');
+  }
+  return jsonStr(result, 'text', '');
+}
+
 export class AppRuntime {
   private store: SecureStore = new SecureStore();
   private config: StoredServerConfig | undefined = undefined;
@@ -135,6 +147,8 @@ export class AppRuntime {
   contextPercent: number = 0;
   /** 当前会话的权限预设；空表示未从主机读到。 */
   permissionPreset: string = '';
+  /** 主机上可切换的权限预设名（来自 /permission 回执，拿不到用内置三项）。 */
+  permissionOptions: string[] = [];
   /** 文件浏览：当前目录路径与条目。 */
   browsePath: string = '';
   directoryEntries: DirectoryEntry[] = [];
@@ -672,7 +686,7 @@ export class AppRuntime {
     line: string): Promise<boolean> {
     try {
       const result: Record<string, Object> | undefined = await harness.commandsExecute(sessionId, line);
-      const text: string = result !== undefined ? jsonStr(result, 'text', '') : '';
+      const text: string = commandReplyText(result);
       if (text.length === 0) {
         // 有些命令（如 /permission）只产生副作用、没有文字回执。
         // 不能静默吞掉输入，否则用户会以为消息丢了。
@@ -1092,12 +1106,72 @@ export class AppRuntime {
       return;
     }
     try {
-      await harness.selectPermission(sessionId, preset);
+      // DSH 的 session API 没有 selectPermission（只在 create 时能指定），运行期切换走内置命令
+      const result: Record<string, Object> | undefined =
+        await harness.commandsExecute(sessionId, '/permission ' + preset);
+      const text: string = commandReplyText(result);
+      logInfo('permission switch -> ' + preset + ' : ' + text);
+      if (text.indexOf('unknown preset') >= 0) {
+        this.errorMsg = text;
+        this.parsePermissionOptions(text);
+        this.notify();
+        return;
+      }
       this.permissionPreset = preset;
+      this.errorMsg = '';
       this.notify();
     } catch (error) {
       this.errorMsg = errorMessage(error);
       this.notify();
+    }
+  }
+
+  /** 读一次 `/permission`（不带参数）：回执带当前值与可选项，用来把面板铺对。 */
+  async refreshPermissionState(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      const result: Record<string, Object> | undefined =
+        await harness.commandsExecute(sessionId, '/permission');
+      const text: string = commandReplyText(result);
+      logInfo('permission state: ' + text);
+      const at: number = text.indexOf('current preset ');
+      if (at >= 0) {
+        const tail: string = text.substring(at + 'current preset '.length);
+        const space: number = tail.indexOf(' ');
+        const current: string = space >= 0 ? tail.substring(0, space) : tail;
+        if (current.length > 0) {
+          this.permissionPreset = current;
+        }
+      }
+      this.parsePermissionOptions(text);
+      this.notify();
+    } catch (error) {
+      logWarn('permission state unavailable: ' + errorMessage(error));
+    }
+  }
+
+    /** 从 `(available: a, b, c)` 里取可选项。 */
+  private parsePermissionOptions(text: string): void {
+    const at: number = text.indexOf('(available: ');
+    if (at < 0) {
+      return;
+    }
+    const tail: string = text.substring(at + '(available: '.length);
+    const close: number = tail.indexOf(')');
+    const body: string = close >= 0 ? tail.substring(0, close) : tail;
+    const names: string[] = [];
+    for (const piece of body.split(',')) {
+      const name: string = piece.trim();
+      if (name.length > 0 && !names.includes(name)) {
+        names.push(name);
+      }
+    }
+    if (names.length > 0) {
+      this.permissionOptions = names;
     }
   }
 
@@ -2133,6 +2207,13 @@ export class AppRuntime {
     this.messages = applySessionEvent(this.messages, event);
     if (event.type === 'user/message' || event.type === 'turn/end') {
       this.scheduleImageHydration();
+    }
+    if (event.type === 'permission/preset') {
+      // 主机确认后的权威值：/permission 命令也会推这个事件
+      const preset: string = jsonStr(event.data, 'preset', '');
+      if (preset.length > 0) {
+        this.permissionPreset = preset;
+      }
     }
     if (event.type === 'turn/start') {
       this.generating = true;
