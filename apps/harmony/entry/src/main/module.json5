@@ -1,5 +1,11 @@
 {
   "module": {
+    "metadata": [
+      {
+        "name": "ohos.net.network_config",
+        "resource": "$profile:network_config"
+      }
+    ],
     "name": "entry",
     "type": "entry",
     "description": "$string:module_desc",
