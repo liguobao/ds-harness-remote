@@ -1153,6 +1153,17 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * 取某张历史图片的字节（base64）；没拉到时返回空串。
+   *
+   * 之前是把字节塞进 ChatItem，一旦会话重新折叠历史（openSession / follow 快照）
+   * 就被冲掉，界面上只剩一条空消息。改成「消息只记 attachmentId，渲染时查缓存」。
+   */
+  imageFor(attachmentId: string): string {
+    const cached: string | undefined = this.attachmentCache.get(attachmentId);
+    return cached !== undefined ? cached : '';
+  }
+
   /** 读一次 `/permission`（不带参数）：回执带当前值与可选项，用来把面板铺对。 */
   async refreshPermissionState(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -1363,9 +1374,11 @@ export class AppRuntime {
         }
       }
       if (body.length === 0) {
+        this.notify();
         continue;
       }
       logInfo('history image ok ' + attachmentId.substring(0, 20) + ' base64=' + body.length);
+      this.notify();
       const next: ChatItem[] = this.messages.slice();
       let changed: boolean = false;
       for (let i = 0; i < next.length; i += 1) {

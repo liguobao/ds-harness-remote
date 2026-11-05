@@ -389,6 +389,28 @@ struct Index {
     return Math.round(base * this.textScaleValue * 10) / 10;
   }
 
+  /**
+   * 一条消息要显示的图片：本地刚发的直接在 item.images 里；
+   * 历史的只有 attachmentId，从运行时缓存里取（拉不到就是空，不占位）。
+   */
+  private messageImages(item: ChatItem): string[] {
+    const out: string[] = [];
+    for (const body of item.images) {
+      if (body.length > 0) {
+        out.push(body);
+      }
+    }
+    for (const attachmentId of item.imageAttachmentIds) {
+      const body: string = this.runtime.imageFor(attachmentId);
+      if (body.length > 0) {
+        if (!item.images.includes(body)) {
+          out.push(body);
+        }
+      }
+    }
+    return out;
+  }
+
   /** 会话区内容最大宽度：窗口越宽放越宽，不再固定 880。 */
   private chatMaxWidth(): number {
     const w: number = this.windowWidthVp;
@@ -3054,9 +3076,9 @@ struct Index {
         // text lines break inside the gradient instead of overflowing it.
         Row() {
           Column({ space: 6 }) {
-            if (item.images.length > 0) {
+            if (this.messageImages(item).length > 0) {
               Column({ space: 6 }) {
-                ForEach(item.images, (base64: string, index: number) => {
+                ForEach(this.messageImages(item), (base64: string, index: number) => {
                   Image(imageDataUri(base64))
                     .width(168)
                     .height(168)
