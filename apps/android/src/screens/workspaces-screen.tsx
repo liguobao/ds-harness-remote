@@ -89,6 +89,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const scrollRef = useRef<ScrollView>(null)
   const workspaceOffsets = useRef(new Map<string, number>())
   const pendingScrollKey = useRef<string | undefined>(undefined)
+  const scrollRetry = useRef<number | undefined>(undefined)
   const focusApplied = useRef(false)
   /**
    * Keys a home-screen shortcut revealed. They stay expanded for this screen
@@ -167,10 +168,25 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     const offset = workspaceOffsets.current.get(key)
     if (offset === undefined) {
       pendingScrollKey.current = key
+      // Cached workspaces lay out before the focus effect runs, so the target's
+      // onLayout may already have fired. Retry on the next frame instead of
+      // waiting for a layout event that will never come again.
+      if (scrollRetry.current !== undefined) cancelAnimationFrame(scrollRetry.current)
+      scrollRetry.current = requestAnimationFrame(() => {
+        scrollRetry.current = undefined
+        if (pendingScrollKey.current !== key) return
+        const retryOffset = workspaceOffsets.current.get(key)
+        if (retryOffset === undefined) return
+        pendingScrollKey.current = undefined
+        scrollRef.current?.scrollTo({ y: Math.max(0, retryOffset - spacing.sm), animated: true })
+      })
       return
     }
     scrollRef.current?.scrollTo({ y: Math.max(0, offset - spacing.sm), animated: true })
   }
+  useEffect(() => () => {
+    if (scrollRetry.current !== undefined) cancelAnimationFrame(scrollRetry.current)
+  }, [])
 
   // A tapped home-screen shortcut opens this screen with a workspace to reveal.
   useEffect(() => {
