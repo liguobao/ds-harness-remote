@@ -1,6 +1,6 @@
 // Simplified upstream HostsPage + product AppHeader. No remote/open/admin actions.
-import { Alert, Button, Card, Empty, Layout, Space, Table, Tag, Typography } from 'antd'
-import { GithubOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Empty, Input, Layout, Space, Table, Tag, Typography } from 'antd'
+import { EditOutlined, GithubOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { api, RequestError, type Device, type DeviceList } from './api'
@@ -13,12 +13,24 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
   const [loggingOut, setLoggingOut] = useState(false)
   const [error, setError] = useState('')
   const [updated, setUpdated] = useState('')
+  const [renaming, setRenaming] = useState<Device>()
+  const [newName, setNewName] = useState('')
+  const [savingName, setSavingName] = useState(false)
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try { const data = await api<DeviceList>('/account/devices'); setResult(data); setUpdated(new Date().toLocaleTimeString('zh-CN')) }
     catch (err) { if (err instanceof RequestError && err.status === 401) onSignedOut(); else setError(err instanceof Error ? err.message : '加载失败，请重试。') }
     finally { setLoading(false) }
   }, [onSignedOut])
+  async function submitRename() {
+    if (!renaming) return
+    const name = newName.trim()
+    if (!name) { setError('设备名称不能为空'); return }
+    setSavingName(true); setError('')
+    try { await api(`/devices/${encodeURIComponent(renaming.deviceId)}/name`, { name }); setRenaming(undefined); await load() }
+    catch (err) { setError(err instanceof Error ? err.message : '改名失败，请重试。') }
+    finally { setSavingName(false) }
+  }
   useEffect(() => { void load() }, [load])
   async function logout() {
     setLoggingOut(true)
@@ -28,7 +40,15 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
   }
   const devices = [...(result?.items ?? [])].sort((a, b) => Number(b.online) - Number(a.online))
   const columns: TableColumnsType<Device> = [
-    { title: '设备名称', dataIndex: 'name', key: 'name', render: (name: string, d) => <Space size={10}><span className={`host-status-dot ${d.online ? 'is-online' : ''}`} /><Text strong className="selfhost-device-name">{name}</Text></Space> },
+    {
+      title: '设备名称', dataIndex: 'name', key: 'name', render: (name: string, d) => renaming?.deviceId === d.deviceId
+        ? <Space size={6}>
+            <Input size="small" value={newName} autoFocus maxLength={80} style={{ width: 200 }} onChange={event => setNewName(event.target.value)} onPressEnter={() => void submitRename()} onKeyDown={event => { if (event.key === 'Escape') setRenaming(undefined) }} />
+            <Button size="small" type="primary" loading={savingName} onClick={() => void submitRename()}>保存</Button>
+            <Button size="small" onClick={() => setRenaming(undefined)}>取消</Button>
+          </Space>
+        : <Space size={10}><span className={`host-status-dot ${d.online ? 'is-online' : ''}`} /><Text strong className="selfhost-device-name">{name}</Text><Button type="text" size="small" icon={<EditOutlined />} aria-label="修改设备名称" onClick={() => { setRenaming(d); setNewName(d.name) }} /></Space>,
+    },
     { title: '状态', dataIndex: 'online', key: 'online', render: (online: boolean) => online ? <Tag color="green">在线</Tag> : <Tag>离线</Tag> },
     { title: '角色', dataIndex: 'role', key: 'role', render: (role: string) => role === 'host' ? 'Host' : '客户端' },
     { title: '系统', dataIndex: 'platform', key: 'platform', render: (platform: string) => ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux', android: 'Android' })[platform] ?? platform },

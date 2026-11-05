@@ -82,6 +82,10 @@ export class Store {
     this.save()
   }
   revoke(id: string): void { this.get(id).revoked = true; this.invalidate(id) }
+  rename(id: string, name: string): void {
+    this.get(id).descriptor.name = name
+    this.save()
+  }
   touch(id: string, clientVersion?: string, harnessVersion?: string): void {
     const d = this.get(id)
     d.lastSeenAt = Date.now()

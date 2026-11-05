@@ -219,11 +219,15 @@ export function createRemoteServer(config: Config) {
     if (req.headers.origin && req.headers.origin !== url.origin) throw new ApiError('AUTH_INVALID', 403)
     if (req.headers['sec-fetch-site'] === 'cross-site') throw new ApiError('AUTH_INVALID', 403)
     const staticAsset = path.startsWith('/assets/') || ['/icon.png', '/brand-whale.webp', '/landing-atmosphere.webp'].includes(path)
-    if (method === 'GET' && (['/', '/app', '/app/login'].includes(path) || staticAsset)) {
+    // SPA fallback: any GET that is not API / WebSocket / health-check returns index.html.
+    // Without this, refreshing a client route such as /app/remote hits the unknown-method branch and yields METHOD_NOT_FOUND.
+    const spaRoute = method === 'GET' && !staticAsset && !path.startsWith('/api/') && !path.startsWith('/ws/') && !['/health', '/healthz', '/ready'].includes(path)
+    if (method === 'GET' && (spaRoute || staticAsset)) {
       const name = staticAsset ? path.slice(1) : 'index.html'
       const asset = assets.get(name)
       if (!asset) throw new ApiError('METHOD_NOT_FOUND', 404)
       const contentType = name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.png') ? 'image/png' : name.endsWith('.webp') ? 'image/webp' : 'text/html; charset=utf-8'
+      if (!staticAsset) res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Content-Type', contentType)
       res.end(asset); return
     }
@@ -278,6 +282,13 @@ export function createRemoteServer(config: Config) {
         return item
       })
       json(res, 200, { items, nextCursor: null }); return
+    }
+    const renameMatch = /^\/api\/v1\/devices\/([^/]+)\/name$/.exec(path)
+    if (method === 'POST' && renameMatch) {
+      accountAuth(req)
+      const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(await body(req))
+      store.rename(renameMatch[1]!, name)
+      json(res, 200, descriptor(store.get(renameMatch[1]!))); return
     }
     const match = /^\/api\/v1\/devices\/([^/]+)(\/presence)?$/.exec(path)
     if (method === 'GET' && match) {
