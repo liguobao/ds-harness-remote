@@ -202,7 +202,7 @@ describe('pickActiveLiveTask', () => {
 describe('foregroundService safe fallback in Node test environment', () => {
   it('safely resolves updateLiveTask in Node test environment without throwing', async () => {
     await expect(
-      foregroundService.updateLiveTask('host-1', 's1', 'H', 'Test', 'Running', false, 12345)
+      foregroundService.updateLiveTask('host-1', 's1', 'H', 'Test', 'Running', false, 12345, 'Latest assistant output')
     ).resolves.toBeUndefined()
   })
 

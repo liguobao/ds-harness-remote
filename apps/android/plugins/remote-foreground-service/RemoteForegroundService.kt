@@ -22,6 +22,7 @@ import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.text.format.DateUtils
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
@@ -43,6 +44,7 @@ data class LiveTaskData(
   val statusText: String,
   val isWaitingInput: Boolean,
   val updatedAtMs: Long,
+  val summary: String = "",
 )
 
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
@@ -219,8 +221,12 @@ class RemoteForegroundService : Service() {
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
           setTextColor(R.id.live_task_time, timeColor)
+          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
           setTextColor(R.id.live_task_title, titleColor)
+          setTextViewText(R.id.live_task_summary, task.summary)
+          setTextColor(R.id.live_task_summary, timeColor)
+          setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
           setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
         }
 
@@ -228,6 +234,7 @@ class RemoteForegroundService : Service() {
           setImageViewResource(R.id.live_task_status_dot, dotRes)
           setTextViewText(R.id.live_task_status_text, status)
           setTextColor(R.id.live_task_status_text, statusColor)
+          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
           setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
           setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
@@ -235,7 +242,7 @@ class RemoteForegroundService : Service() {
 
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-          .setSmallIcon(applicationInfo.icon)
+          .setSmallIcon(R.mipmap.ic_launcher_foreground)
           .setContentTitle(status)
           .setContentText(task.title.ifBlank { getString(R.string.app_name) })
           .setCustomContentView(collapsedViews)
@@ -261,7 +268,7 @@ class RemoteForegroundService : Service() {
     }
 
     return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(applicationInfo.icon)
+      .setSmallIcon(R.mipmap.ic_launcher_foreground)
       .setContentTitle(getString(R.string.app_name))
       .setContentText(when (connectionStatus) {
         "connected" -> "Remote connected"
@@ -320,8 +327,9 @@ class RemoteForegroundService : Service() {
       statusText: String,
       isWaitingInput: Boolean,
       updatedAtMs: Long,
+      summary: String = "",
     ) {
-      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs)
+      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
       currentLiveTask = data
       val service = running ?: return
       service.liveTask = data
@@ -346,7 +354,7 @@ class RemoteForegroundService : Service() {
       val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       val id = (hostId + sessionId).hashCode() and 0x3fffffff
       val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(context.applicationInfo.icon)
+      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(R.mipmap.ic_launcher_foreground)
         .setContentTitle(title).setContentText(body).setContentIntent(pending).setAutoCancel(true)
         .setGroup(TASK_GROUP).setGroupSummary(false)
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
