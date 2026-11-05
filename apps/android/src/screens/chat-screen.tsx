@@ -690,7 +690,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
               inline
               onOpenWorkspaces={() => {
                 Keyboard.dismiss()
-                if (onOpenWorkspaces) onOpenWorkspaces()
+                if (onOpenWorkspaces) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
                 else onBack()
               }}
               onBack={onBack}
@@ -908,7 +908,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         onOpenWorkspaces={() => {
           Keyboard.dismiss()
           setSessionsOpen(false)
-          if (onOpenWorkspaces) onOpenWorkspaces()
+          if (onOpenWorkspaces) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
           else onBack()
         }}
         onBack={() => {

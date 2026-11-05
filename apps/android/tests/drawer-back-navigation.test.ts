@@ -14,17 +14,18 @@ describe('drawer and workspaces back navigation', () => {
     type Route = { name: string; focusWorkspaceKey?: string; source?: string }
     let routes: Route[] = [{ name: 'workspaces' }, { name: 'chat' }]
 
-    const pop = () => {
-      if (routes.length > 1) routes = routes.slice(0, -1)
-    }
     const push = (next: Route) => {
       routes = [...routes, next]
     }
 
     const onOpenWorkspaces = (focusWorkspaceKey?: string) => {
       const previousRoute = routes[routes.length - 2]
-      if (focusWorkspaceKey === undefined && previousRoute?.name === 'workspaces') {
-        pop()
+      if (previousRoute?.name === 'workspaces') {
+        routes = routes.slice(0, -1)
+        const target = routes[routes.length - 1]
+        if (focusWorkspaceKey !== undefined && target?.name === 'workspaces') {
+          routes[routes.length - 1] = { ...target, focusWorkspaceKey }
+        }
         return
       }
       push({ name: 'workspaces', focusWorkspaceKey, source: 'chat' })
@@ -35,29 +36,50 @@ describe('drawer and workspaces back navigation', () => {
     expect(routes).toEqual([{ name: 'workspaces' }])
   })
 
-  it('pushes workspaces when navigating to a specific focusWorkspaceKey', () => {
+  it('returns to the previous workspaces route focused on the conversation workspace', () => {
     type Route = { name: string; focusWorkspaceKey?: string; source?: string }
     let routes: Route[] = [{ name: 'workspaces' }, { name: 'chat' }]
 
-    const pop = () => {
-      if (routes.length > 1) routes = routes.slice(0, -1)
-    }
     const push = (next: Route) => {
       routes = [...routes, next]
     }
 
     const onOpenWorkspaces = (focusWorkspaceKey?: string) => {
       const previousRoute = routes[routes.length - 2]
-      if (focusWorkspaceKey === undefined && previousRoute?.name === 'workspaces') {
-        pop()
+      if (previousRoute?.name === 'workspaces') {
+        routes = routes.slice(0, -1)
+        const target = routes[routes.length - 1]
+        if (focusWorkspaceKey !== undefined && target?.name === 'workspaces') {
+          routes[routes.length - 1] = { ...target, focusWorkspaceKey }
+        }
         return
       }
       push({ name: 'workspaces', focusWorkspaceKey, source: 'chat' })
     }
 
     onOpenWorkspaces('ws-special')
+    expect(routes).toEqual([{ name: 'workspaces', focusWorkspaceKey: 'ws-special' }])
+  })
+
+  it('pushes a workspaces route focused on the workspace when no workspaces route is below', () => {
+    type Route = { name: string; focusWorkspaceKey?: string; source?: string }
+    let routes: Route[] = [{ name: 'chat' }]
+
+    const onOpenWorkspaces = (focusWorkspaceKey?: string) => {
+      const previousRoute = routes[routes.length - 2]
+      if (previousRoute?.name === 'workspaces') {
+        routes = routes.slice(0, -1)
+        const target = routes[routes.length - 1]
+        if (focusWorkspaceKey !== undefined && target?.name === 'workspaces') {
+          routes[routes.length - 1] = { ...target, focusWorkspaceKey }
+        }
+        return
+      }
+      routes = [...routes, { name: 'workspaces', focusWorkspaceKey, source: 'chat' }]
+    }
+
+    onOpenWorkspaces('ws-special')
     expect(routes).toEqual([
-      { name: 'workspaces' },
       { name: 'chat' },
       { name: 'workspaces', focusWorkspaceKey: 'ws-special', source: 'chat' },
     ])

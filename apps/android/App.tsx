@@ -442,8 +442,17 @@ function AppNavigator() {
         onOpenDevices={() => reset({ name: 'devices' })}
         onOpenWorkspaces={focusWorkspaceKey => {
           const previousRoute = routes[routes.length - 2]
-          if (focusWorkspaceKey === undefined && previousRoute?.name === 'workspaces') {
-            pop()
+          if (previousRoute?.name === 'workspaces') {
+            // Returning to the workspaces page keeps the previous page's workspace
+            // in view instead of jumping back to the top of the list.
+            setRoutes(current => {
+              const next = current.slice(0, -1)
+              const target = next[next.length - 1]
+              if (focusWorkspaceKey !== undefined && target?.name === 'workspaces') {
+                next[next.length - 1] = { ...target, focusWorkspaceKey }
+              }
+              return next
+            })
             return
           }
           push({ name: 'workspaces', focusWorkspaceKey, source: 'chat' })
