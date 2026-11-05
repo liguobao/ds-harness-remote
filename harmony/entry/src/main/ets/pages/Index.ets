@@ -105,6 +105,12 @@ struct Index {
   @State foldState: FoldState = 'expanded';
   /** 键盘是否弹起：弹起时收起语境胶囊、收窄列表底部留白。 */
   @State keyboardVisible: boolean = false;
+  /** 提示词面板（本地提示词库）。 */
+  @State promptPanelOpen: boolean = false;
+  @State promptDraftInput: string = '';
+  /** 上一次同步到的会话 id，用来判断「切了会话」并搬运草稿。 */
+  private lastSyncedSessionId: string = '';
+  private draftSaveTimer: number = -1;
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -355,6 +361,14 @@ struct Index {
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
+    }
+    // 切了会话：先把上一段草稿存回去，再把新会话的草稿捞出来
+    if (this.lastSyncedSessionId !== this.currentSessionId) {
+      if (this.lastSyncedSessionId.length > 0) {
+        this.runtime.saveDraft(this.lastSyncedSessionId, this.promptInput);
+      }
+      this.lastSyncedSessionId = this.currentSessionId;
+      this.promptInput = this.runtime.draftOf(this.currentSessionId);
     }
     this.connectedHostName = this.runtime.connectedHostName;
     this.connectedDeviceId = this.runtime.connectedDeviceId;
@@ -1296,6 +1310,9 @@ struct Index {
       }
       if (this.showModelPicker) {
         this.ModelPickerOverlay()
+      }
+      if (this.promptPanelOpen) {
+        this.PromptPanelOverlay()
       }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
@@ -3219,6 +3236,29 @@ struct Index {
           .onClick(() => {
             this.attachImage();
           })
+          // 提示词库入口：和图片键同规格的小圆玻璃
+          Row() {
+            Text('✦')
+              .fontSize(this.fs(15))
+              .fontColor(this.pal().text2)
+          }
+          .width(34)
+          .height(46)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(23)
+          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
+          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
+            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+            adaptiveColor: AdaptiveColor.DEFAULT,
+            blurOptions: { grayscale: [0, 12] }
+          })
+          .border({ width: 1,
+            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+          .onClick(() => {
+            this.promptDraftInput = '';
+            this.promptPanelOpen = true;
+          })
           // 输入框自己就是一块玻璃；换行靠回车，高度随内容长到 5 行再内部滚动
           TextArea({ text: this.promptInput,
             placeholder: this.generating ? this.tr('正在生成，可插话…')
@@ -3255,6 +3295,14 @@ struct Index {
               if (value === '/' && this.slashCommands.length === 0) {
                 this.runtime.loadSlashCommands();
               }
+              // 草稿落盘做个 400ms 防抖，别每敲一个字就写一次 preferences
+              if (this.draftSaveTimer >= 0) {
+                clearTimeout(this.draftSaveTimer);
+              }
+              this.draftSaveTimer = setTimeout(() => {
+                this.draftSaveTimer = -1;
+                this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+              }, 400);
             })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
@@ -4646,6 +4694,119 @@ struct Index {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
+  }
+
+  /** 本地提示词库：点一条就填进输入框，也可以就地增删。 */
+  @Builder
+  PromptPanelOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.promptPanelOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Text(this.tr('提示词'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text('✕')
+            .fontSize(15)
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.promptPanelOpen = false;
+            })
+        }
+        .width('100%')
+
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.runtime.prompts, (item: string) => {
+              Row({ space: 10 }) {
+                Text(item)
+                  .fontSize(this.fs(13))
+                  .fontColor(this.pal().text)
+                  .maxLines(3)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                Text('✕')
+                  .fontSize(this.fs(12))
+                  .fontColor(this.pal().text3)
+                  .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+                  .onClick(() => {
+                    this.runtime.removePrompt(item);
+                  })
+              }
+              .width('100%')
+              .padding({ left: 12, right: 10, top: 10, bottom: 10 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.promptInput = item;
+                this.runtime.saveDraft(this.currentSessionId, item);
+                this.promptPanelOpen = false;
+              })
+            }, (item: string) => 'prompt-' + item)
+            if (this.runtime.prompts.length === 0) {
+              Text(this.tr('还没有提示词，下面加一条'))
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .padding({ top: 6, bottom: 6 })
+            }
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.42 : 300 })
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Off)
+        .width('100%')
+
+        Row({ space: 8 }) {
+          TextInput({ text: this.promptDraftInput, placeholder: this.tr('新增一条提示词…') })
+            .layoutWeight(1)
+            .height(42)
+            .backgroundColor(this.pal().inputBg)
+            .fontColor(this.pal().text)
+            .fontSize(this.fs(14))
+            .placeholderColor(this.pal().text3)
+            .borderRadius(12)
+            .padding({ left: 14, right: 14 })
+            .onChange((value: string) => {
+              this.promptDraftInput = value;
+            })
+          Text(this.tr('添加'))
+            .fontSize(this.fs(13))
+            .fontColor('#FFFFFF')
+            .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+            .borderRadius(12)
+            .onClick(() => {
+              this.runtime.addPrompt(this.promptDraftInput);
+              this.promptDraftInput = '';
+            })
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 520 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 22 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 22, topRight: 22 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 单块玻璃上的跟手光斑：谁被按就亮谁，坐标就是那一块自己的局部坐标。 */

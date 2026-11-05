@@ -201,6 +201,10 @@ export class AppRuntime {
   deviceAliases: Record<string, string> = {};
   /** Theme preference: 0 = follow system, 1 = light, 2 = dark. */
   themeMode: number = 0;
+  /** 会话输入草稿（sessionId -> 文本）。 */
+  drafts: Record<string, string> = {};
+  /** 本地提示词库。 */
+  prompts: string[] = [];
   /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
   languageMode: number = 0;
   /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
@@ -353,6 +357,8 @@ export class AppRuntime {
       this.languageMode = this.store.loadLanguageMode();
       this.textScaleMode = this.store.loadTextScale();
       this.profiles = this.store.loadProfiles();
+      this.drafts = this.store.loadDrafts();
+      this.prompts = this.store.loadPrompts();
       this.applyLanguage();
     } catch (error) {
       const text: string = errorMessage(error);
@@ -694,6 +700,47 @@ export class AppRuntime {
       return '';
     }
     return harness.speechTranscribe(audioBase64, '');
+  }
+
+  /** 读某会话的草稿（没有就空串）。 */
+  draftOf(sessionId: string): string {
+    const value: string | undefined = this.drafts[sessionId];
+    return value === undefined ? '' : value;
+  }
+
+  /** 记一条草稿；空文本即删除，避免脏数据堆积。 */
+  saveDraft(sessionId: string, text: string): void {
+    if (sessionId.length === 0) {
+      return;
+    }
+    const next: Record<string, string> = {};
+    for (const key of Object.keys(this.drafts)) {
+      if (key !== sessionId) {
+        next[key] = this.drafts[key];
+      }
+    }
+    if (text.trim().length > 0) {
+      next[sessionId] = text;
+    }
+    this.drafts = next;
+    this.store.saveDrafts(next);
+  }
+
+  /** 提示词库增删（纯本地）。 */
+  addPrompt(text: string): void {
+    const trimmed: string = text.trim();
+    if (trimmed.length === 0 || this.prompts.includes(trimmed)) {
+      return;
+    }
+    this.prompts = this.prompts.concat([trimmed]);
+    this.store.savePrompts(this.prompts);
+    this.notify();
+  }
+
+  removePrompt(text: string): void {
+    this.prompts = this.prompts.filter(item => item !== text);
+    this.store.savePrompts(this.prompts);
+    this.notify();
   }
 
   async createNewSession(): Promise<void> {

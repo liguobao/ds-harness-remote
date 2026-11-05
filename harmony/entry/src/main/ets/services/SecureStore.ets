@@ -16,6 +16,10 @@ const KEY_THEME_MODE = 'dshremote.themeMode.v1';
 const KEY_LANGUAGE_MODE = 'dshremote.languageMode.v1';
 const KEY_TEXT_SCALE = 'dshremote.textScale.v1';
 const KEY_HOST_PINS = 'dshremote.hostPins.v1';
+/** 会话输入草稿：{ sessionId: 文本 }，切会话/重开 App 都能接着写。 */
+const KEY_DRAFTS = 'dshremote.drafts.v1';
+/** 本地提示词库（纯本地，不上报任何东西）。 */
+const KEY_PROMPTS = 'dshremote.prompts.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
 const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
 
@@ -579,6 +583,66 @@ export class SecureStore {
       if (code !== 24000002) {
         logWarn('asset remove failed for ' + alias + ': ' + JSON.stringify(error));
       }
+    }
+  }
+
+
+  /** 会话草稿：按 sessionId 存，纯文本，不含任何凭据。 */
+  loadDrafts(): Record<string, string> {
+    const raw: string = this.getSync(KEY_DRAFTS, '');
+    if (raw.length === 0) {
+      return {};
+    }
+    const out: Record<string, string> = {};
+    try {
+      const parsed: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      for (const key of Object.keys(parsed)) {
+        const value: Object = parsed[key];
+        if (typeof value === 'string' && value.length > 0) {
+          out[key] = value;
+        }
+      }
+    } catch (error) {
+      logWarn('drafts parse failed');
+    }
+    return out;
+  }
+
+  saveDrafts(drafts: Record<string, string>): void {
+    try {
+      this.putSync(KEY_DRAFTS, JSON.stringify(drafts));
+    } catch (error) {
+      logWarn('drafts save failed');
+    }
+  }
+
+  /** 提示词库：自定义条目，按顺序保存。 */
+  loadPrompts(): string[] {
+    const raw: string = this.getSync(KEY_PROMPTS, '');
+    if (raw.length === 0) {
+      return [];
+    }
+    const out: string[] = [];
+    try {
+      const parsed: Object = JSON.parse(raw) as Object;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed as Object[]) {
+          if (typeof item === 'string' && item.trim().length > 0) {
+            out.push(item);
+          }
+        }
+      }
+    } catch (error) {
+      logWarn('prompts parse failed');
+    }
+    return out;
+  }
+
+  savePrompts(prompts: string[]): void {
+    try {
+      this.putSync(KEY_PROMPTS, JSON.stringify(prompts));
+    } catch (error) {
+      logWarn('prompts save failed');
     }
   }
 
