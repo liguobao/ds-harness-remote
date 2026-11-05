@@ -87,7 +87,13 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
   `relay data socket closed code=4008 reason=relay capacity reached` →
   随后重试打 `gz-turn` / `turn.r2049.cn` 全部 `4008 invalid relay ticket claims` →
   `connect failed`。**ticket 是绑节点的**，用 `connect.accepted` 里那份候选列表轮换节点必然被判
-  invalid claims，等于白烧两次重试还给出误导性错误；真接不上时应该直接报「中继没容量」并让用户重试
+  invalid claims，等于白烧两次重试还给出误导性错误
+- **已修（V0.04.8）**：`handleConnectAccepted` 只打服务端指定的那台中继，候选列表降级为排障日志。
+  改后同样场景 8 秒内直接抛出「中继当前没有可用容量（4008 relay capacity reached）」，不再绕 gz-turn
+- **容量问题是节点级的**：`DESKTOP-R5BVQJJ` 与 `localhost` 两台主机、连点两次全部同一个 4008，
+  说明是 `turn-mj.r2049.cn` 这台中继满了，不是某台主机的问题。客户端无从绕开（票据由服务端签给该节点），
+  要么等容量、要么让服务端给别的节点发票。**WebRTC 直连的信令也要先有 active connection，
+  所以这个 4008 也挡着 WebRTC 任务 2/3 的联调**
 
 ## 关键文件
 
@@ -136,6 +142,7 @@ PCM、停止后走转写、错误有中文提示（那台没连主机，所以�
 
 | versionName | versionCode | 内容 |
 |---|---|---|
+| 0.04.8 | 1000026 | 中继 attach 只打服务端指定节点（票据绑节点，候选轮换必被拒） |
 | 0.04.7 | 1000025 | 聊天页/会话面板文案进 I18n，补 68 条英文；日期格式按语言换序 |
 | 0.04.6 | 1000024 | 中继预热与 REST 并行；放弃/令牌轮换时正确重建或关闭通道 |
 | 0.03.2 | 1000010 | 记住上次连通的中继节点 |

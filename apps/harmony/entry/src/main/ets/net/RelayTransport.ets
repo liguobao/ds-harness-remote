@@ -26,8 +26,12 @@ export class RelayTransportOptions {
 }
 
 /**
- * 服务器只给一个 relayEndpoint。同一集群里还有 gz-turn / turn 等节点，
- * 某个节点打满时换个域名再试——票据是服务端签的，换节点不影响校验。
+ * 服务器只给一个 relayEndpoint。同一集群里还有 gz-turn / turn 等候选节点。
+ *
+ * 注意（2026-11-05 实测）：`connect.accepted.relayTicket` 是**绑节点**的，
+ * 拿同一张票去 gz-turn / turn.r2049.cn 一律回 `4008 invalid relay ticket claims`。
+ * 所以候选列表只用于日志与排障，真正 attach 只打服务端指定的那一台；
+ * 那台满了就重新要票再试同一台，别把仅有的两次重试烧在必然被拒的节点上。
  */
 export function buildRelayCandidates(endpoint: string): string[] {
   const out: string[] = [];
@@ -349,10 +353,9 @@ export class RelayTransport {
     if (relayEndpoint.length > 0 && relayTicket.length > 0) {
       if (this.relayCandidates.length === 0) {
         this.relayCandidates = buildRelayCandidates(relayEndpoint);
-        logInfo('relay candidates: ' + this.relayCandidates.join(' , '));
+        logInfo('relay candidates (仅排障参考，票据不通用): ' + this.relayCandidates.join(' , '));
       }
-      const target: string = this.relayCandidates[this.attachAttempt % this.relayCandidates.length];
-      this.openDataSocket(target, relayTicket, relayEpoch)
+      this.openDataSocket(relayEndpoint, relayTicket, relayEpoch)
         .then(() => {
           this.attachAttempt = 0;
           this.finishConnect();
