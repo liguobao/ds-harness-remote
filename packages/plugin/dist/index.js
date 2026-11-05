@@ -75843,9 +75843,8 @@ function nodeBinaryCandidates() {
     if (!candidates.includes(value)) candidates.push(value);
   };
   add3(process.env.DSH_REMOTE_NODE);
-  for (const runtime of [process.env.DSH_PRIMARY_RUNTIME, process.env.DSH_BUNDLED_PRIMARY_RUNTIME]) {
-    if (runtime !== void 0 && runtime.trim() !== '') add3(join4(runtime, 'dependencies', 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node'));
-  }
+  addBundledPrimaryRuntimeNode(candidates, process.env.DSH_PRIMARY_RUNTIME);
+  addBundledPrimaryRuntimeNode(candidates, process.env.DSH_BUNDLED_PRIMARY_RUNTIME);
   add3(process.env.NODE);
   add3(process.execPath);
   for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join4(part, process.platform === "win32" ? "node.exe" : "node"));
@@ -75857,6 +75856,14 @@ function nodeBinaryCandidates() {
   add3(join4(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
   for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
+}
+function addBundledPrimaryRuntimeNode(candidates, runtime) {
+  if (runtime === void 0 || runtime.trim() === "") return;
+  addCandidate(candidates, join4(runtime, "dependencies", "node", "bin", process.platform === "win32" ? "node.exe" : "node"));
+}
+function addCandidate(candidates, value) {
+  if (value === void 0 || value.trim() === "" || candidates.includes(value)) return;
+  candidates.push(value);
 }
 function nvmNodeCandidates() {
   const root = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
