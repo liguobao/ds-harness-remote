@@ -1,7 +1,7 @@
 import { UIContext, window, promptAction } from '@kit.ArkUI';
 import { common, Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHASE_CHAT,
+import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
@@ -290,7 +290,7 @@ struct Index {
     if (!this.fieldsPrefilled) {
       // Prefill the official public Server so a fresh install never dials an empty or dead address.
       this.serverInput = this.runtime.serverUrl.length > 0 ? this.runtime.serverUrl : DEFAULT_SERVER_URL;
-      this.emailInput = this.runtime.email;
+      this.emailInput = this.runtime.email.length > 0 ? this.runtime.email : DEFAULT_ACCOUNT;
       this.fieldsPrefilled = true;
     }
     if (this.phase === PHASE_CHAT) {
@@ -1328,7 +1328,7 @@ struct Index {
           .fontColor(this.pal().text2)
           .letterSpacing(1)
       }
-      TextInput({ text: this.serverInput, placeholder: this.tr('服务器地址（https://…）') })
+      TextInput({ text: this.serverInput, placeholder: this.tr('服务器地址（http://…）') })
         .height(48)
         .backgroundColor(this.pal().chip)
         .fontColor(this.pal().text)

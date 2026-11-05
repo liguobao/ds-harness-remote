@@ -57,6 +57,7 @@ function buildEnglish(): Map<string, string> {
   // —— 登录 / 授权 ——
   map.set('连接你的 DEEPSEEK HARNESS 主机', 'Connect to your DEEPSEEK HARNESS host');
   map.set('服务器地址（https://…）', 'Server URL (https://…)');
+  map.set('服务器地址（http://…）', 'Server URL (http://…)');
   map.set('邮箱', 'Email');
   map.set('密码', 'Password');
   map.set('登录', 'Sign in');

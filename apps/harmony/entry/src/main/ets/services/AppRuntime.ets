@@ -28,7 +28,15 @@ export const PHASE_CHAT: string = 'chat';
 
 /** Official public Server, used to prefill the setup screen and as the QR-login fallback
  *  so a fresh install never dials a dead placeholder address. */
-export const DEFAULT_SERVER_URL: string = 'https://dsh.r2049.cn';
+/**
+ * 本地专用版的默认服务器：局域网自建 server。
+ *
+ * 这个 fork 就是给「日常只连自家 LAN」用的，省得每次在登录页切服务器。
+ * 官方服务器仍可在登录页手动改地址登录（不会删掉这个默认值）。
+ */
+export const DEFAULT_SERVER_URL: string = 'http://192.168.11.128:8080';
+/** 本地专用版预填的账号。 */
+export const DEFAULT_ACCOUNT: string = 'admin@dsh.local';
 
 const MAX_TOOL_DETAIL_CHARS: number = 8000;
 
