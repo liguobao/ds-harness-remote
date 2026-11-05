@@ -216,7 +216,7 @@ struct Index {
       decorPx = 0;
     }
     const systemTopPx: number = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height;
-    const topPx: number = Math.max(systemTopPx, decorPx);
+    const topPx: number = Math.max(systemTopPx, decorPx > 0 ? decorPx + 24 : 0);
     const bottomPx: number = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height;
     this.topInset = ui.px2vp(topPx);
     this.bottomInset = ui.px2vp(bottomPx);
@@ -1233,7 +1233,7 @@ struct Index {
     .height('100%')
     .backgroundColor(this.pal().bg)
     // 顶部留一点兜底：2in1 全屏时系统状态栏高度是 0，但窗口自己那条标题栏还在
-    .padding({ top: Math.max(this.topInset, 30), bottom: Math.max(this.bottomInset, 64) })
+    .padding({ top: Math.max(this.topInset, 44), bottom: Math.max(this.bottomInset, 64) })
     .onAppear(() => {
       this.measureInsets();
     })
@@ -2284,10 +2284,6 @@ struct Index {
   @Builder
   DevicesScreen() {
     Column() {
-      // 宽屏空间富裕，整块内容垂直居中，不至于全堆在顶部、下面空一大片
-      if (this.windowWidthVp >= 900) {
-        Blank()
-      }
       // 第一行：标题压在整行正中，按钮独立浮在右侧，标题位置不再被按钮宽度带偏
       Stack({ alignContent: Alignment.Center }) {
         Column({ space: 6 }) {
@@ -2337,6 +2333,10 @@ struct Index {
         .width('100%')
       }
       .width('100%')
+      // 宽屏：标题留在顶部，下面的「胶囊 + 主机卡片 + 小人」作为一组垂直居中
+      if (this.windowWidthVp >= 900) {
+        Blank()
+      }
       // 第二行：当前服务器胶囊（自己一行，点开切换），不参与标题行竞争
       Row() {
         Row({ space: 6 }) {
@@ -2394,18 +2394,21 @@ struct Index {
         }, (device: RemoteHostDevice) => `${device.deviceId}#${this.languageMode}`)
       }
       .width('100%')
+      // 宽屏双列：一列会留出大片空白，两列更像桌面端的主机面板
+      .lanes(this.windowWidthVp >= 1000 && this.devices.length > 1 ? 2 : 1)
       .constraintSize({ maxHeight: 560 })
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
-      // 剩下的空间留给陪伴小人：她在中间垂直居中，宽屏下不会孤零零贴底边
+      // 陪伴小人固定一块高度，上下由两个 Blank 撑开，整页内容在宽屏里垂直居中
       if (this.showMascot()) {
         Column() {
           this.MaidMascot()
         }
-        .layoutWeight(1)
         .width('100%')
+        .height(214)
         .justifyContent(FlexAlign.Center)
-      } else {
+      }
+      if (this.windowWidthVp >= 900) {
         Blank()
       }
       if (this.devices.length === 0 && !this.busy) {
