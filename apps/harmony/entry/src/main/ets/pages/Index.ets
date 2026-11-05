@@ -147,6 +147,9 @@ struct Index {
   @State dockLightX: number = 0;
   @State dockLightY: number = 0;
   @State dockLightOpacity: number = 0;
+  /** 列表下方陪伴小人的呼吸状态（由定时器来回切）。 */
+  @State maidBob: boolean = false;
+  private maidTimer: number = -1;
   /** 录音已停止、等主机转写。 */
   /** 被手动展开的连续工具调用段（键是段首工具的 id）。 */
   @State expandedRuns: string[] = [];
@@ -160,9 +163,17 @@ struct Index {
     // 把隐藏 Web 里的 WebRTC 桥交给运行时：连接时若它已就绪就走 LAN 直连，否则走中继
     this.runtime.attachRtcBridge(this.rtc);
     this.runtime.bootstrap(getContext(this));
+    // 陪伴小人：每 2 秒翻身一次，配合 .animation 就是来回呼吸
+    this.maidTimer = setInterval(() => {
+      this.maidBob = !this.maidBob;
+    }, 2000);
   }
 
   aboutToDisappear(): void {
+    if (this.maidTimer >= 0) {
+      clearInterval(this.maidTimer);
+      this.maidTimer = -1;
+    }
     if (this.mainWindow !== undefined) {
       this.mainWindow.off('avoidAreaChange');
       this.mainWindow.off('windowSizeChange');
@@ -2299,6 +2310,8 @@ struct Index {
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 12 })
       .scrollBar(BarState.Off)
+      // 列表下面这块一直是空的，放一只会呼吸的小女仆，安静但不呆板
+      this.MaidMascot()
       if (this.devices.length === 0 && !this.busy) {
         Text(this.tr('暂无远程主机，请先在服务器上注册主机设备'))
           .fontSize(13)
@@ -2338,6 +2351,36 @@ struct Index {
     .width('100%')
     .height('100%')
     .constraintSize({ maxWidth: 760 })
+  }
+
+  /** 列表下方的陪伴小人：缓慢上下浮 + 轻微摆头，落地处有一圈随呼吸缩放的影子。 */
+  @Builder
+  MaidMascot() {
+    Column({ space: 2 }) {
+      Stack({ alignContent: Alignment.Bottom }) {
+        Column()
+          .width(104)
+          .height(12)
+          .borderRadius(6)
+          .backgroundColor(this.isDarkUi ? 'rgba(0,0,0,0.30)' : 'rgba(90,120,190,0.16)')
+          .scale({ x: this.maidBob ? 1 : 0.86 })
+          .opacity(this.maidBob ? 0.9 : 0.6)
+          .animation({ duration: 2000, curve: Curve.EaseInOut })
+        Image($r('app.media.maid_mascot'))
+          .width(158)
+          .height(204)
+          .objectFit(ImageFit.Contain)
+          .translate({ y: this.maidBob ? -7 : 0 })
+          .rotate({ angle: this.maidBob ? 1.2 : -1.2 })
+          .animation({ duration: 2000, curve: Curve.EaseInOut })
+      }
+      .height(208)
+      .width('100%')
+    }
+    .width('100%')
+    .padding({ top: 2, bottom: 6 })
+    .alignItems(HorizontalAlign.Center)
+    .hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
@@ -2650,48 +2693,23 @@ struct Index {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        // 齿轮：图标本体放大到 24，外面套 40 的点击区（原来 38 的框里只画 20，看着太小）
-        Row() {
-          Image($r('app.media.ic_settings'))
-            .width(24)
-            .height(24)
-            .fillColor(this.pal().text2)
-        }
-        .width(40)
-        .height(40)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => {
+        // 三颗图标共用一套尺寸（22 的图形 + 40 的点击区），粗细与视觉重量才对得上
+        this.TopIcon($r('app.media.ic_settings'), () => {
           if (!this.runtime.modelCatalogLoaded) {
             this.runtime.refreshModelCatalog();
           }
           this.runtime.refreshPermissionState();
           this.showSessionPanel = true;
         })
-        Text('＋')
-          .fontSize(22)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.pal().text)
-          .width(38)
-          .height(38)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.showSessions = false;
-            this.runtime.createNewSession();
-          })
+        this.TopIcon($r('app.media.ic_plus'), () => {
+          this.showSessions = false;
+          this.runtime.createNewSession();
+        })
         if (!this.isLandscape) {
-          Text('≡')
-            .fontSize(20)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.pal().text)
-            .width(38)
-            .height(38)
-            .textAlign(TextAlign.Center)
-            .margin({ left: 2 })
-            .onClick(() => {
-              this.showSessions = true;
-              this.runtime.loadWorkspaces();
-            })
+          this.TopIcon($r('app.media.ic_menu'), () => {
+            this.showSessions = true;
+            this.runtime.loadWorkspaces();
+          })
         }
       }
       .width('100%')
@@ -2804,6 +2822,19 @@ struct Index {
     .width('100%')
     .height('100%')
     .constraintSize({ maxWidth: this.chatMaxWidth() })
+    // 右往左横滑唤出会话列表（竖屏时列表就是从右边滑进来的那个抽屉）
+    .gesture(
+      PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
+        .onActionEnd((event: GestureEvent) => {
+          if (this.isLandscape || this.showSessions) {
+            return;
+          }
+          if (event.offsetX <= -70) {
+            this.showSessions = true;
+            this.runtime.loadWorkspaces();
+          }
+        })
+    )
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
@@ -2929,63 +2960,49 @@ struct Index {
           .shadow({ radius: 12,
             color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
             offsetX: 0, offsetY: 5 })
-          .onClick(() => {
-            this.attachImage();
-          })
-          // 输入框自己就是一块玻璃；光斑跟着触点在这块里走，不会漫到两边
-          Stack() {
-            TextInput({ text: this.promptInput,
-              placeholder: this.generating ? this.tr('正在生成，可插话…')
-                : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
-              .width('100%')
-              .height(46)
-              .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
-              .fontColor(this.pal().text)
-              .fontSize(this.fs(15))
-              .placeholderColor(this.pal().text3)
-              .caretColor('#22D3EE')
-              .borderRadius(23)
-              .border({ width: 1,
-                color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
-              .padding({ left: 18, right: 18 })
-              // 生成中保持可输入：否则「插话」无从谈起。
-              .enabled(true)
-              .onChange((value: string) => {
-                this.promptInput = value;
-                if (value === '/' && this.slashCommands.length === 0) {
-                  this.runtime.loadSlashCommands();
-                }
-              })
-              .onSubmit(() => {
-                this.sendTap();
-              })
-            // 跟手光斑：玻璃被指针「擦亮」的那块，坐标是这块输入框自己的局部坐标
-            Column()
-              .width('100%')
-              .height(46)
-              .borderRadius(23)
-              .radialGradient({
-                center: [this.dockLightX, this.dockLightY],
-                radius: 110,
-                colors: [
-                  ['rgba(255,255,255,0.55)', 0],
-                  ['rgba(255,255,255,0.16)', 0.5],
-                  ['rgba(255,255,255,0)', 1]
-                ]
-              })
-              .opacity(this.dockLightOpacity)
-              .hitTestBehavior(HitTestMode.None)
-          }
-          .layoutWeight(1)
-          .height(46)
-          .borderRadius(23)
           .clip(true)
+          .overlay(this.DockSpot(52), { align: Alignment.Center })
           .onTouch((event: TouchEvent) => {
             this.trackDockLight(event);
           })
-          .onMouse((event: MouseEvent) => {
-            this.trackDockMouse(event);
+          .onClick(() => {
+            this.attachImage();
           })
+          // 输入框自己就是一块玻璃；触摸事件走它自己，父级容器收不到
+          TextInput({ text: this.promptInput,
+            placeholder: this.generating ? this.tr('正在生成，可插话…')
+              : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
+            .layoutWeight(1)
+            .height(46)
+            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.66)')
+            .fontColor(this.pal().text)
+            .fontSize(this.fs(15))
+            .placeholderColor(this.pal().text3)
+            .caretColor('#22D3EE')
+            .borderRadius(23)
+            .border({ width: 1,
+              color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+            .padding({ left: 18, right: 18 })
+            .clip(true)
+            // 生成中保持可输入：否则「插话」无从谈起。
+            .enabled(true)
+            .onChange((value: string) => {
+              this.promptInput = value;
+              if (value === '/' && this.slashCommands.length === 0) {
+                this.runtime.loadSlashCommands();
+              }
+            })
+            .onSubmit(() => {
+              this.sendTap();
+            })
+            // 跟手光斑：坐标就是这块自己的局部坐标
+            .overlay(this.DockSpot(96), { align: Alignment.Center })
+            .onTouch((event: TouchEvent) => {
+              this.trackDockLight(event);
+            })
+            .onMouse((event: MouseEvent) => {
+              this.trackDockMouse(event);
+            })
           if (this.generating) {
             Text('■')
               .fontSize(this.fs(16))
@@ -3004,6 +3021,11 @@ struct Index {
               .shadow({ radius: 12,
                 color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
                 offsetX: 0, offsetY: 5 })
+              .clip(true)
+              .overlay(this.DockSpot(52), { align: Alignment.Center })
+              .onTouch((event: TouchEvent) => {
+                this.trackDockLight(event);
+              })
               .onClick(() => {
                 this.runtime.stopGeneration();
               })
@@ -3018,6 +3040,11 @@ struct Index {
             .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
             .borderRadius(23)
             .shadow({ radius: 12, color: 'rgba(77,107,254,0.45)', offsetX: 0, offsetY: 5 })
+            .clip(true)
+            .overlay(this.DockSpot(52), { align: Alignment.Center })
+            .onTouch((event: TouchEvent) => {
+              this.trackDockLight(event);
+            })
             .onClick(() => {
               this.sendTap();
             })
@@ -3769,6 +3796,18 @@ struct Index {
       .height('100%')
       .backgroundColor(this.pal().panel)
       .border({ width: { left: 0.5 }, color: this.pal().borderStrong })
+      // 抽屉自右侧滑入；在面板上往右推回即收起，和滑出来时同一个方向
+      .transition(TransitionEffect.translate({ x: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+      .gesture(
+        PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
+          .onActionEnd((event: GestureEvent) => {
+            if (event.offsetX >= 70) {
+              this.showSessions = false;
+            }
+          })
+      )
     }
     .width('100%')
     .height('100%')
@@ -4325,101 +4364,135 @@ struct Index {
     .justifyContent(FlexAlign.Start)
   }
 
-  /** 折叠后的连续工具调用：一行「N 步 · 展开」，点一下逐条摊开。 */
+  /** 单块玻璃上的跟手光斑：谁被按就亮谁，坐标就是那一块自己的局部坐标。 */
+  @Builder
+  DockSpot(radius: number) {
+    Column()
+      .width('100%')
+      .height('100%')
+      .radialGradient({
+        center: [this.dockLightX, this.dockLightY],
+        radius: radius,
+        colors: [
+          ['rgba(255,255,255,0.62)', 0],
+          ['rgba(255,255,255,0.20)', 0.45],
+          ['rgba(255,255,255,0)', 1]
+        ]
+      })
+      .opacity(this.dockLightOpacity)
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  /** 顶栏图标：22 的图形 + 40 的点击区，齿轮/加号/三横摆在一起比例才一致。 */
+  @Builder
+  TopIcon(icon: Resource, action: () => void) {
+    Row() {
+      Image(icon)
+        .width(22)
+        .height(22)
+        .fillColor(this.pal().text2)
+    }
+    .width(40)
+    .height(40)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      action();
+    })
+  }
+
+  /**
+   * 折叠后的连续工具调用：左边一条竖线当时间轴，一行「N 步」，点一下摊开。
+   * 不再套整块卡片，聊天流里不抢视线。
+   */
   @Builder
   ToolRunRow(item: ChatItem) {
     Row({ space: 10 }) {
+      Column()
+        .width(2)
+        .height(22)
+        .borderRadius(1)
+        .backgroundColor(item.toolState === 'failed'
+          ? 'rgba(248,87,73,0.55)' : this.pal().border)
       if (item.toolState === 'running') {
         LoadingProgress()
-          .width(14)
-          .height(14)
+          .width(12)
+          .height(12)
           .color('#22D3EE')
-      } else if (item.toolState === 'failed') {
-        Text('✕')
-          .fontSize(this.fs(12))
-          .fontColor('#F85749')
       } else {
-        Text('✓')
-          .fontSize(this.fs(12))
-          .fontColor('#34D399')
+        Column()
+          .width(6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor(item.toolState === 'failed' ? '#F85749' : '#34D399')
       }
-      Column({ space: 2 }) {
-        Text(item.text)
-          .fontSize(this.fs(12))
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.pal().text2)
-        if (item.summary.length > 0) {
-          Text(item.summary)
-            .fontSize(this.fs(11))
-            .fontColor(this.pal().text3)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
+      Text(item.text)
+        .fontSize(this.fs(12))
+        .fontColor(this.pal().text2)
+      if (item.summary.length > 0) {
+        Text(item.summary)
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+      } else {
+        Blank()
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      Text(item.rev === 1 ? this.tr('收起') : this.tr('展开'))
-        .fontSize(this.fs(11))
-        .fontColor('#22D3EE')
+      Text(item.rev === 1 ? '⌃' : '⌄')
+        .fontSize(this.fs(12))
+        .fontColor(this.pal().text3)
     }
     .width('100%')
-    .padding({ top: 9, bottom: 9, left: 12, right: 12 })
-    .backgroundColor(this.pal().card)
-    .borderRadius(12)
-    .border({ width: 1, color: this.pal().border })
+    .padding({ top: 4, bottom: 4 })
+    .alignItems(VerticalAlign.Center)
     .onClick(() => {
       this.toggleRun(item.requestRpcId);
     })
   }
 
+  /** 摊开后的单条工具调用：缩进对齐时间轴，只留一行摘要，不再是一块厚卡片。 */
   @Builder
   ToolRow(item: ChatItem) {
-    Row({ space: 10 }) {
+    Row({ space: 8 }) {
       if (item.toolState === 'running') {
         LoadingProgress()
-          .width(14)
-          .height(14)
+          .width(10)
+          .height(10)
           .color('#22D3EE')
-      } else if (item.toolState === 'failed') {
-        Text('✕')
-          .fontSize(this.fs(12))
-          .fontColor('#F85749')
       } else {
-        Text('✓')
-          .fontSize(this.fs(12))
-          .fontColor('#34D399')
+        Column()
+          .width(4)
+          .height(4)
+          .borderRadius(2)
+          .backgroundColor(item.toolState === 'failed' ? '#F85749' : this.pal().text3)
       }
-      Column({ space: 2 }) {
-        Text(item.toolName)
-          .fontSize(this.fs(13))
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.pal().text)
+      Text(item.toolName)
+        .fontSize(this.fs(12))
+        .fontColor(this.pal().text2)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (item.summary.length > 0) {
+        Text(item.summary)
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (item.summary.length > 0) {
-          Text(item.summary)
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().text2)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        if (item.text.length > 0) {
-          Text(item.text)
-            .fontSize(this.fs(11))
-            .fontColor(this.pal().text2)
-            .fontFamily('monospace')
-            .maxLines(2)
-            .wordBreak(WordBreak.BREAK_ALL)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
+          .layoutWeight(1)
+      } else if (item.text.length > 0) {
+        Text(item.text)
+          .fontSize(this.fs(10))
+          .fontColor(this.pal().text3)
+          .fontFamily('monospace')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+      } else {
+        Blank()
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .padding({ top: 8, bottom: 8, left: 12, right: 12 })
-    .backgroundColor(this.pal().inputBg)
-    .borderRadius(10)
+    .padding({ top: 3, bottom: 3, left: 24, right: 6 })
   }
 
   @Builder

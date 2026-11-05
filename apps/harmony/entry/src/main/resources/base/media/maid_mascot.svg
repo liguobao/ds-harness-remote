@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="660" viewBox="0 0 512 660">
+  <defs>
+    <linearGradient id="hairG" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#9FCCFF"/>
+      <stop offset="0.55" stop-color="#6EA5F2"/>
+      <stop offset="1" stop-color="#477CDF"/>
+    </linearGradient>
+    <linearGradient id="dressG" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B435C"/>
+      <stop offset="1" stop-color="#1E2434"/>
+    </linearGradient>
+    <radialGradient id="blushG">
+      <stop offset="0" stop-color="#FF9AA8" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#FF9AA8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="groundG">
+      <stop offset="0" stop-color="#7C9BE0" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#7C9BE0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <ellipse cx="256" cy="608" rx="168" ry="34" fill="url(#groundG)"/>
+
+  <!-- 后发 -->
+  <path d="M256 104c-64 0-116 50-116 112 0 26 6 48 18 66 8-52 40-84 98-84s90 32 98 84c12-18 18-40 18-66 0-62-52-112-116-112Z" fill="url(#hairG)"/>
+
+  <!-- 双马尾 -->
+  <path d="M146 246c-34 26-52 78-48 128 3 38 24 62 46 60 16-2 22-20 15-44-10-34-8-78 7-106Z" fill="url(#hairG)"/>
+  <path d="M366 246c34 26 52 78 48 128-3 38-24 62-46 60-16-2-22-20-15-44 10-34 8-78-7-106Z" fill="url(#hairG)"/>
+
+  <!-- 连衣裙 -->
+  <path d="M196 318h120l44 152H152Z" fill="url(#dressG)"/>
+  <!-- 白围裙 -->
+  <path d="M212 364c14 5 30 7 44 7s30-2 44-7l16 96c-18 8-38 12-60 12s-42-4-60-12Z" fill="#FFFFFF"/>
+  <!-- 黑色领结与领口 -->
+  <path d="M212 318l44 30 44-30 12 20-56 34-56-34Z" fill="#1B2130"/>
+
+  <!-- 腿与鞋 -->
+  <rect x="214" y="464" width="26" height="78" rx="13" fill="#FFE6D6"/>
+  <rect x="272" y="464" width="26" height="78" rx="13" fill="#FFE6D6"/>
+  <rect x="204" y="528" width="48" height="34" rx="16" fill="#2A3145"/>
+  <rect x="260" y="528" width="48" height="34" rx="16" fill="#2A3145"/>
+
+  <!-- 袖子 -->
+  <path d="M196 330c-26 8-42 30-46 60-3 24 10 40 30 38 16-2 24-18 22-38Z" fill="url(#dressG)"/>
+  <path d="M316 330c26 8 42 30 46 60 3 24-10 40-30 38-16-2-24-18-22-38Z" fill="url(#dressG)"/>
+
+  <!-- 手 -->
+  <circle cx="172" cy="420" r="19" fill="#FFE6D6"/>
+  <circle cx="340" cy="420" r="19" fill="#FFE6D6"/>
+
+  <!-- 托盘与小点心 -->
+  <rect x="132" y="424" width="248" height="18" rx="9" fill="#EEF3FC" stroke="#C8D5EF" stroke-width="2"/>
+  <circle cx="200" cy="414" r="13" fill="#FFC1CE"/>
+  <circle cx="256" cy="408" r="15" fill="#FFE1A8"/>
+  <circle cx="312" cy="414" r="13" fill="#BFE3FF"/>
+
+  <!-- 脖子 -->
+  <rect x="238" y="296" width="36" height="30" rx="14" fill="#FFD9C6"/>
+
+  <!-- 头 -->
+  <circle cx="256" cy="210" r="96" fill="#FFE6D6"/>
+
+  <!-- 刘海 -->
+  <path d="M160 212c0-56 44-100 96-100s96 44 96 100c0 4 0 8-1 12-10-30-28-46-48-50-14-2-26 6-42 6-18 0-28-8-42-6-20 4-38 20-48 50-1-4-1-8-1-12Z" fill="url(#hairG)"/>
+
+  <!-- 侧发 -->
+  <path d="M166 226c-8 24-9 52-2 74 5 16 16 24 26 21 9-3 9-15 4-29-7-19-9-44-6-66Z" fill="url(#hairG)"/>
+  <path d="M346 226c8 24 9 52 2 74-5 16-16 24-26 21-9-3-9-15-4-29 7-19 9-44 6-66Z" fill="url(#hairG)"/>
+
+  <!-- 女仆头饰：白檐 + 三瓣荷叶边，压在头发上 -->
+  <rect x="184" y="108" width="144" height="26" rx="13" fill="#FFFFFF"/>
+  <circle cx="196" cy="112" r="12" fill="#FFFFFF"/>
+  <circle cx="256" cy="104" r="14" fill="#FFFFFF"/>
+  <circle cx="316" cy="112" r="12" fill="#FFFFFF"/>
+
+  <!-- 眼睛 -->
+  <ellipse cx="218" cy="232" rx="17" ry="23" fill="#2B3550"/>
+  <ellipse cx="294" cy="232" rx="17" ry="23" fill="#2B3550"/>
+  <circle cx="212" cy="225" r="6.5" fill="#FFFFFF"/>
+  <circle cx="288" cy="225" r="6.5" fill="#FFFFFF"/>
+  <circle cx="224" cy="241" r="3.5" fill="#8EC5FF" opacity="0.9"/>
+  <circle cx="300" cy="241" r="3.5" fill="#8EC5FF" opacity="0.9"/>
+
+  <!-- 腮红 -->
+  <ellipse cx="184" cy="258" rx="20" ry="11" fill="url(#blushG)"/>
+  <ellipse cx="328" cy="258" rx="20" ry="11" fill="url(#blushG)"/>
+
+  <!-- 嘴 -->
+  <path d="M246 270c3 6 8 9 10 9s7-3 10-9" fill="none" stroke="#E8836F" stroke-width="4" stroke-linecap="round"/>
+</svg>
