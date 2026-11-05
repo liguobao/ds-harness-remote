@@ -11,7 +11,8 @@ import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import {
-  Breakpoint, breakpointOf, contentColumnWidth, deviceColumns, isCompactWidth, isExpandedWidth, mascotVisible
+  Breakpoint, FoldState, breakpointOf, contentColumnWidth, deviceColumns, foldStateOf,
+  isCompactWidth, isExpandedWidth, mascotVisible
 } from '../services/Adaptive';
 import { PickedImage, pickImages } from '../services/ImagePicker';
 import { SavedProfile } from '../services/SecureStore';
@@ -100,8 +101,8 @@ struct Index {
   @State windowHeightVp: number = 0;
   /** 当前窗口宽度落在哪个断点（xs/sm/md/lg/xl），布局判断统一走它。 */
   @State breakpoint: Breakpoint = 'sm';
-  /** 折叠屏状态：展开后窗口会变宽，断点会跟着变，这里只做记录与兜底。 */
-  @State foldExpanded: boolean = true;
+  /** 折叠形态（展开 / 半折 / 折叠）；双折轴三折叠也归一到这三态。 */
+  @State foldState: FoldState = 'expanded';
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -204,14 +205,18 @@ struct Index {
    */
   private watchFoldStatus(): void {
     try {
-      this.foldExpanded = display.getFoldStatus() !== display.FoldStatus.FOLD_STATUS_FOLDED;
+      this.foldState = foldStateOf(display.getFoldStatus());
       display.on('foldStatusChange', (status: display.FoldStatus) => {
-        this.foldExpanded = status !== display.FoldStatus.FOLD_STATUS_FOLDED;
+        this.foldState = foldStateOf(status);
+        this.breakpoint = breakpointOf(this.windowWidthVp);
+      });
+      // 主屏/副屏/协同显示切换会换一套窗口尺寸，断点也要重算
+      display.on('foldDisplayModeChange', (mode: display.FoldDisplayMode) => {
         this.breakpoint = breakpointOf(this.windowWidthVp);
       });
     } catch (error) {
-      // 非折叠设备没有该能力，忽略即可
-      this.foldExpanded = true;
+      // 非折叠设备没有该能力，按完全展开处理
+      this.foldState = 'expanded';
     }
   }
 

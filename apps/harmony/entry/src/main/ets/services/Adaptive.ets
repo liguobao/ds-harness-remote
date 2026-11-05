@@ -80,3 +80,31 @@ export function mascotVisible(breakpoint: Breakpoint, windowHeightVp: number): b
   }
   return windowHeightVp >= 620;
 }
+
+/**
+ * 折叠形态：单折轴设备只有 展开 / 折叠 / 半折 三态，
+ * 双折轴（三折叠）在 SDK 里是 10 个组合值（11/12/13 表示第一轴展开、第二轴展开/折叠/半折，
+ * 21/22/23 表示第一轴折叠，31/32/33 表示第一轴半折）。
+ * 布局只关心「第一折轴是否展开」，所以按十位数归一成三态。
+ */
+export type FoldState = 'expanded' | 'half' | 'folded';
+
+export function foldStateOf(status: number): FoldState {
+  if (status <= 0) {
+    return 'expanded';
+  }
+  const axis1: number = Math.floor(status / 10);
+  const primary: number = axis1 === 0 ? status : axis1;
+  if (primary === 1) {
+    return 'expanded';
+  }
+  if (primary === 3) {
+    return 'half';
+  }
+  return 'folded';
+}
+
+/** 半折悬停时（桌面立起来那种）适合上下分栏，展开/折叠时仍是常规布局。 */
+export function isHalfFoldedFold(state: FoldState): boolean {
+  return state === 'half';
+}
