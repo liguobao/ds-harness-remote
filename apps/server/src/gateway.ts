@@ -22,6 +22,8 @@ import { normalizeGatewayOptions, type GatewayTimingOptions } from './config.js'
 export interface GatewayOptions extends GatewayTimingOptions {
   logLevel?: LogLevel
   logger?: Logger
+  /** Advertise `transport.turn` (and accept TURN credential requests). */
+  turnEnabled?: boolean
 }
 
 /**
@@ -33,7 +35,16 @@ export interface GatewayOptions extends GatewayTimingOptions {
 type ConnectionState = 'awaiting_hello' | 'authenticated' | 'closing' | 'closed'
 
 type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string }
-type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number> }
+type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: string[]; iceCandidates: number }
+
+/** Protocol v1 default: at most 256 ICE candidates per logical connection. */
+export const MAX_ICE_CANDIDATES_PER_CONNECTION = 256
+/** Mirrors docs/protocol.md: Clients use max(server, local) and default to 12 s. */
+const WEBRTC_FALLBACK_TIMEOUT_MS = 12_000
+const SUPPORTED_TRANSPORTS = ['transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay'] as const
+const WEBRTC_TRANSPORT_CAPABILITIES = ['transport.lan', 'transport.p2p', 'transport.turn'] as const
+const TRANSPORT_NAMES = ['lan', 'p2p', 'turn', 'relay'] as const
+type TransportName = (typeof TRANSPORT_NAMES)[number]
 
 function modernHost(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:\+.*)?$/.exec(version)
@@ -94,6 +105,7 @@ export class Gateway {
   private wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false })
   private heartbeat: ReturnType<typeof setInterval>
   private closed = false
+  readonly turnEnabled: boolean
   readonly helloTimeoutMs: number
   readonly heartbeatIntervalMs: number
   readonly heartbeatDisconnectMs: number
@@ -110,6 +122,7 @@ export class Gateway {
     this.heartbeatDisconnectMs = timing.heartbeatDisconnectMs
     this.forceTerminateGraceMs = timing.forceTerminateGraceMs
     this.logger = options.logger ?? new Logger('gateway', options.logLevel ?? 'info')
+    this.turnEnabled = options.turnEnabled === true
 
     store.onInvalidate = id => this.disconnect(id, 'AUTH_INVALID')
     server.on('upgrade', (req, socket, head) => {
@@ -187,6 +200,28 @@ export class Gateway {
       if (peer.ws.readyState !== WebSocket.CLOSED) peer.ws.terminate()
     }, this.forceTerminateGraceMs)
     timer.unref()
+  }
+
+  /**
+   * Authorize a REST `/api/v1/turn/credentials` request. Only the two devices
+   * of an active logical connection may obtain credentials, and only while
+   * that connection is still being established.
+   */
+  authorizeIce(deviceId: string, connectionId: string): boolean {
+    const link = this.links.get(connectionId)
+    if (link === undefined) return false
+    if (link.host !== deviceId && link.client !== deviceId) return false
+    if (link.stage !== 'accepted' && link.stage !== 'handshake') return false
+    return this.peers.has(link.host) && this.peers.has(link.client)
+  }
+  private supportedCapabilities(): string[] {
+    return SUPPORTED_TRANSPORTS.filter(capability => capability !== 'transport.turn' || this.turnEnabled)
+  }
+  private negotiatedCapabilities(offered: readonly string[]): string[] {
+    return this.supportedCapabilities().filter(capability => offered.includes(capability))
+  }
+  private supportsWebRtc(peer: Peer): boolean {
+    return WEBRTC_TRANSPORT_CAPABILITIES.some(capability => peer.capabilities.includes(capability))
   }
 
   private accept(ws: WebSocket): void {
@@ -309,9 +344,9 @@ export class Gateway {
             heartbeatIntervalMs: this.heartbeatIntervalMs,
             maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES,
             maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
-            capabilities: p.capabilities.includes('transport.relay') ? ['transport.relay'] : [],
-            webrtcEnabled: false,
-            webrtcFallbackTimeoutMs: 1,
+            capabilities: this.negotiatedCapabilities(p.capabilities),
+            webrtcEnabled: true,
+            webrtcFallbackTimeoutMs: WEBRTC_FALLBACK_TIMEOUT_MS,
           }))
           return
         }
@@ -364,9 +399,24 @@ export class Gateway {
       if (!request.preferredTransports.includes('relay') || !peer.capabilities.includes('transport.relay') || !host.capabilities.includes('transport.relay')) throw new ApiError('CAPABILITY_NOT_SUPPORTED')
       for (const old of this.links.values()) if (old.client === peer.id || (old.host === host.id && !modernHost(host.version))) this.drop(old, 'CONNECTION_REPLACED')
       if (this.links.size >= 256) throw new ApiError('RATE_LIMITED')
-      const link: Link = { id: randomUUID(), host: host.id, client: peer.id, stage: 'pending', created: Date.now(), counters: new Map() }
+      const link: Link = {
+        id: randomUUID(),
+        host: host.id,
+        client: peer.id,
+        stage: 'pending',
+        created: Date.now(),
+        counters: new Map(),
+        preferredTransports: [...request.preferredTransports],
+        iceCandidates: 0,
+      }
       this.links.set(link.id, link)
-      this.send(host, createControlFrame('connect.incoming', { connectionId: link.id, clientDeviceId: peer.id, clientIdentityKey: this.store.get(peer.id).descriptor.identityKey, authorization: 'account', preferredTransports: ['relay'] }))
+      this.send(host, createControlFrame('connect.incoming', {
+        connectionId: link.id,
+        clientDeviceId: peer.id,
+        clientIdentityKey: this.store.get(peer.id).descriptor.identityKey,
+        authorization: 'account',
+        preferredTransports: link.preferredTransports,
+      }))
       return
     }
     const id = p.connectionId
@@ -384,12 +434,14 @@ export class Gateway {
       return
     }
     if (p.targetDeviceId !== otherId || link.stage === 'pending') throw new ApiError('CONNECTION_NOT_FOUND')
-    if (frame.type === 'transport.selected') {
-      if (peer.id !== link.client || (frame.payload as TransportSelectedPayload).transport !== 'relay') throw new ApiError('CAPABILITY_NOT_SUPPORTED')
-      if (modernHost(other.version)) this.send(other, frame)
+    if (frame.type.startsWith('signal.')) {
+      this.forwardSignal(link, peer, other, frame)
       return
     }
-    if (frame.type.startsWith('signal.')) return // Relay-only negotiation: no signaling forwarding.
+    if (frame.type === 'transport.selected') {
+      this.forwardTransportSelected(link, peer, other, frame.payload as TransportSelectedPayload)
+      return
+    }
     if (frame.type === 'secure.handshake') {
       const step = (frame.payload as SecureHandshakePayload).step
       if (step === 1 && peer.id === link.client && link.stage === 'accepted') link.stage = 'handshake'
@@ -401,6 +453,57 @@ export class Gateway {
       link.counters.set(peer.id, counter)
     } else throw new ApiError('INVALID_MESSAGE')
     this.send(other, frame)
+  }
+  /**
+   * Forward WebRTC signaling only while the logical connection is being
+   * established. An offer is not forwarded to a Host that never advertised a
+   * WebRTC transport: the Client then times out and falls back to Relay
+   * instead of forcing the Host to reject an unexpected frame.
+   */
+  private forwardSignal(link: Link, peer: Peer, other: Peer, frame: ControlFrame): void {
+    if (link.stage === 'ready') return
+    if (frame.type === 'signal.offer') {
+      if (peer.id !== link.client) throw new ApiError('INVALID_MESSAGE')
+      if (!this.supportsWebRtc(other)) return
+    } else if (frame.type === 'signal.answer') {
+      if (peer.id !== link.host) throw new ApiError('INVALID_MESSAGE')
+    } else if (frame.type === 'signal.ice') {
+      if (!this.supportsWebRtc(other)) return
+      if (++link.iceCandidates > MAX_ICE_CANDIDATES_PER_CONNECTION) throw new ApiError('INVALID_MESSAGE')
+    } else {
+      throw new ApiError('INVALID_MESSAGE')
+    }
+    this.send(other, frame)
+  }
+  /**
+   * Forward the initiator's transport choice. `lan` is downgraded to `p2p`
+   * only for a Host that did not negotiate `transport.lan` (old RC2 peers), as
+   * required by docs/protocol.md. Relay keeps the legacy compatibility gate.
+   */
+  private forwardTransportSelected(link: Link, peer: Peer, other: Peer, payload: TransportSelectedPayload): void {
+    // The protocol only lets the initiator (Client) select the transport. A
+    // responder (Host) may also announce its own selection after its RTC data
+    // channel opens; clients ignore it, so ignoring here is compatibility, not
+    // a protocol violation. Throwing would drop the whole link and prevent the
+    // Noise handshake from completing.
+    if (peer.id !== link.client) return
+    if (link.stage !== 'accepted' && link.stage !== 'handshake') throw new ApiError('INVALID_MESSAGE')
+    const transport: TransportName = payload.transport
+    if (!TRANSPORT_NAMES.includes(transport)) throw new ApiError('INVALID_MESSAGE')
+    if (transport === 'relay') {
+      if (modernHost(other.version)) this.send(other, createControlFrame('transport.selected', { ...payload }))
+      return
+    }
+    const requiredCapability = `transport.${transport}`
+    if (other.capabilities.includes(requiredCapability)) {
+      this.send(other, createControlFrame('transport.selected', { ...payload }))
+      return
+    }
+    if (transport === 'lan' && other.capabilities.includes('transport.p2p')) {
+      this.send(other, createControlFrame('transport.selected', { ...payload, transport: 'p2p' }))
+      return
+    }
+    throw new ApiError('CAPABILITY_NOT_SUPPORTED')
   }
   close(): void {
     if (this.closed) return

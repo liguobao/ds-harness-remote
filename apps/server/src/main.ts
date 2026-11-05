@@ -7,6 +7,7 @@ import {
   parseForceTerminateGrace,
 } from './server.js'
 import { parseLogLevel } from './logger.js'
+import { parseIceConfig } from './ice.js'
 
 const port = Number(process.env.DSH_SERVER_PORT ?? '8080')
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid DSH_SERVER_PORT.')
@@ -28,6 +29,7 @@ const app = createRemoteServer({
   heartbeatDisconnectMs,
   forceTerminateGraceMs,
   logLevel,
+  ice: parseIceConfig(process.env),
 })
 app.server.listen(port, process.env.DSH_SERVER_HOST ?? '127.0.0.1', () => console.info(`Remote Server listening on port ${port}`))
 app.server.on('error', () => { console.error('Remote Server could not listen. Check address and port.'); process.exitCode = 1; app.gateway.close() })
