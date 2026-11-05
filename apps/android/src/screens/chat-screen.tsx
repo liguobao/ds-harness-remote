@@ -59,6 +59,7 @@ import {
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
 import { ChatComposer } from './chat/composer'
+import { ExpandedComposer } from './chat/expanded-composer'
 import {
   ChatImages,
   ChatItemView,
@@ -249,19 +250,20 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       .finally(() => { if (!controller.signal.aborted) setPermissionLoading(false) })
     return () => controller.abort()
   }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
-  useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
+  useEffect(() => { setToolsMode(undefined); setComposerExpanded(false) }, [session?.sessionId, connection.phase])
   // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
   useEffect(() => {
     if (connection.phase !== 'connected' || session?.backend === 'codex') return
     if (useAppStore.getState().agentPresetOptions !== undefined) return
     void loadAgentPresets()
   }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
+  const [composerExpanded, setComposerExpanded] = useState(false)
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)
   const creatingSessionRef = useRef(false)
   const lastNewSessionTimeRef = useRef(0)
   const { visibleMessages, visibleSections, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
-  const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
+  const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
   const { listRef, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
@@ -342,6 +344,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const onBackRef = useRef(backFromChat)
   onBackRef.current = backFromChat
   useChatBackHandler(composerInputRef, () => onBackRef.current(), [
+    { open: composerExpanded, close: () => setComposerExpanded(false) },
     { open: plusMenuOpen, close: () => { Keyboard.dismiss(); setPlusMenuOpen(false) } },
     { open: modelPickerOpen, close: () => setModelPickerOpen(false) },
     { open: modePickerOpen, close: () => setModePickerOpen(false) },
@@ -836,11 +839,26 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
           model={{ available: sessionModels !== undefined, label: currentModelLabel, selecting: modelSelecting, onOpen: () => setModelPickerOpen(true) }}
           promptsPickerOpen={promptsPickerOpen} onExpand={() => setComposingDuringRun(true)}
+          onOpenExpand={() => setComposerExpanded(true)}
           onOpenActions={openPlusMenu} onOpenPrompts={openPromptsPicker}
           onSubmit={() => void submit()} onStop={() => void stopSession()}
         />
         </View>
       </View>
+      <ExpandedComposer
+        visible={composerExpanded}
+        onClose={() => setComposerExpanded(false)}
+        backend={session.backend}
+        draft={draft}
+        quotes={quotes}
+        onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
+        input={mentionInput}
+        replyActive={replyActive}
+        stopping={stopping}
+        sendDisabled={sendDisabled}
+        onSubmit={() => void submit()}
+        onStop={() => void stopSession()}
+      />
         </View>
       </View>
 

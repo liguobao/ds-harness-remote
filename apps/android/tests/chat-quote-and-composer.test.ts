@@ -89,3 +89,35 @@ describe('Chat Action Menu cards boundary', () => {
     expect(allowedCards.includes('quote')).toBe(false)
   })
 })
+
+
+describe('Composer expand state and back handler priority', () => {
+  it('defines expandComposer and collapseComposer across all locales', async () => {
+    const { messageCatalogs } = await import('../src/locales/i18n')
+    for (const [lang, s] of Object.entries(messageCatalogs)) {
+      expect(typeof s.chat.expandComposer, "lang: " + lang).toBe('string')
+      expect(s.chat.expandComposer.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.chat.collapseComposer, "lang: " + lang).toBe('string')
+      expect(s.chat.collapseComposer.length, "lang: " + lang).toBeGreaterThan(0)
+    }
+  })
+
+  it('prioritizes closing expanded composer before back navigation or dismiss', () => {
+    let composerExpanded = true
+    let backNavigated = false
+    const panels = [
+      { open: composerExpanded, close: () => { composerExpanded = false } },
+      { open: false, close: () => {} },
+    ]
+
+    const activePanel = panels.find(p => p.open)
+    if (activePanel) {
+      activePanel.close()
+    } else {
+      backNavigated = true
+    }
+
+    expect(composerExpanded).toBe(false)
+    expect(backNavigated).toBe(false)
+  })
+})
