@@ -13,11 +13,11 @@ type Snapshot = {
   entries: Record<string, BrowseEntry>
   catalogs: Record<string, { workspaces: WorkspaceView[]; sessions: RemoteSession[] }>
   hostModes: Record<string, 'agent' | 'bot'>
-  resume: boolean; notifications: boolean
+  resume: boolean; notifications: boolean; autoConnectHost: boolean
   last?: { scope: string; deviceId: string; sessionId: string }
 }
 type Memory = Snapshot & { ready: boolean; error?: string }
-const empty = (): Snapshot => ({ entries: {}, catalogs: {}, hostModes: {}, resume: false, notifications: true })
+const empty = (): Snapshot => ({ entries: {}, catalogs: {}, hostModes: {}, resume: false, notifications: true, autoConnectHost: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
 export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
@@ -59,7 +59,7 @@ function savedEntry(value: BrowseEntry): BrowseEntry {
 function snapshot(): Snapshot {
   const state = useBrowseMemory.getState()
   const entries = Object.fromEntries(Object.entries(state.entries).map(([id, value]) => [id, savedEntry(value)]))
-  return {entries, catalogs: state.catalogs, hostModes: state.hostModes, resume: state.resume, notifications: state.notifications, last: state.last}
+  return {entries, catalogs: state.catalogs, hostModes: state.hostModes, resume: state.resume, notifications: state.notifications, autoConnectHost: state.autoConnectHost, last: state.last}
 }
 export function flushBrowseMemory(): Promise<void> {
   if (timer !== undefined) {clearTimeout(timer); timer = undefined}
@@ -96,7 +96,7 @@ export async function hydrateBrowseMemory(): Promise<void> {
       const data = JSON.parse(new TextDecoder().decode(decryptFrame(key, encrypted, aad))) as Snapshot
       const catalogs = Object.fromEntries(Object.entries(data.catalogs).map(([scope, catalog]) => [scope, restoreCatalog(catalog)]))
       const entries = Object.fromEntries(Object.entries(data.entries).map(([id, value]) => [id, savedEntry(value)]))
-      useBrowseMemory.setState({...empty(), ...data, entries, catalogs, ready: true})
+      useBrowseMemory.setState({...empty(), ...data, autoConnectHost: typeof data.autoConnectHost === 'boolean' ? data.autoConnectHost : true, entries, catalogs, ready: true})
       // Remove legacy text previews from disk without losing drafts or preferences.
       if (Object.values(data.entries).some(value => Object.hasOwn(value, 'messages'))) await flushBrowseMemory()
     } else useBrowseMemory.setState({ready: true})
@@ -113,7 +113,7 @@ export function saveBrowseCatalog(scope: string, workspaces: WorkspaceView[], se
   useBrowseMemory.setState(state => ({catalogs: {...state.catalogs, [scope]: catalog}}))
   schedule()
 }
-export function browsePreference(patch: Partial<Pick<Snapshot, 'resume' | 'notifications' | 'last'>>): void {
+export function browsePreference(patch: Partial<Pick<Snapshot, 'resume' | 'autoConnectHost' | 'notifications' | 'last'>>): void {
   useBrowseMemory.setState(patch); schedule()
 }
 export async function clearBrowseMemory(): Promise<void> {
