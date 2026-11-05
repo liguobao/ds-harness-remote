@@ -12,14 +12,23 @@ const identity: DeviceIdentity = {
 }
 
 describe('Remote Server API compatibility', () => {
-  it('preserves authorization when a rate limit carries an auth error code', async () => {
-    const fetchImplementation = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'DEVICE_REVOKED', message: 'Retry later' } }), { status: 429 }))
-      .mockResolvedValueOnce(jsonResponse({ name: 'OK' }))
-    const api = new RemoteServerApi('https://remote.example.com', 'token', fetchImplementation)
-    await expect(api.renameAccountDevice('host', 'OK')).rejects.toMatchObject({ code: 'RATE_LIMITED', retryable: true })
-    expect(await api.renameAccountDevice('host', 'OK')).toEqual({ name: 'OK' })
-    expect(fetchImplementation.mock.calls[1]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer token' })
+  it('preserves rate limits and authorization across Server and proxy response formats without replaying mutations', async () => {
+    await runScenarios([
+      { name: 'protocol JSON with misleading auth code', body: JSON.stringify({ error: { code: 'DEVICE_REVOKED', message: 'Retry later' } }) },
+      { name: 'proxy HTML', body: '<html><h1>429 Too Many Requests</h1></html>' },
+      { name: 'proxy plain text', body: 'Too Many Requests' },
+      { name: 'truncated JSON', body: '{"error":' },
+      { name: 'empty response', body: '' },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const fetchImplementation = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(scenario.body, { status: 429, headers: { 'Retry-After': '60' } }))
+        .mockResolvedValueOnce(jsonResponse({ name: 'OK' }))
+      const api = new RemoteServerApi('https://remote.example.com', 'token', fetchImplementation)
+      await expect(api.renameAccountDevice('host', 'OK')).rejects.toMatchObject({ code: 'RATE_LIMITED', status: 429, retryable: true })
+      expect(fetchImplementation).toHaveBeenCalledTimes(1)
+      expect(await api.renameAccountDevice('host', 'OK')).toEqual({ name: 'OK' })
+      expect(fetchImplementation.mock.calls[1]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer token' })
+    } })))
   })
 
   it('renames an account-owned device with authenticated PATCH and the canonical server name', async () => {

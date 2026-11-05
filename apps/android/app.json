@@ -26,7 +26,7 @@
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
+        "backgroundColor": "#111C32",
         "foregroundImage": "./assets/android-icon-foreground-adaptive.png"
       },
       "predictiveBackGestureEnabled": false

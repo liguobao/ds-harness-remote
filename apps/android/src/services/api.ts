@@ -335,6 +335,11 @@ export class RemoteServerApi {
       try {
         body = JSON.parse(text)
       } catch {
+        // Proxies can return HTML or plain text when throttling. Preserve the
+        // HTTP rate limit instead of disguising it as a protocol failure.
+        if (response.status === 429) {
+          throw new RemoteApiError('RATE_LIMITED', 'Too many requests. Please try again later.', 429, true)
+        }
         throw new RemoteApiError('INVALID_MESSAGE', 'The server returned invalid JSON.', response.status)
       }
     }
@@ -456,6 +461,5 @@ function mapStatus(status: number, detail: string, serverCode: unknown): string 
   if (status === 403) return 'AUTH_REQUIRED'
   if (status === 404) return 'DEVICE_NOT_FOUND'
   if (status === 409) return 'DEVICE_OWNERSHIP_REQUIRED'
-  if (status === 429) return 'RATE_LIMITED'
   return status >= 500 ? 'CONNECTION_FAILED' : 'INVALID_MESSAGE'
 }

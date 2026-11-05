@@ -37,7 +37,8 @@
     "./client": "./packages/plugin/dist/client.github.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./icon": "./icon.png"
   },
   "files": [
     "index.js",
@@ -50,7 +51,8 @@
     "cordis.patch.yml",
     "locale/",
     "README.md",
-    "package.json"
+    "package.json",
+    "icon.png"
   ],
   "dsh": {
     "bundle": {

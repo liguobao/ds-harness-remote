@@ -42,7 +42,8 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": "./dist/client.js",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./icon": "./icon.png"
   },
   "files": [
     "bin",
@@ -53,7 +54,8 @@
     "locale",
     "public.d.ts",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "icon.png"
   ],
   "dsh": {
     "bundle": {
