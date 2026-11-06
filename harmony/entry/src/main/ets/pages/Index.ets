@@ -143,6 +143,8 @@ struct Index {
   @State messageActionTime: number = 0;
   /** 该消息里所有代码块拼起来的内容，空串表示没有代码。 */
   @State messageActionCode: string = '';
+  /** 设备详情面板（点 ⋯ 菜单里的「查看详情」打开）。 */
+  @State deviceDetailId: string = '';
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
   /** 会话内搜索（只在当前会话里找）。 */
@@ -842,6 +844,85 @@ struct Index {
       return text;
     }
     return lines.slice(0, 18).join('\n') + '\n\n…';
+  }
+
+  private deviceDetail(): RemoteHostDevice | undefined {
+    for (const device of this.devices) {
+      if (device.deviceId === this.deviceDetailId) {
+        return device;
+      }
+    }
+    return undefined;
+  }
+
+  private deviceDetailName(): string {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    return device === undefined ? '' : device.name;
+  }
+
+  private deviceDetailOnline(): boolean {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    return device === undefined ? false : device.online;
+  }
+
+  private deviceDetailOnlineLabel(): string {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    return device === undefined ? '' : this.hostSeenLabel(device);
+  }
+
+  private deviceDetailField(key: string): string {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    if (device === undefined) {
+      return '';
+    }
+    if (key === 'platform') {
+      return device.platform;
+    }
+    if (key === 'harnessVersion') {
+      return device.harnessVersion;
+    }
+    return device.clientVersion;
+  }
+
+  private deviceDetailLastSeen(): string {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    if (device === undefined || device.lastSeenAt <= 0) {
+      return '';
+    }
+    const date: Date = new Date(device.lastSeenAt);
+    const pad = (n: number): string => n < 10 ? '0' + n : '' + n;
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  private deviceDetailFingerprint(): string {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    if (device === undefined || device.identityKey.length === 0) {
+      return '';
+    }
+    const key: string = device.identityKey;
+    return key.length > 24 ? key.substring(0, 12) + '…' + key.substring(key.length - 8) : key;
+  }
+
+  private copyDeviceDetail(): void {
+    const device: RemoteHostDevice | undefined = this.deviceDetail();
+    if (device === undefined) {
+      return;
+    }
+    const lines: string[] = [
+      'name: ' + device.name,
+      'deviceId: ' + device.deviceId,
+      'platform: ' + device.platform,
+      'harness: ' + device.harnessVersion,
+      'client: ' + device.clientVersion,
+      'online: ' + (device.online ? 'yes' : 'no'),
+      'lastSeen: ' + this.deviceDetailLastSeen(),
+      'identityKey: ' + device.identityKey
+    ];
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, lines.join('\n'));
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      promptAction.showToast({ message: this.tr('已复制主机信息') });
+    }).catch(() => undefined);
   }
 
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
@@ -1568,6 +1649,9 @@ struct Index {
       if (this.inSessionSearchOpen) {
         this.InSessionSearchOverlay()
       }
+      if (this.deviceDetailId.length > 0) {
+        this.DeviceDetailOverlay()
+      }
       if (this.messageActionsOpen) {
         this.MessageActionsOverlay()
       }
@@ -2232,6 +2316,20 @@ struct Index {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+        Text(this.tr('查看详情'))
+          .fontSize(this.fs(15))
+          .fontColor(this.pal().text)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 14, bottom: 14 })
+          .backgroundColor(this.pal().card)
+          .borderRadius(14)
+          .border({ width: 1, color: this.pal().border })
+          .onClick(() => {
+            const target: string = this.deviceMenuId;
+            this.deviceMenuId = '';
+            this.deviceDetailId = target;
+          })
         Text(this.tr('改名'))
           .fontSize(14)
           .fontColor(this.pal().text)
@@ -5519,6 +5617,98 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 主机详情：把 server 上报的字段摊开，指纹/ID 可以一键复制。 */
+  @Builder
+  DeviceDetailOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.deviceDetailId = '';
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 2 }) {
+            Text(this.deviceDetailName())
+              .fontSize(this.fs(16))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.deviceDetailOnlineLabel())
+              .fontSize(this.fs(11))
+              .fontColor(this.deviceDetailOnline() ? '#34D399' : this.pal().text3)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.deviceDetailId = '';
+            })
+        }
+        .width('100%')
+
+        this.DetailRow(this.tr('平台'), this.deviceDetailField('platform'))
+        this.DetailRow(this.tr('主机版本'), this.deviceDetailField('harnessVersion'))
+        this.DetailRow(this.tr('客户端版本'), this.deviceDetailField('clientVersion'))
+        this.DetailRow(this.tr('最后在线'), this.deviceDetailLastSeen())
+        this.DetailRow(this.tr('设备 ID'), this.deviceDetailId)
+        this.DetailRow(this.tr('公钥指纹'), this.deviceDetailFingerprint())
+
+        Text(this.tr('复制全部'))
+          .fontSize(this.fs(13))
+          .fontColor('#FFFFFF')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 12, bottom: 12 })
+          .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+          .borderRadius(12)
+          .onClick(() => {
+            this.copyDeviceDetail();
+          })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 420 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  DetailRow(label: string, value: string) {
+    Row({ space: 10 }) {
+      Text(label)
+        .fontSize(this.fs(11))
+        .fontColor(this.pal().text3)
+        .width(76)
+      Text(value.length > 0 ? value : '—')
+        .fontSize(this.fs(12))
+        .fontColor(this.pal().text2)
+        .fontFamily('monospace')
+        .layoutWeight(1)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .backgroundColor(this.pal().inputBg)
+    .borderRadius(10)
   }
 
   /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */
