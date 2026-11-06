@@ -3460,6 +3460,42 @@ struct Index {
                       this.renamingSession = true;
                     }
                   })
+                  .gesture(LongPressGesture().onAction(() => {
+                    if (this.currentSessionId.length === 0) {
+                      return;
+                    }
+                    ActionSheet.show({
+                      title: this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('会话'),
+                      message: this.currentSessionId,
+                      sheets: [
+                        {
+                          title: this.tr('重命名'),
+                          action: () => {
+                            this.sessionTitleInput = this.currentSessionTitle;
+                            this.renamingSession = true;
+                          }
+                        },
+                        {
+                          title: this.tr('复制为 Markdown'),
+                          action: () => {
+                            const data: pasteboard.PasteData = pasteboard.createData(
+                              pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.sessionMarkdown());
+                            pasteboard.getSystemPasteboard().setData(data).then(() => {
+                              promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+                            }).catch(() => {
+                              promptAction.showToast({ message: this.tr('复制失败') });
+                            });
+                          }
+                        },
+                        {
+                          title: this.tr('归档会话'),
+                          action: () => {
+                            this.runtime.archiveCurrentSession();
+                          }
+                        }
+                      ]
+                    });
+                  }))
               }
               .alignItems(VerticalAlign.Center)
               if (this.connectedTransport.length > 0) {
@@ -3687,6 +3723,12 @@ struct Index {
       })
       .onReachEnd(() => {
         this.stickToBottom = true;
+      })
+      // 滚到顶就自动往更早翻一页（按钮仍然留着，翻不动时点它不会重复拉）
+      .onReachStart(() => {
+        if (this.historyHasMore && !this.loadingOlderHistory) {
+          this.runtime.loadOlderHistory();
+        }
       })
       // 记住当前停在哪个条目，切走再回来据此恢复位置
       .onScrollIndex((first: number) => {
@@ -4725,16 +4767,34 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text(this.tr('压缩上下文'))
-            .fontSize(this.fs(12))
-            .fontColor('#22D3EE')
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .backgroundColor('rgba(34,211,238,0.10)')
-            .borderRadius(10)
-            .onClick(() => {
-              this.showSessionPanel = false;
-              this.runtime.sendPrompt('/compact');
-            })
+          Row({ space: 8 }) {
+            Text(this.tr('导出'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(10)
+              .onClick(() => {
+                const data: pasteboard.PasteData = pasteboard.createData(
+                  pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.sessionMarkdown());
+                pasteboard.getSystemPasteboard().setData(data).then(() => {
+                  promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+                }).catch(() => {
+                  promptAction.showToast({ message: this.tr('复制失败') });
+                });
+              })
+            Text(this.tr('压缩上下文'))
+              .fontSize(this.fs(12))
+              .fontColor('#22D3EE')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor('rgba(34,211,238,0.10)')
+              .borderRadius(10)
+              .onClick(() => {
+                this.showSessionPanel = false;
+                this.runtime.sendPrompt('/compact');
+              })
+          }
+          .alignItems(VerticalAlign.Center)
         }
         .width('100%')
         .padding({ left: 18, right: 18, top: 4, bottom: 12 })

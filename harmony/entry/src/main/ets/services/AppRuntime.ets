@@ -1491,6 +1491,62 @@ export class AppRuntime {
     this.notify();
   }
 
+  /**
+   * 把当前会话拼成 Markdown（复制到剪贴板用）。
+   * 只取已加载的部分：首屏 30 条 + 手动翻的更早历史；工具调用压成一行，不铺长参数。
+   */
+  sessionMarkdown(): string {
+    const lines: string[] = [];
+    const title: string = this.currentSessionTitle.length > 0 ? this.currentSessionTitle : '会话';
+    lines.push('# ' + title);
+    const meta: string[] = [];
+    if (this.connectedHostName.length > 0) {
+      meta.push('主机：' + this.connectedHostDisplayName());
+    }
+    if (this.currentSessionId.length > 0) {
+      meta.push('会话：' + this.currentSessionId);
+    }
+    meta.push('导出：' + formatStamp(Date.now()));
+    lines.push('');
+    lines.push('> ' + meta.join(' · '));
+    lines.push('');
+    const out: string[] = [];
+    for (const item of this.messages) {
+      if (item.kind === 'user') {
+        if (item.text.length === 0) {
+          continue;
+        }
+        out.push('## 我 · ' + formatStamp(item.timestamp));
+        out.push('');
+        out.push(item.text);
+        out.push('');
+      } else if (item.kind === 'assistant') {
+        if (item.text.length === 0) {
+          continue;
+        }
+        out.push('## 助手 · ' + formatStamp(item.timestamp));
+        out.push('');
+        out.push(item.text);
+        out.push('');
+      } else if (item.kind === 'tool' || item.kind === 'toolrun') {
+        const name: string = item.toolName.length > 0 ? item.toolName : 'tool';
+        const state: string = item.toolState.length > 0 ? item.toolState : '';
+        out.push('- `' + name + '`' + (state.length > 0 ? '（' + state + '）' : '')
+          + (item.summary.length > 0 ? '：' + firstLineOf(item.summary) : ''));
+      } else if (item.kind === 'notice') {
+        if (item.text.length > 0) {
+          out.push('> ⚠ ' + firstLineOf(item.text));
+        }
+      }
+    }
+    const body: string = out.join('\n').trim();
+    lines.push(body.length > 0 ? body : '_（这段历史里没有可导出的正文）_');
+    lines.push('');
+    const markdown: string = lines.join('\n');
+    logInfo('session markdown -> ' + markdown.length + ' chars');
+    return markdown;
+  }
+
   /** 归档指定会话（会话列表长按触发）。归档集合以主机回执为准。 */
   async archiveSession(sessionId: string): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -3062,6 +3118,24 @@ function cloneItem(item: ChatItem): ChatItem {
 }
 
 /** Fold a native history window into ordered chat items. */
+/** 导出用：MM-DD HH:MM（时间为 0 时给空串）。 */
+function formatStamp(timestamp: number): string {
+  if (timestamp <= 0) {
+    return '—';
+  }
+  const date: Date = new Date(timestamp);
+  const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
+  return pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' '
+    + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+/** 多行文本压成一行，导出工具摘要用。 */
+function firstLineOf(text: string): string {
+  const cut: number = text.indexOf('\n');
+  const line: string = cut >= 0 ? text.substring(0, cut) : text;
+  return line.length > 120 ? line.substring(0, 120) + '…' : line;
+}
+
 /** 一页历史里最早的事件 seq（没有有效 seq 时返回 -1）。 */
 function oldestSeqOf(entries: HarnessHistoryEntry[]): number {
   let oldest: number = -1;
