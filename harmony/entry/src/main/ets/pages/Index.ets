@@ -780,6 +780,23 @@ struct Index {
   }
 
   /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
+  /** 跨天时插一条日期分隔；同一天不打断。 */
+  private shouldShowDayDivider(index: number): boolean {
+    const rows: ChatItem[] = this.chatRows();
+    if (index <= 0 || index >= rows.length) {
+      return false;
+    }
+    const current: number = rows[index].timestamp;
+    const previous: number = rows[index - 1].timestamp;
+    if (current <= 0) {
+      return false;
+    }
+    if (previous <= 0) {
+      return index === 0;
+    }
+    return !sameDay(current, previous);
+  }
+
   /** 这条回复是否需要折叠：非流式、没被展开过、且超过 24 行。 */
   private isLongCollapsed(item: ChatItem): boolean {
     if (item.streaming || this.expandedMessages.includes(item.id)) {
@@ -3368,9 +3385,22 @@ struct Index {
             .padding({ top: 40 })
           }
         }
-        ForEach(this.chatRows(), (item: ChatItem) => {
+        ForEach(this.chatRows(), (item: ChatItem, index: number) => {
           ListItem() {
-            this.MessageRow(item)
+            Column({ space: 6 }) {
+              if (this.shouldShowDayDivider(index)) {
+                Text(dayDividerLabel(item.timestamp, this.en()))
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
+                  .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                  .backgroundColor(this.pal().chip)
+                  .borderRadius(8)
+                  .margin({ top: 8, bottom: 2 })
+              }
+              this.MessageRow(item)
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Center)
           }
         }, (item: ChatItem) => `${item.id}#${item.rev}#${this.languageMode}`)
       }
@@ -5901,6 +5931,16 @@ struct Index {
     }
     .width('100%')
     .padding({ top: 3, bottom: 3, left: 24, right: 6 })
+    .onClick(() => {
+      const payload: string = item.text.length > 0 ? item.text : item.summary;
+      if (payload.length === 0) {
+        return;
+      }
+      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, payload);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        promptAction.showToast({ message: this.tr('已复制该条命令') });
+      }).catch(() => undefined);
+    })
   }
 
   @Builder
@@ -6291,6 +6331,36 @@ function extractCodeBlocks(text: string): string {
     }
   }
   return out.join('\n\n');
+}
+
+/** 两个时间戳是否同一天。 */
+function sameDay(a: number, b: number): boolean {
+  const da: Date = new Date(a);
+  const db: Date = new Date(b);
+  return da.getFullYear() === db.getFullYear()
+    && da.getMonth() === db.getMonth()
+    && da.getDate() === db.getDate();
+}
+
+/** 日期分隔文案：今天 / 昨天 / M月d日。 */
+function dayDividerLabel(timestamp: number, english: boolean): string {
+  if (timestamp <= 0) {
+    return '';
+  }
+  const target: Date = new Date(timestamp);
+  const now: Date = new Date();
+  const sameAsToday: boolean = sameDay(timestamp, now.getTime());
+  const yesterday: Date = new Date(now.getTime() - 86400000);
+  const sameAsYesterday: boolean = sameDay(timestamp, yesterday.getTime());
+  if (sameAsToday) {
+    return english ? 'Today' : '今天';
+  }
+  if (sameAsYesterday) {
+    return english ? 'Yesterday' : '昨天';
+  }
+  const month: number = target.getMonth() + 1;
+  const day: number = target.getDate();
+  return english ? `${month}/${day}` : `${month}月${day}日`;
 }
 
 function formatClock(timestamp: number): string {
