@@ -77,7 +77,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/verify-version-sync.mjs && tsc -p tsconfig.json && node scripts/build-bundles.mjs",
+    "build": "pnpm --filter @dsh-remote/server build && node scripts/verify-version-sync.mjs && tsc -p tsconfig.json && node scripts/build-bundles.mjs",
     "check": "node scripts/verify-version-sync.mjs && tsc -p tsconfig.test.json",
     "test": "node scripts/verify-version-sync.mjs && vitest run"
   },

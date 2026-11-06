@@ -1378,14 +1378,14 @@ var require_receiver = __commonJS({
        * @return {(Error|RangeError)} The error
        * @private
        */
-      createError(ErrorCtor, message, prefix, statusCode, errorCode5) {
+      createError(ErrorCtor, message, prefix, statusCode, errorCode6) {
         this._loop = false;
         this._errored = true;
         const err5 = new ErrorCtor(
           prefix ? `Invalid WebSocket frame: ${message}` : message
         );
         Error.captureStackTrace(err5, this.createError);
-        err5.code = errorCode5;
+        err5.code = errorCode6;
         err5[kStatusCode] = statusCode;
         return err5;
       }
@@ -8945,8 +8945,8 @@ function tryAlternateOf(error62, addressFamily) {
   if (!(error62 instanceof TransactionFailed)) {
     return void 0;
   }
-  const [errorCode5] = error62.response.getAttributeValue("ERROR-CODE") ?? [];
-  if (errorCode5 !== 300) {
+  const [errorCode6] = error62.response.getAttributeValue("ERROR-CODE") ?? [];
+  if (errorCode6 !== 300) {
     return void 0;
   }
   const servers = error62.response.alternateServers;
@@ -19894,13 +19894,13 @@ var init_lib = __esm({
             log23("requestWithRetry error", error62);
             throw error62;
           }
-          const [errorCode5] = error62.response.getAttributeValue("ERROR-CODE");
+          const [errorCode6] = error62.response.getAttributeValue("ERROR-CODE");
           const nonce = error62.response.getAttributeValue("NONCE");
           const realm = error62.response.getAttributeValue("REALM");
-          if ((errorCode5 === 401 && realm || errorCode5 === 438 && this.realm) && nonce) {
-            log23("retry with nonce", errorCode5);
+          if ((errorCode6 === 401 && realm || errorCode6 === 438 && this.realm) && nonce) {
+            log23("retry with nonce", errorCode6);
             this.nonce = nonce;
-            if (errorCode5 === 401) {
+            if (errorCode6 === 401) {
               this.realm = realm;
             }
             this.integrityKey = makeIntegrityKey(
@@ -22120,13 +22120,13 @@ var init_lib = __esm({
           }
         }
       }
-      respondError(request, addr, protocol, errorCode5, localPassword = this.localPassword) {
+      respondError(request, addr, protocol, errorCode6, localPassword = this.localPassword) {
         const response = new Message(
           request.messageMethod,
           272,
           request.transactionId
         );
-        response.setAttribute("ERROR-CODE", errorCode5).addMessageIntegrity(Buffer.from(localPassword, "utf8")).addFingerprint();
+        response.setAttribute("ERROR-CODE", errorCode6).addMessageIntegrity(Buffer.from(localPassword, "utf8")).addFingerprint();
         protocol.sendStun(response, addr).catch((e) => {
           log24("sendStun error", e);
         });
@@ -64512,6 +64512,8 @@ function classifyControlClose(code, reason) {
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
+var SERVER_SHUTDOWN_CLOSE_CODE = 4009;
+var SERVER_SHUTDOWN_CLOSE_REASON = SERVER_SHUTDOWN_REASON;
 var PROTOCOL_VERSION = 1;
 var MAX_CONTROL_FRAME_BYTES = 64 * 1024;
 var MAX_RELAY_FRAME_BYTES = 1024 * 1024;
@@ -99735,6 +99737,7 @@ import { existsSync as existsSync7, readFileSync as readFileSync3, readdirSync a
 import { join as join16 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { randomUUID as randomUUID19 } from "node:crypto";
+import { isIP as isIP4 } from "node:net";
 
 // ../../apps/server/dist/store.js
 import { createHash as createHash7, randomBytes as randomBytes13, scryptSync, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
@@ -99850,6 +99853,10 @@ var Store = class {
     this.get(id6).revoked = true;
     this.invalidate(id6);
   }
+  rename(id6, name2) {
+    this.get(id6).descriptor.name = name2;
+    this.save();
+  }
   touch(id6, clientVersion, harnessVersion) {
     const d = this.get(id6);
     d.lastSeenAt = Date.now();
@@ -99863,6 +99870,272 @@ var Store = class {
 
 // ../../apps/server/dist/gateway.js
 import { randomUUID as randomUUID18 } from "node:crypto";
+
+// ../../apps/server/dist/logger.js
+var LOG_LEVEL_SEVERITY = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+  silent: 50
+};
+var SENSITIVE_KEYS = [
+  "accesstoken",
+  "refreshtoken",
+  "token",
+  "password",
+  "passwd",
+  "secret",
+  "sdp",
+  "ciphertext",
+  "authorization",
+  "cookie",
+  "apikey"
+];
+function isSensitiveKey(key) {
+  if (typeof key !== "string" || key === "")
+    return false;
+  const normalized = key.toLowerCase().replace(/[-_\s]/g, "");
+  return SENSITIVE_KEYS.some((sensitive) => normalized === sensitive || normalized.endsWith(sensitive));
+}
+var REDACTED = "[REDACTED]";
+var CIRCULAR = "[CIRCULAR]";
+var DEPTH_LIMIT = "[DEPTH_LIMIT]";
+var UNSERIALIZABLE = "[UNSERIALIZABLE]";
+var MAX_DEPTH = 8;
+var KEY_VOCABULARY = "access[_-]?token|refresh[_-]?token|token|password|passwd|secret|sdp|ciphertext|authorization|cookie|api[_-]?key";
+var KEY_START = "(?<![A-Za-z0-9])";
+var KEY_END = "(?![A-Za-z0-9])";
+var JSON_VALUE = /"(?:[^"\x5C]|\x5C.)*"/;
+var SINGLE_QUOTED_VALUE = /'(?:[^'\x5C]|\x5C.)*'/;
+var BARE_VALUE = /[^\s,;&}"']+/;
+var URL_VALUE = /[^&#\s"']*/;
+var JSON_KEY_SEPARATOR = /\s*:\s*/;
+var KEY_VALUE_SEPARATOR = /\s*[=:]\s*/;
+var URL_PARAM = new RegExp(`([?&](?:${KEY_VOCABULARY})=)${URL_VALUE.source}`, "gi");
+var JSON_FIELD = new RegExp(`("(?:${KEY_VOCABULARY})")(${JSON_KEY_SEPARATOR.source})(${JSON_VALUE.source})`, "gi");
+var KEY_VALUE = new RegExp(`(${KEY_START}(?:${KEY_VOCABULARY})${KEY_END})(${KEY_VALUE_SEPARATOR.source})(${JSON_VALUE.source}|${SINGLE_QUOTED_VALUE.source}|${BARE_VALUE.source})`, "gi");
+var BEARER = /(bearer\s+)[A-Za-z0-9._~+/-]+=*/gi;
+var BASIC = /(basic\s+)[A-Za-z0-9+/=]+/gi;
+function redactString(value) {
+  return value.replace(URL_PARAM, `$1${REDACTED}`).replace(JSON_FIELD, `$1$2"${REDACTED}"`).replace(BEARER, `$1${REDACTED}`).replace(BASIC, `$1${REDACTED}`).replace(KEY_VALUE, `$1$2${REDACTED}`);
+}
+function readSafely(read, fallback) {
+  try {
+    const value = read();
+    return value === void 0 || value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+function redactSensitive(data2, seen = /* @__PURE__ */ new WeakSet(), depth = 0) {
+  try {
+    if (data2 === null || data2 === void 0)
+      return data2;
+    switch (typeof data2) {
+      case "string":
+        return redactString(data2);
+      case "number":
+        return Number.isFinite(data2) ? data2 : String(data2);
+      case "boolean":
+        return data2;
+      case "bigint":
+        return data2.toString();
+      case "symbol":
+        return data2.toString();
+      case "function":
+        return "[FUNCTION]";
+      default:
+        break;
+    }
+    if (depth >= MAX_DEPTH)
+      return DEPTH_LIMIT;
+    const object5 = data2;
+    if (seen.has(object5))
+      return CIRCULAR;
+    seen.add(object5);
+    if (Array.isArray(object5)) {
+      return object5.map((item) => redactSensitive(item, seen, depth + 1));
+    }
+    if (object5 instanceof Error) {
+      const name2 = readSafely(() => typeof object5.name === "string" ? object5.name : "Error", "Error");
+      const message = readSafely(() => redactString(typeof object5.message === "string" ? object5.message : ""), "");
+      const stack = readSafely(() => typeof object5.stack === "string" ? redactString(object5.stack) : void 0, void 0);
+      return { name: name2, message, ...stack ? { stack } : {} };
+    }
+    const result = {};
+    for (const key of Object.keys(object5)) {
+      if (isSensitiveKey(key)) {
+        result[key] = REDACTED;
+        continue;
+      }
+      const value = readSafely(() => object5[key], UNSERIALIZABLE);
+      result[key] = redactSensitive(value, seen, depth + 1);
+    }
+    return result;
+  } catch {
+    return UNSERIALIZABLE;
+  }
+}
+var LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_.-]*$/;
+function safeLabel(value, fallback) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 80 || !LABEL_PATTERN.test(value))
+    return fallback;
+  return value;
+}
+function isLogLevel(value) {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(LOG_LEVEL_SEVERITY, value);
+}
+function severityOf(level) {
+  return isLogLevel(level) ? LOG_LEVEL_SEVERITY[level] : LOG_LEVEL_SEVERITY.info;
+}
+var Logger = class _Logger {
+  scope;
+  level;
+  sink;
+  constructor(scope2 = "server", level = "info", sink) {
+    this.scope = safeLabel(scope2, "server");
+    this.level = isLogLevel(level) ? level : "info";
+    this.sink = sink;
+  }
+  child(subScope) {
+    return new _Logger(`${this.scope}:${safeLabel(subScope, "child")}`, this.level, this.sink);
+  }
+  debug(event, meta3) {
+    this.log("debug", event, meta3);
+  }
+  info(event, meta3) {
+    this.log("info", event, meta3);
+  }
+  warn(event, meta3) {
+    this.log("warn", event, meta3);
+  }
+  error(event, meta3) {
+    this.log("error", event, meta3);
+  }
+  buildEntry(level, event, meta3) {
+    const ts = (/* @__PURE__ */ new Date()).toISOString();
+    let cleanMeta = {};
+    try {
+      const redacted = meta3 === void 0 ? {} : redactSensitive(meta3);
+      cleanMeta = redacted !== null && typeof redacted === "object" && !Array.isArray(redacted) ? redacted : { value: redacted };
+    } catch {
+      cleanMeta = { redactionFailed: true };
+    }
+    return { ts, level, scope: this.scope, event: safeLabel(event, "invalid_event"), meta: cleanMeta };
+  }
+  log(level, event, meta3) {
+    try {
+      if (severityOf(level) < severityOf(this.level))
+        return;
+      const entry = this.buildEntry(level, event, meta3);
+      let line = "";
+      try {
+        const serialized = JSON.stringify(entry);
+        if (typeof serialized !== "string")
+          throw new TypeError("log entry is not serializable");
+        line = serialized;
+      } catch {
+        line = JSON.stringify({
+          ts: (/* @__PURE__ */ new Date()).toISOString(),
+          level,
+          scope: this.scope,
+          event: safeLabel(event, "invalid_event"),
+          meta: { serializationFailed: true }
+        });
+      }
+      if (this.sink) {
+        try {
+          this.sink(line, entry);
+        } catch {
+        }
+        return;
+      }
+      if (level === "error")
+        console.error(line);
+      else if (level === "warn")
+        console.warn(line);
+      else
+        console.info(line);
+    } catch {
+    }
+  }
+};
+
+// ../../apps/server/dist/config.js
+var HELLO_TIMEOUT_MS_RANGE = { min: 1e3, max: 6e4, fallback: 5e3 };
+var HEARTBEAT_INTERVAL_MS_RANGE = { min: 5e3, max: 12e4, fallback: 25e3 };
+var FORCE_TERMINATE_GRACE_MS_RANGE = { min: 100, max: 1e4, fallback: 1e3 };
+var HEARTBEAT_DISCONNECT_MS_MIN_FACTOR = 2;
+var HEARTBEAT_DISCONNECT_MS_MAX = 6e5;
+var HEARTBEAT_DISCONNECT_MS_FLOOR = 75e3;
+var HEARTBEAT_DISCONNECT_MS_FACTOR = 3;
+function normalizeMs(value, range, label) {
+  if (value === void 0 || value === null)
+    return range.fallback;
+  let candidate = Number.NaN;
+  try {
+    if (typeof value === "number")
+      candidate = value;
+    else if (typeof value === "string" && value.trim() !== "")
+      candidate = Number(value);
+  } catch {
+    candidate = Number.NaN;
+  }
+  if (!Number.isFinite(candidate) || !Number.isInteger(candidate) || candidate < range.min || candidate > range.max) {
+    console.warn(`[config] Invalid ${label}. Must be an integer between ${range.min} and ${range.max}. Falling back to ${range.fallback}.`);
+    return range.fallback;
+  }
+  return candidate;
+}
+function normalizeHelloTimeoutMs(value) {
+  return normalizeMs(value, HELLO_TIMEOUT_MS_RANGE, "DSH_SERVER_HELLO_TIMEOUT_MS");
+}
+function normalizeHeartbeatIntervalMs(value) {
+  return normalizeMs(value, HEARTBEAT_INTERVAL_MS_RANGE, "DSH_SERVER_HEARTBEAT_INTERVAL_MS");
+}
+function heartbeatDisconnectFallback(heartbeatIntervalMs) {
+  return Math.min(HEARTBEAT_DISCONNECT_MS_MAX, Math.max(HEARTBEAT_DISCONNECT_MS_FLOOR, heartbeatIntervalMs * HEARTBEAT_DISCONNECT_MS_FACTOR));
+}
+function normalizeHeartbeatDisconnectMs(value, heartbeatIntervalMs) {
+  const min = heartbeatIntervalMs * HEARTBEAT_DISCONNECT_MS_MIN_FACTOR;
+  const fallback = heartbeatDisconnectFallback(heartbeatIntervalMs);
+  if (value === void 0 || value === null)
+    return fallback;
+  let candidate = Number.NaN;
+  try {
+    if (typeof value === "number")
+      candidate = value;
+    else if (typeof value === "string" && value.trim() !== "")
+      candidate = Number(value);
+  } catch {
+    candidate = Number.NaN;
+  }
+  if (!Number.isFinite(candidate) || !Number.isInteger(candidate) || candidate < min || candidate > HEARTBEAT_DISCONNECT_MS_MAX) {
+    console.warn(`[config] Invalid DSH_SERVER_HEARTBEAT_DISCONNECT_MS. Must be an integer between ${min} and ${HEARTBEAT_DISCONNECT_MS_MAX} (at least ${HEARTBEAT_DISCONNECT_MS_MIN_FACTOR}x the heartbeat interval). Falling back to ${fallback}.`);
+    return fallback;
+  }
+  return candidate;
+}
+function normalizeForceTerminateGraceMs(value) {
+  return normalizeMs(value, FORCE_TERMINATE_GRACE_MS_RANGE, "DSH_SERVER_FORCE_TERMINATE_GRACE_MS");
+}
+function normalizeGatewayOptions(options) {
+  const source = options ?? {};
+  const heartbeatIntervalMs = normalizeHeartbeatIntervalMs(source.heartbeatIntervalMs);
+  return {
+    helloTimeoutMs: normalizeHelloTimeoutMs(source.helloTimeoutMs),
+    heartbeatIntervalMs,
+    heartbeatDisconnectMs: normalizeHeartbeatDisconnectMs(source.heartbeatDisconnectMs, heartbeatIntervalMs),
+    forceTerminateGraceMs: normalizeForceTerminateGraceMs(source.forceTerminateGraceMs)
+  };
+}
+
+// ../../apps/server/dist/gateway.js
+var MAX_ICE_CANDIDATES_PER_CONNECTION = 256;
+var WEBRTC_FALLBACK_TIMEOUT_MS = 12e3;
+var SUPPORTED_TRANSPORTS = ["transport.lan", "transport.p2p", "transport.turn", "transport.relay"];
+var TRANSPORT_NAMES = ["lan", "p2p", "turn", "relay"];
 function modernHost(version2) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:\+.*)?$/.exec(version2);
   if (!match)
@@ -99870,35 +100143,109 @@ function modernHost(version2) {
   const [major, minor, patch] = match.slice(1).map(Number);
   return major > 0 || (minor > 2 || minor === 2 && patch >= 15);
 }
+var SAFE_TEXT = /^[A-Za-z0-9_.:-]+$/;
+var SAFE_PATH = /^[A-Za-z0-9/._~-]*$/;
+var SAFE_ADDRESS = /^[0-9a-fA-F:.]{2,45}$/;
+var SAFE_ERROR_NAME = /^[A-Za-z][A-Za-z0-9]{0,31}$/;
+var SAFE_ERROR_CODE = /^[A-Z0-9_]{1,32}$/;
+function safeText(value, max = 64) {
+  return typeof value === "string" && SAFE_TEXT.test(value) ? value.slice(0, max) : void 0;
+}
+function requestPath(rawUrl) {
+  if (typeof rawUrl !== "string" || rawUrl === "")
+    return "";
+  const end = rawUrl.search(/[?#]/);
+  const path = end === -1 ? rawUrl : rawUrl.slice(0, end);
+  return SAFE_PATH.test(path) ? path.slice(0, 64) : "<invalid>";
+}
+function socketAddress(socket) {
+  try {
+    const address2 = socket?.remoteAddress;
+    return typeof address2 === "string" && SAFE_ADDRESS.test(address2) ? address2 : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function errorName(error62) {
+  try {
+    const name2 = error62 instanceof Error ? error62.name : void 0;
+    return typeof name2 === "string" && SAFE_ERROR_NAME.test(name2) ? name2 : "Error";
+  } catch {
+    return "Error";
+  }
+}
+function errorCode5(error62) {
+  try {
+    const code = error62?.code;
+    return typeof code === "string" && SAFE_ERROR_CODE.test(code) ? code : void 0;
+  } catch {
+    return void 0;
+  }
+}
 var Gateway = class {
   store;
   peers = /* @__PURE__ */ new Map();
   links = /* @__PURE__ */ new Map();
   wss = new import_websocket_server.default({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false });
   heartbeat;
-  constructor(server, store, origin) {
+  closed = false;
+  turnEnabled;
+  helloTimeoutMs;
+  heartbeatIntervalMs;
+  heartbeatDisconnectMs;
+  forceTerminateGraceMs;
+  logger;
+  constructor(server, store, origin, options = {}) {
     this.store = store;
+    const timing = normalizeGatewayOptions(options);
+    this.helloTimeoutMs = timing.helloTimeoutMs;
+    this.heartbeatIntervalMs = timing.heartbeatIntervalMs;
+    this.heartbeatDisconnectMs = timing.heartbeatDisconnectMs;
+    this.forceTerminateGraceMs = timing.forceTerminateGraceMs;
+    this.logger = options.logger ?? new Logger("gateway", options.logLevel ?? "info");
+    this.turnEnabled = options.turnEnabled === true;
     store.onInvalidate = (id6) => this.disconnect(id6, "AUTH_INVALID");
     server.on("upgrade", (req, socket, head) => {
-      if (req.url !== "/ws/v1/connect" || req.headers.origin && req.headers.origin !== origin || this.wss.clients.size >= 256) {
+      const path = requestPath(req.url);
+      const pathRejected = req.url !== "/ws/v1/connect";
+      const originRejected = Boolean(req.headers.origin) && req.headers.origin !== origin;
+      if (pathRejected || originRejected || this.wss.clients.size >= 256) {
+        this.logger.warn("ws_upgrade_rejected", {
+          // Parsed pathname only: the raw URL may carry credentials in its query.
+          path: path === "" ? "unknown" : path,
+          reason: pathRejected ? "invalid_url" : originRejected ? "origin_mismatch" : "connection_limit_reached",
+          clientCount: this.wss.clients.size,
+          hasOrigin: Boolean(req.headers.origin),
+          remoteAddress: socketAddress(socket)
+        });
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         return;
       }
       this.wss.handleUpgrade(req, socket, head, (ws) => this.accept(ws));
     });
     this.heartbeat = setInterval(() => {
+      if (this.closed)
+        return;
       for (const peer of this.peers.values()) {
-        if (Date.now() - peer.lastPong > 75e3) {
+        if (Date.now() - peer.lastPong > this.heartbeatDisconnectMs) {
+          this.logger.warn("ws_heartbeat_timeout", {
+            peerId: peer.id,
+            role: peer.role,
+            lastPong: peer.lastPong,
+            elapsedMs: Date.now() - peer.lastPong,
+            thresholdMs: this.heartbeatDisconnectMs
+          });
           this.disconnect(peer.id, "CONNECTION_FAILED");
           continue;
         }
         peer.nonce = randomUUID18();
         this.send(peer, createControlFrame("ping", { nonce: peer.nonce }));
       }
-      for (const link2 of this.links.values())
+      for (const link2 of this.links.values()) {
         if (link2.stage !== "ready" && Date.now() - link2.created > 3e4)
           this.drop(link2, "CONNECTION_FAILED");
-    }, 25e3);
+      }
+    }, this.heartbeatIntervalMs);
     this.heartbeat.unref();
   }
   send(peer, frame) {
@@ -99924,23 +100271,116 @@ var Gateway = class {
     for (const link2 of this.links.values())
       if (link2.host === id6 || link2.client === id6)
         this.drop(link2, code);
-    if (peer) {
+    if (!peer)
+      return;
+    this.logger.info("ws_peer_disconnected", { peerId: id6, code });
+    try {
       peer.ws.close(code === "CONNECTION_REPLACED" ? 4003 : 4001, code);
-      setTimeout(() => peer.ws.terminate(), 1e3).unref();
+    } catch {
     }
+    const timer2 = setTimeout(() => {
+      if (peer.ws.readyState !== import_websocket.default.CLOSED)
+        peer.ws.terminate();
+    }, this.forceTerminateGraceMs);
+    timer2.unref();
+  }
+  /**
+   * Authorize a REST `/api/v1/turn/credentials` request. Only the two devices
+   * of an active logical connection may obtain credentials, and only while
+   * that connection is still being established.
+   */
+  authorizeIce(deviceId, connectionId) {
+    const link2 = this.links.get(connectionId);
+    if (link2 === void 0)
+      return false;
+    if (link2.host !== deviceId && link2.client !== deviceId)
+      return false;
+    if (link2.stage !== "accepted" && link2.stage !== "handshake")
+      return false;
+    return this.peers.has(link2.host) && this.peers.has(link2.client);
+  }
+  supportedCapabilities() {
+    return SUPPORTED_TRANSPORTS.filter((capability) => capability !== "transport.turn" || this.turnEnabled);
+  }
+  negotiatedCapabilities(offered) {
+    return this.supportedCapabilities().filter((capability) => offered.includes(capability));
   }
   accept(ws) {
+    let state2 = "awaiting_hello";
     let peer;
-    const deadline = setTimeout(() => ws.terminate(), 5e3);
-    let windowStart = Date.now(), frames = 0, bytes = 0;
-    ws.on("error", () => {
-    });
-    ws.on("close", () => {
+    let deadline;
+    let graceTimer;
+    const clearDeadline = () => {
+      if (deadline === void 0)
+        return;
       clearTimeout(deadline);
+      deadline = void 0;
+    };
+    const clearGrace = () => {
+      if (graceTimer === void 0)
+        return;
+      clearTimeout(graceTimer);
+      graceTimer = void 0;
+    };
+    const terminateSoon = (target3) => {
+      clearGrace();
+      graceTimer = setTimeout(() => {
+        graceTimer = void 0;
+        if (target3.readyState !== import_websocket.default.CLOSED)
+          target3.terminate();
+      }, this.forceTerminateGraceMs);
+      graceTimer.unref();
+    };
+    this.logger.debug("ws_connection_accepted", { clientCount: this.wss.clients.size });
+    deadline = setTimeout(() => {
+      deadline = void 0;
+      if (state2 !== "awaiting_hello")
+        return;
+      state2 = "closing";
+      this.logger.warn("ws_hello_timeout", { timeoutMs: this.helloTimeoutMs, readyState: ws.readyState });
+      if (ws.readyState === import_websocket.default.OPEN) {
+        try {
+          const frame = createControlFrame("error", {
+            code: "HELLO_TIMEOUT",
+            message: `Hello handshake timed out after ${this.helloTimeoutMs}ms`,
+            retryable: true
+          });
+          ws.send(JSON.stringify(frame));
+        } catch (error62) {
+          this.logger.warn("ws_hello_timeout_send_failed", { errorName: errorName(error62) });
+        }
+      }
+      try {
+        ws.close(4001, "CONNECTION_FAILED");
+      } catch {
+      }
+      terminateSoon(ws);
+    }, this.helloTimeoutMs);
+    deadline.unref();
+    let windowStart = Date.now(), frames = 0, bytes = 0;
+    ws.on("error", (error62) => {
+      this.logger.warn("ws_socket_error", {
+        peerId: peer?.id,
+        errorName: errorName(error62),
+        errorCode: errorCode5(error62)
+      });
+    });
+    ws.on("close", (code, reason) => {
+      state2 = "closed";
+      clearDeadline();
+      clearGrace();
+      this.logger.debug("ws_connection_closed", {
+        peerId: peer?.id,
+        code,
+        // The close reason is arbitrary client text: report only its presence.
+        hasReason: Buffer.isBuffer(reason) ? reason.length > 0 : false
+      });
       if (peer && this.peers.get(peer.id) === peer)
         this.disconnect(peer.id, "CONNECTION_FAILED");
     });
     ws.on("message", (raw, binary) => {
+      if (state2 !== "awaiting_hello" && state2 !== "authenticated")
+        return;
       if (ws.readyState !== import_websocket.default.OPEN)
         return;
       let frame;
@@ -99959,7 +100399,7 @@ var Gateway = class {
         if (envelope && envelope.v !== 1)
           throw new ApiError("UNSUPPORTED_VERSION");
         frame = decodeControlFrame(text);
-        if (!peer) {
+        if (state2 === "awaiting_hello") {
           if (frame.type !== "hello")
             throw new ApiError("AUTH_REQUIRED");
           const p = frame.payload;
@@ -99968,36 +100408,73 @@ var Gateway = class {
             throw new ApiError("AUTH_INVALID");
           if (!p.protocols.includes(1))
             throw new ApiError("UNSUPPORTED_VERSION");
+          if (state2 !== "awaiting_hello")
+            return;
+          state2 = "authenticated";
+          clearDeadline();
           this.disconnect(device.deviceId, "CONNECTION_REPLACED");
-          peer = { ws, id: device.deviceId, role: device.role, capabilities: p.capabilities, version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() };
+          peer = { ws, id: device.deviceId, role: device.role, capabilities: this.negotiatedCapabilities(p.capabilities), version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() };
           this.peers.set(peer.id, peer);
-          clearTimeout(deadline);
           this.store.touch(peer.id, p.clientVersion, p.harnessVersion);
-          this.send(peer, createControlFrame("hello.ack", { protocol: 1, serverVersion: "self-hosted/0.1.0", connectionSessionId: randomUUID18(), heartbeatIntervalMs: 25e3, maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES, maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES, capabilities: p.capabilities.includes("transport.relay") ? ["transport.relay"] : [], webrtcEnabled: false, webrtcFallbackTimeoutMs: 1 }));
+          this.logger.info("ws_hello_authenticated", {
+            deviceId: safeText(peer.id),
+            role: peer.role,
+            clientVersion: safeText(peer.version),
+            capabilities: peer.capabilities.filter((capability) => typeof capability === "string" && SAFE_TEXT.test(capability)).slice(0, 8)
+          });
+          this.send(peer, createControlFrame("hello.ack", {
+            protocol: 1,
+            serverVersion: "self-hosted/0.1.0",
+            connectionSessionId: randomUUID18(),
+            heartbeatIntervalMs: this.heartbeatIntervalMs,
+            maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES,
+            maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
+            capabilities: this.negotiatedCapabilities(p.capabilities),
+            webrtcEnabled: true,
+            webrtcFallbackTimeoutMs: WEBRTC_FALLBACK_TIMEOUT_MS
+          }));
           return;
         }
-        if (this.peers.get(peer.id) !== peer)
+        if (frame.type === "hello")
+          throw new ApiError("INVALID_MESSAGE");
+        if (!peer || this.peers.get(peer.id) !== peer)
           throw new ApiError("AUTH_INVALID");
         this.store.get(peer.id);
         this.handle(peer, frame);
       } catch (error62) {
         const code = error62 instanceof ApiError ? error62.code : "INVALID_MESSAGE";
+        this.logger.warn("ws_message_error", {
+          code,
+          peerId: peer?.id,
+          // Never log error.message: JSON parse failures echo the payload.
+          errorName: errorName(error62)
+        });
         const connectionId = frame?.payload?.connectionId;
         if (peer && typeof connectionId === "string" && code !== "RATE_LIMITED") {
           const link2 = this.links.get(connectionId);
-          if (link2 && (link2.host === peer.id || link2.client === peer.id))
+          if (link2 && (link2.host === peer.id || link2.client === peer.id)) {
             this.drop(link2, code);
-          else
-            this.send(peer, createControlFrame("error", { code, message: code, connectionId, retryable: false }));
+            return;
+          }
+          this.send(peer, createControlFrame("error", { code, message: code, connectionId, retryable: false }));
           return;
         }
-        if (ws.readyState === import_websocket.default.OPEN)
-          ws.send(JSON.stringify(createControlFrame("error", { code, message: code, retryable: false })));
+        state2 = "closing";
+        clearDeadline();
+        if (ws.readyState === import_websocket.default.OPEN) {
+          try {
+            ws.send(JSON.stringify(createControlFrame("error", { code, message: code, retryable: false })));
+          } catch {
+          }
+        }
         if (peer)
           this.disconnect(peer.id, code);
         else {
-          ws.close(4001, code);
-          setTimeout(() => ws.terminate(), 1e3).unref();
+          try {
+            ws.close(4001, code);
+          } catch {
+          }
+          terminateSoon(ws);
         }
       }
     });
@@ -100027,14 +100504,32 @@ var Gateway = class {
       this.store.get(host.id);
       if (!request.preferredTransports.includes("relay") || !peer.capabilities.includes("transport.relay") || !host.capabilities.includes("transport.relay"))
         throw new ApiError("CAPABILITY_NOT_SUPPORTED");
+      const preferredTransports = [...new Set(request.preferredTransports)].filter((transport) => peer.capabilities.includes(`transport.${transport}`) && host.capabilities.includes(`transport.${transport}`));
+      if (preferredTransports.length === 0)
+        throw new ApiError("CAPABILITY_NOT_SUPPORTED");
       for (const old of this.links.values())
         if (old.client === peer.id || old.host === host.id && !modernHost(host.version))
           this.drop(old, "CONNECTION_REPLACED");
       if (this.links.size >= 256)
         throw new ApiError("RATE_LIMITED");
-      const link3 = { id: randomUUID18(), host: host.id, client: peer.id, stage: "pending", created: Date.now(), counters: /* @__PURE__ */ new Map() };
+      const link3 = {
+        id: randomUUID18(),
+        host: host.id,
+        client: peer.id,
+        stage: "pending",
+        created: Date.now(),
+        counters: /* @__PURE__ */ new Map(),
+        preferredTransports,
+        iceCandidates: 0
+      };
       this.links.set(link3.id, link3);
-      this.send(host, createControlFrame("connect.incoming", { connectionId: link3.id, clientDeviceId: peer.id, clientIdentityKey: this.store.get(peer.id).descriptor.identityKey, authorization: "account", preferredTransports: ["relay"] }));
+      this.send(host, createControlFrame("connect.incoming", {
+        connectionId: link3.id,
+        clientDeviceId: peer.id,
+        clientIdentityKey: this.store.get(peer.id).descriptor.identityKey,
+        authorization: "account",
+        preferredTransports: link3.preferredTransports
+      }));
       return;
     }
     const id6 = p.connectionId;
@@ -100058,15 +100553,14 @@ var Gateway = class {
     }
     if (p.targetDeviceId !== otherId || link2.stage === "pending")
       throw new ApiError("CONNECTION_NOT_FOUND");
-    if (frame.type === "transport.selected") {
-      if (peer.id !== link2.client || frame.payload.transport !== "relay")
-        throw new ApiError("CAPABILITY_NOT_SUPPORTED");
-      if (modernHost(other.version))
-        this.send(other, frame);
+    if (frame.type.startsWith("signal.")) {
+      this.forwardSignal(link2, peer, other, frame);
       return;
     }
-    if (frame.type.startsWith("signal."))
+    if (frame.type === "transport.selected") {
+      this.forwardTransportSelected(link2, peer, other, frame.payload);
       return;
+    }
     if (frame.type === "secure.handshake") {
       const step = frame.payload.step;
       if (step === 1 && peer.id === link2.client && link2.stage === "accepted")
@@ -100084,13 +100578,149 @@ var Gateway = class {
       throw new ApiError("INVALID_MESSAGE");
     this.send(other, frame);
   }
+  /**
+   * Forward WebRTC signaling only while the logical connection is being
+   * established, and only for a transport this link actually negotiated. A
+   * relay-only link has no data plane to coordinate — the Host treats
+   * unsolicited signaling as a protocol violation that closes its whole
+   * Control connection and every tunnel on it, so such frames are dropped for
+   * the Client to time out and fall back to Relay.
+   */
+  forwardSignal(link2, peer, other, frame) {
+    if (link2.stage === "ready")
+      return;
+    if (!link2.preferredTransports.some((transport) => transport !== "relay"))
+      return;
+    if (frame.type === "signal.offer") {
+      if (peer.id !== link2.client)
+        throw new ApiError("INVALID_MESSAGE");
+    } else if (frame.type === "signal.answer") {
+      if (peer.id !== link2.host)
+        throw new ApiError("INVALID_MESSAGE");
+    } else if (frame.type === "signal.ice") {
+      if (++link2.iceCandidates > MAX_ICE_CANDIDATES_PER_CONNECTION)
+        throw new ApiError("INVALID_MESSAGE");
+    } else {
+      throw new ApiError("INVALID_MESSAGE");
+    }
+    this.send(other, frame);
+  }
+  /**
+   * Forward the initiator's transport choice, gated on the transports the
+   * link negotiated. `lan` is downgraded to `p2p` only when the link did not
+   * negotiate `transport.lan` (old RC2 peers), as required by
+   * docs/protocol.md. Relay keeps the legacy compatibility gate.
+   */
+  forwardTransportSelected(link2, peer, other, payload) {
+    if (peer.id !== link2.client)
+      return;
+    if (link2.stage !== "accepted" && link2.stage !== "handshake")
+      throw new ApiError("INVALID_MESSAGE");
+    const transport = payload.transport;
+    if (!TRANSPORT_NAMES.includes(transport))
+      throw new ApiError("INVALID_MESSAGE");
+    const selected = transport === "lan" && !link2.preferredTransports.includes("lan") && link2.preferredTransports.includes("p2p") ? "p2p" : transport;
+    if (!link2.preferredTransports.includes(selected))
+      throw new ApiError("CAPABILITY_NOT_SUPPORTED");
+    if (selected === "relay" && !modernHost(other.version))
+      return;
+    this.send(other, selected === transport ? createControlFrame("transport.selected", { ...payload }) : createControlFrame("transport.selected", { ...payload, transport: selected }));
+  }
   close() {
+    if (this.closed)
+      return;
+    this.closed = true;
     clearInterval(this.heartbeat);
-    for (const ws of this.wss.clients)
-      ws.terminate();
+    this.logger.info("ws_gateway_closing", { clientCount: this.wss.clients.size });
+    for (const ws of this.wss.clients) {
+      try {
+        if (ws.readyState === import_websocket.default.OPEN)
+          ws.close(SERVER_SHUTDOWN_CLOSE_CODE, SERVER_SHUTDOWN_CLOSE_REASON);
+        else
+          ws.terminate();
+      } catch {
+      }
+      const timer2 = setTimeout(() => {
+        if (ws.readyState !== import_websocket.default.CLOSED)
+          ws.terminate();
+      }, this.forceTerminateGraceMs);
+      timer2.unref();
+    }
     this.wss.close();
   }
 };
+
+// ../../apps/server/dist/ice.js
+import { createHmac as createHmac6 } from "node:crypto";
+var DEFAULT_TURN_TTL_SECONDS = 300;
+var MAX_TURN_TTL_SECONDS = 3600;
+var MIN_TURN_TTL_SECONDS = 60;
+var TURN_URL_PATTERN = /^turns?:[^\s]+$/i;
+var STUN_URL_PATTERN = /^stuns?:[^\s]+$/i;
+function splitUrls(value, pattern2, name2) {
+  if (value === void 0)
+    return [];
+  const urls = value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  for (const url2 of urls) {
+    if (!pattern2.test(url2))
+      throw new Error(`Invalid ${name2} entry "${url2}": expected a stun:/stuns: or turn:/turns: URL.`);
+  }
+  return [...new Set(urls)];
+}
+function parseTtl(value) {
+  if (value === void 0 || value.trim() === "")
+    return DEFAULT_TURN_TTL_SECONDS;
+  const ttl = Number(value);
+  if (!Number.isSafeInteger(ttl) || ttl < MIN_TURN_TTL_SECONDS || ttl > MAX_TURN_TTL_SECONDS) {
+    throw new Error(`Invalid DSH_SERVER_TURN_TTL_SECONDS: expected an integer between ${MIN_TURN_TTL_SECONDS} and ${MAX_TURN_TTL_SECONDS}.`);
+  }
+  return ttl;
+}
+function parseIceConfig(env) {
+  const stunUrls = splitUrls(env.DSH_SERVER_STUN_URLS, STUN_URL_PATTERN, "DSH_SERVER_STUN_URLS");
+  const turnUrls = splitUrls(env.DSH_SERVER_TURN_URLS, TURN_URL_PATTERN, "DSH_SERVER_TURN_URLS");
+  const secret2 = env.DSH_SERVER_TURN_SECRET?.trim() || void 0;
+  const turnUsername = env.DSH_SERVER_TURN_USERNAME?.trim() || void 0;
+  const turnPassword = env.DSH_SERVER_TURN_PASSWORD?.trim() || void 0;
+  const staticPair = turnUsername !== void 0 && turnPassword !== void 0;
+  if (secret2 !== void 0 && (turnUsername !== void 0 || turnPassword !== void 0)) {
+    throw new Error("Set either DSH_SERVER_TURN_SECRET or DSH_SERVER_TURN_USERNAME + DSH_SERVER_TURN_PASSWORD, not both.");
+  }
+  if (!staticPair && (turnUsername !== void 0 || turnPassword !== void 0)) {
+    throw new Error("DSH_SERVER_TURN_USERNAME and DSH_SERVER_TURN_PASSWORD must be configured together.");
+  }
+  if (turnUrls.length > 0 && secret2 === void 0 && !staticPair) {
+    throw new Error("DSH_SERVER_TURN_URLS requires DSH_SERVER_TURN_SECRET or DSH_SERVER_TURN_USERNAME + DSH_SERVER_TURN_PASSWORD.");
+  }
+  if ((secret2 !== void 0 || staticPair) && turnUrls.length === 0) {
+    throw new Error("DSH_SERVER_TURN_URLS is required when TURN credentials are configured.");
+  }
+  return { stunUrls, turnUrls, turnSecret: secret2, turnUsername, turnPassword, turnTtlSeconds: parseTtl(env.DSH_SERVER_TURN_TTL_SECONDS) };
+}
+function buildIceServers(config2, deviceId, now = Date.now()) {
+  const servers = [];
+  if (config2.stunUrls.length > 0) {
+    servers.push({ urls: config2.stunUrls.length === 1 ? config2.stunUrls[0] : [...config2.stunUrls] });
+  }
+  if (config2.turnUrls.length > 0) {
+    if (config2.turnSecret !== void 0) {
+      const expiresAt = Math.floor((now + config2.turnTtlSeconds * 1e3) / 1e3);
+      const username = `${expiresAt}:${deviceId}`;
+      servers.push({
+        urls: config2.turnUrls.length === 1 ? config2.turnUrls[0] : [...config2.turnUrls],
+        username,
+        credential: createHmac6("sha1", config2.turnSecret).update(username).digest("base64")
+      });
+    } else if (config2.turnUsername !== void 0 && config2.turnPassword !== void 0) {
+      servers.push({
+        urls: config2.turnUrls.length === 1 ? config2.turnUrls[0] : [...config2.turnUrls],
+        username: config2.turnUsername,
+        credential: config2.turnPassword
+      });
+    }
+  }
+  return servers;
+}
 
 // ../../apps/server/dist/server.js
 var loginSchema = external_exports.object({ email: external_exports.string().min(1).max(254), password: external_exports.string().min(1).max(1024) }).strict();
@@ -100125,12 +100755,68 @@ async function body(req) {
     throw new ApiError("INVALID_MESSAGE");
   }
 }
+function normalizeIp(value) {
+  const family = isIP4(value);
+  if (family === 4)
+    return value.toLowerCase();
+  if (family !== 6)
+    return null;
+  let canonical;
+  try {
+    canonical = new URL(`http://[${value}]/`).hostname.slice(1, -1);
+  } catch {
+    return null;
+  }
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical);
+  if (!mapped)
+    return canonical;
+  const high = Number.parseInt(mapped[1], 16), low = Number.parseInt(mapped[2], 16);
+  return `${high >>> 8}.${high & 255}.${low >>> 8}.${low & 255}`;
+}
+function normalizeTrustedProxyIps(values = []) {
+  const result = /* @__PURE__ */ new Set();
+  for (const raw of values) {
+    const value = raw.trim();
+    const normalized = value === "" ? null : normalizeIp(value);
+    if (normalized === null)
+      throw new Error(`Invalid DSH_SERVER_TRUSTED_PROXY_IPS entry "${raw}": expected a bare IPv4/IPv6 address (no port, CIDR or hostname).`);
+    result.add(normalized);
+  }
+  return result;
+}
+function readSingleForwardedFor(req) {
+  let value;
+  let count = 0;
+  const raw = req.rawHeaders;
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    if (raw[i].toLowerCase() !== "x-forwarded-for")
+      continue;
+    count++;
+    value = raw[i + 1];
+  }
+  if (count !== 1)
+    throw new ApiError("INVALID_MESSAGE");
+  return value;
+}
+function clientAddress(req, trustedProxyIps) {
+  const peer = normalizeIp(req.socket.remoteAddress ?? "");
+  if (peer === null)
+    throw new ApiError("INVALID_MESSAGE");
+  if (!trustedProxyIps.has(peer))
+    return peer;
+  const forwarded = normalizeIp(readSingleForwardedFor(req));
+  if (forwarded === null)
+    throw new ApiError("INVALID_MESSAGE");
+  return forwarded;
+}
 function createRemoteServer(config2) {
   if (!config2.account.trim() || config2.password.length < 12)
     throw new Error("DSH_SERVER_ACCOUNT and DSH_SERVER_PASSWORD (at least 12 characters) are required.");
   const url2 = new URL(config2.publicUrl);
   if (!["http:", "https:"].includes(url2.protocol) || url2.username || url2.password || url2.pathname !== "/" || url2.search || url2.hash)
     throw new Error("DSH_SERVER_PUBLIC_URL must be an HTTP(S) origin.");
+  const trustedProxyIps = normalizeTrustedProxyIps(config2.trustedProxyIps);
+  const ice = config2.ice ?? parseIceConfig({});
   const store = new Store(config2.dataFile, config2.account.trim(), config2.password);
   const assets = readAssets();
   const sessions = /* @__PURE__ */ new Map();
@@ -100185,24 +100871,40 @@ function createRemoteServer(config2) {
       json2(res, e.status, { error: { code: e.code, message: e.code, requestId: randomUUID19(), retryable: e.status === 429 || e.status >= 500 } });
     });
   });
-  const gateway = new Gateway(server, store, url2.origin);
+  const logger2 = new Logger("server", config2.logLevel ?? "info");
+  const timing = normalizeGatewayOptions({
+    helloTimeoutMs: config2.helloTimeoutMs,
+    heartbeatIntervalMs: config2.heartbeatIntervalMs,
+    heartbeatDisconnectMs: config2.heartbeatDisconnectMs,
+    forceTerminateGraceMs: config2.forceTerminateGraceMs
+  });
+  const gateway = new Gateway(server, store, url2.origin, {
+    ...timing,
+    logLevel: config2.logLevel,
+    logger: logger2.child("gateway"),
+    turnEnabled: ice.turnUrls.length > 0
+  });
   function descriptor(d) {
     return { ...d.descriptor, membershipId: `account:${hash3(store.account).slice(0, 16)}`, online: gateway.peers.has(d.descriptor.deviceId), lastSeenAt: d.lastSeenAt };
   }
   async function route(req, res) {
-    const path = new URL(req.url ?? "/", url2).pathname;
+    const requestUrl = new URL(req.url ?? "/", url2);
+    const path = requestUrl.pathname;
     const method = req.method;
     if (req.headers.origin && req.headers.origin !== url2.origin)
       throw new ApiError("AUTH_INVALID", 403);
     if (req.headers["sec-fetch-site"] === "cross-site")
       throw new ApiError("AUTH_INVALID", 403);
     const staticAsset = path.startsWith("/assets/") || ["/icon.png", "/brand-whale.webp", "/landing-atmosphere.webp"].includes(path);
-    if (method === "GET" && (["/", "/app", "/app/login"].includes(path) || staticAsset)) {
+    const spaRoute = method === "GET" && !staticAsset && !path.startsWith("/api/") && !path.startsWith("/ws/") && !["/health", "/healthz", "/ready"].includes(path);
+    if (method === "GET" && (spaRoute || staticAsset)) {
       const name2 = staticAsset ? path.slice(1) : "index.html";
       const asset = assets.get(name2);
       if (!asset)
         throw new ApiError("METHOD_NOT_FOUND", 404);
       const contentType2 = name2.endsWith(".js") ? "text/javascript; charset=utf-8" : name2.endsWith(".css") ? "text/css; charset=utf-8" : name2.endsWith(".png") ? "image/png" : name2.endsWith(".webp") ? "image/webp" : "text/html; charset=utf-8";
+      if (!staticAsset)
+        res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Content-Type", contentType2);
       res.end(asset);
       return;
@@ -100211,9 +100913,10 @@ function createRemoteServer(config2) {
       json2(res, 200, { status: "ok" });
       return;
     }
-    rate(`api:${req.socket.remoteAddress ?? ""}`, 240);
+    const client = clientAddress(req, trustedProxyIps);
+    rate(`api:${client}`, 240);
     if (method === "POST" && path === "/api/v1/auth/login") {
-      rate(`login:${req.socket.remoteAddress ?? ""}`, 20);
+      rate(`login:${client}`, 20);
       const credentials = loginSchema.parse(await body(req));
       if (!equal(credentials.email.trim(), store.account) || !equal(credentials.password, config2.password))
         throw new ApiError("AUTH_INVALID", 401);
@@ -100241,7 +100944,7 @@ function createRemoteServer(config2) {
     }
     if (method === "GET" && path === "/api/v1/account/devices") {
       accountAuth(req);
-      json2(res, 200, { items: store.list().map(descriptor), serverUrl: url2.origin, transport: "relay" });
+      json2(res, 200, { items: store.list().map(descriptor), serverUrl: url2.origin, transport: "webrtc" });
       return;
     }
     if (method === "POST" && (path === "/api/v1/devices/register" || path === "/api/v1/devices/register-owned-role")) {
@@ -100268,6 +100971,16 @@ function createRemoteServer(config2) {
       json2(res, 200, descriptor(deviceAuth(req)));
       return;
     }
+    if (method === "GET" && path === "/api/v1/turn/credentials") {
+      const source = deviceAuth(req);
+      const connectionId = requestUrl.searchParams.get("connection_id") ?? "";
+      if (!connectionId || connectionId.length > 128)
+        throw new ApiError("INVALID_MESSAGE");
+      if (!gateway.authorizeIce(source.descriptor.deviceId, connectionId))
+        throw new ApiError("CONNECTION_NOT_FOUND", 404);
+      json2(res, 200, { iceServers: buildIceServers(ice, source.descriptor.deviceId) });
+      return;
+    }
     if (method === "GET" && path === "/api/v1/devices") {
       const source = deviceAuth(req);
       if (source.descriptor.role !== "client")
@@ -100277,6 +100990,14 @@ function createRemoteServer(config2) {
         return item;
       });
       json2(res, 200, { items, nextCursor: null });
+      return;
+    }
+    const renameMatch = /^\/api\/v1\/devices\/([^/]+)\/name$/.exec(path);
+    if (method === "POST" && renameMatch) {
+      accountAuth(req);
+      const { name: name2 } = external_exports.object({ name: external_exports.string().trim().min(1).max(80) }).parse(await body(req));
+      store.rename(renameMatch[1], name2);
+      json2(res, 200, descriptor(store.get(renameMatch[1])));
       return;
     }
     const match = /^\/api\/v1\/devices\/([^/]+)(\/presence)?$/.exec(path);
@@ -100290,7 +101011,7 @@ function createRemoteServer(config2) {
     }
     throw new ApiError("METHOD_NOT_FOUND", 404);
   }
-  return { server, store, gateway, close: async () => {
+  return { server, store, gateway, logger: logger2, close: async () => {
     gateway.close();
     server.closeAllConnections();
     await new Promise((resolve9, reject) => server.close((error62) => error62 ? reject(error62) : resolve9()));
