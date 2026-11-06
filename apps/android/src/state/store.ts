@@ -84,6 +84,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   scheduleLoading: false,
   scheduleError: undefined,
   transportPreference: 'auto',
+  cellularSkipP2p: false,
   languagePreference: 'system',
   language: getActiveLanguage(),
   compactHistory: false,

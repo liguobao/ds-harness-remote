@@ -21,6 +21,7 @@ const KEYS = {
   themePreference: 'dshremote.theme-preference.v1',
   typographyDensity: 'dshremote.typography-density.v1',
   compactHistory: 'dshremote.compact-history.v1',
+  cellularSkipP2p: 'dshremote.cellular-skip-p2p.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
@@ -439,6 +440,14 @@ export async function loadCompactHistory(): Promise<boolean> {
 }
 export async function saveCompactHistory(value: boolean): Promise<void> {
   await writeJson(KEYS.compactHistory, { value })
+}
+
+export async function loadCellularSkipP2p(): Promise<boolean> {
+  const stored = await readJson<{ value: unknown }>(KEYS.cellularSkipP2p)
+  return stored?.value === true
+}
+export async function saveCellularSkipP2p(value: boolean): Promise<void> {
+  await writeJson(KEYS.cellularSkipP2p, { value })
 }
 
 export async function loadTypographyDensity(): Promise<TypographyDensity> {

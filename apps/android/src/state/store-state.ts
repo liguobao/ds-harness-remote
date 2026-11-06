@@ -106,6 +106,13 @@ export interface AppState {
    * or WebRTC negotiation keeps failing; expires so 'auto' can retry P2P.
    */
   relayOnlyUntil?: number
+  /**
+   * User opt-in: on 4G/5G (remote networks) go straight to Relay instead of
+   * spending the WebRTC budget on P2P attempts CGNAT never allows. Wi-Fi
+   * connections keep LAN/P2P priority regardless.
+   */
+  cellularSkipP2p: boolean
+  setCellularSkipP2p(value: boolean): Promise<void>
   compactHistory: boolean
   setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference

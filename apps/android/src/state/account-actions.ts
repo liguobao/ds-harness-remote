@@ -24,6 +24,7 @@ import {
   loadDefaultPermissionPreset,
   loadFavoriteWorkspaces,
   loadCompactHistory,
+  loadCellularSkipP2p,
   loadLanguagePreference,
   loadLastConnectedDeviceId,
   loadOrCreateIdentity,
@@ -106,7 +107,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory, cellularSkipP2p] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
@@ -119,6 +120,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           loadLastConnectedDeviceId(),
           loadDefaultPermissionPreset(),
           loadCompactHistory(),
+          loadCellularSkipP2p(),
         ])
         const language = applyLanguagePreference(languagePreference)
         set({
@@ -132,6 +134,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           typographyDensity,
           statusBarVisible,
           compactHistory,
+          cellularSkipP2p,
           defaultPermissionPreset,
           favoriteWorkspaces,
           recentWorkspaces,
