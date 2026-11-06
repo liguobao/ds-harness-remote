@@ -209,6 +209,8 @@ struct Index {
   @State providerId: string = '';
   private providersRequested: boolean = false;
   @State showSessions: boolean = false;
+  /** PC：鼠标悬停在哪一行（会话行/主机卡），用来做 hover 高亮。 */
+  @State hoverRowId: string = '';
   /** 分栏分隔条拖动中 / 悬停中。 */
   @State splitDragging: boolean = false;
   @State splitHover: boolean = false;
@@ -1771,32 +1773,52 @@ struct Index {
           if (this.showThreePane()) {
             Row() {
               this.SessionsPane()
-              Column()
-                .width(6)
-                .height('100%')
-                .backgroundColor(this.splitDragging ? 'rgba(34,211,238,0.35)' : Color.Transparent)
-                .gesture(
-                  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
-                    .onActionStart(() => {
-                      this.splitDragging = true;
-                      this.splitDragBase = this.splitPaneWidth();
-                    })
-                    .onActionUpdate((event: GestureEvent) => {
-                      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
-                    })
-                    .onActionEnd(() => {
-                      this.splitDragging = false;
-                      this.runtime.setSplitWidth(this.splitPaneWidth());
-                    })
-                )
-                .onHover((isHover: boolean) => {
-                  this.splitHover = isHover;
-                })
+              Column() {
+  Column()
+    .width(this.splitDragging ? 2 : 1)
+    .height(this.splitDragging || this.splitHover ? '70%' : '0%')
+    .backgroundColor(this.splitDragging || this.splitHover
+      ? 'rgba(34,211,238,0.70)' : Color.Transparent)
+    .borderRadius(1)
+}
+.width(6)
+.height('100%')
+.justifyContent(FlexAlign.Center)
+.alignItems(HorizontalAlign.Center)
+.onHover((isHover: boolean) => {
+  this.splitHover = isHover;
+})
+.gesture(
+  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
+    .onActionStart(() => {
+      this.splitDragging = true;
+      this.splitDragBase = this.splitPaneWidth();
+    })
+    .onActionUpdate((event: GestureEvent) => {
+      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
+    })
+    .onActionEnd(() => {
+      this.splitDragging = false;
+      this.runtime.setSplitWidth(this.splitPaneWidth());
+    })
+)
               Column() {
                 this.ChatScreen()
               }
               .layoutWeight(1)
               .height('100%')
+              Column() {
+  Column()
+    .width(this.splitDragging ? 2 : 1)
+    .height(this.splitDragging || this.splitHover ? '70%' : '0%')
+    .backgroundColor(this.splitDragging || this.splitHover
+      ? 'rgba(34,211,238,0.70)' : Color.Transparent)
+    .borderRadius(1)
+}
+.width(6)
+.height('100%')
+.justifyContent(FlexAlign.Center)
+.alignItems(HorizontalAlign.Center)
               this.InspectorPane()
             }
             .width('100%')
@@ -1805,27 +1827,35 @@ struct Index {
             Row() {
               this.SessionsPane()
               // 分隔条：PC 上可以拖着调会话栏宽度，宽度记在本地
-              Column()
-                .width(6)
-                .height('100%')
-                .backgroundColor(this.splitDragging ? 'rgba(34,211,238,0.35)' : Color.Transparent)
-                .gesture(
-                  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
-                    .onActionStart(() => {
-                      this.splitDragging = true;
-                      this.splitDragBase = this.splitPaneWidth();
-                    })
-                    .onActionUpdate((event: GestureEvent) => {
-                      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
-                    })
-                    .onActionEnd(() => {
-                      this.splitDragging = false;
-                      this.runtime.setSplitWidth(this.splitPaneWidth());
-                    })
-                )
-                .onHover((isHover: boolean) => {
-                  this.splitHover = isHover;
-                })
+              Column() {
+  Column()
+    .width(this.splitDragging ? 2 : 1)
+    .height(this.splitDragging || this.splitHover ? '70%' : '0%')
+    .backgroundColor(this.splitDragging || this.splitHover
+      ? 'rgba(34,211,238,0.70)' : Color.Transparent)
+    .borderRadius(1)
+}
+.width(6)
+.height('100%')
+.justifyContent(FlexAlign.Center)
+.alignItems(HorizontalAlign.Center)
+.onHover((isHover: boolean) => {
+  this.splitHover = isHover;
+})
+.gesture(
+  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
+    .onActionStart(() => {
+      this.splitDragging = true;
+      this.splitDragBase = this.splitPaneWidth();
+    })
+    .onActionUpdate((event: GestureEvent) => {
+      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
+    })
+    .onActionEnd(() => {
+      this.splitDragging = false;
+      this.runtime.setSplitWidth(this.splitPaneWidth());
+    })
+)
               Column() {
                 this.ChatScreen()
               }
@@ -3508,9 +3538,12 @@ struct Index {
     }
     .width('100%')
     .padding({ top: 16, bottom: 16, left: 16, right: 16 })
-    .backgroundColor(this.pal().card)
+    .backgroundColor(this.hoverRowId === device.deviceId ? this.pal().inputBg : this.pal().card)
     .borderRadius(18)
     .border({ width: 1, color: this.pal().border })
+    .onHover((isHover: boolean) => {
+      this.hoverRowId = isHover ? device.deviceId : '';
+    })
     // 整行可点即连接；PC 上右键出能力菜单（改名 / 详情 / 清除公钥）
     .onClick(() => {
       if (device.online && this.renamingDeviceId !== device.deviceId) {
@@ -3950,6 +3983,8 @@ struct Index {
       .layoutWeight(1)
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
+      // 宽屏下消息区居中，而不是贴着会话栏（2in1/三屏下特别明显）
+      .alignSelf(ItemAlign.Center)
       // 多缓存几屏，滚动时少重建气泡（长会话明显）
       .cachedCount(6)
       // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面；
@@ -4752,7 +4787,11 @@ struct Index {
             .width('100%')
             .padding({ top: 10, bottom: 10, left: 12, right: 12 })
             .backgroundColor(session.sessionId === this.currentSessionId
-              ? 'rgba(77,107,254,0.14)' : this.pal().card)
+              ? 'rgba(77,107,254,0.14)'
+              : (this.hoverRowId === session.sessionId ? this.pal().inputBg : this.pal().card))
+            .onHover((isHover: boolean) => {
+              this.hoverRowId = isHover ? session.sessionId : '';
+            })
             .borderRadius(14)
             .opacity(this.isArchivedSession(session.sessionId) ? 0.6 : 1)
             .border({ width: 1,
@@ -4961,10 +5000,11 @@ struct Index {
         .width('100%')
     }
     .width(300)
-    .height('100%')
     .padding({ left: 14, right: 14, top: 16, bottom: 16 })
+    .margin({ right: 8, top: 8, bottom: 8 })
     .backgroundColor(this.pal().panel)
-    .border({ width: { left: 0.5 }, color: this.pal().borderStrong })
+    .borderRadius(18)
+    .border({ width: 1, color: this.pal().border })
     .alignItems(HorizontalAlign.Start)
     // 常驻栏没有「打开面板」这个动作，出现时自己补一次模型目录与权限状态
     .onAppear(() => {
@@ -5548,9 +5588,11 @@ struct Index {
       this.SessionsPanelBody()
     }
     .width(this.listPanelWidth())
-    .height('100%')
+    .margin({ left: 8, top: 8, bottom: 8 })
     .backgroundColor(this.pal().panel)
-    .border({ width: { right: 0.5 }, color: this.pal().borderStrong })
+    .borderRadius(18)
+    .border({ width: 1, color: this.pal().border })
+    .clip(true)
   }
 
   @Builder
