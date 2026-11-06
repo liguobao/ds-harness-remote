@@ -126,6 +126,8 @@ struct Index {
   @State messageActionText: string = '';
   @State messageActionKind: string = '';
   @State messageActionSeq: number = 0;
+  /** 会话列表只看收藏。 */
+  @State favoriteOnly: boolean = false;
   @State workspacePathInput: string = '';
   @State workspaceNameDraft: string = '';
   @State promptDraftInput: string = '';
@@ -742,6 +744,16 @@ struct Index {
   }
 
   /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
+  /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
+  private visibleSessions(): HarnessRemoteSession[] {
+    const base: HarnessRemoteSession[] = this.sessionSearchActive
+      ? this.sessionSearchResults : this.sessions;
+    if (!this.favoriteOnly) {
+      return base;
+    }
+    return base.filter((session: HarnessRemoteSession) => this.runtime.isFavoriteSession(session.sessionId));
+  }
+
   /** 最近访问的会话标题；列表里没有（已归档/换主机）时给个短 id。 */
   private recentSessionTitle(sessionId: string): string {
     for (const session of this.sessions) {
@@ -3693,9 +3705,12 @@ struct Index {
             .fontSize(this.fs(11))
             .fontColor('#F5A623')
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor('rgba(245,166,35,0.12)')
+            .backgroundColor(this.favoriteOnly ? 'rgba(245,166,35,0.28)' : 'rgba(245,166,35,0.12)')
             .borderRadius(7)
             .margin({ left: 6 })
+            .onClick(() => {
+              this.favoriteOnly = !this.favoriteOnly;
+            })
         }
         Text(`${this.sessions.length}`)
           .fontSize(this.fs(12))
@@ -3895,7 +3910,7 @@ struct Index {
         .scrollBar(BarState.Off)
         .width('100%')
       }
-      if ((this.sessionSearchActive ? this.sessionSearchResults.length : this.sessions.length) === 0) {
+      if (this.visibleSessions().length === 0) {
         Column({ space: 6 }) {
           Text(this.sessionSearchActive ? this.tr('没有匹配的会话') : this.tr('还没有会话'))
             .fontSize(this.fs(12))
@@ -3911,7 +3926,7 @@ struct Index {
         .alignItems(HorizontalAlign.Center)
       }
       List({ space: 8 }) {
-        ForEach(this.sessionSearchActive ? this.sessionSearchResults : this.sessions,
+        ForEach(this.visibleSessions(),
           (session: HarnessRemoteSession, index: number) => {
           ListItem() {
             Column() {
