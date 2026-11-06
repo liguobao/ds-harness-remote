@@ -4633,6 +4633,14 @@ struct Index {
           .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 18, bottomRight: 6 })
           .alignItems(HorizontalAlign.Start)
           .shadow({ radius: 12, color: 'rgba(61,92,246,0.30)', offsetX: 0, offsetY: 3 })
+          if (item.timestamp > 0) {
+            Text(formatClock(item.timestamp))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+              .width('80%')
+              .textAlign(TextAlign.End)
+              .padding({ top: 2 })
+          }
         }
         .width('80%')
         .justifyContent(FlexAlign.End)
@@ -5158,6 +5166,12 @@ struct Index {
             } else {
               this.MarkdownText(item.text, item.streaming)
             }
+          }
+          if (item.timestamp > 0) {
+            Text(formatClock(item.timestamp))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+              .padding({ top: 2 })
           }
           if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
             Row({ space: 8 }) {
