@@ -106,6 +106,8 @@ export interface AppState {
    * or WebRTC negotiation keeps failing; expires so 'auto' can retry P2P.
    */
   relayOnlyUntil?: number
+  /** Last successful connect's stage timings, shown in Settings for diagnosis. */
+  connectionTimings?: { total: number; auth: number; transport: number; describe: number }
   compactHistory: boolean
   setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference

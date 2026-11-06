@@ -597,6 +597,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const comfort = useBrowseMemory()
   const preference = useAppStore(state => state.transportPreference)
   const setPreference = useAppStore(state => state.setTransportPreference)
+  const connectionTimings = useAppStore(state => state.connectionTimings)
   const languagePreference = useAppStore(state => state.languagePreference)
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false)
@@ -864,6 +865,11 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               })}
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
+              {connectionTimings !== undefined && (
+                <Text style={styles.preferenceNote}>
+                  {`connect ${(connectionTimings.total / 1000).toFixed(1)}s · auth ${(connectionTimings.auth / 1000).toFixed(1)}s · transport ${(connectionTimings.transport / 1000).toFixed(1)}s · host ${(connectionTimings.describe / 1000).toFixed(1)}s`}
+                </Text>
+              )}
 
             <SectionTitle>{zhCN.settings.identity}</SectionTitle>
             <GroupCard>
