@@ -1,3 +1,4 @@
+import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
 import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -290,6 +291,22 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
+function HeartbeatMessage({ text, body }: { text: string; body: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return <View>
+    <NativeMarkdown text={body} />
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
+      onPress={() => setExpanded(value => !value)} style={styles.reasoningHeader}>
+      <Code2 size={16} color={colors.muted} />
+      <Text style={styles.reasoningLabel}>{expanded ? zhCN.chat.heartbeatCollapse : zhCN.chat.heartbeatExpand}</Text>
+      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+    </Pressable>
+    {expanded && <Text selectable style={styles.toolDetailCode}>{text}</Text>}
+  </View>
+}
+
 /**
  * In-place free text selection on assistant prose (Figure 2 / IMG_1488).
  * Allows the user to freely select any snippet using native handles.
@@ -298,9 +315,10 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
  */
 function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   const styles = useThemedStyles(createStyles)
+  const body = heartbeatMessageBody(item.text, 'assistant')
   return (
     <View style={styles.assistantProseWrap}>
-      <NativeMarkdown text={item.text} />
+      {body === undefined ? <NativeMarkdown text={item.text} /> : <HeartbeatMessage text={item.text} body={body} />}
     </View>
   )
 }
@@ -349,11 +367,12 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
   if (user) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
+    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
     return <View style={styles.userBlock}>
       <View style={styles.userBubble}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
-        {quotes.length > 0 ? (
+        {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
             {quotes.map((quoteText, index) => (
               <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>

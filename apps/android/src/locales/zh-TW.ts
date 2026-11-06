@@ -463,6 +463,7 @@ const zhTW = {
     hermesDirectoryHint: '使用所選目錄進行 Hermes 對話，已有對話從電腦端載入。', renameTitle: '重新命名工作區', namePlaceholder: '輸入工作區名稱', saveName: '儲存', chooseFolder: '選擇專案目錄', loading: '正在載入…', loadingDirectory: '正在讀取目錄…', noFolders: '這裡沒有可選的資料夾', showHidden: '顯示隱藏資料夾', hideHidden: '隱藏隱藏資料夾', chooseThisFolder: '使用此目錄',
   },
   chat: {
+    heartbeatExpand: '查看巡檢原文', heartbeatCollapse: '收起巡檢原文',
     currentWorkSessions: '當前工作', noCurrentWorkSessions: '本次遠端尚未使用對話',
     otherHostSessions: '其他對話',
     hostSessions: '主機對話', openHostSessions: '開啟當前主機的對話列表', backToWorkspaces: '返回工作區', backToChat: '返回對話', noHostSessions: '當前主機暫無對話',

@@ -465,6 +465,7 @@ const enUS = {
     hermesDirectoryHint: 'Use this directory for Hermes conversations. Existing conversations are loaded from the computer.', renameTitle: 'Rename workspace', namePlaceholder: 'Enter a workspace name', saveName: 'Save', chooseFolder: 'Choose project directory', loading: 'Loading…', loadingDirectory: 'Reading directory…', noFolders: 'No folders are available here', showHidden: 'Show hidden folders', hideHidden: 'Hide hidden folders', chooseThisFolder: 'Use this directory',
   },
   chat: {
+    heartbeatExpand: 'Show heartbeat source', heartbeatCollapse: 'Hide heartbeat source',
     currentWorkSessions: 'Current work', noCurrentWorkSessions: 'No conversations used in this remote connection yet',
     otherHostSessions: 'Other conversations',
     hostSessions: 'Host conversations', openHostSessions: 'Open conversations on this host', backToWorkspaces: 'Back to workspaces', backToChat: 'Back to chat', noHostSessions: 'No conversations on this host yet',
