@@ -1,9 +1,7 @@
 import { hydrateBrowseMemory, useBrowseMemory, browseKey, browsePreference, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useRef, useState } from 'react'
-import { AppState, BackHandler, Linking, LogBox, StyleSheet, Text, View } from 'react-native'
-
-LogBox.ignoreAllLogs(true)
+import { AppState, BackHandler, Linking, StyleSheet, Text, View } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
 import { useLocales } from 'expo-localization'
 import * as SplashScreen from 'expo-splash-screen'
