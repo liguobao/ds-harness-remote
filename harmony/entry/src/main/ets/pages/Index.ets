@@ -145,6 +145,9 @@ struct Index {
   @State messageActionCode: string = '';
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
+  /** 会话内搜索（只在当前会话里找）。 */
+  @State inSessionSearchOpen: boolean = false;
+  @State inSessionQuery: string = '';
   /** 被手工展开的长消息（item.id）。 */
   @State expandedMessages: string[] = [];
   @State workspacePathInput: string = '';
@@ -1531,6 +1534,9 @@ struct Index {
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
+      }
+      if (this.inSessionSearchOpen) {
+        this.InSessionSearchOverlay()
       }
       if (this.messageActionsOpen) {
         this.MessageActionsOverlay()
@@ -4213,7 +4219,18 @@ struct Index {
           this.showSessionPanel = false;
         })
       Column({ space: 0 }) {
-        Row() {
+        Row({ space: 8 }) {
+          Text('🔍')
+            .fontSize(this.fs(13))
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(9)
+            .margin({ right: 2 })
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.inSessionQuery = '';
+              this.inSessionSearchOpen = true;
+            })
           Column({ space: 2 }) {
             Text(this.tr('会话设置'))
               .fontSize(this.fs(16))
@@ -5684,6 +5701,139 @@ struct Index {
       .transition(TransitionEffect.translate({ y: 340 })
         .combine(TransitionEffect.opacity(0))
         .animation({ duration: 220, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 当前会话里搜消息：命中片段列表，点一条滚过去。 */
+  private inSessionHits(): ChatItem[] {
+    const query: string = this.inSessionQuery.trim().toLowerCase();
+    if (query.length === 0) {
+      return [];
+    }
+    const out: ChatItem[] = [];
+    for (const item of this.messages) {
+      if (item.text.toLowerCase().indexOf(query) >= 0) {
+        out.push(item);
+      }
+    }
+    return out.slice(0, 40);
+  }
+
+  private scrollToMessage(messageId: string): void {
+    const rows: ChatItem[] = this.chatRows();
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].id === messageId) {
+        this.stickToBottom = false;
+        this.scroller.scrollToIndex(i, true);
+        return;
+      }
+    }
+  }
+
+  private hitSnippet(text: string): string {
+    const query: string = this.inSessionQuery.trim().toLowerCase();
+    const index: number = query.length === 0 ? -1 : text.toLowerCase().indexOf(query);
+    if (index < 0) {
+      return text.length > 60 ? text.substring(0, 60) + '…' : text;
+    }
+    const start: number = Math.max(0, index - 20);
+    const end: number = Math.min(text.length, index + query.length + 30);
+    const head: string = start > 0 ? '…' : '';
+    const tail: string = end < text.length ? '…' : '';
+    return head + text.substring(start, end) + tail;
+  }
+
+  @Builder
+  InSessionSearchOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+        .onClick(() => {
+          this.inSessionSearchOpen = false;
+        })
+      Column({ space: 8 }) {
+        Row() {
+          Text(this.tr('搜索本会话'))
+            .fontSize(this.fs(15))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+          Blank()
+          Text('✕')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.inSessionSearchOpen = false;
+            })
+        }
+        .width('100%')
+        TextInput({ text: this.inSessionQuery, placeholder: this.tr('输入关键词…') })
+          .width('100%')
+          .height(42)
+          .fontSize(this.fs(13))
+          .fontColor(this.pal().text)
+          .placeholderColor(this.pal().text3)
+          .backgroundColor(this.pal().inputBg)
+          .borderRadius(10)
+          .border({ width: 1, color: this.pal().border })
+          .padding({ left: 12, right: 12 })
+          .onChange((value: string) => {
+            this.inSessionQuery = value;
+          })
+        Scroll() {
+          Column({ space: 6 }) {
+            ForEach(this.inSessionHits(), (item: ChatItem) => {
+              Row({ space: 8 }) {
+                Text(item.kind === 'user' ? '我' : '答')
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
+                  .width(16)
+                Text(this.hitSnippet(item.text))
+                  .fontSize(this.fs(11))
+                  .fontColor(this.pal().text2)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                Text(item.timestamp > 0 ? formatClock(item.timestamp) : '')
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
+              }
+              .width('100%')
+              .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(10)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.inSessionSearchOpen = false;
+                this.scrollToMessage(item.id);
+              })
+            }, (item: ChatItem) => 'hit-' + item.id)
+            if (this.inSessionQuery.trim().length > 0 && this.inSessionHits().length === 0) {
+              Text(this.tr('没有匹配的消息'))
+                .fontSize(this.fs(11))
+                .fontColor(this.pal().text3)
+                .padding({ top: 10, bottom: 10 })
+            }
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.5 : 320 })
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Off)
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 420 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
     }
     .width('100%')
     .height('100%')
