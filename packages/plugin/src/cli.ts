@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DEFAULT_REMOTE_SERVER_URL, normalizeServerUrl } from './config.js'
 import {
   IdentityStore,
+  prepareDefaultIdentityDirectory,
   serverStorageDirectory,
   type HostIdentity,
   type IdentityStoreOptions,
@@ -146,7 +147,7 @@ async function login(args: readonly string[], runtime: CliRuntime): Promise<numb
 async function status(args: readonly string[], runtime: CliRuntime): Promise<number> {
   if (args.length !== 0) throw new CliUsageError('Usage: ds-harness-remote status')
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
   const directory = serverStorageDirectory(root, serverUrl, 'host')
   const lines = [
     'Remote Host status',
@@ -192,7 +193,7 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
 async function logout(args: readonly string[], runtime: CliRuntime): Promise<number> {
   if (args.length !== 0) throw new CliUsageError('Usage: ds-harness-remote logout')
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
   const directory = serverStorageDirectory(root, serverUrl, 'host')
   if (!await exists(join(directory, 'device.json'))) {
     await new ServerCredentialStore(directory).clear()
@@ -226,7 +227,7 @@ async function hostContext(runtime: CliRuntime): Promise<{
   deviceName: string
 }> {
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
   const directory = serverStorageDirectory(root, serverUrl, 'host')
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
   const identities = runtime.createIdentityStore({ directory, env: runtime.env })

@@ -1,8 +1,15 @@
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from '../src/identity-store.js'
+
+import { ServerCredentialStore } from '../src/server-credentials.js'
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
 
 const directories: string[] = []
 
@@ -11,6 +18,137 @@ afterEach(async () => {
 })
 
 describe('IdentityStore', () => {
+  it('moves all Server roles without changing identities, trust or credential bytes, and serializes repeated migration', async () => {
+    const home = await temporaryDirectory()
+    const env = { DSH_HOME: home }
+    const source = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    const records: Array<{ directory: string; identity: Awaited<ReturnType<IdentityStore['loadOrCreate']>>; peers: unknown; files: Map<string, Buffer> }> = []
+    for (const origin of ['https://first.example.com', 'https://second.example.com']) {
+      for (const role of ['host', 'client'] as const) {
+        const directory = serverStorageDirectory(source, origin, role)
+        const store = new IdentityStore({ directory })
+        const identity = await store.loadOrCreate('Host')
+        await store.trustPeer({ deviceId: identity.deviceId, name: 'Peer', platform: 'linux', publicKey: identity.publicKey })
+        await new ServerCredentialStore(directory).save({ serverUrl: origin, deviceId: identity.deviceId, authorizationMethod: 'owned_device', accessToken: 'fixture-access-token', accessTokenExpiresAt: 1, refreshToken: 'fixture-refresh-token', refreshTokenExpiresAt: 2 })
+        const files = new Map<string, Buffer>()
+        for (const file of await readdir(directory)) files.set(file, await readFile(join(directory, file)))
+        records.push({ directory, identity, peers: store.listTrustedPeers(), files })
+      }
+    }
+    await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await Promise.all(Array.from({ length: 3 }, () => prepareDefaultIdentityDirectory({ env })))).toEqual([target, target, target])
+    await expect(stat(source)).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const record of records) {
+      const directory = record.directory.replace(source, target)
+      for (const [file, bytes] of record.files) expect(await readFile(join(directory, file))).toEqual(bytes)
+      const store = new IdentityStore({ directory })
+      expect(await store.loadOrCreate('Host')).toEqual(record.identity)
+      expect(store.listTrustedPeers()).toEqual(record.peers)
+      if (process.platform !== 'win32') expect((await stat(join(directory, 'device.key'))).mode & 0o777).toBe(0o600)
+    }
+    expect(new IdentityStore({ env }).directory).toBe(target)
+    expect(await prepareDefaultIdentityDirectory({ env })).toBe(target)
+  })
+
+  it('refuses conflicting roots, lock records and symlinks without modifying either storage tree', async () => {
+    for (const scenario of ['conflict', 'destination-race', 'identity-lock', 'refresh-lock', 'symlink']) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const target = join(home, 'ds-harness-remote')
+      const original = await new IdentityStore({ directory: source }).loadOrCreate('Host')
+      if (scenario === 'conflict') await mkdir(target)
+      if (scenario === 'destination-race') vi.mocked(rename).mockImplementationOnce(async (_source, destination) => {
+        await mkdir(destination)
+        throw Object.assign(new IdentityInvalidError('destination appeared'), { code: 'EEXIST' })
+      })
+      if (scenario === 'identity-lock') await writeFile(join(source, 'device.lock'), String(process.pid))
+      if (scenario === 'refresh-lock') await mkdir(join(source, 'server-credentials.json.refresh-lock'))
+      if (scenario === 'symlink') await symlink(join(source, 'device.key'), join(source, 'linked'))
+      await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), scenario).rejects.toBeInstanceOf(IdentityInvalidError)
+      expect((await readFile(join(source, 'device.key'), 'utf8')).trim()).toBe(original.privateKey)
+      if (!['conflict', 'destination-race'].includes(scenario)) await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+    const directory = await temporaryDirectory()
+    expect(await prepareDefaultIdentityDirectory({ directory })).toBe(directory)
+  })
+
+  it('keeps using verified legacy identities, trust and authorization when the directory move fails', async () => {
+    for (const code of ['EACCES', 'EPERM', 'EBUSY', 'EXDEV', 'EROFS', 'ENOSPC', 'EDQUOT']) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const env = { DSH_HOME: home }
+      const store = new IdentityStore({ directory: source })
+      const original = await store.loadOrCreate('Host')
+      await store.trustPeer({ deviceId: original.deviceId, name: 'Peer', platform: 'linux', publicKey: original.publicKey })
+      const credentials = await new ServerCredentialStore(source).save({ serverUrl: 'https://first.example.com', deviceId: original.deviceId, authorizationMethod: 'owned_device', accessToken: 'fixture-access-token', accessTokenExpiresAt: 1, refreshToken: 'fixture-refresh-token', refreshTokenExpiresAt: 2 })
+      const bytes = await readFile(join(source, 'server-credentials.json'))
+      vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('move unavailable'), { code }))
+      expect(await prepareDefaultIdentityDirectory({ env }), code).toBe(source)
+      // A subsequent default-store load must adopt the fallback, without retrying
+      // the move or creating a replacement identity at the canonical path.
+      const fallback = new IdentityStore({ env })
+      expect(await fallback.loadOrCreate('Host'), code).toEqual(original)
+      expect(fallback.directory).toBe(source)
+      expect(fallback.listTrustedPeers()).toEqual(store.listTrustedPeers())
+      expect(await new ServerCredentialStore(fallback.directory).load(credentials.serverUrl, original.deviceId)).toEqual(credentials)
+      expect(await readFile(join(source, 'server-credentials.json'))).toEqual(bytes)
+      await expect(stat(join(home, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('refuses to replace missing or changed storage after a persisted legacy fallback', async () => {
+    for (const scenario of ['missing', 'replaced']) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const original = await new IdentityStore({ directory: source }).loadOrCreate('Host')
+      vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('move unavailable'), { code: 'EACCES' }))
+      await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      const backup = join(home, 'preserved')
+      await rename(source, backup)
+      if (scenario === 'replaced') await new IdentityStore({ directory: source }).loadOrCreate('Other Host')
+      await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), scenario).rejects.toBeInstanceOf(IdentityInvalidError)
+      expect((await readFile(join(backup, 'device.key'), 'utf8')).trim()).toBe(original.privateKey)
+      await expect(stat(join(home, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('leaves foreign, mixed and inconsistent legacy contents untouched instead of claiming ownership', async () => {
+    for (const scenario of ['foreign', 'empty', 'mixed', 'wrong-key', 'bad-peers', 'wrong-device', 'wrong-scope', 'unknown-role']) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      await mkdir(source)
+      const env = { DSH_HOME: home }
+      if (scenario === 'foreign') await writeFile(join(source, 'settings.json'), '{"owner":"other-plugin"}')
+      if (!['foreign', 'empty'].includes(scenario)) {
+        const origin = 'https://first.example.com'
+        const directory = scenario === 'wrong-scope'
+          ? join(source, 'servers', '0'.repeat(24), 'host')
+          : scenario === 'unknown-role'
+            ? join(source, 'servers', '0'.repeat(24), 'other')
+            : serverStorageDirectory(source, origin, 'host')
+        const identity = await new IdentityStore({ directory }).loadOrCreate('Host')
+        if (scenario === 'mixed') await writeFile(join(directory, 'foreign.txt'), 'leave-this-alone')
+        if (scenario === 'wrong-key') await writeFile(join(directory, 'device.key'), 'invalid-private-key')
+        if (scenario === 'bad-peers') await writeFile(join(directory, 'trusted-peers.json'), '{"schemaVersion":1,"peers":[{}]}')
+        if (scenario === 'wrong-device' || scenario === 'wrong-scope') {
+          await new ServerCredentialStore(directory).save({ serverUrl: origin, deviceId: scenario === 'wrong-device' ? 'another-device' : identity.deviceId, authorizationMethod: 'owned_device', accessToken: 'fixture-access-token', accessTokenExpiresAt: 1, refreshToken: 'fixture-refresh-token', refreshTokenExpiresAt: 2 })
+        }
+      }
+      const snapshot = async (directory: string): Promise<unknown> => {
+        const values: Record<string, unknown> = {}
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          values[entry.name] = entry.isDirectory() ? await snapshot(join(directory, entry.name)) : await readFile(join(directory, entry.name))
+        }
+        return values
+      }
+      const before = await snapshot(source)
+      await expect(prepareDefaultIdentityDirectory({ env }), scenario).rejects.toThrow('ownership could not be verified')
+      expect(await snapshot(source), scenario).toEqual(before)
+      await expect(stat(join(home, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
   it('creates and reloads one stable device identity', async () => {
     const directory = await temporaryDirectory()
     const first = await new IdentityStore({ directory }).loadOrCreate('Workstation')

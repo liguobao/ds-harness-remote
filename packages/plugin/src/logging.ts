@@ -21,7 +21,7 @@ export class SafeLogger {
   private write(level: LogLevel, message: string, fields?: Record<string, unknown>): void {
     if (levels.indexOf(level) < levels.indexOf(this.threshold)) return
     const safeFields = fields === undefined ? '' : ` ${JSON.stringify(redact(fields))}`
-    this.sink[level](`[dsh-remote] ${message}${safeFields}`)
+    this.sink[level](`[ds-harness-remote] ${message}${safeFields}`)
   }
 }
 

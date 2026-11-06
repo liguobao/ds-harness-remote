@@ -86970,7 +86970,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -86997,15 +86997,21 @@ var IdentityInvalidError = class extends Error {
   code = "IDENTITY_INVALID";
 };
 var IdentityStore = class {
-  directory;
+  storageDirectory;
+  get directory() {
+    return this.storageDirectory;
+  }
   identity;
   peers = /* @__PURE__ */ new Map();
+  defaultOptions;
   constructor(options = {}) {
     const env = options.env ?? process.env;
     const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    this.directory = options.directory ?? join5(dshHome, "remote");
+    this.storageDirectory = options.directory ?? join5(dshHome, "ds-harness-remote");
+    this.defaultOptions = options.directory === void 0 ? options : void 0;
   }
   async loadOrCreate(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
   }
@@ -87059,6 +87065,7 @@ var IdentityStore = class {
    * lock another process holds — and cannot leave itself unprotected either.
    */
   async reset(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, async () => {
       this.identity = void 0;
@@ -87116,6 +87123,144 @@ var IdentityStore = class {
     }, 384);
   }
 };
+var legacyRootPinSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  dev: external_exports.number().int().nonnegative(),
+  ino: external_exports.number().int().nonnegative()
+}).strict();
+async function prepareDefaultIdentityDirectory(options = {}) {
+  if (options.directory !== void 0) return options.directory;
+  const env = options.env ?? process.env;
+  const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+  const source = join5(home, "remote");
+  const target3 = join5(home, "ds-harness-remote");
+  await mkdir3(home, { recursive: true, mode: 448 });
+  const lockDirectory = join5(home, ".ds-harness-remote-migration");
+  await storageDirectoryStat(lockDirectory);
+  await ensureDirectory(lockDirectory);
+  return withIdentityLock(lockDirectory, async () => {
+    const old = await storageDirectoryStat(source);
+    const current = await storageDirectoryStat(target3);
+    const pinPath = join5(lockDirectory, "legacy-root.json");
+    const pinMetadata = await lstat(pinPath).catch((error62) => {
+      if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+      throw error62;
+    });
+    let pin;
+    if (pinMetadata !== void 0) {
+      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.");
+      }
+      await assertPrivateMode2(pinPath);
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+    }
+    if (old !== void 0) {
+      if (current !== void 0) {
+        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.");
+      }
+      await assertOwnedRemoteStorage(source);
+      await assertStorageIdle(source);
+      if (pin !== void 0) {
+        if (pin.dev !== old.dev || pin.ino !== old.ino) throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.");
+        return source;
+      }
+      try {
+        await rename2(source, target3);
+      } catch (error62) {
+        if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
+        const remaining = await storageDirectoryStat(source);
+        if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
+        await assertOwnedRemoteStorage(source);
+        await assertStorageIdle(source);
+        await atomicJsonWrite(pinPath, { schemaVersion: 1, dev: old.dev, ino: old.ino }, 384);
+        return source;
+      }
+    } else if (pin !== void 0) {
+      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.");
+      await assertOwnedRemoteStorage(target3);
+    }
+    return target3;
+  });
+}
+async function assertOwnedRemoteStorage(root) {
+  const rejected = () => new IdentityInvalidError("Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.");
+  const identityFiles = /* @__PURE__ */ new Set(["device.json", "device.key", "trusted-peers.json", "server-credentials.json"]);
+  let identities = 0;
+  const checkIdentity = async (directory, scope2) => {
+    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root && entry.name === "servers" && entry.isDirectory()));
+    for (const entry of entries) {
+      if (!entry.isFile() || !identityFiles.has(entry.name)) throw rejected();
+      const metadata = await lstat(join5(directory, entry.name));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) throw rejected();
+    }
+    const names = new Set(entries.map((entry) => entry.name));
+    if (!names.has("device.json") || !names.has("device.key")) throw rejected();
+    await assertPrivateMode2(join5(directory, "device.key"));
+    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) throw rejected();
+    if (names.has("trusted-peers.json")) {
+      const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+      const ids = /* @__PURE__ */ new Set();
+      for (const peer of peers) {
+        if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected();
+        ids.add(peer.deviceId);
+      }
+    }
+    if (names.has("server-credentials.json")) {
+      const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
+      if (typeof raw.serverUrl !== "string") throw rejected();
+      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record11.deviceId);
+      if (credentials === void 0) throw rejected();
+      const origin = new URL(credentials.serverUrl);
+      if (!["http:", "https:"].includes(origin.protocol)) throw rejected();
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) throw rejected();
+    }
+    identities++;
+  };
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const flat = entries.filter((entry) => entry.name !== "servers");
+    if (flat.length > 0) {
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected();
+      await checkIdentity(root);
+    }
+    const servers = entries.find((entry) => entry.name === "servers");
+    if (servers !== void 0) {
+      if (!servers.isDirectory()) throw rejected();
+      for (const scope2 of await readdir(join5(root, "servers"), { withFileTypes: true })) {
+        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected();
+        for (const role2 of await readdir(join5(root, "servers", scope2.name), { withFileTypes: true })) {
+          if (!role2.isDirectory() || !["host", "client"].includes(role2.name)) throw rejected();
+          await checkIdentity(join5(root, "servers", scope2.name, role2.name), scope2.name);
+        }
+      }
+    }
+    if (identities === 0) throw rejected();
+  } catch {
+    throw rejected();
+  }
+}
+async function storageDirectoryStat(path) {
+  try {
+    const entry = await lstat(path);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.");
+    }
+    return entry;
+  } catch (error62) {
+    if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+    throw error62;
+  }
+}
+async function assertStorageIdle(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+      throw new IdentityInvalidError("Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.");
+    }
+    if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
+  }
+}
 function serverStorageDirectory(root, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
   const scope2 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
@@ -90251,7 +90396,7 @@ var IsolatedAcpClient = class {
 };
 
 // src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/remote-terminal-controller.ts
@@ -90934,7 +91079,7 @@ var WorkspaceBridge = class {
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
-          const info2 = await lstat(item);
+          const info2 = await lstat2(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
         }
@@ -91033,7 +91178,7 @@ var WorkspaceBridge = class {
     const rel = relative2(root, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
-      const info = await lstat(candidate);
+      const info = await lstat2(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
       const canonicalRel = relative2(root, canonical);
@@ -95863,7 +96008,7 @@ var SafeLogger = class {
   write(level, message, fields) {
     if (levels.indexOf(level) < levels.indexOf(this.threshold)) return;
     const safeFields = fields === void 0 ? "" : ` ${JSON.stringify(redact(fields))}`;
-    this.sink[level](`[dsh-remote] ${message}${safeFields}`);
+    this.sink[level](`[ds-harness-remote] ${message}${safeFields}`);
   }
 };
 function redact(value, key = "") {
@@ -95876,7 +96021,7 @@ function redact(value, key = "") {
 // src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -95992,7 +96137,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat2(upload.temp);
+    const temp = await lstat3(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -96051,8 +96196,8 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root = await lstat2(upload.root);
-      const temp = await lstat2(upload.temp);
+      const root = await lstat3(upload.root);
+      const temp = await lstat3(upload.temp);
       if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
@@ -97829,7 +97974,7 @@ function closeCode(code) {
 
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/promises";
+import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
@@ -98596,7 +98741,7 @@ var HarnessRemoteBridge = class {
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
     }
     try {
-      const rootLstat = await lstat3(root);
+      const rootLstat = await lstat4(root);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
       }
@@ -98610,12 +98755,12 @@ var HarnessRemoteBridge = class {
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
         }
-        const dirLstat = await lstat3(currentPath);
+        const dirLstat = await lstat4(currentPath);
         if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.");
         }
       }
-      const targetLstat = await lstat3(candidate);
+      const targetLstat = await lstat4(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
       }
@@ -100031,7 +100176,7 @@ Waiting for authorization...
 async function status(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote status");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   const lines = [
     "Remote Host status",
@@ -100081,7 +100226,7 @@ Run "ds-harness-remote login" to authorize this Host.
 async function logout(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote logout");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   if (!await exists3(join16(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
@@ -100108,7 +100253,7 @@ async function logout(args, runtime) {
 }
 async function hostContext(runtime) {
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
@@ -100243,7 +100388,6 @@ var AcpGateway = class {
 var name = "ds-harness-remote";
 var legacyLoaderModuleNames = /* @__PURE__ */ new Set(["@dsh-remote/plugin"]);
 var pluginSettingsNamespace = "ds-harness-remote";
-var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
 function apply(ctx, entry = void 0) {
@@ -100254,7 +100398,8 @@ function apply(ctx, entry = void 0) {
     if (isLegacySettingsProvider(settings)) return;
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
-  const activateWhenCarrierReady = (runtimeContext) => {
+  const activateWhenCarrierReady = async (runtimeContext) => {
+    const identityDirectory = await prepareDefaultIdentityDirectory();
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
     const webServer = runtimeContext.get("webServer");
@@ -100264,13 +100409,13 @@ function apply(ctx, entry = void 0) {
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
-          new IdentityStore().directory,
+          identityDirectory,
           void 0,
           void 0,
           void 0
         );
         return control.register(connection, webServer);
-      }, "dsh-remote pending control");
+      }, "ds-harness-remote pending control");
     };
     const startActiveRuntime = async (activeContext) => {
       await disposePendingControl?.();
@@ -100290,11 +100435,11 @@ async function activate(ctx, readConfig, entryId) {
   const connection = ctx.get("connection");
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const defaultIdentityDirectory = new IdentityStore().directory;
+  const defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
   if (!config2.enabled) {
     if (connection !== void 0) {
       const controlRuntime2 = new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, void 0, void 0);
-      ctx.effect(() => controlRuntime2.register(connection, webServer), "dsh-remote disabled control");
+      ctx.effect(() => controlRuntime2.register(connection, webServer), "ds-harness-remote disabled control");
     }
     return;
   }
@@ -100331,7 +100476,7 @@ async function activate(ctx, readConfig, entryId) {
     const peer = fallbackPeer;
     fallbackPeer = void 0;
     return peer?.dispose?.();
-  }, "dsh-remote fallback owner peer");
+  }, "ds-harness-remote fallback owner peer");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
   const localTypertGateway = hostGateway.local();
   localTypertGateway.createPeer = () => {
@@ -100452,7 +100597,7 @@ async function activate(ctx, readConfig, entryId) {
       await clientRuntime?.close();
       await runtime.close();
     };
-  }, "dsh-remote lifecycle");
+  }, "ds-harness-remote lifecycle");
   if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? void 0 : clientRuntime);
 }
 function readEntryConfig(entry) {
@@ -100491,7 +100636,6 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
       resolveConfig(value);
     }
   });
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope2, hmr));
   return {
     get: () => scope2.get(),
     replace: (section) => runHmrSafe(async () => {
@@ -100501,39 +100645,6 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
 }
 function isLegacySettingsProvider(value) {
   return typeof value === "object" && value !== null && typeof value.register === "function";
-}
-function reportSettingsMigration(ctx, migration) {
-  if (migration === "migrated") ctx.logger.info("migrated legacy Remote settings namespace");
-  if (migration === "failed") ctx.logger.warn("failed to migrate legacy Remote settings namespace");
-}
-async function migrateLegacySettings(settings, currentScope, hmr) {
-  if (typeof settings.describe !== "function") return "skipped";
-  try {
-    let descriptors = settings.describe();
-    const current = descriptors.find((descriptor) => descriptor.ns === pluginSettingsNamespace);
-    if (isPlainRecord2(current?.user)) return "skipped";
-    let legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    if (legacy === void 0) {
-      settings.register(legacySettingsNamespace, Config, {
-        applies: "restart",
-        validate: (value) => {
-          resolveConfig(value);
-        }
-      });
-      descriptors = settings.describe();
-      legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    }
-    if (!isPlainRecord2(legacy?.user) || Object.keys(legacy.user).length === 0) return "skipped";
-    await runHmrSafe(async () => {
-      await currentScope.replace(legacy.user);
-    }, hmr);
-    return "migrated";
-  } catch {
-    return "failed";
-  }
-}
-function isPlainRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 async function disableLegacyLoaderEntries(ctx, logger2) {
   const loader = ctx.get("loader");
@@ -100597,8 +100708,8 @@ export {
   apply,
   createRemoteFileContentProvider,
   fingerprint2 as fingerprint,
-  migrateLegacySettings,
   name,
+  prepareDefaultIdentityDirectory,
   resolveConfig,
   runCli,
   serverStorageDirectory

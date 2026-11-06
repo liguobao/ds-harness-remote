@@ -1,5 +1,37 @@
 # Repository Guide for Agents
 
+## Canonical Remote naming and credential migration (2026-11-06)
+
+按用户要求移除旧 `dsh-remote` 设置命名空间的自动导入，不再注册旧 section；保留旧
+Harness settings provider 接口。日志前缀与生命周期标签统一 `ds-harness-remote`。
+共享包 `@dsh-remote/*` 与防止重复 Host 的旧 loader 禁用逻辑保留。
+
+Linux 新安装默认使用 `/opt/ds-harness-remote` 与 `ds-harness-remote-<profile>.service`，
+不自动迁移旧 runtime 或服务。安装器在改包前检测归属本项目的旧服务，若仍运行或启用则
+拒绝继续，要求先停用；不停止、不删除未知服务。中英文安装指南同步。
+
+凭据根改为 `$DSH_HOME/ds-harness-remote`（默认 `~/.dsh/ds-harness-remote`）。安装器
+处理凭据及升级后首次启动时自动整体迁移旧 `remote` 目录，先于凭据读写及身份创建。
+迁移先只读校验整个旧目录：已知布局/文件白名单、公私钥配对、信任指纹、凭据 schema、
+deviceId 与 Server scope 哈希；未知文件、混合数据、不一致记录、锁和符号链接均拒绝。
+根目录外的跨进程锁序列化迁移；新旧根同时存在时不合并、不覆盖。升级需停止旧实例，
+不能依赖空闲旧进程持锁检测。自定义 IdentityStore.directory 保持原路径。
+
+已确认归属的旧目录 rename 遇权限/占用/只读/空间等错误时，复核同一原目录仍在且目标
+不存在后回退旧根。在 `.ds-harness-remote-migration/legacy-root.json` 私有记录原目录的
+设备号/inode，当前与后续新版进程都沿用旧根，避免活跃存储分裂；不自动重试移动已固定的
+旧根。无法持久化回退记录、固定目录消失或被替换时停止，不创建替代身份。Host、安装器、
+CLI 与默认 IdentityStore 均采用实际选定根；不重新生成密钥、不清除 Token/信任记录。
+
+验证：Plugin 源码/test 类型检查、全量 73 文件 / 537 tests、生产构建、DSH bundle、安装
+脚本语法与 diff check 通过。生产 CLI 在隔离目录验证成功自动迁移、未知目录拒绝、真实
+父目录权限拒绝后仍有授权，以及权限恢复后另一个进程仍沿用旧根；凭据字节不变。安装器
+真实 helper 在隔离 profile / 模拟 systemctl 中验证归属旧服务的 active/enabled 拦截，
+以及停用服务/无关服务不被改写。本机 `~/.dsh/remote` 只读归属检查通过，未打印私密内容
+或执行真实迁移。Windows、Linux systemd 实装与跨设备未验收。
+
+本机 hoisted 安装遗留的子包 bin wrapper 指向旧 isolated 路径，类型检查直接调用根 tsc。
+
 ## Claude / Hermes direct workspace tools (2026-11-05)
 
 Claude 与 Hermes 的 Desktop/Android 直接 Files/Terminal 已接入现有 ACP workspace tools。
