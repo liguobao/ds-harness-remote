@@ -1,5 +1,16 @@
 # Repository Guide for Agents
 
+## Local plugin online upgrade (2026-11-05)
+
+Harness `0.2.2-rc.1` 的 `pluginManager.updateBundle` 可以替换从 npm registry 安装、
+且被标记 `updatable` 的第三方 bundle。本机 Remote 弹窗在 registry 检查确认有新版本、
+并且官方 `listBundles` 认定当前安装可更新时，footer 的「{latest} 可用」调用该接口，
+旁边保留「发布页」链接。GitHub、本地路径和其他非 registry 安装仍只打开 Releases。只接受本次 registry 检查得到的
+`latest`，不接受调用方自报版本。升级走本机 loopback `plugin.update`。官方管理器先检查
+再卸载，检查失败不改安装；进入卸载后由管理器继续安装，失败时按其自身规则回滚。
+加密 Remote 通道仍然拒绝替换 Remote 自身或拥有它的 bundle。旧 Host 没有该接口时保持
+原来的 Releases 链接。
+
 ## Claude / Hermes direct workspace tools (2026-11-05)
 
 Claude 与 Hermes 的 Desktop/Android 直接 Files/Terminal 已接入现有 ACP workspace tools。

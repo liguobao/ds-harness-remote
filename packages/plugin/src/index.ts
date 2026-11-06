@@ -27,6 +27,7 @@ import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './p
 import { installRemoteDiscoveryTools } from './remote-tools.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
+import { LocalPluginUpgrade, type PluginManagerUpdate } from './plugin-self-update.js'
 import {
   createOwnerPeerFactory,
   ownerPeerConstructor,
@@ -185,6 +186,20 @@ async function activate(
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
   const updateChecker = new PluginUpdateChecker(logger)
+  // Harness 0.2.2 updates a registry-installed third-party bundle in place.
+  // The manager is a Host boot service, so it keeps running after this plugin
+  // is removed and replaced. GitHub and path installs are left on the releases link.
+  const pluginUpgrade = new LocalPluginUpgrade(
+    updateChecker,
+    () => readPluginManager(ctx),
+    listener => {
+      // The manager emits on its own context. Desktop puts that service on the
+      // profile root; a nested context with its own bus still needs to hear it.
+      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events]
+      const dispose = buses.map(events => events.on('plugin-manager/update-state', listener, { global: true }))
+      return () => { for (const stop of dispose) stop() }
+    },
+  )
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
@@ -314,7 +329,7 @@ async function activate(
 
   const controlRuntime = connection === undefined
     ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker)
+    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, pluginUpgrade)
 
   ctx.provide('dshRemote', runtime)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
@@ -369,6 +384,21 @@ function readEntryConfig(entry: EntryConfig | ConfigShape | undefined): ConfigIn
 /** Whether a config value is the Loader's live volatile reference. */
 function isEntryConfig(value: EntryConfig | ConfigShape): value is EntryConfig {
   return typeof (value as { get?: unknown }).get === 'function'
+}
+
+/**
+ * The official plugin manager lives on the profile context. A plugin-scoped
+ * lookup misses it when the service is isolated to the root.
+ */
+function readPluginManager(ctx: Context): PluginManagerUpdate | undefined {
+  const candidate = ctx.get('pluginManager', false) ?? ctx.root.get('pluginManager', false)
+  if (
+    typeof candidate !== 'object'
+    || candidate === null
+    || typeof (candidate as { listBundles?: unknown }).listBundles !== 'function'
+    || typeof (candidate as { updateBundle?: unknown }).updateBundle !== 'function'
+  ) return undefined
+  return candidate as PluginManagerUpdate
 }
 
 /** Entry id whose live Config backs this plugin instance's settings writes. */
