@@ -1,4 +1,4 @@
-import { hydrateBrowseMemory, useBrowseMemory, browsePreference, browseScope, saveHostMode } from './src/services/browse-memory'
+import { hydrateBrowseMemory, useBrowseMemory, browseKey, browsePreference, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, BackHandler, Linking, LogBox, StyleSheet, Text, View } from 'react-native'
@@ -125,8 +125,38 @@ function AppNavigator() {
   const pop = () => setRoutes(current => current.length > 1 ? current.slice(0, -1) : current)
   const reset = (next: Route) => setRoutes([next])
 
+  const selectOfflineTrustedDevice = (device: (typeof devices)[number], preferredSessionId?: string) => {
+    const state = useAppStore.getState()
+    const scope = browseScope({ config: state.config, selectedDevice: device })
+    const memory = useBrowseMemory.getState()
+    const cached = device.trusted ? memory.catalogs[scope] : undefined
+    const sameHost = state.selectedDevice?.deviceId === device.deviceId
+    const nextSessions = sameHost && state.sessions.length > 0 ? state.sessions : cached?.sessions ?? []
+    const nextWorkspaces = sameHost && state.workspaces.length > 0 ? state.workspaces : cached?.workspaces ?? []
+    useAppStore.setState(current => ({
+      selectedDevice: device,
+      workspaces: nextWorkspaces,
+      sessions: nextSessions,
+      ...(!sameHost ? { selectedSession: undefined } : {}),
+      connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false } },
+      error: undefined,
+    }))
+    const candidateId = preferredSessionId ?? (memory.last?.scope === scope ? memory.last.sessionId : undefined)
+    const targetSession =
+      (candidateId ? nextSessions.find(item => item.sessionId === candidateId) ?? memory.entries[browseKey(scope, candidateId)]?.session : undefined)
+      ?? [...nextSessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+    if (targetSession !== undefined) {
+      void openSession(targetSession)
+    }
+  }
+
   const openDevice = (device: (typeof devices)[number]) => {
     if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') {
+      reset({ name: 'chat' })
+      return
+    }
+    if (device.trusted && !device.online) {
+      selectOfflineTrustedDevice(device)
       reset({ name: 'chat' })
       return
     }
@@ -203,7 +233,16 @@ function AppNavigator() {
         ...(target.sessionId === undefined ? {} : { sessionId: target.sessionId }),
       })
     } else if (useAppStore.getState().selectedDevice === undefined) {
-      setHostSwitcherOpen(true)
+      const offlineTargetId = memory.last?.deviceId ?? useAppStore.getState().lastConnectedDeviceId
+      const offlineDevice =
+        (offlineTargetId ? devices.find(item => item.deviceId === offlineTargetId && item.trusted) : undefined)
+        ?? devices.find(item => item.trusted)
+      if (offlineDevice !== undefined) {
+        selectOfflineTrustedDevice(offlineDevice, memory.last?.sessionId)
+      }
+      if (offlineDevice === undefined || devices.some(item => item.trusted && item.online)) {
+        setHostSwitcherOpen(true)
+      }
     }
   }, [bootPhase, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
 

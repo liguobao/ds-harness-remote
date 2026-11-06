@@ -118,7 +118,46 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       }
       runtime.historyCompactMode = compact
       const hostId = get().selectedDevice?.deviceId ?? ''
-      const pageScope = browseScope(get()) + (get().compactHistory ? ':compact' : ':full')
+      const memoryScope = browseScope(get())
+      if (get().connection.phase !== 'connected') {
+        const cachedEntry = useBrowseMemory.getState().entries[browseKey(memoryScope, session.sessionId)] as
+          | { messages?: import('../types').ChatItem[] }
+          | undefined
+        const inMemoryMessages = get().messages[session.sessionId]
+        const preservedMessages =
+          inMemoryMessages && inMemoryMessages.length > 0
+            ? inMemoryMessages
+            : cachedEntry?.messages && cachedEntry.messages.length > 0
+              ? cachedEntry.messages
+              : undefined
+        set(state => ({
+          busyAction: undefined,
+          selectedSession: session,
+          sessions: state.sessions.some(item => item.sessionId === session.sessionId)
+            ? state.sessions
+            : [session, ...state.sessions],
+          ...(preservedMessages !== undefined
+            ? {
+                messages: {
+                  ...state.messages,
+                  [session.sessionId]: preservedMessages,
+                },
+              }
+            : {}),
+          error: undefined,
+          historyLoadingOlder: false,
+          sessionModels: undefined,
+          modelSelecting: false,
+          historyHasMore: false,
+          oldestLoadedSeq: undefined,
+        }))
+        void runtime.rememberRecentWorkspace(session).catch(() => undefined)
+        set(state => ({
+          currentWorkSessionIds: [...state.currentWorkSessionIds.filter(id => id !== session.sessionId), session.sessionId].slice(-32),
+        }))
+        return true
+      }
+      const pageScope = memoryScope + (get().compactHistory ? ':compact' : ':full')
       const pageKey = (id: string) => browseKey(pageScope, id)
       const previous = get().selectedSession
       if (!historyModeChanged && previous !== undefined && !get().busyAction?.startsWith('session:') && !get().historyLoadingOlder) {

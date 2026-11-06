@@ -437,7 +437,7 @@ export function ChatScreen({
     if (sessionIsBot) {
       useAppStore.setState({ selectedSession: undefined })
     }
-    if ((session !== undefined && !sessionIsBot) || !connected || busy !== undefined || autoSelectingRef.current) return
+    if ((session !== undefined && !sessionIsBot) || busy !== undefined || autoSelectingRef.current) return
     const candidates = sessions.filter(
       item => !archivedSessionIds.includes(item.sessionId) && !isKnownBotSessionId(item.sessionId, botTeamState, memoryScope),
     )
