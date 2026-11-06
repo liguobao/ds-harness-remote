@@ -128,6 +128,8 @@ struct Index {
   @State messageActionSeq: number = 0;
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
+  /** 被手工展开的长消息（item.id）。 */
+  @State expandedMessages: string[] = [];
   @State workspacePathInput: string = '';
   @State workspaceNameDraft: string = '';
   @State promptDraftInput: string = '';
@@ -746,6 +748,28 @@ struct Index {
   }
 
   /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
+  /** 这条回复是否需要折叠：非流式、没被展开过、且超过 24 行。 */
+  private isLongCollapsed(item: ChatItem): boolean {
+    if (item.streaming || this.expandedMessages.includes(item.id)) {
+      return false;
+    }
+    return this.textLineCount(item.text) > 24;
+  }
+
+  /** 文本行数（粗算，用于判断要不要折叠）。 */
+  private textLineCount(text: string): number {
+    return text.split('\n').length;
+  }
+
+  /** 折叠到前 18 行，行尾加省略提示。 */
+  private collapseText(text: string): string {
+    const lines: string[] = text.split('\n');
+    if (lines.length <= 18) {
+      return text;
+    }
+    return lines.slice(0, 18).join('\n') + '\n\n…';
+  }
+
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
   private visibleSessions(): HarnessRemoteSession[] {
     const base: HarnessRemoteSession[] = this.sessionSearchActive
@@ -4657,6 +4681,14 @@ struct Index {
             .borderRadius(6)
             .wordBreak(WordBreak.BREAK_ALL)
             .textAlign(TextAlign.Start)
+            // 代码行：可选中，也可以长按整行复制（子组件的长按优先于消息菜单）
+            .copyOption(CopyOptions.LocalDevice)
+            .gesture(LongPressGesture().onAction(() => {
+              const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, line.text);
+              pasteboard.getSystemPasteboard().setData(data).then(() => {
+                promptAction.showToast({ message: this.tr('已复制该行') });
+              }).catch(() => undefined);
+            }))
         } else if (line.bullet) {
           Row({ space: 6 }) {
             Text('·')
@@ -4691,6 +4723,7 @@ struct Index {
             .width('100%')
             .wordBreak(WordBreak.NORMAL)
             .textAlign(TextAlign.Start)
+            .copyOption(CopyOptions.LocalDevice)
         }
       }, (line: MdLine, index: number) => index.toString())
     }
@@ -5063,7 +5096,19 @@ struct Index {
               .textAlign(TextAlign.Start)
           }
           if (item.text.length > 0) {
-            this.MarkdownText(item.text, item.streaming)
+            // 长回复先折叠到 18 行，避免一条消息把整屏占满
+            if (this.isLongCollapsed(item)) {
+              this.MarkdownText(this.collapseText(item.text), item.streaming)
+              Text(this.tr('展开全文') + ' · ' + this.textLineCount(item.text) + this.tr(' 行'))
+                .fontSize(this.fs(11))
+                .fontColor('#22D3EE')
+                .padding({ top: 2, bottom: 2 })
+                .onClick(() => {
+                  this.expandedMessages = this.expandedMessages.concat([item.id]);
+                })
+            } else {
+              this.MarkdownText(item.text, item.streaming)
+            }
           }
           if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
             Row({ space: 8 }) {
