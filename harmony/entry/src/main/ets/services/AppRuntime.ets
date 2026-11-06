@@ -9,7 +9,8 @@ import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HistoryPage, PromptImagePart } from '../net/HarnessClient';
+  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HarnessWorkspaceSnapshot, HistoryPage,
+  PromptImagePart } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -210,6 +211,9 @@ export class AppRuntime {
   drafts: Record<string, string> = {};
   /** 本地提示词库。 */
   prompts: string[] = [];
+  /** 主机侧的归档 / 置顶集合（workspace/follow baseline 与归档、置顶回执同步）。 */
+  archivedSessionIds: string[] = [];
+  pinnedSessionIds: string[] = [];
   /** 会话收藏与最近访问（sessionId 列表）。 */
   favoriteSessions: string[] = [];
   recentSessions: string[] = [];
@@ -1192,7 +1196,10 @@ export class AppRuntime {
       return;
     }
     try {
-      this.workspaces = await harness.workspaceList();
+      const snapshot: HarnessWorkspaceSnapshot = await harness.workspaceList();
+      this.workspaces = snapshot.items;
+      this.archivedSessionIds = snapshot.archivedSessionIds;
+      this.pinnedSessionIds = snapshot.pinnedSessionIds;
       this.notify();
     } catch (error) {
       logWarn('workspace/list unavailable: ' + errorMessage(error));
@@ -1379,58 +1386,88 @@ export class AppRuntime {
     }
   }
 
-  /** 归档指定会话（会话列表长按触发）。 */
+  /** 归档指定会话（会话列表长按触发）。归档集合以主机回执为准。 */
   async archiveSession(sessionId: string): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined || sessionId.length === 0) {
       return;
     }
     try {
-      await harness.sessionArchive(sessionId);
-      const next: HarnessRemoteSession[] = [];
-      for (const session of this.sessions) {
-        if (session.sessionId !== sessionId) {
-          next.push(session);
-        }
-      }
-      this.sessions = next;
+      this.archivedSessionIds = await harness.sessionArchive(sessionId);
+      // 归档同时会取消置顶，别让旧置顶留在本地
+      this.pinnedSessionIds = this.pinnedSessionIds.filter((id: string) => id !== sessionId);
       if (this.currentSessionId === sessionId) {
         this.currentSessionId = '';
         this.currentSessionTitle = '';
         this.messages = [];
       }
+      this.clearRetry();
       this.notify();
     } catch (error) {
       this.errorMsg = errorMessage(error);
+      this.setRetry('重新归档', () => {
+        this.archiveSession(sessionId);
+      });
       this.notify();
     }
   }
 
-  /** 归档当前会话并回到会话列表。 */
-  async archiveCurrentSession(): Promise<void> {
+  /** 取消归档：把会话从归档集合里放回列表。 */
+  async unarchiveSession(sessionId: string): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
-    const sessionId: string = this.currentSessionId;
     if (harness === undefined || sessionId.length === 0) {
       return;
     }
     try {
-      await harness.sessionArchive(sessionId);
-      const next: HarnessRemoteSession[] = [];
-      for (const session of this.sessions) {
-        if (session.sessionId !== sessionId) {
-          next.push(session);
-        }
-      }
-      this.sessions = next;
-      this.currentSessionId = '';
-      this.currentSessionTitle = '';
-      this.messages = [];
+      this.archivedSessionIds = await harness.sessionUnarchive(sessionId);
+      this.clearRetry();
       this.notify();
-      await this.refreshSessionsSoon();
     } catch (error) {
       this.errorMsg = errorMessage(error);
+      this.setRetry('重新取消归档', () => {
+        this.unarchiveSession(sessionId);
+      });
       this.notify();
     }
+  }
+
+  /** 置顶 / 取消置顶会话。 */
+  async togglePinSession(sessionId: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    const pinned: boolean = this.isPinnedSession(sessionId);
+    try {
+      this.pinnedSessionIds = pinned
+        ? await harness.sessionUnpin(sessionId)
+        : await harness.sessionPin(sessionId);
+      this.clearRetry();
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.setRetry(pinned ? '重新取消置顶' : '重新置顶', () => {
+        this.togglePinSession(sessionId);
+      });
+      this.notify();
+    }
+  }
+
+  isArchivedSession(sessionId: string): boolean {
+    return this.archivedSessionIds.includes(sessionId);
+  }
+
+  isPinnedSession(sessionId: string): boolean {
+    return this.pinnedSessionIds.includes(sessionId);
+  }
+
+  /** 归档当前会话并回到会话列表。 */
+  async archiveCurrentSession(): Promise<void> {
+    const sessionId: string = this.currentSessionId;
+    if (sessionId.length === 0) {
+      return;
+    }
+    await this.archiveSession(sessionId);
   }
 
   /** 全文搜索会话；空字符串表示退出搜索。 */

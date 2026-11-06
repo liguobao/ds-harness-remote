@@ -147,6 +147,11 @@ struct Index {
   @State deviceDetailId: string = '';
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
+  /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
+  @State archivedIds: string[] = [];
+  @State pinnedIds: string[] = [];
+  /** 会话抽屉里是否把已归档的会话也列出来。 */
+  @State showArchived: boolean = false;
   /** 会话内搜索（只在当前会话里找）。 */
   @State inSessionSearchOpen: boolean = false;
   @State inSessionQuery: string = '';
@@ -456,6 +461,8 @@ struct Index {
     this.devices = this.runtime.devices.slice();
     this.sessions = this.runtime.sessions.slice();
     this.sessionsLoadFailed = this.runtime.sessionsLoadFailed;
+    this.archivedIds = this.runtime.archivedSessionIds.slice();
+    this.pinnedIds = this.runtime.pinnedSessionIds.slice();
     this.messages = this.runtime.messages.slice();
     this.generating = this.runtime.generating;
     this.currentSessionId = this.runtime.currentSessionId;
@@ -945,14 +952,36 @@ struct Index {
   }
 
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
+  private isArchivedSession(sessionId: string): boolean {
+    return this.archivedIds.includes(sessionId);
+  }
+
+  private isPinnedSession(sessionId: string): boolean {
+    return this.pinnedIds.includes(sessionId);
+  }
+
   private visibleSessions(): HarnessRemoteSession[] {
     const base: HarnessRemoteSession[] = this.sessionSearchActive
       ? this.sessionSearchResults : this.sessions;
-    const list: HarnessRemoteSession[] = this.favoriteOnly
-      ? base.filter((session: HarnessRemoteSession) => this.runtime.isFavoriteSession(session.sessionId))
-      : base.slice();
-    // 正在跑的会话排前面，其余保持服务端给的时间顺序
+    const list: HarnessRemoteSession[] = [];
+    for (const session of base) {
+      // 归档的会话默认不进列表；搜索时照常给结果，别让搜到的会话凭空消失
+      const archived: boolean = this.isArchivedSession(session.sessionId);
+      if (archived && !this.showArchived && !this.sessionSearchActive) {
+        continue;
+      }
+      if (this.favoriteOnly && !this.runtime.isFavoriteSession(session.sessionId)) {
+        continue;
+      }
+      list.push(session);
+    }
+    // 置顶最先，其次运行中，其余保持服务端给的时间顺序
     return list.sort((a: HarnessRemoteSession, b: HarnessRemoteSession) => {
+      const aPin: number = this.runtime.isPinnedSession(a.sessionId) ? 1 : 0;
+      const bPin: number = this.runtime.isPinnedSession(b.sessionId) ? 1 : 0;
+      if (aPin !== bPin) {
+        return bPin - aPin;
+      }
       const aRunning: number = a.running ? 1 : 0;
       const bRunning: number = b.running ? 1 : 0;
       return bRunning - aRunning;
@@ -4049,7 +4078,21 @@ struct Index {
               this.favoriteOnly = !this.favoriteOnly;
             })
         }
-        Text(`${this.sessions.length}`)
+        if (this.archivedIds.length > 0) {
+          Text(this.showArchived
+            ? this.tr('收起归档')
+            : this.tr('已归档 ') + this.archivedIds.length)
+            .fontSize(this.fs(11))
+            .fontColor(this.showArchived ? '#22D3EE' : this.pal().text3)
+            .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+            .backgroundColor(this.showArchived ? 'rgba(34,211,238,0.16)' : this.pal().inputBg)
+            .borderRadius(7)
+            .margin({ left: 6 })
+            .onClick(() => {
+              this.showArchived = !this.showArchived;
+            })
+        }
+        Text(`${this.visibleSessions().length}`)
           .fontSize(this.fs(12))
           .fontColor(this.pal().text3)
           .margin({ left: 6 })
@@ -4324,6 +4367,22 @@ struct Index {
                         .fontColor('#34D399')
                     }
                   }
+                  if (this.isPinnedSession(session.sessionId)) {
+                    Text('置顶')
+                      .fontSize(this.fs(9))
+                      .fontColor('#4D6BFE')
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                      .backgroundColor('rgba(77,107,254,0.14)')
+                      .borderRadius(5)
+                  }
+                  if (this.isArchivedSession(session.sessionId)) {
+                    Text(this.tr('已归档'))
+                      .fontSize(this.fs(9))
+                      .fontColor(this.pal().text3)
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                      .backgroundColor(this.pal().inputBg)
+                      .borderRadius(5)
+                  }
                 }
               }
               .layoutWeight(1)
@@ -4341,6 +4400,7 @@ struct Index {
             .backgroundColor(session.sessionId === this.currentSessionId
               ? 'rgba(77,107,254,0.14)' : this.pal().card)
             .borderRadius(14)
+            .opacity(this.isArchivedSession(session.sessionId) ? 0.6 : 1)
             .border({ width: 1,
               color: session.sessionId === this.currentSessionId
                 ? 'rgba(77,107,254,0.40)' : this.pal().border })
@@ -4360,6 +4420,13 @@ struct Index {
                     }
                   },
                   {
+                    title: this.isPinnedSession(session.sessionId)
+                      ? this.tr('取消置顶') : this.tr('置顶'),
+                    action: () => {
+                      this.runtime.togglePinSession(session.sessionId);
+                    }
+                  },
+                  {
                     title: this.tr('复制标题'),
                     action: () => {
                       const data: pasteboard.PasteData = pasteboard.createData(
@@ -4370,9 +4437,14 @@ struct Index {
                     }
                   },
                   {
-                    title: this.tr('归档会话'),
+                    title: this.isArchivedSession(session.sessionId)
+                      ? this.tr('取消归档') : this.tr('归档会话'),
                     action: () => {
-                      this.runtime.archiveSession(session.sessionId);
+                      if (this.isArchivedSession(session.sessionId)) {
+                        this.runtime.unarchiveSession(session.sessionId);
+                      } else {
+                        this.runtime.archiveSession(session.sessionId);
+                      }
                     }
                   }
                 ]

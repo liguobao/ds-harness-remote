@@ -20,6 +20,13 @@ export class HarnessWorkspace {
   updatedAt: number = 0;
 }
 
+/** `workspace/follow` baseline 里的工作区列表 + 归档/置顶会话集合。 */
+export class HarnessWorkspaceSnapshot {
+  items: HarnessWorkspace[] = [];
+  archivedSessionIds: string[] = [];
+  pinnedSessionIds: string[] = [];
+}
+
 /** One remote Harness session row (`session/list` item). */
 export class HarnessRemoteSession {
   sessionId: string = '';
@@ -333,8 +340,10 @@ export class HarnessAlphaClient {
    * `workspace/follow` 的第一帧 baseline（`{type:'baseline', value:{items:[…]}}`），
    * 取到就立刻关掉这条流。
    */
-  async workspaceList(): Promise<HarnessWorkspace[]> {
+  async workspaceList(): Promise<HarnessWorkspaceSnapshot> {
     let items: Object[] | undefined = undefined;
+    let archivedIds: string[] = [];
+    let pinnedIds: string[] = [];
     let firstFrame: ((value: Object) => void) | undefined = undefined;
     const first: Promise<Object> = new Promise<Object>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -366,7 +375,10 @@ export class HarnessAlphaClient {
       const baseline: Record<string, Object> | undefined =
         frame !== undefined ? asRecord(frame['value']) : undefined;
       items = baseline !== undefined ? asArray(baseline['items']) : undefined;
-      logInfo('workspace/follow baseline -> ' + (items !== undefined ? items.length : 0) + ' item(s)');
+      archivedIds = baseline !== undefined ? stringListOf(baseline['archivedSessionIds']) : [];
+      pinnedIds = baseline !== undefined ? stringListOf(baseline['pinnedSessionIds']) : [];
+      logInfo('workspace/follow baseline -> ' + (items !== undefined ? items.length : 0) + ' item(s), archived='
+        + archivedIds.length + ' pinned=' + pinnedIds.length);
     } finally {
       stream.close(false);
     }
@@ -389,7 +401,11 @@ export class HarnessAlphaClient {
       }
     }
     logInfo('workspace/list -> ' + out.length + ' item(s)');
-    return out;
+    const snapshot: HarnessWorkspaceSnapshot = new HarnessWorkspaceSnapshot();
+    snapshot.items = out;
+    snapshot.archivedSessionIds = archivedIds;
+    snapshot.pinnedSessionIds = pinnedIds;
+    return snapshot;
   }
 
   /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */
@@ -476,12 +492,48 @@ export class HarnessAlphaClient {
     logInfo('session/rename ok -> ' + sessionId);
   }
 
-  /** 归档会话，让它从活跃列表里消失。 */
-  async sessionArchive(sessionId: string): Promise<void> {
+  /** 归档会话；返回主机确认后的完整归档集合。 */
+  async sessionArchive(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'stopActivity': true };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/archiveSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['archivedSessionIds']) : [];
+    logInfo('session/archive ok -> ' + sessionId + ' archived=' + ids.length);
+    return ids;
+  }
+
+  /** 取消归档；返回主机确认后的完整归档集合。 */
+  async sessionUnarchive(sessionId: string): Promise<string[]> {
     const request: Record<string, Object> = { 'sessionId': sessionId };
     const args: Record<string, Object> = { 'request': request };
-    await this.callValue('workspace/archiveSession', args);
-    logInfo('session/archive ok -> ' + sessionId);
+    const value: Object = await this.callValue('workspace/unarchiveSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['archivedSessionIds']) : [];
+    logInfo('session/unarchive ok -> ' + sessionId + ' archived=' + ids.length);
+    return ids;
+  }
+
+  /** 把会话置顶；返回主机确认后的完整置顶集合。 */
+  async sessionPin(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/pinSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['pinnedSessionIds']) : [];
+    logInfo('session/pin ok -> ' + sessionId + ' pinned=' + ids.length);
+    return ids;
+  }
+
+  /** 取消置顶；返回主机确认后的完整置顶集合。 */
+  async sessionUnpin(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/unpinSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['pinnedSessionIds']) : [];
+    logInfo('session/unpin ok -> ' + sessionId + ' pinned=' + ids.length);
+    return ids;
   }
 
   /** 全文搜索会话（标题与消息正文）。 */
@@ -951,6 +1003,20 @@ export class HarnessAlphaClient {
       follow.close(true);
     }
   }
+}
+
+/** 主机把会话 id 集合放在数组里；只认字符串，别把 undefined 传下去。 */
+function stringListOf(value: Object | undefined): string[] {
+  const out: string[] = [];
+  const raw: Object[] | undefined = asArray(value);
+  if (raw !== undefined) {
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        out.push(item);
+      }
+    }
+  }
+  return out;
 }
 
 function withTimeout(work: Promise<Object>, budgetMs: number): Promise<Object> {
