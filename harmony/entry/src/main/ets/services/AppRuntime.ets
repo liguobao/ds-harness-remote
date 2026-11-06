@@ -237,6 +237,8 @@ export class AppRuntime {
   /** 主机侧的归档 / 置顶集合（workspace/follow baseline 与归档、置顶回执同步）。 */
   archivedSessionIds: string[] = [];
   pinnedSessionIds: string[] = [];
+  /** 分栏布局里会话栏的宽度（vp）；0 = 用默认比例。 */
+  splitWidth: number = 0;
   /** 会话收藏与最近访问（sessionId 列表）。 */
   favoriteSessions: string[] = [];
   recentSessions: string[] = [];
@@ -409,6 +411,7 @@ export class AppRuntime {
       this.themeMode = this.store.loadThemeMode();
       this.languageMode = this.store.loadLanguageMode();
       this.textScaleMode = this.store.loadTextScale();
+      this.splitWidth = this.store.loadSplitWidth();
       this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
@@ -1620,6 +1623,16 @@ export class AppRuntime {
       await this.openSession(sessionId);
     }
     return this.sessionMarkdown();
+  }
+
+  /** 记住分栏宽度（拖完分隔条调用）。 */
+  setSplitWidth(width: number): void {
+    const clamped: number = Math.max(240, Math.min(460, Math.round(width)));
+    this.splitWidth = clamped;
+    this.store.saveSplitWidth(clamped).catch((error: Error) => {
+      logWarn('save split width failed: ' + errorMessage(error));
+    });
+    this.notify();
   }
 
   /** 归档指定会话（会话列表长按触发）。归档集合以主机回执为准。 */

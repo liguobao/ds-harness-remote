@@ -1,4 +1,5 @@
 import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
+import { KeyCode } from '@ohos.multimodalInput.keyCode';
 import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
@@ -208,6 +209,10 @@ struct Index {
   @State providerId: string = '';
   private providersRequested: boolean = false;
   @State showSessions: boolean = false;
+  /** 分栏分隔条拖动中 / 悬停中。 */
+  @State splitDragging: boolean = false;
+  @State splitHover: boolean = false;
+  private splitDragBase: number = 0;
   /** 竖屏会话抽屉的跟手进度：0 全收起，1 全展开（手势拖动直接改这个值）。 */
   @State drawerOpen: number = 0;
   private drawerCloseTimer: number = -1;
@@ -388,6 +393,8 @@ struct Index {
   private measureInsets(): void {
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
       this.mainWindow = win;
+      // 2in1/PC：设个最小窗口尺寸（官方建议自由窗口应用给出可用下限，别让人拖成一条缝）
+      win.setWindowLimits({ minWidth: 480, minHeight: 520 }).catch(() => undefined);
       // 沉浸式布局：页面铺到状态栏/导航条下面，避让交给 applyInsets 的 padding。
       // 不开这个，expandSafeArea 不会真的延伸到系统栏区域，底部就会多出一条导航条留白。
       win.setWindowLayoutFullScreen(true).catch(() => {
@@ -1130,6 +1137,36 @@ struct Index {
 
   /** 左侧会话栏宽度：宽窗口下按比例放宽，窄窗口保持 300。 */
   /** 竖屏抽屉宽度（屏宽 82%），跟手位移按它换算。 */
+  /**
+   * 是否走「会话 + 聊天」双栏。
+   * 按断点（窗口宽度 ≥ 600vp）而不是横竖屏判断：平板竖屏、折叠屏展开、PC 窗口都该分栏，
+   * 手机横屏（宽 800 但高 360）反而该保持单列。
+   */
+  private showTwoPane(): boolean {
+    // 宽 ≥ 600vp（md 起）且高 ≥ 480vp：手机横屏（840×360）高度不够，仍走单列
+    return this.windowWidthVp >= 600 && this.windowHeightVp >= 480
+      && this.phase === PHASE_CHAT;
+  }
+
+  /**
+   * 铰链留白：API 26 的 AvoidAreaType 里没有铰链类型，
+   * 只能按「半折态 + 窗口高度」估一个合理间距（不同机型铰链宽度不一样，取 1.2%，夹在 8–24vp）。
+   */
+  private hingeGapVp(): number {
+    const h: number = this.windowHeightVp > 0 ? this.windowHeightVp : 800;
+    return Math.round(Math.min(24, Math.max(8, h * 0.012)));
+  }
+
+  /** 分栏里会话栏的宽度：用户拖过就用记住的值，否则按窗口比例（夹在 240–460）。 */
+  private splitPaneWidth(): number {
+    const saved: number = this.runtime.splitWidth;
+    const w: number = this.windowWidthVp > 0 ? this.windowWidthVp : 900;
+    if (saved > 0) {
+      return saved;
+    }
+    return Math.round(Math.min(460, Math.max(240, w * 0.3)));
+  }
+
   private drawerWidthVp(): number {
     const w: number = this.windowWidthVp > 0 ? this.windowWidthVp : 360;
     return Math.round(w * 0.82);
@@ -1212,7 +1249,12 @@ struct Index {
     return mascotVisible(this.breakpoint, this.windowHeightVp);
   }
 
+  /** 分栏里会话栏宽度：拖过分隔条就用记住的值，否则按窗口 20%（夹在 260–380）。 */
   private listPanelWidth(): number {
+    const saved: number = this.runtime.splitWidth;
+    if (saved > 0) {
+      return saved;
+    }
     const w: number = this.windowWidthVp;
     if (w <= 0) {
       return 300;
@@ -1717,9 +1759,31 @@ struct Index {
         } else if (this.phase === PHASE_CONNECTING) {
           this.ConnectingScreen()
         } else {
-          if (this.isLandscape) {
+          if (this.showTwoPane()) {
             Row() {
               this.SessionsPane()
+              // 分隔条：PC 上可以拖着调会话栏宽度，宽度记在本地
+              Column()
+                .width(6)
+                .height('100%')
+                .backgroundColor(this.splitDragging ? 'rgba(34,211,238,0.35)' : Color.Transparent)
+                .gesture(
+                  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
+                    .onActionStart(() => {
+                      this.splitDragging = true;
+                      this.splitDragBase = this.splitPaneWidth();
+                    })
+                    .onActionUpdate((event: GestureEvent) => {
+                      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
+                    })
+                    .onActionEnd(() => {
+                      this.splitDragging = false;
+                      this.runtime.setSplitWidth(this.splitPaneWidth());
+                    })
+                )
+                .onHover((isHover: boolean) => {
+                  this.splitHover = isHover;
+                })
               Column() {
                 this.ChatScreen()
               }
@@ -3404,16 +3468,16 @@ struct Index {
     .padding({ top: 16, bottom: 16, left: 16, right: 16 })
     .backgroundColor(this.pal().card)
     .borderRadius(18)
-    .onClick(() => {
-      // 对齐 dsh-go：整行可点即连接，不必瞄准右侧按钮。
-      if (device.online && this.renamingDeviceId.length === 0) {
-        this.runtime.connectDevice(device.deviceId);
-      }
-    })
     .border({ width: 1, color: this.pal().border })
+    // 整行可点即连接；PC 上右键出能力菜单（改名 / 详情 / 清除公钥）
     .onClick(() => {
       if (device.online && this.renamingDeviceId !== device.deviceId) {
         this.runtime.connectDevice(device.deviceId);
+      }
+    })
+    .onMouse((event: MouseEvent) => {
+      if (event.action === MouseAction.Press && event.button === MouseButton.Right) {
+        this.deviceMenuId = device.deviceId;
       }
     })
   }
@@ -3476,7 +3540,7 @@ struct Index {
   @Builder
   ChatScreen() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Column({ space: this.foldState === 'half' ? 10 : 0 }) {
+      Column({ space: this.foldState === 'half' ? this.hingeGapVp() : 0 }) {
       Row() {
         Text('‹')
           .fontSize(26)
@@ -4156,6 +4220,18 @@ struct Index {
               : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
             .constraintSize({ minHeight: 46, maxHeight: this.isWideLayout() ? 240 : 132 })
+            // PC：Ctrl+Enter 发送（普通 Enter 仍按输入法/换行走，不抢）
+            .onKeyEvent((event: KeyEvent) => {
+              if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ENTER) {
+                return;
+              }
+              // ArkUI 的 KeyEvent 没有 ctrlKey 字段，修饰键要走 getModifierKeyState
+              const ctrl: boolean = event.getModifierKeyState !== undefined
+                ? event.getModifierKeyState(['Ctrl']) : false;
+              if (ctrl) {
+                this.sendTap();
+              }
+            })
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
             .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
               colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
@@ -4246,11 +4322,18 @@ struct Index {
             .shadow({ radius: 12, color: 'rgba(77,107,254,0.45)', offsetX: 0, offsetY: 5 })
             .clip(true)
             .overlay(this.DockSpot(52), { align: Alignment.Center })
+            .focusable(true)
             .onTouch((event: TouchEvent) => {
               this.trackDockLight(event);
             })
             .onClick(() => {
               this.sendTap();
+            })
+            .onKeyEvent((event: KeyEvent) => {
+              if (event.type === KeyType.Down
+                && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
+                this.sendTap();
+              }
             })
             .gesture(LongPressGesture().onAction(() => {
               ActionSheet.show({
@@ -4633,73 +4716,26 @@ struct Index {
             .border({ width: 1,
               color: session.sessionId === this.currentSessionId
                 ? 'rgba(77,107,254,0.40)' : this.pal().border })
+            .focusable(true)
             .onClick(() => {
               this.closeDrawer();
               this.runtime.openSession(session.sessionId);
             })
+            .onKeyEvent((event: KeyEvent) => {
+              if (event.type === KeyType.Down
+                && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
+                this.runtime.openSession(session.sessionId);
+              }
+            })
+            // 长按（触屏）和右键（PC）都出同一个会话菜单
             .gesture(LongPressGesture().onAction(() => {
-              ActionSheet.show({
-                title: formatSessionTitle(session),
-                message: session.cwd.length > 0 ? session.cwd : session.sessionId,
-                sheets: [
-                  {
-                    title: this.runtime.isFavoriteSession(session.sessionId) ? this.tr('取消收藏') : this.tr('收藏'),
-                    action: () => {
-                      this.runtime.toggleFavoriteSession(session.sessionId);
-                    }
-                  },
-                  {
-                    title: this.isPinnedSession(session.sessionId)
-                      ? this.tr('取消置顶') : this.tr('置顶'),
-                    action: () => {
-                      this.runtime.togglePinSession(session.sessionId);
-                    }
-                  },
-                  {
-                    title: this.tr('复制标题'),
-                    action: () => {
-                      const data: pasteboard.PasteData = pasteboard.createData(
-                        pasteboard.MIMETYPE_TEXT_PLAIN, formatSessionTitle(session));
-                      pasteboard.getSystemPasteboard().setData(data).then(() => {
-                        promptAction.showToast({ message: this.tr('已复制标题') });
-                      }).catch(() => undefined);
-                    }
-                  },
-                  {
-                    title: this.tr('复制为 Markdown'),
-                    action: () => {
-                      this.closeDrawer();
-                      this.runtime.sessionMarkdownFor(session.sessionId).then((markdown: string) => {
-                        if (markdown.length === 0) {
-                          promptAction.showToast({ message: this.tr('这张会话还没有内容') });
-                          return;
-                        }
-                        const data: pasteboard.PasteData = pasteboard.createData(
-                          pasteboard.MIMETYPE_TEXT_PLAIN, markdown);
-                        pasteboard.getSystemPasteboard().setData(data).then(() => {
-                          promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
-                        }).catch(() => {
-                          promptAction.showToast({ message: this.tr('复制失败') });
-                        });
-                      }).catch(() => {
-                        promptAction.showToast({ message: this.tr('导出失败') });
-                      });
-                    }
-                  },
-                  {
-                    title: this.isArchivedSession(session.sessionId)
-                      ? this.tr('取消归档') : this.tr('归档会话'),
-                    action: () => {
-                      if (this.isArchivedSession(session.sessionId)) {
-                        this.runtime.unarchiveSession(session.sessionId);
-                      } else {
-                        this.runtime.archiveSession(session.sessionId);
-                      }
-                    }
-                  }
-                ]
-              });
+              this.openSessionMenu(session);
             }))
+            .onMouse((event: MouseEvent) => {
+              if (event.action === MouseAction.Press && event.button === MouseButton.Right) {
+                this.openSessionMenu(session);
+              }
+            })
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
@@ -5355,6 +5391,11 @@ struct Index {
         .gesture(LongPressGesture().onAction(() => {
           this.offerMessageActions(item);
         }))
+        .onMouse((event: MouseEvent) => {
+          if (event.action === MouseAction.Press && event.button === MouseButton.Right) {
+            this.offerMessageActions(item);
+          }
+        })
       }
       .width('100%')
       .justifyContent(FlexAlign.End)
@@ -5797,6 +5838,71 @@ struct Index {
     });
   }
 
+  /** 会话行菜单：收藏 / 置顶 / 复制标题 / 复制为 Markdown / 归档或取消归档。 */
+  private openSessionMenu(session: HarnessRemoteSession): void {
+    ActionSheet.show({
+    title: formatSessionTitle(session),
+    message: session.cwd.length > 0 ? session.cwd : session.sessionId,
+    sheets: [
+      {
+        title: this.runtime.isFavoriteSession(session.sessionId) ? this.tr('取消收藏') : this.tr('收藏'),
+        action: () => {
+          this.runtime.toggleFavoriteSession(session.sessionId);
+        }
+      },
+      {
+        title: this.isPinnedSession(session.sessionId)
+          ? this.tr('取消置顶') : this.tr('置顶'),
+        action: () => {
+          this.runtime.togglePinSession(session.sessionId);
+        }
+      },
+      {
+        title: this.tr('复制标题'),
+        action: () => {
+          const data: pasteboard.PasteData = pasteboard.createData(
+            pasteboard.MIMETYPE_TEXT_PLAIN, formatSessionTitle(session));
+          pasteboard.getSystemPasteboard().setData(data).then(() => {
+            promptAction.showToast({ message: this.tr('已复制标题') });
+          }).catch(() => undefined);
+        }
+      },
+      {
+        title: this.tr('复制为 Markdown'),
+        action: () => {
+          this.closeDrawer();
+          this.runtime.sessionMarkdownFor(session.sessionId).then((markdown: string) => {
+            if (markdown.length === 0) {
+              promptAction.showToast({ message: this.tr('这张会话还没有内容') });
+              return;
+            }
+            const data: pasteboard.PasteData = pasteboard.createData(
+              pasteboard.MIMETYPE_TEXT_PLAIN, markdown);
+            pasteboard.getSystemPasteboard().setData(data).then(() => {
+              promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+            }).catch(() => {
+              promptAction.showToast({ message: this.tr('复制失败') });
+            });
+          }).catch(() => {
+            promptAction.showToast({ message: this.tr('导出失败') });
+          });
+        }
+      },
+      {
+        title: this.isArchivedSession(session.sessionId)
+          ? this.tr('取消归档') : this.tr('归档会话'),
+        action: () => {
+          if (this.isArchivedSession(session.sessionId)) {
+            this.runtime.unarchiveSession(session.sessionId);
+          } else {
+            this.runtime.archiveSession(session.sessionId);
+          }
+        }
+      }
+    ]
+    });
+  }
+
   /** 长按消息：复制正文 / 从这里分叉（分叉不再占用长按默认动作）。 */
   private offerMessageActions(item: ChatItem): void {
     this.messageActionText = item.text.length > 0 ? item.text : item.summary;
@@ -5912,6 +6018,11 @@ struct Index {
         .gesture(LongPressGesture().onAction(() => {
           this.offerMessageActions(item);
         }))
+        .onMouse((event: MouseEvent) => {
+          if (event.action === MouseAction.Press && event.button === MouseButton.Right) {
+            this.offerMessageActions(item);
+          }
+        })
       }
       .width('88%')
       .constraintSize({ maxWidth: 780 })
@@ -7102,8 +7213,16 @@ struct Index {
     .height(40)
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
+    // PC/大屏：Tab 能走到、Enter/Space 能按下去（官方无障碍与键盘操作要求）
+    .focusable(true)
     .onClick(() => {
       action();
+    })
+    .onKeyEvent((event: KeyEvent) => {
+      if (event.type === KeyType.Down
+        && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
+        action();
+      }
     })
   }
 

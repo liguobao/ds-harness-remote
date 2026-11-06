@@ -430,6 +430,20 @@ export class SecureStore {
     await this.putSync(KEY_TEXT_SCALE, `${mode}`);
   }
 
+  /** 分栏布局里会话栏的宽度（vp）；0 表示用默认比例。 */
+  loadSplitWidth(): number {
+    const raw: string = this.getSync('splitWidth', '0');
+    const parsed: number = Number.parseInt(raw);
+    if (parsed >= 200 && parsed <= 520) {
+      return parsed;
+    }
+    return 0;
+  }
+
+  async saveSplitWidth(width: number): Promise<void> {
+    await this.putSync('splitWidth', `${Math.round(width)}`);
+  }
+
   /** Locally pinned Host identity keys (protocol §2 / §12.1), keyed by Host deviceId.
    *  A Host whose key no longer matches its pin must never be connected silently. */
   loadHostPins(): Record<string, string> {
