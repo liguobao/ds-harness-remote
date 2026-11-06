@@ -83766,6 +83766,7 @@ var entryConfigSchema = Schema.object({
   loopback: Schema.object({ ports: Schema.array(Schema.number()) }),
   forceRelay: Schema.boolean(),
   rotatePinnedPeerKey: Schema.boolean(),
+  iceIpv6: Schema.boolean(),
   logLevel: Schema.union(["debug", "info", "warn", "error"]),
   reconnect: Schema.union([
     Schema.boolean(),
@@ -83810,6 +83811,7 @@ var configSchema = external_exports.object({
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
   rotatePinnedPeerKey: external_exports.boolean().optional(),
+  iceIpv6: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
   reconnect: reconnectSchema.optional(),
   codex: external_exports.object({
@@ -83850,6 +83852,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
+    iceIpv6: parsed.iceIpv6 ?? false,
     logLevel: parsed.logLevel ?? "info",
     reconnect: {
       enabled: parsed.reconnect !== false,
@@ -85587,7 +85590,10 @@ function buildWeriftFactory(werift, options = {}) {
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []),
         iceUseIpv4: true,
-        iceUseIpv6: false,
+        // IPv6 host candidates let a dual-stack client (mobile carriers usually
+        // are) reach this Host without NAT hole punching at all. Disabled by
+        // default historically; callers opt in through the plugin config.
+        iceUseIpv6: options.iceIpv6 === true,
         iceUseLinkLocalAddress: false,
         ...hostIpv4Candidates.length === 0 ? {} : {
           iceAdditionalHostAddresses: hostIpv4Candidates,
@@ -85956,7 +85962,7 @@ async function detectRouteHostIpv4(target3, timeoutMs) {
   }
 }
 function isCacheableFactoryOptions(options) {
-  return options.interfaces === void 0 && options.preferredHostIpv4Candidates === void 0 && options.routeTargets === void 0;
+  return options.interfaces === void 0 && options.preferredHostIpv4Candidates === void 0 && options.routeTargets === void 0 && options.iceIpv6 === void 0;
 }
 function parseIceCandidate(candidate) {
   const value = candidate.candidate?.trim();
@@ -99203,7 +99209,7 @@ var HostPluginRuntime = class {
       this.connections,
       this.logger,
       void 0,
-      this.config.forceRelay ? void 0 : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === void 0 ? [] : [this.config.serverUrl] }),
+      this.config.forceRelay ? void 0 : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === void 0 ? [] : [this.config.serverUrl], iceIpv6: this.config.iceIpv6 }),
       () => this.hostCapabilities(),
       this.harnessVersion
     );

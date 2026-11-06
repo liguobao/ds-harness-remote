@@ -81,6 +81,11 @@ describe('plugin config', () => {
     expect(normalizeServerUrl('https://REMOTE.example.com/')).toBe('https://remote.example.com')
   })
 
+  it('keeps IPv6 ICE candidates opt-in and parses an explicit choice', () => {
+    expect(resolveConfig({}, {}).iceIpv6).toBe(false)
+    expect(resolveConfig({ iceIpv6: true }).iceIpv6).toBe(true)
+    expect(() => resolveConfig({ iceIpv6: 'yes' } as never)).toThrow()
+  })
   it('rejects an inverted reconnect range', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
   })

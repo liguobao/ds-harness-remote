@@ -223,6 +223,8 @@ export interface WeriftFactoryOptions {
   preferredHostIpv4Candidates?: readonly string[]
   routeTargets?: readonly string[]
   routeProbeTimeoutMs?: number
+  /** Offer IPv6 host candidates (direct path for dual-stack peers). */
+  iceIpv6?: boolean
 }
 
 /** Synchronous factory for tests and callers that already resolved werift. */
@@ -237,7 +239,10 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []) as RtcIceServer[],
         iceUseIpv4: true,
-        iceUseIpv6: false,
+        // IPv6 host candidates let a dual-stack client (mobile carriers usually
+        // are) reach this Host without NAT hole punching at all. Disabled by
+        // default historically; callers opt in through the plugin config.
+        iceUseIpv6: options.iceIpv6 === true,
         iceUseLinkLocalAddress: false,
         ...(hostIpv4Candidates.length === 0
           ? {}
@@ -561,6 +566,9 @@ function isCacheableFactoryOptions(options: WeriftFactoryOptions): boolean {
   return options.interfaces === undefined
     && options.preferredHostIpv4Candidates === undefined
     && options.routeTargets === undefined
+    // Candidate family is part of the factory behavior; never share a cached
+    // factory across different IPv6 settings.
+    && options.iceIpv6 === undefined
 }
 
 function parseIceCandidate(candidate: RtcIceCandidateInit): WeriftCandidate | undefined {
