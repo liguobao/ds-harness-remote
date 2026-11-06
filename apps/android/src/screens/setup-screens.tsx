@@ -121,7 +121,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
         qrRun.current += 1
         setProvidersPhase('failed')
         setLoginMethod('password')
-        setShowPassword(true)
+        setShowPassword(false)
         setShowQr(false)
         setQrLogin(undefined)
         setQrPhase('idle')
@@ -139,7 +139,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       qrRun.current += 1
       setProvidersPhase('failed')
       setLoginMethod('password')
-      setShowPassword(true)
+      setShowPassword(false)
       setShowQr(false)
       setQrLogin(undefined)
       setQrPhase('idle')
@@ -328,6 +328,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       setQrPhase('idle')
     }
     setLoginMethod(method)
+    setShowPassword(false)
     if (method === 'oauth') void signInWithZhihu()
     else if (method === 'github-oauth') void signInWithGithub()
     else if (method === 'google-oauth') void signInWithGoogle()
@@ -344,6 +345,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     const method = qrMethods.includes(loginMethod) ? loginMethod : qrMethods[0]
     if (method === undefined) return
     setLoginMethod(method)
+    setShowPassword(false)
     setShowQr(true)
     void refreshQr(method)
   }
@@ -351,7 +353,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   // Third-party sign-in is the primary path; email is a collapsed fallback
   // (the Server has no email sign-up). QR is offered on large screens only.
   const qrVisible = largeScreen && showQr
-  const emailVisible = showPassword || oauthMethods.length === 0
+  const emailVisible = showPassword || (providersPhase === 'ready' && oauthMethods.length === 0)
   const controlsDisabled = busy || oauthBusy || serverDirty
 
   const providerIcon = (method: SetupLoginMethod, size = 22) => method === 'oauth'
@@ -505,7 +507,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                     {providersPhase === 'failed' && (
                       <View style={styles.retryRow}><Button label={zhCN.common.retry} variant="secondary" onPress={() => setProviderReload(value => value + 1)} /></View>
                     )}
-                    {oauthMethods.length > 0 && (
+                    {(providersPhase === 'failed' || oauthMethods.length > 0) && (
                       <View style={styles.orDivider}>
                         <View style={styles.orLine} />
                         <Text style={styles.orText}>{zhCN.setup.or}</Text>
@@ -513,7 +515,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                       </View>
                     )}
                     {emailVisible && emailContent}
-                    {(!emailVisible || (largeScreen && qrMethods.length > 0)) && (
+                    {((largeScreen && qrMethods.length > 0) || providersPhase === 'failed' || oauthMethods.length > 0) && (
                       <View style={styles.altRow}>
                         {largeScreen && qrMethods.length > 0 && (
                           <Pressable
@@ -528,19 +530,25 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                             <Text style={styles.altButtonText}>{zhCN.setup.qr}</Text>
                           </Pressable>
                         )}
-                        {!emailVisible && (
+                        {(providersPhase === 'failed' || oauthMethods.length > 0) && (
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={zhCN.setup.emailSignIn}
+                            accessibilityLabel={emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
                             disabled={busy}
                             onPress={() => {
-                              setShowPassword(true)
-                              setLoginMethod('password')
+                              if (emailVisible) {
+                                setShowPassword(false)
+                              } else {
+                                setShowPassword(true)
+                                setLoginMethod('password')
+                              }
                             }}
                             style={({ pressed }) => [styles.altButton, pressed && styles.providerButtonPressed]}
                           >
                             <Mail size={18} color={colors.ink} />
-                            <Text style={styles.altButtonText}>{zhCN.setup.emailSignIn}</Text>
+                            <Text style={styles.altButtonText}>
+                              {emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
+                            </Text>
                           </Pressable>
                         )}
                       </View>

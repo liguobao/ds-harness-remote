@@ -203,13 +203,13 @@ const zhCN = {
   },
   status: { online: '在线', offline: '离线', disconnected: '未连接', lan: '局域网直连', relay: '服务器转发', p2p: 'P2P 直连', turn: 'TURN 转发', waiting: '连接中', running: '运行中' },
   setup: {
-    or: '或', heroSignIn: '登录 DeepSeek Harness Remote', emailSignIn: '使用邮箱登录',
+    or: '或', heroSignIn: '登录 DeepSeek Harness Remote', emailSignIn: '使用邮箱登录', emailSignInCollapse: '收起邮箱登录',
     title: '登录', signIn: '登录账号', signInAgain: '重新登录', lead: '请选择与远端设备相同的登录方式，继续你的工作。',
     switchServer: "切换服务器", saveServer: "保存服务器", switchServerHint: "保存后会断开当前连接，并需要在新服务器重新登录。",
     google: "使用 Google 账号登录",
     oauth: '知乎', githubOAuth: 'GitHub', passwordMethod: '邮箱', zhihu: '使用知乎账号登录', github: '使用 GitHub 账号登录', oauthHint: '会打开浏览器完成授权，然后自动返回这里。',
     qr: '扫码登录', qrEntryHint: '点击显示二维码，用手机扫码授权', qrScanTitle: '使用手机扫码登录', qrScanHint: '用手机扫描二维码并在授权页确认，完成后会自动登录此设备。', qrWaiting: '等待手机扫码…', qrExpired: '二维码已过期，请刷新后重试。', qrRefresh: '刷新二维码', qrUnsupported: '当前服务器未开启扫码登录，请使用其他方式登录。', qrFailed: '扫码登录未完成，请重试。',
-    email: '邮箱', emailPlaceholder: '输入邮箱', password: '密码', passwordPlaceholder: '输入密码', passwordHint: '密码只用于本次登录，不会保存在手机上。',
+    email: '邮箱', emailPlaceholder: '输入邮箱', password: '密码', passwordPlaceholder: '输入密码', passwordHint: '仅限邀请码注册或自建服务账号，不支持 DeepSeek 官方账号。',
     server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: 'P2P网络优先，TURN 转发候选，对话内容全程端到端加密。',
   },
   settings: {

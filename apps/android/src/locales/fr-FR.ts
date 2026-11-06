@@ -205,13 +205,13 @@ const frFR = {
   },
   status: { online: "En ligne", offline: "Hors ligne", disconnected: "Déconnecté", lan: "Réseau local direct", relay: "Relais serveur", p2p: "P2P direct", turn: "TOUR relais", waiting: "Connexion en cours", running: "En cours" },
   setup: {
-    or: 'ou', heroSignIn: 'Se connecter à DeepSeek Harness Remote', emailSignIn: 'Se connecter par e-mail',
+    or: 'ou', heroSignIn: 'Se connecter à DeepSeek Harness Remote', emailSignIn: 'Se connecter par e-mail', emailSignInCollapse: 'Masquer la connexion par e-mail',
     title: "Se connecter", signIn: "Connectez-vous à votre compte", signInAgain: "Connectez-vous à nouveau", lead: "Choisissez la même méthode de connexion que sur votre appareil distant pour continuer votre travail.",
     switchServer: "Changer de serveur", saveServer: "Enregistrer le serveur", switchServerHint: "La connexion actuelle sera interrompue. Connectez-vous ensuite au nouveau serveur.",
     google: "Continuer avec Google",
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "E-mail", zhihu: "Continuer avec Zhihu", github: "Continuer avec GitHub", oauthHint: "Un navigateur s'ouvrira pour terminer l'autorisation, puis reviendra ici automatiquement.",
     qr: "Connectez-vous avec le code QR", qrEntryHint: "Appuyez pour afficher le code, puis scannez-le avec votre téléphone", qrScanTitle: "Connectez-vous avec votre téléphone", qrScanHint: "Scannez ce code avec votre téléphone et confirmez sur la page d'autorisation. Cet appareil se connecte automatiquement par la suite.", qrWaiting: "En attendant votre téléphone…", qrExpired: "Ce code QR a expiré. Actualisez et réessayez.", qrRefresh: "Actualiser le code", qrUnsupported: "Ce serveur n'offre pas de connexion QR. Utilisez une autre méthode de connexion.", qrFailed: "La connexion QR n’a pas abouti. Essayer à nouveau.",
-    email: "E-mail", emailPlaceholder: "Entrez votre email", password: "Mot de passe", passwordPlaceholder: "Entrez votre mot de passe", passwordHint: "Votre mot de passe est utilisé uniquement pour cette connexion et n'est pas stocké sur votre téléphone.",
+    email: "E-mail", emailPlaceholder: "Entrez votre email", password: "Mot de passe", passwordPlaceholder: "Entrez votre mot de passe", passwordHint: "Uniquement pour les comptes inscrits par invitation ou auto-hébergés ; les comptes DeepSeek officiels ne sont pas pris en charge.",
     server: "Adresse du serveur", serverHint: "Utilisez une adresse HTTPS.", trustTitle: "Protégez vos appareils et vos conversations", trustBody: "Les données de conversation sont cryptées pendant leur transit. Seuls les appareils de confiance connectés au même compte peuvent y accéder.",
   },
   settings: {

@@ -205,13 +205,13 @@ const deDE = {
   },
   status: { online: "Online", offline: "Offline", disconnected: "Getrennt", lan: "Direktes LAN", relay: "Server-Relay", p2p: "Direktes P2P", turn: "TURN-Relais", waiting: "Verbindung wird hergestellt", running: "In Bearbeitung" },
   setup: {
-    or: 'oder', heroSignIn: 'Bei DeepSeek Harness Remote anmelden', emailSignIn: 'Mit E-Mail anmelden',
+    or: 'oder', heroSignIn: 'Bei DeepSeek Harness Remote anmelden', emailSignIn: 'Mit E-Mail anmelden', emailSignInCollapse: 'E-Mail-Anmeldung ausblenden',
     title: "anmelden", signIn: "Melden Sie sich bei Ihrem Konto an", signInAgain: "Melden Sie sich erneut an", lead: "Wählen Sie dieselbe Anmeldemethode wie auf Ihrem Remote-Gerät, um Ihre Arbeit fortzusetzen.",
     switchServer: "Server wechseln", saveServer: "Server speichern", switchServerHint: "Beim Speichern wird die Verbindung getrennt. Melden Sie sich beim neuen Server an.",
     google: "Mit Google fortfahren",
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "E-Mail", zhihu: "Weiter mit Zhihu", github: "Fahren Sie mit GitHub fort", oauthHint: "Ein Browser wird geöffnet, um die Autorisierung abzuschließen, und kehrt dann automatisch hierher zurück.",
     qr: "Melden Sie sich mit QR-Code an", qrEntryHint: "Tippen Sie, um den Code anzuzeigen, und scannen Sie ihn dann mit Ihrem Telefon", qrScanTitle: "Melden Sie sich mit Ihrem Telefon an", qrScanHint: "Scannen Sie diesen Code mit Ihrem Telefon und bestätigen Sie ihn auf der Autorisierungsseite. Dieses Gerät meldet sich anschließend automatisch an.", qrWaiting: "Ich warte auf Ihr Telefon ...", qrExpired: "Dieser QR-Code ist abgelaufen. Aktualisieren Sie und versuchen Sie es erneut.", qrRefresh: "Code aktualisieren", qrUnsupported: "Dieser Server bietet keine QR-Anmeldung. Verwenden Sie eine andere Anmeldemethode.", qrFailed: "Die QR-Anmeldung wurde nicht abgeschlossen. Versuchen Sie es erneut.",
-    email: "E-Mail", emailPlaceholder: "Geben Sie Ihre E-Mail-Adresse ein", password: "Passwort", passwordPlaceholder: "Geben Sie Ihr Passwort ein", passwordHint: "Ihr Passwort wird nur für diese Anmeldung verwendet und nicht auf Ihrem Telefon gespeichert.",
+    email: "E-Mail", emailPlaceholder: "Geben Sie Ihre E-Mail-Adresse ein", password: "Passwort", passwordPlaceholder: "Geben Sie Ihr Passwort ein", passwordHint: "Nur für per Einladung registrierte oder selbst gehostete Konten; offizielle DeepSeek-Konten werden nicht unterstützt.",
     server: "Serveradresse", serverHint: "Verwenden Sie eine HTTPS-Adresse.", trustTitle: "Schützen Sie Ihre Geräte und Gespräche", trustBody: "Gesprächsdaten werden während der Übertragung verschlüsselt. Nur vertrauenswürdige Geräte, die bei demselben Konto angemeldet sind, können darauf zugreifen.",
   },
   settings: {

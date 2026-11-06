@@ -1693,7 +1693,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     registrationCodeHint: "Generate it after signing in on the Server website. Use it once to connect this device.",
     accountHint: "The account must belong to the selected Server.",
     password: "Password",
-    passwordHint: "Used only for this HTTPS authorization request and never saved.",
+    passwordHint: "For invite-registered or self-hosted accounts only; DeepSeek accounts are not supported.",
     modeSavedNeedsAuthorization: "Mode saved. Authorize {role} before connecting. Existing registrations were kept.",
     modeSavedReused: "Mode saved. Existing registration reused. Restart Harness to apply.",
     modeSavedOwnedRole: "Mode saved. This owned device was authorized automatically. Restart Harness to apply.",
@@ -1931,6 +1931,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     editServiceAddress: "Edit service address",
     cancelServiceAddressEdit: "Cancel",
     accountPasswordLogin: "Password",
+    useAccountPassword: "Use account and password",
+    backToQrLogin: "Back to QR sign-in",
     qrLoginExpired: "This QR code expired. Refresh it to continue.",
     refreshQrCode: "Refresh QR code",
     codexVirtualWorkspace: "CodeX virtual workspace",
@@ -2002,7 +2004,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     registrationCodeHint: "\u767B\u5F55 Server \u7F51\u9875\u540E\u751F\u6210\uFF0C\u7528\u4E00\u6B21\u5373\u53EF\u8FDE\u63A5\u8FD9\u53F0\u8BBE\u5907\u3002",
     accountHint: "\u8D26\u53F7\u5FC5\u987B\u5C5E\u4E8E\u6240\u9009 Server\u3002",
     password: "\u5BC6\u7801",
-    passwordHint: "\u4EC5\u7528\u4E8E\u672C\u6B21 HTTPS \u6388\u6743\u8BF7\u6C42\uFF0C\u4E0D\u4F1A\u4FDD\u5B58\u3002",
+    passwordHint: "\u4EC5\u9650\u9080\u8BF7\u7801\u6CE8\u518C\u6216\u81EA\u5EFA\u670D\u52A1\u8D26\u53F7\uFF0C\u4E0D\u652F\u6301 DeepSeek \u5B98\u65B9\u8D26\u53F7\u3002",
     modeSavedNeedsAuthorization: "\u6A21\u5F0F\u5DF2\u4FDD\u5B58\u3002\u8FDE\u63A5\u524D\u8BF7\u5148\u6388\u6743 {role}\uFF1B\u5DF2\u6709\u6CE8\u518C\u4FE1\u606F\u5DF2\u4FDD\u7559\u3002",
     modeSavedReused: "\u6A21\u5F0F\u5DF2\u4FDD\u5B58\u5E76\u590D\u7528\u5DF2\u6709\u6CE8\u518C\u4FE1\u606F\u3002\u91CD\u542F Harness \u540E\u751F\u6548\u3002",
     modeSavedOwnedRole: "\u6A21\u5F0F\u5DF2\u4FDD\u5B58\uFF0C\u5E76\u5DF2\u81EA\u52A8\u6388\u6743\u6B64\u81EA\u6709\u8BBE\u5907\u3002\u91CD\u542F Harness \u540E\u751F\u6548\u3002",
@@ -2240,6 +2242,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     editServiceAddress: "\u4FEE\u6539\u670D\u52A1\u5730\u5740",
     cancelServiceAddressEdit: "\u53D6\u6D88",
     accountPasswordLogin: "\u8D26\u53F7\u5BC6\u7801",
+    useAccountPassword: "\u4F7F\u7528\u8D26\u53F7\u5BC6\u7801\u767B\u5F55",
+    backToQrLogin: "\u8FD4\u56DE\u626B\u7801\u767B\u5F55",
     qrLoginExpired: "\u4E8C\u7EF4\u7801\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002",
     refreshQrCode: "\u5237\u65B0\u4E8C\u7EF4\u7801",
     codexVirtualWorkspace: "CodeX \u5DE5\u4F5C\u533A",
@@ -3090,7 +3094,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         )
       );
       if (props.view === "summary") return React.createElement("span", null, t("pluginDescription"));
-      let orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), qrLoginTab = (provider) => React.createElement("button", {
+      let orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), passwordVisible = loginMethod === "password" && loginMethodManuallySelected.current || !providersLoading && !providersFailed && oauthProviders.length === 0, showPasswordSwitch = !providersLoading && (passwordVisible ? orderedQrProviders.length > 0 : providersFailed || orderedQrProviders.length > 0), qrLoginTab = (provider) => React.createElement("button", {
         key: provider.id,
         type: "button",
         role: "tab",
@@ -3106,21 +3110,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
           id: "dsh-remote-inline-signin",
           className: "dshRemoteInlineSignIn"
         },
-        oauthProviders.length === 0 && !providersLoading ? null : React.createElement(
+        orderedQrProviders.length > 0 ? React.createElement(
           "div",
           { className: "dshRemoteLoginTabs", role: "tablist" },
-          ...orderedQrProviders.map(qrLoginTab),
-          React.createElement("button", {
-            type: "button",
-            role: "tab",
-            id: "dsh-remote-settings-password-tab",
-            "aria-selected": loginMethod === "password",
-            "aria-controls": "dsh-remote-settings-password-panel",
-            className: loginMethod === "password" ? "isActive" : "",
-            disabled: busy,
-            onClick: () => selectLoginMethod("password")
-          }, t("accountPasswordLogin"))
-        ),
+          ...orderedQrProviders.map(qrLoginTab)
+        ) : null,
         providersLoading ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("loadingLoginProviders")) : null,
         providersFailed ? React.createElement("button", {
           type: "button",
@@ -3130,7 +3124,38 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setError(void 0), setProviderReload((v) => v + 1);
           }
         }, t("retryLoginProviders")) : null,
-        loginMethod !== "password" && selectedProvider !== void 0 ? React.createElement(
+        passwordVisible ? React.createElement(
+          "div",
+          {
+            className: "dshRemoteClientLogin",
+            role: "tabpanel",
+            id: "dsh-remote-settings-password-panel"
+          },
+          React.createElement("input", {
+            type: "email",
+            value: loginEmail,
+            disabled: busy,
+            autoComplete: "username",
+            placeholder: t("account"),
+            "aria-label": t("account"),
+            onChange: (event) => setLoginEmail(event.target.value)
+          }),
+          React.createElement("input", {
+            type: "password",
+            value: loginPassword,
+            disabled: busy,
+            autoComplete: "current-password",
+            placeholder: t("password"),
+            "aria-label": t("password"),
+            onChange: (event) => setLoginPassword(event.target.value)
+          }),
+          React.createElement("button", {
+            type: "button",
+            disabled: busy || loginEmail.trim() === "" || loginPassword === "",
+            onClick: () => void signInClient()
+          }, t(busy ? "signingIn" : "startSignIn")),
+          React.createElement("p", { className: "dshRemotePasswordHint" }, t("passwordHint"))
+        ) : loginMethod !== "password" && selectedProvider !== void 0 ? React.createElement(
           "div",
           {
             className: "dshRemoteQrLogin",
@@ -3197,38 +3222,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
           ) : null,
           React.createElement("strong", null, scanLabel),
           React.createElement("p", null, t("scanLoginHint"))
-        ) : React.createElement(
-          "div",
-          {
-            className: "dshRemoteClientLogin",
-            role: "tabpanel",
-            id: "dsh-remote-settings-password-panel",
-            "aria-labelledby": "dsh-remote-settings-password-tab"
-          },
-          React.createElement("input", {
-            type: "email",
-            value: loginEmail,
-            disabled: busy,
-            autoComplete: "username",
-            placeholder: t("account"),
-            "aria-label": t("account"),
-            onChange: (event) => setLoginEmail(event.target.value)
-          }),
-          React.createElement("input", {
-            type: "password",
-            value: loginPassword,
-            disabled: busy,
-            autoComplete: "current-password",
-            placeholder: t("password"),
-            "aria-label": t("password"),
-            onChange: (event) => setLoginPassword(event.target.value)
-          }),
-          React.createElement("button", {
-            type: "button",
-            disabled: busy || loginEmail.trim() === "" || loginPassword === "",
-            onClick: () => void signInClient()
-          }, t(busy ? "signingIn" : "startSignIn"))
-        )
+        ) : null,
+        showPasswordSwitch ? React.createElement("button", {
+          type: "button",
+          className: "dshRemotePasswordSwitch",
+          disabled: busy,
+          onClick: () => {
+            if (passwordVisible) {
+              let next = orderedQrProviders[0];
+              next !== void 0 && selectLoginMethod(`oauth:${next.id}`);
+            } else
+              selectLoginMethod("password");
+          }
+        }, t(passwordVisible ? "backToQrLogin" : "useAccountPassword")) : null
       ) : null;
       return React.createElement(
         props.view === "page" ? "div" : "li",
@@ -3503,9 +3509,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
       ".dshRemoteEnable{box-sizing:border-box;width:min(440px,100%);max-width:100%;min-height:388px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:10px}.dshRemoteEnable p{margin:0;color:var(--dsw-alias-label-secondary);line-height:1.5}",
       '.dshRemoteLoginTabs{width:min(440px,100%);display:flex;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteLoginTabs>button{position:relative;min-height:38px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 14px;font:inherit;font-size:13px;cursor:pointer}.dshRemoteLoginTabs>button:hover:not(:disabled){color:var(--dsw-alias-label-primary)}.dshRemoteLoginTabs>button.isActive{color:var(--dsw-alias-label-primary);font-weight:600}.dshRemoteLoginTabs>button.isActive::after{content:"";position:absolute;right:12px;bottom:-1px;left:12px;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-brand-primary)}.dshRemoteLoginTabs>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;border-radius:6px}',
       ".dshRemoteLoginServer{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;flex:0 1 680px;min-width:0;margin:0}.dshRemoteLoginServer button{font-size:12px}.dshRemoteLoginServer input{box-sizing:border-box;flex:1 1 220px;min-width:0;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteLoginServer button{flex:0 0 auto;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:8px 12px;font:inherit;cursor:pointer}",
-      ".dshRemoteClientLogin{width:min(440px,100%);display:flex;flex-direction:column;gap:8px}.dshRemoteClientLogin input{min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteClientLogin button{align-self:flex-start;min-height:40px;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}",
+      ".dshRemoteClientLogin{width:min(440px,100%);display:flex;flex-direction:column;gap:8px}.dshRemoteClientLogin input{box-sizing:border-box;width:100%;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteClientLogin button{align-self:flex-start;min-height:40px;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}.dshRemoteEnable>button.dshRemotePasswordSwitch,.dshRemoteInlineSignIn>button.dshRemotePasswordSwitch,button.dshRemotePasswordSwitch{display:block;align-self:center;margin:0 auto;min-height:32px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;font:inherit;font-size:12px;line-height:1.5;cursor:pointer}.dshRemoteEnable>button.dshRemotePasswordSwitch:hover:not(:disabled),.dshRemoteInlineSignIn>button.dshRemotePasswordSwitch:hover:not(:disabled),button.dshRemotePasswordSwitch:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteEnable>button.dshRemotePasswordSwitch:focus-visible,.dshRemoteInlineSignIn>button.dshRemotePasswordSwitch:focus-visible,button.dshRemotePasswordSwitch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:6px}.dshRemoteEnable>button.dshRemotePasswordSwitch:disabled,.dshRemoteInlineSignIn>button.dshRemotePasswordSwitch:disabled,button.dshRemotePasswordSwitch:disabled{opacity:.5;cursor:default}.dshRemotePasswordHint{margin:0;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}",
       ".dshRemoteQrLogin{width:min(440px,100%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0 2px;text-align:center}.dshRemoteQrLogin img,.dshRemoteQrPlaceholder{box-sizing:border-box;width:200px;height:200px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:#fff;padding:8px}.dshRemoteQrOpen{display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none}.dshRemoteQrOpen:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrOpen:hover img{border-color:var(--dsw-alias-label-dimmed)}.dshRemoteQrOpen:focus-visible{border-radius:12px;outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}.dshRemoteQrPlaceholder{display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary)}.dshRemoteQrLogin>strong{font-size:14px}.dshRemoteQrLogin>p{max-width:48ch;margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}.dshRemoteServiceAddress{box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;gap:6px;width:100%;height:44px;min-height:44px;margin:8px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteServiceAddress>span{flex:0 0 auto;white-space:nowrap}.dshRemoteServiceAddress>a{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);text-decoration:none}.dshRemoteServiceAddress>a:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteServiceAddressEdit{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:4px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}.dshRemoteServiceAddressEdit:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.dshRemoteServiceAddressEdit:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteServiceAddressEdit:disabled{opacity:.5;cursor:default}.dshRemoteQrLogin>button,.dshRemoteClientLogin>.dshRemoteLoginSwitch{min-height:32px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;font:inherit;font-size:12px;cursor:pointer}.dshRemoteQrLogin>button:hover,.dshRemoteClientLogin>.dshRemoteLoginSwitch:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteClientLogin>.dshRemoteLoginSwitch{align-self:flex-start;background:transparent;color:var(--dsw-alias-label-secondary);padding-left:0}",
-      ".dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;justify-content:center;overflow:hidden;white-space:nowrap;font-size:14px}.dshRemoteLoginHeading>a{display:inline-flex;align-items:baseline;justify-content:center;gap:10px;min-width:0;color:var(--dsw-alias-label-primary);font-size:inherit;font-weight:700;text-decoration:none;border-bottom:1px solid transparent}.dshRemoteLoginHeading>a:hover{text-decoration:none;border-bottom-color:currentColor}.dshRemoteLoginHeading>a:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:3px}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>a>span{flex:0 0 auto;color:inherit;font-size:inherit;font-weight:inherit}.dshRemoteLoginTabs{box-sizing:border-box;width:100%;flex-wrap:nowrap;overflow-x:auto}.dshRemoteLoginTabs>button{min-width:max-content;flex:1 0 auto;display:flex;align-items:center;justify-content:center;padding:6px 10px;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;bottom:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:300px;min-height:300px}.dshRemoteClientLogin{align-items:stretch;padding-top:16px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}.dshRemoteQrLogin{padding-top:12px}",
+      ".dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;justify-content:center;overflow:hidden;white-space:nowrap;font-size:14px}.dshRemoteLoginHeading>a{display:inline-flex;align-items:baseline;justify-content:center;gap:10px;min-width:0;color:var(--dsw-alias-label-primary);font-size:inherit;font-weight:700;text-decoration:none;border-bottom:1px solid transparent}.dshRemoteLoginHeading>a:hover{text-decoration:none;border-bottom-color:currentColor}.dshRemoteLoginHeading>a:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:3px}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>a>span{flex:0 0 auto;color:inherit;font-size:inherit;font-weight:inherit}.dshRemoteLoginTabs{box-sizing:border-box;width:100%;flex-wrap:nowrap;overflow-x:auto}.dshRemoteLoginTabs>button{min-width:max-content;flex:1 0 auto;display:flex;align-items:center;justify-content:center;padding:6px 10px;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;bottom:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:auto}.dshRemoteQrLogin{min-height:260px;padding-top:12px}.dshRemoteClientLogin{min-height:0;align-items:stretch;padding-top:12px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}",
       '.dshRemoteHostControlToggle{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:nowrap;cursor:default}.dshRemoteHostControlToggle>input{appearance:none;box-sizing:border-box;position:relative;width:32px;height:18px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteHostControlToggle>input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteHostControlToggle>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteHostControlToggle>input:checked::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteHostControlToggle>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteHostControlToggle>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteHostControlToggle>input,.dshRemoteHostControlToggle>input::after{transition:none}}',
       ".dshRemoteAccountFooter{display:flex;align-items:center;justify-content:flex-start;gap:12px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:14px;color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteAccountSettings{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font:inherit;line-height:1.5;white-space:nowrap}.dshRemoteAccountSettings:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteAccountExit{flex:0 0 auto;margin-left:auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px;line-height:1.5;white-space:nowrap}.dshRemoteAccountExit:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteAccountExit:disabled{opacity:.5;cursor:default;text-decoration:none}",
       ".dshRemoteLocalLink{align-self:flex-start;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 0;cursor:pointer}.dshRemoteLocalLink:hover{color:var(--dsw-alias-label-primary)}",
@@ -3744,7 +3750,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }, [open, loginMethod, qrSession, savingServer, serverDirty]);
       let selectLoginMethod = (method) => {
         loginMethodManuallySelected.current = !0, method !== loginMethod && (qrFlowRun.current += 1, setLoginMethod(method), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setError(void 0));
-      }, orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), qrLoginTab = (provider) => React.createElement("button", {
+      }, orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), passwordVisible = !savingServer && !serverDirty && (loginMethod === "password" && loginMethodManuallySelected.current || !providersLoading && !providersFailed && oauthProviders.length === 0), showPasswordSwitch = !savingServer && !serverDirty && !providersLoading && (passwordVisible ? orderedQrProviders.length > 0 : providersFailed || orderedQrProviders.length > 0), qrLoginTab = (provider) => React.createElement("button", {
         key: provider.id,
         type: "button",
         role: "tab",
@@ -4183,21 +4189,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     React.createElement("span", null, t("signInClientDescription"))
                   )
                 ),
-                React.createElement(
+                orderedQrProviders.length > 0 ? React.createElement(
                   "div",
                   { className: "dshRemoteLoginTabs", role: "tablist" },
-                  ...orderedQrProviders.map(qrLoginTab),
-                  React.createElement("button", {
-                    type: "button",
-                    role: "tab",
-                    id: "dsh-remote-password-tab",
-                    "aria-selected": loginMethod === "password",
-                    "aria-controls": "dsh-remote-password-panel",
-                    className: loginMethod === "password" ? "isActive" : "",
-                    disabled: busy || savingServer || serverDirty,
-                    onClick: () => selectLoginMethod("password")
-                  }, t("accountPasswordLogin"))
-                ),
+                  ...orderedQrProviders.map(qrLoginTab)
+                ) : null,
                 providersLoading ? React.createElement("p", { role: "status" }, t("loadingLoginProviders")) : null,
                 providersFailed ? React.createElement("button", {
                   type: "button",
@@ -4207,7 +4203,34 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   }
                 }, t("retryLoginProviders")) : null,
                 !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0 ? React.createElement("p", { role: "status" }, t("noLoginProviders")) : null,
-                loginMethod !== "password" && selectedProvider !== void 0 ? React.createElement(
+                passwordVisible ? React.createElement(
+                  "div",
+                  {
+                    className: "dshRemoteClientLogin",
+                    role: "tabpanel",
+                    id: "dsh-remote-password-panel"
+                  },
+                  React.createElement("input", {
+                    type: "email",
+                    value: email,
+                    disabled: busy,
+                    autoComplete: "username",
+                    placeholder: t("account"),
+                    "aria-label": t("account"),
+                    onChange: (event) => setEmail(event.target.value)
+                  }),
+                  React.createElement("input", {
+                    type: "password",
+                    value: password,
+                    disabled: busy,
+                    autoComplete: "current-password",
+                    placeholder: t("password"),
+                    "aria-label": t("password"),
+                    onChange: (event) => setPassword(event.target.value)
+                  }),
+                  React.createElement("button", { type: "button", disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn")),
+                  React.createElement("p", { className: "dshRemotePasswordHint" }, t("passwordHint"))
+                ) : loginMethod !== "password" && selectedProvider !== void 0 ? React.createElement(
                   "div",
                   {
                     className: "dshRemoteQrLogin",
@@ -4243,34 +4266,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     disabled: busy,
                     onClick: () => setQrExpired(!1)
                   }, t("refreshQrCode")) : null
-                ) : React.createElement(
-                  "div",
-                  {
-                    className: "dshRemoteClientLogin",
-                    role: "tabpanel",
-                    id: "dsh-remote-password-panel",
-                    "aria-labelledby": "dsh-remote-password-tab"
-                  },
-                  React.createElement("input", {
-                    type: "email",
-                    value: email,
-                    disabled: busy,
-                    autoComplete: "username",
-                    placeholder: t("account"),
-                    "aria-label": t("account"),
-                    onChange: (event) => setEmail(event.target.value)
-                  }),
-                  React.createElement("input", {
-                    type: "password",
-                    value: password,
-                    disabled: busy,
-                    autoComplete: "current-password",
-                    placeholder: t("password"),
-                    "aria-label": t("password"),
-                    onChange: (event) => setPassword(event.target.value)
-                  }),
-                  React.createElement("button", { type: "button", disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn"))
-                ),
+                ) : null,
+                showPasswordSwitch ? React.createElement("button", {
+                  type: "button",
+                  className: "dshRemotePasswordSwitch",
+                  disabled: busy || savingServer || serverDirty,
+                  onClick: () => {
+                    if (passwordVisible) {
+                      let next = orderedQrProviders[0];
+                      next !== void 0 && selectLoginMethod(`oauth:${next.id}`);
+                    } else
+                      selectLoginMethod("password");
+                  }
+                }, t(passwordVisible ? "backToQrLogin" : "useAccountPassword")) : null,
                 React.createElement(
                   "div",
                   { className: "dshRemoteServiceAddress" },

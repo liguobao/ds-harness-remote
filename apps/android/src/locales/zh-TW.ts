@@ -203,13 +203,13 @@ const zhTW = {
   },
   status: { online: '線上', offline: '離線', disconnected: '未連線', lan: '區域網直連', relay: '伺服器轉發', p2p: 'P2P 直連', turn: 'TURN 轉發', waiting: '連線中', running: '執行中' },
   setup: {
-    or: '或', heroSignIn: '登入 DeepSeek Harness Remote', emailSignIn: '使用電子郵件登入',
+    or: '或', heroSignIn: '登入 DeepSeek Harness Remote', emailSignIn: '使用電子郵件登入', emailSignInCollapse: '收起電子郵件登入',
     title: '登入', signIn: '登入賬號', signInAgain: '重新登入', lead: '請選擇與遠端裝置相同的登入方式，繼續你的工作。',
     switchServer: "切換伺服器", saveServer: "儲存伺服器", switchServerHint: "儲存後會中斷目前連線，並需要在新伺服器重新登入。",
     google: "使用 Google 帳號登入",
     oauth: '知乎', githubOAuth: 'GitHub', passwordMethod: '郵箱', zhihu: '使用知乎賬號登入', github: '使用 GitHub 賬號登入', oauthHint: '會開啟瀏覽器完成授權，然後自動返回這裡。',
     qr: '掃碼登入', qrEntryHint: '點選顯示二維碼，用手機掃碼授權', qrScanTitle: '使用手機掃碼登入', qrScanHint: '用手機掃描二維碼並在授權頁確認，完成後會自動登入此裝置。', qrWaiting: '等待手機掃碼…', qrExpired: '二維碼已過期，請重新整理後重試。', qrRefresh: '重新整理二維碼', qrUnsupported: '當前伺服器未開啟掃碼登入，請使用其他方式登入。', qrFailed: '掃碼登入未完成，請重試。',
-    email: '郵箱', emailPlaceholder: '輸入郵箱', password: '密碼', passwordPlaceholder: '輸入密碼', passwordHint: '密碼只用於本次登入，不會儲存在手機上。',
+    email: '郵箱', emailPlaceholder: '輸入郵箱', password: '密碼', passwordPlaceholder: '輸入密碼', passwordHint: '僅限邀請碼註冊或自建服務帳號，不支援 DeepSeek 官方帳號。',
     server: '服務地址', serverHint: '請使用 HTTPS 地址。', trustTitle: '保護你的裝置和對話', trustBody: '對話內容會加密傳輸。只有登入同一賬號的可信裝置才能訪問。',
   },
   settings: {
