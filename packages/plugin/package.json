@@ -83,7 +83,6 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5",
-    "@dsh-remote/server": "workspace:*",
     "qrcode": "^1.5.4",
     "zod": "^4.6.7",
     "ws": "^8.21.3",
@@ -157,6 +156,7 @@
     "@dsh-remote/client-core": "workspace:*",
     "@dsh-remote/crypto": "workspace:*",
     "@dsh-remote/protocol": "workspace:*",
+    "@dsh-remote/server": "workspace:*",
     "@dsh-remote/webrtc": "workspace:*",
     "@types/qrcode": "^1.5.5",
     "esbuild": "^0.25.0",

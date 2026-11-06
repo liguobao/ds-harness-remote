@@ -450,9 +450,6 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.5
         version: 3.18.5
-      '@dsh-remote/server':
-        specifier: workspace:*
-        version: link:../../apps/server
       '@xterm/addon-serialize':
         specifier: 0.14.0
         version: 0.14.0
@@ -542,6 +539,9 @@ importers:
       '@dsh-remote/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@dsh-remote/server':
+        specifier: workspace:*
+        version: link:../../apps/server
       '@dsh-remote/webrtc':
         specifier: workspace:*
         version: link:../webrtc
