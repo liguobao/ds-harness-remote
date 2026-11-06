@@ -140,6 +140,7 @@ struct Index {
   @State messageActionText: string = '';
   @State messageActionKind: string = '';
   @State messageActionSeq: number = 0;
+  @State messageActionTime: number = 0;
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
   /** 被手工展开的长消息（item.id）。 */
@@ -5085,6 +5086,7 @@ struct Index {
     this.messageActionText = item.text.length > 0 ? item.text : item.summary;
     this.messageActionKind = item.kind;
     this.messageActionSeq = item.seq;
+    this.messageActionTime = item.timestamp;
     this.messageActionsOpen = true;
   }
 
@@ -5226,7 +5228,8 @@ struct Index {
               .fontSize(15)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.pal().text)
-            Text(this.messageActionKind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'))
+            Text((this.messageActionKind === 'user' ? this.tr('你发送的消息') : this.tr('助手回复'))
+              + (this.messageActionTime > 0 ? '  ·  ' + formatClock(this.messageActionTime) : ''))
               .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
           }
@@ -6241,6 +6244,17 @@ class ThemeChoice {
 }
 
 /** 一行可直接渲染的 Markdown 内容。 */
+/** 只取时分，用于消息操作面板这类小地方。 */
+function formatClock(timestamp: number): string {
+  if (timestamp <= 0) {
+    return '';
+  }
+  const date: Date = new Date(timestamp);
+  const hh: string = date.getHours() < 10 ? '0' + date.getHours() : '' + date.getHours();
+  const mm: string = date.getMinutes() < 10 ? '0' + date.getMinutes() : '' + date.getMinutes();
+  return hh + ':' + mm;
+}
+
 class MdLine {
   text: string = '';
   code: boolean = false;
