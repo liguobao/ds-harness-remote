@@ -83,7 +83,10 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (path !== undefined) setFileLinkPath(path)
   }, [state.bots, bot?.id, onSelectBot, ready, connected])
   useEffect(() => { setFileLinkPath(undefined) }, [session.sessionId])
-  const disabled = busy || !active || !ready || (bot !== undefined && bot.sessionId !== session.sessionId) || state.readOnly !== undefined
+  const disabled = busy || !active || !ready
+    || (bot !== undefined && bot.sessionId !== session.sessionId)
+    || (room !== undefined && (room.sessionId || room.id) !== session.sessionId)
+    || state.readOnly !== undefined
   useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
   useEffect(() => { mounted.current = true; request.current = new AbortController(); return () => { mounted.current = false; request.current.abort() } }, [session.sessionId])
   useEffect(() => {
@@ -330,13 +333,13 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       ListEmptyComponent={<Text style={styles.muted}>{s.bots.noMessages}</Text>}
       ListHeaderComponent={<View style={styles.section}>
         {bot && !hasMore && cursor !== null && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderBusy} onPress={() => void earlierPage()} />}
-        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
+        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
         {hasMore && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderLoading || !ready} onPress={() => { atEnd.current = false; void loadOlder() }} />}
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} />}
         {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
-        {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} />)}
+        {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, id: card.id })} />)}
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
         {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}
         {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}

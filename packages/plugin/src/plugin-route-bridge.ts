@@ -9,11 +9,12 @@ export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot'] as const
 
 /** Reviewed DS Bot operations; new upstream operations stay local by default. */
 export const BOT_REMOTE_OPERATIONS = [
-  'state', 'models', 'efforts', 'exchange', 'earlier', 'usage', 'room-progress', 'schedules',
-  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
-  'create-room', 'update-room', 'delete-room',
+  'state', 'models', 'efforts', 'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'schedules',
+  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags', 'resume',
+  'create-room', 'update-room', 'delete-room', 'stop-room-work', 'goal-draft', 'goal-control',
   'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
-  'send', 'btw', 'btw-cancel', 'room-continue', 'answer-question', 'dismiss-question', 'view-reply', 'approval-answer', 'stop-member-work',
+  'send', 'btw', 'btw-cancel', 'btw-delete', 'side-new', 'side-ask', 'side-cancel', 'side-close',
+  'room-continue', 'answer-question', 'dismiss-question', 'dismiss-view', 'view-reply', 'approval-answer', 'stop-member-work',
 ] as const
 
 export function isAllowedPluginRoute(route: string): route is typeof PLUGIN_ROUTE_ALLOWLIST[number] {

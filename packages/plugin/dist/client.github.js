@@ -5085,7 +5085,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       });
     }, room = (input) => {
       if (!isRecord(input)) throw new Error("Invalid Bot room entry.");
-      add(input.id), addArray(input.parts), isRecord(input.sessions) && Object.values(input.sessions).forEach(add);
+      add(input.id), add(input.sessionId), addArray(input.ownParts), addArray(input.parts), isRecord(input.sessions) && Object.values(input.sessions).forEach(add);
     }, agent = (input) => {
       if (!isRecord(input)) throw new Error("Invalid Bot agent entry.");
       addArray(input.sessions);
@@ -5102,6 +5102,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
       case "delete-room":
       case "set-main":
       case "remove-agent":
+      case "goal-draft":
+      case "goal-control":
         roster();
         break;
       case "create-bot":

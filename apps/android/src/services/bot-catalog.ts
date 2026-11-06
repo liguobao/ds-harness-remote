@@ -5,24 +5,60 @@ export type BotObject = Record<string, unknown>
 export interface BotEntry {
   id: string
   sessionId: string
+  parts?: string[]
   name: string
   role: string
   instructions: string
   model: string
   effort: string
   color?: string
-  avatar?: { shape?: string }
+  avatar?: { shape?: string; image?: string }
   preview?: string
   main: boolean
+  tile?: boolean
+  pinned?: boolean
+  hidden?: boolean
+  waiting?: boolean
+  createdAt?: number
 }
-export interface BotRoom { preview?: string; id: string; name: string; members: string[]; notice: string; admin: string; paused?: boolean }
+export interface BotRoom {
+  preview?: string
+  id: string
+  sessionId: string
+  ownParts?: string[]
+  name: string
+  members: string[]
+  notice: string
+  admin: string
+  paused?: boolean
+  pinned?: boolean
+  hidden?: boolean
+  goal?: BotObject
+  createdAt?: number
+}
+export interface BotAgent {
+  id: string
+  sessions: string[]
+  pinned?: boolean
+  createdAt?: number
+}
 export interface BotState {
+  mainBotId?: string
   bots: BotEntry[]
   rooms: BotRoom[]
+  agents: BotAgent[]
   exchangeTurns: BotObject
   btwCards: BotObject
   btwSupported: boolean
+  sideChats: BotObject
   activity: BotObject
+  work: {
+    bots: BotObject
+    rooms: BotObject
+    waiting: BotObject
+    turns: BotObject
+    steered: BotObject
+  }
   questions: BotObject
   views: BotObject
   approvals: BotObject[]
@@ -32,10 +68,12 @@ export interface BotState {
 
 // Android only exposes the reviewed Bot workflows, never arbitrary plugin routes.
 export const BOT_OPERATIONS = [
-  'state', 'models', 'efforts', 'earlier', 'exchange', 'usage', 'room-progress', 'schedules',
-  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
-  'create-room', 'update-room', 'delete-room', 'send', 'btw', 'btw-cancel', 'room-continue', 'answer-question', 'dismiss-question',
-  'view-reply', 'approval-answer', 'stop-member-work',
+  'state', 'models', 'efforts', 'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'schedules',
+  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags', 'resume',
+  'create-room', 'update-room', 'delete-room', 'stop-room-work', 'goal-draft', 'goal-control',
+  'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
+  'send', 'btw', 'btw-cancel', 'btw-delete', 'side-new', 'side-ask', 'side-cancel', 'side-close',
+  'room-continue', 'answer-question', 'dismiss-question', 'dismiss-view', 'view-reply', 'approval-answer', 'stop-member-work',
 ] as const
 export type BotOperation = typeof BOT_OPERATIONS[number]
 
@@ -78,7 +116,7 @@ export class BotRemoteClient {
     checkAborted(signal)
     const catalog = new Map(sessions.filter(entry => (entry.backend ?? 'harness') === 'harness').map(entry => [entry.sessionId, entry]))
     for (const bot of state.bots) bot.preview = sessionPreview(catalog.get(bot.sessionId), state.exchangeTurns[bot.sessionId])
-    for (const room of state.rooms) room.preview ||= sessionPreview(catalog.get(room.id))
+    for (const room of state.rooms) room.preview ||= sessionPreview(catalog.get(room.sessionId || room.id))
     return state
   }
 
@@ -86,7 +124,9 @@ export class BotRemoteClient {
   async resolveSession(id: string, signal?: AbortSignal): Promise<{ state: BotState; session: RemoteSession }> {
     const state = await this.state(signal)
     const bot = state.bots.find(entry => entry.id === id)
-    const sessionId = bot?.sessionId ?? state.rooms.find(entry => entry.id === id)?.id
+    const room = state.rooms.find(entry => entry.id === id)
+    const agentSession = state.agents.flatMap(entry => entry.sessions).find(sessionId => sessionId === id)
+    const sessionId = bot?.sessionId ?? (room ? (room.sessionId || room.id) : agentSession)
     if (sessionId === undefined) throw new Error(strings.bots.sessionUnavailable)
     const sessions = await this.readSessions()
     this.assertCurrent()
@@ -99,22 +139,87 @@ export class BotRemoteClient {
 
 export function parseBotState(value: unknown): BotState {
   if (!isBotObject(value) || !Array.isArray(value.bots) || !Array.isArray(value.rooms)) throw new Error(strings.bots.invalid)
+  const mainBotIds = Array.isArray(value.mainBotIds)
+    ? value.mainBotIds.filter(nonempty)
+    : nonempty(value.mainBotId)
+      ? [value.mainBotId]
+      : []
+  const mainBotId = nonempty(value.mainBotId) ? value.mainBotId : mainBotIds[0]
   const bots = value.bots.map(entry => {
     if (!isBotObject(entry) || !nonempty(entry.id) || !nonempty(entry.sessionId)) throw new Error(strings.bots.invalid)
-    return { id: entry.id, sessionId: entry.sessionId, name: text(entry.name) || entry.id,
-      color: text(entry.color), avatar: { shape: text(object(entry.avatar).shape) },
-      role: text(entry.role), instructions: text(entry.instructions), model: text(entry.model), effort: text(entry.effort),
-      main: Array.isArray(value.mainBotIds) ? value.mainBotIds.includes(entry.id) : value.mainBotId === entry.id }
+    const avatarObj = object(entry.avatar)
+    return {
+      id: entry.id,
+      sessionId: entry.sessionId,
+      ...(Array.isArray(entry.parts) ? { parts: entry.parts.filter(nonempty) } : {}),
+      name: text(entry.name) || entry.id,
+      color: text(entry.color),
+      avatar: { shape: text(avatarObj.shape), ...(nonempty(avatarObj.image) ? { image: avatarObj.image } : {}) },
+      role: text(entry.role),
+      instructions: text(entry.instructions),
+      model: text(entry.model),
+      effort: text(entry.effort),
+      main: mainBotIds.includes(entry.id),
+      tile: mainBotId === entry.id,
+      ...(entry.pinned === true ? { pinned: true } : {}),
+      ...(entry.hidden === true ? { hidden: true } : {}),
+      ...(entry.waiting === true ? { waiting: true } : {}),
+      ...(typeof entry.createdAt === 'number' ? { createdAt: entry.createdAt } : {}),
+    }
   })
   const rooms = value.rooms.map(entry => {
     if (!isBotObject(entry) || !nonempty(entry.id) || !Array.isArray(entry.members) || !entry.members.every(nonempty)) throw new Error(strings.bots.invalid)
-    return { preview: compactPreview(text(entry.preview)), id: entry.id, name: text(entry.name) || entry.id, members: entry.members as string[], notice: text(entry.notice), admin: text(entry.admin), paused: objects(entry.paused).length > 0 }
+    const sessionId = text(entry.sessionId) || entry.id
+    return {
+      preview: compactPreview(text(entry.preview)),
+      id: entry.id,
+      sessionId,
+      ...(Array.isArray(entry.ownParts) ? { ownParts: entry.ownParts.filter(nonempty) } : {}),
+      name: text(entry.name) || entry.id,
+      members: entry.members as string[],
+      notice: text(entry.notice),
+      admin: text(entry.admin),
+      paused: objects(entry.paused).length > 0 || entry.paused === true,
+      ...(entry.pinned === true ? { pinned: true } : {}),
+      ...(entry.hidden === true ? { hidden: true } : {}),
+      ...(isBotObject(entry.goal) ? { goal: entry.goal } : {}),
+      ...(typeof entry.createdAt === 'number' ? { createdAt: entry.createdAt } : {}),
+    }
   })
+  const agents = Array.isArray(value.agents)
+    ? value.agents.filter(isBotObject).filter(entry => nonempty(entry.id)).map(entry => ({
+        id: entry.id as string,
+        sessions: Array.isArray(entry.sessions) ? entry.sessions.filter(nonempty) : [],
+        ...(entry.pinned === true ? { pinned: true } : {}),
+        ...(typeof entry.createdAt === 'number' ? { createdAt: entry.createdAt } : {}),
+      }))
+    : []
   const ids = [...bots, ...rooms].map(entry => entry.id)
   if (new Set(ids).size !== ids.length) throw new Error(strings.bots.invalid)
-  return { bots, rooms, btwCards: object(value.btwCards), btwSupported: isBotObject(value.btwCards), exchangeTurns: object(value.exchangeTurns), activity: object(value.activity), questions: object(value.questions), views: object(value.views),
-    approvals: objects(object(value.work).approvals), models: objects(value.models),
-    ...(typeof value.readOnly === 'string' ? { readOnly: value.readOnly } : {}) }
+  const workObj = object(value.work)
+  return {
+    ...(mainBotId !== undefined ? { mainBotId } : {}),
+    bots,
+    rooms,
+    agents,
+    btwCards: object(value.btwCards),
+    btwSupported: isBotObject(value.btwCards),
+    sideChats: object(value.sideChats),
+    exchangeTurns: object(value.exchangeTurns),
+    activity: object(value.activity),
+    work: {
+      bots: object(workObj.bots),
+      rooms: object(workObj.rooms),
+      waiting: object(workObj.waiting),
+      turns: object(workObj.turns),
+      steered: object(workObj.steered),
+    },
+    questions: object(value.questions),
+    views: object(value.views),
+    approvals: objects(workObj.approvals),
+    models: objects(value.models),
+    ...(typeof value.readOnly === 'string' ? { readOnly: value.readOnly } : {}),
+  }
 }
 export function isBotObject(value: unknown): value is BotObject { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 export function object(value: unknown): BotObject { return isBotObject(value) ? value : {} }

@@ -66,11 +66,13 @@ describe('Android Bot client authority', () => {
     await runScenarios([
       { name: 'current Bot part', id: 'bot', sessions: [session('part-2')], expected: 'part-2' },
       { name: 'group', id: 'room', sessions: [session('room')], expected: 'room' },
+      { name: 'group current part (v0.2.7)', id: 'room', state: { ...botState(), rooms: [{ id: 'room', sessionId: 'room-part-2', name: 'Team', members: ['bot', 'other'] }] }, sessions: [session('room-part-2')], expected: 'room-part-2' },
+      { name: 'DSH Agent session in Bot team', id: 'agent-s1', state: { ...botState(), agents: [{ id: 'agent-1', sessions: ['agent-s1'] }] }, sessions: [session('agent-s1')], expected: 'agent-s1' },
       { name: 'old part cannot replace current', id: 'bot', sessions: [session('bot'), session('part-1')] },
       { name: 'ACP identity collision', id: 'bot', sessions: [session('part-2', 'cursor')] },
       { name: 'unlisted session', id: 'other', sessions: [session('other')] },
     ].map(row => ({ name: row.name, run: async () => {
-      const client = new BotRemoteClient(vi.fn(async () => envelope(botState())), async () => row.sessions, () => {})
+      const client = new BotRemoteClient(vi.fn(async () => envelope(row.state ?? botState())), async () => row.sessions, () => {})
       if (row.expected) await expect(client.resolveSession(row.id)).resolves.toMatchObject({ session: { sessionId: row.expected } })
       else await expect(client.resolveSession(row.id)).rejects.toThrow()
     } })))
@@ -97,7 +99,11 @@ describe('Android Bot client authority', () => {
     await runScenarios([
       { name: 'aside', endpoint: 'btw', payload: { sessionId: 'bot', text: 'progress?' }, allowed: true },
       { name: 'cancel aside', endpoint: 'btw-cancel', payload: { sessionId: 'bot', id: 'aside' }, allowed: true },
+      { name: 'delete aside', endpoint: 'btw-delete', payload: { sessionId: 'bot', cardId: 'aside' }, allowed: true },
       { name: 'continue group', endpoint: 'room-continue', payload: { roomId: 'room' }, allowed: true },
+      { name: 'stop room work', endpoint: 'stop-room-work', payload: { roomId: 'room' }, allowed: true },
+      { name: 'goal control', endpoint: 'goal-control', payload: { roomId: 'room', action: 'pause' }, allowed: true },
+      { name: 'run stats', endpoint: 'run-stats', payload: { botId: 'bot' }, allowed: true },
       { name: 'send', endpoint: 'send', payload: { sessionId: 'bot', text: 'hello' }, allowed: true },
       { name: 'card', endpoint: 'view-reply', payload: { sessionId: 'part-2', viewId: 'view', action: 'form', values: { fields: { name: 'value' } } }, allowed: true },
       { name: 'one time', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'allow' }, allowed: true },
