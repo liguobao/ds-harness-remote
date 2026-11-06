@@ -7,7 +7,7 @@ import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT
   getAppRuntime, errorMessage } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
-import { HarnessRemoteSession } from '../net/HarnessClient';
+import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
 import { darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
@@ -48,6 +48,8 @@ struct Index {
   @State reconnecting: boolean = false;
   /** 连接诊断面板。 */
   @State diagnosticsOpen: boolean = false;
+  /** 定时任务面板。 */
+  @State schedulesOpen: boolean = false;
   @State devices: RemoteHostDevice[] = [];
   @State sessions: HarnessRemoteSession[] = [];
   @State sessionsLoadFailed: boolean = false;
@@ -324,6 +326,10 @@ struct Index {
     }
     if (this.filePreviewOpen) {
       this.filePreviewOpen = false;
+      return true;
+    }
+    if (this.schedulesOpen) {
+      this.schedulesOpen = false;
       return true;
     }
     if (this.diagnosticsOpen) {
@@ -1760,6 +1766,9 @@ struct Index {
       }
       if (this.diagnosticsOpen) {
         this.DiagnosticsOverlay()
+      }
+      if (this.schedulesOpen) {
+        this.SchedulesOverlay()
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
@@ -4972,6 +4981,31 @@ struct Index {
         .width('100%')
         .padding({ left: 18, right: 18, top: 4, bottom: 12 })
 
+        // —— 定时任务 ——
+        Row({ space: 10 }) {
+          Column({ space: 3 }) {
+            Text(this.tr('定时任务'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+            Text(this.runtime.schedules.length > 0
+              ? this.runtime.schedules.length + this.tr(' 个任务')
+              : this.tr('还没有'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text(this.tr('管理'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.schedulesOpen = true;
+              this.runtime.loadSchedules();
+            })
+        }
+        .width('100%')
+
         // —— 连接 ——
         Row({ space: 10 }) {
           Column({ space: 3 }) {
@@ -6194,6 +6228,174 @@ struct Index {
   }
 
   /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */
+  /** 定时任务：列表 / 投递历史 / 删除；创建走会话里的官方 schedule_create 工具。 */
+  @Builder
+  SchedulesOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.55)')
+        .onClick(() => {
+          this.schedulesOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row({ space: 10 }) {
+          Text(this.tr('定时任务'))
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          if (this.runtime.schedulesLoading) {
+            LoadingProgress()
+              .width(14)
+              .height(14)
+              .color('#22D3EE')
+          }
+          Blank()
+          Text(this.tr('刷新'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.runtime.loadSchedules();
+            })
+          Text(this.tr('收起'))
+            .fontSize(this.fs(13))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 2, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.schedulesOpen = false;
+            })
+        }
+        .width('100%')
+        Scroll() {
+          Column({ space: 8 }) {
+            if (this.runtime.schedules.length === 0) {
+              Text(this.tr('还没有定时任务'))
+                .fontSize(this.fs(13))
+                .fontColor(this.pal().text2)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+              Text(this.tr('新建要在会话里说一句，由主机上的 agent 用 schedule_create 工具创建（协议不开放客户端直接创建）。'))
+                .fontSize(this.fs(11))
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+              Text(this.tr('填入示例：每天 9 点跑一次巡检，结果发到这个会话'))
+                .fontSize(this.fs(12))
+                .fontColor('#22D3EE')
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .backgroundColor('rgba(34,211,238,0.10)')
+                .borderRadius(10)
+                .onClick(() => {
+                  this.promptInput = this.tr('每天 9 点跑一次巡检，结果发到这个会话');
+                  this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+                  this.schedulesOpen = false;
+                  promptAction.showToast({ message: this.tr('已填入输入框，发送即可让 agent 创建') });
+                })
+            }
+            ForEach(this.runtime.schedules, (schedule: HarnessSchedule) => {
+              Column({ space: 6 }) {
+                Row({ space: 8 }) {
+                  Text(schedule.title.length > 0 ? schedule.title : schedule.id)
+                    .fontSize(this.fs(13))
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+                  if (schedule.inactive) {
+                    Text(this.tr('已停用'))
+                      .fontSize(this.fs(10))
+                      .fontColor(this.pal().text3)
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                      .backgroundColor(this.pal().inputBg)
+                      .borderRadius(5)
+                  }
+                }
+                .width('100%')
+                Text(this.scheduleSummary(schedule))
+                  .fontSize(this.fs(11))
+                  .fontColor(this.pal().text2)
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+                Row({ space: 8 }) {
+                  Text(this.tr('历史'))
+                    .fontSize(this.fs(11))
+                    .fontColor('#22D3EE')
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .onClick(() => {
+                      this.runtime.loadScheduleHistory(schedule);
+                    })
+                  Text(this.tr('删除'))
+                    .fontSize(this.fs(11))
+                    .fontColor('#F85749')
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .onClick(() => {
+                      this.runtime.deleteSchedule(schedule);
+                    })
+                  Blank()
+                }
+                .width('100%')
+                if (this.runtime.scheduleHistoryId === schedule.id
+                  && this.runtime.scheduleHistory.length > 0) {
+                  Column({ space: 2 }) {
+                    ForEach(this.runtime.scheduleHistory, (delivery: HarnessScheduleDelivery) => {
+                      Text(formatSessionTime(delivery.deliveredAt) + ' · '
+                        + (delivery.status.length > 0 ? delivery.status : '投递'))
+                        .fontSize(this.fs(10))
+                        .fontColor(this.pal().text3)
+                        .width('100%')
+                        .textAlign(TextAlign.Start)
+                    }, (delivery: HarnessScheduleDelivery) => delivery.id + delivery.deliveredAt)
+                  }
+                  .width('100%')
+                }
+              }
+              .width('100%')
+              .padding(10)
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+              .alignItems(HorizontalAlign.Start)
+            }, (schedule: HarnessSchedule) => schedule.id + schedule.inactive)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .height('66%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 340 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 一条定时任务的一行摘要：类型 + 下次时间 + 上次投递。 */
+  private scheduleSummary(schedule: HarnessSchedule): string {
+    const parts: string[] = [];
+    parts.push(schedule.kind.length > 0 ? schedule.kind : '定时');
+    if (schedule.expression.length > 0) {
+      parts.push(schedule.expression);
+    }
+    if (schedule.scheduledAt > 0) {
+      parts.push(this.tr('下次 ') + formatSessionTime(schedule.scheduledAt));
+    }
+    if (schedule.lastDeliveredAt > 0) {
+      parts.push(this.tr('上次 ') + formatSessionTime(schedule.lastDeliveredAt));
+    }
+    return parts.join(' · ');
+  }
+
   /** 连接诊断：现场排障不用连电脑抓 hilog。 */
   @Builder
   DiagnosticsOverlay() {

@@ -20,6 +20,35 @@ export class HarnessWorkspace {
   updatedAt: number = 0;
 }
 
+/** 一条自动化定时任务（`schedule/list` 的行，字段按 Host 版本宽容解析）。 */
+export class HarnessSchedule {
+  id: string = '';
+  title: string = '';
+  prompt: string = '';
+  /** after | at | every | daily | weekly | cron（Host 给什么就是什么）。 */
+  kind: string = '';
+  /** 下次/预定触发时间（毫秒；0 表示未知）。 */
+  scheduledAt: number = 0;
+  /** 上次投递时间（毫秒；0 表示没有）。 */
+  lastDeliveredAt: number = 0;
+  timeZone: string = '';
+  expression: string = '';
+  /** true = 已结束/停用；Host 用不同字段表达，这里归一。 */
+  inactive: boolean = false;
+  /** 该任务绑定的会话。 */
+  sessionId: string = '';
+  /** 原始行，排障时打日志用。 */
+  rawKeys: string = '';
+}
+
+/** 一条投递记录（`schedule/history`）。 */
+export class HarnessScheduleDelivery {
+  id: string = '';
+  deliveredAt: number = 0;
+  status: string = '';
+  detail: string = '';
+}
+
 /** `workspace/follow` baseline 里的工作区列表 + 归档/置顶会话集合。 */
 export class HarnessWorkspaceSnapshot {
   items: HarnessWorkspace[] = [];
@@ -497,6 +526,72 @@ export class HarnessAlphaClient {
     const args: Record<string, Object> = { 'request': request };
     await this.callValue('session/rename', args);
     logInfo('session/rename ok -> ' + sessionId);
+  }
+
+  /**
+   * 定时任务列表。协议不放行 `schedule/create`（创建走会话里的官方 `schedule_create` 工具），
+   * 客户端只做列表 / 投递历史 / 修改 / 删除。
+   */
+  async scheduleList(sessionId: string): Promise<HarnessSchedule[]> {
+    const request: Record<string, Object> = {};
+    if (sessionId.length > 0) {
+      request['sessionId'] = sessionId;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('schedule/list', args);
+    const direct: Object[] | undefined = asArray(value);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = direct !== undefined ? direct
+      : (root !== undefined ? asArray(root['items']) : undefined);
+    const out: HarnessSchedule[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const parsed: HarnessSchedule | undefined = normalizeSchedule(item, sessionId);
+        if (parsed !== undefined) {
+          out.push(parsed);
+        }
+      }
+    }
+    logInfo('schedule/list -> ' + out.length + ' item(s)');
+    return out;
+  }
+
+  /** 删除一条定时任务；返回 Host 的业务结果文本（失败时抛出）。 */
+  async scheduleDelete(sessionId: string, id: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'id': id };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('schedule/delete', args);
+    logInfo('schedule/delete ok -> ' + id);
+  }
+
+  /** 投递历史（最近的在前）。 */
+  async scheduleHistory(sessionId: string, id: string, limit: number): Promise<HarnessScheduleDelivery[]> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'id': id,
+      'limit': limit
+    };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('schedule/history', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const records: Object[] | undefined = root !== undefined ? asArray(root['records']) : undefined;
+    const out: HarnessScheduleDelivery[] = [];
+    if (records !== undefined) {
+      for (const item of records) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const delivery: HarnessScheduleDelivery = new HarnessScheduleDelivery();
+        delivery.id = jsonStr(record, 'id', '');
+        delivery.deliveredAt = toMs(record['deliveredAt']);
+        delivery.status = jsonStr(record, 'status', '');
+        delivery.detail = jsonStr(record, 'detail', jsonStr(record, 'message', ''));
+        out.push(delivery);
+      }
+    }
+    logInfo('schedule/history -> ' + out.length + ' record(s)');
+    return out;
   }
 
   /** 归档会话；返回主机确认后的完整归档集合。 */
@@ -1075,6 +1170,52 @@ function normalizeSearchItem(value: Object): HarnessRemoteSession | undefined {
   const updated: Object | undefined = root['updatedAt'];
   session.updatedAt = typeof updated === 'number' ? (updated >= 1e12 ? updated : updated * 1000) : 0;
   return session;
+}
+
+/** 时间字段既可能是毫秒也可能是秒；统一成毫秒。 */
+function toMs(value: Object | undefined): number {
+  if (typeof value !== 'number' || value <= 0) {
+    return 0;
+  }
+  return value >= 1e12 ? value : value * 1000;
+}
+
+/** `schedule/list` 的行：字段名随 Host 版本变，这里按候选名逐个试。 */
+function normalizeSchedule(value: Object, fallbackSessionId: string): HarnessSchedule | undefined {
+  const row: Record<string, Object> | undefined = asRecord(value);
+  if (row === undefined) {
+    return undefined;
+  }
+  const schedule: HarnessSchedule = new HarnessSchedule();
+  schedule.id = jsonStr(row, 'id', '');
+  if (schedule.id.length === 0) {
+    return undefined;
+  }
+  schedule.title = jsonStr(row, 'title', '');
+  schedule.prompt = jsonStr(row, 'prompt', jsonStr(row, 'instructions', ''));
+  schedule.kind = jsonStr(row, 'kind', '');
+  schedule.sessionId = jsonStr(row, 'sessionId', fallbackSessionId);
+  schedule.timeZone = jsonStr(row, 'timeZone', '');
+  schedule.expression = jsonStr(row, 'expression', '');
+  schedule.scheduledAt = toMs(row['scheduledAt']);
+  schedule.lastDeliveredAt = toMs(row['lastDeliveredAt']);
+  const inactive: Object | undefined = row['inactive'];
+  const active: Object | undefined = row['active'];
+  const enabled: Object | undefined = row['enabled'];
+  if (typeof inactive === 'boolean') {
+    schedule.inactive = inactive;
+  } else if (typeof active === 'boolean') {
+    schedule.inactive = !active;
+  } else if (typeof enabled === 'boolean') {
+    schedule.inactive = !enabled;
+  }
+  const keys: string[] = [];
+  for (const key of Object.keys(row)) {
+    keys.push(key);
+  }
+  schedule.rawKeys = keys.join(',');
+  logInfo('schedule row id=' + schedule.id + ' kind=' + schedule.kind + ' keys=' + schedule.rawKeys);
+  return schedule;
 }
 
 function normalizeSession(value: Object): HarnessRemoteSession | undefined {

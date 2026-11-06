@@ -9,8 +9,8 @@ import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  DirectoryEntry, HarnessSessionEvent, HarnessWorkspace, HarnessWorkspaceSnapshot, HistoryPage,
-  PromptImagePart } from '../net/HarnessClient';
+  DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessWorkspace,
+  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -197,6 +197,12 @@ export class AppRuntime {
   reconnecting: boolean = false;
   /** 最近的链路事件（环形，最多 20 条），诊断面板直接看，不用连电脑抓 hilog。 */
   linkEvents: string[] = [];
+  /** 当前会话的定时任务列表（schedule/list）。 */
+  schedules: HarnessSchedule[] = [];
+  /** 定时任务投递历史（面板打开某条时才拉）。 */
+  scheduleHistory: HarnessScheduleDelivery[] = [];
+  scheduleHistoryId: string = '';
+  schedulesLoading: boolean = false;
   serverUrl: string = '';
   email: string = '';
   devices: RemoteHostDevice[] = [];
@@ -3048,6 +3054,74 @@ export class AppRuntime {
       : '无'));
     rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
     return rows;
+  }
+
+  /** 拉当前会话的定时任务列表。 */
+  async loadSchedules(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined) {
+      return;
+    }
+    this.schedulesLoading = true;
+    this.notify();
+    try {
+      this.schedules = await harness.scheduleList(sessionId);
+      this.clearRetry();
+    } catch (error) {
+      const text: string = errorMessage(error);
+      logWarn('schedule/list failed: ' + text);
+      // 老插件不放行 schedule/list 时会回「unknown endpoint」，说清楚比红条好
+      this.errorMsg = text.toLowerCase().indexOf('unknown') >= 0 || text.indexOf('不支持') >= 0
+        ? '这台主机没有开启定时任务（Host 侧插件不支持 schedule/list）' : text;
+    }
+    this.schedulesLoading = false;
+    this.notify();
+  }
+
+  /** 删除一条定时任务，成功后从列表移除。 */
+  async deleteSchedule(schedule: HarnessSchedule): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || schedule.id.length === 0) {
+      return;
+    }
+    const sessionId: string = schedule.sessionId.length > 0 ? schedule.sessionId
+      : this.currentSessionId;
+    try {
+      await harness.scheduleDelete(sessionId, schedule.id);
+      this.schedules = this.schedules.filter((item: HarnessSchedule) => item.id !== schedule.id);
+      if (this.scheduleHistoryId === schedule.id) {
+        this.scheduleHistory = [];
+        this.scheduleHistoryId = '';
+      }
+      this.errorMsg = '';
+      this.notify();
+    } catch (error) {
+      const text: string = errorMessage(error);
+      this.errorMsg = '删除定时任务失败：' + text;
+      this.setRetry('重新删除', () => {
+        this.deleteSchedule(schedule);
+      });
+      this.notify();
+    }
+  }
+
+  /** 拉某条任务的投递历史。 */
+  async loadScheduleHistory(schedule: HarnessSchedule): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || schedule.id.length === 0) {
+      return;
+    }
+    const sessionId: string = schedule.sessionId.length > 0 ? schedule.sessionId
+      : this.currentSessionId;
+    try {
+      this.scheduleHistory = await harness.scheduleHistory(sessionId, schedule.id, 20);
+      this.scheduleHistoryId = schedule.id;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = '读取投递历史失败：' + errorMessage(error);
+      this.notify();
+    }
   }
 
   /** 会话页横幅上的「立即重试」：不等退避，马上重连一次。 */
