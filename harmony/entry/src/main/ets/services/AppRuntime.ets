@@ -146,6 +146,9 @@ export class AppRuntime {
   private lastDeviceId: string = '';
   private reconnectAttempt: number = 0;
   private reconnectTimer: number = -1;
+  /** 错误条上「重试」按钮的文案与要重跑的动作：失败时登记，成功或手动关闭时清掉。 */
+  private retryText: string = '';
+  private retryAction: (() => void) | undefined = undefined;
 
   phase: string = PHASE_BOOT;
   busy: boolean = false;
@@ -453,8 +456,12 @@ export class AppRuntime {
       await this.fillPresence(devices);
       devices.sort(compareDevices);
       this.devices = devices;
+      this.clearRetry();
     } catch (error) {
       this.errorMsg = errorMessage(error);
+      this.setRetry('刷新主机', () => {
+        this.refreshDevices();
+      });
     }
     this.setBusy(false);
     this.notify();
@@ -581,6 +588,7 @@ export class AppRuntime {
       this.reconnectStatus = '';
       this.clearReconnectTimer();
       this.connectStage = '';
+      this.clearRetry();
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
@@ -592,6 +600,9 @@ export class AppRuntime {
         && this.reconnectAttempt > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
       if (!this.connectCancelled && !autoRetry) {
         this.errorMsg = errorMessage(error);
+        this.setRetry('重新连接', () => {
+          this.connectDevice(deviceId);
+        });
       }
       this.teardownConnection();
       if (this.phase !== PHASE_DEVICES) {
@@ -846,7 +857,41 @@ export class AppRuntime {
       return;
     }
     this.errorMsg = '';
+    this.clearRetry();
     this.notify();
+  }
+
+  /** 登记一个「重试」动作；错误条据此显示按钮。 */
+  private setRetry(text: string, action: () => void): void {
+    this.retryText = text;
+    this.retryAction = action;
+  }
+
+  private clearRetry(): void {
+    this.retryText = '';
+    this.retryAction = undefined;
+  }
+
+  /** 错误条上要不要显示「重试」（有错误、且有可重跑的动作）。 */
+  canRetry(): boolean {
+    return this.errorMsg.length > 0 && this.retryAction !== undefined;
+  }
+
+  /** 重试按钮文案；没有可重试动作时返回空串。 */
+  retryLabel(): string {
+    return this.retryAction === undefined ? '' : this.retryText;
+  }
+
+  /** 跑一次上次失败的动作；先清掉错误条，别让旧错误压着新结果。 */
+  retryLastError(): void {
+    const action: (() => void) | undefined = this.retryAction;
+    if (action === undefined) {
+      return;
+    }
+    this.clearRetry();
+    this.errorMsg = '';
+    this.notify();
+    action();
   }
 
   /** 收藏/取消收藏一个会话。 */
@@ -955,8 +1000,12 @@ export class AppRuntime {
         this.notify();
       }
       this.refreshSessionsSoon();
+      this.clearRetry();
     } catch (error) {
       this.errorMsg = errorMessage(error);
+      this.setRetry('新建会话', () => {
+        this.createNewSession();
+      });
     }
     this.setBusy(false);
     this.notify();
@@ -984,8 +1033,12 @@ export class AppRuntime {
       await this.openSessionInternal(harness, sessionId, title);
       this.rememberRecentSession(sessionId);
       this.hydrateHistoryImages().catch(() => undefined);
+      this.clearRetry();
     } catch (error) {
       this.errorMsg = errorMessage(error);
+      this.setRetry('重新打开会话', () => {
+        this.openSession(sessionId);
+      });
     }
     this.setBusy(false);
     this.notify();
@@ -1674,9 +1727,21 @@ export class AppRuntime {
     try {
       await harness.sessionPrompt(sessionId, trimmed, requestId,
         this.steerMode ? 'steer' : 'queue', images);
+      this.clearRetry();
     } catch (error) {
       this.errorMsg = errorMessage(error);
       this.generating = false;
+      // 主机没收到：先把乐观插入的气泡撤掉，重试时按原样重发一次，避免重复两条
+      const kept: ChatItem[] = [];
+      for (const item of this.messages) {
+        if (item.id !== `local:${requestId}`) {
+          kept.push(item);
+        }
+      }
+      this.messages = kept;
+      this.setRetry('重新发送', () => {
+        this.sendPrompt(trimmed, images);
+      });
       this.notify();
     }
   }

@@ -15,7 +15,7 @@ import {
   Breakpoint, FoldState, breakpointOf, contentColumnWidth, deviceColumns, foldStateOf,
   isCompactWidth, isExpandedWidth, mascotVisible
 } from '../services/Adaptive';
-import { PickedImage, pickImages } from '../services/ImagePicker';
+import { PickedImage, compressPixelMap, pickImages } from '../services/ImagePicker';
 import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
@@ -609,6 +609,25 @@ struct Index {
         this.scrollChatToBottom();
       }
     }, 240);
+  }
+
+  /** 从剪贴板取图：有图片就压一下挂到待发送区，没有就什么也不做。 */
+  private pasteImageFromClipboard(): void {
+    try {
+      const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      board.getData().then((data: pasteboard.PasteData) => {
+        if (!data.hasType(pasteboard.MIMETYPE_PIXELMAP)) {
+          return;
+        }
+        const pixel: image.PixelMap = data.getPrimaryPixelMap();
+        compressPixelMap(pixel).then((picked: PickedImage) => {
+          this.pendingImages = this.pendingImages.concat([picked]);
+          promptAction.showToast({ message: this.tr('已粘贴图片') });
+        }).catch(() => undefined);
+      }).catch(() => undefined);
+    } catch (error) {
+      // 剪贴板不可用就算了，不打断输入
+    }
   }
 
   /** 从系统相册选图；选完先压再进待发队列。 */
@@ -2943,6 +2962,17 @@ struct Index {
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
+          if (this.runtime.canRetry()) {
+            Text(this.runtime.retryLabel())
+              .fontSize(this.fs(12))
+              .fontColor('#FFFFFF')
+              .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+              .borderRadius(10)
+              .backgroundColor('#F85749')
+              .onClick(() => {
+                this.runtime.retryLastError();
+              })
+          }
           Text('✕')
             .fontSize(this.fs(12))
             .fontColor('#F85749')
@@ -3285,6 +3315,18 @@ struct Index {
           .fontSize(13)
           .fontColor('#F85749')
           .textAlign(TextAlign.Center)
+        if (this.runtime.canRetry()) {
+          Button(this.runtime.retryLabel())
+            .height(36)
+            .fontSize(13)
+            .fontColor('#FFFFFF')
+            .padding({ left: 22, right: 22 })
+            .borderRadius(18)
+            .backgroundColor('#F85749')
+            .onClick(() => {
+              this.runtime.retryLastError();
+            })
+        }
       }
       Blank()
     }
@@ -3455,6 +3497,17 @@ struct Index {
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
+          if (this.runtime.canRetry()) {
+            Text(this.runtime.retryLabel())
+              .fontSize(this.fs(12))
+              .fontColor('#FFFFFF')
+              .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+              .borderRadius(10)
+              .backgroundColor('#F85749')
+              .onClick(() => {
+                this.runtime.retryLastError();
+              })
+          }
           Text('✕')
             .fontSize(this.fs(12))
             .fontColor('#F85749')
@@ -3884,6 +3937,10 @@ struct Index {
                 this.runtime.saveDraft(this.currentSessionId, this.promptInput);
               }, 400);
             })
+            // 粘贴：剪贴板里是图片就直接挂到待发送区（文本仍按默认插入）
+            .onPaste(() => {
+              this.pasteImageFromClipboard();
+            })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
             .onTouch((event: TouchEvent) => {
@@ -4292,7 +4349,34 @@ struct Index {
               this.runtime.openSession(session.sessionId);
             })
             .gesture(LongPressGesture().onAction(() => {
-              this.runtime.archiveSession(session.sessionId);
+              ActionSheet.show({
+                title: formatSessionTitle(session),
+                message: session.cwd.length > 0 ? session.cwd : session.sessionId,
+                sheets: [
+                  {
+                    title: this.runtime.isFavoriteSession(session.sessionId) ? this.tr('取消收藏') : this.tr('收藏'),
+                    action: () => {
+                      this.runtime.toggleFavoriteSession(session.sessionId);
+                    }
+                  },
+                  {
+                    title: this.tr('复制标题'),
+                    action: () => {
+                      const data: pasteboard.PasteData = pasteboard.createData(
+                        pasteboard.MIMETYPE_TEXT_PLAIN, formatSessionTitle(session));
+                      pasteboard.getSystemPasteboard().setData(data).then(() => {
+                        promptAction.showToast({ message: this.tr('已复制标题') });
+                      }).catch(() => undefined);
+                    }
+                  },
+                  {
+                    title: this.tr('归档会话'),
+                    action: () => {
+                      this.runtime.archiveSession(session.sessionId);
+                    }
+                  }
+                ]
+              });
             }))
             }
             .width('100%')

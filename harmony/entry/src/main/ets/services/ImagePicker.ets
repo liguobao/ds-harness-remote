@@ -88,6 +88,33 @@ async function loadAndCompress(uri: string): Promise<PickedImage> {
   return picked;
 }
 
+
+/** 把一个现成的 PixelMap 压成 PickedImage（相册选择与剪贴板粘贴共用）。 */
+export async function compressPixelMap(pixel: image.PixelMap): Promise<PickedImage> {
+  const info: image.ImageInfo = await pixel.getImageInfo();
+  const width: number = info.size.width;
+  const height: number = info.size.height;
+  const longest: number = Math.max(width, height);
+  const scale: number = longest > MAX_EDGE ? MAX_EDGE / longest : 1;
+  // PixelMap.scale 是原地缩放、返回 void
+  if (scale < 1) {
+    await pixel.scale(Math.max(1, Math.round(width * scale)) / width,
+      Math.max(1, Math.round(height * scale)) / height);
+  }
+  const scaled: image.PixelMap = pixel;
+  const packer: image.ImagePacker = image.createImagePacker();
+  const packOptions: image.PackingOption = { format: 'image/jpeg', quality: JPEG_QUALITY };
+  const encoded: ArrayBuffer = await packer.packing(scaled, packOptions);
+  const data: Uint8Array = new Uint8Array(encoded);
+  const picked: PickedImage = new PickedImage();
+  picked.mediaType = 'image/jpeg';
+  picked.base64 = new util.Base64Helper().encodeToStringSync(data);
+  picked.preview = scaled;
+  picked.bytes = data.byteLength;
+  picked.name = 'pasted.jpg';
+  return picked;
+}
+
 function lastNameOf(uri: string): string {
   const cut: number = uri.lastIndexOf('/');
   const name: string = cut >= 0 ? uri.substring(cut + 1) : uri;
