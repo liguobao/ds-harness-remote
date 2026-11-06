@@ -399,12 +399,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       Number(b.id === props.preferredQrProvider) - Number(a.id === props.preferredQrProvider))
     const selectedProvider = oauthProviders.find(item => `oauth:${item.id}` === loginMethod)
     const scanLabel = t('scanWithProvider', { provider: selectedProvider?.displayName ?? '' })
-    const passwordVisible = !savingServer && !serverDirty && (
-      (loginMethod === 'password' && loginMethodManuallySelected.current)
-      || (!providersLoading && !providersFailed && oauthProviders.length === 0)
-    )
-    const showPasswordSwitch = !savingServer && !serverDirty && !providersLoading && (
-      passwordVisible ? orderedQrProviders.length > 0 : (providersFailed || orderedQrProviders.length > 0)
+    const passwordVisible = !savingServer && !serverDirty && loginMethod === 'password' && (
+      loginMethodManuallySelected.current || (!providersLoading && !providersFailed && oauthProviders.length === 0)
     )
 
     const qrLoginTab = (provider: OAuthProviderInfo): unknown => React.createElement('button', {
@@ -1237,10 +1233,14 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 },
                   React.createElement('strong', { className: 'dshRemoteLoginTitle' }, t('signInClient')),
                   React.createElement('span', null, t('signInClientDescription')))),
-              orderedQrProviders.length > 0
-                ? React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
-                  ...orderedQrProviders.map(qrLoginTab))
-                : null,
+              React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
+                ...orderedQrProviders.map(qrLoginTab),
+                React.createElement('button', {
+                  type: 'button', role: 'tab', id: 'dsh-remote-password-tab',
+                  'aria-selected': passwordVisible, 'aria-controls': 'dsh-remote-password-panel',
+                  className: passwordVisible ? 'isActive' : '', disabled: busy || savingServer || serverDirty,
+                  onClick: () => selectLoginMethod('password'),
+                }, t('accountPasswordLogin'))),
               providersLoading ? React.createElement('p', { role: 'status' }, t('loadingLoginProviders')) : null,
               providersFailed ? React.createElement('button', {
                 type: 'button', disabled: busy || savingServer || serverDirty,
@@ -1251,6 +1251,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               passwordVisible
                 ? React.createElement('div', {
                   className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
+                  'aria-labelledby': 'dsh-remote-password-tab',
                 },
                   React.createElement('input', {
                     type: 'email', value: email, disabled: busy, autoComplete: 'username', placeholder: t('account'),
@@ -1262,7 +1263,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   }),
                   React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')),
                   React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))
-                : loginMethod !== 'password' && selectedProvider !== undefined
+                : selectedProvider !== undefined
                   ? React.createElement('div', {
                     className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
                     'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
@@ -1288,20 +1289,6 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                       type: 'button', disabled: busy, onClick: () => setQrExpired(false),
                     }, t('refreshQrCode')) : null)
                   : null,
-              showPasswordSwitch
-                ? React.createElement('button', {
-                  type: 'button', className: 'dshRemotePasswordSwitch',
-                  disabled: busy || savingServer || serverDirty,
-                  onClick: () => {
-                    if (passwordVisible) {
-                      const next = orderedQrProviders[0]
-                      if (next !== undefined) selectLoginMethod(`oauth:${next.id}`)
-                    } else {
-                      selectLoginMethod('password')
-                    }
-                  },
-                }, t(passwordVisible ? 'backToQrLogin' : 'useAccountPassword'))
-                : null,
               React.createElement('div', { className: 'dshRemoteServiceAddress' },
                 React.createElement('span', null, t('currentServiceAddress')),
                 editingServer

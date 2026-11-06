@@ -451,7 +451,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
           ? <ActivityIndicator color={colors.white} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
       </Pressable>
-      <Text style={styles.oauthHint}>{zhCN.setup.passwordHint}</Text>
+      <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text>
     </View>
   )
 
@@ -1303,6 +1303,7 @@ function createStyles(colors: ThemeColors) {
   providerButtonPressed: { opacity: 0.7 },
   providerButtonDisabled: { opacity: 0.5 },
   oauthHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xxs },
+  passwordHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
   retryRow: { alignSelf: 'stretch' },
   orDivider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.sm },
   orLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },

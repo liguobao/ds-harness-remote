@@ -211,7 +211,7 @@ const frFR = {
     google: "Continuer avec Google",
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "E-mail", zhihu: "Continuer avec Zhihu", github: "Continuer avec GitHub", oauthHint: "Un navigateur s'ouvrira pour terminer l'autorisation, puis reviendra ici automatiquement.",
     qr: "Connectez-vous avec le code QR", qrEntryHint: "Appuyez pour afficher le code, puis scannez-le avec votre téléphone", qrScanTitle: "Connectez-vous avec votre téléphone", qrScanHint: "Scannez ce code avec votre téléphone et confirmez sur la page d'autorisation. Cet appareil se connecte automatiquement par la suite.", qrWaiting: "En attendant votre téléphone…", qrExpired: "Ce code QR a expiré. Actualisez et réessayez.", qrRefresh: "Actualiser le code", qrUnsupported: "Ce serveur n'offre pas de connexion QR. Utilisez une autre méthode de connexion.", qrFailed: "La connexion QR n’a pas abouti. Essayer à nouveau.",
-    email: "E-mail", emailPlaceholder: "Entrez votre email", password: "Mot de passe", passwordPlaceholder: "Entrez votre mot de passe", passwordHint: "Uniquement pour les comptes inscrits par invitation ou auto-hébergés ; les comptes DeepSeek officiels ne sont pas pris en charge.",
+    email: "E-mail", emailPlaceholder: "Entrez votre email", password: "Mot de passe", passwordPlaceholder: "Entrez votre mot de passe", passwordHint: "Comptes invités ou hébergés uniquement; pas DeepSeek.",
     server: "Adresse du serveur", serverHint: "Utilisez une adresse HTTPS.", trustTitle: "Protégez vos appareils et vos conversations", trustBody: "Les données de conversation sont cryptées pendant leur transit. Seuls les appareils de confiance connectés au même compte peuvent y accéder.",
   },
   settings: {

@@ -679,17 +679,17 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     expect(qrImg).not.toBeNull()
     expect(findElement(qrTree, (n: any) => n.props?.type === 'password')).toBeNull()
 
-    // Secondary switch reveals password form and can return to QR
-    const switchToPassword = findElement(qrTree, (n: any) => n.props?.className === 'dshRemotePasswordSwitch')
-    expect(switchToPassword?.children?.[0]).toBe('useAccountPassword')
-    switchToPassword.props.onClick()
+    // Flat password tab switches to password form and can return to QR tab
+    const passwordTab = findElement(qrTree, (n: any) => n.props?.id === 'dsh-remote-settings-password-tab')
+    expect(passwordTab).not.toBeNull()
+    passwordTab.props.onClick()
     tree = render()
     expect(findElement(tree, (n: any) => n.props?.type === 'password')).not.toBeNull()
     expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePasswordHint')?.children?.[0]).toBe('passwordHint')
 
-    const backToQr = findElement(tree, (n: any) => n.props?.className === 'dshRemotePasswordSwitch')
-    expect(backToQr?.children?.[0]).toBe('backToQrLogin')
-    backToQr.props.onClick()
+    const qrTab = findElement(tree, (n: any) => n.props?.id === 'dsh-remote-settings-oauth:zhihu-tab')
+    expect(qrTab).not.toBeNull()
+    qrTab.props.onClick()
     const { el: qrImgAgain } = await waitForElement(render, (n: any) => n.type === 'img')
     expect(qrImgAgain).not.toBeNull()
 

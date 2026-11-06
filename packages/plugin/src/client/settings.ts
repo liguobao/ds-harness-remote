@@ -563,10 +563,8 @@ export function createRemotePluginOptions(React: ClientReact) {
       Number(b.id === props.preferredQrProvider) - Number(a.id === props.preferredQrProvider))
     const selectedProvider = oauthProviders.find(item => `oauth:${item.id}` === loginMethod)
     const scanLabel = t('scanWithProvider', { provider: selectedProvider?.displayName ?? '' })
-    const passwordVisible = (loginMethod === 'password' && loginMethodManuallySelected.current)
-      || (!providersLoading && !providersFailed && oauthProviders.length === 0)
-    const showPasswordSwitch = !providersLoading && (
-      passwordVisible ? orderedQrProviders.length > 0 : (providersFailed || orderedQrProviders.length > 0)
+    const passwordVisible = loginMethod === 'password' && (
+      loginMethodManuallySelected.current || (!providersLoading && !providersFailed && oauthProviders.length === 0)
     )
 
     const qrLoginTab = (provider: OAuthProviderInfo): unknown => React.createElement('button', {
@@ -580,10 +578,14 @@ export function createRemotePluginOptions(React: ClientReact) {
       id: 'dsh-remote-inline-signin',
       className: 'dshRemoteInlineSignIn',
     },
-      orderedQrProviders.length > 0
-        ? React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
-          ...orderedQrProviders.map(qrLoginTab))
-        : null,
+      oauthProviders.length === 0 && !providersLoading && !providersFailed ? null : React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
+        ...orderedQrProviders.map(qrLoginTab),
+        React.createElement('button', {
+          type: 'button', role: 'tab', id: 'dsh-remote-settings-password-tab',
+          'aria-selected': passwordVisible, 'aria-controls': 'dsh-remote-settings-password-panel',
+          className: passwordVisible ? 'isActive' : '', disabled: busy,
+          onClick: () => selectLoginMethod('password'),
+        }, t('accountPasswordLogin'))),
       providersLoading ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
       providersFailed ? React.createElement('button', {
         type: 'button', className: 'dshRemoteReconnect', disabled: busy,
@@ -592,6 +594,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       passwordVisible
         ? React.createElement('div', {
           className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-settings-password-panel',
+          'aria-labelledby': 'dsh-remote-settings-password-tab',
         },
           React.createElement('input', {
             type: 'email', value: loginEmail, disabled: busy, autoComplete: 'username', placeholder: t('account'),
@@ -606,7 +609,7 @@ export function createRemotePluginOptions(React: ClientReact) {
             onClick: () => void signInClient(),
           }, t(busy ? 'signingIn' : 'startSignIn')),
           React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))
-        : loginMethod !== 'password' && selectedProvider !== undefined
+        : selectedProvider !== undefined
           ? React.createElement('div', {
             className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-settings-${loginMethod}-panel`,
             'aria-labelledby': `dsh-remote-settings-${loginMethod}-tab`,
@@ -663,19 +666,6 @@ export function createRemotePluginOptions(React: ClientReact) {
             React.createElement('strong', null, scanLabel),
             React.createElement('p', null, t('scanLoginHint')))
           : null,
-      showPasswordSwitch
-        ? React.createElement('button', {
-          type: 'button', className: 'dshRemotePasswordSwitch', disabled: busy,
-          onClick: () => {
-            if (passwordVisible) {
-              const next = orderedQrProviders[0]
-              if (next !== undefined) selectLoginMethod(`oauth:${next.id}`)
-            } else {
-              selectLoginMethod('password')
-            }
-          },
-        }, t(passwordVisible ? 'backToQrLogin' : 'useAccountPassword'))
-        : null,
     )
 
     return React.createElement(props.view === 'page' ? 'div' : 'li', {
