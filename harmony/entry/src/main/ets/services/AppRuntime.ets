@@ -808,6 +808,15 @@ export class AppRuntime {
     return harness.speechTranscribe(audioBase64, '');
   }
 
+  /** 用户手动关掉错误提示。 */
+  clearError(): void {
+    if (this.errorMsg.length === 0) {
+      return;
+    }
+    this.errorMsg = '';
+    this.notify();
+  }
+
   /** 收藏/取消收藏一个会话。 */
   toggleFavoriteSession(sessionId: string): void {
     if (sessionId.length === 0) {

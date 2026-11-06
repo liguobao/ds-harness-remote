@@ -2663,10 +2663,31 @@ struct Index {
         .padding({ left: 20, right: 20, bottom: 8 })
       }
       if (this.errorMsg.length > 0) {
-        Text(this.errorMsg)
-          .fontSize(13)
-          .fontColor('#F85749')
-          .padding({ left: 20, right: 20, bottom: 8 })
+        Row({ space: 8 }) {
+          Column()
+            .width(3)
+            .height(16)
+            .borderRadius(1.5)
+            .backgroundColor('#F85749')
+          Text(this.errorMsg)
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+            .onClick(() => {
+              this.runtime.clearError();
+            })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor('rgba(248,87,73,0.10)')
+        .borderRadius(10)
+        .margin({ left: 20, right: 20, bottom: 8 })
       }
       List({ space: 12 }) {
         ForEach(this.devices, (device: RemoteHostDevice) => {
@@ -3153,12 +3174,31 @@ struct Index {
         .height(0.5)
         .backgroundColor(this.pal().border)
       if (this.errorMsg.length > 0) {
-        Text(this.errorMsg)
-          .fontSize(12)
-          .fontColor('#F85749')
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .padding({ left: 16, right: 16, top: 8 })
+        Row({ space: 8 }) {
+          Column()
+            .width(3)
+            .height(16)
+            .borderRadius(1.5)
+            .backgroundColor('#F85749')
+          Text(this.errorMsg)
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(12))
+            .fontColor('#F85749')
+            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+            .onClick(() => {
+              this.runtime.clearError();
+            })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor('rgba(248,87,73,0.10)')
+        .borderRadius(10)
+        .margin({ left: 16, right: 16, top: 6 })
       }
       List({ scroller: this.scroller, space: 14 }) {
         if (this.messages.length === 0) {
