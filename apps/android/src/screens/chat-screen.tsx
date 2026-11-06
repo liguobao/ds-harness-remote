@@ -554,7 +554,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const pickMode = async (preset: string) => {
     setModePickerOpen(false)
-    if (preset === session.agentPreset) return
+    if (!connected || preset === session.agentPreset) return
     const applied = await selectAgentPreset(preset)
     if (!applied) {
       Alert.alert(
@@ -573,6 +573,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const sessionBlank = visibleMessages.length === 0 && session.blank !== false
 
   const startNewSession = async () => {
+    if (!connected) {
+      Alert.alert(strings.chat.newChatFailedTitle, strings.chat.offlineNotice)
+      return
+    }
     const now = Date.now()
     if (now - lastNewSessionTimeRef.current < 800) return
     if (creatingSessionRef.current || newSessionPending || busy !== undefined) return
@@ -603,12 +607,20 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const sendPrompt = async (prompt: CustomPrompt) => {
     setPromptsPickerOpen(false)
+    if (!connected) {
+      Alert.alert(strings.chat.toolPromptSendFailed, strings.chat.offlineNotice)
+      return
+    }
     const outcome = await sendMessage(prompt.text)
     if (outcome === 'sent') AccessibilityInfo.announceForAccessibility(strings.chat.toolPromptSent(prompt.title))
     else if (outcome === 'rejected') Alert.alert(strings.chat.toolPromptSendFailed, strings.chat.toolPromptSendFailed)
   }
 
   const moveSessionToWorkspace = async (workspace: WorkspaceView) => {
+    if (!connected) {
+      Alert.alert(strings.chat.moveFailedTitle, strings.chat.offlineNotice)
+      return
+    }
     const previousId = session.sessionId
     const opened = await createSession(workspace.workspaceId)
     if (!opened) {
@@ -622,6 +634,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const pickWorkspace = (workspace: WorkspaceView) => {
     setWorkspacePickerOpen(false)
+    if (!connected) {
+      Alert.alert(strings.chat.moveFailedTitle, strings.chat.offlineNotice)
+      return
+    }
     if (workspace.sessionIds.includes(session.sessionId)) return
     if (sessionBlank) {
       void moveSessionToWorkspace(workspace)
@@ -672,7 +688,15 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         <View style={styles.connectionBanner} accessibilityRole="alert">
           <View style={styles.connectionDot} />
           <Text style={styles.connectionBannerText}>
-            {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
+            {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offlineNotice}
+          </Text>
+        </View>
+      )}
+      {connected && busy === `session:${session.sessionId}` && (
+        <View style={styles.connectionBanner} accessibilityRole="summary">
+          <View style={[styles.connectionDot, { backgroundColor: colors.primary }]} />
+          <Text style={styles.connectionBannerText}>
+            {strings.chat.syncingHistory}
           </Text>
         </View>
       )}

@@ -271,7 +271,19 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   })
 
   const open = async (session: RemoteSession) => {
-    if (await openSession(session)) onSession(session)
+    // The cached snapshot is on screen as soon as the selection lands, so enter
+    // the conversation before the authoritative history request finishes.
+    if (session.sessionId === useAppStore.getState().selectedSession?.sessionId) {
+      onSession(session)
+      return
+    }
+    const pending = openSession(session)
+    if (session.sessionId === useAppStore.getState().selectedSession?.sessionId) {
+      onSession(session)
+      await pending
+      return
+    }
+    if (await pending) onSession(session)
   }
 
   const refresh = async () => {
