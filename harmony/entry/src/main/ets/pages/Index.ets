@@ -848,10 +848,15 @@ struct Index {
   private visibleSessions(): HarnessRemoteSession[] {
     const base: HarnessRemoteSession[] = this.sessionSearchActive
       ? this.sessionSearchResults : this.sessions;
-    if (!this.favoriteOnly) {
-      return base;
-    }
-    return base.filter((session: HarnessRemoteSession) => this.runtime.isFavoriteSession(session.sessionId));
+    const list: HarnessRemoteSession[] = this.favoriteOnly
+      ? base.filter((session: HarnessRemoteSession) => this.runtime.isFavoriteSession(session.sessionId))
+      : base.slice();
+    // 正在跑的会话排前面，其余保持服务端给的时间顺序
+    return list.sort((a: HarnessRemoteSession, b: HarnessRemoteSession) => {
+      const aRunning: number = a.running ? 1 : 0;
+      const bRunning: number = b.running ? 1 : 0;
+      return bRunning - aRunning;
+    });
   }
 
   /** 最近访问的会话标题；列表里没有（已归档/换主机）时给个短 id。 */
