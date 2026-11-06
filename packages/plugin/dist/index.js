@@ -100167,18 +100167,18 @@ function apply(ctx, entry = void 0) {
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
 }
-function applyTuiHost(ctx, entry, onRuntime) {
+function applyTuiHost(ctx, entry) {
   const readConfig = () => readEntryConfig(entry);
   const entryId = locateEntryId(ctx);
-  ctx.inject(["settings", "typertGateway", "commands"], async (runtimeContext) => {
+  ctx.inject(["settings", "typertGateway"], async (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     if (!new TypertGatewaySwitch(gateway).supportsCarrier()) {
       throw new Error("dsh-TUI Remote requires the official Typert Gateway carrier.");
     }
-    await activate(runtimeContext, readConfig, entryId, { requireRemoteEvents: true, onRuntime });
+    await activate(runtimeContext, readConfig, entryId, true);
   });
 }
-async function activate(ctx, readConfig, entryId, tui) {
+async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const settings = ctx.get("settings");
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
   const connection = ctx.get("connection");
@@ -100238,7 +100238,7 @@ async function activate(ctx, readConfig, entryId, tui) {
       }
     };
   };
-  if (tui?.requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
+  if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
   const subprocess = ctx.get("subprocess", false);
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
@@ -100300,7 +100300,6 @@ async function activate(ctx, readConfig, entryId, tui) {
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
       ctx.dshRemote = runtime;
-      tui?.onRuntime(runtime, next);
       if (clientRuntime !== void 0) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
         else {
@@ -100315,7 +100314,6 @@ async function activate(ctx, readConfig, entryId, tui) {
   };
   const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
   ctx.provide("dshRemote", runtime);
-  tui?.onRuntime(runtime, config2);
   if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {

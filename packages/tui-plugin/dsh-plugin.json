@@ -10,29 +10,6 @@
       "apiVersion": "v1alpha1"
     }
   },
-  "requires": {
-    "contracts": [
-      {
-        "apiVersion": "commands.dsh/v1alpha1",
-        "kind": "Command"
-      }
-    ]
-  },
-  "contributes": {
-    "commands": [
-      {
-        "id": "ds-harness.remote",
-        "title": "Manage Remote Host login and connection status"
-      }
-    ]
-  },
-  "permissions": [
-    {
-      "name": "commands.invoke",
-      "scope": "ds-harness.remote",
-      "reason": "run /remote status, login, and logout from dsh-TUI"
-    }
-  ],
   "subscriptions": [],
   "license": "MIT",
   "source": {

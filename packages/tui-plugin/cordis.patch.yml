@@ -31,7 +31,7 @@
       name: '@deepseek-ai/dsh-workspace-changes'
     - id: ds-harness-remote-tui
       name: 'ds-harness-remote-tui'
-      inject: [settings, typertGateway, commands]
+      inject: [settings, typertGateway]
       config:
         enabled: true
         role: host

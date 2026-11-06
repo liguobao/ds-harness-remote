@@ -25,7 +25,7 @@ Do not claim that dsh-TUI works until a real profile passes the checks below.
 2. List the official Host API packages that the patch must load.
 3. Check that the profile provides `connection`, `typertGateway`, and the Host Remote event source.
 4. Report a missing service before the Host advertises usable Remote access.
-5. Restore the terminal login, status, and logout commands in the separate package.
+5. Use the existing `ds-harness-remote` CLI for terminal login and status.
 6. Keep the existing Remote authentication and peer ownership checks.
 
 The package list needs a check against the selected Harness version.
