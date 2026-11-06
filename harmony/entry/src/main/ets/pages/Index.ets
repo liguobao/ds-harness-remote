@@ -211,6 +211,8 @@ struct Index {
   @State showSessions: boolean = false;
   /** PC：鼠标悬停在哪一行（会话行/主机卡），用来做 hover 高亮。 */
   @State hoverRowId: string = '';
+  /** PC：鼠标停在哪个消息上（气泡旁出快捷操作）。 */
+  @State hoverMessageId: string = '';
   /** 分栏分隔条拖动中 / 悬停中。 */
   @State splitDragging: boolean = false;
   @State splitHover: boolean = false;
@@ -5010,6 +5012,45 @@ struct Index {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
 
+      // 定时任务摘要：最多两条，其余进面板看
+      if (this.runtime.schedules.length > 0) {
+        Column({ space: 4 }) {
+          Row({ space: 6 }) {
+            Text(this.tr('定时任务'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+            Blank()
+            Text(this.runtime.schedules.length + this.tr(' 个'))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+              .onClick(() => {
+                this.schedulesOpen = true;
+              })
+          }
+          .width('100%')
+          ForEach(this.runtime.schedules.slice(0, 2), (schedule: HarnessSchedule) => {
+            Column({ space: 1 }) {
+              Text(schedule.title.length > 0 ? schedule.title : schedule.id)
+                .fontSize(this.fs(11))
+                .fontColor(this.pal().text2)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+              Text(this.scheduleSummary(schedule))
+                .fontSize(this.fs(9))
+                .fontColor(this.pal().text3)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+          }, (schedule: HarnessSchedule) => 'insp-' + schedule.id)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+
       // 快捷入口
       Column({ space: 6 }) {
         Text(this.tr('快捷入口'))
@@ -5084,6 +5125,7 @@ struct Index {
         this.runtime.refreshModelCatalog();
       }
       this.runtime.refreshPermissionState();
+      this.runtime.loadSchedules();
     })
   }
 
@@ -5734,9 +5776,16 @@ struct Index {
             this.offerMessageActions(item);
           }
         })
+        .onHover((isHover: boolean) => {
+          // 鼠标（PC）停在气泡上才出快捷操作；触屏不走这里，行为不变
+          this.hoverMessageId = isHover ? item.id : '';
+        })
       }
       .width('100%')
       .justifyContent(FlexAlign.End)
+      if (this.hoverMessageId === item.id) {
+        this.MessageQuickActions(item, true)
+      }
     } else if (item.kind === 'assistant') {
       this.AssistantRow(item)
     } else if (item.kind === 'tool') {
@@ -6241,6 +6290,55 @@ struct Index {
     });
   }
 
+  /** PC 鼠标悬停时贴在气泡下方的快捷操作（复制 / 引用 / 分叉）。 */
+  @Builder
+  MessageQuickActions(item: ChatItem, alignEnd: boolean) {
+    Row({ space: 6 }) {
+      Text(this.tr('复制'))
+        .fontSize(this.fs(10))
+        .fontColor(this.pal().text3)
+        .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+        .backgroundColor(this.pal().chip)
+        .borderRadius(7)
+        .onClick(() => {
+          const data: pasteboard.PasteData = pasteboard.createData(
+            pasteboard.MIMETYPE_TEXT_PLAIN, item.text);
+          pasteboard.getSystemPasteboard().setData(data).then(() => {
+            promptAction.showToast({ message: this.tr('已复制') });
+          }).catch(() => undefined);
+        })
+      if (item.text.length > 0) {
+        Text(this.tr('引用'))
+          .fontSize(this.fs(10))
+          .fontColor(this.pal().text3)
+          .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(7)
+          .onClick(() => {
+            const quoted: string = item.text.split('\n')
+              .map((line: string) => '> ' + line).join('\n') + '\n\n';
+            this.promptInput = quoted + this.promptInput;
+            this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+            promptAction.showToast({ message: this.tr('已引用到输入框') });
+          })
+      }
+      if (item.seq > 0 && this.runtime.currentSessionId.length > 0) {
+        Text(this.tr('分叉'))
+          .fontSize(this.fs(10))
+          .fontColor(this.pal().text3)
+          .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(7)
+          .onClick(() => {
+            this.runtime.forkCurrentSession(item.seq);
+          })
+      }
+    }
+    .width('100%')
+    .justifyContent(alignEnd ? FlexAlign.End : FlexAlign.Start)
+    .padding({ top: 2 })
+  }
+
   /** 长按消息：复制正文 / 从这里分叉（分叉不再占用长按默认动作）。 */
   private offerMessageActions(item: ChatItem): void {
     this.messageActionText = item.text.length > 0 ? item.text : item.summary;
@@ -6361,10 +6459,16 @@ struct Index {
             this.offerMessageActions(item);
           }
         })
+        .onHover((isHover: boolean) => {
+          this.hoverMessageId = isHover ? item.id : '';
+        })
       }
       .width('88%')
       .constraintSize({ maxWidth: 780 })
       .justifyContent(FlexAlign.Start)
+      if (this.hoverMessageId === item.id) {
+        this.MessageQuickActions(item, false)
+      }
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
