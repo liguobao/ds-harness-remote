@@ -1,4 +1,4 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, ShieldAlert, Terminal, X } from 'lucide-react-native'
+import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { IconButton } from '../../ui/components'
@@ -24,6 +24,7 @@ type Props = {
   permissionSelecting: boolean
   permissionDisabled: boolean
   permissionLabel: string | undefined
+  onReferenceChat?: () => void
   onOpenWorkspace: () => void
   onOpenMode: () => void
   onOpenTools: () => void
@@ -33,7 +34,7 @@ type Props = {
 export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPicking,
   takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
-  permissionDisabled, permissionLabel, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions }: Props) {
+  permissionDisabled, permissionLabel, onReferenceChat, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const plusMenuListMaxHeight = usePickerListMaxHeight()
@@ -85,6 +86,18 @@ export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPi
               <Text style={styles.plusCardText}>{strings.chat.files}</Text>
             </Pressable>
           </View>
+          {onReferenceChat !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="引用对话"
+              onPress={() => { onClose(); onReferenceChat() }}
+              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
+            >
+              <MessageSquare size={20} color={colors.primary} />
+              <Text style={styles.plusMenuOptionText}>引用对话</Text>
+              <ChevronRight size={16} color={colors.muted} />
+            </Pressable>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.openWorkspaces}

@@ -96,6 +96,8 @@ import { useLiveSessionStatus } from './device-screens'
 import { BotModeScreen } from './bot-mode-screen'
 import { HostSessionsDrawer } from './host-sessions-drawer'
 import { PluginsModal } from './plugins-modal'
+import { ReferenceChatModal, ReferencedChatPills } from './bot/reference-chat-modal'
+import type { ReferenceChatCandidate } from './bot/at-menu'
 import { SessionToolsPanel } from './session-tools-panel'
 
 import { browseKey, browseScope, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
@@ -250,6 +252,8 @@ export function ChatScreen({
     session, memoryKey, images, setImages, stagedFiles, setStagedFiles, sessionGenerationRef,
   })
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [referenceChatOpen, setReferenceChatOpen] = useState(false)
+  const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
   const [modePickerOpen, setModePickerOpen] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
@@ -373,6 +377,7 @@ export function ChatScreen({
   useChatBackHandler(composerInputRef, () => onBackRef.current(), [
     { open: composerExpanded, close: () => setComposerExpanded(false) },
     { open: plusMenuOpen, close: () => { Keyboard.dismiss(); setPlusMenuOpen(false) } },
+    { open: referenceChatOpen, close: () => setReferenceChatOpen(false) },
     { open: modelPickerOpen, close: () => setModelPickerOpen(false) },
     { open: modePickerOpen, close: () => setModePickerOpen(false) },
     { open: permissionPickerOpen, close: () => setPermissionPickerOpen(false) },
@@ -385,10 +390,18 @@ export function ChatScreen({
     { open: trajectory, close: () => setTrajectory(false) },
   ])
 
+  const botTeamState = useBotTeamStore(state => state.state)
+
   const openLink = useCallback((href: string) => {
     // 1. Session reference navigation: dsh-session:<base64url>
     const targetSessionId = decodeSessionMentionUri(href)
     if (targetSessionId !== undefined) {
+      const matchedBot = botTeamState?.bots.find(entry => entry.sessionId === targetSessionId)
+      if (matchedBot !== undefined) {
+        onBotModeChange?.(true)
+        onSelectBot?.(matchedBot.id)
+        return
+      }
       const targetSession = sessions.find(candidate => candidate.sessionId === targetSessionId)
       if (targetSession !== undefined) {
         void openSession(targetSession)
@@ -404,13 +417,12 @@ export function ChatScreen({
     if (path === undefined) return
     setFileLinkPath(path)
     setToolsMode('files')
-  }, [openSession, session?.backend, sessions])
+  }, [openSession, session?.backend, sessions, botTeamState?.bots, onBotModeChange, onSelectBot])
 
   const connected = connection.phase === 'connected' && !reconnectingSession
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const replyActive = connected && (busy === 'send-message' || busy === 'stop-session' || (session?.running ?? false) || hasActiveChatItem)
 
-  const botTeamState = useBotTeamStore(state => state.state)
   const lastAgentSessionByScopeRef = useRef<Record<string, typeof session>>({})
   useEffect(() => {
     if (!botMode && session !== undefined && !isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)) {
@@ -620,7 +632,10 @@ export function ChatScreen({
     // Read the live ref: the render-closure `draft` can lag the last keystrokes
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
-    const text = submittedDraft.trim()
+    const rawText = submittedDraft.trim()
+    const submittedReferences = stagedReferences
+    const refPrefix = submittedReferences.map(item => item.mentionText.trim()).join(' ')
+    const text = [refPrefix, rawText].filter(Boolean).join(' ')
     const submittedQuotes = quotes
     const submittedImages = images
     const submittedFiles = stagedFiles
@@ -653,6 +668,7 @@ export function ChatScreen({
     setQuotes([])
     setImages([])
     setStagedFiles([])
+    setStagedReferences([])
     setMentionType(null)
     resetSelection()
     const targetSessionId = session.sessionId
@@ -668,6 +684,7 @@ export function ChatScreen({
         setDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
         setQuotes(previous => previous.length === 0 ? submittedQuotes : [...submittedQuotes, ...previous])
         setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
+        setStagedReferences(previous => previous.length === 0 ? submittedReferences : [...submittedReferences, ...previous])
         setStagedFiles(current => {
           const combined = [...submittedFiles, ...current]
           let acc = 0
@@ -754,7 +771,7 @@ export function ChatScreen({
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const sendReady = connected && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
-  const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0
+  const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
   const compactRunning = replyActive && !hasComposerContent && !composingDuringRun
   const stopping = busy === 'stop-session'
   const composerDisabled = !connected || permissionSelecting
@@ -1035,6 +1052,10 @@ export function ChatScreen({
             ))}
           </ScrollView>
         )}
+        <ReferencedChatPills
+          items={stagedReferences}
+          onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
+        />
         <ChatComposer
           backend={session.backend} draft={draft} input={mentionInput}
           quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
@@ -1077,8 +1098,23 @@ export function ChatScreen({
         permissionsAvailable={permissions !== undefined} permissionSelecting={permissionSelecting}
         permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
         permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}
+        onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
         onOpenWorkspace={() => setWorkspacePickerOpen(true)} onOpenMode={() => setModePickerOpen(true)}
         onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
+      />
+
+      <ReferenceChatModal
+        visible={referenceChatOpen}
+        currentSessionId={session.sessionId}
+        botState={botTeamState}
+        onClose={() => setReferenceChatOpen(false)}
+        onPick={(_mentionText, candidate) => {
+          setStagedReferences(current =>
+            current.some(item => item.sessionId === candidate.sessionId)
+              ? current
+              : [...current, candidate],
+          )
+        }}
       />
 
       <ModelPicker

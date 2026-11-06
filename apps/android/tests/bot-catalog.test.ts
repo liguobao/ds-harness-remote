@@ -2,6 +2,8 @@ import { AbortController as NativeAbortController } from 'abort-controller'
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { BotRemoteClient, botMessageRequest, parseBotState, type BotOperation } from '../src/services/bot-catalog'
+import { buildBotMentionRows, buildReferenceChatGroups, insertReferenceAtSelection } from '../src/screens/bot/at-menu'
+import { sessionMentionText } from '../src/ui/mention-helpers'
 import type { RemoteSession } from '../src/types'
 
 const botState = () => ({ bots: [{ id: 'bot', sessionId: 'part-2', name: 'Bot' }], rooms: [{ id: 'room', name: 'Team', members: ['bot', 'other'] }], mainBotIds: ['bot'] })
@@ -76,6 +78,39 @@ describe('Android Bot client authority', () => {
       if (row.expected) await expect(client.resolveSession(row.id)).resolves.toMatchObject({ session: { sessionId: row.expected } })
       else await expect(client.resolveSession(row.id)).rejects.toThrow()
     } })))
+
+    const team = parseBotState({
+      bots: [
+        { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', role: 'Lead', main: true },
+        { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs' },
+      ],
+      rooms: [{ id: 'room-1', sessionId: 'room-part-2', ownParts: ['room-part-1'], name: 'Core Team', members: ['chief', 'writer'] }],
+      mainBotId: 'chief',
+    })
+    const directMentions = buildBotMentionRows({ state: team, currentBotId: 'chief' })
+    expect(directMentions.map(item => item.text)).toEqual(['@Writer '])
+    const roomMentions = buildBotMentionRows({ state: team, currentRoom: team.rooms[0] })
+    expect(roomMentions.map(item => item.text)).toEqual(['@Chief ', '@Writer ', '@所有人 '])
+
+    const refGroups = buildReferenceChatGroups({
+      state: team,
+      currentSessionId: 'chief-part-2',
+      currentBotId: 'chief',
+      sessions: [
+        { ...session('chief-part-2'), title: 'Chief' },
+        { ...session('writer-part-1'), title: 'Writer' },
+        { ...session('room-part-2'), title: 'Core Team' },
+        { ...session('room-part-1'), title: 'Core Team Part 1' },
+        { ...session('dsh-1'), title: '架构讨论', updatedAt: 200 },
+        { ...session('dsh-sub'), title: 'Subagent', origin: 'subagent', parentSessionId: 'dsh-1', updatedAt: 300 },
+      ],
+    })
+    expect(refGroups.bots).toHaveLength(1)
+    expect(refGroups.bots[0]?.mentionLabel).toBe('与 Writer 的对话')
+    expect(refGroups.bots[0]?.mentionText).toBe(sessionMentionText('writer-part-1', '与 Writer 的对话'))
+    expect(refGroups.conversations.map(item => item.sessionId)).toEqual(['dsh-1'])
+    const inserted = insertReferenceAtSelection('请参考', { start: 3, end: 3 }, refGroups.conversations[0]!.mentionText)
+    expect(inserted.text).toBe(`请参考 ${refGroups.conversations[0]!.mentionText}`)
   })
 
   it('keeps roster previews scoped to current Harness sessions and rejects stale catalog responses', async () => {

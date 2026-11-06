@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native'
-import { ArrowUp, Square } from 'lucide-react-native'
+import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
-import { markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
+import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
+import { detectMention, MentionPopover, splitDraftSegments, type MentionGroup } from '../../ui/mention-popover'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatActivityGroup, ChatItemView } from '../chat/messages'
@@ -16,11 +17,14 @@ import { useSessionUiArtifacts } from '../chat/use-session-ui-artifacts'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import type { ToolActivity } from '../../types'
 import type { UiArtifact } from '../../state/ui-artifacts'
+import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
+import { BotAvatar } from './avatar'
 import { BotQuestion, BotViewCard } from './cards'
 import { parseBotReplies } from './replies'
 import { BotReplies } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
+import { BotPlusMenuModal, ReferenceChatModal, ReferencedChatPills } from './reference-chat-modal'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
 import { SessionToolsPanel } from '../session-tools-panel'
@@ -49,7 +53,19 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const respondQuestion = useAppStore(store => store.respondQuestion)
   const stopSession = useAppStore(store => store.stopSession)
   const [draft, setDraft] = useState('')
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const [selection, setSelection] = useState({ start: 0, end: 0 })
+  const selectionRef = useRef({ start: 0, end: 0 })
+  const inputRef = useRef<TextInput>(null)
+  const [atQuery, setAtQuery] = useState<string | null>(null)
+  const atSpanStartRef = useRef(0)
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [referenceChatOpen, setReferenceChatOpen] = useState(false)
+  const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
   const [fileLinkPath, setFileLinkPath] = useState<string>()
+  const sessions = useAppStore(store => store.sessions)
+  const openSession = useAppStore(store => store.openSession)
   const connected = useAppStore(store => store.connection.phase === 'connected')
   const [progress, setProgress] = useState<BotObject[]>([])
   const [earlier, setEarlier] = useState<BotObject[]>([])
@@ -74,6 +90,19 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (openSafeExternalUrl(href)) return
 
     if (!ready || !connected) return
+    const targetSessionId = decodeSessionMentionUri(href)
+    if (targetSessionId !== undefined) {
+      const matchedBot = state.bots.find(entry => entry.sessionId === targetSessionId)
+      if (matchedBot !== undefined) {
+        if (matchedBot.id !== bot?.id) onSelectBot(matchedBot.id)
+        return
+      }
+      const matchedSession = sessions.find(item => item.sessionId === targetSessionId)
+      if (matchedSession !== undefined) {
+        void openSession(matchedSession)
+      }
+      return
+    }
     const target = botMentionTarget(href, state.bots)
     if (target !== undefined) {
       if (target !== bot?.id) onSelectBot(target)
@@ -81,8 +110,81 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     }
     const path = markdownFilePath(href)
     if (path !== undefined) setFileLinkPath(path)
-  }, [state.bots, bot?.id, onSelectBot, ready, connected])
-  useEffect(() => { setFileLinkPath(undefined) }, [session.sessionId])
+  }, [state.bots, bot?.id, onSelectBot, ready, connected, sessions, openSession])
+  useEffect(() => { setFileLinkPath(undefined); setAtQuery(null); setPlusMenuOpen(false); setReferenceChatOpen(false); setStagedReferences([]) }, [session.sessionId])
+
+  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
+  const updateAtMention = (nextText: string, cursor: number) => {
+    const detected = detectMention(nextText, cursor)
+    if (detected === undefined || detected.type !== 'context') {
+      setAtQuery(null)
+      return
+    }
+    atSpanStartRef.current = detected.start
+    setAtQuery(detected.query)
+  }
+  const handleDraftChange = (nextText: string) => {
+    if (nextText === draftRef.current) return
+    const delta = nextText.length - draftRef.current.length
+    draftRef.current = nextText
+    setDraft(nextText)
+    const cursor = Math.max(0, Math.min(nextText.length, selectionRef.current.end + delta))
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    updateAtMention(nextText, cursor)
+  }
+  const handleSelectionChange = (event: { nativeEvent: { selection: { start: number; end: number } } }) => {
+    const nextSel = event.nativeEvent.selection
+    if (nextSel.start === selectionRef.current.start && nextSel.end === selectionRef.current.end) return
+    selectionRef.current = nextSel
+    setSelection(nextSel)
+    if (nextSel.start === nextSel.end) updateAtMention(draftRef.current, nextSel.end)
+  }
+  const insertAtMention = (mentionText: string) => {
+    const start = atSpanStartRef.current
+    const end = selectionRef.current.end
+    const current = draftRef.current
+    const nextText = current.slice(0, start) + mentionText + current.slice(end)
+    const nextCursor = start + mentionText.length
+    draftRef.current = nextText
+    setDraft(nextText)
+    selectionRef.current = { start: nextCursor, end: nextCursor }
+    setSelection({ start: nextCursor, end: nextCursor })
+    setAtQuery(null)
+    inputRef.current?.focus()
+  }
+  const handlePickReferencedChat = (_mentionText: string, candidate: ReferenceChatCandidate) => {
+    setStagedReferences(current =>
+      current.some(item => item.sessionId === candidate.sessionId)
+        ? current
+        : [...current, candidate],
+    )
+    setAtQuery(null)
+    inputRef.current?.focus()
+  }
+  const botAtMentionGroups = useMemo<MentionGroup[]>(() => {
+    if (atQuery === null) return []
+    const rows = buildBotMentionRows({
+      state,
+      currentBotId: bot?.id,
+      currentRoom: room,
+      query: atQuery,
+    })
+    if (rows.length === 0) return []
+    return [{
+      key: 'bots',
+      title: s.bots.title,
+      items: rows.map(row => ({
+        id: row.id,
+        icon: row.bot
+          ? ({ size = 16 }) => <BotAvatar bot={row.bot!} size={size + 6} />
+          : Users,
+        title: row.label,
+        description: row.description,
+        onPress: () => insertAtMention(row.text),
+      })),
+    }]
+  }, [atQuery, state, bot?.id, room])
   const disabled = busy || !active || !ready
     || (bot !== undefined && bot.sessionId !== session.sessionId)
     || (room !== undefined && (room.sessionId || room.id) !== session.sessionId)
@@ -104,7 +206,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     return () => { control.abort(); clearTimeout(timer) }
   }, [client, room?.id, active])
   const send = async () => {
-    const submitted = draft.trim()
+    const rawDraft = draft.trim()
+    const prefix = stagedReferences.map(item => item.mentionText.trim()).join(' ')
+    const submitted = [prefix, rawDraft].filter(Boolean).join(' ')
     if (!submitted || disabled) return
     atEnd.current = true
     followEnd()
@@ -112,7 +216,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     try {
       const message = botMessageRequest(state, bot?.id ?? room?.id ?? '', submitted)
       const result = await perform(message.endpoint, message.payload)
-      if (mounted.current && result.ok) setDraft(current => current.trim() === submitted ? '' : current)
+      if (mounted.current && result.ok) {
+        draftRef.current = ''
+        setDraft(current => current.trim() === rawDraft ? '' : current)
+        setStagedReferences([])
+      }
     } catch (reason) { setError(reason instanceof Error ? reason.message : s.bots.unavailable) }
   }
   const earlierPage = async () => {
@@ -346,11 +454,63 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       </View>} />
     {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     {bot && state.btwSupported && <Text style={[styles.muted, { paddingHorizontal: 12 }]}>{s.bots.btwHint}</Text>}
+    {atQuery !== null && botAtMentionGroups.length > 0 && (
+      <View style={{ paddingHorizontal: 8 }}>
+        <MentionPopover
+          groups={botAtMentionGroups}
+          onDismiss={() => setAtQuery(null)}
+          emptyText={s.mention.noMatches}
+        />
+      </View>
+    )}
+    <ReferencedChatPills
+      items={stagedReferences}
+      onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
+    />
     <View style={styles.composer}>
-      <TextInput accessibilityLabel={room ? s.bots.groupMessage : s.bots.message} placeholder={room ? s.bots.groupMessage : s.bots.message} placeholderTextColor={colors.muted} style={[styles.input, styles.draft]} multiline editable={!disabled} value={draft} onChangeText={setDraft} />
+      <IconButton
+        label={s.chat.moreActions}
+        icon={Plus}
+        disabled={disabled}
+        onPress={() => setPlusMenuOpen(true)}
+      />
+      <TextInput
+        ref={inputRef}
+        accessibilityLabel={room ? s.bots.groupMessage : s.bots.message}
+        placeholder={room ? s.bots.groupMessage : s.bots.message}
+        placeholderTextColor={colors.muted}
+        style={[styles.input, styles.draft]}
+        multiline
+        editable={!disabled}
+        selection={selection}
+        onChangeText={handleDraftChange}
+        onSelectionChange={handleSelectionChange}
+      >
+        <Text>
+          {draftSegments.map((segment, index) => (
+            <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
+              {segment.text}
+            </Text>
+          ))}
+        </Text>
+      </TextInput>
       {selected?.running && <IconButton label={s.bots.stop} icon={Square} disabled={disabled} onPress={() => void stopSession()} />}
-      {busy ? <ActivityIndicator color={colors.primary} /> : <IconButton label={s.bots.send} icon={ArrowUp} tint={colors.primary} disabled={disabled || !draft.trim()} onPress={() => void send()} />}
+      {busy ? <ActivityIndicator color={colors.primary} /> : <IconButton label={s.bots.send} icon={ArrowUp} tint={colors.primary} disabled={disabled || (!draft.trim() && stagedReferences.length === 0)} onPress={() => void send()} />}
     </View>
+    <BotPlusMenuModal
+      visible={plusMenuOpen}
+      onClose={() => setPlusMenuOpen(false)}
+      onReferenceChat={() => setReferenceChatOpen(true)}
+      onOpenSchedules={() => void perform('schedules')}
+    />
+    <ReferenceChatModal
+      visible={referenceChatOpen}
+      currentSessionId={session.sessionId}
+      currentBotId={bot?.id}
+      botState={state}
+      onClose={() => setReferenceChatOpen(false)}
+      onPick={(_mentionText, candidate) => handlePickReferencedChat(_mentionText, candidate)}
+    />
     {fileLinkPath !== undefined && connected && ready && <SessionToolsPanel
       key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}
       initialFile={fileLinkPath} onClose={() => setFileLinkPath(undefined)} />}
