@@ -3857,6 +3857,21 @@ struct Index {
         .width('100%')
         .height(0.5)
         .backgroundColor(this.pal().border)
+      if ((this.sessionSearchActive ? this.sessionSearchResults.length : this.sessions.length) === 0) {
+        Column({ space: 6 }) {
+          Text(this.sessionSearchActive ? this.tr('没有匹配的会话') : this.tr('还没有会话'))
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text3)
+          if (!this.sessionSearchActive) {
+            Text(this.tr('点右上角「新建」开一个'))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+          }
+        }
+        .width('100%')
+        .padding({ top: 18, bottom: 12 })
+        .alignItems(HorizontalAlign.Center)
+      }
       List({ space: 8 }) {
         ForEach(this.sessionSearchActive ? this.sessionSearchResults : this.sessions,
           (session: HarnessRemoteSession, index: number) => {
