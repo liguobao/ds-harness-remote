@@ -19,6 +19,7 @@ import { PickedImage, compressPixelMap, pickImages } from '../services/ImagePick
 import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
+import { heartbeatBodyOf } from '../services/Heartbeat';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
@@ -150,6 +151,10 @@ struct Index {
   @State deviceDetailId: string = '';
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
+  /** 展开看原文的心跳消息 id（默认折叠成可读正文）。 */
+  @State heartbeatExpanded: string[] = [];
+  /** 全屏编辑面板（长文写作时用，对齐 Android 的 composer expand）。 */
+  @State composerExpanded: boolean = false;
   /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
   @State archivedIds: string[] = [];
   @State pinnedIds: string[] = [];
@@ -315,6 +320,10 @@ struct Index {
     }
     if (this.filePreviewOpen) {
       this.filePreviewOpen = false;
+      return true;
+    }
+    if (this.composerExpanded) {
+      this.composerExpanded = false;
       return true;
     }
     if (this.workspaceCreateOpen) {
@@ -1053,6 +1062,24 @@ struct Index {
    * 一条消息要显示的图片：本地刚发的直接在 item.images 里；
    * 历史的只有 attachmentId，从运行时缓存里取（拉不到就是空，不占位）。
    */
+  /** 心跳消息折成可读正文；不是心跳就是空串。 */
+  private heartbeatBody(item: ChatItem): string {
+    const role: string = item.kind === 'user' ? 'user' : 'assistant';
+    return heartbeatBodyOf(item.text, role);
+  }
+
+  private heartbeatOpen(item: ChatItem): boolean {
+    return this.heartbeatExpanded.includes(item.id);
+  }
+
+  private toggleHeartbeat(item: ChatItem): void {
+    if (this.heartbeatOpen(item)) {
+      this.heartbeatExpanded = this.heartbeatExpanded.filter((id: string) => id !== item.id);
+      return;
+    }
+    this.heartbeatExpanded = this.heartbeatExpanded.concat([item.id]);
+  }
+
   private messageImages(item: ChatItem): string[] {
     const out: string[] = [];
     for (const body of item.images) {
@@ -1718,6 +1745,9 @@ struct Index {
       }
       if (this.workspaceCreateOpen) {
         this.WorkspaceCreateOverlay()
+      }
+      if (this.composerExpanded) {
+        this.ExpandedComposerOverlay()
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
@@ -4042,6 +4072,28 @@ struct Index {
             this.promptDraftInput = '';
             this.promptPanelOpen = true;
           })
+          // 展开：小屏上长文容易被候选条和输入坞挤扁，切到全屏编辑面板写
+          Row() {
+            Text('⤢')
+              .fontSize(this.fs(15))
+              .fontColor(this.pal().text2)
+          }
+          .width(34)
+          .height(46)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(23)
+          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
+          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
+            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
+            adaptiveColor: AdaptiveColor.DEFAULT,
+            blurOptions: { grayscale: [0, 12] }
+          })
+          .border({ width: 1,
+            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+          .onClick(() => {
+            this.composerExpanded = true;
+          })
           // 输入框自己就是一块玻璃；换行靠回车，高度随内容长到 5 行再内部滚动
           TextArea({ text: this.promptInput,
             placeholder: this.generating ? this.tr('正在生成，可插话…')
@@ -5176,10 +5228,24 @@ struct Index {
               }
             }
             if (item.text.length > 0) {
-              Text(item.text)
-                .fontSize(this.fs(15))
-                .fontColor('#FFFFFF')
-                .textAlign(TextAlign.Start)
+              if (this.heartbeatBody(item).length > 0) {
+                Text(this.heartbeatOpen(item) ? item.text : this.heartbeatBody(item))
+                  .fontSize(this.fs(this.heartbeatOpen(item) ? 12 : 15))
+                  .fontColor('#FFFFFF')
+                  .textAlign(TextAlign.Start)
+                Text(this.heartbeatOpen(item) ? this.tr('收起巡检原文') : this.tr('查看巡检原文'))
+                  .fontSize(this.fs(11))
+                  .fontColor('rgba(255,255,255,0.78)')
+                  .padding({ top: 2, bottom: 2 })
+                  .onClick(() => {
+                    this.toggleHeartbeat(item);
+                  })
+              } else {
+                Text(item.text)
+                  .fontSize(this.fs(15))
+                  .fontColor('#FFFFFF')
+                  .textAlign(TextAlign.Start)
+              }
             }
           }
           .padding({ top: 10, bottom: 10, left: 14, right: 14 })
@@ -5707,7 +5773,18 @@ struct Index {
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .textAlign(TextAlign.Start)
           }
-          if (item.text.length > 0) {
+          if (item.text.length > 0 && this.heartbeatBody(item).length > 0) {
+            // 巡检心跳：默认只显示可读正文，标签原文折叠起来
+            this.MarkdownText(this.heartbeatOpen(item) ? item.text : this.heartbeatBody(item),
+              item.streaming)
+            Text(this.heartbeatOpen(item) ? this.tr('收起巡检原文') : this.tr('查看巡检原文'))
+              .fontSize(this.fs(11))
+              .fontColor('#22D3EE')
+              .padding({ top: 2, bottom: 2 })
+              .onClick(() => {
+                this.toggleHeartbeat(item);
+              })
+          } else if (item.text.length > 0) {
             // 长回复先折叠到 18 行，避免一条消息把整屏占满
             if (this.isLongCollapsed(item)) {
               this.MarkdownText(this.collapseText(item.text), item.streaming)
@@ -6063,6 +6140,86 @@ struct Index {
   }
 
   /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */
+  /** 全屏编辑：写长 prompt 时不受输入坞高度和候选条限制。 */
+  @Builder
+  ExpandedComposerOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.55)')
+        .onClick(() => {
+          this.composerExpanded = false;
+        })
+      Column({ space: 10 }) {
+        Row({ space: 10 }) {
+          Text(this.tr('编辑消息'))
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Blank()
+          Text(this.promptInput.length + this.tr(' 字'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+          Text(this.tr('收起'))
+            .fontSize(this.fs(13))
+            .fontColor('#22D3EE')
+            .padding({ left: 10, right: 4, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.composerExpanded = false;
+            })
+        }
+        .width('100%')
+        TextArea({ text: this.promptInput,
+          placeholder: this.tr('在这里写长消息，换行不会丢') })
+          .layoutWeight(1)
+          .width('100%')
+          .backgroundColor(this.pal().inputBg)
+          .fontColor(this.pal().text)
+          .fontSize(this.fs(15))
+          .borderRadius(14)
+          .border({ width: 1, color: this.pal().border })
+          .padding(12)
+          .onChange((value: string) => {
+            this.promptInput = value;
+            this.runtime.saveDraft(this.currentSessionId, value);
+          })
+        Row({ space: 10 }) {
+          if (this.pendingImages.length > 0) {
+            Text(this.pendingImages.length + this.tr(' 张图待发'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+          }
+          Blank()
+          Button(this.tr('发送'))
+            .height(40)
+            .fontSize(this.fs(14))
+            .fontColor('#FFFFFF')
+            .padding({ left: 26, right: 26 })
+            .borderRadius(20)
+            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+            .enabled(this.promptInput.trim().length > 0 || this.pendingImages.length > 0)
+            .onClick(() => {
+              this.composerExpanded = false;
+              this.sendTap();
+            })
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .height('78%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 380 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   @Builder
   WorkspaceCreateOverlay() {
     Stack({ alignContent: Alignment.Bottom }) {

@@ -212,6 +212,9 @@ function describeNetError(e: Object): string {
 }
 
 export class RemoteServerApi {
+  /** 设备列表分页：每页条数（协议允许 1–100）与最多翻几页（防服务端 cursor 异常死循环）。 */
+  private static readonly DEVICE_PAGE_SIZE: number = 50;
+  private static readonly MAX_DEVICE_PAGES: number = 20;
   private baseUrl: string;
   private accessToken: string | undefined;
   /** REST 请求预算：服务端高峰期实测 TTFB 能到 12–22 秒，10 秒会让登录直接失败。 */
@@ -354,12 +357,34 @@ export class RemoteServerApi {
     return parseTokenPair(text);
   }
 
+  /**
+   * 设备列表。
+   * 新服务端支持 `?limit=` + 不透明 `cursor` 分页（协议 §设备分页）：必须读完所有页，
+   * 不能把第一页当完整列表；老服务端忽略 limit 直接返回全量，此时没有 nextCursor 就停。
+   */
   async listDevices(): Promise<RemoteHostDevice[]> {
     const token = this.requireToken();
-    const text = await this.requestText('/api/v1/devices', 'GET', undefined, token);
-    const root = JSON.parse(text) as Record<string, Object>;
-    const items = jsonArr(root, 'items');
     const out: RemoteHostDevice[] = [];
+    let cursor: string = '';
+    for (let page = 0; page < RemoteServerApi.MAX_DEVICE_PAGES; page++) {
+      const query: string = cursor.length > 0
+        ? '/api/v1/devices?limit=' + RemoteServerApi.DEVICE_PAGE_SIZE + '&cursor=' + encodeURIComponent(cursor)
+        : '/api/v1/devices?limit=' + RemoteServerApi.DEVICE_PAGE_SIZE;
+      const text = await this.requestText(query, 'GET', undefined, token);
+      const root = JSON.parse(text) as Record<string, Object>;
+      const items = jsonArr(root, 'items');
+      RemoteServerApi.appendHosts(items, out);
+      const next: Object | undefined = root['nextCursor'];
+      cursor = typeof next === 'string' ? next : '';
+      if (cursor.length === 0) {
+        break;
+      }
+    }
+    return out;
+  }
+
+  /** 把一页设备记录里的 Host 行追加进列表（分页与单页共用）。 */
+  private static appendHosts(items: Object[], out: RemoteHostDevice[]): void {
     for (const item of items) {
       const d = item as Record<string, Object>;
       if (jsonStr(d, 'role', '') !== 'host') {
@@ -381,7 +406,6 @@ export class RemoteServerApi {
       }
       out.push(host);
     }
-    return out;
   }
 
   async deviceFor(deviceId: string): Promise<AuthorizedPeerDevice> {
