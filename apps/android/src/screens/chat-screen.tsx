@@ -182,7 +182,7 @@ export function ChatScreen({
   const [trajectory, setTrajectory] = useState(false)
   const [composingDuringRun, setComposingDuringRun] = useState(false)
 
-  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [sessionsOpen, setSessionsOpen] = useState(true)
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
@@ -337,7 +337,11 @@ export function ChatScreen({
           if (tabletSplit || sessionsOpen) return false
           return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectory)
         },
-        onMoveShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponderCapture: (_evt, g) => {
+          if (tabletSplit || sessionsOpen) return false
+          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectory)
+        },
+        onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: (_evt, g) => {
           if (tabletSplit || sessionsOpen) return
           if (shouldConfirmSwipeRightOpen({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
@@ -346,6 +350,31 @@ export function ChatScreen({
         },
       }),
     [sessionsOpen, tabletSplit, trajectory, openSessionsDrawer]
+  )
+  const swipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
+  const swipeRightTouchProps = useMemo(
+    () => ({
+      ...edgeSwipeResponder.panHandlers,
+      onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+        swipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
+      },
+      onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+        const start = swipeStartRef.current
+        swipeStartRef.current = undefined
+        if (start === undefined || tabletSplit || sessionsOpen) return
+        const dx = e.nativeEvent.pageX - start.x0
+        const dy = e.nativeEvent.pageY - start.y0
+        const dt = Math.max(16, Date.now() - start.t0)
+        const vx = dx / dt
+        if (
+          shouldStartSwipeRightToOpen({ dx, dy, x0: start.x0 }, trajectory)
+          && shouldConfirmSwipeRightOpen({ dx, dy, x0: start.x0, vx })
+        ) {
+          openSessionsDrawer()
+        }
+      },
+    }),
+    [edgeSwipeResponder, tabletSplit, sessionsOpen, trajectory, openSessionsDrawer],
   )
 
   // Artifact changes must invalidate FlatList cells even when their section is
@@ -367,6 +396,10 @@ export function ChatScreen({
     if (parent !== undefined) {
       Keyboard.dismiss()
       void openSession(parent)
+      return
+    }
+    if (!tabletSplit && !sessionsOpen) {
+      openSessionsDrawer()
       return
     }
     Keyboard.dismiss()
@@ -524,7 +557,7 @@ export function ChatScreen({
       <KeyboardInset><>
         <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
           {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
-          <View style={styles.splitMain} {...edgeSwipeResponder.panHandlers}>
+          <View style={styles.splitMain} {...swipeRightTouchProps}>
             <BotModeScreen
               selectedId={botConversationId}
               onSelect={id => onSelectBot?.(id)}
@@ -593,8 +626,8 @@ export function ChatScreen({
       <KeyboardInset><>
         <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
           {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
-          <View style={styles.splitMain} {...edgeSwipeResponder.panHandlers}>
-            <BlurHeaderFrame header={emptyHeader} inset={false}>
+          <View style={styles.splitMain} {...swipeRightTouchProps}>
+            <BlurHeaderFrame header={emptyHeader}>
               {headerHeight => (
                 <View style={[styles.list, readableColumn, styles.emptyList, { paddingTop: headerHeight + spacing.xl }]}>
                   {busy !== undefined ? (
@@ -924,7 +957,7 @@ export function ChatScreen({
             {drawerElement(true)}
           </View>
         )}
-        <View style={styles.splitMain} {...edgeSwipeResponder.panHandlers}>
+        <View style={styles.splitMain} {...swipeRightTouchProps}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList

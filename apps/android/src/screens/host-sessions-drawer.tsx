@@ -69,8 +69,7 @@ import { BotModalsHost, BotSidebarSection, useBotTeamPolling } from './bot-sideb
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
-const DRAWER_WIDTH_RATIO = 0.85
-const DRAWER_MAX_WIDTH = 360
+const DRAWER_WIDTH_RATIO = 1
 
 /** 浮窗相对工具栏底部的间距 */
 const POPOVER_OFFSET = 4
@@ -625,7 +624,7 @@ export function HostSessionsDrawer({
 
   // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
-  const drawerWidth = Math.min(Math.round(screenWidth * DRAWER_WIDTH_RATIO), DRAWER_MAX_WIDTH)
+  const drawerWidth = Math.round(screenWidth * DRAWER_WIDTH_RATIO)
   const translateX = useRef(new Animated.Value(-drawerWidth)).current
   const overlayOpacity = useRef(new Animated.Value(0)).current
   const dragStartX = useRef(0)
@@ -685,7 +684,10 @@ export function HostSessionsDrawer({
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
         onMoveShouldSetPanResponder: (_e, g) => (!inline && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           if (closingRef.current) return
           currentAnim.current?.stop()
@@ -717,6 +719,29 @@ export function HostSessionsDrawer({
       }),
     [inline, drawerWidth, translateX, overlayOpacity]
   )
+
+  const touchSwipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
+  const drawerTouchProps = {
+    ...panResponder.panHandlers,
+    onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      touchSwipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
+    },
+    onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      const start = touchSwipeStartRef.current
+      touchSwipeStartRef.current = undefined
+      if (start === undefined || inline || closingRef.current) return
+      const dx = e.nativeEvent.pageX - start.x0
+      const dy = e.nativeEvent.pageY - start.y0
+      const dt = Math.max(16, Date.now() - start.t0)
+      const vx = dx / dt
+      if (
+        shouldStartSwipeLeftToClose({ dx, dy, x0: start.x0 })
+        && shouldConfirmSwipeLeftClose({ dx, dy, x0: start.x0, vx })
+      ) {
+        smoothClose(true)
+      }
+    },
+  }
 
   const closeConfig = () => setShowConfigModal(false)
 
@@ -1655,22 +1680,49 @@ export function HostSessionsDrawer({
         claudeAvailable={claudeAvailable}
         hermesAvailable={hermesAvailable}
         initialBackend={backend}
-        busy={busy === 'create-workspace'}
+        busy={
+          busy === 'create-workspace'
+          || busy === 'create-codex-workspace'
+          || busy === 'create-cursor-workspace'
+          || busy === 'create-antigravity-workspace'
+          || busy === 'create-pi-workspace'
+          || busy === 'create-opencode-workspace'
+          || busy === 'create-claude-workspace'
+          || busy === 'create-hermes-workspace'
+        }
         onClose={() => setCreateWorkspaceOpen(false)}
         onCreate={(path, targetBackend) => createWorkspace(path, targetBackend)}
         onCreated={workspace => {
+          const expectedDeviceId = deviceId
+          if (useAppStore.getState().selectedDevice?.deviceId !== expectedDeviceId) return
           const nextBackend = workspace.backend ?? 'harness'
           setBackend(nextBackend)
-          if (deviceId !== undefined) void saveWorkspaceBackend(deviceId, nextBackend)
+          if (expectedDeviceId !== undefined) void saveWorkspaceBackend(expectedDeviceId, nextBackend)
           const groupId = `workspace:${nextBackend}:${workspace.workspaceId}`
-          if (deviceId !== undefined && groupScopeKey !== undefined) {
+          if (expectedDeviceId !== undefined && groupScopeKey !== undefined) {
             memoryGroupsByDevice[groupScopeKey] = { ...memoryGroupsByDevice[groupScopeKey], [groupId]: true }
             setGroupsByDevice(current => ({
               ...current,
               [groupScopeKey]: { ...current[groupScopeKey], [groupId]: true },
             }))
-            void saveHostSessionsDrawerGroup(deviceId, groupId, true).catch(() => undefined)
+            void saveHostSessionsDrawerGroup(expectedDeviceId, groupId, true).catch(() => undefined)
           }
+          const latestSession = [...useAppStore.getState().sessions]
+            .filter(item => workspace.sessionIds.includes(item.sessionId) && !useAppStore.getState().archivedSessionIds.includes(item.sessionId))
+            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+          if (latestSession !== undefined) {
+            void onSelect(latestSession).then(() => {
+              if (useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+                closeDrawer()
+              }
+            })
+            return
+          }
+          void createSession(workspace.workspaceId, nextBackend).then(ok => {
+            if (ok && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+              closeDrawer()
+            }
+          })
         }}
       />
       <RenameWorkspaceModal
@@ -1739,7 +1791,7 @@ export function HostSessionsDrawer({
         </Animated.View>
         <Animated.View
           accessibilityViewIsModal
-          {...panResponder.panHandlers}
+          {...drawerTouchProps}
           style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, transform: [{ translateX }] }]}
         >
           {content}
@@ -1753,7 +1805,7 @@ const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
-    drawer: { flex: 1, width: `${DRAWER_WIDTH_RATIO * 100}%`, maxWidth: DRAWER_MAX_WIDTH, backgroundColor: colors.background, borderTopRightRadius: radius.xxl, borderBottomRightRadius: radius.xxl, overflow: 'hidden' },
+    drawer: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background, overflow: 'hidden' },
     inlineDrawer: { width: '100%', maxWidth: '100%', borderRadius: 0, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
     container: { flex: 1 },
 

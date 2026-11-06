@@ -14,19 +14,25 @@ import {
 import {
   ArrowDown,
   ArrowUp,
-  ChevronRight,
+  Check,
+  CirclePlus,
+  Code2,
   Eye,
   EyeOff,
   Folder,
+  FolderOpen,
   Pencil,
   Plus,
+  Sparkles,
   Star,
   Trash2,
   X,
+  type LucideIcon,
 } from 'lucide-react-native'
+import { deviceVersionSubtitle, platformIcon } from '../lib/device-display'
 import { useAppStore } from '../state/store'
 import type { AgentBackend, DirectoryListing, WorkspaceView } from '../types'
-import { Button, GroupCard, GroupRow, IconButton } from '../ui/components'
+import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -184,17 +190,22 @@ export function CreateWorkspaceModal({
   onCreate: (path: string, backend: AgentBackend) => Promise<WorkspaceView | undefined>
   onCreated: (workspace: WorkspaceView) => void
 }) {
+  useAppStore(state => state.language)
+  const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connectionPhase = useAppStore(state => state.connection.phase)
   const [backend, setBackend] = useState<AgentBackend>('harness')
   const [path, setPath] = useState('')
   const [browseOpen, setBrowseOpen] = useState(false)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const { sheetMaxHeight } = useResponsiveLayout()
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
   const sheetScrollRef = useRef<ScrollView>(null)
+  const requestEpochRef = useRef(0)
 
   useEffect(() => {
+    requestEpochRef.current += 1
     if (visible) sheetScrollRef.current?.scrollTo({ y: 0, animated: false })
-  }, [visible])
+  }, [visible, selectedDevice?.deviceId])
 
   useEffect(() => {
     if (!visible) return
@@ -208,13 +219,27 @@ export function CreateWorkspaceModal({
     else setBackend('harness')
   }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, initialBackend, visible])
 
+  const dismissModal = () => {
+    requestEpochRef.current += 1
+    setBrowseOpen(false)
+    onClose()
+  }
+
   const create = async () => {
     const trimmed = path.trim()
     if (trimmed.length === 0) return
+    const epoch = requestEpochRef.current
+    const targetDeviceId = selectedDevice?.deviceId
     const workspace = await onCreate(trimmed, backend)
-    if (workspace === undefined) return
+    if (
+      workspace === undefined
+      || requestEpochRef.current !== epoch
+      || useAppStore.getState().selectedDevice?.deviceId !== targetDeviceId
+    ) {
+      return
+    }
     setPath('')
-    onClose()
+    dismissModal()
     onCreated(workspace)
   }
 
@@ -223,104 +248,163 @@ export function CreateWorkspaceModal({
     setBrowseOpen(true)
   }
 
-  const allBackendItems: Array<{ value: AgentBackend; label: string; available: boolean }> = [
-    { value: 'harness', label: strings.workspaces.dsh, available: true },
-    { value: 'codex', label: strings.workspaces.codex, available: codexAvailable },
-    { value: 'claude', label: strings.workspaces.claude, available: claudeAvailable },
-    { value: 'hermes', label: strings.workspaces.hermes, available: hermesAvailable },
-    { value: 'cursor', label: strings.workspaces.cursor, available: cursorAvailable },
-    { value: 'antigravity', label: strings.workspaces.antigravity, available: antigravityAvailable },
-    { value: 'opencode', label: strings.workspaces.opencode, available: opencodeAvailable },
-    { value: 'pi', label: strings.workspaces.pi, available: piAvailable },
+  const backendItems: Array<{ value: AgentBackend; label: string; detail: string; icon: LucideIcon }> = [
+    { value: 'harness', label: strings.workspaces.dsh, detail: strings.devices.harness, icon: FolderOpen },
+    ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI CodeX', icon: Code2 }] : []),
+    ...(claudeAvailable ? [{ value: 'claude' as const, label: strings.workspaces.claude, detail: 'Anthropic Claude', icon: Sparkles }] : []),
+    ...(hermesAvailable ? [{ value: 'hermes' as const, label: strings.workspaces.hermes, detail: 'Nous Research Hermes', icon: Sparkles }] : []),
+    ...(cursorAvailable ? [{ value: 'cursor' as const, label: strings.workspaces.cursor, detail: 'Cursor ACP', icon: Sparkles }] : []),
+    ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: strings.workspaces.antigravity, detail: 'Antigravity ACP', icon: Sparkles }] : []),
+    ...(opencodeAvailable ? [{ value: 'opencode' as const, label: strings.workspaces.opencode, detail: 'OpenCode ACP', icon: Sparkles }] : []),
+    ...(piAvailable ? [{ value: 'pi' as const, label: strings.workspaces.pi, detail: 'Pi ACP', icon: Sparkles }] : []),
   ]
-  const backendItems = allBackendItems.filter(item => item.available)
+
+  const directoryHint = backend === 'codex'
+    ? strings.workspaces.codexDirectoryHint
+    : backend === 'cursor'
+      ? strings.workspaces.cursorDirectoryHint
+      : backend === 'pi'
+        ? strings.workspaces.piDirectoryHint
+        : backend === 'antigravity'
+          ? strings.workspaces.antigravityDirectoryHint
+          : backend === 'opencode'
+            ? strings.workspaces.opencodeDirectoryHint
+            : backend === 'claude'
+              ? strings.workspaces.claudeDirectoryHint
+              : backend === 'hermes'
+                ? strings.workspaces.hermesDirectoryHint
+                : strings.workspaces.directoryHint
+
+  const HostIcon = selectedDevice ? platformIcon(selectedDevice.platform) : FolderOpen
+  const hostOnline = connectionPhase === 'connected'
+  const hostConnecting = connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+  const hostStatusDot = hostOnline ? colors.success : hostConnecting ? colors.warning : colors.disabled
+  const hostStatusLabel = hostOnline ? strings.status.online : hostConnecting ? strings.status.waiting : strings.status.offline
 
   return (
-    <>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-        <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
-          <View style={styles.grabber} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{strings.workspaces.create}</Text>
-            <IconButton label={strings.common.close} icon={X} onPress={onClose} />
-          </View>
-          <ScrollView
-            ref={sheetScrollRef}
-            style={styles.sheetScroll}
-            contentContainerStyle={styles.sheetScrollContent}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.fieldLabel}>{strings.workspaces.type}</Text>
-            <View style={styles.backendOptions}>
-              {backendItems.map(item => {
-                const selected = backend === item.value
-                return (
-                  <Pressable
-                    key={item.value}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected, disabled: busy }}
-                    disabled={busy}
-                    onPress={() => setBackend(item.value)}
-                    style={({ pressed }) => [
-                      styles.backendOption,
-                      selected && styles.backendOptionSelected,
-                      pressed && !busy && styles.workspaceRowPressed,
-                      busy && styles.disabled,
-                    ]}
-                  >
-                    <View style={[styles.radioIndicator, selected && styles.radioIndicatorSelected]}>
-                      {selected && <View style={styles.radioIndicatorDot} />}
-                    </View>
-                    <Text style={[styles.backendOptionText, selected && styles.backendOptionTextSelected]}>
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                )
-              })}
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={dismissModal} statusBarTranslucent>
+      <View style={styles.flex}>
+        <BlurHeaderFrame
+          header={
+            <TopBar
+              title={strings.workspaces.create}
+              subtitle={selectedDevice?.name}
+              onBack={dismissModal}
+              centered
+            />
+          }
+        >
+          <Screen scrollRef={sheetScrollRef}>
+            <View style={[styles.createContentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+              {selectedDevice !== undefined && (
+                <>
+                  <SectionTitle>{strings.sessionInfo.host}</SectionTitle>
+                  <GroupCard>
+                    <GroupRow
+                      first
+                      icon={HostIcon}
+                      label={selectedDevice.name}
+                      detail={deviceVersionSubtitle(selectedDevice)}
+                      chevron={false}
+                      accessory={
+                        <View style={styles.createStatusInline}>
+                          <View style={[styles.createStatusDot, { backgroundColor: hostStatusDot }]} />
+                          <Text style={styles.createStatusText}>{hostStatusLabel}</Text>
+                        </View>
+                      }
+                    />
+                  </GroupCard>
+                </>
+              )}
+
+              <SectionTitle>{strings.workspaces.deviceDirectory}</SectionTitle>
+              <GroupCard>
+                <View style={styles.createPathRow}>
+                  <View style={styles.createPathIcon}>
+                    <FolderOpen size={21} color={colors.primary} strokeWidth={1.8} />
+                  </View>
+                  <View style={styles.createPathBody}>
+                    <TextInput
+                      accessibilityLabel={strings.workspaces.deviceDirectory}
+                      style={styles.createPathInput}
+                      value={path}
+                      onChangeText={setPath}
+                      placeholder="/workspace/project"
+                      placeholderTextColor={colors.muted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                      returnKeyType="done"
+                    />
+                    {path.length > 0 && !busy && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={strings.workspaces.clearSearch}
+                        hitSlop={8}
+                        onPress={() => setPath('')}
+                        style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
+                      >
+                        <X size={17} color={colors.muted} />
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+                <GroupRow
+                  icon={Folder}
+                  label={strings.workspaces.browse}
+                  detail={strings.workspaces.chooseFolder}
+                  disabled={busy}
+                  onPress={openBrowser}
+                />
+              </GroupCard>
+              <Text style={styles.createSectionNote}>{directoryHint}</Text>
+
+              <SectionTitle>{strings.workspaces.type}</SectionTitle>
+              <GroupCard>
+                <View accessibilityRole="radiogroup">
+                  {backendItems.map((option, index) => {
+                    const chosen = backend === option.value
+                    return (
+                      <GroupRow
+                        key={option.value}
+                        first={index === 0}
+                        icon={option.icon}
+                        label={option.label}
+                        detail={option.detail}
+                        selected={chosen}
+                        chevron={false}
+                        disabled={busy}
+                        onPress={() => setBackend(option.value)}
+                        accessory={
+                          <View style={styles.createCheckSlot}>
+                            {chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                          </View>
+                        }
+                      />
+                    )
+                  })}
+                </View>
+              </GroupCard>
+
+              <View style={styles.createPrimaryArea}>
+                <Button
+                  label={strings.workspaces.create}
+                  icon={CirclePlus}
+                  onPress={() => void create()}
+                  loading={busy}
+                  disabled={path.trim().length === 0}
+                />
+              </View>
             </View>
-            <Text style={styles.fieldLabel}>{strings.workspaces.deviceDirectory}</Text>
-            <View style={styles.pathRow}>
-              <TextInput
-                style={styles.pathInput}
-                value={path}
-                onChangeText={setPath}
-                placeholder="/home/user/project"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!busy}
-              />
-              <Button label={strings.workspaces.browse} variant="secondary" onPress={openBrowser} disabled={busy} />
-            </View>
-            <Text style={styles.fieldHint}>
-              {backend === 'codex'
-                ? strings.workspaces.codexDirectoryHint
-                : backend === 'cursor'
-                  ? strings.workspaces.cursorDirectoryHint
-                  : backend === 'pi'
-                    ? strings.workspaces.piDirectoryHint
-                    : backend === 'antigravity'
-                      ? strings.workspaces.antigravityDirectoryHint
-                      : backend === 'opencode'
-                        ? strings.workspaces.opencodeDirectoryHint
-                        : backend === 'claude'
-                          ? strings.workspaces.claudeDirectoryHint
-                          : backend === 'hermes'
-                            ? strings.workspaces.hermesDirectoryHint
-                            : strings.workspaces.directoryHint}
-            </Text>
-            <Button label={strings.workspaces.create} onPress={() => void create()} loading={busy} disabled={path.trim().length === 0} />
-          </ScrollView>
-        </WorkspaceModalSurface>
-      </Modal>
-      <DirectoryBrowserModal
-        visible={browseOpen}
-        onClose={() => setBrowseOpen(false)}
-        onChoose={picked => { setPath(picked); setBrowseOpen(false) }}
-      />
-    </>
+          </Screen>
+        </BlurHeaderFrame>
+        <DirectoryBrowserModal
+          visible={browseOpen}
+          onClose={() => setBrowseOpen(false)}
+          onChoose={picked => { setPath(picked); setBrowseOpen(false) }}
+        />
+      </View>
+    </Modal>
   )
 }
 
@@ -432,9 +516,12 @@ export function DirectoryBrowserModal({
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>
           <IconButton label={strings.common.close} icon={X} onPress={onClose} />
         </View>
-        <View style={styles.browserPath}>
-          <Text style={styles.browserPathText} numberOfLines={1}>{listing?.path ?? strings.workspaces.loading}</Text>
-        </View>
+        <GroupCard style={styles.browserPathCard}>
+          <View style={styles.browserPath}>
+            <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
+            <Text style={styles.browserPathText} numberOfLines={1}>{listing?.path ?? strings.workspaces.loading}</Text>
+          </View>
+        </GroupCard>
         <View style={styles.crumbRow}>
           {(listing?.crumbs ?? []).map((crumb, index, all) => (
             <Pressable key={`${crumb.path}-${index}`} onPress={() => void open(crumb.path)}>
@@ -445,7 +532,7 @@ export function DirectoryBrowserModal({
           ))}
         </View>
         {error !== undefined && <Text style={styles.errorText}>{error}</Text>}
-        <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList}>
+        <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList} showsVerticalScrollIndicator={false}>
           {loading
             ? <Text style={styles.loadingText}>{strings.workspaces.loadingDirectory}</Text>
             : entries.length === 0
@@ -453,20 +540,13 @@ export function DirectoryBrowserModal({
               : (
                 <GroupCard>
                   {entries.map((entry, index) => (
-                    <Pressable
+                    <GroupRow
                       key={entry.path}
-                      accessibilityRole="button"
+                      first={index === 0}
+                      icon={Folder}
+                      label={entry.name}
                       onPress={() => void open(entry.path)}
-                      style={({ pressed }) => [
-                        styles.entryRow,
-                        index > 0 && styles.entryDivider,
-                        pressed && styles.workspaceRowPressed,
-                      ]}
-                    >
-                      <Folder size={18} color={colors.primary} strokeWidth={1.8} />
-                      <Text style={styles.entryName} numberOfLines={1}>{entry.name}</Text>
-                      <ChevronRight size={16} color={colors.subtle} />
-                    </Pressable>
+                    />
                   ))}
                 </GroupCard>
               )}
@@ -516,8 +596,21 @@ function WorkspaceModalSurface({
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    flex: { flex: 1, backgroundColor: colors.background },
     backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
     grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.subtle, opacity: 0.45, alignSelf: 'center', marginBottom: spacing.xxs },
+    createContentColumn: { width: '100%', alignSelf: 'center' },
+    createStatusInline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    createStatusDot: { width: 7, height: 7, borderRadius: 4 },
+    createStatusText: { ...type.caption, color: colors.muted },
+    createPathRow: { minHeight: 58, paddingLeft: spacing.md, flexDirection: 'row', alignItems: 'center' },
+    createPathIcon: { width: 28, marginRight: spacing.sm, alignItems: 'center', justifyContent: 'center' },
+    createPathBody: { flex: 1, minWidth: 0, minHeight: 58, paddingRight: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    createPathInput: { flex: 1, ...type.body, fontSize: 16, color: colors.ink, paddingVertical: spacing.sm },
+    clearSearch: { padding: spacing.xxs, alignItems: 'center', justifyContent: 'center' },
+    createSectionNote: { ...type.caption, fontSize: 13, lineHeight: 18, color: colors.muted, marginTop: spacing.xs, paddingHorizontal: spacing.md },
+    createCheckSlot: { width: 20, alignItems: 'center', justifyContent: 'center' },
+    createPrimaryArea: { marginTop: spacing.xl },
     sheet: {
       backgroundColor: colors.background,
       borderTopLeftRadius: radius.xxl,
@@ -544,48 +637,6 @@ function createStyles(colors: ThemeColors) {
     workspaceActionPath: { ...type.caption, color: colors.muted, fontFamily: 'monospace', paddingHorizontal: spacing.xxs },
     workspaceRowPressed: { opacity: 0.7 },
     disabled: { opacity: 0.55 },
-    fieldLabel: { ...type.smallStrong, color: colors.ink },
-    fieldHint: { ...type.caption, color: colors.muted },
-    backendOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-    backendOption: {
-      minHeight: 42,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.xs,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surface,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-    },
-    backendOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-    backendOptionText: { ...type.smallStrong, color: colors.muted },
-    backendOptionTextSelected: { color: colors.primary },
-    radioIndicator: {
-      width: 18,
-      height: 18,
-      borderWidth: 2,
-      borderColor: colors.border,
-      borderRadius: 9,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    radioIndicatorSelected: { borderColor: colors.primary },
-    radioIndicatorDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
-    pathRow: { flexDirection: 'row', gap: spacing.sm },
-    pathInput: {
-      flex: 1,
-      ...type.body,
-      color: colors.ink,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.lg,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-    },
     titleInput: {
       ...type.body,
       color: colors.ink,
@@ -596,23 +647,12 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
     },
-    browserPath: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.sm, marginTop: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
-    browserPathText: { ...type.small, color: colors.ink, fontFamily: 'monospace' },
-    crumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: spacing.xs },
+    browserPathCard: { marginTop: spacing.xs },
+    browserPath: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+    browserPathText: { flex: 1, ...type.small, color: colors.ink, fontFamily: 'monospace' },
+    crumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: spacing.xs, paddingHorizontal: spacing.xxs },
     crumbText: { ...type.small, color: colors.primary },
     browserList: { flex: 1, marginTop: spacing.xs },
-    entryRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
-    },
-    entryDivider: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
-    },
-    entryName: { ...type.body, color: colors.ink, flex: 1 },
     loadingText: { ...type.small, color: colors.muted, textAlign: 'center', marginTop: spacing.lg },
     emptyText: { ...type.small, color: colors.muted, textAlign: 'center', marginTop: spacing.lg },
     errorText: { ...type.small, color: colors.danger },

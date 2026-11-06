@@ -331,11 +331,6 @@ function AppNavigator() {
       }
       // ConnectionScreen owns hardware back (and may swallow it while connecting).
       if (route.name === 'connecting') return false
-      const current = routeRef.current
-      if (current.name === 'chat' && botMode && current.botConversationId !== undefined) {
-        setRoutes(entries => entries.map((entry, index) => index === entries.length - 1 && entry.name === 'chat' ? { ...entry, botConversationId: undefined } : entry))
-        return true
-      }
       if (routes.length <= 1) {
         return false
       }
@@ -343,7 +338,7 @@ function AppNavigator() {
       return true
     })
     return () => subscription.remove()
-  }, [hostSwitcherOpen, homeMenuOpen, route.name, routes, botMode])
+  }, [hostSwitcherOpen, homeMenuOpen, route.name, routes])
 
   useEffect(() => {
     const recovery = new ForegroundConnectionRecovery(
