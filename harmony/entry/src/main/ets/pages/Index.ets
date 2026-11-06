@@ -156,6 +156,8 @@ struct Index {
   /** 上一次同步到的会话 id，用来判断「切了会话」并搬运草稿。 */
   private lastSyncedSessionId: string = '';
   private draftSaveTimer: number = -1;
+  /** 每个会话自己的「是否跟随底部」：切走再回来不强行把你拽到底部。 */
+  private stickBySession: Record<string, boolean> = {};
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -494,9 +496,12 @@ struct Index {
     if (this.lastSyncedSessionId !== this.currentSessionId) {
       if (this.lastSyncedSessionId.length > 0) {
         this.runtime.saveDraft(this.lastSyncedSessionId, this.promptInput);
+        this.stickBySession[this.lastSyncedSessionId] = this.stickToBottom;
       }
       this.lastSyncedSessionId = this.currentSessionId;
       this.promptInput = this.runtime.draftOf(this.currentSessionId);
+      const restored: boolean | undefined = this.stickBySession[this.currentSessionId];
+      this.stickToBottom = restored === undefined ? true : restored;
     }
     this.switchingServer = this.runtime.switchingServer;
     this.switchingTo = this.runtime.switchingTo;
