@@ -211,6 +211,8 @@ export class AppRuntime {
   favoriteSessions: string[] = [];
   recentSessions: string[] = [];
   /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
+  /** busy 的起始时间，用于泄漏自愈。 */
+  private busySince: number = 0;
   /** 切换服务器时用的独立锁：不再共用 busy，避免别处的 busy 把切换挡回去。 */
   switchingServer: boolean = false;
   switchingTo: string = '';
@@ -406,7 +408,7 @@ export class AppRuntime {
     if (this.busy) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.errorMsg = '';
     this.notify();
     try {
@@ -427,7 +429,7 @@ export class AppRuntime {
       this.serverUrl = config.baseUrl;
       this.email = config.email;
       this.phase = PHASE_DEVICES;
-      this.busy = false;
+      this.setBusy(false);
       await this.rememberProfile();
       this.notify();
       await this.refreshDevices();
@@ -435,7 +437,7 @@ export class AppRuntime {
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
-    this.busy = false;
+    this.setBusy(false);
     this.notify();
   }
 
@@ -443,7 +445,7 @@ export class AppRuntime {
     if (this.phase !== PHASE_DEVICES) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.errorMsg = '';
     this.notify();
     try {
@@ -454,7 +456,7 @@ export class AppRuntime {
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
-    this.busy = false;
+    this.setBusy(false);
     this.notify();
   }
 
@@ -691,7 +693,7 @@ export class AppRuntime {
     // 退出前先把手上的登录态存成 profile：以后在设置里一键切回来，不用重输密码
     await this.rememberProfile();
     this.phase = PHASE_SETUP;
-    this.busy = false;
+    this.setBusy(false);
     this.errorMsg = '';
     this.devices = [];
     this.credentials = undefined;
@@ -808,6 +810,24 @@ export class AppRuntime {
     return harness.speechTranscribe(audioBase64, '');
   }
 
+  /** busy 的写入统一走这里：同时记时间戳，泄漏时能自动解锁，不至于界面永远卡在「忙」。 */
+  private setBusy(value: boolean): void {
+    this.busy = value;
+    if (!value) {
+      this.busySince = 0;
+      return;
+    }
+    this.busySince = Date.now();
+    setTimeout(() => {
+      if (this.busy && this.busySince > 0 && Date.now() - this.busySince >= 19000) {
+        logWarn('busy flag leaked, auto-reset after 20s');
+        this.setBusy(false);
+        this.busySince = 0;
+        this.notify();
+      }
+    }, 20000);
+  }
+
   /** 用户手动关掉错误提示。 */
   clearError(): void {
     if (this.errorMsg.length === 0) {
@@ -899,7 +919,7 @@ export class AppRuntime {
     if (harness === undefined) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.errorMsg = '';
     this.notify();
     try {
@@ -926,7 +946,7 @@ export class AppRuntime {
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
-    this.busy = false;
+    this.setBusy(false);
     this.notify();
   }
 
@@ -938,7 +958,7 @@ export class AppRuntime {
     if (harness === undefined) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.errorMsg = '';
     this.notify();
     try {
@@ -955,7 +975,7 @@ export class AppRuntime {
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
-    this.busy = false;
+    this.setBusy(false);
     this.notify();
   }
 
@@ -1059,7 +1079,7 @@ export class AppRuntime {
     this.email = config.email;
     this.phase = PHASE_DEVICES;
     this.devices = [];
-    this.busy = true;
+    this.setBusy(true);
     this.notify();
     // 旧连接是同步拆的（关闭 WS、销毁 core），丢到下一帧别挡点击响应
     setTimeout(() => {
@@ -2253,7 +2273,7 @@ export class AppRuntime {
     if (harness === undefined || this.phase !== PHASE_CHAT) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.sessionsLoadFailed = false;
     this.notify();
     try {
@@ -2262,7 +2282,7 @@ export class AppRuntime {
         return;
       }
       this.sessions = sortSessions(sessions);
-      this.busy = false;
+      this.setBusy(false);
       this.sessionsLoadFailed = false;
       this.notify();
       await this.pickInitialSession();
@@ -2277,7 +2297,7 @@ export class AppRuntime {
       this.currentSessionTitle = '会话列表加载失败';
       this.messages = [];
       this.generating = false;
-      this.busy = false;
+      this.setBusy(false);
       this.errorMsg = '会话列表加载失败：' + errorMessage(error);
       this.notify();
     }
@@ -2289,7 +2309,7 @@ export class AppRuntime {
     if (harness === undefined || this.phase !== PHASE_CHAT || this.busy) {
       return;
     }
-    this.busy = true;
+    this.setBusy(true);
     this.sessionsLoadFailed = false;
     this.errorMsg = '';
     this.notify();
@@ -2299,7 +2319,7 @@ export class AppRuntime {
         return;
       }
       this.sessions = sortSessions(sessions);
-      this.busy = false;
+      this.setBusy(false);
       this.notify();
       await this.pickInitialSession();
     } catch (error) {
@@ -2307,7 +2327,7 @@ export class AppRuntime {
         return;
       }
       this.sessionsLoadFailed = true;
-      this.busy = false;
+      this.setBusy(false);
       this.errorMsg = '会话列表加载失败：' + errorMessage(error);
       this.notify();
     }
