@@ -986,6 +986,8 @@ export class AppRuntime {
     if (harness === undefined) {
       return;
     }
+    // 当前会话还空着就顺手归档：否则连点几次「新建」会在列表里堆一串「新会话」。
+    this.archiveBlankCurrentSession();
     this.setBusy(true);
     this.errorMsg = '';
     this.notify();
@@ -1392,6 +1394,41 @@ export class AppRuntime {
       this.errorMsg = errorMessage(error);
       this.notify();
     }
+  }
+
+  /**
+   * 新建会话前收尾：当前会话一条消息都没有、也没在跑，就先归档，
+   * 免得「新建」点几次就堆出一串空会话（主机列表会越来越难找）。
+   */
+  private archiveBlankCurrentSession(): void {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    if (this.messages.length > 0 || this.generating) {
+      return;
+    }
+    let blank: boolean = false;
+    let running: boolean = false;
+    for (const session of this.sessions) {
+      if (session.sessionId === sessionId) {
+        blank = session.blank;
+        running = session.running;
+        break;
+      }
+    }
+    if (!blank || running) {
+      return;
+    }
+    logInfo('archive blank session before create: ' + sessionId);
+    harness.sessionArchive(sessionId).then((ids: string[]) => {
+      this.archivedSessionIds = ids;
+      this.pinnedSessionIds = this.pinnedSessionIds.filter((id: string) => id !== sessionId);
+      this.notify();
+    }).catch((error: Error) => {
+      logWarn('archive blank session failed: ' + errorMessage(error));
+    });
   }
 
   /**
