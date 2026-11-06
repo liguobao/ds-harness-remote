@@ -207,6 +207,9 @@ export class AppRuntime {
   drafts: Record<string, string> = {};
   /** 本地提示词库。 */
   prompts: string[] = [];
+  /** 会话收藏与最近访问（sessionId 列表）。 */
+  favoriteSessions: string[] = [];
+  recentSessions: string[] = [];
   /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
   /** 切换服务器时用的独立锁：不再共用 busy，避免别处的 busy 把切换挡回去。 */
   switchingServer: boolean = false;
@@ -372,6 +375,9 @@ export class AppRuntime {
       this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
+      const meta: Record<string, string[]> = this.store.loadSessionMeta();
+      this.favoriteSessions = meta['favorites'] !== undefined ? meta['favorites'] : [];
+      this.recentSessions = meta['recents'] !== undefined ? meta['recents'] : [];
       this.applyLanguage();
     } catch (error) {
       const text: string = errorMessage(error);
@@ -802,6 +808,39 @@ export class AppRuntime {
     return harness.speechTranscribe(audioBase64, '');
   }
 
+  /** 收藏/取消收藏一个会话。 */
+  toggleFavoriteSession(sessionId: string): void {
+    if (sessionId.length === 0) {
+      return;
+    }
+    if (this.favoriteSessions.includes(sessionId)) {
+      this.favoriteSessions = this.favoriteSessions.filter(id => id !== sessionId);
+    } else {
+      this.favoriteSessions = this.favoriteSessions.concat([sessionId]);
+    }
+    this.store.saveSessionMeta(this.favoriteSessions, this.recentSessions);
+    this.notify();
+  }
+
+  isFavoriteSession(sessionId: string): boolean {
+    return this.favoriteSessions.includes(sessionId);
+  }
+
+  /** 打开会话时把它推到最近访问最前面（最多留 8 条）。 */
+  private rememberRecentSession(sessionId: string): void {
+    if (sessionId.length === 0) {
+      return;
+    }
+    const next: string[] = [sessionId];
+    for (const id of this.recentSessions) {
+      if (id !== sessionId && next.length < 8) {
+        next.push(id);
+      }
+    }
+    this.recentSessions = next;
+    this.store.saveSessionMeta(this.favoriteSessions, this.recentSessions);
+  }
+
   /** 读某会话的草稿（没有就空串）。 */
   draftOf(sessionId: string): string {
     const value: string | undefined = this.drafts[sessionId];
@@ -902,6 +941,7 @@ export class AppRuntime {
         }
       }
       await this.openSessionInternal(harness, sessionId, title);
+      this.rememberRecentSession(sessionId);
       this.hydrateHistoryImages().catch(() => undefined);
     } catch (error) {
       this.errorMsg = errorMessage(error);

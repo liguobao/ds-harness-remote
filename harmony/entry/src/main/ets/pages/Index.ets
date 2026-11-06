@@ -2695,11 +2695,49 @@ struct Index {
         Blank()
       }
       if (this.devices.length === 0 && !this.busy) {
-        Text(this.tr('暂无远程主机，请先在服务器上注册主机设备'))
-          .fontSize(13)
-          .fontColor(this.pal().text3)
-          .padding(24)
-          .textAlign(TextAlign.Center)
+        // 空态别只留一行灰字：给一张卡片说清楚下一步该做什么
+        Column({ space: 10 }) {
+          Text('🖥')
+            .fontSize(26)
+          Text(this.tr('还没有可用的主机'))
+            .fontSize(this.fs(14))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Text(this.tr('在电脑上安装 DSH 并用同一账号登录，主机就会出现在这里'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .textAlign(TextAlign.Center)
+            .maxLines(2)
+          Row({ space: 10 }) {
+            Text(this.tr('刷新'))
+              .fontSize(this.fs(12))
+              .fontColor('#FFFFFF')
+              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+              .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+              .borderRadius(10)
+              .onClick(() => {
+                this.runtime.refreshDevices();
+              })
+            Text(this.tr('切换服务器'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+              .backgroundColor(this.pal().chip)
+              .borderRadius(10)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.showServerSwitch = true;
+              })
+          }
+          .padding({ top: 2 })
+        }
+        .width('100%')
+        .padding({ left: 24, right: 24, top: 18, bottom: 18 })
+        .margin({ left: 20, right: 20, top: 8 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(16)
+        .border({ width: 1, color: this.pal().border })
+        .alignItems(HorizontalAlign.Center)
       }
       Column()
         .width('100%')
@@ -3567,6 +3605,15 @@ struct Index {
           .fontSize(this.fs(18))
           .fontWeight(FontWeight.Bold)
           .fontColor(this.pal().text)
+        if (this.runtime.favoriteSessions.length > 0) {
+          Text('★ ' + this.runtime.favoriteSessions.length)
+            .fontSize(this.fs(11))
+            .fontColor('#F5A623')
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor('rgba(245,166,35,0.12)')
+            .borderRadius(7)
+            .margin({ left: 6 })
+        }
         Text(`${this.sessions.length}`)
           .fontSize(this.fs(12))
           .fontColor(this.pal().text3)
@@ -3782,6 +3829,13 @@ struct Index {
               }
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
+              Text(this.runtime.isFavoriteSession(session.sessionId) ? '★' : '☆')
+                .fontSize(this.fs(14))
+                .fontColor(this.runtime.isFavoriteSession(session.sessionId) ? '#F5A623' : this.pal().text3)
+                .padding({ left: 6, right: 2, top: 6, bottom: 6 })
+                .onClick(() => {
+                  this.runtime.toggleFavoriteSession(session.sessionId);
+                })
             }
             .width('100%')
             .padding({ top: 10, bottom: 10, left: 12, right: 12 })

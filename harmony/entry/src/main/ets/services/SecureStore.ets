@@ -20,6 +20,8 @@ const KEY_HOST_PINS = 'dshremote.hostPins.v1';
 const KEY_DRAFTS = 'dshremote.drafts.v1';
 /** 本地提示词库（纯本地，不上报任何东西）。 */
 const KEY_PROMPTS = 'dshremote.prompts.v1';
+/** 会话收藏与最近访问：{ favorites: string[], recents: string[] }。 */
+const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
 const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
 
@@ -643,6 +645,42 @@ export class SecureStore {
       this.putSync(KEY_PROMPTS, JSON.stringify(prompts));
     } catch (error) {
       logWarn('prompts save failed');
+    }
+  }
+
+
+  /** 会话收藏 + 最近访问（纯本地偏好，不含会话内容）。 */
+  loadSessionMeta(): Record<string, string[]> {
+    const raw: string = this.getSync(KEY_SESSION_META, '');
+    const out: Record<string, string[]> = { 'favorites': [], 'recents': [] };
+    if (raw.length === 0) {
+      return out;
+    }
+    try {
+      const parsed: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      for (const key of ['favorites', 'recents']) {
+        const value: Object | undefined = parsed[key];
+        if (Array.isArray(value)) {
+          const list: string[] = [];
+          for (const item of value as Object[]) {
+            if (typeof item === 'string' && item.length > 0) {
+              list.push(item);
+            }
+          }
+          out[key] = list;
+        }
+      }
+    } catch (error) {
+      logWarn('session meta parse failed');
+    }
+    return out;
+  }
+
+  saveSessionMeta(favorites: string[], recents: string[]): void {
+    try {
+      this.putSync(KEY_SESSION_META, JSON.stringify({ 'favorites': favorites, 'recents': recents }));
+    } catch (error) {
+      logWarn('session meta save failed');
     }
   }
 
