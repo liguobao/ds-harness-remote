@@ -170,6 +170,8 @@ struct Index {
   @State loadingOlderHistory: boolean = false;
   /** 会话抽屉里是否把已归档的会话也列出来。 */
   @State showArchived: boolean = false;
+  /** 按工作区过滤会话（存完整 cwd；空 = 全部）。 */
+  @State workspaceFilter: string = '';
   /** 会话内搜索（只在当前会话里找）。 */
   @State inSessionSearchOpen: boolean = false;
   @State inSessionQuery: string = '';
@@ -1001,6 +1003,23 @@ struct Index {
   }
 
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
+  /** 会话列表里出现过的不同工作区（按会话数降序，最多 6 个）。 */
+  private sessionWorkspaces(): string[] {
+    const counts: Map<string, number> = new Map<string, number>();
+    for (const session of this.sessions) {
+      if (session.cwd.length === 0) {
+        continue;
+      }
+      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
+    }
+    const keys: string[] = [];
+    counts.forEach((count: number, cwd: string) => {
+      keys.push(cwd);
+    });
+    keys.sort((a: string, b: string) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
+    return keys.slice(0, 6);
+  }
+
   private isArchivedSession(sessionId: string): boolean {
     return this.archivedIds.includes(sessionId);
   }
@@ -1015,6 +1034,9 @@ struct Index {
     const list: HarnessRemoteSession[] = [];
     for (const session of base) {
       // 归档的会话默认不进列表；搜索时照常给结果，别让搜到的会话凭空消失
+      if (this.workspaceFilter.length > 0 && session.cwd !== this.workspaceFilter) {
+        continue;
+      }
       const archived: boolean = this.isArchivedSession(session.sessionId);
       if (archived && !this.showArchived && !this.sessionSearchActive) {
         continue;
@@ -4745,6 +4767,43 @@ struct Index {
                   this.runtime.openSession(id);
                 })
             }, (id: string) => 'recent-' + id)
+          }
+          .padding({ left: 16, right: 16, bottom: 6 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+      }
+      if (!this.sessionSearchActive && this.sessionWorkspaces().length > 1) {
+        Scroll() {
+          Row({ space: 8 }) {
+            Text(this.tr('工作区'))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+            Text(this.tr('全部'))
+              .fontSize(this.fs(11))
+              .fontColor(this.workspaceFilter.length === 0 ? '#22D3EE' : this.pal().text3)
+              .padding({ left: 9, right: 9, top: 4, bottom: 4 })
+              .backgroundColor(this.workspaceFilter.length === 0
+                ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
+              .borderRadius(8)
+              .onClick(() => {
+                this.workspaceFilter = '';
+              })
+            ForEach(this.sessionWorkspaces(), (cwd: string) => {
+              Text(cwdTail(cwd))
+                .fontSize(this.fs(11))
+                .fontColor(this.workspaceFilter === cwd ? '#22D3EE' : this.pal().text3)
+                .maxLines(1)
+                .constraintSize({ maxWidth: 110 })
+                .padding({ left: 9, right: 9, top: 4, bottom: 4 })
+                .backgroundColor(this.workspaceFilter === cwd
+                  ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
+                .borderRadius(8)
+                .onClick(() => {
+                  this.workspaceFilter = this.workspaceFilter === cwd ? '' : cwd;
+                })
+            }, (cwd: string) => 'ws-' + cwd)
           }
           .padding({ left: 16, right: 16, bottom: 6 })
         }
