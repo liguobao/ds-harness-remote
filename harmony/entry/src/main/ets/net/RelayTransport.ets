@@ -152,6 +152,66 @@ export function describeAttachFailure(code: number, reason: string): AttachVerdi
   return verdict;
 }
 
+/** Control 通道关闭的判词：一句人话 + 还值不值得自动重连。 */
+export class CloseVerdict {
+  /** WebSocket 关闭码；0 表示没拿到（本地主动 close 或对端没发 close 帧）。 */
+  code: number = 0;
+  reason: string = '';
+  message: string = '';
+  /**
+   * false = 自动重连没有意义（授权失败 / 连接被顶掉 / 未知原因）。
+   * protocol.md §22：只有 4001 + CONNECTION_FAILED 这一精确组合可重试。
+   */
+  stopAutoReconnect: boolean = false;
+}
+
+/**
+ * 把 Control 通道的关闭码翻译成判词。
+ *
+ * 之前 ws.on('close') 把 CloseResult 整个丢掉，导致 4003（别的设备登录顶掉本机）
+ * 也照样自动重连六次，用户看到的是「一直在重连、连不上、再重连」。
+ * 4001 是双语义码：reason 为 CONNECTION_FAILED 才是心跳超时（可重试），其余按授权失败处理。
+ */
+export function describeControlClose(code: number, reason: string): CloseVerdict {
+  const verdict: CloseVerdict = new CloseVerdict();
+  verdict.code = code;
+  verdict.reason = reason;
+  const text: string = reason.toLowerCase();
+  if (code === 4003) {
+    verdict.message = '该主机已在其他设备上建立连接，本机已断开';
+    verdict.stopAutoReconnect = true;
+    return verdict;
+  }
+  if (code === 4001) {
+    if (text.length === 0 || text.indexOf('connection_failed') >= 0) {
+      verdict.message = '心跳超时，正在重新连接';
+      return verdict;
+    }
+    verdict.message = '服务器拒绝了本次连接（4001 ' + reason + '），请重新登录后再试';
+    verdict.stopAutoReconnect = true;
+    return verdict;
+  }
+  if (code === 1000) {
+    verdict.message = '连接已被服务器正常关闭';
+    verdict.stopAutoReconnect = true;
+    return verdict;
+  }
+  if (code === 1001) {
+    verdict.message = '服务器正在重启，稍后自动重连';
+    return verdict;
+  }
+  if (code === 1006) {
+    verdict.message = '网络中断，连接被异常关闭';
+    return verdict;
+  }
+  // 未知关闭码：协议要求停止自动恢复，交回用户手动重连
+  verdict.message = code > 0
+    ? '连接被服务器关闭（' + code + (reason.length > 0 ? ' ' + reason : '') + '）'
+    : '连接已断开';
+  verdict.stopAutoReconnect = true;
+  return verdict;
+}
+
 export class RelayConnectionInfo {
   connectionId: string = '';
   localDeviceId: string = '';
@@ -189,6 +249,14 @@ export class RelayTransport {
   private rtcAttempted: boolean = false;
   /** DataChannel 实际选中的路径：'lan' | 'p2p' | 'turn'。 */
   private rtcTransport: string = '';
+  /** 断开时的判词（含关闭码与「是否值得自动重连」），上层在 onClosed 之后读它。 */
+  public closeVerdict: CloseVerdict | undefined = undefined;
+  /** 最近一次收到服务器任何控制帧的时刻：链路还活着的唯一证据。 */
+  private lastInboundAt: number = 0;
+  /** 服务器 hello.ack 下发的心跳间隔（拿不到就用协议默认 25s）。 */
+  private serverHeartbeatMs: number = 25000;
+  private linkTimer: number = -1;
+  private suspectLogged: boolean = false;
 
   constructor(url: string, options: RelayTransportOptions) {
     this.url = url;
@@ -202,6 +270,7 @@ export class RelayTransport {
     this.notifiedClosed = false;
     this.attachAttempt = 0;
     this.relayCandidates = [];
+    this.closeVerdict = undefined;
     return new Promise<void>((resolve, reject) => {
       this.connectResolve = resolve;
       this.connectReject = reject;
@@ -212,6 +281,7 @@ export class RelayTransport {
       this.socket = ws;
       ws.on('open', (err: Error, value: Object) => {
         logInfo('control socket open ' + this.url);
+        this.startLinkWatchdog();
         try {
           this.sendHello();
         } catch (e) {
@@ -224,7 +294,7 @@ export class RelayTransport {
         }
       });
       ws.on('close', (err: Error, value: webSocket.CloseResult) => {
-        this.handleControlClose();
+        this.handleControlClose(value);
       });
       ws.on('error', (err: Error) => {
         this.fail(new Error(`RelayTransport failed to connect to ${this.url}`));
@@ -361,6 +431,7 @@ export class RelayTransport {
     logInfo('ctl frame len=' + text.length + ' type=' + this.frameTypeOfSafe(text));
     try {
       const frame = parseFrame(text);
+      this.markLinkAlive();
       if (frame.type === 'hello.ack') {
         this.handleHelloAck(frame);
         return;
@@ -444,6 +515,14 @@ export class RelayTransport {
     logInfo('server negotiated capabilities: ' + negotiated.join(','));
     if (!allOffered || !negotiated.includes('transport.relay')) {
       throw new Error('Server did not negotiate the required Relay capability');
+    }
+    // 服务端下发了心跳节奏就按它算静默预算：默认 25s 一跳，75s 没帧才判死。
+    const heartbeat: number = jsonNum(frame.payload, 'heartbeatIntervalMs', 25000);
+    if (heartbeat > 0) {
+      this.serverHeartbeatMs = heartbeat;
+      // 与 onLinkTick 的算法保持一致：判死预算 = max(3×心跳, 90s)
+      const deadBudget: number = Math.max(heartbeat * 3, 90000);
+      logInfo('link heartbeat budget interval=' + heartbeat + 'ms dead=' + deadBudget + 'ms');
     }
     const payload: Record<string, Object> = {
       'hostDeviceId': this.options.targetDeviceId,
@@ -837,6 +916,9 @@ export class RelayTransport {
   }
 
   private handleDataSocketFrame(frame: ParsedFrame): void {
+    // 数据面也有服务器帧（ping / relay），同样算链路活着的证据：
+    // 只看控制通道会在「控制静默但数据还在流」时误判断线。
+    this.markLinkAlive();
     if (frame.type === 'relay.detach') {
       this.fail(new Error('Relay peer detached'));
       return;
@@ -861,15 +943,104 @@ export class RelayTransport {
     }
   }
 
-  private handleControlClose(): void {
-    logWarn('control socket closed readiness=' + (this.connectReject !== undefined ? 'pending' : 'ready'));
+  /**
+   * 收到 CloseResult 才能分辨「该不该自动重连」。
+   * 这里只做判定与记录，真正的恢复策略在上层（AppRuntime.handleDisconnect）。
+   */
+  private handleControlClose(result: webSocket.CloseResult | undefined): void {
+    const code: number = result !== undefined && typeof result.code === 'number' ? result.code : 0;
+    const reason: string = result !== undefined && typeof result.reason === 'string' ? result.reason : '';
+    const verdict: CloseVerdict = describeControlClose(code, reason);
+    this.closeVerdict = verdict;
+    logWarn('link close code=' + code + ' reason=' + (reason.length > 0 ? reason : '-')
+      + ' stop=' + verdict.stopAutoReconnect
+      + ' readiness=' + (this.connectReject !== undefined ? 'pending' : 'ready'));
     if (this.connectReject !== undefined) {
-      this.fail(new Error('Relay control channel closed before it was ready'));
+      this.fail(new Error(verdict.message));
       return;
     }
+    this.stopLinkWatchdog();
     this.socket = undefined;
     this.connectionId = undefined;
     this.notifyClosed();
+  }
+
+  /**
+   * 心跳看门狗：判断「链路还活着」的唯一可靠依据是**收到服务器帧**。
+   *
+   * 客户端不主动发 ping（协议里 Control 心跳由服务端驱动：25s 一跳，服务端 75s
+   * 收不到 pong 就主动断开）。所以这里不改协议，只做静默检测：
+   * 超过 2 个心跳周期标记可疑（只记日志，不拆连接），超过 3 个周期判死。
+   * 判死阈值取 max(3×心跳, 90s)，留出比服务端 75s 更宽的余量，避免抢在服务端
+   * 前面误杀健康连接——这条看门狗只负责兜住「close 帧永远到不了」的半开链路。
+   */
+  private startLinkWatchdog(): void {
+    this.stopLinkWatchdog();
+    this.lastInboundAt = Date.now();
+    this.suspectLogged = false;
+    this.linkTimer = setInterval(() => {
+      this.onLinkTick();
+    }, 5000);
+  }
+
+  private onLinkTick(): void {
+    if (this.lastInboundAt <= 0) {
+      return;
+    }
+    const interval: number = this.serverHeartbeatMs > 0 ? this.serverHeartbeatMs : 25000;
+    const age: number = Date.now() - this.lastInboundAt;
+    const suspectAfter: number = Math.max(interval * 2, 40000);
+    const deadAfter: number = Math.max(interval * 3, 90000);
+    if (age >= deadAfter) {
+      logWarn('link state=dead silence=' + age + 'ms budget=' + deadAfter
+        + 'ms transport=' + this.transportKind());
+      // 给上层一句人话：断线文案由 AppRuntime 直接展示，别再是笼统的「连接已断开」。
+      const verdict: CloseVerdict = new CloseVerdict();
+      verdict.code = 0;
+      verdict.reason = 'link-silent';
+      verdict.message = '链路静默 ' + Math.round(age / 1000) + ' 秒，连接已断开';
+      this.closeVerdict = verdict;
+      this.fail(new Error(verdict.message));
+      return;
+    }
+    if (age >= suspectAfter && !this.suspectLogged) {
+      this.suspectLogged = true;
+      logWarn('link state=suspect silence=' + age + 'ms budget=' + deadAfter
+        + 'ms transport=' + this.transportKind());
+    }
+  }
+
+  /** 任何一帧服务器数据都算链路活着的证据。 */
+  private markLinkAlive(): void {
+    const wasSuspect: boolean = this.suspectLogged;
+    this.lastInboundAt = Date.now();
+    this.suspectLogged = false;
+    if (wasSuspect) {
+      logInfo('link state=healthy silence reset transport=' + this.transportKind());
+    }
+  }
+
+  /**
+   * 立刻做一次链路体检：回前台、网络刚恢复时由上层调用。
+   * 静默已经超预算就直接判死（走统一断线重连），否则什么也不做。
+   */
+  recheckLink(): void {
+    if (this.socket === undefined) {
+      return;
+    }
+    this.onLinkTick();
+  }
+
+  /** 距离上一帧服务器数据的毫秒数；-1 表示还没有可用样本。 */
+  linkSilenceMs(): number {
+    return this.lastInboundAt > 0 ? Date.now() - this.lastInboundAt : -1;
+  }
+
+  private stopLinkWatchdog(): void {
+    if (this.linkTimer !== -1) {
+      clearInterval(this.linkTimer);
+      this.linkTimer = -1;
+    }
   }
 
   private finishConnect(mode: string): void {
@@ -943,6 +1114,8 @@ export class RelayTransport {
       }
     }
     this.dataMode = '';
+    this.stopLinkWatchdog();
+    this.lastInboundAt = 0;
     const ds = this.dataSocket;
     this.dataSocket = undefined;
     this.dataReady = false;

@@ -465,3 +465,42 @@ workspace/list -> 3 item(s)
 - 语音转写：主机 profile 未加载 speech 插件，`speech/transcribe` 无回执
 - 目录浏览 `directoryPicker/list`：端点已改对，未点开验证
 - 手机 hdc 频繁掉线（`tconn` 几分钟就断），多次实验被打断
+
+## 2026-11-07 01:55 移交：网络诊断 + 会话导出，两批改动已合流
+
+**两个会话同时改了这棵树，都还没提交**（HEAD = `803733e`）：
+
+| 来源 | 改的东西 | 状态 |
+| --- | --- | --- |
+| 会话 A（已提交 3 个 commit） | 会话导出 Markdown、滚到顶翻历史、新建会话前自动归档空会话 | HEAD 已含 |
+| 会话 A（未提交残留） | `AppRuntime.sessionMarkdownFor()`、`Index.ets` 会话行菜单「导出 / 归档」 | 已与 B 的改动共存，编译通过 |
+| 会话 B（本会话，未提交） | 网络诊断 P0 + P1，见下 | 已装机 |
+
+**B 的改动（v0.17.38-lan）**
+
+- `net/RelayTransport.ets`：`describeControlClose()` + `CloseVerdict`（4001/4003/1001/1006 分流）、
+  静默看门狗（收不到服务器帧 → suspect 40s / dead 90s）、`recheckLink()`、读 `hello.ack.heartbeatIntervalMs`
+- `services/NetworkMonitor.ets`（新）：`netAvailable` / `netLost` / `netCapabilitiesChange`
+- `services/AppRuntime.ets`：`activeRelay` 记判词、断线分流（`stopAutoReconnect` 时不再重连）、
+  `startNetworkMonitor()` / `onAppForeground()` / `retryNow()`
+- `pages/Index.ets`：设备页横幅（重连进度 + 停止重连 + 断网提示）、`onPageShow` 触发体检、断网状态点转红
+- `module.json5`：加 `ohos.permission.GET_NETWORK_INFO`
+- 顺手修的坑：`reconnectStatus`（"n 秒后重连第 k 次"）**以前从没被渲染**，只给状态点染色
+
+**已验证**：`scripts/build-harmony.sh` 编译通过；Edge（`192.168.3.57:40601`）已装 0.17.38，
+冷启动日志确认 `network monitor registered` / `type=wifi` / `runtime: 网络类型 Wi-Fi`，
+首个 `netAvailable` 不再误报"网络已恢复"；`hello.ack` 心跳 25s 被正确读入。
+手机（`192.168.3.145:34521`）已装但**未启动**（开发者模式关闭，`aa start` 被拒，需手动点开）。
+
+**未验证**：真实断网/恢复端到端（在设备上切飞行模式，看横幅与 `link state`）；
+以及"服务器停发心跳时会不会误杀健康连接"——日志里反复出现 `link state=dead` 就是误判信号。
+
+**待办（按优先级）**：① `docs/network-diagnostics.zh.md` §4 的提示语统一重写（"多次重连未成功"那句要带原因和动作）；
+② 诊断面板（RTT / 路径 / 最近事件）；③ 短抖动不把用户踢回设备列表（`handleDisconnect` 现在一律 `phase = PHASE_DEVICES`）；
+④ 客户端主动 ping + RTT（阻塞：协议未定义客户端 ping，需服务端先支持回 pong）。
+
+**设计与测试清单**：`docs/network-diagnostics.zh.md`（25 条网络场景用例、提示语表、close 码判定表）。
+
+**回滚**：`git checkout -- harmony/` 会连带丢掉会话 A 未提交的会话导出改动，别用；
+要回退 B 只动 `RelayTransport.ets`、`NetworkMonitor.ets`、`AppRuntime.ets` 里的网络相关块。
+

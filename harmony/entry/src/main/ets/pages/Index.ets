@@ -40,6 +40,9 @@ struct Index {
   @State busyAction: string = '';
   @State errorMsg: string = '';
   @State infoMsg: string = '';
+  /** 自动重连提示（含倒计时与第几次），原来是死数据只给状态点染色用。 */
+  @State reconnectNotice: string = '';
+  @State networkOnline: boolean = true;
   @State devices: RemoteHostDevice[] = [];
   @State sessions: HarnessRemoteSession[] = [];
   @State sessionsLoadFailed: boolean = false;
@@ -349,6 +352,9 @@ struct Index {
   }
 
   onPageShow(): void {
+    // 回前台：补查网络状态并做一次链路体检（后台待久了 socket 往往是半开的）。
+    // 原来这里只把 appBackground 置回 false，连接死没死全靠用户发消息才知道。
+    this.runtime.onAppForeground();
     this.runtime.appBackground = false;
   }
 
@@ -476,6 +482,9 @@ struct Index {
     this.contextPercent = this.runtime.contextPercent;
     this.connectedTransport = this.runtime.transportLabel;
     this.connectStage = this.runtime.connectStage;
+    // 重连文案原来只用于给状态点染色，用户看不到「几秒后重连第几次」。
+    this.reconnectNotice = this.runtime.reconnectStatus;
+    this.networkOnline = this.runtime.networkOnline;
     if (this.phase === PHASE_CONNECTING) {
       if (this.connectStartAt === 0) {
         this.connectStartAt = Date.now();
@@ -1307,7 +1316,21 @@ struct Index {
     if (this.phase === PHASE_CONNECTING) {
       return '#F5A623';
     }
+    if (!this.networkOnline) {
+      return '#F85749';
+    }
     return '#34D399';
+  }
+
+  /** 设备页顶部横幅：优先显示重连进度，其次提示断网。空串表示不显示。 */
+  private linkBannerText(): string {
+    if (this.reconnectNotice.length > 0) {
+      return this.reconnectNotice;
+    }
+    if (!this.networkOnline) {
+      return this.tr('网络已断开，恢复后自动重连');
+    }
+    return '';
   }
 
   /** 设备页底部统计：英文环境换单位，避免模板里嵌死「台 / 在线」。 */
@@ -3018,6 +3041,36 @@ struct Index {
         .width('100%')
         .padding({ left: 12, right: 12, top: 8, bottom: 8 })
         .backgroundColor('rgba(248,87,73,0.10)')
+        .borderRadius(10)
+        .margin({ left: 20, right: 20, bottom: 8 })
+      }
+      if (this.linkBannerText().length > 0) {
+        Row({ space: 8 }) {
+          if (this.reconnectNotice.length > 0) {
+            LoadingProgress()
+              .width(15)
+              .height(15)
+              .color('#F5A623')
+          }
+          Text(this.linkBannerText())
+            .fontSize(this.fs(12))
+            .fontColor('#F5A623')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          if (this.reconnectNotice.length > 0) {
+            Text(this.tr('停止重连'))
+              .fontSize(this.fs(12))
+              .fontColor('#F5A623')
+              .padding({ left: 8, right: 4, top: 3, bottom: 3 })
+              .onClick(() => {
+                this.runtime.cancelReconnect();
+              })
+          }
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor('rgba(245,166,35,0.12)')
         .borderRadius(10)
         .margin({ left: 20, right: 20, bottom: 8 })
       }

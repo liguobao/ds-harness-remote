@@ -4,7 +4,7 @@ import { notificationManager } from '@kit.NotificationKit';
 import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
-import { RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
+import { CloseVerdict, RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
 import { SecureTransport } from '../net/SecureTransport';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
@@ -17,6 +17,7 @@ import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
 import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 import { RtcBridge } from './RtcBridge';
+import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -113,6 +114,10 @@ export class AppRuntime {
   private unsubscribeClose: (() => void) | undefined = undefined;
   /** 预热中的中继通道：还没交给 SecureTransport/Core 就失败时由 teardown 负责关掉，否则会漏一条 socket。 */
   private pendingRelay: RelayTransport | undefined = undefined;
+  /** 已交给 Core 的那条中继通道：只为断线时读 closeVerdict（决定要不要继续自动重连）。 */
+  private activeRelay: RelayTransport | undefined = undefined;
+  /** 系统网络事件（断网/恢复/切网）。 */
+  private netMonitor: NetworkMonitor | undefined = undefined;
   /** ArkWeb 里的 WebRTC 桥（LAN 直连用），由页面在 aboutToAppear 时挂进来。 */
   private rtcBridge: RtcBridge | undefined = undefined;
   /** 退回设备列表时保留连接的那台主机；空表示没有保活连接。 */
@@ -231,6 +236,10 @@ export class AppRuntime {
   switchingTo: string = '';
   notificationsEnabled: boolean = true;
   appBackground: boolean = false;
+  /** 系统网络是否可用（断网时立刻把 UI 变灰，而不是等 socket 自己断）。 */
+  networkOnline: boolean = true;
+  /** 当前承载名：'Wi-Fi' | '移动数据' | '有线网络' | '无网络' | ''（未知）。 */
+  networkType: string = '';
   /** 文件预览：主机上某个文本文件的内容。 */
   filePreviewPath: string = '';
   filePreviewText: string = '';
@@ -377,6 +386,7 @@ export class AppRuntime {
     if (this.phase !== PHASE_BOOT) {
       return;
     }
+    this.startNetworkMonitor();
     try {
       await initClientVersion();
       await this.store.init(context);
@@ -558,6 +568,9 @@ export class AppRuntime {
       const secure: SecureTransport = new SecureTransport(relay, identity, host, pinnedHostKey);
       // 通道所有权交给 SecureTransport → Core，之后由 teardownConnection 关
       this.pendingRelay = undefined;
+      // 留着引用只为断线时读关闭判词（RelayTransport.closeVerdict）：
+      // 4003/授权失败要靠它决定「停止自动重连」。
+      this.activeRelay = relay;
       const core: RemoteClientCore = new RemoteClientCore(secure, 45000);
       this.core = core;
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
@@ -2741,6 +2754,7 @@ export class AppRuntime {
     this.core = undefined;
     const pending: RelayTransport | undefined = this.pendingRelay;
     this.pendingRelay = undefined;
+    this.activeRelay = undefined;
     if (pending !== undefined) {
       pending.close();
     }
@@ -2770,15 +2784,31 @@ export class AppRuntime {
     if (this.phase !== PHASE_CHAT) {
       return;
     }
+    // 关闭判词必须在 teardown 之前取：teardown 会把 activeRelay 清掉。
+    const verdict: CloseVerdict | undefined = this.activeRelay !== undefined
+      ? this.activeRelay.closeVerdict : undefined;
     this.teardownConnection();
     const target: string = this.lastDeviceId;
+    if (verdict !== undefined && verdict.stopAutoReconnect) {
+      // 4003 连接被顶掉 / 4001 授权失败 / 未知关闭码：自动重连只会让用户以为在恢复。
+      this.clearReconnectTimer();
+      this.reconnectAttempt = 0;
+      this.phase = PHASE_DEVICES;
+      this.reconnectStatus = '';
+      this.errorMsg = verdict.message;
+      logWarn('disconnect without auto-reconnect: ' + verdict.message);
+      this.notify();
+      return;
+    }
     if (target.length > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS) {
       const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
       const delay: number = AppRuntime.RECONNECT_DELAYS_MS[index];
       this.reconnectAttempt += 1;
       this.phase = PHASE_DEVICES;
       this.errorMsg = '';
-      this.reconnectStatus = '与主机的连接已断开，' + Math.round(delay / 1000)
+      const cause: string = verdict !== undefined && verdict.message.length > 0
+        ? verdict.message : '与主机的连接已断开';
+      this.reconnectStatus = cause + '，' + Math.round(delay / 1000)
         + ' 秒后自动重连（第 ' + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
       this.notify();
       this.scheduleReconnect(target, delay);
@@ -2811,6 +2841,91 @@ export class AppRuntime {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = -1;
     }
+  }
+
+  /**
+   * 系统网络事件：这里只反映状态 + 该立刻重试时立刻重试，
+   * 什么时候判死仍归 RelayTransport 的静默看门狗（两个地方别都下结论）。
+   */
+  private startNetworkMonitor(): void {
+    if (this.netMonitor !== undefined) {
+      return;
+    }
+    const monitor: NetworkMonitor = new NetworkMonitor();
+    monitor.onLost = () => {
+      this.networkOnline = false;
+      this.networkType = '无网络';
+      logWarn('runtime: 网络已断开');
+      if (this.phase === PHASE_CHAT && this.reconnectStatus.length === 0) {
+        // 只是提示，不拆连接：半开的 socket 由看门狗按预算处理
+        this.reconnectStatus = '网络已断开，恢复后自动重连';
+      }
+      this.notify();
+    };
+    monitor.onAvailable = () => {
+      this.networkOnline = true;
+      this.networkType = networkTypeLabel(monitor.type);
+      logInfo('runtime: 网络已恢复 type=' + this.networkType);
+      if (this.reconnectStatus.indexOf('网络已断开') >= 0) {
+        this.reconnectStatus = '';
+      }
+      this.notify();
+      this.retryNow('net-available');
+    };
+    monitor.onTypeChange = (type: string) => {
+      this.networkOnline = type !== 'none';
+      this.networkType = networkTypeLabel(type);
+      logInfo('runtime: 网络类型 ' + (this.networkType.length > 0 ? this.networkType : type));
+      this.notify();
+    };
+    this.netMonitor = monitor;
+    monitor.start();
+  }
+
+  /** 回前台：补一次网络状态查询，并对已有连接做一次链路体检。 */
+  onAppForeground(): void {
+    const wasBackground: boolean = this.appBackground;
+    this.appBackground = false;
+    if (!wasBackground) {
+      return;
+    }
+    const monitor: NetworkMonitor | undefined = this.netMonitor;
+    if (monitor !== undefined) {
+      monitor.refreshDefaultNet();
+    }
+    const relay: RelayTransport | undefined = this.activeRelay;
+    if (relay !== undefined) {
+      const silence: number = relay.linkSilenceMs();
+      logInfo('runtime: 回前台，链路静默 ' + silence + 'ms，触发体检');
+      relay.recheckLink();
+      return;
+    }
+    this.retryNow('foreground');
+  }
+
+  /**
+   * 不等退避档位，立刻按原目标重试一次。
+   * 网络刚恢复、刚回前台这类「外部条件已经变好」的时机用它，用户不用干等 30 秒。
+   */
+  private retryNow(reason: string): void {
+    if (this.phase !== PHASE_DEVICES || this.connectCancelled) {
+      return;
+    }
+    if (!this.networkOnline) {
+      return;
+    }
+    if (this.reconnectTimer === -1) {
+      return;
+    }
+    const target: string = this.lastDeviceId;
+    if (target.length === 0) {
+      return;
+    }
+    this.clearReconnectTimer();
+    logInfo('runtime: 立即重连（' + reason + '）target=' + target);
+    this.connectDevice(target).catch((error: Error) => {
+      logWarn('retryNow failed: ' + errorMessage(error));
+    });
   }
 
   /** 用户主动取消自动重连（例如要切换到另一台主机）。 */

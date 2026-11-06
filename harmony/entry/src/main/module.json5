@@ -22,6 +22,9 @@
         "name": "ohos.permission.INTERNET"
       },
       {
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
         "name": "ohos.permission.MICROPHONE",
         "reason": "$string:microphone_reason",
         "usedScene": {
