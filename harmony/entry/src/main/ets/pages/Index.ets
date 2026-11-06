@@ -158,6 +158,9 @@ struct Index {
   private draftSaveTimer: number = -1;
   /** 每个会话自己的「是否跟随底部」：切走再回来不强行把你拽到底部。 */
   private stickBySession: Record<string, boolean> = {};
+  /** 每个会话最后停在的那一行（item.id），切回来据此定位。 */
+  private scrollAnchors: Record<string, string> = {};
+  private anchorSaveTimer: number = -1;
   @State permissionOptionsList: string[] = [];
   /** 工作区选择。 */
   @State workspaces: HarnessWorkspace[] = [];
@@ -502,6 +505,20 @@ struct Index {
       this.promptInput = this.runtime.draftOf(this.currentSessionId);
       const restored: boolean | undefined = this.stickBySession[this.currentSessionId];
       this.stickToBottom = restored === undefined ? true : restored;
+      if (!this.stickToBottom) {
+        const anchorId: string | undefined = this.scrollAnchors[this.currentSessionId];
+        if (anchorId !== undefined) {
+          // 消息还没渲染完，稍等一下再定位，必要时补一次
+          setTimeout(() => {
+            this.scrollToMessage(anchorId);
+          }, 260);
+          setTimeout(() => {
+            if (!this.stickToBottom) {
+              this.scrollToMessage(anchorId);
+            }
+          }, 700);
+        }
+      }
     }
     this.switchingServer = this.runtime.switchingServer;
     this.switchingTo = this.runtime.switchingTo;
@@ -3435,6 +3452,24 @@ struct Index {
       .onReachEnd(() => {
         this.stickToBottom = true;
       })
+      // 记住当前停在哪个条目，切走再回来据此恢复位置
+      .onScrollIndex((first: number) => {
+        if (first < 0 || this.currentSessionId.length === 0) {
+          return;
+        }
+        const rows: ChatItem[] = this.chatRows();
+        if (first >= rows.length) {
+          return;
+        }
+        const anchorId: string = rows[first].id;
+        if (this.anchorSaveTimer >= 0) {
+          clearTimeout(this.anchorSaveTimer);
+        }
+        this.anchorSaveTimer = setTimeout(() => {
+          this.anchorSaveTimer = -1;
+          this.scrollAnchors[this.currentSessionId] = anchorId;
+        }, 400);
+      })
       // 右往左横滑唤出会话抽屉：手势只挂在消息区，输入坞的触摸不再被抢
       .gesture(
         PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
@@ -4071,6 +4106,14 @@ struct Index {
                   Text(formatSessionTime(session.updatedAt))
                     .fontSize(this.fs(11))
                     .fontColor(this.pal().text2)
+                  if (this.runtime.draftOf(session.sessionId).length > 0) {
+                    Text(this.tr('草稿'))
+                      .fontSize(this.fs(9))
+                      .fontColor('#F0A020')
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                      .backgroundColor('rgba(240,160,32,0.14)')
+                      .borderRadius(5)
+                  }
                   if (session.running) {
                     Row({ space: 3 }) {
                       Column()
