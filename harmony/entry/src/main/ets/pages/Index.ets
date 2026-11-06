@@ -150,6 +150,9 @@ struct Index {
   /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
   @State archivedIds: string[] = [];
   @State pinnedIds: string[] = [];
+  /** 当前会话还有更早历史可翻（同上，运行时字段要镜像）。 */
+  @State historyHasMore: boolean = false;
+  @State loadingOlderHistory: boolean = false;
   /** 会话抽屉里是否把已归档的会话也列出来。 */
   @State showArchived: boolean = false;
   /** 会话内搜索（只在当前会话里找）。 */
@@ -463,6 +466,8 @@ struct Index {
     this.sessionsLoadFailed = this.runtime.sessionsLoadFailed;
     this.archivedIds = this.runtime.archivedSessionIds.slice();
     this.pinnedIds = this.runtime.pinnedSessionIds.slice();
+    this.historyHasMore = this.runtime.historyHasMore;
+    this.loadingOlderHistory = this.runtime.loadingOlderHistory;
     this.messages = this.runtime.messages.slice();
     this.generating = this.runtime.generating;
     this.currentSessionId = this.runtime.currentSessionId;
@@ -3552,6 +3557,27 @@ struct Index {
         .margin({ left: 16, right: 16, top: 6 })
       }
       List({ scroller: this.scroller, space: 14 }) {
+        if (this.historyHasMore || this.loadingOlderHistory) {
+          ListItem() {
+            Row({ space: 8 }) {
+              Text(this.loadingOlderHistory ? this.tr('加载中…') : this.tr('加载更早的消息'))
+                .fontSize(this.fs(12))
+                .fontColor(this.loadingOlderHistory ? this.pal().text3 : '#4D6BFE')
+                .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(14)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  if (!this.loadingOlderHistory) {
+                    this.runtime.loadOlderHistory();
+                  }
+                })
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+            .padding({ top: 4, bottom: 2 })
+          }
+        }
         if (this.messages.length === 0) {
           ListItem() {
             Column({ space: 12 }) {

@@ -195,6 +195,12 @@ export class AppRuntime {
   messages: ChatItem[] = [];
   generating: boolean = false;
   currentSessionId: string = '';
+  /** 当前会话是否还有更早的历史可翻（session/page 的 hasMore）。 */
+  historyHasMore: boolean = false;
+  /** 正在翻更早历史，防连点。 */
+  loadingOlderHistory: boolean = false;
+  /** 已加载历史里最早的 seq，session/page 的 beforeSeq 用它。 */
+  private oldestHistorySeq: number = -1;
   /** 会话历史本地缓存（按最近使用淘汰），用于切换会话时立刻出内容 */
   private historyCache: Map<string, ChatItem[]> = new Map<string, ChatItem[]>();
   private historyOrder: string[] = [];
@@ -995,6 +1001,8 @@ export class AppRuntime {
       this.currentSessionId = sessionId;
       this.currentSessionTitle = '新会话';
       this.messages = [];
+      this.historyHasMore = false;
+      this.oldestHistorySeq = -1;
       this.generating = false;
       this.notify();
       const page: HistoryPage = await harness.sessionHistory(sessionId, -1, INITIAL_HISTORY_COUNT);
@@ -1384,6 +1392,66 @@ export class AppRuntime {
       this.errorMsg = errorMessage(error);
       this.notify();
     }
+  }
+
+  /**
+   * 往更早翻一页历史（首屏只拉最近 30 条）。
+   * 主机按 beforeSeq 返回，返回的条目拼到最前面；同一 seq 的重复条目会被丢掉。
+   */
+  async loadOlderHistory(): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    const sessionId: string = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      return;
+    }
+    if (!this.historyHasMore || this.loadingOlderHistory) {
+      return;
+    }
+    this.loadingOlderHistory = true;
+    this.notify();
+    try {
+      const before: number = this.oldestHistorySeq;
+      const page: HistoryPage = await harness.sessionPage(sessionId, before, INITIAL_HISTORY_COUNT);
+      if (this.currentSessionId !== sessionId) {
+        return;
+      }
+      const older: ChatItem[] = foldHistory(page.entries);
+      if (older.length > 0) {
+        const cut: number = oldestSeqOf(page.entries);
+        // 已经有的 seq 不再插一遍（翻页边界偶尔会重叠一两条）
+        const seen: number[] = [];
+        for (const item of this.messages) {
+          if (item.seq > 0) {
+            seen.push(item.seq);
+          }
+        }
+        const kept: ChatItem[] = [];
+        for (const item of older) {
+          if (item.seq > 0 && seen.includes(item.seq)) {
+            continue;
+          }
+          kept.push(item);
+        }
+        const merged: ChatItem[] = kept.concat(this.messages);
+        this.messages = merged;
+        this.rememberHistory(sessionId, merged);
+        if (cut >= 0) {
+          this.oldestHistorySeq = cut;
+        }
+        this.scheduleImageHydration();
+      }
+      this.historyHasMore = page.hasMore;
+      this.clearRetry();
+      logInfo('session/page before=' + before + ' -> ' + older.length + ' item(s), hasMore=' + page.hasMore);
+    } catch (error) {
+      logWarn('session/page failed: ' + errorMessage(error));
+      this.errorMsg = errorMessage(error);
+      this.setRetry('重新加载更早', () => {
+        this.loadOlderHistory();
+      });
+    }
+    this.loadingOlderHistory = false;
+    this.notify();
   }
 
   /** 归档指定会话（会话列表长按触发）。归档集合以主机回执为准。 */
@@ -2529,6 +2597,8 @@ export class AppRuntime {
       return;
     }
     this.messages = foldHistory(page.entries);
+    this.historyHasMore = page.hasMore;
+    this.oldestHistorySeq = oldestSeqOf(page.entries);
     this.rememberHistory(sessionId, this.messages);
     // 历史里的图片只有 attachmentId，这里排程补水（自动打开的会话也走这条）
     this.scheduleImageHydration();
@@ -2955,6 +3025,17 @@ function cloneItem(item: ChatItem): ChatItem {
 }
 
 /** Fold a native history window into ordered chat items. */
+/** 一页历史里最早的事件 seq（没有有效 seq 时返回 -1）。 */
+function oldestSeqOf(entries: HarnessHistoryEntry[]): number {
+  let oldest: number = -1;
+  for (const entry of entries) {
+    if (entry.event.seq > 0 && (oldest < 0 || entry.event.seq < oldest)) {
+      oldest = entry.event.seq;
+    }
+  }
+  return oldest;
+}
+
 function foldHistory(entries: HarnessHistoryEntry[]): ChatItem[] {
   let items: ChatItem[] = [];
   for (const entry of entries) {
