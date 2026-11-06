@@ -133,7 +133,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
     set({
       scope: nextScope,
       state: undefined,
-      loading: true,
+      loading: false,
       busy: false,
       error: undefined,
       actionError: undefined,

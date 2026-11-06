@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
   ChevronRight,
   CirclePlus,
   Copy,
+  Download,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -234,7 +235,7 @@ export function BotSidebarSection({
         </View>
       )}
 
-      {visibleError !== undefined && (
+      {visibleError !== undefined && state !== undefined && (
         <View style={styles.errorBanner}>
           <Text accessibilityRole="alert" style={styles.errorText}>{visibleError}</Text>
           <Pressable
@@ -262,14 +263,7 @@ export function BotSidebarSection({
       )}
 
       {!loading && state === undefined && (
-        <View style={styles.emptyWrap}>
-          <EmptyState
-            icon={Bot}
-            title={s.bots.unavailable}
-            body={visibleError ?? s.bots.unavailable}
-            action={<Button label={s.bots.retry} onPress={() => void refresh(true)} />}
-          />
-        </View>
+        <DsBotInstallCard error={visibleError} onRetry={() => void refresh(true)} />
       )}
 
       {state !== undefined && state.bots.length === 0 && (
@@ -1155,6 +1149,76 @@ function isNonEmptyObject(value: BotObject): boolean {
   return Object.keys(value).length > 0
 }
 
+export function DsBotInstallCard({ error, onRetry }: { error?: string; onRetry: () => void }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const rows = [
+    { label: s.plugins.installDesktop, value: 'ds-bot' },
+    { label: s.plugins.installCli, value: 'dsh plugin --profile web add -w ds-bot' },
+    { label: 'GitHub 源码地址（无法连接 npm 时填入）', value: 'github:Fei2411/DS-Bot&path:/ds-bot' },
+  ]
+  return (
+    <View style={styles.sectionBlock}>
+      <GroupCard>
+        <View style={styles.installCardBody}>
+          <View style={styles.installHeaderRow}>
+            <View style={styles.installIconBadge}>
+              <Download size={18} color={colors.primary} />
+            </View>
+            <View style={styles.grow}>
+              <Text style={styles.installTitle}>{s.plugins.installTitle}</Text>
+              <Text style={styles.installStatusText}>{error ?? s.bots.notInstalled}</Text>
+            </View>
+          </View>
+          <Text style={styles.installDescription}>{s.plugins.installHint}</Text>
+          <View style={styles.installCopyList}>
+            {rows.map(row => (
+              <DsBotInstallCopyRow key={row.value} label={row.label} value={row.value} />
+            ))}
+          </View>
+        </View>
+        <GroupRow
+          icon={RefreshCw}
+          label={s.bots.retry}
+          detail={s.plugins.installOnDesktop}
+          onPress={onRetry}
+        />
+      </GroupCard>
+    </View>
+  )
+}
+
+function DsBotInstallCopyRow({ label, value }: { label: string; value: string }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+  return (
+    <View style={styles.installCopyRow}>
+      <Text style={styles.installCopyLabel}>{label}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${s.plugins.copy}: ${value}`}
+        onPress={() => {
+          void Haptics.selectionAsync().catch(() => undefined)
+          void Clipboard.setStringAsync(value).then(() => setCopied(true)).catch(() => undefined)
+        }}
+        style={({ pressed }) => [styles.installCodeBox, pressed && styles.rowPressed]}
+      >
+        <Text style={styles.installCodeText} selectable>{value}</Text>
+        <View style={styles.installCopyAction}>
+          {copied ? <Check size={15} color={colors.success} /> : <Copy size={15} color={colors.primary} />}
+          {!copied && <Text style={styles.installCopyActionText}>{s.plugins.copy}</Text>}
+        </View>
+      </Pressable>
+    </View>
+  )
+}
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     scroll: { flex: 1 },
@@ -1414,6 +1478,83 @@ function createStyles(colors: ThemeColors) {
       ...type.caption,
       color: colors.muted,
       paddingHorizontal: spacing.xs,
+    },
+    installCardBody: {
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.md,
+      gap: spacing.sm,
+    },
+    installHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    installIconBadge: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.lg,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    installTitle: {
+      ...type.bodyStrong,
+      fontSize: 15,
+      color: colors.ink,
+    },
+    installStatusText: {
+      ...type.caption,
+      color: colors.muted,
+      marginTop: 1,
+    },
+    installDescription: {
+      ...type.small,
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.muted,
+    },
+    installCopyList: {
+      gap: spacing.xs,
+      marginTop: 2,
+    },
+    installCopyRow: {
+      gap: 4,
+    },
+    installCopyLabel: {
+      ...type.caption,
+      fontSize: 12,
+      color: colors.muted,
+    },
+    installCodeBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 8,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    installCodeText: {
+      flex: 1,
+      ...type.small,
+      fontSize: 12.5,
+      color: colors.ink,
+    },
+    installCopyAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      flexShrink: 0,
+    },
+    installCopyActionText: {
+      ...type.caption,
+      fontSize: 12,
+      color: colors.primary,
+      fontWeight: '600',
     },
   })
 }

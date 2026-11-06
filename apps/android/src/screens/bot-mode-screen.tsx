@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, AppState, Text, View } from 'react-native'
+import { ActivityIndicator, AppState, ScrollView, Text, View } from 'react-native'
 import { Bot, Menu, MoreVertical } from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
 import { type BotRemoteClient } from '../services/bot-catalog'
@@ -13,7 +13,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { createBotStyles } from './bot/styles'
-import { BotModalsHost, BotSidebarSection, useBotTeamPolling } from './bot-sidebar-section'
+import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamPolling } from './bot-sidebar-section'
 
 export function BotModeScreen({
   selectedId: propSelectedId,
@@ -206,7 +206,11 @@ export function BotModeScreen({
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>
-              ) : state && state.bots.length === 0 ? (
+              ) : state === undefined ? (
+                <ScrollView contentContainerStyle={{ padding: 16 }}>
+                  <DsBotInstallCard error={visibleError} onRetry={retry} />
+                </ScrollView>
+              ) : state.bots.length === 0 ? (
                 <EmptyState
                   icon={Bot}
                   title={s.bots.empty}
