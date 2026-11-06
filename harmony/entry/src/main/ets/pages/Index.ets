@@ -3541,6 +3541,8 @@ struct Index {
       .layoutWeight(1)
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
+      // 多缓存几屏，滚动时少重建气泡（长会话明显）
+      .cachedCount(6)
       // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面；
       // 键盘弹起时胶囊行收起，但仍要留够输入坞（约 46 + 16）的高度
       .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 74 : 132 })
