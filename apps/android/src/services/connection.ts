@@ -225,7 +225,8 @@ export class AndroidRemoteConnection {
    * Read an existing session attachment through its native carrier; never accept
    * a filesystem path. 0.2.2 Hosts require the full image reference (id, media
    * type, byte length and dimensions are verified), while older Hosts only know
-   * the durable id, so send the reference once the message carries every field.
+   * the durable id. Always carry that id: a 0.2.2 Host can recover the verified
+   * reference from session events even when only partial fields are available.
    */
   async readSessionImageAttachment(
     sessionId: string,
@@ -239,8 +240,10 @@ export class AndroidRemoteConnection {
     if (attachmentId === undefined) throw new Error(strings.common.unavailable)
     const fullReference = typeof attachment.mediaType === 'string' && typeof attachment.bytes === 'number'
       && typeof attachment.width === 'number' && typeof attachment.height === 'number'
+    const request: Record<string, unknown> = { sessionId, attachmentId }
+    if (fullReference) request.attachment = attachment
     const value = await new RemoteTypertGateway(core).call<unknown>('session/attachment', {
-      args: { request: fullReference ? { sessionId, attachment } : { sessionId, attachmentId } },
+      args: { request },
     }, signal, { maxResponseBytes: 12 * 1024 * 1024 })
     if (this.core !== core || this.proxy !== proxy || signal.aborted) throw new Error(strings.runtime.connectHostFirst)
     // Typert versions may preserve the official business Result inside the carrier result.

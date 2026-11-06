@@ -546,3 +546,30 @@ describe('remote mux frame reducer', () => {
   }, 15000)
 
 })
+
+
+describe('image attachment metadata tolerance', () => {
+  it('reads image metadata from alternate attachment field names', () => {
+    const event = sessionEvent({
+      type: 'user/message',
+      data: {
+        message: {
+          id: 'u-meta', role: 'user', source: { kind: 'user' },
+          content: [{ type: 'image', attachment: {
+            attachmentId: 'a1', mimeType: 'image/png', byteLength: 79, size: 79,
+            imageWidth: 4, imageHeight: 2, fileName: 'diagram.png',
+          } }],
+        },
+      },
+    })
+    expect(foldHistory([{ event }], 's1')).toEqual([
+      expect.objectContaining({
+        kind: 'message', id: 'u-meta', role: 'user',
+        images: [{
+          attachmentId: 'a1', sessionId: 's1', name: 'diagram.png',
+          mediaType: 'image/png', bytes: 79, width: 4, height: 2,
+        }],
+      }),
+    ])
+  })
+})

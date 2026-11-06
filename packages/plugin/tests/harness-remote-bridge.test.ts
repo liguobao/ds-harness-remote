@@ -1601,3 +1601,57 @@ function gateway(overrides: Partial<LocalTypertGateway> = {}): LocalTypertGatewa
     ...overrides,
   }
 }
+
+
+describe('HarnessRemoteBridge 0.2.2 attachment reference recovery', () => {
+  const reference = { attachmentId: 'a1', mediaType: 'image/png', bytes: 79, width: 1, height: 1, name: 'a.png' }
+
+  it('fills request.attachment from persisted events for an id-only client', async () => {
+    const events = [{ data: { message: { content: [{ type: 'image', attachment: reference }] } } }]
+    const dispatch = vi.fn(async (method: string, _payload: unknown) => {
+      if (method === 'session/events') return { ok: true as const, value: { events } }
+      return { ok: true as const, value: { attachment: reference, data: '' } }
+    })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(), undefined, '0.2.2')
+    await bridge.call({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+    const attachmentCall = dispatch.mock.calls.find(([method]) => method === 'session/attachment')
+    expect(attachmentCall?.[1]).toEqual({
+      args: { request: { sessionId: 's1', attachmentId: 'a1', attachment: reference } },
+    })
+    expect(dispatch.mock.calls.some(([method]) => method === 'session/events')).toBe(true)
+  })
+
+  it('keeps the id-only request unchanged when no persisted reference is found', async () => {
+    const dispatch = vi.fn(async (_method: string, _payload: unknown) => ({ ok: true as const, value: { attachment: reference, data: '' } }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(), undefined, '0.2.2')
+    await bridge.call({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+    const attachmentCall = dispatch.mock.calls.filter(([method]) => method === 'session/attachment').at(-1)
+    expect(attachmentCall?.[1]).toEqual({ args: { request: { sessionId: 's1', attachmentId: 'a1' } } })
+  })
+
+  it('falls back across event endpoints when the first one is unavailable', async () => {
+    const records = [{ message: { content: [{ type: 'image', attachment: reference }] } }]
+    const dispatch = vi.fn(async (method: string, _payload: unknown) => {
+      if (method === 'session/events') return { ok: false as const, error: { code: 'unsupported', message: '', details: {} } }
+      if (method === 'session/history') return { ok: true as const, value: { records } }
+      return { ok: true as const, value: { attachment: reference, data: '' } }
+    })
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(), undefined, '0.2.2-rc.1')
+    await bridge.call({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+    const attachmentCall = dispatch.mock.calls.find(([method]) => method === 'session/attachment')
+    expect(attachmentCall?.[1]).toEqual({
+      args: { request: { sessionId: 's1', attachmentId: 'a1', attachment: reference } },
+    })
+  })
+
+  it('strips the attachment field for older Hosts without querying events', async () => {
+    const dispatch = vi.fn(async (_method: string, _payload: unknown) => ({ ok: true as const, value: { attachment: reference, data: '' } }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(), undefined, '0.2.1-rc.5')
+    await bridge.call({
+      endpoint: 'session/attachment',
+      payload: { args: { request: { sessionId: 's1', attachment: reference } } },
+    })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch.mock.lastCall?.[1]).toEqual({ args: { request: { sessionId: 's1', attachmentId: 'a1' } } })
+  })
+})

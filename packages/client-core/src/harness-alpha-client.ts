@@ -563,12 +563,23 @@ export class HarnessAlphaClient {
     if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the stop request.')
   }
 
-  async sessionAttachment(sessionId: string, attachmentId: string): Promise<{ attachment: unknown; data: string }> {
+  async sessionAttachment(
+    sessionId: string,
+    attachment: string | Record<string, unknown>,
+  ): Promise<{ attachment: unknown; data: string }> {
+    const reference = typeof attachment === 'string' ? undefined : attachment
+    const attachmentId = typeof attachment === 'string'
+      ? attachment
+      : typeof attachment.attachmentId === 'string' ? attachment.attachmentId : undefined
     const result = await this.callValue<{ attachment?: unknown; data?: string; mediaType?: string }>('session/attachment', {
-      request: { sessionId, attachmentId },
+      request: {
+        sessionId,
+        ...(attachmentId === undefined ? {} : { attachmentId }),
+        ...(reference === undefined ? {} : { attachment: reference }),
+      },
     })
     return {
-      attachment: result.attachment ?? { mediaType: result.mediaType },
+      attachment: result.attachment ?? reference ?? { mediaType: result.mediaType },
       data: result.data ?? '',
     }
   }

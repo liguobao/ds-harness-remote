@@ -123,7 +123,7 @@ afterEach(async () => {
         if (method !== 'harness.remote.call') return rpc(method, params)
         expect(params).toEqual({
           endpoint: 'session/attachment',
-          payload: { args: { request: { sessionId: 's1', attachment } } },
+          payload: { args: { request: { sessionId: 's1', attachmentId: 'a1', attachment } } },
         })
         if (mode === 'disconnected') await connection.close()
         if (mode === 'cancelled') controller.abort()

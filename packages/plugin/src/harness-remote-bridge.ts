@@ -345,7 +345,7 @@ export class HarnessRemoteBridge {
     const signal = AbortSignal.timeout(60_000)
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
-      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion)
+      nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal)
       if (this.resolveWorkspaceRoot !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
       }
@@ -992,25 +992,149 @@ function normalizeWorkspaceRequestPayload(endpoint: string, payload: unknown, ha
  * 0.2.2 changed `session/attachment` from one durable id to the full
  * `ImageAttachmentRef` (the Host now verifies media type, byte length and
  * dimensions against the stored object). Older Hosts only understand the id,
- * so reduce a Remote client's reference to that field before dispatch. A legacy
- * client talking to a 0.2.2 Host cannot supply the full reference; the official
- * Gateway rejects that request explicitly instead of guessing.
- * @param endpoint - requested Typert endpoint.
- * @param payload - untouched `{ args: ... }` Remote payload.
- * @param harnessVersion - running Host Harness version.
- * @returns the payload the running Host understands.
+ * and their strict codec rejects an unexpected `attachment` field, so reduce a
+ * Remote client's reference to `{ sessionId, attachmentId }` before dispatch.
+ *
+ * On a 0.2.2+ Host, a legacy client that only persisted the durable id cannot
+ * supply the verified reference. Recover it from the session's persisted events
+ * (`session/events`, `session/page`, `session/history`) and fill
+ * `request.attachment` so the Host can still verify and return the image.
  */
-function normalizeSessionAttachmentPayload(endpoint: string, payload: unknown, harnessVersion?: string): unknown {
+async function normalizeSessionAttachmentPayload(
+  endpoint: string,
+  payload: unknown,
+  harnessVersion: string | undefined,
+  gateway: LocalTypertGateway,
+  signal: AbortSignal,
+): Promise<unknown> {
   if (endpoint !== 'session/attachment' || !isRecord(payload) || !isRecord(payload.args)) return payload
   const request = isRecord(payload.args.request) ? payload.args.request : undefined
-  if (request === undefined || isDshV022OrNewer(harnessVersion)) return payload
+  if (request === undefined) return payload
   const attachment = isRecord(request.attachment) ? request.attachment : undefined
   const attachmentId = attachment !== undefined && typeof attachment.attachmentId === 'string'
     ? attachment.attachmentId
     : typeof request.attachmentId === 'string' ? request.attachmentId : undefined
   if (attachmentId === undefined) return payload
-  const sessionId = request.sessionId
-  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } }
+
+  if (!isDshV022OrNewer(harnessVersion)) {
+    // Pre-0.2.2 strict codec only accepts the durable id.
+    const sessionId = request.sessionId
+    return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } }
+  }
+  // If the client already supplied a complete reference, keep it honest.
+  if (attachment !== undefined && isCompleteImageReference(attachment)) return payload
+  const reference = await findSessionAttachmentReference(gateway, request.sessionId, attachmentId, signal)
+  if (reference === undefined) return payload
+  const mergedAttachment = attachment !== undefined ? { ...reference, ...attachment } : reference
+  return { ...payload, args: { ...payload.args, request: { ...request, attachment: mergedAttachment } } }
+}
+
+/** Best-effort recovery of the full `ImageAttachmentRef` a 0.2.2 Host verifies. */
+async function findSessionAttachmentReference(
+  gateway: LocalTypertGateway,
+  sessionId: unknown,
+  attachmentId: string,
+  signal: AbortSignal,
+): Promise<Record<string, unknown> | undefined> {
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
+
+  // 1. Try session/events first (complete live stream if available)
+  try {
+    const result = await gateway.dispatch('session/events', { args: { request: { address: { kind: 'session', sessionId } } } }, signal)
+    const reference = extractAttachmentReference(result, attachmentId)
+    if (reference !== undefined) return reference
+  } catch {
+    // Fall back to paginated session/page
+  }
+
+  // 2. Try paginating through session/page
+  let beforeSeq: number | undefined = undefined
+  for (let page = 0; page < 10; page += 1) {
+    try {
+      const pageRequest: Record<string, unknown> = {
+        address: { kind: 'session', sessionId },
+        maxMessages: 200,
+        ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+      }
+      const result = await gateway.dispatch('session/page', { args: { request: pageRequest } }, signal)
+      const reference = extractAttachmentReference(result, attachmentId)
+      if (reference !== undefined) return reference
+      if (result.ok === true && isRecord(result.value)) {
+        if (result.value.hasMore === true && typeof result.value.beforeSeq === 'number') {
+          beforeSeq = result.value.beforeSeq
+          continue
+        }
+      }
+      break
+    } catch {
+      break
+    }
+  }
+
+  // 3. Fallback to session/history for older 0.2.x shapes
+  try {
+    const result = await gateway.dispatch('session/history', { args: { request: { sessionId, maxMessages: 200 } } }, signal)
+    const reference = extractAttachmentReference(result, attachmentId)
+    if (reference !== undefined) return reference
+  } catch {}
+
+  return undefined
+}
+
+/** Locate a complete image reference inside an events/records response. */
+function extractAttachmentReference(result: TypertRpcResult, attachmentId: string): Record<string, unknown> | undefined {
+  if (result.ok !== true) return undefined
+  const value = result.value
+  let records: unknown[] | undefined
+  if (Array.isArray(value)) records = value
+  else if (isRecord(value)) {
+    if (Array.isArray(value.records)) records = value.records
+    else if (Array.isArray(value.events)) records = value.events
+  }
+  if (records === undefined) return undefined
+  for (const record of records) {
+    const found = findImageReference(record, attachmentId, 0)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** Recursively find an image block carrying a complete reference for `attachmentId`. */
+function findImageReference(value: unknown, attachmentId: string, depth: number): Record<string, unknown> | undefined {
+  if (depth > 12 || value === null || typeof value !== 'object') return undefined
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findImageReference(item, attachmentId, depth + 1)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  const block = value as Record<string, unknown>
+  const candidate = isRecord(block.attachment) ? block.attachment : block
+  const candidateId = typeof candidate.attachmentId === 'string' ? candidate.attachmentId : undefined
+  if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
+    return {
+      attachmentId,
+      mediaType: candidate.mediaType,
+      bytes: candidate.bytes,
+      width: candidate.width,
+      height: candidate.height,
+      ...(typeof candidate.name === 'string' ? { name: candidate.name } : {}),
+    }
+  }
+  for (const nested of Object.values(block)) {
+    if (nested === null || typeof nested !== 'object') continue
+    const found = findImageReference(nested, attachmentId, depth + 1)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function isCompleteImageReference(value: Record<string, unknown>): boolean {
+  return typeof value.mediaType === 'string'
+    && typeof value.bytes === 'number'
+    && typeof value.width === 'number'
+    && typeof value.height === 'number'
 }
 
 /** Whether this Host reads the 0.2.2 attachment-reference request shape. */
