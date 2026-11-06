@@ -239,6 +239,10 @@ export class AppRuntime {
   pinnedSessionIds: string[] = [];
   /** 分栏布局里会话栏的宽度（vp）；0 = 用默认比例。 */
   splitWidth: number = 0;
+  /** 会话列表密度：0 自动 / 1 紧凑 / 2 超紧凑。 */
+  layoutDensity: number = 0;
+  /** 超宽窗口是否显示右侧「会话详情」栏。 */
+  showInspector: boolean = true;
   /** 会话收藏与最近访问（sessionId 列表）。 */
   favoriteSessions: string[] = [];
   recentSessions: string[] = [];
@@ -412,6 +416,8 @@ export class AppRuntime {
       this.languageMode = this.store.loadLanguageMode();
       this.textScaleMode = this.store.loadTextScale();
       this.splitWidth = this.store.loadSplitWidth();
+      this.layoutDensity = this.store.loadLayoutDensity();
+      this.showInspector = this.store.loadShowInspector();
       this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
@@ -1623,6 +1629,24 @@ export class AppRuntime {
       await this.openSession(sessionId);
     }
     return this.sessionMarkdown();
+  }
+
+  /** 会话列表密度。 */
+  setLayoutDensity(value: number): void {
+    this.layoutDensity = value;
+    this.store.saveLayoutDensity(value).catch((error: Error) => {
+      logWarn('save layout density failed: ' + errorMessage(error));
+    });
+    this.notify();
+  }
+
+  /** 右侧详情栏开关。 */
+  setShowInspector(value: boolean): void {
+    this.showInspector = value;
+    this.store.saveShowInspector(value).catch((error: Error) => {
+      logWarn('save inspector pref failed: ' + errorMessage(error));
+    });
+    this.notify();
   }
 
   /** 记住分栏宽度（拖完分隔条调用）。 */

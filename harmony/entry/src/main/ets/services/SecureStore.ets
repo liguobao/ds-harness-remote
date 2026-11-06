@@ -430,6 +430,29 @@ export class SecureStore {
     await this.putSync(KEY_TEXT_SCALE, `${mode}`);
   }
 
+  /** 会话列表密度：0 自动（分栏才紧凑）/ 1 紧凑 / 2 超紧凑。 */
+  loadLayoutDensity(): number {
+    const raw: string = this.getSync('layoutDensity', '0');
+    const parsed: number = Number.parseInt(raw);
+    if (parsed >= 0 && parsed <= 2) {
+      return parsed;
+    }
+    return 0;
+  }
+
+  async saveLayoutDensity(value: number): Promise<void> {
+    await this.putSync('layoutDensity', `${value}`);
+  }
+
+  /** 超宽窗口是否显示右侧「会话详情」栏。 */
+  loadShowInspector(): boolean {
+    return this.getSync('showInspector', '1') !== '0';
+  }
+
+  async saveShowInspector(value: boolean): Promise<void> {
+    await this.putSync('showInspector', value ? '1' : '0');
+  }
+
   /** 分栏布局里会话栏的宽度（vp）；0 表示用默认比例。 */
   loadSplitWidth(): number {
     const raw: string = this.getSync('splitWidth', '0');

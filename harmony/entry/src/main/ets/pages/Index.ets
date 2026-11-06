@@ -1144,8 +1144,8 @@ struct Index {
    * 阈值取 1180vp——再窄右栏会把消息区压到 600 以下。
    */
   private showThreePane(): boolean {
-    return this.windowWidthVp >= 1180 && this.windowHeightVp >= 560
-      && this.phase === PHASE_CHAT;
+    return this.runtime.showInspector && this.windowWidthVp >= 1180
+      && this.windowHeightVp >= 560 && this.phase === PHASE_CHAT;
   }
 
   /**
@@ -1255,9 +1255,20 @@ struct Index {
     return isExpandedWidth(this.breakpoint);
   }
 
-  /** 分栏（PC/平板）下会话行用紧凑密度：同样高度多看到两三行。 */
+  /**
+   * 会话行密度：设置里显式选了就听设置（0 自动 / 1 紧凑 / 2 超紧凑），
+   * 「自动」时只在分栏下收紧，单列保持宽松版。
+   */
   private compactRows(): boolean {
+    if (this.runtime.layoutDensity === 1 || this.runtime.layoutDensity === 2) {
+      return true;
+    }
     return this.showTwoPane() || this.showThreePane();
+  }
+
+  /** 超紧凑：会话行不显示轮数与工作区目录，只留标题与时间。 */
+  private ultraCompactRows(): boolean {
+    return this.runtime.layoutDensity === 2;
   }
 
   /** 小女仆的出场条件：窗口够高就出来，手机横屏（约 405vp）这种就不挤列表。 */
@@ -2260,6 +2271,30 @@ struct Index {
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
+            // —— 布局（分栏/密度，PC 与折叠屏才用得上）——
+            Column({ space: 8 }) {
+              Text(this.tr('布局'))
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .padding({ left: 4 })
+              this.SettingsRow(this.tr('列表密度'), this.layoutDensityLabel(), false, () => {
+                this.openChoice('density');
+              })
+              this.SettingsRow(this.tr('右侧详情栏'),
+                this.runtime.showInspector ? this.tr('显示') : this.tr('隐藏'), false, () => {
+                  this.runtime.setShowInspector(!this.runtime.showInspector);
+                })
+              if (this.runtime.splitWidth > 0) {
+                this.SettingsRow(this.tr('会话栏宽度'),
+                  this.runtime.splitWidth + 'vp', true, () => {
+                    this.runtime.setSplitWidth(0);
+                    promptAction.showToast({ message: this.tr('已恢复默认宽度') });
+                  })
+              }
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
             // —— 通用（低频，点开再选）——
             Column({ space: 8 }) {
               Text(this.tr('通用'))
@@ -2461,12 +2496,35 @@ struct Index {
     this.choiceOpen = true;
   }
 
+  /** 布局密度文案：0 自动 / 1 紧凑 / 2 超紧凑。 */
+  private layoutDensityLabel(): string {
+    const value: number = this.runtime.layoutDensity;
+    if (value === 1) {
+      return this.tr('紧凑');
+    }
+    if (value === 2) {
+      return this.tr('超紧凑');
+    }
+    return this.tr('自动（分栏时紧凑）');
+  }
+
+  private densityChoices(): ThemeChoice[] {
+    return [
+      new ThemeChoice(0, this.tr('自动'), this.tr('分栏时自动收紧，单列保持宽松')),
+      new ThemeChoice(1, this.tr('紧凑'), this.tr('行高小一点，同屏多两行')),
+      new ThemeChoice(2, this.tr('超紧凑'), this.tr('只留标题和时间，隐藏轮数与目录'))
+    ];
+  }
+
   private choiceTitleText(): string {
     if (this.choiceKind === 'theme') {
       return this.tr('外观');
     }
     if (this.choiceKind === 'scale') {
       return this.tr('文字大小');
+    }
+    if (this.choiceKind === 'density') {
+      return this.tr('列表密度');
     }
     return this.tr('语言');
   }
@@ -2478,6 +2536,9 @@ struct Index {
     if (this.choiceKind === 'scale') {
       return this.textScaleChoices();
     }
+    if (this.choiceKind === 'density') {
+      return this.densityChoices();
+    }
     return this.languageChoices();
   }
 
@@ -2488,6 +2549,9 @@ struct Index {
     if (this.choiceKind === 'scale') {
       return this.textScaleMode;
     }
+    if (this.choiceKind === 'density') {
+      return this.runtime.layoutDensity;
+    }
     return this.languageMode;
   }
 
@@ -2496,6 +2560,8 @@ struct Index {
       this.runtime.setThemeMode(value);
     } else if (this.choiceKind === 'scale') {
       this.runtime.setTextScaleMode(value);
+    } else if (this.choiceKind === 'density') {
+      this.runtime.setLayoutDensity(value);
     } else {
       this.runtime.setLanguageMode(value);
     }
@@ -4728,12 +4794,12 @@ struct Index {
                   Text(formatSessionTime(session.updatedAt))
                     .fontSize(this.fs(11))
                     .fontColor(this.pal().text2)
-                  if (session.turns > 0) {
+                  if (session.turns > 0 && !this.ultraCompactRows()) {
                     Text(session.turns + this.tr(' 轮'))
                       .fontSize(this.fs(10))
                       .fontColor(this.pal().text3)
                   }
-                  if (cwdTail(session.cwd).length > 0) {
+                  if (cwdTail(session.cwd).length > 0 && !this.ultraCompactRows()) {
                     Text(cwdTail(session.cwd))
                       .fontSize(this.fs(10))
                       .fontColor(this.pal().text3)
