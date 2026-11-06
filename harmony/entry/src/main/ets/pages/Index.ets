@@ -1138,6 +1138,15 @@ struct Index {
   /** 左侧会话栏宽度：宽窗口下按比例放宽，窄窗口保持 300。 */
   /** 竖屏抽屉宽度（屏宽 82%），跟手位移按它换算。 */
   /**
+   * 三栏：会话 | 聊天 | 会话详情。给超宽窗口（2in1 全屏、三折叠三屏展开、大屏平板横放）用，
+   * 阈值取 1180vp——再窄右栏会把消息区压到 600 以下。
+   */
+  private showThreePane(): boolean {
+    return this.windowWidthVp >= 1180 && this.windowHeightVp >= 560
+      && this.phase === PHASE_CHAT;
+  }
+
+  /**
    * 是否走「会话 + 聊天」双栏。
    * 按断点（窗口宽度 ≥ 600vp）而不是横竖屏判断：平板竖屏、折叠屏展开、PC 窗口都该分栏，
    * 手机横屏（宽 800 但高 360）反而该保持单列。
@@ -1759,7 +1768,40 @@ struct Index {
         } else if (this.phase === PHASE_CONNECTING) {
           this.ConnectingScreen()
         } else {
-          if (this.showTwoPane()) {
+          if (this.showThreePane()) {
+            Row() {
+              this.SessionsPane()
+              Column()
+                .width(6)
+                .height('100%')
+                .backgroundColor(this.splitDragging ? 'rgba(34,211,238,0.35)' : Color.Transparent)
+                .gesture(
+                  PanGesture({ direction: PanDirection.Horizontal, distance: 2 })
+                    .onActionStart(() => {
+                      this.splitDragging = true;
+                      this.splitDragBase = this.splitPaneWidth();
+                    })
+                    .onActionUpdate((event: GestureEvent) => {
+                      this.runtime.setSplitWidth(this.splitDragBase + event.offsetX);
+                    })
+                    .onActionEnd(() => {
+                      this.splitDragging = false;
+                      this.runtime.setSplitWidth(this.splitPaneWidth());
+                    })
+                )
+                .onHover((isHover: boolean) => {
+                  this.splitHover = isHover;
+                })
+              Column() {
+                this.ChatScreen()
+              }
+              .layoutWeight(1)
+              .height('100%')
+              this.InspectorPane()
+            }
+            .width('100%')
+            .height('100%')
+          } else if (this.showTwoPane()) {
             Row() {
               this.SessionsPane()
               // 分隔条：PC 上可以拖着调会话栏宽度，宽度记在本地
@@ -4749,6 +4791,188 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  /**
+   * 右栏会话详情（三栏模式常驻）：会话概览 + 模型/权限 + 上下文 + 快捷入口。
+   * 内容与「齿轮」面板同源，但排成竖排窄栏，避免在超宽窗口里还要点开浮层。
+   */
+  @Builder
+  InspectorPane() {
+    Column({ space: 12 }) {
+      Column({ space: 3 }) {
+        Text(this.tr('会话详情'))
+          .fontSize(this.fs(13))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.pal().text)
+          .width('100%')
+        Text(this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('新会话'))
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+
+      // 上下文
+      Column({ space: 4 }) {
+        Row({ space: 8 }) {
+          Text(this.tr('上下文'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+          Text(this.contextPercent > 0 ? `${this.contextPercent}%` : '—')
+            .fontSize(this.fs(12))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.contextPercent >= 80 ? '#F85749' : this.pal().text)
+        }
+        .width('100%')
+        Progress({ value: this.contextPercent, total: 100, type: ProgressType.Linear })
+          .width('100%')
+          .height(4)
+          .color(this.contextPercent >= 80 ? '#F85749' : '#22D3EE')
+        if (this.contextPercent >= 60) {
+          Text(this.tr('压缩上下文'))
+            .fontSize(this.fs(11))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(8)
+            .onClick(() => {
+              this.runtime.sendPrompt('/compact');
+            })
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+
+      // 模型
+      Column({ space: 4 }) {
+        Text(this.tr('模型'))
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .width('100%')
+        Text(this.modelSummary())
+          .fontSize(this.fs(12))
+          .fontColor(this.pal().text2)
+          .maxLines(2)
+          .width('100%')
+        Text(this.tr('更换模型'))
+          .fontSize(this.fs(11))
+          .fontColor('#22D3EE')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor('rgba(34,211,238,0.10)')
+          .borderRadius(8)
+          .onClick(() => {
+            this.runtime.refreshModelCatalog();
+            this.showModelPicker = true;
+          })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+
+      // 权限
+      Column({ space: 4 }) {
+        Text(this.tr('权限'))
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .width('100%')
+        Column({ space: 6 }) {
+          ForEach(this.permissionChoices(), (preset: string) => {
+            Text(this.permissionChoiceLabel(preset))
+              .fontSize(this.fs(11))
+              .fontColor(preset === this.permissionPreset ? '#0B1220' : this.pal().text2)
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ top: 5, bottom: 5 })
+              .backgroundColor(preset === this.permissionPreset ? '#34D399' : this.pal().inputBg)
+              .borderRadius(8)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.runtime.selectPermission(preset);
+              })
+          }, (preset: string) => preset)
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+
+      // 快捷入口
+      Column({ space: 6 }) {
+        Text(this.tr('快捷入口'))
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .width('100%')
+        Row({ space: 6 }) {
+          Text(this.tr('定时任务'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(8)
+            .onClick(() => {
+              this.schedulesOpen = true;
+              this.runtime.loadSchedules();
+            })
+          Text(this.tr('诊断'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(8)
+            .onClick(() => {
+              this.diagnosticsOpen = true;
+            })
+        }
+        Row({ space: 6 }) {
+          Text(this.tr('导出'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(8)
+            .onClick(() => {
+              const data: pasteboard.PasteData = pasteboard.createData(
+                pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.sessionMarkdown());
+              pasteboard.getSystemPasteboard().setData(data).then(() => {
+                promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+              }).catch(() => undefined);
+            })
+          Text(this.tr('归档'))
+            .fontSize(this.fs(11))
+            .fontColor('#F85749')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('rgba(248,87,73,0.10)')
+            .borderRadius(8)
+            .onClick(() => {
+              this.runtime.archiveCurrentSession();
+            })
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      Blank()
+      Text(this.connectionSummary())
+        .fontSize(this.fs(10))
+        .fontColor(this.pal().text3)
+        .maxLines(2)
+        .width('100%')
+    }
+    .width(300)
+    .height('100%')
+    .padding({ left: 14, right: 14, top: 16, bottom: 16 })
+    .backgroundColor(this.pal().panel)
+    .border({ width: { left: 0.5 }, color: this.pal().borderStrong })
+    .alignItems(HorizontalAlign.Start)
+    // 常驻栏没有「打开面板」这个动作，出现时自己补一次模型目录与权限状态
+    .onAppear(() => {
+      if (!this.runtime.modelCatalogLoaded) {
+        this.runtime.refreshModelCatalog();
+      }
+      this.runtime.refreshPermissionState();
+    })
   }
 
   /** 文件浏览：只读列目录，点目录进入、点 .. 返回上级。 */
