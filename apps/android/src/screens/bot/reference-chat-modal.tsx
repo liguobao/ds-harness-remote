@@ -271,34 +271,37 @@ export function ReferencedChatPills({
   const styles = useThemedStyles(createStyles)
   if (items.length === 0) return null
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.pillsRow}
-      keyboardShouldPersistTaps="handled"
-    >
-      {items.map(item => (
-        <View key={item.sessionId} style={styles.referencePill}>
-          {item.bot ? (
-            <BotAvatar bot={item.bot} size={18} />
-          ) : (
-            <OfficialMenuIcons.referenceSession size={14} color={colors.primary} />
-          )}
-          <Text numberOfLines={1} style={styles.referencePillText}>
-            {item.mentionLabel}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${strings.common.delete} ${item.mentionLabel}`}
-            hitSlop={8}
-            onPress={() => onRemove(item.sessionId)}
-            style={styles.referencePillRemove}
-          >
-            <X size={13} color={colors.primary} />
-          </Pressable>
-        </View>
-      ))}
-    </ScrollView>
+    <View style={styles.pillsContainer}>
+      <ScrollView
+        horizontal
+        style={styles.pillsScroll}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.pillsRow}
+        keyboardShouldPersistTaps="handled"
+      >
+        {items.map(item => (
+          <View key={item.sessionId} style={styles.referencePill}>
+            {item.bot ? (
+              <BotAvatar bot={item.bot} size={18} />
+            ) : (
+              <MessageSquare size={14} color={colors.primary} />
+            )}
+            <Text numberOfLines={1} style={styles.referencePillText}>
+              引用：{item.mentionLabel}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${strings.common.delete} ${item.mentionLabel}`}
+              hitSlop={8}
+              onPress={() => onRemove(item.sessionId)}
+              style={styles.referencePillRemove}
+            >
+              <X size={13} color={colors.primary} />
+            </Pressable>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   )
 }
 
@@ -413,6 +416,13 @@ function createStyles(colors: ThemeColors) {
       ...type.small,
       color: colors.muted,
     },
+    pillsContainer: {
+      flexGrow: 0,
+      flexShrink: 0,
+    },
+    pillsScroll: {
+      flexGrow: 0,
+    },
     pillsRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -425,7 +435,7 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      maxWidth: 240,
+      maxWidth: 260,
       paddingLeft: 10,
       paddingRight: 8,
       paddingVertical: 5,
