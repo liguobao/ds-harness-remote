@@ -745,6 +745,23 @@ export class AppRuntime {
     this.notify();
   }
 
+  /**
+   * 把「主机不接受这条路径」的原始报错翻成人话。
+   * 协议收紧后 workspaceFiles/read* 只允许 Session 工作区内、且拒绝越界符号链接，
+   * 报错原文是英文的路径/权限描述，直接弹给用户等于没说。
+   */
+  private fileAccessHint(error: Object): Error {
+    const text: string = errorMessage(error).toLowerCase();
+    const denied: boolean = text.indexOf('outside') >= 0 || text.indexOf('escape') >= 0
+      || text.indexOf('forbidden') >= 0 || text.indexOf('permission') >= 0
+      || text.indexOf('denied') >= 0 || text.indexOf('not within') >= 0;
+    if (!denied) {
+      return asError(error);
+    }
+    return new Error('主机拒绝读取这个路径：新版主机只允许读取当前会话工作区内（cwd）的文件。'
+      + '把文件放到该工作区，或让主机上的 agent 先复制过来。');
+  }
+
   /** 取主机上一张图片的 base64（消息里的本地图片路径）。 */
   async readImageBase64(path: string): Promise<string> {
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -752,7 +769,11 @@ export class AppRuntime {
       throw new Error('尚未连接主机');
     }
     const sessionId: string = this.currentSessionId;
-    return harness.readFileBase64(sessionId, path);
+    try {
+      return await harness.readFileBase64(sessionId, path);
+    } catch (error) {
+      throw this.fileAccessHint(asError(error));
+    }
   }
 
   /** 申请通知权限（用户第一次开启开关时调）。 */
@@ -2061,7 +2082,12 @@ export class AppRuntime {
           body = await harness.sessionAttachment(sessionId, attachmentId);
           this.attachmentCache.set(attachmentId, body);
         } catch (error) {
-          logWarn('history image ' + attachmentId + ' failed: ' + errorMessage(error));
+          const text: string = errorMessage(error);
+          logWarn('history image ' + attachmentId + ' failed: ' + text);
+          // 0.2.2+ 的 Host 要完整 ImageAttachmentRef；只报日志的话用户只会看到图片空着
+          if (text.toLowerCase().indexOf('attachment') >= 0) {
+            this.pushLinkEvent('图片附件读取失败（可能是 Host 版本要求完整引用）');
+          }
           this.attachmentCache.set(attachmentId, '');
         }
       }
@@ -3012,6 +3038,10 @@ export class AppRuntime {
     rows.push('主机：' + (this.connectedHostDisplayName().length > 0 ? this.connectedHostDisplayName() : '—'));
     rows.push('传输：' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
     rows.push('链路：' + silence);
+    const heartbeat: string = relay !== undefined && relay.heartbeatIntervalMs() > 0
+      ? Math.round(relay.heartbeatIntervalMs() / 1000) + ' 秒（服务端心跳）'
+      : '未读到';
+    rows.push('心跳：' + heartbeat);
     rows.push('网络：' + (this.networkOnline ? (this.networkType.length > 0 ? this.networkType : '在线') : '已断开'));
     rows.push('重连：' + (this.reconnecting
       ? (this.reconnectStatus.length > 0 ? this.reconnectStatus : '进行中')

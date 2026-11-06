@@ -244,11 +244,17 @@ export class HarnessAlphaClient {
    * 读历史图片字节：`session/attachment` 只允许读该会话日志引用过的附件，
    * 返回标准 base64（主机会校验归属，不是通用文件读取）。
    */
-  async sessionAttachment(sessionId: string, attachmentId: string): Promise<string> {
+  async sessionAttachment(sessionId: string, attachmentId: string,
+    reference?: Record<string, Object>): Promise<string> {
     const request: Record<string, Object> = {
       'sessionId': sessionId,
       'attachmentId': attachmentId
     };
+    // 0.2.2+ 的 Host 认完整 `ImageAttachmentRef`（少了 mediaType 等字段会回填失败），
+    // 老 Host 只认 `attachmentId`：两个都带上，两边都能过；回执不完整时也不当失败。
+    if (reference !== undefined) {
+      request['attachment'] = reference;
+    }
     const args: Record<string, Object> = { 'request': request };
     const value: Object = await this.callValue('session/attachment', args);
     const root: Record<string, Object> | undefined = asRecord(value);
@@ -257,7 +263,8 @@ export class HarnessAlphaClient {
     }
     const data: string = jsonStr(root, 'data', '');
     if (data.length === 0) {
-      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an empty attachment.');
+      throw new RemoteGatewayError('INVALID_MESSAGE',
+        'The Host returned an empty attachment.');
     }
     return data;
   }

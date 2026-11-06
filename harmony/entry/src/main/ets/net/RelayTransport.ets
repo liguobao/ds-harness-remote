@@ -1010,6 +1010,11 @@ export class RelayTransport {
     }
   }
 
+  /** 服务端在 `hello.ack` 里给的心跳间隔（毫秒）；没读到返回 0。 */
+  heartbeatIntervalMs(): number {
+    return this.serverHeartbeatMs;
+  }
+
   /** 距离上一帧服务器数据过了多久（毫秒）；从没收到过返回 -1。 */
   silenceMs(): number {
     if (this.lastInboundAt <= 0) {
