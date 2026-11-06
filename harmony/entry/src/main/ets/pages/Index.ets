@@ -3225,11 +3225,44 @@ struct Index {
                     .fontSize(11)
                     .fontColor(this.pal().text3)
                 }
-              } else {
-                Text(this.busy ? this.tr('正在加载会话…') : this.tr('发送第一条消息开始对话'))
+              } else if (this.busy) {
+                Text(this.tr('正在加载会话…'))
                   .fontSize(13)
                   .fontColor(this.pal().text3)
                   .padding(32)
+              } else {
+                // 空会话别只留一句话：给几条能直接点的提示词，顺手把 slash 入口说清楚
+                Column({ space: 8 }) {
+                  Text('✨')
+                    .fontSize(22)
+                  Text(this.tr('发送第一条消息开始对话'))
+                    .fontSize(this.fs(13))
+                    .fontColor(this.pal().text2)
+                  if (this.runtime.prompts.length > 0) {
+                    ForEach(this.runtime.prompts.slice(0, 3), (item: string) => {
+                      Text(item)
+                        .fontSize(this.fs(11))
+                        .fontColor(this.pal().text2)
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+                        .backgroundColor(this.pal().card)
+                        .borderRadius(10)
+                        .border({ width: 1, color: this.pal().border })
+                        .constraintSize({ maxWidth: 260 })
+                        .onClick(() => {
+                          this.promptInput = item;
+                          this.runtime.saveDraft(this.currentSessionId, item);
+                        })
+                    }, (item: string) => 'empty-prompt-' + item)
+                  }
+                  Text(this.tr('输入 / 查看主机命令，点 ✦ 打开提示词库'))
+                    .fontSize(this.fs(10))
+                    .fontColor(this.pal().text3)
+                    .padding({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Center)
+                .padding({ top: 30, bottom: 10 })
               }
             }
             .width('100%')
