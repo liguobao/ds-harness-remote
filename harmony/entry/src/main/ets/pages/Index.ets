@@ -742,6 +742,16 @@ struct Index {
   }
 
   /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
+  /** 最近访问的会话标题；列表里没有（已归档/换主机）时给个短 id。 */
+  private recentSessionTitle(sessionId: string): string {
+    for (const session of this.sessions) {
+      if (session.sessionId === sessionId) {
+        return formatSessionTitle(session);
+      }
+    }
+    return '#' + sessionId.substring(sessionId.length - 6);
+  }
+
   private chooseServerChoice(choice: ServerChoice): void {
     if (this.switchingServer) {
       return;
@@ -3857,6 +3867,34 @@ struct Index {
         .width('100%')
         .height(0.5)
         .backgroundColor(this.pal().border)
+      if (!this.sessionSearchActive && this.runtime.recentSessions.length > 0) {
+        Scroll() {
+          Row({ space: 8 }) {
+            Text(this.tr('最近'))
+              .fontSize(this.fs(10))
+              .fontColor(this.pal().text3)
+            ForEach(this.runtime.recentSessions, (id: string) => {
+              Text(this.recentSessionTitle(id))
+                .fontSize(this.fs(11))
+                .fontColor(this.pal().text2)
+                .maxLines(1)
+                .constraintSize({ maxWidth: 120 })
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(9)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  this.closeDrawer();
+                  this.runtime.openSession(id);
+                })
+            }, (id: string) => 'recent-' + id)
+          }
+          .padding({ left: 16, right: 16, bottom: 6 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+      }
       if ((this.sessionSearchActive ? this.sessionSearchResults.length : this.sessions.length) === 0) {
         Column({ space: 6 }) {
           Text(this.sessionSearchActive ? this.tr('没有匹配的会话') : this.tr('还没有会话'))
