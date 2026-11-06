@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject } from '../../services/bot-catalog'
@@ -438,11 +438,22 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       onMomentumScrollEnd={() => { scrolling.current = false }}
       onScroll={event => { if (!scrolling.current) return; const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent; atEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 90 }}
       scrollEventThrottle={32} onContentSizeChange={followEnd}
-      ListEmptyComponent={<Text style={styles.muted}>{s.bots.noMessages}</Text>}
+      ListEmptyComponent={null}
       ListHeaderComponent={<View style={styles.section}>
-        {bot && !hasMore && cursor !== null && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderBusy} onPress={() => void earlierPage()} />}
         {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
-        {hasMore && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderLoading || !ready} onPress={() => { atEnd.current = false; void loadOlder() }} />}
+        {hasMore && (
+          <View style={styles.earlierTop}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={s.bots.loadOlder}
+              disabled={olderLoading || !ready}
+              onPress={() => { atEnd.current = false; void loadOlder() }}
+              style={({ pressed }) => [styles.earlierPill, pressed && { opacity: 0.72 }]}
+            >
+              <Text style={styles.earlierPillText}>{s.bots.loadOlder}</Text>
+            </Pressable>
+          </View>
+        )}
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} />}
@@ -453,9 +464,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}
       </View>} />
     {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-    {bot && state.btwSupported && <Text style={[styles.muted, { paddingHorizontal: 12 }]}>{s.bots.btwHint}</Text>}
     {atQuery !== null && botAtMentionGroups.length > 0 && (
-      <View style={{ paddingHorizontal: 8 }}>
+      <View style={{ paddingHorizontal: 14 }}>
         <MentionPopover
           groups={botAtMentionGroups}
           onDismiss={() => setAtQuery(null)}
@@ -463,39 +473,74 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         />
       </View>
     )}
-    <ReferencedChatPills
-      items={stagedReferences}
-      onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
-    />
-    <View style={styles.composer}>
-      <IconButton
-        label={s.chat.moreActions}
-        icon={Plus}
-        disabled={disabled}
-        onPress={() => setPlusMenuOpen(true)}
-      />
-      <TextInput
-        ref={inputRef}
-        accessibilityLabel={room ? s.bots.groupMessage : s.bots.message}
-        placeholder={room ? s.bots.groupMessage : s.bots.message}
-        placeholderTextColor={colors.muted}
-        style={[styles.input, styles.draft]}
-        multiline
-        editable={!disabled}
-        selection={selection}
-        onChangeText={handleDraftChange}
-        onSelectionChange={handleSelectionChange}
-      >
-        <Text>
-          {draftSegments.map((segment, index) => (
-            <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
-              {segment.text}
+    <View style={styles.composerOuter}>
+      <View style={[styles.composerCard, stagedReferences.length > 0 && styles.composerCardWithPills]}>
+        <ReferencedChatPills
+          items={stagedReferences}
+          onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
+        />
+        <View style={styles.composerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={s.chat.moreActions}
+            disabled={disabled}
+            onPress={() => setPlusMenuOpen(true)}
+            style={({ pressed }) => [styles.plusCircle, pressed && { opacity: 0.72 }, disabled && { opacity: 0.4 }]}
+          >
+            <Plus size={16} color={colors.muted} strokeWidth={2.2} />
+          </Pressable>
+          <TextInput
+            ref={inputRef}
+            accessibilityLabel={bot ? `给 ${bot.name} 发消息` : room ? `给 ${room.name} 发消息` : s.bots.message}
+            placeholder={bot ? `给 ${bot.name} 发消息` : room ? `给 ${room.name} 发消息` : s.bots.message}
+            placeholderTextColor={colors.muted}
+            style={styles.composerInput}
+            multiline
+            editable={!disabled}
+            selection={selection}
+            onChangeText={handleDraftChange}
+            onSelectionChange={handleSelectionChange}
+          >
+            <Text>
+              {draftSegments.map((segment, index) => (
+                <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
+                  {segment.text}
+                </Text>
+              ))}
             </Text>
-          ))}
-        </Text>
-      </TextInput>
-      {selected?.running && <IconButton label={s.bots.stop} icon={Square} disabled={disabled} onPress={() => void stopSession()} />}
-      {busy ? <ActivityIndicator color={colors.primary} /> : <IconButton label={s.bots.send} icon={ArrowUp} tint={colors.primary} disabled={disabled || (!draft.trim() && stagedReferences.length === 0)} onPress={() => void send()} />}
+          </TextInput>
+          {selected?.running && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={s.bots.stop}
+              disabled={disabled}
+              onPress={() => void stopSession()}
+              style={({ pressed }) => [styles.stopCircle, pressed && { opacity: 0.78 }]}
+            >
+              <Square size={12} color={colors.surface} fill={colors.surface} />
+            </Pressable>
+          )}
+          {busy ? (
+            <View style={styles.sendCircle}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={s.bots.send}
+              disabled={disabled || (!draft.trim() && stagedReferences.length === 0)}
+              onPress={() => void send()}
+              style={({ pressed }) => [
+                styles.sendCircle,
+                (disabled || (!draft.trim() && stagedReferences.length === 0)) && styles.sendCircleDisabled,
+                pressed && { opacity: 0.82 },
+              ]}
+            >
+              <ArrowUp size={16} color="#FFFFFF" strokeWidth={2.4} />
+            </Pressable>
+          )}
+        </View>
+      </View>
     </View>
     <BotPlusMenuModal
       visible={plusMenuOpen}

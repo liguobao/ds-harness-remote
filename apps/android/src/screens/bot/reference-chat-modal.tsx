@@ -427,8 +427,8 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      paddingHorizontal: 12,
-      paddingTop: 6,
+      paddingHorizontal: 4,
+      paddingTop: 2,
       paddingBottom: 2,
     },
     referencePill: {

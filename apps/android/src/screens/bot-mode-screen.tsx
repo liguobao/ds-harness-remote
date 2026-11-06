@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, AppState, ScrollView, Text, View } from 'react-native'
-import { Bot, Menu, MoreVertical } from 'lucide-react-native'
+import { ActivityIndicator, AppState, Pressable, ScrollView, Text, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ArrowRight, Bot, Menu, MoreVertical, Users } from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
-import { type BotRemoteClient } from '../services/bot-catalog'
+import { objects, text, type BotRemoteClient } from '../services/bot-catalog'
 import { requireBotClient, useAppStore } from '../state/store'
 import { markBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { RemoteSession } from '../types'
@@ -10,6 +11,7 @@ import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/c
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { BotAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { createBotStyles } from './bot/styles'
@@ -146,25 +148,81 @@ export function BotModeScreen({
     void refresh(true)
   }
 
-  const header = (
+  const insets = useSafeAreaInsets()
+  const navBack = splitView ? undefined : (onOpenDrawer ?? (selectedId ? () => handleSelect(undefined) : onBack))
+  const goalSteps = objects(room?.goal?.steps)
+  const goalDoneCount = goalSteps.filter(step => text(step.status) === 'done').length
+  const goalTitle = text(room?.goal?.title)
+  const roomLeadBot = room && state ? state.bots.find(entry => entry.id === room.members[0]) : undefined
+
+  const header = selectedId && (bot || room) ? (
+    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 52 + insets.top }]}>
+      <View style={styles.headerSide}>
+        {navBack !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
+            onPress={navBack}
+            hitSlop={8}
+            style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
+          >
+            <Menu size={20} color={colors.ink} />
+          </Pressable>
+        )}
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
+        onPress={() => setDetailsOpen(true)}
+        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] }]}
+      >
+        {bot ? (
+          <BotAvatar bot={bot} size={24} />
+        ) : roomLeadBot ? (
+          <BotAvatar bot={roomLeadBot} size={24} />
+        ) : (
+          <Users size={18} color={colors.primary} />
+        )}
+        <Text numberOfLines={1} style={styles.headerPillName}>
+          {goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
+        </Text>
+        {room?.goal !== undefined && goalSteps.length > 0 && (
+          <Text style={styles.headerPillGoalCount}>
+            {goalDoneCount}/{goalSteps.length}
+          </Text>
+        )}
+        <ArrowRight size={14} color={colors.muted} />
+      </Pressable>
+
+      <View style={styles.headerSide}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={s.bots.details}
+          onPress={() => setDetailsOpen(true)}
+          hitSlop={8}
+          style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
+        >
+          <MoreVertical size={18} color={colors.ink} />
+        </Pressable>
+      </View>
+    </View>
+  ) : (
     <TopBar
-      title={bot?.name ?? room?.name ?? device?.name ?? s.bots.title}
+      title={device?.name ?? s.bots.title}
       titleLines={1}
       centered={80}
       titleAccessory={null}
       backIcon={onOpenDrawer ? Menu : undefined}
       backLabel={onOpenDrawer ? s.chat.openHostSessions : undefined}
-      onBack={splitView ? undefined : (onOpenDrawer ?? (selectedId ? () => handleSelect(undefined) : onBack))}
-      onTitlePress={selectedId && (bot || room) ? () => setDetailsOpen(true) : onDeviceInfo}
+      onBack={navBack}
+      onTitlePress={onDeviceInfo}
       action={
         <IconButton
           dense
-          label={selectedId && (bot || room) ? s.bots.details : s.settings.more}
+          label={s.settings.more}
           icon={MoreVertical}
-          onPress={() => {
-            if (selectedId && (bot || room)) setDetailsOpen(true)
-            else onMore()
-          }}
+          onPress={onMore}
         />
       }
     />
