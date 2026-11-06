@@ -534,6 +534,8 @@ struct Index {
       part.name = image.name;
       parts.push(part);
     }
+    // 发出去就把草稿清掉：onChange 不会因为代码里清空而触发，不清的话切回来还是这段文字
+    this.runtime.saveDraft(this.currentSessionId, '');
     this.runtime.sendPrompt(text, parts);
     // 发送后输入框会从多行缩回单行、坞跟着变矮。必须等这一帧布局落定再滚，
     // 否则滚动是按旧高度算的，收回去之后新消息就矮到坞后面去了。
