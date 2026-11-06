@@ -1,7 +1,7 @@
 import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
 import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
-import { pasteboard } from '@kit.BasicServicesKit';
+import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage } from '../services/AppRuntime';
@@ -68,6 +68,16 @@ struct Index {
   /** 正在取图/压缩。 */
   @State pickingImages: boolean = false;
   @State connectStage: string = '';
+  /** 诊断用：设备型号（读不到就给 unknown）。 */
+  private deviceModelLabel(): string {
+    try {
+      const model: string = deviceInfo.productModel;
+      return model.length > 0 ? model : 'unknown';
+    } catch (error) {
+      return 'unknown';
+    }
+  }
+
   /** 连接已经跑了多少秒：卡在哪里一眼能看出来。 */
   @State connectElapsedSec: number = 0;
   private connectStartAt: number = 0;
@@ -1849,6 +1859,23 @@ struct Index {
                 .fontColor(this.pal().text3)
                 .width('100%')
                 .padding({ left: 4 })
+              this.SettingsRow(this.tr('连接诊断'),
+                this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
+                  const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+                  const lines: string[] = [
+                    'bundle: cn.r2049.dshremote',
+                    'app: ' + appVersion(),
+                    'server: ' + this.accountServer,
+                    'account: ' + this.accountEmail,
+                    'host: ' + this.connectedHostDisplay(),
+                    'transport: ' + (this.connectedTransport.length > 0 ? this.connectedTransport : 'none'),
+                    'phone-model: ' + this.deviceModelLabel()
+                  ];
+                  const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, lines.join('\n'));
+                  pasteboard.getSystemPasteboard().setData(data).then(() => {
+                    promptAction.showToast({ message: this.tr('诊断信息已复制') });
+                  }).catch(() => undefined);
+                })
               this.SettingsRow(this.tr('完成通知'),
                 this.runtime.notificationsEnabled ? this.tr('开') : this.tr('关'), false, () => {
                   const next: boolean = !this.runtime.notificationsEnabled;
