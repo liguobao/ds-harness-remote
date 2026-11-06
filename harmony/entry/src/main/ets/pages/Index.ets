@@ -1400,15 +1400,18 @@ struct Index {
     }
     const diff: number = Date.now() - device.lastSeenAt;
     if (diff < 60000) {
-      return this.tr('离线');
+      return this.en() ? 'just offline' : '刚刚离线';
     }
     if (diff < 3600000) {
-      return this.en() ? `offline ${Math.round(diff / 60000)}m` : `离线 ${Math.round(diff / 60000)} 分钟`;
+      const minutes: number = Math.round(diff / 60000);
+      return this.en() ? `${minutes}m ago` : `${minutes} 分钟前`;
     }
     if (diff < 86400000) {
-      return this.en() ? `offline ${Math.round(diff / 3600000)}h` : `离线 ${Math.round(diff / 3600000)} 小时`;
+      const hours: number = Math.round(diff / 3600000);
+      return this.en() ? `${hours}h ago` : `${hours} 小时前`;
     }
-    return this.en() ? `offline ${Math.round(diff / 86400000)}d` : `离线 ${Math.round(diff / 86400000)} 天`;
+    const days: number = Math.round(diff / 86400000);
+    return this.en() ? `${days}d ago` : `${days} 天前`;
   }
 
   /** 设备页标题栏的溢出菜单：退出登录收进菜单，避免和刷新、主题挤成三颗按钮。 */
@@ -3721,7 +3724,7 @@ struct Index {
             placeholder: this.generating ? this.tr('正在生成，可插话…')
               : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
             .layoutWeight(1)
-            .constraintSize({ minHeight: 46, maxHeight: 132 })
+            .constraintSize({ minHeight: 46, maxHeight: this.isWideLayout() ? 240 : 132 })
             .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
             .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
               colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
@@ -5785,17 +5788,21 @@ struct Index {
     }
   }
 
-  private hitSnippet(text: string): string {
-    const query: string = this.inSessionQuery.trim().toLowerCase();
-    const index: number = query.length === 0 ? -1 : text.toLowerCase().indexOf(query);
+  /** 命中片段拆成「前缀 / 命中词 / 后缀」三段，方便分别上色。 */
+  private hitParts(text: string): string[] {
+    const query: string = this.inSessionQuery.trim();
+    const lower: string = text.toLowerCase();
+    const index: number = query.length === 0 ? -1 : lower.indexOf(query.toLowerCase());
     if (index < 0) {
-      return text.length > 60 ? text.substring(0, 60) + '…' : text;
+      const head: string = text.length > 60 ? text.substring(0, 60) + '…' : text;
+      return [head, '', ''];
     }
     const start: number = Math.max(0, index - 20);
     const end: number = Math.min(text.length, index + query.length + 30);
-    const head: string = start > 0 ? '…' : '';
-    const tail: string = end < text.length ? '…' : '';
-    return head + text.substring(start, end) + tail;
+    const before: string = (start > 0 ? '…' : '') + text.substring(start, index);
+    const hit: string = text.substring(index, index + query.length);
+    const after: string = text.substring(index + query.length, end) + (end < text.length ? '…' : '');
+    return [before, hit, after];
   }
 
   @Builder
@@ -5847,12 +5854,19 @@ struct Index {
                   .fontSize(this.fs(10))
                   .fontColor(this.pal().text3)
                   .width(16)
-                Text(this.hitSnippet(item.text))
-                  .fontSize(this.fs(11))
-                  .fontColor(this.pal().text2)
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
+                Text() {
+                  Span(this.hitParts(item.text)[0])
+                    .fontColor(this.pal().text2)
+                  Span(this.hitParts(item.text)[1])
+                    .fontColor('#22D3EE')
+                    .fontWeight(FontWeight.Medium)
+                  Span(this.hitParts(item.text)[2])
+                    .fontColor(this.pal().text2)
+                }
+                .fontSize(this.fs(11))
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
                 Text(item.timestamp > 0 ? formatClock(item.timestamp) : '')
                   .fontSize(this.fs(10))
                   .fontColor(this.pal().text3)
