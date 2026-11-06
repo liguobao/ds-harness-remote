@@ -68,6 +68,10 @@ struct Index {
   /** 正在取图/压缩。 */
   @State pickingImages: boolean = false;
   @State connectStage: string = '';
+  /** 连接已经跑了多少秒：卡在哪里一眼能看出来。 */
+  @State connectElapsedSec: number = 0;
+  private connectStartAt: number = 0;
+  private connectTickTimer: number = -1;
   /** 斜杠命令候选。 */
   @State slashCommands: SlashCommand[] = [];
   /** 模型选择器。 */
@@ -437,6 +441,21 @@ struct Index {
     this.contextPercent = this.runtime.contextPercent;
     this.connectedTransport = this.runtime.transportLabel;
     this.connectStage = this.runtime.connectStage;
+    if (this.phase === PHASE_CONNECTING) {
+      if (this.connectStartAt === 0) {
+        this.connectStartAt = Date.now();
+        this.connectElapsedSec = 0;
+        this.connectTickTimer = setInterval(() => {
+          this.connectElapsedSec = Math.max(0, Math.round((Date.now() - this.connectStartAt) / 1000));
+        }, 1000);
+      }
+    } else if (this.connectStartAt !== 0) {
+      this.connectStartAt = 0;
+      if (this.connectTickTimer >= 0) {
+        clearInterval(this.connectTickTimer);
+        this.connectTickTimer = -1;
+      }
+    }
     this.slashCommands = this.runtime.slashCommands;
     this.modelOptions = this.runtime.modelOptions;
     this.currentModelLabel = this.runtime.currentModelLabel;
@@ -3044,7 +3063,8 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor(this.pal().text)
         .letterSpacing(1)
-      Text(this.connectStage.length > 0 ? this.connectStage : this.tr('NOISE IK 握手 · 能力协商需要几秒'))
+      Text((this.connectStage.length > 0 ? this.connectStage : this.tr('NOISE IK 握手 · 能力协商需要几秒'))
+        + (this.connectElapsedSec > 0 ? '  ·  ' + this.connectElapsedSec + 's' : ''))
         .fontSize(12)
         .fontColor(this.connectStage.length > 0 ? this.pal().text2 : this.pal().text3)
         .letterSpacing(1)
