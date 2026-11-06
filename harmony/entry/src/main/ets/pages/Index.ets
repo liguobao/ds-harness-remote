@@ -1234,7 +1234,7 @@ struct Index {
 
   /** 会话列表分组：新会话不再一个个孤立，按 今天/昨天/更早 归堆。 */
   private sessionGroupGap(index: number): string {
-    const list: HarnessRemoteSession[] = this.sessionSearchActive ? this.sessionSearchResults : this.sessions;
+    const list: HarnessRemoteSession[] = this.visibleSessions();
     if (index < 0 || index >= list.length) {
       return '';
     }
@@ -1999,6 +1999,26 @@ struct Index {
                 .fontColor(this.pal().text3)
                 .width('100%')
                 .padding({ left: 4 })
+              this.SettingsRow(this.tr('清空本地数据'), this.tr('草稿/提示词/收藏'), true, () => {
+                AlertDialog.show({
+                  title: this.tr('清空本地数据'),
+                  message: this.tr('会删除本机的草稿、提示词、收藏与最近访问，登录态和主机凭据不动。确定吗？'),
+                  autoCancel: true,
+                  primaryButton: {
+                    value: this.tr('取消'),
+                    action: () => {
+                    }
+                  },
+                  secondaryButton: {
+                    value: this.tr('清空'),
+                    fontColor: '#F85749',
+                    action: () => {
+                      this.runtime.clearLocalPreferences();
+                      promptAction.showToast({ message: this.tr('已清空本地数据') });
+                    }
+                  }
+                });
+              })
               this.SettingsRow(this.tr('连接诊断'),
                 this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
                   const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;

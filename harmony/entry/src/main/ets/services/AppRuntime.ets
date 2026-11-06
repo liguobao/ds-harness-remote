@@ -828,6 +828,18 @@ export class AppRuntime {
     }, 20000);
   }
 
+  /** 清空本地偏好（草稿、提示词、收藏、最近访问），不动登录态与凭据。 */
+  clearLocalPreferences(): void {
+    this.drafts = {};
+    this.prompts = [];
+    this.favoriteSessions = [];
+    this.recentSessions = [];
+    this.store.saveDrafts({});
+    this.store.savePrompts([]);
+    this.store.saveSessionMeta([], []);
+    this.notify();
+  }
+
   /** 用户手动关掉错误提示。 */
   clearError(): void {
     if (this.errorMsg.length === 0) {
