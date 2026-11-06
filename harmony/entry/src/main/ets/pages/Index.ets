@@ -1255,6 +1255,11 @@ struct Index {
     return isExpandedWidth(this.breakpoint);
   }
 
+  /** 分栏（PC/平板）下会话行用紧凑密度：同样高度多看到两三行。 */
+  private compactRows(): boolean {
+    return this.showTwoPane() || this.showThreePane();
+  }
+
   /** 小女仆的出场条件：窗口够高就出来，手机横屏（约 405vp）这种就不挤列表。 */
   private showMascot(): boolean {
     return mascotVisible(this.breakpoint, this.windowHeightVp);
@@ -4785,14 +4790,15 @@ struct Index {
                 })
             }
             .width('100%')
-            .padding({ top: 10, bottom: 10, left: 12, right: 12 })
+            .padding({ top: this.compactRows() ? 7 : 10, bottom: this.compactRows() ? 7 : 10,
+              left: 12, right: 12 })
             .backgroundColor(session.sessionId === this.currentSessionId
               ? 'rgba(77,107,254,0.14)'
               : (this.hoverRowId === session.sessionId ? this.pal().inputBg : this.pal().card))
             .onHover((isHover: boolean) => {
               this.hoverRowId = isHover ? session.sessionId : '';
             })
-            .borderRadius(14)
+            .borderRadius(this.compactRows() ? 12 : 14)
             .opacity(this.isArchivedSession(session.sessionId) ? 0.6 : 1)
             .border({ width: 1,
               color: session.sessionId === this.currentSessionId
@@ -4911,20 +4917,20 @@ struct Index {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
 
-      // 权限
+      // 权限：横向三个小 chip，省下竖排占掉的高度
       Column({ space: 4 }) {
         Text(this.tr('权限'))
           .fontSize(this.fs(11))
           .fontColor(this.pal().text3)
           .width('100%')
-        Column({ space: 6 }) {
+        Row({ space: 6 }) {
           ForEach(this.permissionChoices(), (preset: string) => {
             Text(this.permissionChoiceLabel(preset))
-              .fontSize(this.fs(11))
+              .fontSize(this.fs(10))
               .fontColor(preset === this.permissionPreset ? '#0B1220' : this.pal().text2)
-              .width('100%')
+              .layoutWeight(1)
               .textAlign(TextAlign.Center)
-              .padding({ top: 5, bottom: 5 })
+              .padding({ top: 4, bottom: 4 })
               .backgroundColor(preset === this.permissionPreset ? '#34D399' : this.pal().inputBg)
               .borderRadius(8)
               .border({ width: 1, color: this.pal().border })
