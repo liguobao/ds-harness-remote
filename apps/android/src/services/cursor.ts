@@ -650,7 +650,7 @@ function retireAssistantBeforeActivity(messages: ChatItem[]): ChatItem[] {
   return index >= 0 && index < messages.length - 1 ? finalizeAssistantLive(messages) : messages
 }
 
-function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
+export function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
   let changed = false
   const next = messages.map(item => {
     if (item.kind !== 'message' || (item.id !== CURSOR_ASSISTANT_LIVE_ID && item.id !== 'cursor-user-live')) return item
