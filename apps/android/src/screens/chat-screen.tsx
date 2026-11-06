@@ -183,6 +183,10 @@ export function ChatScreen({
   const [composingDuringRun, setComposingDuringRun] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(true)
+  // Cold start parks the sidebar full-screen before any page is chosen; swiping
+  // or pressing back must not drop the user into an arbitrary conversation.
+  const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
+  const markConversationChosen = () => setDrawerSwipeUnlocked(true)
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
@@ -324,6 +328,8 @@ export function ChatScreen({
     Keyboard.dismiss()
     setMentionType(null)
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+    // Reached from a conversation, so the sidebar may be swiped away again.
+    setDrawerSwipeUnlocked(true)
     setSessionsOpen(true)
   }, [setMentionType])
 
@@ -498,11 +504,15 @@ export function ChatScreen({
   }, [replyActive, composingDuringRun])
 
   const drawerElement = (inlineMode: boolean) => (
-    <HostSessionsDrawer
-      inline={inlineMode}
-      botMode={botMode}
-      onBotModeChange={onBotModeChange}
-      onSelectBot={id => onSelectBot?.(id)}
+      <HostSessionsDrawer
+        inline={inlineMode}
+        botMode={botMode}
+        onBotModeChange={onBotModeChange}
+        dismissible={inlineMode || drawerSwipeUnlocked}
+        onSelectBot={id => {
+          markConversationChosen()
+          onSelectBot?.(id)
+        }}
       onOpenDeviceInfo={() => {
         Keyboard.dismiss()
         if (!inlineMode) setSessionsOpen(false)
@@ -539,6 +549,7 @@ export function ChatScreen({
         onOpenSettings?.()
       }}
       onSelect={async next => {
+        markConversationChosen()
         onBotModeChange?.(false)
         const pending = openSession(next)
         const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId

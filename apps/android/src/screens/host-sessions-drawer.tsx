@@ -150,6 +150,7 @@ export function HostSessionsDrawer({
   onSelectBot,
   inline = false,
   backLabel,
+  dismissible = true,
 }: {
   onBack?: () => void
   onClose: () => void
@@ -166,6 +167,8 @@ export function HostSessionsDrawer({
   onSelectBot?: (botId: string) => void
   inline?: boolean
   backLabel?: string
+  /** 冷启动停留在侧边栏且尚未选择任何页面时，禁止手势/返回键把侧边栏划走。 */
+  dismissible?: boolean
 }) {
   const language = useAppStore(state => state.language)
   const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
@@ -637,9 +640,16 @@ export function HostSessionsDrawer({
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
+  const dismissibleRef = useRef(dismissible)
+  useEffect(() => {
+    dismissibleRef.current = dismissible
+  }, [dismissible])
 
   const smoothClose = (withHaptic = true) => {
     if (closingRef.current) return
+    // A cold start parks the user in this drawer without a chosen page; only an
+    // explicit tap (session / Bot) may leave it, never a swipe or the back key.
+    if (!inline && !dismissibleRef.current) return
     closingRef.current = true
     gestureSeq.current++
     dragReady.current = false
@@ -663,6 +673,7 @@ export function HostSessionsDrawer({
   const handleBack = () => {
     Keyboard.dismiss()
     if (!inline) {
+      if (!dismissibleRef.current) return
       smoothClose(true)
       return
     }
@@ -685,8 +696,8 @@ export function HostSessionsDrawer({
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => (!inline && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           if (closingRef.current) return
@@ -729,7 +740,7 @@ export function HostSessionsDrawer({
     onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
       const start = touchSwipeStartRef.current
       touchSwipeStartRef.current = undefined
-      if (start === undefined || inline || closingRef.current) return
+      if (start === undefined || inline || !dismissibleRef.current || closingRef.current) return
       const dx = e.nativeEvent.pageX - start.x0
       const dy = e.nativeEvent.pageY - start.y0
       const dt = Math.max(16, Date.now() - start.t0)
@@ -854,7 +865,7 @@ export function HostSessionsDrawer({
           >
             <RefreshCw size={17} color={colors.ink} strokeWidth={1.9} />
           </Pressable>
-          {Boolean(onBack) && (
+          {Boolean(onBack) && (inline || dismissible) && (
             <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={handleBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
               <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>
