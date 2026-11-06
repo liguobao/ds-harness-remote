@@ -1547,6 +1547,20 @@ export class AppRuntime {
     return markdown;
   }
 
+  /**
+   * 指定会话的 Markdown（会话行菜单用）。
+   * 不是当前会话就先切过去——导出要靠已加载的历史，换会话再拼最稳。
+   */
+  async sessionMarkdownFor(sessionId: string): Promise<string> {
+    if (sessionId.length === 0) {
+      return '';
+    }
+    if (sessionId !== this.currentSessionId) {
+      await this.openSession(sessionId);
+    }
+    return this.sessionMarkdown();
+  }
+
   /** 归档指定会话（会话列表长按触发）。归档集合以主机回执为准。 */
   async archiveSession(sessionId: string): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;

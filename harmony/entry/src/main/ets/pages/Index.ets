@@ -4505,6 +4505,27 @@ struct Index {
                     }
                   },
                   {
+                    title: this.tr('复制为 Markdown'),
+                    action: () => {
+                      this.closeDrawer();
+                      this.runtime.sessionMarkdownFor(session.sessionId).then((markdown: string) => {
+                        if (markdown.length === 0) {
+                          promptAction.showToast({ message: this.tr('这张会话还没有内容') });
+                          return;
+                        }
+                        const data: pasteboard.PasteData = pasteboard.createData(
+                          pasteboard.MIMETYPE_TEXT_PLAIN, markdown);
+                        pasteboard.getSystemPasteboard().setData(data).then(() => {
+                          promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+                        }).catch(() => {
+                          promptAction.showToast({ message: this.tr('复制失败') });
+                        });
+                      }).catch(() => {
+                        promptAction.showToast({ message: this.tr('导出失败') });
+                      });
+                    }
+                  },
+                  {
                     title: this.isArchivedSession(session.sessionId)
                       ? this.tr('取消归档') : this.tr('归档会话'),
                     action: () => {
