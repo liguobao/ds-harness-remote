@@ -1457,10 +1457,15 @@ export class AppRuntime {
     if (!this.historyHasMore || this.loadingOlderHistory) {
       return;
     }
+    const before: number = this.oldestHistorySeq;
+    if (before < 0) {
+      // 首屏没给出可用 seq（空会话、主机未回游标）：没有翻页锚点，收手
+      this.historyHasMore = false;
+      return;
+    }
     this.loadingOlderHistory = true;
     this.notify();
     try {
-      const before: number = this.oldestHistorySeq;
       const page: HistoryPage = await harness.sessionPage(sessionId, before, INITIAL_HISTORY_COUNT);
       if (this.currentSessionId !== sessionId) {
         return;
@@ -1494,11 +1499,17 @@ export class AppRuntime {
       this.clearRetry();
       logInfo('session/page before=' + before + ' -> ' + older.length + ' item(s), hasMore=' + page.hasMore);
     } catch (error) {
-      logWarn('session/page failed: ' + errorMessage(error));
-      this.errorMsg = errorMessage(error);
-      this.setRetry('重新加载更早', () => {
-        this.loadOlderHistory();
-      });
+      const text: string = errorMessage(error);
+      logWarn('session/page failed: ' + text);
+      if (text.indexOf('cursor') >= 0) {
+        // 游标已经对不上（换会话 / 主机重放）：这次不翻，也不再拿错误条打扰用户
+        this.historyHasMore = false;
+      } else {
+        this.errorMsg = text;
+        this.setRetry('重新加载更早', () => {
+          this.loadOlderHistory();
+        });
+      }
     }
     this.loadingOlderHistory = false;
     this.notify();
@@ -2700,6 +2711,10 @@ export class AppRuntime {
     title: string): Promise<void> {
     this.currentSessionId = sessionId;
     this.currentSessionTitle = title;
+    // 换会话先清翻页游标：列表刚重建时可能触发 onReachStart，拿着上一个会话的 seq 去翻页
+    // 会被主机拒（session/page ... is past cursor）——那是最典型的串会话。
+    this.historyHasMore = false;
+    this.oldestHistorySeq = -1;
     // 记住这个会话的工作区，下一次新建会话直接复用
     for (const session of this.sessions) {
       if (session.sessionId === sessionId && session.cwd.length > 0) {
