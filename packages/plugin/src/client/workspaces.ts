@@ -138,6 +138,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [showAllWorkspaces, setShowAllWorkspaces] = React.useState(false)
     const [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(false)
     const [devicesOpen, setDevicesOpen] = React.useState(false)
+    const [upgradePhase, setUpgradePhase] = React.useState<'idle' | 'running' | 'started' | 'failed'>('idle')
+    const [upgradeError, setUpgradeError] = React.useState<string | undefined>(undefined)
     const [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(false)
     const [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(false)
     const [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(false)
@@ -1041,6 +1043,39 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const updateNotice = updateInfo !== undefined && localUpdateAvailable
       ? t('updateAvailable', { latest: updateInfo.latestVersion, current: updateInfo.currentVersion })
       : undefined
+    const releasesUrl = 'https://github.com/liguobao/ds-harness-remote/releases'
+    const canUpgradeInPlace = updateInfo?.upgrade === 'ready'
+    const startLocalUpgrade = async (): Promise<void> => {
+      if (!canUpgradeInPlace || updateInfo === undefined) return
+      setUpgradePhase('running')
+      setUpgradeError(undefined)
+      try {
+        const result = await props.control<{ status: string; message?: string }>('plugin.update', {
+          version: updateInfo.latestVersion,
+        })
+        if (result.status === 'started') {
+          setUpgradePhase('started')
+          return
+        }
+        if (result.status === 'manual') {
+          setUpgradePhase('idle')
+          window.open(releasesUrl, '_blank', 'noopener')
+          return
+        }
+        setUpgradePhase('failed')
+        setUpgradeError(typeof result.message === 'string' && result.message !== '' ? result.message : t('pluginUpdateFailed'))
+      } catch (reason) {
+        // The official manager removes this plugin once installation starts, so
+        // the loopback call can die before its response. That is the reload path.
+        const text = messageOf(reason, t)
+        if (text === t('remoteControlUnavailable') || /failed to fetch|network error|ECONNRESET|socket hang up|aborted/i.test(text)) {
+          setUpgradePhase('started')
+          return
+        }
+        setUpgradePhase('failed')
+        setUpgradeError(text)
+      }
+    }
     const deviceUpdateAvailable = (device: RemoteDevice): boolean =>
       updateInfo !== undefined
       && device.clientVersion !== undefined
@@ -1380,13 +1415,35 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         linked: connectedCount > 0 || status?.connected === true,
                         expiresAt: status?.host?.recoveryExpiresAt ?? status?.network?.recoveryExpiresAt, t,
                       })),
-                    updateNotice === undefined ? null : React.createElement('a', {
-                      className: 'dshRemoteAccountUpdate',
-                      href: 'https://github.com/liguobao/ds-harness-remote/releases',
-                      target: '_blank',
-                      rel: 'noreferrer',
-                      title: updateNotice,
-                    }, t('updateAvailableShort', { version: updateInfo?.latestVersion ?? '' })),
+                    updateNotice === undefined ? null : canUpgradeInPlace
+                      ? React.createElement(React.Fragment, null,
+                        React.createElement('button', {
+                          type: 'button',
+                          className: 'dshRemoteAccountUpdate',
+                          disabled: upgradePhase === 'running' || upgradePhase === 'started',
+                          title: upgradePhase === 'failed' ? upgradeError ?? updateNotice : updateNotice,
+                          onClick: () => void startLocalUpgrade(),
+                        }, t(
+                          upgradePhase === 'running' ? 'pluginUpdating'
+                            : upgradePhase === 'started' ? 'pluginUpdateReload'
+                              : upgradePhase === 'failed' ? 'pluginUpdateFailed'
+                                : 'updateAvailableShort',
+                          { version: updateInfo?.latestVersion ?? '' },
+                        )),
+                        React.createElement('a', {
+                          className: 'dshRemoteAccountUpdate',
+                          href: releasesUrl,
+                          target: '_blank',
+                          rel: 'noreferrer',
+                          title: updateNotice,
+                        }, t('pluginUpdateManual')))
+                      : React.createElement('a', {
+                        className: 'dshRemoteAccountUpdate',
+                        href: releasesUrl,
+                        target: '_blank',
+                        rel: 'noreferrer',
+                        title: updateNotice,
+                      }, t('updateAvailableShort', { version: updateInfo?.latestVersion ?? '' })),
                     props.openSettings === undefined ? null : React.createElement('button', {
                       type: 'button', className: 'dshRemoteAccountSettings',
                       onClick: props.openSettings,

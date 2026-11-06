@@ -58,7 +58,7 @@ export function installStyle(clientModuleId: string): () => void {
     // Registry update link inside the modal's account footer row, and the mini
     // upgrade affordances on the sidebar entry buttons. The host-row
     // "update available" marker stays plain text inside the joined detail string.
-    '.dshRemoteAccountUpdate{flex:0 0 auto;color:var(--dsw-alias-brand-primary);font-size:12px;font-weight:500;white-space:nowrap;text-decoration:none}.dshRemoteAccountUpdate:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:3px}.dshRemoteAccountUpdate:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px;border-radius:3px}',
+    '.dshRemoteAccountUpdate,button.dshRemoteAccountUpdate{flex:0 0 auto;color:var(--dsw-alias-brand-primary);font-size:12px;font-weight:500;white-space:nowrap;text-decoration:none}button.dshRemoteAccountUpdate{background:none;border:0;padding:0;font:inherit;line-height:1.5;cursor:pointer}button.dshRemoteAccountUpdate:disabled{cursor:default;text-decoration:none;opacity:.7}.dshRemoteAccountUpdate:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:3px}.dshRemoteAccountUpdate:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px;border-radius:3px}',
     // Update affordances in the host's own update-indicator look: the labeled
     // sidebar entry button (full width again, as before cab95ec) carries the
     // DesktopUpdateIndicator palette (8% brand fill, 20% brand border, 12px/500

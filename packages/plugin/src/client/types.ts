@@ -54,6 +54,8 @@ export interface RemoteStatus {
     currentVersion: string
     latestVersion: string
     checkedAt: number
+    /** Set when this Desktop install can be updated in place. */
+    upgrade?: 'ready'
   }
   hostAuthorizationAvailable: boolean
   host?: {

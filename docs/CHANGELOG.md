@@ -1,3 +1,13 @@
+## Unreleased
+
+### English
+
+- Update an npm-installed Remote plugin from the Desktop dialog when Harness can replace that bundle, and keep a releases-page link beside that action. GitHub and local installs still open the releases page directly. A connected device still cannot replace the Host's Remote plugin.
+
+### 中文
+
+- 从 npm 安装的 Remote 插件，可以在 Desktop 弹窗里直接升级（需要 Harness 支持替换该 bundle），「可用」旁边保留发布页链接。GitHub 与本地安装仍直接打开发布页。已连接的远端设备仍然不能替换 Host 上的 Remote 插件。
+
 ## 0.6.3 — 2026-11-05
 
 Android build 71.

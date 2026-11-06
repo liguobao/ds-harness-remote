@@ -95314,6 +95314,7 @@ var PluginControlRuntime = class {
         this.host.reconnectHost();
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
+      if (endpoint === "plugin.update") return ok3(await this.updatePlugin(payload));
       if (endpoint === "status") {
         const base = this.client !== void 0 ? await this.client.handleControl(endpoint, payload, signal) : ok3(this.hostOnlyStatus());
         return withUpdate(base, this.updates?.snapshot());
@@ -95665,6 +95666,24 @@ var PluginControlRuntime = class {
       method: credentials.authorizationMethod,
       ...credentials.account === void 0 ? {} : { account: credentials.account }
     };
+  }
+  /**
+   * Replace this Desktop install through the official plugin manager.
+   * A version the registry check did not publish is refused. Installs the
+   * manager cannot update stay on the manual releases path.
+   */
+  async updatePlugin(payload) {
+    const version2 = record9(payload).version;
+    if (typeof version2 !== "string" || version2.trim() === "") {
+      throw new ClientModeError("INVALID_MESSAGE", "A plugin version is required.");
+    }
+    if (this.updates?.start === void 0) return { status: "manual" };
+    const outcome = await this.updates.start(version2);
+    if (outcome.status === "rejected") {
+      throw new ClientModeError("INVALID_MESSAGE", "That version is not the published update.");
+    }
+    if (outcome.status === "failed") return { status: "failed", message: outcome.message };
+    return { status: outcome.status };
   }
   hostOnlyStatus() {
     return {
@@ -99664,6 +99683,155 @@ var PluginUpdateChecker = class {
   }
 };
 
+// src/plugin-self-update.ts
+import { randomUUID as randomUUID18 } from "node:crypto";
+
+// src/version-compare.ts
+var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+function parseVersion(value) {
+  const match = VERSION_PATTERN.exec(value.trim().replace(/^v/, ""));
+  if (match === null) return void 0;
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease: match[4] === void 0 ? [] : match[4].split(".")
+  };
+}
+function comparePrerelease(left, right) {
+  if (left.length === 0 && right.length === 0) return 0;
+  if (left.length === 0) return 1;
+  if (right.length === 0) return -1;
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const part = left[index];
+    const other = right[index];
+    if (part === void 0) return -1;
+    if (other === void 0) return 1;
+    if (part === other) continue;
+    const partNumeric = /^\d+$/.test(part);
+    const otherNumeric = /^\d+$/.test(other);
+    if (partNumeric && otherNumeric) return Math.sign(Number(part) - Number(other));
+    if (partNumeric) return -1;
+    if (otherNumeric) return 1;
+    return part < other ? -1 : 1;
+  }
+  return 0;
+}
+function compareVersions(left, right) {
+  const parsedLeft = parseVersion(left);
+  const parsedRight = parseVersion(right);
+  if (parsedLeft === void 0 || parsedRight === void 0) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (parsedLeft.core[index] !== parsedRight.core[index]) {
+      return Math.sign(parsedLeft.core[index] - parsedRight.core[index]);
+    }
+  }
+  return comparePrerelease(parsedLeft.prerelease, parsedRight.prerelease);
+}
+
+// src/plugin-self-update.ts
+var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
+var LocalPluginUpgrade = class {
+  constructor(checker, manager, subscribe, requestId = randomUUID18) {
+    this.checker = checker;
+    this.manager = manager;
+    this.subscribe = subscribe;
+    this.requestId = requestId;
+  }
+  decidedVersion;
+  ready = false;
+  probeFlight;
+  startFlight;
+  /** Registry snapshot, plus `upgrade: 'ready'` once this install is confirmed updatable. */
+  snapshot() {
+    const base = this.checker.snapshot();
+    if (base === void 0) return void 0;
+    if (compareVersions(base.currentVersion, base.latestVersion) < 0) {
+      if (this.decidedVersion !== base.latestVersion) this.probe(base.latestVersion);
+      if (this.ready && this.decidedVersion === base.latestVersion) return { ...base, upgrade: "ready" };
+    }
+    return base;
+  }
+  /**
+   * Replace this plugin with `version` when it is the checked latest and the
+   * official manager marks the installed bundle updatable.
+   */
+  start(version2) {
+    const refused = this.refusal(version2);
+    if (refused !== void 0) return Promise.resolve(refused);
+    this.startFlight ??= this.execute(version2).finally(() => {
+      this.startFlight = void 0;
+    });
+    return this.startFlight;
+  }
+  refusal(version2) {
+    const current = this.checker.snapshot();
+    if (current === void 0 || version2 !== current.latestVersion || compareVersions(current.currentVersion, version2) >= 0) return { status: "rejected" };
+    return void 0;
+  }
+  probe(version2) {
+    if (this.probeFlight !== void 0) return;
+    this.probeFlight = this.readReady().then((ready) => {
+      this.ready = ready;
+      this.decidedVersion = version2;
+    }).finally(() => {
+      this.probeFlight = void 0;
+    });
+  }
+  async readReady() {
+    try {
+      const manager = this.manager();
+      if (manager === void 0) return false;
+      return bundleUpdatable(await manager.listBundles(), REMOTE_PLUGIN_PACKAGE);
+    } catch {
+      return false;
+    }
+  }
+  async execute(version2) {
+    const manager = this.manager();
+    if (manager === void 0) return { status: "manual" };
+    let updatable = false;
+    try {
+      updatable = bundleUpdatable(await manager.listBundles(), REMOTE_PLUGIN_PACKAGE);
+    } catch {
+      return { status: "manual" };
+    }
+    if (!updatable) return { status: "manual" };
+    const requestId = this.requestId();
+    let dispose = () => {
+    };
+    const started = new Promise((resolve9) => {
+      dispose = this.subscribe((event) => {
+        if (event.requestId !== requestId) return;
+        if (event.step === "removing" || event.step === "installing") resolve9({ status: "started" });
+      });
+    });
+    try {
+      const settled = manager.updateBundle(REMOTE_PLUGIN_PACKAGE, version2, { requestId }).then((result) => classifyUpdateResult(result)).catch(() => ({ status: "failed", message: "update-failed" }));
+      return await Promise.race([started, settled]);
+    } finally {
+      dispose();
+    }
+  }
+};
+function bundleUpdatable(listed, packageName) {
+  if (!Array.isArray(listed)) return false;
+  return listed.some((row) => isRecord22(row) && row.name === packageName && row.updatable === true);
+}
+function classifyUpdateResult(result) {
+  if (!isRecord22(result) || !isRecord22(result.result)) return { status: "failed", message: "update-failed" };
+  const application = result.result.application;
+  if (application === "applied" || application === "restart-required") return { status: "started" };
+  return { status: "failed", message: failureMessage(result.result.error) };
+}
+function failureMessage(error62) {
+  if (!isRecord22(error62)) return "update-failed";
+  const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
+  const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
+  return diagnostic === "" ? code : `${code}: ${diagnostic}`;
+}
+function isRecord22(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/owner-peer.ts
 function ownerPeerConstructor(connectionExports) {
   const candidate = typeof connectionExports.Peer === "function" ? connectionExports.Peer : connectionExports.OperatorPeer;
@@ -100133,6 +100301,17 @@ async function activate(ctx, readConfig, entryId) {
     }
   }, config2.logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
+  const pluginUpgrade = new LocalPluginUpgrade(
+    updateChecker,
+    () => readPluginManager(ctx),
+    (listener) => {
+      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events];
+      const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
+      return () => {
+        for (const stop of dispose) stop();
+      };
+    }
+  );
   const nativeTypertGateway = ctx.get("typertGateway");
   const connectionExports = DshConnection;
   const connectionService = ctx.get("connection", false);
@@ -100233,7 +100412,7 @@ async function activate(ctx, readConfig, entryId) {
     replacement = operation();
     return replacement;
   };
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
+  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, pluginUpgrade);
   ctx.provide("dshRemote", runtime);
   if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
   await disableLegacyLoaderEntries(ctx, logger2);
@@ -100277,6 +100456,11 @@ function readEntryConfig(entry) {
 }
 function isEntryConfig(value) {
   return typeof value.get === "function";
+}
+function readPluginManager(ctx) {
+  const candidate = ctx.get("pluginManager", false) ?? ctx.root.get("pluginManager", false);
+  if (typeof candidate !== "object" || candidate === null || typeof candidate.listBundles !== "function" || typeof candidate.updateBundle !== "function") return void 0;
+  return candidate;
 }
 function locateEntryId(ctx) {
   const loader = ctx.get("loader");

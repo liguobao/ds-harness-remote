@@ -12,6 +12,11 @@ export interface PluginUpdateSnapshot {
   currentVersion: string
   latestVersion: string
   checkedAt: number
+  /**
+   * Present when this Desktop install is a registry bundle the official plugin
+   * manager can replace. Absent for GitHub, path, and other non-registry installs.
+   */
+  upgrade?: 'ready'
 }
 
 /** dist-tags endpoints raced in parallel; the mirror backs up the official registry. */
