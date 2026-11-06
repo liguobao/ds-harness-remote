@@ -668,16 +668,16 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
                     ? <View style={styles.compactStatusSlot}><View style={styles.statusDotDone} /></View>
                     : <View style={styles.rowIcon}><View style={styles.statusDotDoneLarge} /></View>)
                   : (compact
-                    ? <View style={styles.compactStatusSlot}><SessionIcon size={17} color={colors.muted} /></View>
+                    ? <View style={styles.compactStatusSlot}><MessageSquareText size={16} color={colors.muted} strokeWidth={1.6} /></View>
                     : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
             <View style={compact ? [styles.compactSessionCopy, !first && styles.compactSessionDivider] : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
-                <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
+                <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={compact ? 2 : 1}>{displayTitle}</Text>
                 {!compact && running && <StatusBadge status="running" />}
-                {compact && (opening
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <Text style={[styles.compactSessionMeta, running && styles.compactSessionRunning]}>{running ? zhCN.status.running : displayMeta}</Text>)}
               </View>
+              {compact && (opening
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Text style={[styles.compactSessionMeta, running && styles.compactSessionRunning]}>{running ? zhCN.status.running : displayMeta}</Text>)}
               {!compact && <View style={styles.rowDetailLine}>
                 <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
                 <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
@@ -1183,10 +1183,10 @@ function createStyles(colors: ThemeColors) {
   rowInlineSubtitle: { flex: 1 },
   rowMeta: { ...type.caption, color: colors.muted },
   compactSessionContent: { backgroundColor: colors.background },
-  compactSessionPressTarget: { minHeight: 56, paddingLeft: 52, paddingRight: spacing.xs, alignItems: 'stretch' },
+  compactSessionPressTarget: { minHeight: 64, paddingLeft: 32, paddingRight: spacing.xs, alignItems: 'stretch' },
   compactSessionPressed: { backgroundColor: colors.surfaceStrong },
   compactSessionRow: { flexDirection: 'row', alignItems: 'stretch' },
-  compactSessionCopy: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: spacing.sm },
+  compactSessionCopy: { flex: 1, minWidth: 0, gap: 4, justifyContent: 'center', paddingVertical: spacing.sm },
   compactSessionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   compactSessionTitle: { ...type.body, fontSize: 16, color: colors.ink, flex: 1 },
   compactSessionMeta: { ...type.small, fontSize: 13, color: colors.subtle },

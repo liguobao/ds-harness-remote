@@ -1,7 +1,7 @@
 import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, Bot, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
+import { ArrowDown, ArrowUp, Bot, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Plus, RefreshCw, Search, Star, Trash2, WifiOff, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -549,24 +549,22 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
                         style={({ pressed }) => [styles.workspaceToggle, pressed && styles.workspaceRowPressed]}
                       >
                         {collapsed
-                          ? <ChevronRight size={20} color={colors.ink} strokeWidth={1.8} />
-                          : <ChevronDown size={20} color={colors.ink} strokeWidth={1.8} />}
+                          ? <ChevronRight size={16} color={colors.muted} strokeWidth={1.8} />
+                          : <ChevronDown size={16} color={colors.muted} strokeWidth={1.8} />}
                         <View style={styles.workspaceIcon}>
-                          {workspace.backend === 'codex'
-                            ? <Code2 size={21} color={colors.ink} strokeWidth={1.7} />
-                            : workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode' || workspace.backend === 'claude' || workspace.backend === 'hermes'
-                              ? <Sparkles size={21} color={colors.ink} strokeWidth={1.7} />
-                              : collapsed
-                                ? <Folder size={21} color={colors.ink} strokeWidth={1.7} />
-                                : <FolderOpen size={21} color={colors.ink} strokeWidth={1.7} />}
+                          {collapsed
+                            ? <Folder size={22} color={colors.muted} strokeWidth={1.6} />
+                            : <FolderOpen size={22} color={colors.primary} strokeWidth={1.6} />}
                         </View>
                         <View style={styles.workspaceCopy}>
-                          <Text style={styles.workspaceTitle} numberOfLines={1}>{workspace.title}</Text>
-                          <Text style={styles.workspacePath} numberOfLines={1} ellipsizeMode="tail">
-                            {workspaceParentPath(workspace.path)}
-                          </Text>
+                          <Text style={styles.workspaceTitle} numberOfLines={2}>{workspace.title}</Text>
+                          <View style={styles.workspaceDetail}>
+                            <Text style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
+                              {workspaceParentPath(workspace.path)}
+                            </Text>
+                            {workspaceSessions.length > 0 && <Text style={styles.workspaceCount}>{workspaceSessions.length}</Text>}
+                          </View>
                         </View>
-                        {workspaceSessions.length > 0 && <Text style={styles.workspaceCount}>{workspaceSessions.length}</Text>}
                       </Pressable>
                       <View style={styles.workspaceRowActions}>
                         <IconButton
@@ -577,7 +575,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
                           fill={favorited ? colors.primary : 'none'}
                           onPress={() => toggleFavorite(workspace)}
                         />
-                        <IconButton dense label={zhCN.workspaces.newSessionIn(workspace.title)} icon={CirclePlus} tint={colors.muted} onPress={() => void createInWorkspace(workspace.workspaceId)} />
+                        <IconButton dense label={zhCN.workspaces.newSessionIn(workspace.title)} icon={Plus} tint={colors.muted} onPress={() => void createInWorkspace(workspace.workspaceId)} />
                         {workspace.backend !== 'codex' && <IconButton dense label={zhCN.workspaces.options} icon={MoreVertical} tint={colors.muted} onPress={() => setActionsTarget(workspace)} />}
                       </View>
                     </View>
@@ -1204,14 +1202,15 @@ function createStyles(colors: ThemeColors) {
   clearSearch: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
   workspaceRow: { flexDirection: 'row', alignItems: 'center', gap: 0, minHeight: 64, paddingVertical: spacing.xs },
   workspaceRowActions: { flexDirection: 'row', alignItems: 'center' },
-  workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingLeft: spacing.xxs },
+  workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingLeft: spacing.xxs, paddingVertical: spacing.xs },
   workspaceRowPressed: { opacity: 0.7 },
   disabled: { opacity: 0.55 },
   workspaceIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
-  workspaceCopy: { flex: 1, gap: 2 },
+  workspaceCopy: { flex: 1, minWidth: 0, gap: 4 },
+  workspaceDetail: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   workspaceTitle: { ...type.body, fontSize: 17, lineHeight: 22, fontWeight: '500', color: colors.ink },
-  workspaceCount: { ...type.body, fontSize: 15, color: colors.subtle, marginLeft: spacing.xs },
-  workspacePath: { ...type.caption, fontSize: 13, color: colors.muted, writingDirection: 'ltr' },
+  workspaceCount: { ...type.caption, fontSize: 11, color: colors.muted, fontVariant: ['tabular-nums'], paddingHorizontal: 5, borderRadius: 4, backgroundColor: colors.surfaceStrong },
+  workspacePath: { flex: 1, minWidth: 0, ...type.caption, fontSize: 13, color: colors.muted, writingDirection: 'ltr' },
   workspaceMeta: { ...type.caption, color: colors.muted },
   // Flat folder list: groups are separated by a full-width hairline, no raised cards.
   workspaceGroup: {
