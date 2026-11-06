@@ -57,6 +57,7 @@ import { browseStatus } from '../lib/backend-groups'
 import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup, saveWorkspaceBackend } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
+import { CreateWorkspaceModal } from './workspaces-screen'
 
 const SESSION_PAGE_SIZE = 3
 const DRAWER_WIDTH_RATIO = 0.85
@@ -168,6 +169,14 @@ export function HostSessionsDrawer({
   const busy = useAppStore(state => state.busyAction)
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
+  const workspaceCreate = useAppStore(state => state.workspaceCreate)
+  const codexAvailable = useAppStore(state => state.codexAvailable)
+  const cursorAvailable = useAppStore(state => state.cursorAvailable)
+  const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
+  const piAvailable = useAppStore(state => state.piAvailable)
+  const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
+  const claudeAvailable = useAppStore(state => state.claudeAvailable)
+  const hermesAvailable = useAppStore(state => state.hermesAvailable)
   const createSession = useAppStore(state => state.createSession)
   const pinSession = useAppStore(state => state.pinSession)
   const unpinSession = useAppStore(state => state.unpinSession)
@@ -182,6 +191,8 @@ export function HostSessionsDrawer({
   const [renameError, setRenameError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
+  const createWorkspaceEpochRef = useRef(0)
 
   const menuBackend = menuSession?.backend ?? 'harness'
   const canUseHarnessActions = !!menuSession && menuBackend === 'harness'
@@ -189,11 +200,13 @@ export function HostSessionsDrawer({
   const menuIsArchived = !!menuSession && canUseHarnessActions && archivedIds.includes(menuSession.sessionId)
 
   const closeDrawer = () => {
+    createWorkspaceEpochRef.current += 1
     setMenuSession(null)
     setRenameTarget(null)
     setRenameError(null)
     setRenaming(false)
     setToastMessage(null)
+    setCreateWorkspaceOpen(false)
     onClose()
   }
 
@@ -340,13 +353,23 @@ export function HostSessionsDrawer({
 
   useEffect(() => {
     if (!connected) {
+      createWorkspaceEpochRef.current += 1
       setMenuSession(null)
       setRenameTarget(null)
       setRenameError(null)
       setRenaming(false)
       setToastMessage(null)
+      setCreateWorkspaceOpen(false)
     }
   }, [connected])
+
+  useEffect(() => {
+    createWorkspaceEpochRef.current += 1
+    setCreateWorkspaceOpen(false)
+    return () => {
+      createWorkspaceEpochRef.current += 1
+    }
+  }, [deviceId])
 
   useEffect(() => {
     if (!toastMessage) return
@@ -791,18 +814,13 @@ export function HostSessionsDrawer({
               accessibilityLabel={strings.sessions.addWorkspace}
               hitSlop={6}
               onPress={() => {
-                Alert.alert(
-                  strings.workspaces.title,
-                  strings.sessions.manageWorkspacesPrompt,
-                  [
-                    { text: strings.common.cancel, style: 'cancel' },
-                    { text: strings.sessions.goToWorkspaces, onPress: () => { onClose(); onBack() } }
-                  ]
-                )
+                Keyboard.dismiss()
+                setShowConfigModal(false)
+                setCreateWorkspaceOpen(true)
               }}
               style={styles.iconBtn}
             >
-              <FolderPlus size={17} color={colors.muted} />
+              <FolderPlus size={17} color={createWorkspaceOpen ? colors.ink : colors.muted} />
             </Pressable>
           </View>
         </View>
@@ -1363,6 +1381,65 @@ export function HostSessionsDrawer({
           </View>
         </View>
       </Modal>
+
+      <CreateWorkspaceModal
+        visible={createWorkspaceOpen}
+        codexAvailable={codexAvailable}
+        cursorAvailable={cursorAvailable}
+        antigravityAvailable={antigravityAvailable}
+        piAvailable={piAvailable}
+        opencodeAvailable={opencodeAvailable}
+        claudeAvailable={claudeAvailable}
+        hermesAvailable={hermesAvailable}
+        initialBackend={backend}
+        busy={
+          busy === 'create-workspace'
+          || busy === 'create-codex-workspace'
+          || busy === 'create-cursor-workspace'
+          || busy === 'create-antigravity-workspace'
+          || busy === 'create-pi-workspace'
+          || busy === 'create-opencode-workspace'
+          || busy === 'create-claude-workspace'
+          || busy === 'create-hermes-workspace'
+        }
+        onClose={() => {
+          createWorkspaceEpochRef.current += 1
+          setCreateWorkspaceOpen(false)
+        }}
+        onCreate={workspaceCreate}
+        onCreated={workspace => {
+          const epoch = createWorkspaceEpochRef.current
+          const expectedDeviceId = deviceId
+          if (useAppStore.getState().selectedDevice?.deviceId !== expectedDeviceId) return
+          const targetBackend = workspace.backend ?? 'harness'
+          setBackend(targetBackend)
+          if (expectedDeviceId !== undefined) {
+            void saveWorkspaceBackend(expectedDeviceId, targetBackend)
+            const groupId = `workspace:${targetBackend}:${workspace.workspaceId}`
+            setGroupsByDevice(current => ({
+              ...current,
+              [expectedDeviceId]: { ...current[expectedDeviceId], [groupId]: true },
+            }))
+            void saveHostSessionsDrawerGroup(expectedDeviceId, groupId, true).catch(() => undefined)
+          }
+          const latestSession = [...useAppStore.getState().sessions]
+            .filter(item => workspace.sessionIds.includes(item.sessionId) && !useAppStore.getState().archivedSessionIds.includes(item.sessionId))
+            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+          if (latestSession !== undefined) {
+            void onSelect(latestSession).then(() => {
+              if (createWorkspaceEpochRef.current === epoch && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+                closeDrawer()
+              }
+            })
+            return
+          }
+          void createSession(workspace.workspaceId, targetBackend).then(ok => {
+            if (ok && createWorkspaceEpochRef.current === epoch && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+              closeDrawer()
+            }
+          })
+        }}
+      />
     </View>
   )
 

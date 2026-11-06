@@ -1,10 +1,11 @@
 import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, Bot, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Plus, RefreshCw, Search, Star, Trash2, WifiOff, X } from 'lucide-react-native'
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
-import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
+import type { AgentBackend, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
+import { BlurHeaderFrame, Button, EmptyState, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
+import { platformIcon, deviceVersionSubtitle } from '../lib/device-display'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -773,7 +774,7 @@ function initialWorkspaceBackend(
   return 'harness'
 }
 
-function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
+export function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
   visible: boolean
   codexAvailable: boolean
   cursorAvailable: boolean
@@ -782,24 +783,28 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
   opencodeAvailable: boolean
   claudeAvailable: boolean
   hermesAvailable: boolean
-  initialBackend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+  initialBackend: AgentBackend
   busy: boolean
   onClose: () => void
-  onCreate: (path: string, backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes') => Promise<WorkspaceView | undefined>
+  onCreate: (path: string, backend: AgentBackend) => Promise<WorkspaceView | undefined>
   onCreated: (workspace: WorkspaceView) => void
 }) {
-  const [backend, setBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'>('harness')
+  useAppStore(state => state.language)
+  const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connectionPhase = useAppStore(state => state.connection.phase)
+  const [backend, setBackend] = useState<AgentBackend>('harness')
   const [path, setPath] = useState('')
   const [browseOpen, setBrowseOpen] = useState(false)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const { sheetMaxHeight } = useResponsiveLayout()
-  // A capped landscape sheet can be scrolled; reopening starts at the header.
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
   const sheetScrollRef = useRef<ScrollView>(null)
+  const requestEpochRef = useRef(0)
 
   useEffect(() => {
+    requestEpochRef.current += 1
     if (visible) sheetScrollRef.current?.scrollTo({ y: 0, animated: false })
-  }, [visible])
+  }, [visible, selectedDevice?.deviceId])
 
   useEffect(() => {
     if (!visible) return
@@ -813,13 +818,27 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
     else setBackend('harness')
   }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, initialBackend, visible])
 
+  const dismissModal = () => {
+    requestEpochRef.current += 1
+    setBrowseOpen(false)
+    onClose()
+  }
+
   const create = async () => {
     const trimmed = path.trim()
     if (trimmed.length === 0) return
+    const epoch = requestEpochRef.current
+    const targetDeviceId = selectedDevice?.deviceId
     const workspace = await onCreate(trimmed, backend)
-    if (workspace === undefined) return
+    if (
+      workspace === undefined
+      || requestEpochRef.current !== epoch
+      || useAppStore.getState().selectedDevice?.deviceId !== targetDeviceId
+    ) {
+      return
+    }
     setPath('')
-    onClose()
+    dismissModal()
     onCreated(workspace)
   }
 
@@ -829,200 +848,163 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
     setBrowseOpen(true)
   }
 
+  const backendItems: Array<{ value: AgentBackend; label: string; detail: string; icon: LucideIcon }> = [
+    { value: 'harness' as const, label: zhCN.workspaces.dsh, detail: zhCN.devices.harness, icon: FolderOpen },
+    ...(codexAvailable ? [{ value: 'codex' as const, label: zhCN.workspaces.codex, detail: 'OpenAI CodeX', icon: Code2 }] : []),
+    ...(claudeAvailable ? [{ value: 'claude' as const, label: zhCN.workspaces.claude, detail: 'Anthropic Claude', icon: Sparkles }] : []),
+    ...(hermesAvailable ? [{ value: 'hermes' as const, label: zhCN.workspaces.hermes, detail: 'Nous Research Hermes', icon: Sparkles }] : []),
+    ...(cursorAvailable ? [{ value: 'cursor' as const, label: zhCN.workspaces.cursor, detail: 'Cursor ACP', icon: Sparkles }] : []),
+    ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: zhCN.workspaces.antigravity, detail: 'Antigravity ACP', icon: Sparkles }] : []),
+    ...(opencodeAvailable ? [{ value: 'opencode' as const, label: zhCN.workspaces.opencode, detail: 'OpenCode ACP', icon: Sparkles }] : []),
+    ...(piAvailable ? [{ value: 'pi' as const, label: zhCN.workspaces.pi, detail: 'Pi ACP', icon: Sparkles }] : []),
+  ]
+
+  const directoryHint = backend === 'codex'
+    ? zhCN.workspaces.codexDirectoryHint
+    : backend === 'cursor'
+      ? zhCN.workspaces.cursorDirectoryHint
+      : backend === 'pi'
+        ? zhCN.workspaces.piDirectoryHint
+        : backend === 'antigravity'
+          ? zhCN.workspaces.antigravityDirectoryHint
+          : backend === 'opencode'
+            ? zhCN.workspaces.opencodeDirectoryHint
+            : backend === 'claude'
+              ? zhCN.workspaces.claudeDirectoryHint
+              : backend === 'hermes'
+                ? zhCN.workspaces.hermesDirectoryHint
+                : zhCN.workspaces.directoryHint
+
+  const HostIcon = selectedDevice ? platformIcon(selectedDevice.platform) : FolderOpen
+  const hostOnline = connectionPhase === 'connected'
+  const hostConnecting = connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
+  const hostStatusDot = hostOnline ? colors.success : hostConnecting ? colors.warning : colors.disabled
+  const hostStatusLabel = hostOnline ? zhCN.status.online : hostConnecting ? zhCN.status.waiting : zhCN.status.offline
+
   return (
-    <>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-        <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>{zhCN.workspaces.create}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
-            </View>
-            {/* Header stays pinned; the fields and the Create action scroll
-                inside the capped sheet so a short landscape window (or the
-                IME) cannot push the action off screen. */}
-            <ScrollView
-              ref={sheetScrollRef}
-              style={styles.sheetScroll}
-              contentContainerStyle={styles.sheetScrollContent}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-            >
-              <Text style={styles.fieldLabel}>{zhCN.workspaces.type}</Text>
-              <View style={styles.backendOptions}>
-                <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'harness', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('harness')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'harness' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'harness' && styles.radioIndicatorSelected]}>
-                    {backend === 'harness' && <View style={styles.radioIndicatorDot} />}
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={dismissModal} statusBarTranslucent>
+      <View style={styles.flex}>
+        <BlurHeaderFrame
+          header={
+            <TopBar
+              title={zhCN.workspaces.create}
+              subtitle={selectedDevice?.name}
+              onBack={dismissModal}
+              centered
+            />
+          }
+        >
+          <Screen scrollRef={sheetScrollRef}>
+            <View style={[styles.createContentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+              {selectedDevice !== undefined && (
+                <>
+                  <SectionTitle>{zhCN.sessionInfo.host}</SectionTitle>
+                  <GroupCard>
+                    <GroupRow
+                      first
+                      icon={HostIcon}
+                      label={selectedDevice.name}
+                      detail={deviceVersionSubtitle(selectedDevice)}
+                      chevron={false}
+                      accessory={
+                        <View style={styles.createStatusInline}>
+                          <View style={[styles.createStatusDot, { backgroundColor: hostStatusDot }]} />
+                          <Text style={styles.createStatusText}>{hostStatusLabel}</Text>
+                        </View>
+                      }
+                    />
+                  </GroupCard>
+                </>
+              )}
+
+              <SectionTitle>{zhCN.workspaces.deviceDirectory}</SectionTitle>
+              <GroupCard>
+                <View style={styles.createPathRow}>
+                  <View style={styles.createPathIcon}>
+                    <FolderOpen size={21} color={colors.primary} strokeWidth={1.8} />
                   </View>
-                  <Text style={[styles.backendOptionText, backend === 'harness' && styles.backendOptionTextSelected]}>{zhCN.workspaces.dsh}</Text>
-                </Pressable>
-                {codexAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'codex', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('codex')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'codex' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'codex' && styles.radioIndicatorSelected]}>
-                    {backend === 'codex' && <View style={styles.radioIndicatorDot} />}
+                  <View style={styles.createPathBody}>
+                    <TextInput
+                      accessibilityLabel={zhCN.workspaces.deviceDirectory}
+                      style={styles.createPathInput}
+                      value={path}
+                      onChangeText={setPath}
+                      placeholder="/workspace/project"
+                      placeholderTextColor={colors.muted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                      returnKeyType="done"
+                    />
+                    {path.length > 0 && !busy && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={zhCN.workspaces.clearSearch}
+                        hitSlop={8}
+                        onPress={() => setPath('')}
+                        style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
+                      >
+                        <X size={17} color={colors.muted} />
+                      </Pressable>
+                    )}
                   </View>
-                  <Text style={[styles.backendOptionText, backend === 'codex' && styles.backendOptionTextSelected]}>{zhCN.workspaces.codex}</Text>
-                </Pressable>}
-                {cursorAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'cursor', disabled: busy }}
+                </View>
+                <GroupRow
+                  icon={Folder}
+                  label={zhCN.workspaces.browse}
+                  detail={zhCN.workspaces.chooseFolder}
                   disabled={busy}
-                  onPress={() => setBackend('cursor')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'cursor' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'cursor' && styles.radioIndicatorSelected]}>
-                    {backend === 'cursor' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'cursor' && styles.backendOptionTextSelected]}>{zhCN.workspaces.cursor}</Text>
-                </Pressable>}
-                {antigravityAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'antigravity', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('antigravity')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'antigravity' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'antigravity' && styles.radioIndicatorSelected]}>
-                    {backend === 'antigravity' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'antigravity' && styles.backendOptionTextSelected]}>{zhCN.workspaces.antigravity}</Text>
-                </Pressable>}
-                {piAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'pi', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('pi')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'pi' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'pi' && styles.radioIndicatorSelected]}>
-                    {backend === 'pi' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'pi' && styles.backendOptionTextSelected]}>{zhCN.workspaces.pi}</Text>
-                </Pressable>}
-                {opencodeAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'opencode', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('opencode')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'opencode' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'opencode' && styles.radioIndicatorSelected]}>
-                    {backend === 'opencode' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'opencode' && styles.backendOptionTextSelected]}>{zhCN.workspaces.opencode}</Text>
-                </Pressable>}
-                {claudeAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'claude', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('claude')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'claude' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'claude' && styles.radioIndicatorSelected]}>
-                    {backend === 'claude' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'claude' && styles.backendOptionTextSelected]}>{zhCN.workspaces.claude}</Text>
-                </Pressable>}
-                {hermesAvailable && <Pressable
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: backend === 'hermes', disabled: busy }}
-                  disabled={busy}
-                  onPress={() => setBackend('hermes')}
-                  style={({ pressed }) => [
-                    styles.backendOption,
-                    backend === 'hermes' && styles.backendOptionSelected,
-                    pressed && !busy && styles.workspaceRowPressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <View style={[styles.radioIndicator, backend === 'hermes' && styles.radioIndicatorSelected]}>
-                    {backend === 'hermes' && <View style={styles.radioIndicatorDot} />}
-                  </View>
-                  <Text style={[styles.backendOptionText, backend === 'hermes' && styles.backendOptionTextSelected]}>{zhCN.workspaces.hermes}</Text>
-                </Pressable>}
-              </View>
-              <Text style={styles.fieldLabel}>{zhCN.workspaces.deviceDirectory}</Text>
-              <View style={styles.pathRow}>
-                <TextInput
-                  style={styles.pathInput}
-                  value={path}
-                  onChangeText={setPath}
-                  placeholder="/home/user/project"
-                  placeholderTextColor={colors.muted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!busy}
+                  onPress={openBrowser}
                 />
-                <Button label={zhCN.workspaces.browse} variant="secondary" onPress={openBrowser} disabled={busy} />
+              </GroupCard>
+              <Text style={styles.createSectionNote}>{directoryHint}</Text>
+
+              <SectionTitle>{zhCN.workspaces.type}</SectionTitle>
+              <GroupCard>
+                <View accessibilityRole="radiogroup">
+                  {backendItems.map((option, index) => {
+                    const chosen = backend === option.value
+                    return (
+                      <GroupRow
+                        key={option.value}
+                        first={index === 0}
+                        icon={option.icon}
+                        label={option.label}
+                        detail={option.detail}
+                        selected={chosen}
+                        chevron={false}
+                        disabled={busy}
+                        onPress={() => setBackend(option.value)}
+                        accessory={
+                          <View style={styles.createCheckSlot}>
+                            {chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                          </View>
+                        }
+                      />
+                    )
+                  })}
+                </View>
+              </GroupCard>
+
+              <View style={styles.createPrimaryArea}>
+                <Button
+                  label={zhCN.workspaces.create}
+                  icon={CirclePlus}
+                  onPress={() => void create()}
+                  loading={busy}
+                  disabled={path.trim().length === 0}
+                />
               </View>
-              <Text style={styles.fieldHint}>{
-                backend === 'codex'
-                  ? zhCN.workspaces.codexDirectoryHint
-                  : backend === 'cursor'
-                    ? zhCN.workspaces.cursorDirectoryHint
-                    : backend === 'pi' ? zhCN.workspaces.piDirectoryHint
-                     : backend === 'antigravity'
-                      ? zhCN.workspaces.antigravityDirectoryHint
-                      : backend === 'opencode'
-                        ? zhCN.workspaces.opencodeDirectoryHint
-                        : zhCN.workspaces.directoryHint
-              }</Text>
-              <Button label={zhCN.workspaces.create} onPress={() => void create()} loading={busy} disabled={path.trim().length === 0} />
-            </ScrollView>
-        </WorkspaceModalSurface>
-      </Modal>
-      <DirectoryBrowserModal
-        visible={browseOpen}
-        onClose={() => setBrowseOpen(false)}
-        onChoose={picked => { setPath(picked); setBrowseOpen(false) }}
-      />
-    </>
+            </View>
+          </Screen>
+        </BlurHeaderFrame>
+        <DirectoryBrowserModal
+          visible={browseOpen}
+          onClose={() => setBrowseOpen(false)}
+          onChoose={picked => { setPath(picked); setBrowseOpen(false) }}
+        />
+      </View>
+    </Modal>
   )
 }
 
@@ -1121,13 +1103,17 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight }]}>
+          <View style={styles.browserGrabber} />
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.chooseFolder}</Text>
             <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
           </View>
-          <View style={styles.browserPath}>
-            <Text style={styles.browserPathText} numberOfLines={1}>{listing?.path ?? zhCN.workspaces.loading}</Text>
-          </View>
+          <GroupCard style={styles.browserPathCard}>
+            <View style={styles.browserPath}>
+              <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
+              <Text style={styles.browserPathText} numberOfLines={1}>{listing?.path ?? zhCN.workspaces.loading}</Text>
+            </View>
+          </GroupCard>
           <View style={styles.crumbRow}>
             {(listing?.crumbs ?? []).map((crumb, index, all) => (
               <Pressable key={`${crumb.path}-${index}`} onPress={() => void open(crumb.path)}>
@@ -1138,23 +1124,22 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
             ))}
           </View>
           {error !== undefined && <Text style={styles.errorText}>{error}</Text>}
-          <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList}>
+          <ScrollView keyboardShouldPersistTaps="always" style={styles.browserList} showsVerticalScrollIndicator={false}>
             {loading
               ? <Text style={styles.loadingText}>{zhCN.workspaces.loadingDirectory}</Text>
               : entries.length === 0
                 ? <Text style={styles.emptyText}>{zhCN.workspaces.noFolders}</Text>
-                : entries.map(entry => (
-                    <Pressable
-                      key={entry.path}
-                      accessibilityRole="button"
-                      onPress={() => void open(entry.path)}
-                      style={styles.entryRow}
-                    >
-                      <Folder size={16} color={colors.primary} />
-                      <Text style={styles.entryName} numberOfLines={1}>{entry.name}</Text>
-                      <ChevronRight size={14} color={colors.muted} />
-                    </Pressable>
-                  ))}
+                : <GroupCard>
+                    {entries.map((entry, index) => (
+                      <GroupRow
+                        key={entry.path}
+                        first={index === 0}
+                        icon={Folder}
+                        label={entry.name}
+                        onPress={() => void open(entry.path)}
+                      />
+                    ))}
+                  </GroupCard>}
           </ScrollView>
           <View style={styles.browserFooter}>
             <Button
@@ -1203,6 +1188,17 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   contentTop: { marginTop: spacing.md },
+  createContentColumn: { width: '100%', alignSelf: 'center' },
+  createStatusInline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  createStatusDot: { width: 7, height: 7, borderRadius: 4 },
+  createStatusText: { ...type.caption, color: colors.muted },
+  createPathRow: { minHeight: 58, paddingLeft: spacing.md, flexDirection: 'row', alignItems: 'center' },
+  createPathIcon: { width: 28, marginRight: spacing.sm, alignItems: 'center', justifyContent: 'center' },
+  createPathBody: { flex: 1, minWidth: 0, minHeight: 58, paddingRight: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  createPathInput: { flex: 1, ...type.body, fontSize: 16, color: colors.ink, paddingVertical: spacing.sm },
+  createSectionNote: { ...type.caption, fontSize: 13, lineHeight: 18, color: colors.muted, marginTop: spacing.xs, paddingHorizontal: spacing.md },
+  createCheckSlot: { width: 20, alignItems: 'center', justifyContent: 'center' },
+  createPrimaryArea: { marginTop: spacing.xl },
   // Filter pills: the active harness floats on a white chip.
   backendTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xxs, marginBottom: spacing.md },
   backendTab: { height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, paddingHorizontal: spacing.md },
@@ -1246,7 +1242,8 @@ function createStyles(colors: ThemeColors) {
   // the capped sheet cannot fit it.
   sheetScroll: { flexGrow: 0, flexShrink: 1 },
   sheetScrollContent: { gap: spacing.md },
-  browserSheet: { backgroundColor: colors.background, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.lg, paddingBottom: spacing.lg },
+  browserSheet: { backgroundColor: colors.background, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.lg },
+  browserGrabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.subtle, opacity: 0.45, alignSelf: 'center', marginBottom: spacing.xs },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle: { ...type.heading, color: colors.ink },
   workspaceActionHeading: { flex: 1, minWidth: 0 },
@@ -1268,9 +1265,10 @@ function createStyles(colors: ThemeColors) {
   pathRow: { flexDirection: 'row', gap: spacing.sm },
   pathInput: { flex: 1, ...type.body, color: colors.ink, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   titleInput: { ...type.body, color: colors.ink, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  browserPath: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.sm, marginTop: spacing.sm },
-  browserPathText: { ...type.small, color: colors.ink, fontFamily: 'monospace' },
-  crumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: spacing.xs },
+  browserPathCard: { marginTop: spacing.xs },
+  browserPath: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  browserPathText: { flex: 1, ...type.small, color: colors.ink, fontFamily: 'monospace' },
+  crumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: spacing.xs, paddingHorizontal: spacing.xxs },
   crumbText: { ...type.small, color: colors.primary },
   browserList: { flex: 1, marginTop: spacing.xs },
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
