@@ -202,7 +202,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 - LAN 、P2P网络下，除了网络协调相关指令，所有的数据不经过服务器；TURN服务使用开源coturn服务器部署，Relay 模式使用WebSocket转发。
 - 所有的会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
-- Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
+- 同账号设备连接无需额外确认，详见[设备信任与权限边界](docs/end-to-end-encryption.md#2-设备身份与信任)。
 - [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认开启，可在详细 Remote 设置中开启。
 - 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
 - 不开放通用工具 RPC 或远程桌面。

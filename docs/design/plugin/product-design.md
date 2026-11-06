@@ -53,7 +53,8 @@ Harness 通过官方 Typert Remote carrier 接入；CodeX 与 ACP 后端 保留�
 
 ## 安全与验收
 
-Server membership 与 Host 本地 pinned trust 同时成立；设备 identity 不匹配、未知连接、错误 target、篡改和重放均拒绝。
+同账号设备首次连接自动信任，无需额外确认；已知设备换钥默认拒绝。信任源、Web「仅受控」与终端开关的边界见[设备身份与信任](../../end-to-end-encryption.md#2-设备身份与信任)。
+未知连接、错误 target、篡改和重放均拒绝。
 业务仅进入认证后的 Noise channel；token、私钥、匹配码、Prompt、源码与工具输出不写日志。
 权限只允许单次允许/拒绝，连接结束后旧审批不能继续使用。
 

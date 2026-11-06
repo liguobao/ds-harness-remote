@@ -223,7 +223,7 @@ See [Network and transport](docs/network.md) for the topology, control and data 
 
 - On LAN and P2P paths, data bypasses the Server except for connection coordination. TURN uses the open-source coturn server; Relay mode forwards traffic over WebSocket.
 - Session traffic is end-to-end encrypted. The service relays ciphertext without storing session plaintext or device private keys.
-- Server membership and the Host's locally pinned peer identity must both authorize a connection.
+- Same-account devices connect without extra confirmation; see [device trust and permissions](docs/end-to-end-encryption.md#2-设备身份与信任).
 - [Remote Tools injection](docs/remote-tools.md) — optional `remote_*` session tools; enabled by default and configurable in detailed Remote settings.
 
 - Interactive terminals use the Host-local `terminal.enabled` switch (on by default). They run as the Host user, independently of Agent approvals.
