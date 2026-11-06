@@ -588,6 +588,12 @@ importers:
       '@deepseek-ai/dsh-client-connection':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-scope@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))
+      '@dsh-remote/client-core':
+        specifier: workspace:*
+        version: link:../client-core
+      '@dsh-remote/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12

@@ -43,6 +43,8 @@
     "@deepseek-ai/dsh-api-gateway": "0.2.2-rc.1",
     "@deepseek-ai/dsh-api-remotes": "0.2.2-rc.1",
     "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
+    "@dsh-remote/client-core": "workspace:*",
+    "@dsh-remote/crypto": "workspace:*",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3"
   }
