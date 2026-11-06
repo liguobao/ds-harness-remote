@@ -87312,7 +87312,7 @@ var ControlStatusStream = class {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
+import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
@@ -89092,7 +89092,14 @@ function findImageBlock(value, attachmentId) {
   return void 0;
 }
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "darwin") return macOSCodexBinaryCandidates(userHome);
+  if (hostPlatform === "win32") {
+    return [.../* @__PURE__ */ new Set([...windowsBundledCodexCandidates(userHome), configured])];
+  }
+  return [configured];
+}
+function macOSCodexBinaryCandidates(userHome) {
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
     join6(userHome, "Applications", "ChatGPT.app")
@@ -89115,8 +89122,23 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
+    "codex"
   ])];
+}
+function windowsBundledCodexCandidates(userHome) {
+  const localAppData = process.env.LOCALAPPDATA ?? join6(userHome, "AppData", "Local");
+  const binRoot = join6(localAppData, "OpenAI", "Codex", "bin");
+  try {
+    return readdirSync2(binRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(binRoot, entry.name, "codex.exe")).filter((candidate) => existsSync2(candidate)).map((candidate) => {
+      try {
+        return { candidate, mtime: statSync2(candidate).mtimeMs };
+      } catch {
+        return { candidate, mtime: 0 };
+      }
+    }).sort((left, right) => right.mtime - left.mtime).map((entry) => entry.candidate);
+  } catch {
+    return [];
+  }
 }
 function parseCallEnvelope(input4) {
   if (!isRecord13(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
@@ -94915,7 +94937,7 @@ function isRecord18(value) {
 
 // src/acp/backend-installer.ts
 import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
 import { promisify as promisify4 } from "node:util";
@@ -94974,7 +94996,7 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat10 = statSync2(candidate);
+    const stat10 = statSync3(candidate);
     if (!stat10.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
