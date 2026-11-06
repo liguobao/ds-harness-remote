@@ -27,6 +27,7 @@ import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './p
 import { installRemoteDiscoveryTools } from './remote-tools.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
+import { assertRemoteEventSource } from './tui-event-source.js'
 import {
   createOwnerPeerFactory,
   ownerPeerConstructor,
@@ -153,10 +154,31 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
 }
 
+/** Start the shared Host runtime from the separate dsh-TUI package. */
+export function applyTuiHost(
+  ctx: Context,
+  entry: EntryConfig | ConfigShape | undefined,
+  onRuntime: (runtime: HostPluginRuntime, config: ResolvedConfig) => void,
+): void {
+  const readConfig = (): ConfigInput => readEntryConfig(entry)
+  const entryId = locateEntryId(ctx)
+  ctx.inject(['settings', 'typertGateway', 'commands'], async runtimeContext => {
+    const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
+    if (!new TypertGatewaySwitch(gateway).supportsCarrier()) {
+      throw new Error('dsh-TUI Remote requires the official Typert Gateway carrier.')
+    }
+    await activate(runtimeContext, readConfig, entryId, { requireRemoteEvents: true, onRuntime })
+  })
+}
+
 async function activate(
   ctx: Context,
   readConfig: () => ConfigInput,
   entryId: string,
+  tui?: {
+    requireRemoteEvents: true
+    onRuntime(runtime: HostPluginRuntime, config: ResolvedConfig): void
+  },
 ): Promise<void> {
   const settings = ctx.get('settings') as SettingsServiceLike | undefined
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
@@ -223,6 +245,7 @@ async function activate(
       },
     }
   }
+  if (tui?.requireRemoteEvents) await assertRemoteEventSource(localTypertGateway)
   // The Host `subprocess` service owns PTY allocation, containment, and process
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
@@ -299,6 +322,7 @@ async function activate(
       runtime = fresh.runtime
       clientRuntime = fresh.clientRuntime
       ctx.dshRemote = runtime
+      tui?.onRuntime(runtime, next)
       if (clientRuntime !== undefined) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
         else {
@@ -317,6 +341,7 @@ async function activate(
     : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker)
 
   ctx.provide('dshRemote', runtime)
+  tui?.onRuntime(runtime, config)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {

@@ -99706,6 +99706,31 @@ var PluginUpdateChecker = class {
   }
 };
 
+// src/tui-event-source.ts
+async function assertRemoteEventSource(gateway) {
+  const peerGateway = gateway.createPeer?.();
+  if (peerGateway?.peer === void 0) {
+    await peerGateway?.dispose?.();
+    throw new Error("dsh-TUI Remote requires an official owner Peer for Remote events.");
+  }
+  const signal = AbortSignal.timeout(5e3);
+  let iterator;
+  try {
+    const source = await peerGateway.open("$events", { args: {} }, signal);
+    iterator = source[Symbol.asyncIterator]();
+    const first2 = await iterator.next();
+    const value = first2.value;
+    if (first2.done || typeof value !== "object" || value === null || !("type" in value) || value.type !== "ready") {
+      throw new Error("The Host Remote event source did not send a ready frame.");
+    }
+  } catch {
+    throw new Error("dsh-TUI Remote needs @deepseek-ai/dsh-api-remotes and its Host API packages.");
+  } finally {
+    await iterator?.return?.().catch(() => void 0);
+    await peerGateway.dispose?.();
+  }
+}
+
 // src/owner-peer.ts
 function ownerPeerConstructor(connectionExports) {
   const candidate = typeof connectionExports.Peer === "function" ? connectionExports.Peer : connectionExports.OperatorPeer;
@@ -100142,7 +100167,18 @@ function apply(ctx, entry = void 0) {
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
 }
-async function activate(ctx, readConfig, entryId) {
+function applyTuiHost(ctx, entry, onRuntime) {
+  const readConfig = () => readEntryConfig(entry);
+  const entryId = locateEntryId(ctx);
+  ctx.inject(["settings", "typertGateway", "commands"], async (runtimeContext) => {
+    const gateway = runtimeContext.get("typertGateway");
+    if (!new TypertGatewaySwitch(gateway).supportsCarrier()) {
+      throw new Error("dsh-TUI Remote requires the official Typert Gateway carrier.");
+    }
+    await activate(runtimeContext, readConfig, entryId, { requireRemoteEvents: true, onRuntime });
+  });
+}
+async function activate(ctx, readConfig, entryId, tui) {
   const settings = ctx.get("settings");
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
   const connection = ctx.get("connection");
@@ -100202,6 +100238,7 @@ async function activate(ctx, readConfig, entryId) {
       }
     };
   };
+  if (tui?.requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
   const subprocess = ctx.get("subprocess", false);
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
@@ -100263,6 +100300,7 @@ async function activate(ctx, readConfig, entryId) {
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
       ctx.dshRemote = runtime;
+      tui?.onRuntime(runtime, next);
       if (clientRuntime !== void 0) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
         else {
@@ -100277,6 +100315,7 @@ async function activate(ctx, readConfig, entryId) {
   };
   const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
   ctx.provide("dshRemote", runtime);
+  tui?.onRuntime(runtime, config2);
   if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
@@ -100453,6 +100492,7 @@ export {
   ServerCredentialsInvalidError,
   TypertGatewaySwitch,
   apply,
+  applyTuiHost,
   createRemoteFileContentProvider,
   fingerprint2 as fingerprint,
   migrateLegacySettings,
