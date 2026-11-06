@@ -6,11 +6,15 @@ import { join } from 'node:path'
 import { randomUUID, createHmac } from 'node:crypto'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
+import { request as httpRequest } from 'node:http'
 import { WebSocket } from 'ws'
 import { MAX_CONTROL_FRAME_BYTES, createControlFrame } from '@dsh-remote/protocol'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url, fromBase64Url } from '../../../packages/crypto/src/index.js'
 import { RelayTransport } from '../../../packages/webrtc/src/index.js'
 import { ClientSecureTransport } from '../../../packages/plugin/src/client-secure-transport.js'
+import { ClientServerApi } from '../../../packages/plugin/src/server-api.js'
+import { IdentityStore } from '../../../packages/plugin/src/identity-store.js'
+import { ServerCredentialStore } from '../../../packages/plugin/src/server-credentials.js'
 import {
   createRemoteServer,
   normalizeGatewayOptions,
@@ -199,17 +203,74 @@ describe('account and device authorization', () => {
     expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, h.accessToken)).status).toBe(409)
     expect((await request('/devices/register-owned-role', 'POST', { v: 1, device: descriptor }, c.accessToken)).status).toBe(200)
   })
-  it('persists credentials as digests, rotates refresh tokens and revokes a reused family', async () => {
+  it('recovers a lost refresh response across restart without invalidating the successor', async () => {
     const d = await device()
     const saved = readFileSync(join(dir, 'state.json'), 'utf8')
     expect(saved).not.toContain(d.refreshToken); expect(saved).not.toContain(d.accessToken); expect(saved).not.toContain(password)
     await app.close(); await start()
     expect((await request('/devices', 'GET', undefined, d.accessToken)).status).toBe(200)
+    // Discard the successful response body, as when the link drops after commit.
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest(base + '/api/v1/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } }, res => {
+        const status = res.statusCode
+        res.destroy()
+        if (status === 200) resolve()
+        else reject(new Error('Expected successful rotation before response loss'))
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify({ deviceId: d.deviceId, refreshToken: d.refreshToken }))
+    })
+    await app.close(); await start()
     const rotated = await request('/auth/refresh', 'POST', { deviceId: d.deviceId, refreshToken: d.refreshToken })
     expect(rotated.status).toBe(200)
     expect(rotated.data.refreshTokenExpiresAt).toBe(d.refreshTokenExpiresAt)
+    const retries = await Promise.all(Array.from({ length: 3 }, () => request('/auth/refresh', 'POST', { deviceId: d.deviceId, refreshToken: d.refreshToken })))
+    for (const retry of retries) { expect(retry.status).toBe(200); expect(retry.data).toEqual(rotated.data) }
+    expect((await request('/devices', 'GET', undefined, rotated.data.accessToken)).status).toBe(200)
+    const next = await request('/auth/refresh', 'POST', { deviceId: d.deviceId, refreshToken: rotated.data.refreshToken })
+    expect(next.status).toBe(200)
     expect((await request('/auth/refresh', 'POST', { deviceId: d.deviceId, refreshToken: d.refreshToken })).status).toBe(401)
-    expect((await request('/devices', 'GET', undefined, rotated.data.accessToken)).status).toBe(401)
+    expect((await request('/devices', 'GET', undefined, next.data.accessToken)).status).toBe(200)
+    const persisted = readFileSync(join(dir, 'state.json'), 'utf8')
+    for (const value of [d.accessToken, d.refreshToken, rotated.data.accessToken, rotated.data.refreshToken, next.data.refreshToken]) {
+      expect(persisted).not.toContain(value)
+    }
+  })
+  it('lets the Plugin recover a dropped refresh response without signing in again, even after access expiry', async () => {
+    await runScenarios([0, 2 * 60 * 60_000].map(delay => ({
+      name: delay === 0 ? 'immediate retry' : 'two hours offline', run: async () => {
+        const identity = await new IdentityStore({ directory: join(dir, `identity-${delay}`) }).loadOrCreate('test')
+        const credentials = new ServerCredentialStore(join(dir, `client-${delay}`))
+        let loseResponse = true, logins = 0, registrations = 0
+        const api = new ClientServerApi(base, credentials, async (url, init) => {
+          if (url.endsWith('/auth/login')) logins++
+          if (url.endsWith('/devices/register')) registrations++
+          const response = await fetch(url, init)
+          if (loseResponse && url.endsWith('/auth/refresh')) {
+            loseResponse = false
+            expect(response.status).toBe(200)
+            await response.arrayBuffer()
+            throw new TypeError('Simulated response loss after Server commit')
+          }
+          return response
+        })
+        await api.authorizeWithAccount(identity, account, password)
+        const before = await credentials.load(base, identity.deviceId)
+        await expect(api.refreshCredentials()).rejects.toMatchObject({ code: 'CONNECTION_FAILED', phase: 'credential_refresh' })
+        expect(await credentials.load(base, identity.deviceId)).toEqual(before)
+        const now = Date.now() + delay
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+        try {
+          if (delay === 0) await api.refreshCredentials()
+          await expect(api.listDevices()).resolves.toEqual([])
+          const recovered = await credentials.load(base, identity.deviceId)
+          expect(recovered?.refreshToken).not.toBe(before?.refreshToken)
+          expect(recovered?.accessTokenExpiresAt).toBeGreaterThan(now)
+          expect(recovered?.refreshTokenExpiresAt).toBe(before?.refreshTokenExpiresAt)
+          expect(logins).toBe(1); expect(registrations).toBe(1)
+        } finally { clock.mockRestore() }
+      },
+    })))
   })
   it('invalidates credentials when the configured password changes', async () => {
     const d = await device(); await app.close(); await start('a-different-password')

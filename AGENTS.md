@@ -1,5 +1,18 @@
 # Repository Guide for Agents
 
+## Self-hosted refresh response recovery (2026-11-06)
+
+`apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间
+离线恢复；后继再次轮换后拒绝祖先 token，不撤销当前有效凭据。HMAC 以旧 bearer 为
+密钥，nonce/设备/用途域分离；只持久化摘要与恢复元数据，不能从磁盘记录还原 bearer。
+消耗旧 token 和签发后继一起提交，失败回滚内存。保持绝对到期时间、撤销及账号隔离；
+旧版已消耗且无恢复元数据的 token 不能恢复，损坏的恢复记录返回可重试 503。
+
+验证：Protocol build、Server check、58 个测试与 Server build 通过。真实本地 HTTP
+丢响应/重启、并发重试，以及 Plugin ClientServerApi 即时重试/模拟两小时离线后无需
+再次登录恢复通过；覆盖过期、撤销、旧数据、写入失败和容量边界。未部署生产 Server，
+未进行跨机或长期真实断网验收。
+
 ## Canonical Remote naming and credential migration (2026-11-06)
 
 按用户要求移除旧 `dsh-remote` 设置命名空间的自动导入，不再注册旧 section；保留旧
