@@ -58,6 +58,7 @@ import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { ModalSurface } from './chat/modal'
 import { resolveSessionDisplayTitle } from './session-title'
+import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar } from './bot/avatar'
 import { BotEditor, type BotPerform } from './bot/editor'
 
@@ -329,6 +330,7 @@ export function BotSidebarSection({
                       <Text numberOfLines={1} style={[styles.mainBotName, isSelected && styles.rowNameSelected]}>
                         {entry.name}
                       </Text>
+                      <BotAgentBadge engine={entry.engine ?? engineOfModel(entry.model || entry.appliedModel)} size={15} />
                       <Star size={13} color={colors.primary} fill={colors.primary} />
                       {Boolean(entry.role) && (
                         <View style={styles.roleChip}>
@@ -437,6 +439,7 @@ export function BotSidebarSection({
                         <Text numberOfLines={1} style={[styles.rowName, isSelected && styles.rowNameSelected]}>
                           {entry.name}
                         </Text>
+                        <BotAgentBadge engine={entry.engine ?? engineOfModel(entry.model || entry.appliedModel)} size={14} />
                         {entry.pinned && (
                           <OfficialMenuIcons.pinFill size={12} color={colors.muted} />
                         )}
@@ -692,6 +695,7 @@ export function BotModalsHost() {
   const setContextMenu = useBotTeamStore(store => store.setContextMenu)
   const perform = useBotTeamStore(store => store.perform)
   const loadRunStats = useBotTeamStore(store => store.loadRunStats)
+  const appSessions = useAppStore(store => store.sessions)
 
   const visibleError = actionError ?? error
   const detailBot = state?.bots.find(entry => entry.id === selectedId)
@@ -915,7 +919,15 @@ export function BotModalsHost() {
               <View style={styles.sheetHeaderTitleWrap}>
                 {detailBot ? <BotAvatar bot={detailBot} size={44} /> : <Users size={32} color={colors.primary} />}
                 <View style={styles.grow}>
-                  <Text style={styles.sheetTitle}>{detailBot?.name ?? detailRoom?.name}</Text>
+                  <View style={styles.rowTitleLine}>
+                    <Text style={styles.sheetTitle}>{detailBot?.name ?? detailRoom?.name}</Text>
+                    {detailBot && (
+                      <BotAgentBadge
+                        engine={detailBot.engine ?? engineOfModel(detailBot.model || detailBot.appliedModel)}
+                        size={16}
+                      />
+                    )}
+                  </View>
                   {Boolean(detailBot?.role ?? detailRoom?.notice) && (
                     <Text numberOfLines={2} style={styles.sheetSubtitle}>
                       {detailBot?.role ?? detailRoom?.notice}
@@ -1022,6 +1034,58 @@ export function BotModalsHost() {
                 )}
               </GroupCard>
 
+              {detailBot && (
+                <>
+                  <View style={styles.sidebarSectionHeader}>
+                    <Text style={styles.sidebarSectionTitle}>{s.bots.sessions}</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={s.bots.newSession}
+                      disabled={busy || Boolean(state?.readOnly)}
+                      onPress={() => void perform('bot-new-part', { botId: detailBot.id })}
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.sectionActionBtn,
+                        (busy || Boolean(state?.readOnly)) && styles.disabled,
+                        pressed && styles.pressedFade,
+                      ]}
+                    >
+                      <CirclePlus size={15} color={colors.primary} strokeWidth={2} />
+                      <Text style={styles.sectionActionText}>{s.bots.newSession}</Text>
+                    </Pressable>
+                  </View>
+                  <GroupCard>
+                    {[
+                      detailBot.sessionId,
+                      ...(detailBot.parts ?? []).filter(id => id !== detailBot.sessionId).slice().reverse(),
+                    ].map((partId, index, list) => {
+                      const current = index === 0
+                      const matched = appSessions.find(item => item.sessionId === partId)
+                      const label =
+                        matched?.title && matched.title.trim() !== ''
+                          ? matched.title
+                          : s.bots.sessionNumber(list.length - index)
+                      return (
+                        <GroupRow
+                          key={partId}
+                          first={index === 0}
+                          label={label}
+                          detail={current ? s.bots.currentSession : s.bots.openEarlierSession}
+                          selected={current}
+                          chevron={!current}
+                          disabled={current || busy || Boolean(state?.readOnly)}
+                          onPress={
+                            current
+                              ? undefined
+                              : () => void perform('bot-open-part', { botId: detailBot.id, sessionId: partId })
+                          }
+                        />
+                      )
+                    })}
+                  </GroupCard>
+                </>
+              )}
+
               {detailRoom && detailRoom.members.length > 0 && (
                 <>
                   <SectionTitle>{s.bots.members}</SectionTitle>
@@ -1108,7 +1172,7 @@ function BotReportView({ value, kind, state }: { value: unknown; kind: 'usage' |
         {tasks.map((task, i) => {
           const ownerName = state?.bots.find(bot => bot.id === task.botId)?.name
             ?? state?.rooms.find(room => room.id === task.roomId)?.name
-          const timeText = [text(task.scheduledAt) || text(task.time), text(task.timeZone), text(task.status)].filter(Boolean).join(' · ')
+          const timeText = [text(task.scheduledAt) || text(task.time), text(task.timeZone), text(task.status) || text(task.state)].filter(Boolean).join(' · ')
           return (
             <View key={i} style={[styles.reportRow, i > 0 && styles.rowDivider]}>
               <Text style={styles.statsHeading}>{text(task.title) || s.bots.schedules}</Text>

@@ -97,7 +97,19 @@ const frFR = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "Sessions",
+    "newSession": "Nouvelle session",
+    "currentSession": "Actuelle",
+    "openEarlierSession": "Ouvrir cette session précédente",
+    "sessionNumber": (n: number) => `Session ${n}`,
+    "answeredByMessage": "Répondu par message",
+    "cardDismissed": "Fermé",
+    "defaultEffort": "Par défaut",
+    "resetEffort": "Réinitialiser par défaut",
+    "viaPlatform": (platform: string) => `via ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} s’est arrêté : ${reason}. Changez son modèle ou demandez-lui de continuer.`,
+    "desktopActionRequired": "Cette demande (connecteur, e-mail ou contrôle de l’ordinateur) nécessite une confirmation sur le bureau de l’hôte."
 },
 
   comfort: {

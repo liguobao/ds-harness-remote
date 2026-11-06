@@ -1,10 +1,12 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
+import { Image } from 'react-native'
 import Svg, { Defs, G, LinearGradient, Mask, Path, Rect, Stop } from 'react-native-svg'
 import type { BotEntry } from '../../services/bot-catalog'
 import { useTheme } from '../../ui/theme-context'
+import { badgeOf, BotAgentAvatar, engineOfModel } from './agent-badge'
 import assets from './assets/characters.json'
 
-// Static native rendering of DeepSeek-Bot v0.2.0 characters (Apache-2.0).
+// Static native rendering of DeepSeek-Bot v0.2.0+ characters and v0.3.0 local-agent marks (Apache-2.0).
 // Attribution and upstream license are retained in assets/.
 const shapes = ['star', 'moon', 'gumdrop', 'peanut', 'bunny', 'kitty', 'acorn']
 const inks = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta']
@@ -14,9 +16,24 @@ function hash(id: string) {
   return value >>> 0
 }
 interface Character { body: string; shade: string; light: string; paints?: (string | number)[][]; eyes: [number, number, number, number, number][] }
-export function BotAvatar({ bot, size = 40 }: { bot: Pick<BotEntry, 'id' | 'avatar' | 'color'>; size?: number }) {
+export function BotAvatar({ bot, size = 40 }: { bot: Pick<BotEntry, 'id' | 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel'>; size?: number }) {
   const { scheme } = useTheme()
   const uid = useId().replace(/:/g, '')
+  const [brokenImage, setBrokenImage] = useState('')
+  const rawImage = bot.avatar?.image && bot.avatar.image !== brokenImage ? bot.avatar.image : undefined
+  const engine = bot.engine ?? engineOfModel(bot.model || bot.appliedModel)
+  if (rawImage?.startsWith('data:image/svg+xml') && engine !== undefined && badgeOf(engine) !== undefined) {
+    return <BotAgentAvatar engine={engine} size={size} />
+  }
+  if (rawImage !== undefined && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(rawImage)) {
+    return (
+      <Image
+        source={{ uri: rawImage }}
+        style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}
+        onError={() => setBrokenImage(rawImage)}
+      />
+    )
+  }
   const seed = hash(bot.id)
   let shapeHash = Math.imul(seed ^ (seed >>> 16), 73244475)
   shapeHash = Math.imul(shapeHash ^ (shapeHash >>> 13), 3266489909)

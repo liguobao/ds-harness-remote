@@ -97,7 +97,19 @@ const esES = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "Sesiones",
+    "newSession": "Nueva sesión",
+    "currentSession": "Actual",
+    "openEarlierSession": "Abrir esta sesión anterior",
+    "sessionNumber": (n: number) => `Sesión ${n}`,
+    "answeredByMessage": "Respondido por mensaje",
+    "cardDismissed": "Descartado",
+    "defaultEffort": "Predeterminado",
+    "resetEffort": "Restablecer predeterminado",
+    "viaPlatform": (platform: string) => `vía ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} se detuvo: ${reason}. Cambia su modelo o pídele que continúe.`,
+    "desktopActionRequired": "Esta solicitud (conector, correo o uso del equipo) requiere confirmación en el escritorio del Host."
 },
 
   comfort: {

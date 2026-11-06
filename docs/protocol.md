@@ -826,11 +826,11 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
 按 `endpoint` 执行以下编译期固定操作白名单，新增上游操作默认拒绝：
 
-- 查询：`state`、`models`、`efforts`、`exchange`、`earlier`、`usage`、`room-progress`、`schedules`。
-- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
-- 群聊管理：`create-room`、`update-room`、`delete-room`、`room-continue`。
+- 查询：`state`、`models`、`efforts`、`exchange`、`exchange-text`、`file-text`、`earlier`、`chat`、`run-stats`、`thinking`、`usage`、`room-progress`、`schedules`。
+- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`、`resume`、`bot-new-part`、`bot-open-part`。
+- 群聊管理：`create-room`、`update-room`、`delete-room`、`stop-room-work`、`goal-draft`、`goal-control`、`room-continue`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`btw`、`btw-cancel`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
+- 会话交互：`send`、`btw`、`btw-cancel`、`btw-delete`、`side-new`、`side-ask`、`side-cancel`、`side-close`、`answer-question`、`dismiss-question`、`dismiss-view`、`view-reply`、`approval-answer`、`stop-member-work`。
 
 `view-reply` 转发 DS Bot 0.2.0 / 0.2.1 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
 用于选择、确认、表单及 0.2.1 的 `submit` 提交；公式输入通过 `values.inputs` 传递。
@@ -846,8 +846,8 @@ DS Bot 0.2.1 旁问：`btw { sessionId, text }` 返回卡片 ID，`btw-cancel { 
 Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本地计算与 SVG 图表；
 HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
-`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
-安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断
+`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批（0.3.0 起同时覆盖群聊与 Bot 自有会话审批）。
+安装/升级、日程增删、凭据和 connector/mail 管理、IM 外部账号配对与登录、本机 CLI Agent 注册（`local-agent-*`）、电脑操控与截屏（`computer-*`）、能力脚本、memory 写入、浏览器控制、诊断
 文件及本机偏好设置等操作均不开放；不允许通过 `api/bot` 间接扩大 Harness Remote 权限。
 被拒绝的操作返回 `INVALID_MESSAGE`，浏览器兼容入口显示安全的
 `remote-plugin/operation-not-allowed` 原生错误封装。

@@ -97,7 +97,19 @@ const enUS = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "Sessions",
+    "newSession": "New session",
+    "currentSession": "Current",
+    "openEarlierSession": "Open this earlier session",
+    "sessionNumber": (n: number) => `Session ${n}`,
+    "answeredByMessage": "Answered by message",
+    "cardDismissed": "Dismissed",
+    "defaultEffort": "Default",
+    "resetEffort": "Reset to default",
+    "viaPlatform": (platform: string) => `via ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} stopped: ${reason}. Switch its model or ask it to go on.`,
+    "desktopActionRequired": "This request (connector, mail, or computer use) requires confirmation on the Host desktop."
 },
 
   comfort: {

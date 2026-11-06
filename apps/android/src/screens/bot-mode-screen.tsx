@@ -11,6 +11,7 @@ import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/c
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
@@ -187,6 +188,7 @@ export function BotModeScreen({
         <Text numberOfLines={1} style={styles.headerPillName}>
           {goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
         </Text>
+        {bot && <BotAgentBadge engine={bot.engine ?? engineOfModel(bot.model || bot.appliedModel)} size={14} />}
         {room?.goal !== undefined && goalSteps.length > 0 && (
           <Text style={styles.headerPillGoalCount}>
             {goalDoneCount}/{goalSteps.length}

@@ -97,7 +97,19 @@ const jaJP = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "セッション",
+    "newSession": "新しいセッション",
+    "currentSession": "現在",
+    "openEarlierSession": "以前のセッションを開く",
+    "sessionNumber": (n: number) => `セッション ${n}`,
+    "answeredByMessage": "メッセージで回答済み",
+    "cardDismissed": "閉じた",
+    "defaultEffort": "デフォルト",
+    "resetEffort": "デフォルトに戻す",
+    "viaPlatform": (platform: string) => `${platform} 経由`,
+    "relayFailed": (name: string, reason: string) => `${name} が停止しました：${reason}。モデルを切り替えるか、続行を指示してください。`,
+    "desktopActionRequired": "このリクエスト（コネクタ / メール / PC 操作）はホストのデスクトップで確認が必要です。"
 },
 
   comfort: {

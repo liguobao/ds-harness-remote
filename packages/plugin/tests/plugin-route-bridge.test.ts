@@ -39,7 +39,7 @@ describe('PluginRouteBridge', () => {
 
   it('admits reviewed Bot operations and refuses local administration before dispatch', async () => {
     await runScenarios([
-      ...['state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules', 'btw', 'btw-cancel', 'btw-delete', 'room-continue', 'chat', 'run-stats', 'stop-room-work', 'goal-draft', 'goal-control', 'side-new', 'side-ask', 'side-cancel', 'side-close', 'dismiss-view', 'resume', 'exchange-text', 'file-text', 'thinking'].map(endpoint => ({
+      ...['state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules', 'btw', 'btw-cancel', 'btw-delete', 'room-continue', 'chat', 'run-stats', 'stop-room-work', 'goal-draft', 'goal-control', 'side-new', 'side-ask', 'side-cancel', 'side-close', 'dismiss-view', 'resume', 'bot-new-part', 'bot-open-part', 'exchange-text', 'file-text', 'thinking'].map(endpoint => ({
         name: `admit ${endpoint}`, body: { endpoint, payload: {} }, allowed: true,
       })),
       { name: 'one-time approval', body: { endpoint: 'approval-answer', payload: { choice: 'allow' } }, allowed: true },
@@ -57,7 +57,11 @@ describe('PluginRouteBridge', () => {
       ...[
         'update-install', 'dsh-update-install', 'schedule-create', 'schedule-delete',
         'secret-set', 'secret-allow', 'secret-update', 'secret-delete', 'secret-cancel',
-        'connector-connect', 'connector-disconnect', 'connector-retry',
+        'connector-connect', 'connector-disconnect', 'connector-retry', 'connector-add', 'connector-import-scan',
+        'mail-account-add', 'mail-send-answer',
+        'im-add', 'im-pair', 'im-login-start',
+        'local-agents', 'local-agent-add', 'local-agent-update', 'local-agent-remove',
+        'computer-set-enabled', 'computer-set-level', 'computer-shot', 'computer-app-answer',
         'capability-save', 'capability-delete', 'capability-approve', 'bot-capability',
         'memory-ask', 'memory-forget', 'browser-wait', 'browser-result',
         'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'set-prefs',

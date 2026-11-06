@@ -97,7 +97,19 @@ const deDE = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "Sitzungen",
+    "newSession": "Neue Sitzung",
+    "currentSession": "Aktuell",
+    "openEarlierSession": "Diese frühere Sitzung öffnen",
+    "sessionNumber": (n: number) => `Sitzung ${n}`,
+    "answeredByMessage": "Per Nachricht beantwortet",
+    "cardDismissed": "Geschlossen",
+    "defaultEffort": "Standard",
+    "resetEffort": "Auf Standard zurücksetzen",
+    "viaPlatform": (platform: string) => `über ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} gestoppt: ${reason}. Modell wechseln oder zum Fortfahren auffordern.`,
+    "desktopActionRequired": "Diese Anfrage (Konnektor, E-Mail oder Computersteuerung) erfordert eine Bestätigung auf dem Host-Desktop."
 },
 
   comfort: {

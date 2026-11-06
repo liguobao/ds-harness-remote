@@ -78424,6 +78424,8 @@ var BOT_REMOTE_OPERATIONS = [
   "set-main",
   "set-flags",
   "resume",
+  "bot-new-part",
+  "bot-open-part",
   "create-room",
   "update-room",
   "delete-room",

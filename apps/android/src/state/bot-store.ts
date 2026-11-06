@@ -2,8 +2,11 @@ import { create } from 'zustand'
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
 import {
+  isScopedKnownBotSessionId,
+  markScopedBotSessionId,
   object,
   text,
+  trackScopedBotStateSessions,
   type BotObject,
   type BotOperation,
   type BotRemoteClient,
@@ -27,41 +30,16 @@ export interface BotReportTarget {
   value: unknown
 }
 
-const knownBotSessionIdsByScope = new Map<string, Set<string>>()
-
 export function currentBotScope(): string {
   return browseScope(useAppStore.getState())
 }
 
-function scopeSet(scope: string): Set<string> {
-  let set = knownBotSessionIdsByScope.get(scope)
-  if (!set) {
-    set = new Set<string>()
-    knownBotSessionIdsByScope.set(scope, set)
-  }
-  return set
-}
-
 export function markBotSessionId(sessionId: string | undefined, scope = currentBotScope()): void {
-  if (!sessionId || !scope) return
-  scopeSet(scope).add(sessionId)
+  markScopedBotSessionId(sessionId, scope)
 }
 
 export function trackBotStateSessions(state: BotState | undefined, scope = currentBotScope()): void {
-  if (!state || !scope) return
-  const target = scopeSet(scope)
-  for (const bot of state.bots) {
-    if (bot.sessionId) target.add(bot.sessionId)
-  }
-  for (const room of state.rooms) {
-    const primarySessionId = room.sessionId || room.id
-    if (primarySessionId) target.add(primarySessionId)
-    if (room.ownParts) {
-      for (const part of room.ownParts) {
-        if (part) target.add(part)
-      }
-    }
-  }
+  trackScopedBotStateSessions(state, scope)
 }
 
 export function isKnownBotSessionId(
@@ -69,11 +47,7 @@ export function isKnownBotSessionId(
   state?: BotState,
   scope = currentBotScope(),
 ): boolean {
-  if (!sessionId || !scope) return false
-  if (state) {
-    trackBotStateSessions(state, scope)
-  }
-  return knownBotSessionIdsByScope.get(scope)?.has(sessionId) ?? false
+  return isScopedKnownBotSessionId(sessionId, scope, state)
 }
 
 interface BotTeamStoreState {
@@ -222,6 +196,9 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       if (operation === 'agent-session') {
         const sessionId = text(object(value).sessionId)
         if (sessionId) set({ selectedId: sessionId, detailsOpen: false })
+      }
+      if (operation === 'bot-new-part' || operation === 'bot-open-part') {
+        set({ detailsOpen: false })
       }
       if (operation === 'delete-bot' || operation === 'delete-room') {
         const deletedId = text(payload?.id)

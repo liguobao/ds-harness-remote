@@ -10,8 +10,8 @@ import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, Native
 import { detectMention, MentionPopover, splitDraftSegments, type MentionGroup } from '../../ui/mention-popover'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { ChatActivityGroup, ChatItemView } from '../chat/messages'
-import { chatSections, type ChatSection } from '../../state/message-helpers'
+import { ChatActivityGroup, ChatItemView, QueueDock } from '../chat/messages'
+import { chatSections, inboxQueuedItems, inboxRpcIds, type ChatSection } from '../../state/message-helpers'
 import { processSegments } from '../chat-process'
 import { useSessionUiArtifacts } from '../chat/use-session-ui-artifacts'
 import { IntelligentUiCard } from '../intelligent-ui-card'
@@ -19,9 +19,9 @@ import type { ToolActivity } from '../../types'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
 import { BotAvatar } from './avatar'
-import { BotQuestion, BotViewCard } from './cards'
+import { BotQuestion, BotSettledCard, BotViewCard } from './cards'
 import { parseBotReplies } from './replies'
-import { BotReplies } from './reply-view'
+import { BotReplies, BotViaPill } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
 import { BotPlusMenuModal, ReferenceChatModal, ReferencedChatPills } from './reference-chat-modal'
@@ -92,7 +92,12 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (!ready || !connected) return
     const targetSessionId = decodeSessionMentionUri(href)
     if (targetSessionId !== undefined) {
-      const matchedBot = state.bots.find(entry => entry.sessionId === targetSessionId)
+      const matchedBot = state.bots.find(
+        entry =>
+          entry.sessionId === targetSessionId
+          || entry.id === targetSessionId
+          || entry.parts?.includes(targetSessionId),
+      )
       if (matchedBot !== undefined) {
         if (matchedBot.id !== bot?.id) onSelectBot(matchedBot.id)
         return
@@ -264,7 +269,33 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   }, [active, bot?.id, client, session.sessionId, pendingAsidePages])
   const question = object(state.questions[session.sessionId])
   const view = object(state.views[session.sessionId])
+  const closedCards = object(state.closedCards[session.sessionId])
   const approvals = state.approvals.filter(entry => entry.answerable === true && (room ? entry.roomId === room.id : entry.sessionId === session.sessionId))
+  const hasDesktopPendingRequest = useMemo(() => {
+    const hasConnector = Object.keys(object(state.connectorRequests[session.sessionId])).length > 0
+    const hasMail = Object.keys(object(state.mailRequests[session.sessionId])).length > 0
+    const computerAsks = object(state.computerLive?.asks)
+    const computerHolds = object(state.computerLive?.holds)
+    const hasComputer = Boolean(
+      bot && (Object.keys(object(computerAsks[bot.id])).length > 0 || Object.keys(object(computerHolds[bot.id])).length > 0),
+    )
+    return hasConnector || hasMail || hasComputer
+  }, [state.connectorRequests, state.mailRequests, state.computerLive, session.sessionId, bot])
+  const inboxProjection = (session.projections?.values as Record<string, unknown> | undefined)?.inbox
+  const queueItems = useMemo(() => {
+    const inboxItems = inboxProjection === undefined ? [] : inboxQueuedItems(inboxProjection)
+    const adopted = inboxRpcIds(inboxProjection)
+    const pending = messages.flatMap(item =>
+      item.kind === 'message'
+      && item.role === 'user'
+      && item.sendState === 'queued'
+      && item.queuedAdopted !== true
+      && (item.requestRpcId === undefined || !adopted.has(item.requestRpcId))
+        ? [{ preview: item.text }]
+        : [],
+    )
+    return [...inboxItems, ...pending]
+  }, [inboxProjection, messages])
   const hidden = state.exchangeTurns[session.sessionId]
   const visible = useMemo(() => {
     const hiddenTurns = new Set(Array.isArray(hidden) ? hidden.map(String) : [])
@@ -302,6 +333,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const isDisplayTool = (item: ChatItem): boolean => {
     if (item.kind !== 'tool') return false
     if (item.toolKey === 'show_view') return true
+    if (item.toolKey === 'ask_user' && text(closedCards[item.id]) !== '') return true
     // A single Bot can relay a group round too; the payload determines presentation.
     if (item.state === 'finished') return (parseBotReplies(item.resultDetail?.text)?.length ?? 0) > 0
     return false
@@ -395,10 +427,30 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const onApproval: Parameters<typeof ChatItemView>[0]['onApproval'] = async (...args) => { if (!disabled) await respondApproval(...args) }
   const onQuestion: Parameters<typeof ChatItemView>[0]['onQuestion'] = async (...args) => { if (!disabled) await respondQuestion(...args) }
   const render = (item: ChatItem, artifacts?: UiArtifact[]) => {
+    if (item.kind === 'tool' && item.toolKey === 'ask_user') {
+      const closedStatus = text(closedCards[item.id])
+      if (closedStatus !== '') {
+        try {
+          const args = object(JSON.parse(item.arguments ?? item.callDetail?.text ?? 'null'))
+          return <BotSettledCard title={text(args.question) || text(args.header) || s.bots.question} closed={closedStatus} />
+        } catch {
+          return <BotSettledCard title={s.bots.question} closed={closedStatus} />
+        }
+      }
+    }
     if (item.kind === 'tool' && item.toolKey === 'show_view') {
       // Settled and display-only views live in tool history; only the current
       // pending view has authority to submit, and is rendered in the footer.
       if (view.callId === item.id) return null
+      const closedStatus = text(closedCards[item.id])
+      if (closedStatus !== '') {
+        try {
+          const args = object(JSON.parse(item.arguments ?? item.callDetail?.text ?? 'null'))
+          return <BotSettledCard title={text(args.title) || s.bots.question} closed={closedStatus} />
+        } catch {
+          return <BotSettledCard title={s.bots.question} closed={closedStatus} />
+        }
+      }
       try {
         const args = object(JSON.parse(item.arguments ?? item.callDetail?.text ?? 'null'))
         if (args.view !== undefined) return <BotViewCard pending={args} busy reply={() => {}} />
@@ -440,7 +492,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       scrollEventThrottle={32} onContentSizeChange={followEnd}
       ListEmptyComponent={null}
       ListHeaderComponent={<View style={styles.section}>
-        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
+        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
         {hasMore && (
           <View style={styles.earlierTop}>
             <Pressable
@@ -462,8 +514,14 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
         {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}
         {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}
+        {hasDesktopPendingRequest && <View style={styles.card}><Text style={styles.muted}>{s.bots.desktopActionRequired}</Text></View>}
       </View>} />
     {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+    {queueItems.length > 0 && (
+      <View style={{ paddingHorizontal: 14, paddingBottom: 4 }}>
+        <QueueDock items={queueItems} />
+      </View>
+    )}
     {atQuery !== null && botAtMentionGroups.length > 0 && (
       <View style={{ paddingHorizontal: 14 }}>
         <MentionPopover

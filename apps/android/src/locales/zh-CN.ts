@@ -95,7 +95,19 @@ const zhCN = {
     "selected": "已选择",
     "add": "新建 Bot 或群聊",
     "earlierUnavailable": "无法加载更早的历史。",
-    "manage": "管理团队"
+    "manage": "管理团队",
+    "sessions": "会话",
+    "newSession": "新会话",
+    "currentSession": "当前",
+    "openEarlierSession": "打开这个较早的会话",
+    "sessionNumber": (n: number) => `会话 ${n}`,
+    "answeredByMessage": "已用消息回答",
+    "cardDismissed": "已关闭",
+    "defaultEffort": "默认",
+    "resetEffort": "恢复默认",
+    "viaPlatform": (platform: string) => `来自 ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} 停下了：${reason}。换个模型，或让它继续。`,
+    "desktopActionRequired": "此请求（连接器 / 邮件 / 电脑操控）需在主机桌面端确认。"
 },
 
   comfort: {

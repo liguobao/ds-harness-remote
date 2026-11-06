@@ -95,7 +95,19 @@ const zhTW = {
     "selected": "Selected",
     "add": "New Bot or group",
     "earlierUnavailable": "Earlier history could not be loaded.",
-    "manage": "Manage team"
+    "manage": "Manage team",
+    "sessions": "會話",
+    "newSession": "新會話",
+    "currentSession": "目前",
+    "openEarlierSession": "開啟這個較早的會話",
+    "sessionNumber": (n: number) => `會話 ${n}`,
+    "answeredByMessage": "已用訊息回答",
+    "cardDismissed": "已關閉",
+    "defaultEffort": "預設",
+    "resetEffort": "恢復預設",
+    "viaPlatform": (platform: string) => `來自 ${platform}`,
+    "relayFailed": (name: string, reason: string) => `${name} 停下了：${reason}。換個模型，或讓它繼續。`,
+    "desktopActionRequired": "此請求（連接器 / 郵件 / 電腦操控）需在主機桌面端確認。"
 },
 
   comfort: {
