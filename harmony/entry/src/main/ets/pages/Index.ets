@@ -141,6 +141,8 @@ struct Index {
   @State messageActionKind: string = '';
   @State messageActionSeq: number = 0;
   @State messageActionTime: number = 0;
+  /** 该消息里所有代码块拼起来的内容，空串表示没有代码。 */
+  @State messageActionCode: string = '';
   /** 会话列表只看收藏。 */
   @State favoriteOnly: boolean = false;
   /** 被手工展开的长消息（item.id）。 */
@@ -5095,6 +5097,7 @@ struct Index {
     this.messageActionKind = item.kind;
     this.messageActionSeq = item.seq;
     this.messageActionTime = item.timestamp;
+    this.messageActionCode = extractCodeBlocks(item.text);
     this.messageActionsOpen = true;
   }
 
@@ -5279,6 +5282,15 @@ struct Index {
           this.copyActionText();
           this.messageActionsOpen = false;
         })
+        if (this.messageActionCode.length > 0) {
+          this.MessageActionRow('{}', this.tr('复制代码块'), false, () => {
+            const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.messageActionCode);
+            pasteboard.getSystemPasteboard().setData(data).then(() => {
+              promptAction.showToast({ message: this.tr('已复制代码') });
+            }).catch(() => undefined);
+            this.messageActionsOpen = false;
+          })
+        }
         this.MessageActionRow('❝', this.tr('引用到输入框'), false, () => {
           const quoted: string = this.messageActionText.split('\n')
             .map((line: string) => '> ' + line).join('\n') + '\n\n';
@@ -6259,6 +6271,28 @@ class ThemeChoice {
 
 /** 一行可直接渲染的 Markdown 内容。 */
 /** 只取时分，用于消息操作面板这类小地方。 */
+/** 把 markdown 里所有 ``` 代码块内容拼出来（不含围栏），没有就返回空串。 */
+function extractCodeBlocks(text: string): string {
+  const out: string[] = [];
+  const lines: string[] = text.split('\n');
+  let inside: boolean = false;
+  let buffer: string[] = [];
+  for (const line of lines) {
+    if (line.trimStart().startsWith('```')) {
+      if (inside) {
+        out.push(buffer.join('\n'));
+        buffer = [];
+      }
+      inside = !inside;
+      continue;
+    }
+    if (inside) {
+      buffer.push(line);
+    }
+  }
+  return out.join('\n\n');
+}
+
 function formatClock(timestamp: number): string {
   if (timestamp <= 0) {
     return '';
