@@ -41,6 +41,19 @@ export interface Config {
     binary?: string
   }
   acp?: { enabled?: boolean; backends?: Array<{ id:string; enabled?: boolean; command?: string; args?: string[]; cwd?: string }>; backend?: string; command?: string; args?: string[]; cwd?: string }
+  /**
+   * Opt-in embedded self-hosted Server (the open-source deployment in
+   * `apps/server`). When enabled the plugin starts it in-process and points
+   * the Host at it instead of a third-party `serverUrl`.
+   */
+  selfHost?: {
+    enabled?: boolean
+    port?: number
+    account?: string
+    password?: string
+    publicUrl?: string
+    tunnel?: { mode?: 'off' | 'named'; token?: string }
+  }
 }
 
 export interface ResolvedCodexConfig {
@@ -88,6 +101,30 @@ export interface ResolvedConfig {
   codex: ResolvedCodexConfig
   cursor: ResolvedCursorConfig
   acp?: ResolvedAcpConfig
+  /**
+   * Embedded self-hosted Relay server. When enabled the plugin starts the
+   * open-source `@dsh-remote/server` in-process and points the Host at it, so
+   * no third-party Server deployment is required. With `publicUrl` empty the
+   * origin is the LAN IPv4 address (same-WiFi clients only); set it to a
+   * stable HTTPS origin (own reverse proxy or a named Cloudflare Tunnel) for
+   * remote access.
+   */
+  selfHost: {
+    enabled: boolean
+    port: number
+    account: string
+    password: string
+    publicUrl?: string
+    /**
+     * Cloudflare Tunnel. `named` starts a cached `cloudflared` with the tunnel
+     * token while `publicUrl` provides the public HTTPS origin; the tunnel's
+     * DNS/ingress stay in the Cloudflare dashboard.
+     */
+    tunnel: {
+      mode: 'off' | 'named'
+      token: string
+    }
+  }
 }
 
 /** The entry's volatile Cordis config: one stable reference for the whole section. */
@@ -134,6 +171,17 @@ const entryConfigSchema = s.object({
     binary: s.string(),
   }),
   acp: s.object({ enabled: s.boolean(), backends: s.array(s.object({ id:s.string(), enabled:s.boolean(), command:s.string(), args:s.array(s.string()), cwd:s.string() })) }),
+  selfHost: s.object({
+    enabled: s.boolean(),
+    port: s.natural().min(1).max(65535),
+    account: s.string(),
+    password: s.string(),
+    publicUrl: s.string(),
+    tunnel: s.object({
+      mode: s.union(['off', 'named'] as const),
+      token: s.string(),
+    }),
+  }),
 })
 
 /**
@@ -183,6 +231,18 @@ const configSchema = z.object({
     binary: z.string().trim().min(1).max(4096).optional(),
   }).strict().optional(),
   acp: z.object({ enabled:z.boolean().optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
+  selfHost: z.object({
+    /** Opt-in switch; absent/false keeps the official-server behaviour. */
+    enabled: z.boolean().optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    account: z.string().trim().max(254).optional(),
+    password: z.string().max(1024).optional(),
+    publicUrl: z.string().url().optional(),
+    tunnel: z.object({
+      mode: z.enum(['off', 'named']).optional(),
+      token: z.string().max(4096).optional(),
+    }).strict().optional(),
+  }).strict().optional(),
 }).strict()
 
 export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
@@ -197,6 +257,9 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const codexEnabled = codexBackend?.enabled ?? parsed.codex?.enabled ?? true
   const acpEnabled = parsed.acp?.enabled ?? true
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
+  const selfHostOptions = parsed.selfHost ?? {}
+  const selfHostEnabled = selfHostOptions.enabled ?? false
+  const tunnelOptions = selfHostOptions.tunnel ?? {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
   const initialDelayMs = reconnect.initialDelayMs ?? 4_000
@@ -254,6 +317,17 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
           ...(cwd === undefined ? {} : { cwd }),
         }
       }),
+    },
+    selfHost: {
+      enabled: selfHostEnabled,
+      port: selfHostOptions.port ?? 8081,
+      account: selfHostOptions.account ?? '',
+      password: selfHostOptions.password ?? '',
+      ...(selfHostOptions.publicUrl === undefined ? {} : { publicUrl: selfHostOptions.publicUrl }),
+      tunnel: {
+        mode: tunnelOptions.mode === 'named' ? 'named' : 'off',
+        token: tunnelOptions.token ?? '',
+      },
     },
   }
 }

@@ -33,6 +33,9 @@ import {
   type OwnerPeerLike,
   type OwnerPeerServiceLike,
 } from './owner-peer.js'
+import { startSelfHost, type SelfHostRuntime } from './self-host.js'
+import { startCloudflareTunnel, type CloudflareTunnelRuntime } from './cloudflare-tunnel.js'
+import { join } from 'node:path'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -164,7 +167,7 @@ async function activate(
   const webServer = ctx.get('webServer') as HostWebServerLike | undefined
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
-  const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
+  let config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
   const defaultIdentityDirectory = new IdentityStore().directory
   if (!config.enabled) {
     if (connection !== undefined) {
@@ -273,6 +276,61 @@ async function activate(
 
     return { runtime, clientRuntime }
   }
+  // Embedded self-hosted Server. Starts the open-source Relay in-process and
+  // points the Host at it, replacing any third-party serverUrl. Clients must
+  // use the same origin (settings → selfHost.publicUrl, or the LAN IPv4 default).
+  let selfHost: SelfHostRuntime | undefined
+  let selfHostKey: string | undefined
+  let tunnel: CloudflareTunnelRuntime | undefined
+  const ensureSelfHost = (target: ResolvedConfig): ResolvedConfig => {
+    if (!target.selfHost.enabled) return target
+    const key = [target.selfHost.port, target.selfHost.account, target.selfHost.password, target.selfHost.publicUrl ?? ''].join('|')
+    if (selfHostKey !== key) {
+      void selfHost?.close()
+      selfHost = undefined
+      selfHostKey = undefined
+      try {
+        selfHost = startSelfHost({
+          port: target.selfHost.port,
+          account: target.selfHost.account,
+          password: target.selfHost.password,
+          dataDirectory: join(defaultIdentityDirectory, 'self-host'),
+          ...(target.selfHost.publicUrl === undefined ? {} : { publicUrl: target.selfHost.publicUrl }),
+        })
+        selfHostKey = key
+        logger.info('self-hosted remote server started', { url: selfHost.publicUrl })
+      } catch (error) {
+        logger.error('self-hosted remote server failed to start', {
+          message: error instanceof Error ? error.message : String(error),
+        })
+        return target
+      }
+    }
+    // Cloudflare Tunnel: the public origin stays the user's HTTPS domain
+    // (selfHost.publicUrl); cloudflared only carries traffic to the local
+    // listener, so it starts in the background without blocking the Host.
+    if (target.selfHost.tunnel.mode === 'named' && target.selfHost.tunnel.token.trim() !== '') {
+      if (target.selfHost.publicUrl === undefined) {
+        logger.warn('cloudflare tunnel requires selfHost.publicUrl (https://domain) for Host and clients')
+      }
+      if (tunnel === undefined) {
+        void startCloudflareTunnel({
+          token: target.selfHost.tunnel.token,
+          binaryDirectory: join(defaultIdentityDirectory, 'self-host', 'cloudflared'),
+          logger,
+        }).then(runtime => {
+          tunnel = runtime
+          logger.info('cloudflare tunnel started', { localUrl: `http://127.0.0.1:${target.selfHost.port}` })
+        }).catch(error => {
+          logger.error('cloudflare tunnel failed to start', {
+            message: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
+    }
+    return selfHost === undefined ? target : { ...target, serverUrl: selfHost.publicUrl }
+  }
+  config = ensureSelfHost(config)
   let { runtime, clientRuntime } = createRuntimes(config)
   let closed = false
   let clientServiceProvided = clientRuntime !== undefined
@@ -287,7 +345,7 @@ async function activate(
       const failure = shutdown.find(result => result.status === 'rejected')
       if (failure?.status === 'rejected') throw failure.reason
       if (closed) throw new Error('Remote plugin is closed')
-      const fresh = createRuntimes(next)
+      const fresh = createRuntimes(ensureSelfHost(next))
       try {
         await fresh.runtime.start()
         await fresh.clientRuntime?.start()
@@ -342,6 +400,8 @@ async function activate(
       await disposeControl?.()
       await clientRuntime?.close()
       await runtime.close()
+      await selfHost?.close().catch(() => undefined)
+      await tunnel?.close().catch(() => undefined)
       throw error
     }
     return async () => {

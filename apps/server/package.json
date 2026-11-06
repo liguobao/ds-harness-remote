@@ -3,6 +3,10 @@
   "version": "0.5.21",
   "private": true,
   "type": "module",
+  "main": "dist/server.js",
+  "exports": {
+    ".": "./dist/server.js"
+  },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",

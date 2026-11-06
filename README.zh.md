@@ -198,6 +198,38 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
 
+## 自部署服务器（可选）
+
+默认情况下 Host 和客户端都使用官方服务器（`https://dsh.r2049.cn`）。也可以改为在本机运行开源自部署 Server，不依赖任何第三方服务器。在插件设置（或 `cordis.patch.yml`）中选择模式：
+
+| 模式 | 配置 | 结果 |
+| --- | --- | --- |
+| 官方服务器（默认） | `serverUrl` 留空 | 使用 `https://dsh.r2049.cn` |
+| 自定义服务器 | `serverUrl: https://your-server.example.com` | 你自己的 Server（VPS、反向代理等） |
+| 内置自部署（本插件） | `selfHost.enabled: true` | 插件在进程内启动 `@dsh-remote/server`，Host 连它 |
+
+```yaml
+- id: ds-harness-remote
+  config:
+    selfHost:
+      enabled: true
+      port: 8081
+      account: owner@example.com
+      password: replace-with-a-long-password
+      # 留空 = 仅局域网；外网访问时填公网 HTTPS 地址：
+      publicUrl: https://remote.example.com
+      tunnel:
+        mode: named        # off | named（Cloudflare Tunnel）
+        token: ''          # cloudflared tunnel token
+```
+
+注意事项：
+
+- **Host 与客户端必须使用同一个 Server origin。** 手机（或其他客户端）填同一个 `publicUrl`（或局域网地址 `http://<host-局域网IP>:8081`），并用同一账号登录；设备凭据按 origin 隔离。
+- `publicUrl` 留空时内置 Server 仅局域网可达。外网访问可以自己暴露（反向代理 + DNS），或使用命名 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)：创建隧道、把主机名路由到 `http://127.0.0.1:<端口>`，把隧道 token 填进 `tunnel.token`。插件会下载并托管 `cloudflared`；隧道的 DNS/ingress 仍在 Cloudflare 面板配置。
+- 设备凭据持久化在插件的身份目录（`.../self-host/state.json`）。
+- 如果你的网络无法访问 Cloudflare 的 IPv4 边缘地址（部分网络会屏蔽），尝试 IPv6：隧道域名通常也会解析到可达的 IPv6 地址。
+
 ## 安全边界
 
 - LAN 、P2P网络下，除了网络协调相关指令，所有的数据不经过服务器；TURN服务使用开源coturn服务器部署，Relay 模式使用WebSocket转发。

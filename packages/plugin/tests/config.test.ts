@@ -84,4 +84,44 @@ describe('plugin config', () => {
   it('rejects an inverted reconnect range', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
   })
+
+  it('keeps the embedded self-hosted server off by default', () => {
+    const resolved = resolveConfig({}, {})
+    expect(resolved.selfHost).toEqual({
+      enabled: false,
+      port: 8081,
+      account: '',
+      password: '',
+      tunnel: { mode: 'off', token: '' },
+    })
+  })
+
+  it('parses an enabled self-hosted server with its tunnel settings', () => {
+    const resolved = resolveConfig({
+      selfHost: {
+        enabled: true,
+        port: 9090,
+        account: 'owner@example.com',
+        password: 'a-long-enough-password',
+        publicUrl: 'https://remote.example.com',
+        tunnel: { mode: 'named', token: 'tunnel-token' },
+      },
+    }, {})
+    expect(resolved.selfHost).toEqual({
+      enabled: true,
+      port: 9090,
+      account: 'owner@example.com',
+      password: 'a-long-enough-password',
+      publicUrl: 'https://remote.example.com',
+      tunnel: { mode: 'named', token: 'tunnel-token' },
+    })
+  })
+
+  it('normalizes incomplete self-hosted settings and rejects invalid bounds', () => {
+    expect(resolveConfig({ selfHost: { enabled: true } }, {}).selfHost).toMatchObject({ enabled: true, port: 8081 })
+    expect(resolveConfig({ selfHost: { enabled: true, tunnel: { mode: 'off' } } }, {}).selfHost.tunnel.mode).toBe('off')
+    expect(() => resolveConfig({ selfHost: { port: 0 } })).toThrow()
+    expect(() => resolveConfig({ selfHost: { port: 70000 } })).toThrow()
+    expect(() => resolveConfig({ selfHost: { publicUrl: 'not-a-url' } })).toThrow()
+  })
 })

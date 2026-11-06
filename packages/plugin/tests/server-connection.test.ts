@@ -1225,6 +1225,7 @@ function helloAck(connectionSessionId: string) {
 
 function config(): ResolvedConfig {
   return {
+    selfHost: { enabled: false, port: 8081, account: "", password: "", tunnel: { mode: "off", token: "" } },
     terminal: { enabled: false },
     sidebar: { entry: 'standard' },
     loopback: { ports: [] },

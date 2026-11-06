@@ -219,6 +219,38 @@ Every path carries the same Noise ciphertext and keeps the same Host/Client iden
 
 See [Network and transport](docs/network.md) for the topology, control and data planes, NAT behavior, fallback, reconnect semantics, and current validation status.
 
+## Self-hosted server (optional)
+
+By default the Host and its clients use the hosted Server (`https://dsh.r2049.cn`). You can instead run the open-source Server locally, so no third-party Server deployment is involved. Choose the mode in the plugin settings (or `cordis.patch.yml`):
+
+| Mode | Setting | Result |
+| --- | --- | --- |
+| Hosted (default) | `serverUrl` empty | Uses `https://dsh.r2049.cn` |
+| Custom server | `serverUrl: https://your-server.example.com` | Your own Server deployment (VPS, reverse proxy, ...) |
+| Embedded (this plugin) | `selfHost.enabled: true` | The plugin starts `@dsh-remote/server` in-process and points the Host at it |
+
+```yaml
+- id: ds-harness-remote
+  config:
+    selfHost:
+      enabled: true
+      port: 8081
+      account: owner@example.com
+      password: replace-with-a-long-password
+      # LAN only when empty; set the public HTTPS origin for remote access:
+      publicUrl: https://remote.example.com
+      tunnel:
+        mode: named        # off | named (Cloudflare Tunnel)
+        token: ''          # cloudflared tunnel token
+```
+
+Notes:
+
+- **Host and clients must use the same Server origin.** Point the phone (or other client) at the same `publicUrl` (or the LAN address `http://<host-lan-ip>:8081`) and sign in with the same account; device credentials are scoped to that origin.
+- Without `publicUrl` the embedded Server is reachable only on the LAN. For remote access either expose it yourself (reverse proxy + DNS) or use a named [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/): create the tunnel, route the hostname to `http://127.0.0.1:<port>`, and put the tunnel token in `tunnel.token`. The plugin downloads and supervises `cloudflared`; the tunnel's DNS/ingress remain in the Cloudflare dashboard.
+- Device credentials persist under the plugin's identity directory (`.../self-host/state.json`).
+- If Cloudflare's IPv4 edge addresses are unreachable from your network (some networks block them), try IPv6: the tunnel domain usually resolves to reachable IPv6 addresses as well.
+
 ## Security
 
 - On LAN and P2P paths, data bypasses the Server except for connection coordination. TURN uses the open-source coturn server; Relay mode forwards traffic over WebSocket.
