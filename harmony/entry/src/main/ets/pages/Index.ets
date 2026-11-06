@@ -4212,6 +4212,19 @@ struct Index {
                   Text(formatSessionTime(session.updatedAt))
                     .fontSize(this.fs(11))
                     .fontColor(this.pal().text2)
+                  if (session.turns > 0) {
+                    Text(session.turns + this.tr(' 轮'))
+                      .fontSize(this.fs(10))
+                      .fontColor(this.pal().text3)
+                  }
+                  if (cwdTail(session.cwd).length > 0) {
+                    Text(cwdTail(session.cwd))
+                      .fontSize(this.fs(10))
+                      .fontColor(this.pal().text3)
+                      .maxLines(1)
+                      .constraintSize({ maxWidth: 90 })
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
                   if (this.runtime.draftOf(session.sessionId).length > 0) {
                     Text(this.tr('草稿'))
                       .fontSize(this.fs(9))
@@ -6768,6 +6781,16 @@ function dayDividerLabel(timestamp: number, english: boolean): string {
   const month: number = target.getMonth() + 1;
   const day: number = target.getDate();
   return english ? `${month}/${day}` : `${month}月${day}日`;
+}
+
+/** 取工作区路径的末段，作为会话行的目录提示。 */
+function cwdTail(cwd: string): string {
+  if (cwd.length === 0) {
+    return '';
+  }
+  const trimmed: string = cwd.endsWith('/') ? cwd.substring(0, cwd.length - 1) : cwd;
+  const cut: number = trimmed.lastIndexOf('/');
+  return cut >= 0 ? trimmed.substring(cut + 1) : trimmed;
 }
 
 function formatClock(timestamp: number): string {
