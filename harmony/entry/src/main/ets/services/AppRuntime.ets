@@ -150,6 +150,8 @@ export class AppRuntime {
   private qrTimer: number = -1;
   /** 最近一次成功连接的主机，断线自动重连时复用。 */
   private lastDeviceId: string = '';
+  /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
+  private pendingResumeSessionId: string = '';
   private reconnectAttempt: number = 0;
   private reconnectTimer: number = -1;
   /** 错误条上「重试」按钮的文案与要重跑的动作：失败时登记，成功或手动关闭时清掉。 */
@@ -191,6 +193,10 @@ export class AppRuntime {
   modelCatalogRaw: Record<string, Object> = {};
   /** 自动重连状态文案；空字符串表示没有正在进行的重连。 */
   reconnectStatus: string = '';
+  /** true = 断线后正在会话页里等重连（短抖动不把用户踢回设备列表）。 */
+  reconnecting: boolean = false;
+  /** 最近的链路事件（环形，最多 20 条），诊断面板直接看，不用连电脑抓 hilog。 */
+  linkEvents: string[] = [];
   serverUrl: string = '';
   email: string = '';
   devices: RemoteHostDevice[] = [];
@@ -493,7 +499,9 @@ export class AppRuntime {
   }
 
   async connectDevice(deviceId: string): Promise<void> {
-    if (this.phase !== PHASE_DEVICES) {
+    // 正常入口在设备页；断线重连时允许从会话页直接重来（reconnecting 标记着这件事）
+    const fromChatReconnect: boolean = this.phase === PHASE_CHAT && this.reconnecting;
+    if (this.phase !== PHASE_DEVICES && !fromChatReconnect) {
       return;
     }
     // 刚从这台主机的会话页退回来（连接还活着）：不重新认证，直接回聊天
@@ -607,11 +615,13 @@ export class AppRuntime {
       this.connectedDeviceId = host.deviceId;
       this.transportLabel = relay.transportKind();
       logInfo('connected to host ' + host.deviceId + ' transport=' + this.transportLabel);
+      this.pushLinkEvent('已连接 · ' + this.transportLabel);
       this.reconnectAttempt = 0;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
       this.connectStage = '';
       this.clearRetry();
+      this.reconnecting = false;
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
@@ -2550,6 +2560,17 @@ export class AppRuntime {
   }
 
   private async pickInitialSession(): Promise<void> {
+    // 断线重连回来的：直接回原来那个会话，别按更新时间另挑一个
+    const resume: string = this.pendingResumeSessionId;
+    this.pendingResumeSessionId = '';
+    if (resume.length > 0) {
+      for (const session of this.sessions) {
+        if (session.sessionId === resume) {
+          await this.openSessionInternal(this.requireHarness(), resume, sessionTitle(session));
+          return;
+        }
+      }
+    }
     let best: HarnessRemoteSession | undefined = undefined;
     for (const session of this.sessions) {
       if (session.blank) {
@@ -2812,6 +2833,7 @@ export class AppRuntime {
       this.reconnectStatus = '';
       this.errorMsg = verdict.message;
       logWarn('disconnect without auto-reconnect: ' + verdict.message);
+      this.pushLinkEvent('断线（不重连）：' + verdict.message);
       this.notify();
       return;
     }
@@ -2819,22 +2841,38 @@ export class AppRuntime {
       const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
       const delay: number = AppRuntime.RECONNECT_DELAYS_MS[index];
       this.reconnectAttempt += 1;
-      this.phase = PHASE_DEVICES;
       this.errorMsg = '';
+      // 短抖动不把用户踢回设备列表：留在会话页，消息和滚动位置都还在，
+      // 连上后直接回到这个会话（pendingResumeSessionId）。
+      this.reconnecting = true;
+      if (this.currentSessionId.length > 0) {
+        this.pendingResumeSessionId = this.currentSessionId;
+      }
       const cause: string = verdict !== undefined && verdict.message.length > 0
         ? verdict.message : '与主机的连接已断开';
       this.reconnectStatus = cause + '，' + Math.round(delay / 1000)
         + ' 秒后自动重连（第 ' + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+      this.pushLinkEvent('断线：' + cause + ' → ' + Math.round(delay / 1000) + 's 后第 '
+        + this.reconnectAttempt + ' 次重连');
       this.notify();
       this.scheduleReconnect(target, delay);
       return;
     }
+    // 退避耗尽：这时确实要交回用户，文案带上原因和下一步动作
+    this.reconnecting = false;
+    this.pendingResumeSessionId = '';
     this.phase = PHASE_DEVICES;
     this.reconnectStatus = '';
-    this.errorMsg = this.reconnectAttempt > 0
-      ? '多次重连未成功，请检查网络或稍后手动连接'
-      : '与主机的连接已断开';
+    if (this.reconnectAttempt > 0) {
+      const why: string = verdict !== undefined && verdict.message.length > 0
+        ? verdict.message : '主机一直连不上';
+      this.errorMsg = '连续 ' + this.reconnectAttempt + ' 次重连都没成功（' + why + '）。'
+        + '已回到主机列表：检查网络或主机是否在线后点「连接」，网络恢复时也会自动再试一次。';
+    } else {
+      this.errorMsg = '与主机的连接已断开，点「连接」可以重试。';
+    }
     this.reconnectAttempt = 0;
+    this.pushLinkEvent('重连次数用尽，已回到主机列表');
     this.notify();
   }
 
@@ -2842,7 +2880,9 @@ export class AppRuntime {
     this.clearReconnectTimer();
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = -1;
-      if (this.phase !== PHASE_DEVICES || this.connectCancelled) {
+      const allowed: boolean = this.phase === PHASE_DEVICES
+        || (this.phase === PHASE_CHAT && this.reconnecting);
+      if (!allowed || this.connectCancelled) {
         return;
       }
       this.connectDevice(deviceId).catch((error: Error) => {
@@ -2869,6 +2909,7 @@ export class AppRuntime {
     const monitor: NetworkMonitor = new NetworkMonitor();
     monitor.onLost = () => {
       this.networkOnline = false;
+      this.pushLinkEvent('网络断开');
       this.networkType = '无网络';
       logWarn('runtime: 网络已断开');
       if (this.phase === PHASE_CHAT && this.reconnectStatus.length === 0) {
@@ -2879,6 +2920,7 @@ export class AppRuntime {
     };
     monitor.onAvailable = () => {
       this.networkOnline = true;
+      this.pushLinkEvent('网络已恢复');
       this.networkType = networkTypeLabel(monitor.type);
       logInfo('runtime: 网络已恢复 type=' + this.networkType);
       if (this.reconnectStatus.indexOf('网络已断开') >= 0) {
@@ -2944,10 +2986,63 @@ export class AppRuntime {
   }
 
   /** 用户主动取消自动重连（例如要切换到另一台主机）。 */
+  /** 记一条链路事件（诊断面板与导出用）。 */
+  private pushLinkEvent(text: string): void {
+    const clock: Date = new Date();
+    const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
+    const stamp: string = pad(clock.getHours()) + ':' + pad(clock.getMinutes()) + ':' + pad(clock.getSeconds());
+    const next: string[] = this.linkEvents.slice();
+    next.push(stamp + '  ' + text);
+    while (next.length > 20) {
+      next.shift();
+    }
+    this.linkEvents = next;
+  }
+
+  /** 诊断面板的行内容（也用于「复制全部」）。 */
+  diagnosticsLines(): string[] {
+    const relay: RelayTransport | undefined = this.activeRelay;
+    const silence: string = relay !== undefined
+      ? ((): string => {
+        const ms: number = relay.silenceMs();
+        return ms < 0 ? '未知' : (Math.round(ms / 100) / 10) + ' 秒前收到过数据';
+      })()
+      : '未连接';
+    const rows: string[] = [];
+    rows.push('主机：' + (this.connectedHostDisplayName().length > 0 ? this.connectedHostDisplayName() : '—'));
+    rows.push('传输：' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
+    rows.push('链路：' + silence);
+    rows.push('网络：' + (this.networkOnline ? (this.networkType.length > 0 ? this.networkType : '在线') : '已断开'));
+    rows.push('重连：' + (this.reconnecting
+      ? (this.reconnectStatus.length > 0 ? this.reconnectStatus : '进行中')
+      : '无'));
+    rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
+    return rows;
+  }
+
+  /** 会话页横幅上的「立即重试」：不等退避，马上重连一次。 */
+  retryReconnectNow(): void {
+    if (!this.reconnecting || this.lastDeviceId.length === 0) {
+      return;
+    }
+    this.clearReconnectTimer();
+    this.pushLinkEvent('用户点了「立即重试」');
+    this.connectDevice(this.lastDeviceId).catch((error: Error) => {
+      logWarn('manual reconnect failed: ' + errorMessage(error));
+    });
+  }
+
   cancelReconnect(): void {
     this.clearReconnectTimer();
     this.reconnectAttempt = 0;
     this.reconnectStatus = '';
+    this.reconnecting = false;
+    this.pendingResumeSessionId = '';
+    if (this.phase === PHASE_CHAT) {
+      // 从会话页点「停止重连」等于放弃这次会话，回设备列表让用户重新选
+      this.phase = PHASE_DEVICES;
+      this.teardownConnection();
+    }
     this.notify();
   }
 

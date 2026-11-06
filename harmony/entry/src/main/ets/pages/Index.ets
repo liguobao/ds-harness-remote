@@ -44,6 +44,10 @@ struct Index {
   /** 自动重连提示（含倒计时与第几次），原来是死数据只给状态点染色用。 */
   @State reconnectNotice: string = '';
   @State networkOnline: boolean = true;
+  /** 会话页里正在等重连（短抖动不踢回设备列表）。 */
+  @State reconnecting: boolean = false;
+  /** 连接诊断面板。 */
+  @State diagnosticsOpen: boolean = false;
   @State devices: RemoteHostDevice[] = [];
   @State sessions: HarnessRemoteSession[] = [];
   @State sessionsLoadFailed: boolean = false;
@@ -322,6 +326,10 @@ struct Index {
       this.filePreviewOpen = false;
       return true;
     }
+    if (this.diagnosticsOpen) {
+      this.diagnosticsOpen = false;
+      return true;
+    }
     if (this.composerExpanded) {
       this.composerExpanded = false;
       return true;
@@ -493,6 +501,7 @@ struct Index {
     this.connectStage = this.runtime.connectStage;
     // 重连文案原来只用于给状态点染色，用户看不到「几秒后重连第几次」。
     this.reconnectNotice = this.runtime.reconnectStatus;
+    this.reconnecting = this.runtime.reconnecting;
     this.networkOnline = this.runtime.networkOnline;
     if (this.phase === PHASE_CONNECTING) {
       if (this.connectStartAt === 0) {
@@ -1748,6 +1757,9 @@ struct Index {
       }
       if (this.composerExpanded) {
         this.ExpandedComposerOverlay()
+      }
+      if (this.diagnosticsOpen) {
+        this.DiagnosticsOverlay()
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
@@ -3637,6 +3649,41 @@ struct Index {
         .width('100%')
         .height(0.5)
         .backgroundColor(this.pal().border)
+      if (this.reconnecting) {
+        Row({ space: 8 }) {
+          LoadingProgress()
+            .width(15)
+            .height(15)
+            .color('#F5A623')
+          Text(this.reconnectNotice.length > 0
+            ? this.reconnectNotice
+            : this.tr('连接中断，正在重连…'))
+            .fontSize(this.fs(12))
+            .fontColor('#F5A623')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text(this.tr('立即重试'))
+            .fontSize(this.fs(12))
+            .fontColor('#F5A623')
+            .padding({ left: 8, right: 4, top: 3, bottom: 3 })
+            .onClick(() => {
+              this.runtime.retryReconnectNow();
+            })
+          Text(this.tr('停止'))
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text3)
+            .padding({ left: 8, right: 4, top: 3, bottom: 3 })
+            .onClick(() => {
+              this.runtime.cancelReconnect();
+            })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor('rgba(245,166,35,0.12)')
+        .borderRadius(10)
+        .margin({ left: 16, right: 16, top: 6 })
+      }
       if (this.errorMsg.length > 0) {
         Row({ space: 8 }) {
           Column()
@@ -4939,6 +4986,13 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
+          Text(this.tr('诊断'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.diagnosticsOpen = true;
+            })
           Text(this.tr('断开连接'))
             .fontSize(this.fs(12))
             .fontColor('#F85749')
@@ -6140,6 +6194,103 @@ struct Index {
   }
 
   /** 新建工作区：主机侧只认绝对路径，名称留空就用路径末段。 */
+  /** 连接诊断：现场排障不用连电脑抓 hilog。 */
+  @Builder
+  DiagnosticsOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.55)')
+        .onClick(() => {
+          this.diagnosticsOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row({ space: 10 }) {
+          Text(this.tr('连接诊断'))
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Blank()
+          Text(this.tr('复制'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              const lines: string[] = this.runtime.diagnosticsLines()
+                .concat(['', this.tr('最近事件：')])
+                .concat(this.runtime.linkEvents);
+              const data: pasteboard.PasteData = pasteboard.createData(
+                pasteboard.MIMETYPE_TEXT_PLAIN, lines.join('\n'));
+              pasteboard.getSystemPasteboard().setData(data).then(() => {
+                promptAction.showToast({ message: this.tr('诊断信息已复制') });
+              }).catch(() => undefined);
+            })
+          Text(this.tr('收起'))
+            .fontSize(this.fs(13))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 2, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.diagnosticsOpen = false;
+            })
+        }
+        .width('100%')
+        Scroll() {
+          Column({ space: 6 }) {
+            ForEach(this.runtime.diagnosticsLines(), (line: string) => {
+              Text(line)
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text2)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            }, (line: string) => line)
+            Column()
+              .width('100%')
+              .height(0.5)
+              .backgroundColor(this.pal().border)
+              .margin({ top: 4, bottom: 4 })
+            Text(this.tr('最近事件'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .width('100%')
+              .textAlign(TextAlign.Start)
+            if (this.runtime.linkEvents.length === 0) {
+              Text(this.tr('还没有记录'))
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            } else {
+              ForEach(this.runtime.linkEvents, (line: string) => {
+                Text(line)
+                  .fontSize(this.fs(11))
+                  .fontColor(this.pal().text2)
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+              }, (line: string) => line)
+            }
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .height('62%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   /** 全屏编辑：写长 prompt 时不受输入坞高度和候选条限制。 */
   @Builder
   ExpandedComposerOverlay() {

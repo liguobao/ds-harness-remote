@@ -1010,6 +1010,14 @@ export class RelayTransport {
     }
   }
 
+  /** 距离上一帧服务器数据过了多久（毫秒）；从没收到过返回 -1。 */
+  silenceMs(): number {
+    if (this.lastInboundAt <= 0) {
+      return -1;
+    }
+    return Date.now() - this.lastInboundAt;
+  }
+
   /** 任何一帧服务器数据都算链路活着的证据。 */
   private markLinkAlive(): void {
     const wasSuspect: boolean = this.suspectLogged;
@@ -1045,6 +1053,12 @@ export class RelayTransport {
 
   private finishConnect(mode: string): void {
     this.clearHandshakeTimer();
+    // dataMode 是「数据面现在走哪条路」的唯一真相：之前只在这里发 transport.selected 却不赋值，
+    // 走 else 分支（直接中继）时 dataMode 一直是空串 —— 传输徽标和诊断都显示空，
+    // 而且迟到的 signal.answer 不会被「已回落中继」那条判断拦下，会把已关的 peer 再救活。
+    if (mode.length > 0) {
+      this.dataMode = mode;
+    }
     // 主机只有在收到 transport.selected 之后才会 resumePendingHandshake（启动 Noise responder），
     // 少这一帧时客户端会一直等 msg2，最终表现为“安全握手超时”。
     const connId = this.connectionId;
