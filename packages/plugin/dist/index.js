@@ -84184,9 +84184,33 @@ var HostServerApi = class {
     });
   }
   async listDevices(signal) {
-    const result = await this.request("/api/v1/devices", { signal });
-    if (!Array.isArray(result.items)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list.", false);
-    return result.items.map(parseHostDevice);
+    const devices = [];
+    for await (const page of this.devicePages(signal)) devices.push(...page);
+    return devices;
+  }
+  async *devicePages(signal) {
+    let cursor3;
+    const cursors = /* @__PURE__ */ new Set();
+    const ids = /* @__PURE__ */ new Set();
+    do {
+      signal?.throwIfAborted();
+      const query = new URLSearchParams({ limit: "50" });
+      if (cursor3 !== void 0) query.set("cursor", cursor3);
+      const result = await this.request(`/api/v1/devices?${query}`, { signal });
+      if (!Array.isArray(result.items)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list.", false);
+      const page = result.items.map(parseHostDevice);
+      const next = result.nextCursor;
+      if (next !== void 0 && next !== null && (typeof next !== "string" || next.length === 0 || next.length > 512 || cursors.has(next) || page.length === 0)) {
+        throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list cursor.", false);
+      }
+      for (const device of page) {
+        if (ids.has(device.deviceId)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned a duplicate device.", false);
+        ids.add(device.deviceId);
+      }
+      cursor3 = typeof next === "string" ? next : void 0;
+      if (cursor3 !== void 0) cursors.add(cursor3);
+      yield page;
+    } while (cursor3 !== void 0);
   }
   async deviceFor(peerDeviceId, signal) {
     const result = await this.request(`/api/v1/devices/${encodeURIComponent(peerDeviceId)}`, { signal });
@@ -86255,22 +86279,39 @@ var ClientModeRuntime = class {
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     this.assertHostAuthorizationForDeviceDiscovery();
     this.requireIdentity();
-    const serverDevices = await this.server.listDevices(signal);
-    signal?.throwIfAborted();
-    const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
-    const results = await Promise.allSettled(remoteDevices.map(async (device) => {
-      signal?.throwIfAborted();
-      await this.connection.authorizeHostPeer(device, signal);
-      const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }));
-      signal?.throwIfAborted();
+    const devices = [];
+    for await (const page of this.server.devicePages(signal)) {
+      const remoteDevices = page.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
+      const resolved = new Array(remoteDevices.length);
+      let next = 0;
+      let failed = false;
+      const workers = await Promise.allSettled(Array.from({ length: Math.min(8, remoteDevices.length) }, async () => {
+        try {
+          while (!failed && next < remoteDevices.length) {
+            signal.throwIfAborted();
+            this.assertHostAuthorizationForDeviceDiscovery();
+            const index = next++;
+            const device = remoteDevices[index];
+            await this.connection.authorizeHostPeer(device, signal);
+            const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }));
+            signal.throwIfAborted();
+            this.assertHostAuthorizationForDeviceDiscovery();
+            resolved[index] = { ...device, ...presence };
+          }
+        } catch (error62) {
+          failed = true;
+          throw error62;
+        }
+      }));
+      signal.throwIfAborted();
       this.assertHostAuthorizationForDeviceDiscovery();
-      return { ...device, ...presence };
-    }));
+      const failure5 = workers.find((result) => result.status === "rejected");
+      if (failure5?.status === "rejected") throw failure5.reason;
+      devices.push(...resolved);
+    }
     signal.throwIfAborted();
     this.assertHostAuthorizationForDeviceDiscovery();
-    const failure5 = results.find((result) => result.status === "rejected");
-    if (failure5?.status === "rejected") throw failure5.reason;
-    return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    return devices;
   }
   /**
    * Device discovery is exposed through the local app control route. When this
@@ -86900,7 +86941,8 @@ var trustedPeerSchema = external_exports.object({
 }).strict();
 var trustedPeersSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
-  peers: external_exports.array(trustedPeerSchema).max(256)
+  // Discovery can persist multiple pages; reading must accept every record we write.
+  peers: external_exports.array(trustedPeerSchema)
 }).strict();
 var IdentityInvalidError = class extends Error {
   code = "IDENTITY_INVALID";

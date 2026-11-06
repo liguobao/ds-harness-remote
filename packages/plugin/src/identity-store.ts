@@ -25,7 +25,8 @@ const trustedPeerSchema = z.object({
 
 const trustedPeersSchema = z.object({
   schemaVersion: z.literal(1),
-  peers: z.array(trustedPeerSchema).max(256),
+  // Discovery can persist multiple pages; reading must accept every record we write.
+  peers: z.array(trustedPeerSchema),
 }).strict()
 
 export interface HostIdentity {

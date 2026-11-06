@@ -35,6 +35,23 @@ describe('IdentityStore', () => {
     expect(hostStore.isTrusted(client.deviceId, client.publicKey)).toBe(true)
   })
 
+  it('reloads all trusted peers after discovering more than 256 hosts', async () => {
+    const directory = await temporaryDirectory()
+    const store = new IdentityStore({ directory })
+    const identity = await store.loadOrCreate('Client')
+    for (let index = 0; index < 301; index++) {
+      await store.trustPeer({ deviceId: `host-${index}`, name: `Host ${index}`, platform: 'linux', publicKey: identity.publicKey })
+    }
+    const restarted = new IdentityStore({ directory })
+    await expect(restarted.loadOrCreate('Client')).resolves.toMatchObject({ deviceId: identity.deviceId })
+    expect(restarted.listTrustedPeers()).toEqual(store.listTrustedPeers())
+    const file = join(directory, 'trusted-peers.json')
+    const records = JSON.parse(await readFile(file, 'utf8'))
+    records.peers[300].fingerprint = 'invalid'
+    await writeFile(file, JSON.stringify(records), { mode: 0o600 })
+    await expect(new IdentityStore({ directory }).loadOrCreate('Client')).rejects.toThrow(/invalid fingerprint/)
+  })
+
   it('fails closed for incomplete or overly permissive identity files', async () => {
     const incomplete = await temporaryDirectory()
     await writeFile(join(incomplete, 'device.json'), '{}')

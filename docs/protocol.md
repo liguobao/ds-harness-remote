@@ -347,6 +347,14 @@ Content-Type: application/json
 - Host 与 Client 的 `owner_account` 必须非空且完全一致。
 - 不允许匿名 Client 注册，也没有设备码创建、领取、确认或轮询接口。
 - `GET /api/v1/devices` 只返回当前 Client 通过同账号授权边可访问的 Host。
+  新客户端使用 `?limit=50` 启用分页（1–100），后续传回不透明的 `cursor`，
+  直到 `nextCursor=null`。只传 cursor 时 limit 默认 50。分页按不可变 deviceId
+  升序使用 keyset 续读，每页重新过滤有效 membership 和未撤销 Host；不返回 identityKey。
+  游标不是授权凭据，也不代表冻结快照：翻页间的新建/撤销会反映到后续查询；
+  排在已读位置之前的新设备在下次刷新出现。格式错误游标返回 400 INVALID_MESSAGE，
+  越界 limit / 过长游标返回 422。为兼容旧客户端，不传 limit/cursor 时仍返回完整列表。
+  客户端必须读完所有页；每页完成授权/在线查询后再读取下一页，最多 8 路并发。
+  老服务端忽略 limit 并返回完整列表时仍限制并发，错误或取消不能被当成成功的部分列表。
 - 设备详情、presence、TURN 和连接请求继续校验 membership，防止 IDOR。
 - Server 发出 `connect.incoming` 前再次校验双方账号一致，历史跨账号授权边无效。
 - Host 只接受 `authorization: "account"` 的连接事件，并使用自己的 device token
