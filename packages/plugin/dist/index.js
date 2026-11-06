@@ -81653,27 +81653,76 @@ async function readHarnessManifestVersion(manifestPath) {
     return void 0;
   }
 }
-async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
-  if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
-  let resolvedEntrypoint = entrypoint;
-  try {
-    resolvedEntrypoint = await realpathEntrypoint(entrypoint);
-  } catch {
+function globalNpmRoots(context, execPath, cwd2) {
+  const roots = [];
+  const add3 = (value) => {
+    if (typeof value === "string" && value.length > 0) roots.push(value);
+  };
+  const env = context.env ?? process.env;
+  if (isAbsolute(execPath)) {
+    add3(dirname(execPath));
+    add3(join(dirname(execPath), "..", "lib"));
   }
-  if (!isAbsolute(resolvedEntrypoint)) return void 0;
-  let directory = dirname(resolvedEntrypoint);
-  for (let depth = 0; depth < 8; depth += 1) {
-    const version2 = await readHarnessManifestVersion(join(directory, "package.json"));
+  const prefix = env.npm_config_prefix;
+  if (prefix !== void 0 && prefix.length > 0) {
+    add3(prefix);
+    add3(join(prefix, "lib"));
+  }
+  const appData = env.APPDATA;
+  if (appData !== void 0 && appData.length > 0) add3(join(appData, "npm"));
+  for (const base of ["/usr/local/lib", "/usr/lib", "/opt/homebrew/lib"]) add3(base);
+  return roots;
+}
+async function readHarnessDistributionVersion(entrypoint = process.argv[1], context = {}) {
+  const cwd2 = context.cwd ?? process.cwd();
+  const execPath = context.execPath ?? (typeof process.execPath === "string" ? process.execPath : "");
+  const globalRoots = context.globalRoots ?? globalNpmRoots(context, execPath, cwd2);
+  const manifests = [];
+  const seen = /* @__PURE__ */ new Set();
+  const addManifest = (value) => {
+    if (typeof value !== "string" || value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    manifests.push(value);
+  };
+  const addAncestors = (start) => {
+    let directory = start;
+    for (let depth = 0; depth < 8; depth += 1) {
+      addManifest(join(directory, "package.json"));
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  };
+  const addResolved = (base) => {
+    try {
+      addManifest(createRequire(base).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+    } catch {
+    }
+  };
+  if (typeof entrypoint === "string" && entrypoint.length > 0 && isAbsolute(entrypoint)) {
+    let resolvedEntrypoint = entrypoint;
+    try {
+      resolvedEntrypoint = await realpathEntrypoint(entrypoint);
+    } catch {
+    }
+    if (isAbsolute(resolvedEntrypoint)) {
+      addAncestors(dirname(resolvedEntrypoint));
+      addResolved(resolvedEntrypoint);
+    }
+  }
+  if (isAbsolute(execPath)) {
+    addAncestors(dirname(execPath));
+    addResolved(execPath);
+  }
+  for (const root of globalRoots) addManifest(join(root, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addManifest(join(cwd2, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addResolved(join(cwd2, "package.json"));
+  addResolved(cwd2);
+  for (const manifest of manifests) {
+    const version2 = await readHarnessManifestVersion(manifest);
     if (version2 !== void 0) return version2;
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
   }
-  try {
-    return await readHarnessManifestVersion(createRequire(resolvedEntrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
-  } catch {
-    return void 0;
-  }
+  return void 0;
 }
 
 // src/ids.ts
@@ -98084,7 +98133,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion);
+      nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
       if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
@@ -98634,15 +98683,108 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   }
   return payload;
 }
-function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion) {
+async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
   if (endpoint !== "session/attachment" || !isRecord21(payload) || !isRecord21(payload.args)) return payload;
   const request = isRecord21(payload.args.request) ? payload.args.request : void 0;
-  if (request === void 0 || isDshV022OrNewer(harnessVersion)) return payload;
+  if (request === void 0) return payload;
   const attachment = isRecord21(request.attachment) ? request.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
-  const sessionId = request.sessionId;
-  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  if (!isDshV022OrNewer(harnessVersion)) {
+    const sessionId = request.sessionId;
+    return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  }
+  if (attachment !== void 0 && isCompleteImageReference(attachment)) return payload;
+  const reference = await findSessionAttachmentReference(gateway, request.sessionId, attachmentId, signal);
+  if (reference === void 0) return payload;
+  const mergedAttachment = attachment !== void 0 ? { ...reference, ...attachment } : reference;
+  return { ...payload, args: { ...payload.args, request: { ...request, attachment: mergedAttachment } } };
+}
+async function findSessionAttachmentReference(gateway, sessionId, attachmentId, signal) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
+  try {
+    const result = await gateway.dispatch("session/events", { args: { request: { address: { kind: "session", sessionId } } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  let beforeSeq = void 0;
+  for (let page = 0; page < 10; page += 1) {
+    try {
+      const pageRequest = {
+        address: { kind: "session", sessionId },
+        maxMessages: 200,
+        ...beforeSeq !== void 0 ? { beforeSeq } : {}
+      };
+      const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
+      const reference = extractAttachmentReference(result, attachmentId);
+      if (reference !== void 0) return reference;
+      if (result.ok === true && isRecord21(result.value)) {
+        if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
+          beforeSeq = result.value.beforeSeq;
+          continue;
+        }
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+  try {
+    const result = await gateway.dispatch("session/history", { args: { request: { sessionId, maxMessages: 200 } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  return void 0;
+}
+function extractAttachmentReference(result, attachmentId) {
+  if (result.ok !== true) return void 0;
+  const value = result.value;
+  let records;
+  if (Array.isArray(value)) records = value;
+  else if (isRecord21(value)) {
+    if (Array.isArray(value.records)) records = value.records;
+    else if (Array.isArray(value.events)) records = value.events;
+  }
+  if (records === void 0) return void 0;
+  for (const record11 of records) {
+    const found = findImageReference(record11, attachmentId, 0);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function findImageReference(value, attachmentId, depth) {
+  if (depth > 12 || value === null || typeof value !== "object") return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findImageReference(item, attachmentId, depth + 1);
+      if (found !== void 0) return found;
+    }
+    return void 0;
+  }
+  const block = value;
+  const candidate = isRecord21(block.attachment) ? block.attachment : block;
+  const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
+  if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
+    return {
+      attachmentId,
+      mediaType: candidate.mediaType,
+      bytes: candidate.bytes,
+      width: candidate.width,
+      height: candidate.height,
+      ...typeof candidate.name === "string" ? { name: candidate.name } : {}
+    };
+  }
+  for (const nested of Object.values(block)) {
+    if (nested === null || typeof nested !== "object") continue;
+    const found = findImageReference(nested, attachmentId, depth + 1);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function isCompleteImageReference(value) {
+  return typeof value.mediaType === "string" && typeof value.bytes === "number" && typeof value.width === "number" && typeof value.height === "number";
 }
 function isDshV022OrNewer(version2) {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2?.trim() ?? "");
