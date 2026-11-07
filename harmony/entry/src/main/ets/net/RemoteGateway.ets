@@ -174,7 +174,8 @@ export class RemoteGateway {
   }
 
   /** Open one `harness.remote.stream`; frames flow through `handler`. */
-  async open(endpoint: string, payload: Object, handler: StreamHandler): Promise<RemoteGatewayStream> {
+  async open(endpoint: string, payload: Object, handler: StreamHandler,
+    timeoutMs?: number): Promise<RemoteGatewayStream> {
     const stream: RemoteGatewayStream = new RemoteGatewayStream(randomId(), this.client, handler);
     stream.attach();
     const params: Record<string, Object> = {
@@ -183,7 +184,7 @@ export class RemoteGateway {
       'payload': payload
     };
     try {
-      await this.client.rpc('harness.remote.stream.open', params);
+      await this.client.rpc('harness.remote.stream.open', params, timeoutMs);
     } catch (error) {
       // The Host registers the stream before the open RPC settles: a failed
       // open must still release the slot or it leaks until disconnect.

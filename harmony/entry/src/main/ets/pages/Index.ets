@@ -652,6 +652,10 @@ struct Index {
   }
 
   private sendTap(): void {
+    if (this.reconnecting) {
+      promptAction.showToast({ message: this.tr('正在重连，连上后再发') });
+      return;
+    }
     const text: string = this.promptInput;
     const picked: PickedImage[] = this.pendingImages;
     if (text.trim().length === 0 && picked.length === 0) {
@@ -4808,6 +4812,7 @@ struct Index {
             .borderRadius(23)
             .shadow({ radius: 12, color: 'rgba(77,107,254,0.45)', offsetX: 0, offsetY: 5 })
             .clip(true)
+            .opacity(this.reconnecting ? 0.45 : 1)
             .overlay(this.DockSpot(52), { align: Alignment.Center })
             .focusable(true)
             .onTouch((event: TouchEvent) => {

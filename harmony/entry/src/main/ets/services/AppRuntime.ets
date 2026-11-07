@@ -152,6 +152,8 @@ export class AppRuntime {
   private qrTimer: number = -1;
   /** 最近一次成功连接的主机，断线自动重连时复用。 */
   private lastDeviceId: string = '';
+  /** 会话列表失败后是否已经排过一次自动重试（防抖，别循环）。 */
+  private sessionListAutoRetried: boolean = false;
   /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
   private pendingResumeSessionId: string = '';
   /** 主机能力探测结果缓存：同一版本的主机能力是固定的，重连不必再问一遍（上游 #326 同一思路）。 */
@@ -2835,11 +2837,22 @@ export class AppRuntime {
       this.generating = false;
       this.setBusy(false);
       if (isTransportFailure(error)) {
-        // 加密通道还没就绪/已经断了：重连一次再拉列表，别让用户以为会话丢了
-        this.errorMsg = '会话列表没拉到：与主机的加密通道还没就绪或已断开。点重试会重连后再拉一次。';
+        // 加密通道还没就绪/已经断了：先体检链路，3 秒后自动重拉一次（用户不用手点）
+        this.nudgeLink();
+        this.errorMsg = '会话列表没拉到：与主机的加密通道还没就绪或已断开，正在自动重试…';
         this.setRetry('重连并重试', () => {
           this.reconnectAndReopen('');
         });
+        if (!this.sessionListAutoRetried) {
+          this.sessionListAutoRetried = true;
+          setTimeout(() => {
+            this.sessionListAutoRetried = false;
+            const harnessNow: HarnessAlphaClient | undefined = this.harness;
+            if (harnessNow !== undefined && this.phase === PHASE_CHAT) {
+              this.retrySessionLoad().catch(() => undefined);
+            }
+          }, 3000);
+        }
       } else {
         this.errorMsg = '会话列表加载失败：' + errorMessage(error);
       }

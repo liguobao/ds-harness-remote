@@ -817,7 +817,9 @@ export class HarnessAlphaClient {
     // `assistantStream` is a response-side snapshot field, never a request flag.
     const inner: Record<string, Object> = { 'request': request };
     const payload: Record<string, Object> = { 'args': inner };
-    const stream: RemoteGatewayStream = await this.gateway.open('session/follow', payload, handler);
+    // 流打开给 20 秒预算：TURN 半开时 45 秒才失败会让用户干等；
+    // 快速失败才能尽快走「重连并重新打开」。
+    const stream: RemoteGatewayStream = await this.gateway.open('session/follow', payload, handler, 20000);
     if (generation !== this.followGeneration) {
       stream.close(false);
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
