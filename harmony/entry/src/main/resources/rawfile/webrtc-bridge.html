@@ -303,7 +303,12 @@
   }
 
   function send(b64) {
-    if (!dc || dc.readyState !== 'open') { return 'nodc'; }
+    if (!dc || dc.readyState !== 'open') {
+      // 数据面已经不在（DC 被关/还没开）：必须让 ArkTS 侧知道，否则帧被静默丢掉，
+      // 上层只会看到一个个 RPC 超时，而不是「链路死了」。
+      call('onError', 'send without open data channel');
+      return 'nodc';
+    }
     try {
       var frames = encodeChunks(b64UrlToBytes(b64));
       for (var i = 0; i < frames.length; i++) { dc.send(frames[i].buffer); }

@@ -187,6 +187,8 @@ export class AppRuntime {
   private connectDeadlineTimer: number = -1;
   /** 系统网络是否掉过（掉过之后要把链路当作可疑，别信「WebSocket 还开着」）。 */
   private awaitingNetwork: boolean = false;
+  /** 用户主动断开/退出登录后，本次运行内别再自动连。 */
+  private autoConnectSuppressed: boolean = false;
   /** 掉网 8 秒后主动判死的那次定时器。 */
   private netLossTimer: number = -1;
   /**
@@ -498,6 +500,20 @@ export class AppRuntime {
     if (this.config !== undefined && this.credentials !== undefined && this.identity !== undefined) {
       this.phase = PHASE_DEVICES;
       this.notify();
+      const lastHost: string = this.store.loadLastHost();
+      if (lastHost.length > 0 && !this.autoConnectSuppressed) {
+        // 上次连着主机：启动后直接连它，不用每次手点「连接」。
+        // 失败照常落到设备列表 + 重试按钮，不影响用户重新选主机。
+        logInfo('auto-connect last host ' + lastHost);
+        LinkLog.write('conn', '启动后自动连接上次的主机 ' + lastHost);
+        setTimeout(() => {
+          if (this.phase === PHASE_DEVICES && this.core === undefined) {
+            this.connectDevice(lastHost).catch((error: Error) => {
+              logWarn('auto connect failed: ' + errorMessage(error));
+            });
+          }
+        }, 400);
+      }
       this.refreshDevices();
       return;
     }
@@ -756,6 +772,9 @@ export class AppRuntime {
       const lanSkip: string = relay.lanSkipReason();
       this.pushLinkEvent('已连接 · ' + this.transportLabel
         + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? '（' + lanSkip + '）' : ''));
+      // 记住这台主机：下次启动自动连它
+      this.store.saveLastHost(host.deviceId);
+      this.autoConnectSuppressed = false;
       // 连着主机时申请长时任务：熄屏/后台不再被系统冻结，心跳与直连都活着
       KeepAlive.start().catch(() => undefined);
       this.connectCount += 1;
@@ -911,6 +930,8 @@ export class AppRuntime {
       return;
     }
     LinkLog.write('conn', '用户主动断开连接');
+    this.autoConnectSuppressed = true;
+    this.store.saveLastHost('');
     this.teardownConnection();
     this.keepAliveDeviceId = '';
     this.clearReconnectTimer();
@@ -964,6 +985,8 @@ export class AppRuntime {
 
   async logout(): Promise<void> {
     this.teardownConnection();
+    this.autoConnectSuppressed = true;
+    this.store.saveLastHost('');
     // 换账号/换服务器就把打点与抖动计数清零，别把上一台的数字带到下一台上看
     NetTrace.reset();
     this.sessionsSnapshot = [];
@@ -3764,6 +3787,7 @@ export class AppRuntime {
     const uptime: string = this.connectedAt > 0
       ? (Math.round((Date.now() - this.connectedAt) / 1000) + ' 秒')
       : '—';
+    rows.push('保活：' + (KeepAlive.isRunning() ? '已开启（长时任务，熄屏不冻结）' : '未开启（后台可能被冻结）'));
     rows.push('稳定：连接 ' + this.connectCount + ' 次 · 断线 ' + this.disconnectCount
       + ' 次 · 本次已在线 ' + uptime
       + (this.lastRecoveryMs > 0 ? ' · 上次恢复 ' + (Math.round(this.lastRecoveryMs / 100) / 10) + 's' : ''));

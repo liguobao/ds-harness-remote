@@ -22,6 +22,8 @@ const KEY_DRAFTS = 'dshremote.drafts.v1';
 const KEY_PROMPTS = 'dshremote.prompts.v1';
 /** 会话收藏与最近访问：{ favorites: string[], recents: string[] }。 */
 const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
+/** 上次连着的主机：下次启动自动连它（聊天客户端该有的行为）。 */
+const KEY_LAST_HOST = 'dshremote.lastHost.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
 const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
 
@@ -718,6 +720,19 @@ export class SecureStore {
       this.putSync(KEY_SESSION_META, JSON.stringify({ 'favorites': favorites, 'recents': recents }));
     } catch (error) {
       logWarn('session meta save failed');
+    }
+  }
+
+  /** 上次连着的主机 deviceId（空 = 没有，别自动连）。 */
+  loadLastHost(): string {
+    return this.getSync(KEY_LAST_HOST, '');
+  }
+
+  saveLastHost(deviceId: string): void {
+    try {
+      this.putSync(KEY_LAST_HOST, deviceId);
+    } catch (error) {
+      logWarn('last host save failed');
     }
   }
 

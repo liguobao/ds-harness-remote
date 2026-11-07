@@ -330,6 +330,10 @@ export class RelayTransport {
       if (rtc === undefined) {
         throw new Error('webrtc bridge is gone');
       }
+      if (!this.dataReady) {
+        // 通道已经不在了：直接抛，让上层快速失败并重连，别让帧石沉大海
+        throw new Error('direct data channel is not open');
+      }
       this.relayCounter += 1;
       rtc.send(toBase64Url(data));
       return Promise.resolve();
