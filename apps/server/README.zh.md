@@ -10,6 +10,12 @@
 
 首页地址是 `/`，点击“开始使用”进入登录页；登录成功后进入 `/app/remote` 设备列表。Host 和客户端都填写同一个 Server 地址，并使用相同的账号密码登录。设备凭据由 Server 保存，Web 登录会话使用 HttpOnly Cookie。
 
+## 刷新响应丢失恢复
+
+刷新成功但响应丢失时，重试旧 refresh token 会返回同一组后继凭据，Server 重启后也可恢复。恢复持续到后继再次轮换、撤销或过期，不延长任何 token 的生命周期。若恢复的 access token 已过期，可用恢复的 refresh token 再次轮换。更早的旧 token 会被拒绝，但不撤销当前有效凭据。
+
+已有设备数据保持兼容。升级前已经消耗的 token 没有恢复元数据，无法恢复；已撤销或过期的凭据仍需重新登录。仅更新 Plugin 不会增加此 Server 行为。恢复元数据不保存明文 bearer token，详见 [刷新协议](../../docs/protocol.md#82-refresh)。
+
 ## Docker 部署
 
 ```bash

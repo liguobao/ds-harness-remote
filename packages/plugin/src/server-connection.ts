@@ -254,11 +254,11 @@ export class HostServerConnection {
     let messageQueue = Promise.resolve()
     await new Promise<void>((resolve, reject) => {
       let settled = false
-      const helloTimer = setTimeout(() => socket.close(4001, 'hello timeout'), 10_000)
+      let helloTimer: ReturnType<typeof setTimeout> | undefined
       const finish = (error?: Error): void => {
         if (settled) return
         settled = true
-        clearTimeout(helloTimer)
+        if (helloTimer !== undefined) clearTimeout(helloTimer)
         this.online = false
         if (this.socket === socket) this.socket = undefined
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested
@@ -270,6 +270,10 @@ export class HostServerConnection {
         void cleanup.finally(() => error === undefined ? resolve() : reject(error))
       }
       socket.onopen = () => {
+        // The hello deadline starts after the WebSocket upgrade. The handshake
+        // itself can be slow, and closing a socket while CONNECTING throws in
+        // some implementations (including Node's built-in WebSocket).
+        helloTimer = setTimeout(() => socket.close(4001, 'hello timeout'), 10_000)
         this.sendControl('hello', {
           role: 'host',
           deviceId: this.identity.deviceId,

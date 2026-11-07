@@ -664,18 +664,34 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     const toggleBtn = findElement(tree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin')
     toggleBtn.props.onClick()
 
-    const { el: retryBtn } = await waitForElement(
+    const { tree: failedTree, el: retryBtn } = await waitForElement(
       render,
       (n: any) => n.props?.className?.includes('dshRemoteReconnect') && n.children?.[0] === 'retryLoginProviders'
     )
     expect(providerCalls).toBe(1)
     expect(retryBtn).not.toBeNull()
+    expect(findElement(failedTree, (n: any) => n.props?.type === 'password')).toBeNull()
 
     // Clicking retry button restarts provider discovery
     retryBtn.props.onClick()
 
-    const { el: qrImg } = await waitForElement(render, (n: any) => n.type === 'img')
+    const { tree: qrTree, el: qrImg } = await waitForElement(render, (n: any) => n.type === 'img')
     expect(qrImg).not.toBeNull()
+    expect(findElement(qrTree, (n: any) => n.props?.type === 'password')).toBeNull()
+
+    // Flat password tab switches to password form and can return to QR tab
+    const passwordTab = findElement(qrTree, (n: any) => n.props?.id === 'dsh-remote-settings-password-tab')
+    expect(passwordTab).not.toBeNull()
+    passwordTab.props.onClick()
+    tree = render()
+    expect(findElement(tree, (n: any) => n.props?.type === 'password')).not.toBeNull()
+    expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePasswordHint')?.children?.[0]).toBe('passwordHint')
+
+    const qrTab = findElement(tree, (n: any) => n.props?.id === 'dsh-remote-settings-oauth:zhihu-tab')
+    expect(qrTab).not.toBeNull()
+    qrTab.props.onClick()
+    const { el: qrImgAgain } = await waitForElement(render, (n: any) => n.type === 'img')
+    expect(qrImgAgain).not.toBeNull()
 
     expect(providerCalls).toBe(2)
 

@@ -68222,7 +68222,10 @@ var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers });
+      const raw = new RTCPeerConnection({
+        iceServers: configuration.iceServers,
+        iceTransportPolicy: configuration.iceTransportPolicy
+      });
       return {
         get connectionState() {
           return raw.connectionState;
@@ -68606,6 +68609,7 @@ var RtcDataChannelTransport = class {
     this.onDiagnostic = options.onDiagnostic;
     this.pc = options.factory.create({
       iceServers: options.iceServers,
+      iceTransportPolicy: options.iceTransportPolicy,
       onDiagnostic: (event) => this.handlePeerDiagnostic(event)
     });
     this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
@@ -69650,7 +69654,8 @@ var AdaptiveTransport = class extends BaseTransport {
       const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
       if (!("code" in failure5))
         Object.assign(failure5, { code: "INVALID_MESSAGE" });
-      this.failConnection(failure5, { reason: "invalid-control-frame" });
+      const code = errorCodeSchema.safeParse(failure5.code);
+      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
     }
   }
   handleRelay(payload) {
@@ -69751,6 +69756,9 @@ var AdaptiveTransport = class extends BaseTransport {
       role: "initiator",
       factory,
       iceServers,
+      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
+      // direct pair wins, then gets rejected as an unnegotiated transport.
+      iceTransportPolicy: this.negotiatedTransports().includes("turn") && !this.negotiatedTransports().some((transport) => transport === "lan" || transport === "p2p") ? "relay" : "all",
       onSignal: (signal2) => this.sendRtcSignal(signal2),
       negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,
@@ -87581,7 +87589,7 @@ var ControlStatusStream = class {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
+import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
@@ -89361,7 +89369,14 @@ function findImageBlock(value, attachmentId) {
   return void 0;
 }
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "darwin") return macOSCodexBinaryCandidates(userHome);
+  if (hostPlatform === "win32") {
+    return [.../* @__PURE__ */ new Set([...windowsBundledCodexCandidates(userHome), configured])];
+  }
+  return [configured];
+}
+function macOSCodexBinaryCandidates(userHome) {
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
     join6(userHome, "Applications", "ChatGPT.app")
@@ -89384,8 +89399,23 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
+    "codex"
   ])];
+}
+function windowsBundledCodexCandidates(userHome) {
+  const localAppData = process.env.LOCALAPPDATA ?? join6(userHome, "AppData", "Local");
+  const binRoot = join6(localAppData, "OpenAI", "Codex", "bin");
+  try {
+    return readdirSync2(binRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(binRoot, entry.name, "codex.exe")).filter((candidate) => existsSync2(candidate)).map((candidate) => {
+      try {
+        return { candidate, mtime: statSync2(candidate).mtimeMs };
+      } catch {
+        return { candidate, mtime: 0 };
+      }
+    }).sort((left, right) => right.mtime - left.mtime).map((entry) => entry.candidate);
+  } catch {
+    return [];
+  }
 }
 function parseCallEnvelope(input4) {
   if (!isRecord13(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
@@ -95184,7 +95214,7 @@ function isRecord18(value) {
 
 // src/acp/backend-installer.ts
 import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
 import { promisify as promisify4 } from "node:util";
@@ -95243,7 +95273,7 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat10 = statSync2(candidate);
+    const stat10 = statSync3(candidate);
     if (!stat10.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
@@ -95708,13 +95738,15 @@ var PluginControlRuntime = class {
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const value = record9(payload);
+    if (value.debugLogging !== void 0 && typeof value.debugLogging !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The debug logging switch must be a boolean.");
     if (value.remoteToolsEnabled !== void 0 && typeof value.remoteToolsEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The Remote Tools switch must be a boolean.");
     if (value.terminalEnabled !== void 0 && typeof value.terminalEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The terminal switch must be a boolean.");
     if (value.ports !== void 0 && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError("INVALID_MESSAGE", "Loopback ports must be integers.");
-    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
+    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0 && value.debugLogging === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
+      logLevel: value.debugLogging === void 0 ? current.logLevel : value.debugLogging ? "debug" : "info",
       terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? true : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === void 0 ? current.remoteTools?.enabled ?? true : value.remoteToolsEnabled },
       loopback: { ports: value.ports === void 0 ? current.loopback?.ports ?? [] : value.ports }
@@ -96039,7 +96071,8 @@ var SafeLogger = class {
     this.write("error", message, fields);
   }
   write(level, message, fields) {
-    if (levels.indexOf(level) < levels.indexOf(this.threshold)) return;
+    const threshold = typeof this.threshold === "function" ? this.threshold() : this.threshold;
+    if (levels.indexOf(level) < levels.indexOf(threshold)) return;
     const safeFields = fields === void 0 ? "" : ` ${JSON.stringify(redact(fields))}`;
     this.sink[level](`[ds-harness-remote] ${message}${safeFields}`);
   }
@@ -97016,11 +97049,11 @@ var HostServerConnection = class {
     let messageQueue = Promise.resolve();
     await new Promise((resolve9, reject) => {
       let settled = false;
-      const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
+      let helloTimer;
       const finish = (error62) => {
         if (settled) return;
         settled = true;
-        clearTimeout(helloTimer);
+        if (helloTimer !== void 0) clearTimeout(helloTimer);
         this.online = false;
         if (this.socket === socket) this.socket = void 0;
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
@@ -97028,6 +97061,7 @@ var HostServerConnection = class {
         void cleanup.finally(() => error62 === void 0 ? resolve9() : reject(error62));
       };
       socket.onopen = () => {
+        helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
         this.sendControl("hello", {
           role: "host",
           deviceId: this.identity.deviceId,
@@ -100493,7 +100527,7 @@ async function activate(ctx, readConfig, entryId) {
       ctx.logger.error(message);
       console.error(message);
     }
-  }, config2.logLevel);
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const nativeTypertGateway = ctx.get("typertGateway");
   const connectionExports = DshConnection;

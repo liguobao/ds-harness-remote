@@ -266,12 +266,14 @@ export class PluginControlRuntime {
   private async setDevelopment(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const value = record(payload)
+    if (value.debugLogging !== undefined && typeof value.debugLogging !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The debug logging switch must be a boolean.')
     if (value.remoteToolsEnabled !== undefined && typeof value.remoteToolsEnabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The Remote Tools switch must be a boolean.')
     if (value.terminalEnabled !== undefined && typeof value.terminalEnabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The terminal switch must be a boolean.')
     if (value.ports !== undefined && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError('INVALID_MESSAGE', 'Loopback ports must be integers.')
-    if (value.terminalEnabled === undefined && value.remoteToolsEnabled === undefined && value.ports === undefined) throw new ClientModeError('INVALID_MESSAGE', 'A development setting is required.')
+    if (value.terminalEnabled === undefined && value.remoteToolsEnabled === undefined && value.ports === undefined && value.debugLogging === undefined) throw new ClientModeError('INVALID_MESSAGE', 'A development setting is required.')
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({ ...current,
+      logLevel: value.debugLogging === undefined ? current.logLevel : value.debugLogging ? 'debug' : 'info',
       terminal: { enabled: value.terminalEnabled === undefined ? (current.terminal?.enabled ?? true) : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === undefined ? (current.remoteTools?.enabled ?? true) : value.remoteToolsEnabled },
       loopback: { ports: value.ports === undefined ? (current.loopback?.ports ?? []) : value.ports },

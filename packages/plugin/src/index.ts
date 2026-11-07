@@ -180,7 +180,7 @@ async function activate(
     info: message => { ctx.logger.info(message); console.info(message) },
     warn: message => { ctx.logger.warn(message); console.warn(message) },
     error: message => { ctx.logger.error(message); console.error(message) },
-  }, config.logLevel)
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
   const updateChecker = new PluginUpdateChecker(logger)

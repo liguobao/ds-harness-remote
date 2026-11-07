@@ -1,6 +1,7 @@
 {
   "meta": {
-    "title": "DeepSeek 远程连接",
-    "description": "基于 P2P 网络，使用端到端加密远程访问 DeepSeek Harness、CodeX、Claude Code、Pi 等工作区，支持Web和移动端。"
+    "title": "DS Harness Remote",
+    "description": "基于 P2P 网络，使用端到端加密远程访问 DeepSeek Harness、CodeX、Claude Code、Pi 等工作区，支持Web和移动端。",
+    "detail": "locale/README.zh.md"
   }
 }

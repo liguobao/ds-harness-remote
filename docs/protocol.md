@@ -295,7 +295,9 @@ deviceId 或相同 role，并为新角色签发独立 token pair、同步同账�
 }
 ```
 
-Server 必须轮换 refresh token。完整多账号 Server 对未再次轮换、未撤销且未过期的后继 token 提供幂等恢复，不使用固定两分钟窗口；过时 token 被拒绝但不撤销当前有效凭据。恢复数据异常或数据库繁忙返回可重试 503。自部署 Server 的策略以其实现为准。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+Server 必须轮换 refresh token。完整多账号 Server 和开源自部署 Server 对未再次轮换、未撤销且未过期的直接后继 token 提供幂等恢复，不使用固定两分钟窗口；过时 token 被拒绝但不撤销当前有效凭据。恢复数据异常或数据库繁忙返回可重试 503。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+
+自部署 Server 用请求携带的旧 refresh bearer 作为 HMAC-SHA256 密钥，结合随机 nonce、deviceId 和用途域分离派生后继 pair；磁盘只保存 token 摘要、nonce 和原始过期时间，不保存明文 bearer。消耗旧 token、保存恢复元数据和后继记录必须一起提交，写入失败时旧 token 保持可用。重复请求返回原 pair，不延长 access 或 refresh 生命周期；若 access 已过期，Client 应保存恢复的 pair，再用其 refresh token 正常轮换。后继再次轮换后，不允许用更早的祖先 token 跨代恢复。升级前已消耗且没有恢复元数据的旧 token 无法恢复，返回 `AUTH_INVALID`，但不撤销现有有效凭据。部署旧版 Server 的行为可能仍是重用即撤销，升级 Plugin 不会改变 Server 策略。
 HTTP `401/403` 的空响应、非 JSON 响应或不符合协议的错误体应保留凭据并退避重试，不单凭状态码判定设备授权失效。完整 Server 握手时的授权快照竞争使用 WebSocket `1013`（稍后重试），Client 保留凭据重连，不消耗授权刷新恢复次数。
 成功响应必须使用 §8.1 的 token pair schema。请求和响应禁止包含未定义字段。
 

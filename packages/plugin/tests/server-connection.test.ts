@@ -36,6 +36,41 @@ class FakeWebSocket {
 }
 
 describe('HostServerConnection', () => {
+  it('starts the hello timeout after the WebSocket upgrade completes', async () => {
+    vi.useFakeTimers()
+    const socket = new FakeWebSocket()
+    const api = {
+      baseUrl: 'https://remote.test',
+      authenticate: async () => ({ accessToken: 'test-token' }),
+    } as unknown as HostServerApi
+    const server = new HostServerConnection(
+      config(),
+      { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST',
+        ...generateKeyPair(new Uint8Array(32).fill(51)) },
+      { trustedPeer: () => undefined } as unknown as IdentityStore,
+      api,
+      { close: async () => {} } as unknown as ConnectionController,
+      logger(),
+      () => socket,
+    )
+    try {
+      server.start()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(socket.readyState).toBe(0)
+
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', helloAck('control-1')))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(server.isOnline()).toBe(true)
+    } finally {
+      try {
+        await server.stop()
+        expect(vi.getTimerCount()).toBe(0)
+      } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+    }
+  })
+
   it('keeps the responder alive for the Server RTC budget and preserves legacy defaults', async () => {
     await runScenarios([
       { name: 'twenty-second Server', timeout: 20000, expected: 20000 },

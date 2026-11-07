@@ -20,6 +20,17 @@ afterEach(async () => {
 })
 
 describe('PluginControlRuntime settings setup', () => {
+  it('persists debug logging and rejects invalid switches without changing other settings', async () => {
+    const settings = settingsBinding({ terminal: { enabled: false }, logLevel: 'warn' })
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), await temporaryDirectory(), settings, undefined, undefined))
+    expect(await handler('settings.development.set', { debugLogging: true }, signal())).toMatchObject({ ok: true })
+    expect(settings.get()).toMatchObject({ logLevel: 'debug', terminal: { enabled: false } })
+    expect(await handler('settings.development.set', { debugLogging: 'true' }, signal())).toMatchObject({ ok: false })
+    expect(settings.get().logLevel).toBe('debug')
+    expect(await handler('settings.development.set', { debugLogging: false }, signal())).toMatchObject({ ok: true })
+    expect(settings.get().logLevel).toBe('info')
+  })
+
   it('holds login discovery until Server replacement settles and rejects overlapping saves', async () => {
     await runScenarios([false, true].map(fails => ({ name: fails ? 'replacement fails' : 'replacement succeeds', run: async () => {
       const directory = await temporaryDirectory()

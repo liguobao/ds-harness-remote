@@ -11,7 +11,7 @@ const levels: readonly LogLevel[] = ['debug', 'info', 'warn', 'error']
 const secretKey = /authorization|cookie|token|secret|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i
 
 export class SafeLogger {
-  constructor(private readonly sink: LogSink, private readonly threshold: LogLevel = 'info') {}
+  constructor(private readonly sink: LogSink, private readonly threshold: LogLevel | (() => LogLevel) = 'info') {}
 
   debug(message: string, fields?: Record<string, unknown>): void { this.write('debug', message, fields) }
   info(message: string, fields?: Record<string, unknown>): void { this.write('info', message, fields) }
@@ -19,7 +19,8 @@ export class SafeLogger {
   error(message: string, fields?: Record<string, unknown>): void { this.write('error', message, fields) }
 
   private write(level: LogLevel, message: string, fields?: Record<string, unknown>): void {
-    if (levels.indexOf(level) < levels.indexOf(this.threshold)) return
+    const threshold = typeof this.threshold === 'function' ? this.threshold() : this.threshold
+    if (levels.indexOf(level) < levels.indexOf(threshold)) return
     const safeFields = fields === undefined ? '' : ` ${JSON.stringify(redact(fields))}`
     this.sink[level](`[ds-harness-remote] ${message}${safeFields}`)
   }

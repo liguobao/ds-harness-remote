@@ -118,6 +118,7 @@ export type RtcSignal =
 export interface RtcDataChannelTransportOptions {
   role: RtcRole
   iceServers?: RtcIceServer[]
+  iceTransportPolicy?: 'all' | 'relay'
   factory: RtcPeerConnectionFactory
   onSignal: (signal: RtcSignal) => void
   negotiateTimeoutMs?: number
@@ -200,6 +201,7 @@ export class RtcDataChannelTransport {
 
     this.pc = options.factory.create({
       iceServers: options.iceServers,
+      iceTransportPolicy: options.iceTransportPolicy,
       onDiagnostic: event => this.handlePeerDiagnostic(event),
     })
     this.pc.ondatachannel = event => this.adoptChannel(event.channel)

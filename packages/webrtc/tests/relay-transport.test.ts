@@ -496,6 +496,7 @@ describe('AdaptiveTransport capability negotiation', () => {
           reason,
           ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
           ...(reason === 'webrtc-closed' ? { transport: 'p2p' } : {}),
+          ...(reason === 'invalid-control-frame' ? { errorCode: 'INVALID_MESSAGE' } : {}),
         }]])
         socket.onclose?.({ code: 1006, reason: '' })
         expect(closed).toHaveBeenCalledOnce()
@@ -684,6 +685,37 @@ describe('AdaptiveTransport capability negotiation', () => {
       lastControlReceivedAt: Date.parse('2026-09-29T02:00:07.000Z'),
       lastControlSentAt: before.lastControlSentAt,
     })
+  })
+
+  it('constrains TURN-only ICE, preserves automatic ICE, and keeps Relay fallback', async () => {
+    await runScenarios([
+      { name: 'TURN-only', preferred: ['turn', 'relay'] as const, policy: 'relay' },
+      { name: 'automatic', preferred: ['lan', 'p2p', 'turn', 'relay'] as const, policy: 'all' },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const rtc = stalledRtc()
+      const transport = createAdaptiveTransport({
+        rtcFactory: rtc.factory,
+        preferredTransports: [...row.preferred],
+        negotiateTimeoutMs: 1000,
+        fetchIceServers: async () => [{ urls: 'turn:turn.example.test', username: 'user', credential: 'secret' }],
+      })
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.turn', 'transport.relay'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await vi.advanceTimersByTimeAsync(1)
+      expect(rtc.factory.create).toHaveBeenCalledWith(expect.objectContaining({ iceTransportPolicy: row.policy }))
+      expect(lastSentPayload(socket, 'connect.request')).toMatchObject({
+        preferredTransports: row.preferred.filter(value => value !== 'lan'),
+      })
+      await vi.advanceTimersByTimeAsync(1300)
+      await connecting
+      expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: 'relay' })
+      await transport.close()
+    } })), cleanupScenario1)
   })
 
   it('requests only transports present in hello.ack capabilities', async () => {
