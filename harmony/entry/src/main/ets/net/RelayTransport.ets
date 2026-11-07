@@ -1147,6 +1147,15 @@ export class RelayTransport {
   }
 
   private fail(error: Error): void {
+    // 没经过 close 帧就走掉的（ws error / 发送失败 / 看门狗）也要有一句判词：
+    // 否则上层只会看到 code=-1 reason=—，链路日志和界面都没法解释「为什么断的」。
+    if (this.closeVerdict === undefined) {
+      const verdict: CloseVerdict = new CloseVerdict();
+      verdict.code = 1006;
+      verdict.reason = 'transport-error';
+      verdict.message = '网络中断，连接被异常关闭（' + error.message + '）';
+      this.closeVerdict = verdict;
+    }
     this.clearHandshakeTimer();
     const reject = this.connectReject;
     this.connectResolve = undefined;

@@ -177,6 +177,11 @@ export class AppRuntime {
   private reconnectTimer: number = -1;
   /** 退避耗尽后仍允许「网络恢复/回前台」再试一轮，否则用户只能手点或杀进程。 */
   private reconnectExhausted: boolean = false;
+  /**
+   * 这次的失败是「恢复尝试」触发的：即使 reconnectAttempt 被清零，
+   * connectDevice 的 catch 也必须继续按退避排下一次，否则网络刚回来那一下没连上就彻底停了。
+   */
+  private autoRecovering: boolean = false;
   /** 当前这次连接的看门狗（CONNECT_DEADLINE_MS 到点判超时）。 */
   private connectDeadlineTimer: number = -1;
   /** 系统网络是否掉过（掉过之后要把链路当作可疑，别信「WebSocket 还开着」）。 */
@@ -720,6 +725,8 @@ export class AppRuntime {
       this.pushLinkEvent('已连接 · ' + this.transportLabel
         + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? '（' + lanSkip + '）' : ''));
       this.reconnectAttempt = 0;
+      this.reconnectExhausted = false;
+      this.autoRecovering = false;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
       this.connectStage = '';
@@ -741,7 +748,8 @@ export class AppRuntime {
       LinkLog.write('conn', '连接失败 device=' + deviceId + '：' + errorMessage(error)
         + '（attempt=' + this.reconnectAttempt + '）');
       const autoRetry: boolean = !this.connectCancelled && deviceId === this.lastDeviceId
-        && this.reconnectAttempt > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
+        && (this.reconnectAttempt > 0 || this.autoRecovering)
+        && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
       if (!this.connectCancelled && !autoRetry) {
         this.errorMsg = errorMessage(error);
         this.setRetry('重新连接', () => {
@@ -3421,6 +3429,14 @@ export class AppRuntime {
         && this.phase === PHASE_CHAT) {
         this.markLinkSuspect('网络从 ' + previous + ' 切到 ' + nextLabel);
       }
+      // 还没连上时换到了一条真实承载（典型：Wi-Fi 刚关联上、移动数据让位）：
+      // NetworkMonitor 已经「online」，不会再发 onAvailable，这里必须自己补一次重试，
+      // 否则刚才那次在旧承载上的失败之后没人再试。
+      if (isRealBearer(nextLabel) && this.phase !== PHASE_CHAT
+        && (this.reconnecting || this.reconnectExhausted || this.autoRecovering
+          || this.reconnectTimer !== -1)) {
+        this.retryNow('bearer-switch:' + nextLabel);
+      }
       this.notify();
     };
     this.netMonitor = monitor;
@@ -3553,6 +3569,8 @@ export class AppRuntime {
     this.clearReconnectTimer();
     this.reconnectAttempt = 0;
     this.reconnectExhausted = false;
+    // 网络条件刚变好时的这一次叫「恢复尝试」：失败也要继续退避，不能一发定生死
+    this.autoRecovering = true;
     LinkLog.write('retry', '立即重连（' + reason + '）phase=' + this.phase + ' target=' + target);
     logInfo('runtime: 立即重连（' + reason + '）target=' + target);
     this.connectDevice(target).catch((error: Error) => {
@@ -3728,6 +3746,7 @@ export class AppRuntime {
     this.reconnectStatus = '';
     this.reconnecting = false;
     this.reconnectExhausted = false;
+    this.autoRecovering = false;
     this.pendingResumeSessionId = '';
     if (this.phase === PHASE_CHAT) {
       // 从会话页点「停止重连」等于放弃这次会话，回设备列表让用户重新选
