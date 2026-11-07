@@ -226,7 +226,7 @@ const zhCN = {
     chat: '对话',
     defaultPermission: '新对话默认权限', defaultPermissionHost: '使用默认权限', defaultPermissionHostDescription: 'DSH 沿用电脑端设置，CodeX 使用工作区内修改。', defaultPermissionNote: '仅影响新建的 DSH / CodeX 对话，已有对话不变。',
     defaultPermissionFullAccessTitle: '新对话默认开启完全权限？', defaultPermissionFullAccessBody: '此后在手机上新建的 DeepSeek Harness 和 CodeX 对话都可直接修改文件和运行命令，不再逐次确认。你仍可在单个对话中更改权限。', defaultPermissionSaveFailed: '无法保存默认权限', defaultPermissionSaveFailedBody: '本地存储写入失败，请重试。', defaultPermissionNotConfirmed: '电脑端未确认新对话的默认权限，请重新连接后重试。',
-    transport: '连接方式', transportNote: '更改后重新连接；直连失败时自动转发。', identity: '此手机的身份', deviceId: '设备 ID', publicKey: '安全密钥', keyNote: '安全密钥由 Android 系统加密保存，不会离开此手机。',
+    transport: '连接方式', transportNote: "更改后重连生效。", identity: '此手机的身份', deviceId: '设备 ID', publicKey: '安全密钥', keyNote: '安全密钥由 Android 系统加密保存，不会离开此手机。',
     about: '关于', aboutLead: '查看当前版本、开源与更新信息', developer: '开发者', developerValue: '知乎@李国宝', twitter: '推特', appVersion: '当前版本', sourceCodeUrl: '开源地址', updateUrl: '更新地址', linkFailedTitle: '无法打开链接', linkFailedBody: '请检查网络或复制地址后在浏览器中打开。',
     more: '更多', checkUpdates: '检查更新', checkingUpdates: '正在检查更新…', updateFoundTitle: '发现新版本', updateFoundBody: (latest: string, current: string) => `发现新版本 v${latest}，当前版本 ${current}。`, downloadUpdate: '下载更新', openUpdates: '打开更新', downloadingUpdate: '正在下载更新', downloadFailedTitle: '下载失败', downloadFailedBody: '无法下载最新安装包，请检查网络后重试。', installFailedTitle: '无法打开安装程序', installFailedBody: '安装包已下载，但无法打开安装程序。请先允许此应用安装未知应用，再重试。', openInstallSettings: '去设置开启', upToDateTitle: '已是最新版本', upToDateBody: '当前已是最新版本。', checkFailedTitle: '检查更新失败', checkFailedBody: '请检查网络后重试。',
     signOut: '退出登录', resetLocal: '清除本地数据', resetTitle: '清除此手机上的数据？', resetBody: '将删除服务设置、登录信息和已信任的设备。之后需要重新登录，此操作无法撤销。', reset: '清除数据', signOutTitle: '退出当前账号？', signOutBody: '退出后，需要重新登录才能访问设备。',
@@ -450,7 +450,7 @@ const zhCN = {
     hourUnit: '小时',
   },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
-  transport: { auto: '自动（推荐）', autoDescription: "自动选择局域网、P2P 或 TURN；连接失败时使用服务器转发。", turn: "优先中转（TURN）", turnDescription: "跳过直连，优先使用 TURN 中转；失败后使用服务器转发。", relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
+  transport: { auto: "自动（推荐）", autoDescription: "自动选择直连或中转。", turn: "TURN 中转", turnDescription: "跳过直连，失败时转服务器。", relay: "服务器转发", relayDescription: "仅通过服务器连接。" },
   workspaces: {
     loadFailed: '工作区加载失败',
     offlineBody: '重新连接电脑后，即可查看工作区和对话。',

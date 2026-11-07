@@ -226,7 +226,7 @@ const zhTW = {
     chat: '對話',
     defaultPermission: '新對話預設許可權', defaultPermissionHost: '使用預設許可權', defaultPermissionHostDescription: 'DSH 沿用電腦端設定，CodeX 使用工作區內修改。', defaultPermissionNote: '僅影響新建的 DSH / CodeX 對話，已有對話不變。',
     defaultPermissionFullAccessTitle: '新對話預設開啟完全許可權？', defaultPermissionFullAccessBody: '此後在手機上新建的 DeepSeek Harness 和 CodeX 對話都可直接修改檔案和執行命令，不再逐次確認。你仍可在單個對話中更改許可權。', defaultPermissionSaveFailed: '無法儲存預設許可權', defaultPermissionSaveFailedBody: '本地儲存寫入失敗，請重試。', defaultPermissionNotConfirmed: '電腦端未確認新對話的預設許可權，請重新連線後重試。',
-    transport: '連線方式', transportNote: '更改後重新連線；直連失敗時自動轉發。', identity: '此手機的身份', deviceId: '裝置 ID', publicKey: '安全金鑰', keyNote: '安全金鑰由 Android 系統加密儲存，不會離開此手機。',
+    transport: '連線方式', transportNote: "變更後重新連線生效。", identity: '此手機的身份', deviceId: '裝置 ID', publicKey: '安全金鑰', keyNote: '安全金鑰由 Android 系統加密儲存，不會離開此手機。',
     about: '關於', aboutLead: '檢視當前版本、開源與更新資訊', developer: '開發者', developerValue: '知乎@李國寶', twitter: '推特', appVersion: '當前版本', sourceCodeUrl: '開源地址', updateUrl: '更新地址', linkFailedTitle: '無法開啟連結', linkFailedBody: '請檢查網路或複製地址後在瀏覽器中開啟。',
     more: '更多', checkUpdates: '檢查更新', checkingUpdates: '正在檢查更新…', updateFoundTitle: '發現新版本', updateFoundBody: (latest: string, current: string) => `發現新版本 v${latest}，當前版本 ${current}。`, downloadUpdate: '下載更新', openUpdates: '開啟更新', downloadingUpdate: '正在下載更新', downloadFailedTitle: '下載失敗', downloadFailedBody: '無法下載最新安裝包，請檢查網路後重試。', installFailedTitle: '無法開啟安裝程式', installFailedBody: '安裝包已下載，但無法開啟安裝程式。請先允許此應用安裝未知應用，再重試。', openInstallSettings: '去設定開啟', upToDateTitle: '已是最新版本', upToDateBody: '當前已是最新版本。', checkFailedTitle: '檢查更新失敗', checkFailedBody: '請檢查網路後重試。',
     signOut: '退出登入', resetLocal: '清除本地資料', resetTitle: '清除此手機上的資料？', resetBody: '將刪除服務設定、登入資訊和已信任的裝置。之後需要重新登入，此操作無法撤銷。', reset: '清除資料', signOutTitle: '退出當前賬號？', signOutBody: '退出後，需要重新登入才能訪問裝置。',
@@ -450,7 +450,7 @@ const zhTW = {
     hourUnit: '小時',
   },
   time: { unavailable: '更新時間不可用', lastSeenUnavailable: '活躍時間不可用', lastActive: (value: string) => `${value}活躍`, now: '剛剛', justNow: '剛剛更新', minutesAgo: (n: number) => `${n} 分鐘前`, hoursAgo: (n: number) => `${n} 小時前`, updatedSuffix: '更新', locale: 'zh-TW' },
-  transport: { auto: '自動（推薦）', autoDescription: "自動選擇區域網路、P2P 或 TURN；連線失敗時使用伺服器轉發。", turn: "優先中轉（TURN）", turnDescription: "略過直連，優先使用 TURN 中轉；失敗後使用伺服器轉發。", relay: '僅伺服器轉發', relayDescription: '所有資料都透過 DSH Remote 伺服器轉發' },
+  transport: { auto: "自動（推薦）", autoDescription: "自動選擇直連或中轉。", turn: "TURN 中轉", turnDescription: "略過直連，失敗時轉伺服器。", relay: "伺服器轉發", relayDescription: "僅透過伺服器連線。" },
   workspaces: {
     loadFailed: '工作區載入失敗',
     offlineBody: '重新連線電腦後，即可檢視工作區和對話。',
