@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { accountDeviceDescriptorSchema, type AccountDeviceDescriptor } from '@dsh-remote/protocol'
@@ -10,10 +10,22 @@ export class ApiError extends Error {
 export const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
 export const secret = (): string => randomBytes(32).toString('base64url')
 export const equal = (left: string, right: string): boolean => timingSafeEqual(Buffer.from(hash(left)), Buffer.from(hash(right)))
-const tokenSchema = z.object({ kind: z.enum(['access', 'refresh']), deviceId: z.string(), expires: z.number(), used: z.boolean() })
+const tokenSchema = z.object({
+  kind: z.enum(['access', 'refresh']), deviceId: z.string(), expires: z.number(), used: z.boolean(),
+  recovery: z.object({ nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/), accessExpires: z.number().int().positive() }).optional(),
+})
 const savedDeviceSchema = z.object({ descriptor: accountDeviceDescriptorSchema, revoked: z.boolean(), lastSeenAt: z.number() })
 const stateSchema = z.object({ version: z.literal(1), account: z.string(), salt: z.string(), verifier: z.string(), devices: z.record(z.string(), savedDeviceSchema), tokens: z.record(z.string(), tokenSchema) })
 type SavedDevice = z.infer<typeof savedDeviceSchema>
+type SavedToken = z.infer<typeof tokenSchema>
+
+// Domain-separated HMACs keyed by the presented bearer, NOT its stored digest.
+// The nonce alone cannot recover credentials from a copy of state.json.
+function successor(token: string, nonce: string, deviceId: string) {
+  const derive = (kind: string) => createHmac('sha256', token)
+    .update(JSON.stringify(['ds-harness-remote/refresh/v1', deviceId, nonce, kind])).digest('base64url')
+  return { accessToken: derive('access'), refreshToken: derive('refresh') }
+}
 
 /** Single-process store. Only token digests and public identities reach disk. */
 export class Store {
@@ -51,14 +63,25 @@ export class Store {
     this.invalidate(descriptor.deviceId)
     return this.issue(descriptor.deviceId)
   }
-  private issue(deviceId: string, refreshTokenExpiresAt = Date.now() + 30 * 86400_000) {
-    for (const [key, value] of Object.entries(this.state.tokens)) if (value.expires <= Date.now()) delete this.state.tokens[key]
-    if (Object.keys(this.state.tokens).length >= 16384) throw new ApiError('RATE_LIMITED', 429)
-    const accessToken = secret(), refreshToken = secret()
+  private issue(deviceId: string, refreshTokenExpiresAt = Date.now() + 30 * 86400_000, previous?: { token: string; record: SavedToken }) {
+    const tokens = { ...this.state.tokens }
+    for (const [key, value] of Object.entries(tokens)) if (value.expires <= Date.now()) delete tokens[key]
+    if (Object.keys(tokens).length + 2 > 16384) throw new ApiError('RATE_LIMITED', 429)
     const accessTokenExpiresAt = Date.now() + 60 * 60_000
-    this.state.tokens[hash(accessToken)] = { kind: 'access', deviceId, expires: accessTokenExpiresAt, used: false }
-    this.state.tokens[hash(refreshToken)] = { kind: 'refresh', deviceId, expires: refreshTokenExpiresAt, used: false }
-    this.save()
+    const nonce = secret()
+    const { accessToken, refreshToken } = previous
+      ? successor(previous.token, nonce, deviceId)
+      : { accessToken: secret(), refreshToken: secret() }
+    if (previous) tokens[hash(previous.token)] = {
+      ...previous.record, used: true, recovery: { nonce, accessExpires: accessTokenExpiresAt },
+    }
+    tokens[hash(accessToken)] = { kind: 'access', deviceId, expires: accessTokenExpiresAt, used: false }
+    tokens[hash(refreshToken)] = { kind: 'refresh', deviceId, expires: refreshTokenExpiresAt, used: false }
+    const before = this.state.tokens
+    this.state.tokens = tokens
+    // Commit consumption, recovery metadata and the successor together. A failed
+    // write must leave the previous token usable both in memory and after restart.
+    try { this.save() } catch (error) { this.state.tokens = before; throw error }
     return { accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt }
   }
   authenticate(token: string): SavedDevice {
@@ -72,9 +95,22 @@ export class Store {
     const record = this.state.tokens[hash(token)]
     if (!record || record.kind !== 'refresh' || record.deviceId !== deviceId) throw new ApiError('AUTH_INVALID', 401)
     if (record.expires <= Date.now()) throw new ApiError('TOKEN_EXPIRED', 401)
-    if (record.used) { this.invalidate(deviceId); throw new ApiError('AUTH_INVALID', 401) }
-    record.used = true
-    return this.issue(deviceId, record.expires)
+    if (!record.used) return this.issue(deviceId, record.expires, { token, record })
+    // Legacy consumed tokens have no recovery record. Reject them without
+    // invalidating credentials that may already be in use by this device.
+    if (!record.recovery) throw new ApiError('AUTH_INVALID', 401)
+    const pair = successor(token, record.recovery.nonce, deviceId)
+    const next = this.state.tokens[hash(pair.refreshToken)]
+    if (!next || next.kind !== 'refresh' || next.deviceId !== deviceId || next.expires !== record.expires) {
+      throw new ApiError('INTERNAL_ERROR', 503)
+    }
+    if (next.used) throw new ApiError('AUTH_INVALID', 401)
+    const access = this.state.tokens[hash(pair.accessToken)]
+    if (access ? access.kind !== 'access' || access.deviceId !== deviceId || access.expires !== record.recovery.accessExpires
+      : record.recovery.accessExpires > Date.now()) throw new ApiError('INTERNAL_ERROR', 503)
+    // Return the original expiry, including an expired access bearer. The
+    // recovered, still-valid refresh token can then rotate normally.
+    return { ...pair, accessTokenExpiresAt: record.recovery.accessExpires, refreshTokenExpiresAt: next.expires }
   }
   invalidate(deviceId: string): void {
     for (const [key, value] of Object.entries(this.state.tokens)) if (value.deviceId === deviceId) delete this.state.tokens[key]
