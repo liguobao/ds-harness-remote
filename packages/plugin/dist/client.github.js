@@ -1706,6 +1706,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     remoteRequestFailed: "Remote mode request failed.",
     remoteControlUnavailable: "Remote plugin control is still starting. Restart DSH if it stays unavailable.",
     identityCorrupted: "Local Remote identity is corrupted. Reset the identity in Settings to recover.",
+    credentialsCorrupted: "Local Remote credentials are corrupted. Sign out or reset the identity in Settings to recover.",
+    identityLocked: "Local Remote identity is locked by another process. Stop other DSH instances and retry.",
+    storageConflict: "Conflicting or unverified legacy Remote storage found. Stop all DSH instances and inspect it manually.",
     resetIdentity: "Reset Remote Identity",
     resetIdentityHint: "Recreate local device key pairs if they are corrupted. You will need to sign in again.",
     resetIdentityConfirm: "Are you sure you want to reset the local Remote identity? You will need to sign in again.",
@@ -2024,6 +2027,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
     remoteRequestFailed: "\u8FDC\u7A0B\u6A21\u5F0F\u8BF7\u6C42\u5931\u8D25\u3002",
     remoteControlUnavailable: "Remote \u63D2\u4EF6\u63A7\u5236\u901A\u9053\u4ECD\u5728\u542F\u52A8\uFF1B\u5982\u679C\u4E00\u76F4\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u542F DSH\u3002",
     identityCorrupted: "\u672C\u673A Remote \u8EAB\u4EFD\u6587\u4EF6\u635F\u574F\uFF0C\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u91CD\u7F6E\u8EAB\u4EFD\u3002",
+    credentialsCorrupted: "\u672C\u673A Remote \u767B\u5F55\u51ED\u636E\u5DF2\u635F\u574F\uFF0C\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u9000\u51FA\u8D26\u53F7\u6216\u91CD\u7F6E\u8EAB\u4EFD\u3002",
+    identityLocked: "\u672C\u673A Remote \u8EAB\u4EFD\u6B63\u88AB\u5176\u4ED6\u8FDB\u7A0B\u5360\u7528\uFF0C\u8BF7\u5B8C\u5168\u9000\u51FA\u5176\u4ED6 DSH \u5B9E\u4F8B\u540E\u91CD\u8BD5\u3002",
+    storageConflict: "\u68C0\u6D4B\u5230\u51B2\u7A81\u6216\u65E0\u6CD5\u786E\u8BA4\u5F52\u5C5E\u7684\u65E7\u7248 Remote \u5B58\u50A8\u76EE\u5F55\uFF0C\u8BF7\u505C\u6B62\u6240\u6709 DSH \u5B9E\u4F8B\u540E\u624B\u52A8\u68C0\u67E5\u5904\u7406\u3002",
     resetIdentity: "\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD",
     resetIdentityHint: "\u5F53\u672C\u673A\u8EAB\u4EFD\u5BC6\u94A5\u5BF9\u635F\u574F\u65F6\u91CD\u5EFA\u8EAB\u4EFD\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
     resetIdentityConfirm: "\u786E\u5B9A\u8981\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD\u5417\uFF1F\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
@@ -2396,8 +2402,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
   function connectionStatusClass(status) {
     return status?.online ? " isOnline" : status?.reconnecting ? " isReconnecting" : status === void 0 ? "" : " isOffline";
   }
+  function startupErrorMessage(error, t) {
+    return error.code === "IDENTITY_INVALID" ? t("identityCorrupted") : error.code === "SERVER_CREDENTIALS_INVALID" ? t("credentialsCorrupted") : error.code === "IDENTITY_LOCKED" ? t("identityLocked") : error.code === "STORAGE_CONFLICT" ? t("storageConflict") : error.code === "SERVER_CREDENTIALS_BUSY" ? t("connectionCredentialsBusy") : error.message || t("remoteStartupFailed");
+  }
   function messageOf(reason, t) {
-    return typeof reason == "object" && reason !== null && "code" in reason && reason.code === "CONNECTION_FAILED" ? t("serverUnavailableError") : reason instanceof Error ? reason.message : String(reason);
+    if (typeof reason == "object" && reason !== null && "code" in reason && typeof reason.code == "string") {
+      if (reason.code === "CONNECTION_FAILED") return t("serverUnavailableError");
+      if (reason.code === "IDENTITY_INVALID") return t("identityCorrupted");
+      if (reason.code === "SERVER_CREDENTIALS_INVALID") return t("credentialsCorrupted");
+      if (reason.code === "IDENTITY_LOCKED") return t("identityLocked");
+      if (reason.code === "STORAGE_CONFLICT") return t("storageConflict");
+      if (reason.code === "SERVER_CREDENTIALS_BUSY") return t("connectionCredentialsBusy");
+    }
+    return reason instanceof Error ? reason.message : String(reason);
   }
   function formatPlatform(value) {
     let normalized = value.toLowerCase();
@@ -2785,7 +2802,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             status.deviceId,
             status.host?.deviceId,
             status.host?.authorized,
-            status.host?.account
+            status.host?.account,
+            status.startupError?.code
           ]);
           if (key === authorizationKey) return;
           authorizationKey = key;
@@ -3053,18 +3071,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
           })
         )
       ), resetIdentity = async () => {
-        if (window.confirm(t("resetIdentityConfirm"))) {
-          setResetBusy(!0), setError(void 0);
-          try {
-            let view = await props.control("settings.identity.reset", {});
-            applyView(view), setNotice({ key: "resetIdentitySuccess" });
-          } catch (reason) {
-            setError(messageOf(reason, t));
-          } finally {
-            setResetBusy(!1);
-          }
+        if (!window.confirm(t("resetIdentityConfirm"))) return;
+        let run = ++associationReadRun.current;
+        setResetBusy(!0), setError(void 0), setNotice(void 0);
+        try {
+          let view = await props.control("settings.identity.reset", {}), status = await props.control("status").catch(() => {
+          });
+          applyView(view, run === associationReadRun.current), status !== void 0 && (setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "")), setSignInOpen(!1), setNotice({ key: "resetIdentitySuccess" });
+        } catch (reason) {
+          setError(messageOf(reason, t));
+        } finally {
+          setResetBusy(!1);
         }
-      }, resetIdentitySetting = React.createElement(
+      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", resetIdentitySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },
         React.createElement(
@@ -3076,13 +3095,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
         React.createElement("button", {
           type: "button",
           className: "dshRemoteDiscard",
-          disabled: busy || resetBusy || !writable,
+          disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
           onClick: () => void resetIdentity()
         }, t(resetBusy ? "resettingAction" : "resetIdentity"))
       ), startupErrorBanner = settingsView?.startupError !== void 0 ? React.createElement(
         "p",
         { className: "dshRemoteError", role: "alert" },
-        settingsView.startupError.code === "IDENTITY_INVALID" ? t("identityCorrupted") : settingsView.startupError.message || t("remoteStartupFailed")
+        startupErrorMessage(settingsView.startupError, t)
       ) : null, sidebarEntrySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },
@@ -3478,7 +3497,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
               React.createElement("button", {
                 type: "button",
                 className: signInOpen ? "dshRemoteDiscard" : "dshRemoteSave",
-                disabled: busy || !loaded,
+                disabled: busy || resetBusy || !loaded || settingsView?.startupError !== void 0,
                 "aria-expanded": signInOpen,
                 "aria-controls": "dsh-remote-inline-signin",
                 onClick: () => {
@@ -3918,7 +3937,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return;
           }
           if (nextStatus.startupError !== void 0) {
-            setNeedsAuthorization(void 0), setError(nextStatus.startupError.code === "IDENTITY_INVALID" ? t("identityCorrupted") : nextStatus.startupError.message || t("remoteStartupFailed"));
+            setDevices([]), setNeedsAuthorization(void 0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setShowAllHermesWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setHermesWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0), setError(startupErrorMessage(nextStatus.startupError, t));
             return;
           }
           if (!nextStatus.available) {

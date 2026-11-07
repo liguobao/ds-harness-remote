@@ -13,9 +13,14 @@ import {
 } from './config.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from './control-runtime.js'
 import type { HostWebServerLike } from './control-route.js'
-import { IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from './identity-store.js'
+import {
+  IdentityStore,
+  prepareDefaultIdentityDirectory,
+  resetDefaultIdentityRoles,
+  serverStorageDirectory,
+} from './identity-store.js'
 import { SafeLogger } from './logging.js'
-import { safeErrorCode } from './safe-error.js'
+import { safeStartupError } from './safe-error.js'
 import { HostPluginRuntime } from './service.js'
 import type { ScheduleCreateService } from './harness-remote-bridge.js'
 import { ClientServerApi } from './server-api.js'
@@ -121,13 +126,19 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   // support is deferred to a later release and no terminal-specific services
   // are resolved here.
   const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
-    const identityDirectory = await prepareDefaultIdentityDirectory()
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
     const webServer = runtimeContext.get('webServer') as HostWebServerLike | undefined
     let disposePendingControl: (() => Promise<void>) | undefined
-    const installPendingControl = (): void => {
+    const installPendingControl = async (): Promise<void> => {
       if (connection === undefined || disposePendingControl !== undefined) return
+      let identityDirectory = new IdentityStore().directory
+      let storageError: unknown
+      try {
+        identityDirectory = await prepareDefaultIdentityDirectory()
+      } catch (error) {
+        storageError = error
+      }
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
@@ -135,7 +146,13 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
           undefined,
           undefined,
           undefined,
+          undefined,
+          undefined,
+          true,
         )
+        if (storageError !== undefined) {
+          control.setStartupFailure(storageError, { storageAvailable: false })
+        }
         return control.register(connection, webServer)
       }, 'ds-harness-remote pending control')
     }
@@ -147,7 +164,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext)
     }
-    installPendingControl()
+    await installPendingControl()
   }
 
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
@@ -165,10 +182,28 @@ async function activate(
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
   const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
-  const defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
+  let defaultIdentityDirectory = new IdentityStore().directory
+  let initialStorageError: unknown
+  try {
+    defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
+  } catch (error) {
+    initialStorageError = error
+  }
   if (!config.enabled) {
     if (connection !== undefined) {
-      const controlRuntime = new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, undefined, undefined)
+      const controlRuntime = new PluginControlRuntime(
+        config,
+        defaultIdentityDirectory,
+        settingsBinding,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      )
+      if (initialStorageError !== undefined) {
+        controlRuntime.setStartupFailure(initialStorageError, { storageAvailable: false })
+      }
       ctx.effect(() => controlRuntime.register(connection, webServer), 'ds-harness-remote disabled control')
     }
     return
@@ -275,20 +310,31 @@ async function activate(
 
     return { runtime, clientRuntime }
   }
-  let { runtime, clientRuntime } = createRuntimes(config)
+  let runtime: HostPluginRuntime | undefined
+  let clientRuntime: ClientModeRuntime | undefined
+  let hostServiceProvided = false
+  let clientServiceProvided = false
+  let clientActive = false
+  if (initialStorageError === undefined) {
+    ;({ runtime, clientRuntime } = createRuntimes(config))
+  }
   let closed = false
-  let clientServiceProvided = clientRuntime !== undefined
   let startup: Promise<void> | undefined
   let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
   const replaceServer = (next: ResolvedConfig) => {
+    const previousReplacement = replacement
     const operation = async () => {
       await startup?.catch(() => undefined)
+      await previousReplacement?.catch(() => undefined)
       if (closed) throw new Error('Remote plugin is closed')
+      clientActive = false
       // Stop both authorities before loading identities scoped to another Server.
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()])
+      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()])
       const failure = shutdown.find(result => result.status === 'rejected')
       if (failure?.status === 'rejected') throw failure.reason
       if (closed) throw new Error('Remote plugin is closed')
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
+      controlRuntime?.setIdentityDirectory(defaultIdentityDirectory)
       const fresh = createRuntimes(next)
       try {
         await fresh.runtime.start()
@@ -300,8 +346,13 @@ async function activate(
       }
       runtime = fresh.runtime
       clientRuntime = fresh.clientRuntime
+      clientActive = clientRuntime !== undefined
       controlRuntime?.clearStartupFailure()
-      ctx.dshRemote = runtime
+      if (hostServiceProvided) ctx.dshRemote = runtime
+      else {
+        ctx.provide('dshRemote', runtime)
+        hostServiceProvided = true
+      }
       if (clientRuntime !== undefined) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
         else {
@@ -309,6 +360,7 @@ async function activate(
           clientServiceProvided = true
         }
       }
+      if (connection !== undefined) updateChecker.start()
       return { client: clientRuntime, host: runtime }
     }
     replacement = operation()
@@ -317,48 +369,70 @@ async function activate(
 
   const controlRuntime = connection === undefined
     ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker)
+    : new PluginControlRuntime(
+        config,
+        defaultIdentityDirectory,
+        settingsBinding,
+        clientRuntime,
+        runtime,
+        replaceServer,
+        updateChecker,
+        true,
+      )
+  if (initialStorageError !== undefined) {
+    controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false })
+  }
 
-  ctx.provide('dshRemote', runtime)
-  if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
+  if (runtime !== undefined) {
+    ctx.provide('dshRemote', runtime)
+    hostServiceProvided = true
+  }
+  if (clientRuntime !== undefined) {
+    ctx.provide('dshRemoteClient', clientRuntime)
+    clientServiceProvided = true
+  }
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection!, webServer)
-    try {
-      startup = (async () => {
-        await runtime.start()
-        if (clientRuntime !== undefined) {
-          await clientRuntime.start()
-        } else {
-          logger.warn('client remote mode is unavailable', {
-            serverConfigured: config.serverUrl !== undefined,
-            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-            connectionAvailable: connection !== undefined,
-          })
-        }
-      })()
-      await startup
-      // Only the browser/Desktop connection surfaces the update notice, so a
-      // Host composition without it skips the registry calls.
-      if (connection !== undefined) updateChecker.start()
-    } catch (error) {
-      logger.error('Remote plugin startup failed', {
-        error: error instanceof Error ? error.message : String(error),
-        code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : safeErrorCode(error),
-      })
-      controlRuntime?.setStartupFailure(error)
-      await Promise.allSettled([clientRuntime?.close(), runtime.close()])
+    if (initialStorageError !== undefined) {
+      logger.error('Remote plugin startup failed', safeStartupError(initialStorageError))
+    } else {
+      try {
+        startup = (async () => {
+          await runtime!.start()
+          if (clientRuntime !== undefined) {
+            await clientRuntime.start()
+            clientActive = true
+          } else {
+            logger.warn('client remote mode is unavailable', {
+              serverConfigured: config.serverUrl !== undefined,
+              remoteGatewayAvailable: localTypertGateway.supportsCarrier,
+              connectionAvailable: connection !== undefined,
+            })
+          }
+        })()
+        await startup
+        // Only the browser/Desktop connection surfaces the update notice, so a
+        // Host composition without it skips the registry calls.
+        if (connection !== undefined) updateChecker.start()
+      } catch (error) {
+        clientActive = false
+        logger.error('Remote plugin startup failed', safeStartupError(error))
+        controlRuntime?.setStartupFailure(error)
+        await Promise.allSettled([clientRuntime?.close(), runtime?.close()])
+      }
     }
     return async () => {
       closed = true
+      clientActive = false
       updateChecker.stop()
       await replacement?.catch(() => undefined)
       await disposeControl?.()
       await clientRuntime?.close()
-      await runtime.close()
+      await runtime?.close()
     }
   }, 'ds-harness-remote lifecycle')
-  if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? undefined : clientRuntime)
+  if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? undefined : clientRuntime)
 }
 
 /**
@@ -470,9 +544,15 @@ export type { ResolvedConfig } from './config.js'
 export { resolveConfig } from './config.js'
 export { ConnectionController, ConnectionRejectedError } from './connection-controller.js'
 export type { PeerConnectionContext, RpcRouterFactory } from './connection-controller.js'
-export { fingerprint, IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory } from './identity-store.js'
+export {
+  fingerprint,
+  IdentityInvalidError,
+  IdentityStore,
+  prepareDefaultIdentityDirectory,
+  resetDefaultIdentityRoles,
+} from './identity-store.js'
 export { serverStorageDirectory } from './identity-store.js'
-export type { HostIdentity, RemoteDeviceRole, TrustedPeer } from './identity-store.js'
+export type { HostIdentity, IdentityErrorCode, RemoteDeviceRole, ResetIdentityOptions, TrustedPeer } from './identity-store.js'
 export { ClientServerApi, HostServerApi, ServerApiError } from './server-api.js'
 export { HostServerConnection } from './server-connection.js'
 export type { WebSocketFactory } from './server-connection.js'

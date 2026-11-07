@@ -205,21 +205,36 @@ describe('Remote CLI', () => {
     expect(output.text).not.toContain('refresh-token-value')
   })
 
-  it('resets local device identity via reset-identity command', async () => {
+  it('resets local device identity via reset-identity command including legacy corrupt storage and rejects extra args', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-reset-${crypto.randomUUID()}`)
     directories.push(dshHome)
     const env = { DSH_HOME: dshHome }
-    const root = new IdentityStore({ env }).directory
-    const hostDir = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
-    const originalHost = await new IdentityStore({ directory: hostDir, env, role: 'host' }).loadOrCreate('Host')
+    const legacyRoot = join(dshHome, 'remote')
+    const hostLegacyDir = serverStorageDirectory(legacyRoot, 'https://dsh.r2049.cn', 'host')
+    const clientLegacyDir = serverStorageDirectory(legacyRoot, 'https://dsh.r2049.cn', 'client')
+    const originalHost = await new IdentityStore({ directory: hostLegacyDir, env, role: 'host' }).loadOrCreate('Host')
+    const originalClient = await new IdentityStore({ directory: clientLegacyDir, env, role: 'client' }).loadOrCreate('Client')
+    await writeFile(join(clientLegacyDir, 'device.key'), 'corrupted-client-key\n')
+    await new ServerCredentialStore(clientLegacyDir).save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: originalClient.deviceId,
+      authorizationMethod: 'owned_device',
+      ...tokens(),
+    })
     const output = writer()
+    const errors = writer()
 
-    await expect(runCli(['reset-identity', 'all'], { env, stdout: output })).resolves.toBe(0)
-    expect(output.text).toContain('Remote host identity was reset')
+    await expect(runCli(['reset-identity', 'client', '--extra'], { env, stdout: output, stderr: errors })).resolves.toBe(2)
+    await expect(runCli(['reset-identity', 'client'], { env, stdout: output, stderr: errors })).resolves.toBe(0)
     expect(output.text).toContain('Remote client identity was reset')
 
-    const newHost = JSON.parse(await readFile(join(hostDir, 'device.json'), 'utf8')) as { deviceId: string }
-    expect(newHost.deviceId).not.toBe(originalHost.deviceId)
+    const canonicalRoot = join(dshHome, 'ds-harness-remote')
+    const hostCanonicalDir = serverStorageDirectory(canonicalRoot, 'https://dsh.r2049.cn', 'host')
+    const clientCanonicalDir = serverStorageDirectory(canonicalRoot, 'https://dsh.r2049.cn', 'client')
+    const preservedHost = JSON.parse(await readFile(join(hostCanonicalDir, 'device.json'), 'utf8')) as { deviceId: string }
+    const rotatedClient = JSON.parse(await readFile(join(clientCanonicalDir, 'device.json'), 'utf8')) as { deviceId: string }
+    expect(preservedHost.deviceId).toBe(originalHost.deviceId)
+    expect(rotatedClient.deviceId).not.toBe(originalClient.deviceId)
   })
 
   it('succeeds on logout even when local device identity is corrupt', async () => {

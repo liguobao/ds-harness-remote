@@ -7,7 +7,7 @@ import type { StatusFeed } from '../status-stream.js'
 import { compareVersions } from '../version-compare.js'
 import { deepSeekWorkspaceIcon, gptWorkspaceIcon } from './icons.js'
 import { pendingWorkspaceSelectionKey } from './navigation.js'
-import { connectedClientModeLabel, connectedProgress, connectionErrorMessage, formatPlatform, messageOf } from './presentation.js'
+import { connectedClientModeLabel, connectedProgress, connectionErrorMessage, formatPlatform, messageOf, startupErrorMessage } from './presentation.js'
 import { createRemoteProgressView, runConnectHostProgress } from './progress.js'
 import type {
   ClientReact,
@@ -579,10 +579,37 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           return
         }
         if (nextStatus.startupError !== undefined) {
+          setDevices([])
           setNeedsAuthorization(undefined)
-          setError(nextStatus.startupError.code === 'IDENTITY_INVALID'
-            ? t('identityCorrupted')
-            : (nextStatus.startupError.message || t('remoteStartupFailed')))
+          setSelectedHost(undefined)
+          setWorkspaces([])
+          setCodexWorkspaces([])
+          setCursorWorkspaces([])
+          setAntigravityWorkspaces([])
+          setPiWorkspaces([])
+          setOpencodeWorkspaces([])
+          setClaudeWorkspaces([])
+          setHermesWorkspaces([])
+          setShowAllWorkspaces(false)
+          setShowAllCodexWorkspaces(false)
+          setShowAllCursorWorkspaces(false)
+          setShowAllAntigravityWorkspaces(false)
+          setShowAllPiWorkspaces(false)
+          setShowAllOpencodeWorkspaces(false)
+          setShowAllClaudeWorkspaces(false)
+          setShowAllHermesWorkspaces(false)
+          setWorkspaceBackend('harness')
+          setCodexWorkspaceId(undefined)
+          setCursorWorkspaceId(undefined)
+          setAntigravityWorkspaceId(undefined)
+          setPiWorkspaceId(undefined)
+          setOpencodeWorkspaceId(undefined)
+          setClaudeWorkspaceId(undefined)
+          setHermesWorkspaceId(undefined)
+          setPath('')
+          setAddingWorkspace(false)
+          setDirectory(undefined)
+          setError(startupErrorMessage(nextStatus.startupError, t))
           return
         }
         if (!nextStatus.available) {
