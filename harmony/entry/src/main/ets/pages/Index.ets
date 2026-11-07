@@ -166,6 +166,8 @@ struct Index {
   @State passwordLoginOpen: boolean = false;
   /** 发送方式面板（长按发送键）。 */
   @State sendModeOpen: boolean = false;
+  /** 写作辅助面板（点 ✦）：提示词库 / 全屏编辑。 */
+  @State writingMenuOpen: boolean = false;
   /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
   @State archivedIds: string[] = [];
   @State pinnedIds: string[] = [];
@@ -341,6 +343,10 @@ struct Index {
     }
     if (this.filePreviewOpen) {
       this.filePreviewOpen = false;
+      return true;
+    }
+    if (this.writingMenuOpen) {
+      this.writingMenuOpen = false;
       return true;
     }
     if (this.sendModeOpen) {
@@ -1961,6 +1967,9 @@ struct Index {
       }
       if (this.sendModeOpen) {
         this.SendModeOverlay()
+      }
+      if (this.writingMenuOpen) {
+        this.WritingMenuOverlay()
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
@@ -4261,6 +4270,108 @@ struct Index {
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
+  /** 写作辅助：提示词库 / 全屏编辑（点输入坞上的 ✦ 打开）。 */
+  @Builder
+  WritingMenuOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.45)')
+        .onClick(() => {
+          this.writingMenuOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(this.tr('写作辅助'))
+              .fontSize(this.fs(16))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+            Text(this.tr('提示词库可一键填入常用说法；长文用全屏编辑'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .maxLines(2)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.writingMenuOpen = false;
+            })
+        }
+        .width('100%')
+        Row({ space: 10 }) {
+          Column({ space: 2 }) {
+            Text(this.tr('提示词库'))
+              .fontSize(this.fs(14))
+              .fontColor(this.pal().text)
+            Text(this.tr('挑一条常用提示词填进输入框'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('›')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .backgroundColor(this.pal().inputBg)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .onClick(() => {
+          this.writingMenuOpen = false;
+          this.promptDraftInput = '';
+          this.promptPanelOpen = true;
+        })
+        Row({ space: 10 }) {
+          Column({ space: 2 }) {
+            Text(this.tr('全屏编辑'))
+              .fontSize(this.fs(14))
+              .fontColor(this.pal().text)
+            Text(this.tr('整屏写长文，换行不会丢'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('›')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .backgroundColor(this.pal().inputBg)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .onClick(() => {
+          this.writingMenuOpen = false;
+          this.composerExpanded = true;
+        })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 460 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 240 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 180, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   /** 发送方式：排队 / 插话。自定义面板替掉系统 ActionSheet（后者样式和信息层级都别扭）。 */
   @Builder
   SendModeOverlay() {
@@ -4535,31 +4646,9 @@ struct Index {
           .border({ width: 1,
             color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
           .onClick(() => {
-            this.promptDraftInput = '';
-            this.promptPanelOpen = true;
+            // 一键出「写作辅助」面板：提示词库 / 全屏编辑（长按在鼠标与触控下都不稳，已弃用）
+            this.writingMenuOpen = true;
           })
-          .gesture(LongPressGesture().onAction(() => {
-            // 手机上把「全屏编辑」收到这里，省一行宽度
-            ActionSheet.show({
-              title: this.tr('写作辅助'),
-              message: this.tr('选一个动作'),
-              sheets: [
-                {
-                  title: this.tr('提示词库'),
-                  action: () => {
-                    this.promptDraftInput = '';
-                    this.promptPanelOpen = true;
-                  }
-                },
-                {
-                  title: this.tr('全屏编辑'),
-                  action: () => {
-                    this.composerExpanded = true;
-                  }
-                }
-              ]
-            });
-          }))
           // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
           if (!this.compactDock()) {
           Row() {
