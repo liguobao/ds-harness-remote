@@ -65376,13 +65376,14 @@ function projectCodexThread(value) {
   const createdAt = normalizeTimestamp(value.createdAt);
   const updatedAt = normalizeTimestamp(value.updatedAt) || createdAt;
   const model = projectCodexModel(value);
+  const preview = typeof value.preview === "string" && value.preview.trim().length > 0 ? value.preview : firstUserPreview(projectCodexHistory(value));
   return {
     id: `codex:${value.id}`,
     backend: "codex",
     nativeId: value.id,
     ...typeof value.sessionId === "string" ? { sessionTreeId: value.sessionId } : {},
     ...typeof value.name === "string" && value.name.length > 0 ? { title: value.name } : {},
-    ...typeof value.preview === "string" && value.preview.length > 0 ? { preview: value.preview } : {},
+    ...preview === void 0 ? {} : { preview },
     ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
     ...model.model === void 0 ? {} : { model: model.model },
     ...model.reasoningEffort === void 0 ? {} : { reasoningEffort: model.reasoningEffort },
@@ -65460,6 +65461,16 @@ function projectCodexHistory(thread) {
     }
   }
   return output2;
+}
+function firstUserPreview(items) {
+  for (const item of items) {
+    if (item.kind !== "message" || item.role !== "user")
+      continue;
+    const preview = item.text?.replace(/\s+/g, " ").trim().slice(0, 160);
+    if (preview)
+      return preview;
+  }
+  return void 0;
 }
 function projectCodexItem(value, threadId, turnId, sessionId, index) {
   const item = isRecord(value) ? value : {};

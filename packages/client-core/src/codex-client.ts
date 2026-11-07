@@ -293,13 +293,15 @@ export function projectCodexThread(value: unknown): DisplaySession | undefined {
   const createdAt = normalizeTimestamp(value.createdAt)
   const updatedAt = normalizeTimestamp(value.updatedAt) || createdAt
   const model = projectCodexModel(value)
+  const preview = typeof value.preview === 'string' && value.preview.trim().length > 0
+    ? value.preview : firstUserPreview(projectCodexHistory(value))
   return {
     id: `codex:${value.id}`,
     backend: 'codex',
     nativeId: value.id,
     ...(typeof value.sessionId === 'string' ? { sessionTreeId: value.sessionId } : {}),
     ...(typeof value.name === 'string' && value.name.length > 0 ? { title: value.name } : {}),
-    ...(typeof value.preview === 'string' && value.preview.length > 0 ? { preview: value.preview } : {}),
+    ...(preview === undefined ? {} : { preview }),
     ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
     ...(model.model === undefined ? {} : { model: model.model }),
     ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }),
@@ -410,6 +412,26 @@ export function createCodexTimelineState(thread: unknown): CodexTimelineState | 
  * replayed by the reducer.
  */
 export function reduceCodexTimelineFrame(
+  state: CodexTimelineState,
+  frame: { method: string; params: unknown },
+): CodexTimelineState {
+  const next = reduceCodexFrame(state, frame)
+  if (next.session.preview?.trim()) return next
+  const preview = firstUserPreview(next.items)
+  return preview === undefined ? next : { ...next, session: { ...next.session, preview } }
+}
+
+/** A live Thread has no preview until a later read; retain its first user message. */
+function firstUserPreview(items: DisplayHistoryItem[]): string | undefined {
+  for (const item of items) {
+    if (item.kind !== 'message' || item.role !== 'user') continue
+    const preview = item.text?.replace(/\s+/g, ' ').trim().slice(0, 160)
+    if (preview) return preview
+  }
+  return undefined
+}
+
+function reduceCodexFrame(
   state: CodexTimelineState,
   frame: { method: string; params: unknown },
 ): CodexTimelineState {
