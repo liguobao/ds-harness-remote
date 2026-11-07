@@ -46,29 +46,9 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - Prefer P2P connections, use TURN relay nodes worldwide, and fall back to multiple Server Relays when needed.
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
 - Remote Tool context injection supports Host and workspace discovery, Harness session creation and management, history reading, waiting for execution, interruption requests, and authorized file transfers. [Details](packages/plugin/README.md#remote-agent-tools).
-- Alongside DeepSeek Harness, access native workspaces for Codex, Cursor, Google Antigravity, Pi, OpenCode, Claude Code, Hermes Agent, and other tools through ACP integrations, with remote file browsing and terminals.
+- Alongside DeepSeek Harness, access native workspaces for Codex, Cursor, Google Antigravity, Pi, OpenCode, Claude Code, Harness Agent, and other tools through ACP integrations, with remote file browsing and terminals.
 - Clients are available across Android, iOS, Web, and native DSH.
 - Multiple clients can connect to the same Harness Host simultaneously, with RPC calls and streams isolated per connection.
-
-## Contents
-
-- [Connect once. Ready whenever you are](#connect-once-ready-whenever-you-are)
-- [Features](#features)
-- [Supported clients](#supported-clients)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Screenshots](#screenshots)
-- [How it works](#how-it-works)
-- [Experimental ACP workspaces](#experimental-acp-workspaces)
-- [End-to-end encryption](#end-to-end-encryption)
-- [Network and transport](#network-and-transport)
-- [Security](#security)
-- [FAQ](#faq)
-- [Documentation](#documentation)
-- [Links](#links)
-- [Star History](#star-history)
-- [Project status and trademarks](#project-status-and-trademarks)
-- [License](#license)
 
 ## Supported clients
 
@@ -81,7 +61,7 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 | iOS | TestFlight beta | Beta | Not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
 | Browser&nbsp;extension | Chrome | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
 | dsh-TUI | Terminal-only CLI | Planned | Integration is not part of this release and returns in a later version; the installer never creates a Web service for it automatically |
-| Linux | Cloud server | Supported | Sign in on the [official website](https://dsh.r2049.cn/) for unattended installation with a single command and no configuration. |
+| Linux | Cloud server | Supported | Sign in on the [official website](https://dsh.r2049.cn/) to install with one command. |
 
 Several clients can connect to the same Host at once; RPC calls and streams are isolated per connection.
 
@@ -96,6 +76,8 @@ from npm, and enter this package:
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
 with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`.
+
+On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
 
 ### Linux one-command installation
 
@@ -126,7 +108,7 @@ After installing the ds-harness-remote plugin in DSH Go on your phone, you can a
 
 By default, Remote uses this project's hosted Server at [https://dsh.r2049.cn](https://dsh.r2049.cn).
 
-For self-hosting, use the repository's [minimal Server](apps/server/README.md). The current version includes P2P coordination and a Relay Server, but does not provide the full hosted Remote Web experience.
+For self-hosting, use the repository's [minimal Server](apps/server/README.md). The current version includes WebRTC LAN/P2P/TURN coordination (TURN requires your own coturn deployment) and an encrypted Relay Server, but does not provide the full hosted Remote Web experience.
 
 ## Screenshots
 
@@ -144,8 +126,6 @@ To prevent this computer from controlling other Hosts, open the Host list at [ht
 ### Android
 
 Use text or image prompts, switch models, and access supported workspace files and terminals.
-
-The interface follows the system language and supports English, Simplified and Traditional Chinese, Japanese, Spanish, German, and French. In language settings, tap “More ...” to show all languages. See the [Android guide](apps/android/README.md) for details.
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
@@ -221,9 +201,8 @@ See [Network and transport](docs/network.md) for the topology, control and data 
 
 - On LAN and P2P paths, data bypasses the Server except for connection coordination. TURN uses the open-source coturn server; Relay mode forwards traffic over WebSocket.
 - Session traffic is end-to-end encrypted. The service relays ciphertext without storing session plaintext or device private keys.
-- Server membership and the Host's locally pinned peer identity must both authorize a connection.
+- Same-account devices connect without extra confirmation; see [device trust and permissions](docs/end-to-end-encryption.md#2-设备身份与信任).
 - [Remote Tools injection](docs/remote-tools.md) — optional `remote_*` session tools; enabled by default and configurable in detailed Remote settings.
-
 - Interactive terminals use the Host-local `terminal.enabled` switch (on by default). They run as the Host user, independently of Agent approvals.
 - General tool RPC and remote desktop are not exposed.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
@@ -324,6 +303,12 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
 
 This is an independent community project and is not an official DeepSeek product.
 DeepSeek and related names and marks belong to their respective owners.
+
+## Connection diagnostics
+
+On Android, reproduce the problem, then open **Settings → Diagnostics → Export connection log** and choose a folder to save the `.txt` file. It contains up to 500 recent diagnostic events from the current app process; restarting the app clears the buffer. Credentials and conversation content are excluded.
+
+On the Host, enable **Debug logging** in **Plugins → Remote settings**. The setting is saved and takes effect immediately; turn it off after troubleshooting (restores `info`). Look for `[ds-harness-remote]` in the Host log, or `desktop.log` on Desktop. Manual configuration also accepts `logLevel: debug`.
 
 ## License
 

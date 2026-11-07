@@ -45,6 +45,12 @@ Noise_IK_25519_ChaChaPoly_SHA256
 
 Client 从受 membership 保护的设备详情获取 Host 公钥。Host 收到连接事件后，还会使用自己的设备凭证重新查询 Client descriptor，交叉校验账号授权、角色、公钥与本地 pinned identity。Server membership 与本地信任缺一不可。
 
+同账号即信任：通过服务端账号归属校验的新设备在首次连接时自动固定公钥，Host 与 Client 均无需额外确认；已知设备公钥变化默认拒绝。服务端是首次授权与公钥分发的信任源，本地 pinning 不构成独立的带外身份核验。
+
+这意味着必须信任所用服务端的账号与设备管理：若服务端被攻破或恶意运行，它可能为同账号伪造新设备描述，使首次连接固定攻击者的公钥；E2EE 与既有设备换钥检测不能阻止这种首次身份替换。
+
+如需关闭某台设备控制其他 Host 的主控权限，可在 [Web 版](https://dsh.r2049.cn/)主机列表中为该设备启用「仅受控」；该设备将无法查看账号下的其他设备，Web 和其他客户端仍可连接它。这与 Host 本地关闭 `terminal.enabled` 的终端开关是不同的控制。
+
 ## 3. 一次安全连接如何建立
 
 ```text
@@ -143,11 +149,11 @@ Noise 单条 transport message 有 65,535 bytes 上限。编码后的业务消�
 
 - 如果 Host 或 Client 操作系统已经被入侵，攻击者可能在加密前或解密后读取内容。
 - 已授权 Client 能执行的操作仍取决于 Host 的 Harness API allowlist 和 Harness 原生 permission 控制；E2EE 不会把恶意的已授权端变成可信端。
-- Server 仍可以拒绝服务、延迟或丢弃密文，并能观察前述连接元数据，但无法伪造通过 Noise 认证的业务消息。
+- Server 仍可以拒绝服务、延迟或丢弃密文，并能观察前述连接元数据。在公钥已正确固定且端点私钥未泄露的连接中，Server 无法伪造通过 Noise 认证的业务消息；首次身份分发仍依赖第 2 节所述的服务端信任。
 - 用户看到的设备名称不是身份凭据；真正的设备身份来自固定的 X25519 public key。
 - E2EE 不等于匿名网络，也不隐藏 IP、ICE candidate、通信时间和流量特征。
 
-Remote 不额外开放 Shell、PTY、远程桌面、通用工具 RPC 或通用文件系统协议。Harness 自己的工具仍可能在 Host 上运行命令或修改文件，并继续受 Harness 原有 permission 流程控制。
+Remote 不提供绕过现有 workspace/provider 边界的通用 exec 或文件写入端点，也不开放远程桌面或通用工具 RPC。远程交互终端通过受支持的 Harness 原生终端或 CodeX / ACP workspace provider 提供 Shell / PTY，受 Host 本地 `terminal.enabled` 控制（默认开启），以 Host 用户身份运行，独立于 Agent 审批；可在 Host 本地关闭。Agent 自己的工具执行仍遵循各后端的 permission / 审批流程，不能把这套审批视为交互终端的授权关卡。
 
 ## 10. 实现与验证入口
 

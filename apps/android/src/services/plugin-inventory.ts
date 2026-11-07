@@ -67,6 +67,10 @@ export const REMOTE_ADAPTED_PLUGINS: Readonly<Record<string, {
     feature: () => strings.plugins.intelligentUiFeature,
     settingsSince: '0.2.10',
   },
+  'ds-bot': {
+    title: 'DS Bot',
+    feature: () => strings.bots.notInstalled,
+  },
 }
 
 /** Read bundles, live entries and settings forms through the authenticated Typert carrier. */

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   harnessSessionGeneration,
   normalizeHarnessVersion,
+  readHarnessDistributionVersion,
 } from '../src/harness-version.js'
 
 describe('Harness version discovery', () => {
@@ -23,5 +27,46 @@ describe('Harness version discovery', () => {
     expect(harnessSessionGeneration('0.3.0')).toBe('legacy')
     expect(harnessSessionGeneration('1.0.0')).toBe('legacy')
     expect(harnessSessionGeneration(undefined)).toBe('legacy')
+  })
+})
+
+
+describe('Harness distribution version discovery', () => {
+  async function fakeInstall(root: string, version: string) {
+    const pkgDir = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+    await mkdir(pkgDir, { recursive: true })
+    await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version }))
+    return pkgDir
+  }
+  const context = (root: string) => ({ cwd: root, execPath: join(root, 'node.exe'), globalRoots: [root] })
+
+  it('reads the version from an absolute CLI entrypoint', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-version-'))
+    try {
+      const pkgDir = await fakeInstall(root, '0.2.2-rc.9')
+      await mkdir(join(pkgDir, 'lib'), { recursive: true })
+      const entry = join(pkgDir, 'lib', 'bin.js')
+      await writeFile(entry, '')
+      await expect(readHarnessDistributionVersion(entry, context(root))).resolves.toBe('0.2.2-rc.9')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('recovers the version from cwd and npm roots when argv[1] is empty or relative', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-version-'))
+    try {
+      await fakeInstall(root, '0.2.3-rc.1')
+      await expect(readHarnessDistributionVersion('', context(root))).resolves.toBe('0.2.3-rc.1')
+      await expect(readHarnessDistributionVersion('relative/entry.js', context(root))).resolves.toBe('0.2.3-rc.1')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('returns undefined only when no Harness manifest is discoverable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-version-'))
+    try {
+      const pkgDir = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+      await mkdir(pkgDir, { recursive: true })
+      await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ name: 'some-other-package', version: '9.9.9' }))
+      await expect(readHarnessDistributionVersion('', context(root))).resolves.toBeUndefined()
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 })

@@ -202,7 +202,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 - LAN 、P2P网络下，除了网络协调相关指令，所有的数据不经过服务器；TURN服务使用开源coturn服务器部署，Relay 模式使用WebSocket转发。
 - 所有的会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
-- Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
+- 同账号设备连接无需额外确认，详见[设备信任与权限边界](docs/end-to-end-encryption.md#2-设备身份与信任)。
 - [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认开启，可在详细 Remote 设置中开启。
 - 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
 - 不开放通用工具 RPC 或远程桌面。
@@ -306,6 +306,12 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 ## 项目声明与商标
 
 本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
+
+## 连接问题排查
+
+Android：复现问题后打开 **设置 → 诊断 → 导出连接日志**，选择文件夹保存 `.txt`。日志保留本次 App 进程启动以来最近 500 条连接诊断；重启 App 后清空，不包含凭据和会话内容。
+
+Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效并持久保存；排查完成后关闭（恢复 `info` 级别）。日志带 `[ds-harness-remote]` 前缀，Desktop 可在 `desktop.log` 查找。手动配置可设置 `logLevel: debug`。
 
 ## License
 

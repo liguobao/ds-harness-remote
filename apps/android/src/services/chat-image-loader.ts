@@ -5,25 +5,23 @@ import { MAX_PREVIEW_BYTES } from './workspace-file-preview'
 export type ChatImageLoader = (image: ChatImage, signal: AbortSignal) => Promise<string>
 
 /**
- * The 0.2.2 `session/attachment` request carries the full `ImageAttachmentRef`
- * so the Host can verify media type, byte length and dimensions. Messages
- * recorded before that ref was kept only its id; return the id-only fallback so
- * older Hosts keep working (a 0.2.2 Host rejects that explicitly).
+ * Build the `session/attachment` reference from a chat image. The 0.2.2 Host
+ * verifies media type, byte length and dimensions when supplied, and can
+ * recover the rest from session events. Messages recorded before the full ref
+ * was persisted may only carry the id; keep every field we do have instead of
+ * dropping back to an id-only reference when one dimension is missing.
  */
 export function chatImageAttachmentReference(image: ChatImage): Record<string, unknown> {
   const { attachmentId } = image
   if (attachmentId === undefined) return {}
-  return typeof image.mediaType === 'string' && typeof image.bytes === 'number'
-    && typeof image.width === 'number' && typeof image.height === 'number'
-    ? {
-        attachmentId,
-        mediaType: image.mediaType,
-        bytes: image.bytes,
-        width: image.width,
-        height: image.height,
-        ...(image.name === undefined ? {} : { name: image.name }),
-      }
-    : { attachmentId }
+  return {
+    attachmentId,
+    ...(typeof image.mediaType === 'string' ? { mediaType: image.mediaType } : {}),
+    ...(typeof image.bytes === 'number' ? { bytes: image.bytes } : {}),
+    ...(typeof image.width === 'number' ? { width: image.width } : {}),
+    ...(typeof image.height === 'number' ? { height: image.height } : {}),
+    ...(typeof image.name === 'string' ? { name: image.name } : {}),
+  }
 }
 
 /** All Host reads stay on the captured authenticated connection. No URL fetching or disk cache. */
@@ -45,15 +43,20 @@ export function createChatImageLoader(sources: {
     } else if (image.attachmentId !== undefined) {
       const result = await sources.attachment(image.sessionId ?? sources.sessionId, image, signal)
       active()
-      if (!record(result) || !record(result.attachment)
-        || result.attachment.attachmentId !== image.attachmentId
-        || typeof result.attachment.mediaType !== 'string' || typeof result.data !== 'string') throw invalidImage()
-      // The 0.2.2 Host verifies the supplied reference; keep the returned one
-      // honest when the message carried every field.
-      if (image.bytes !== undefined && result.attachment.bytes !== image.bytes) throw invalidImage()
-      if (image.width !== undefined && result.attachment.width !== image.width) throw invalidImage()
-      if (image.height !== undefined && result.attachment.height !== image.height) throw invalidImage()
-      uri = validatedImageDataUri(`data:${result.attachment.mediaType};base64,${result.data}`)
+      if (!record(result) || typeof result.data !== 'string') throw invalidImage()
+      const echoed: Record<string, unknown> = record(result.attachment) ? result.attachment : {}
+      // Only reject an explicit conflict with the supplied reference. Older
+      // Hosts may echo just the id (or omit the verified fields entirely), so
+      // an incomplete echo must not be treated as an invalid image.
+      if (typeof echoed.attachmentId === 'string' && echoed.attachmentId !== image.attachmentId) throw invalidImage()
+      if (image.bytes !== undefined && typeof echoed.bytes === 'number' && echoed.bytes !== image.bytes) throw invalidImage()
+      if (image.width !== undefined && typeof echoed.width === 'number' && echoed.width !== image.width) throw invalidImage()
+      if (image.height !== undefined && typeof echoed.height === 'number' && echoed.height !== image.height) throw invalidImage()
+      const mediaType = typeof echoed.mediaType === 'string' ? echoed.mediaType
+        : typeof image.mediaType === 'string' ? image.mediaType
+          : typeof result.mediaType === 'string' ? result.mediaType : undefined
+      if (mediaType === undefined) throw invalidImage()
+      uri = validatedImageDataUri(`data:${mediaType};base64,${result.data}`)
     } else {
       const path = chatImageWorkspacePath(image.uri ?? '')
       if (path === undefined) throw invalidImage()

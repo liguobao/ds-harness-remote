@@ -1204,3 +1204,37 @@ describe('HarnessAlphaClient', () => {
     await client.close()
   })
 })
+
+
+describe('HarnessAlphaClient.sessionAttachment', () => {
+  const data = 'iVBORw0KGgo='
+  const makeCore = () => ({
+    rpc: vi.fn(async (method: string, params: any) => {
+      if (method === 'harness.remote.call' && params?.endpoint === 'session/attachment') {
+        return { ok: true, value: { attachment: { mediaType: 'image/png' }, data } }
+      }
+      return { ok: true, value: {} }
+    }),
+  })
+  const requestOf = (core: ReturnType<typeof makeCore>) => {
+    const call = core.rpc.mock.calls.find(([method, params]) =>
+      method === 'harness.remote.call' && params?.endpoint === 'session/attachment')
+    return call?.[1]?.payload?.args?.request
+  }
+
+  it('keeps the id-only request for a string attachmentId', async () => {
+    const core = makeCore()
+    const client = new HarnessAlphaClient(core as any)
+    await client.sessionAttachment('s1', 'att-1')
+    expect(requestOf(core)).toEqual({ sessionId: 's1', attachmentId: 'att-1' })
+  })
+
+  it('keeps both attachment and attachmentId for a full reference', async () => {
+    const core = makeCore()
+    const client = new HarnessAlphaClient(core as any)
+    const reference = { attachmentId: 'att-1', mediaType: 'image/png', bytes: 8, width: 4, height: 2, name: 'a.png' }
+    const result = await client.sessionAttachment('s1', reference)
+    expect(result.data).toBe(data)
+    expect(requestOf(core)).toEqual({ sessionId: 's1', attachmentId: 'att-1', attachment: reference })
+  })
+})

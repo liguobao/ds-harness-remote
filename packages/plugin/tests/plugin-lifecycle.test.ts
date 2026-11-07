@@ -127,10 +127,12 @@ describe('Cordis plugin lifecycle', () => {
     await ctx.fiber.dispose()
   })
 
-  it('loads against Typert and disposes its runtime', async () => {
+  it('automatically migrates storage on upgrade before loading Typert and disposes its runtime', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-cordis-'))
     directories.push(dshHome)
     vi.stubEnv('DSH_HOME', dshHome)
+
+    const original = await new remotePlugin.IdentityStore({ directory: join(dshHome, 'remote') }).loadOrCreate('Cordis test host')
 
     const ctx = new Context()
     let identityReadyWhenControlRegistered: boolean | undefined
@@ -153,6 +155,8 @@ describe('Cordis plugin lifecycle', () => {
         capabilities: expect.arrayContaining(['harness.remote.v1', 'harness.remote.transfer.v1']),
       })
     })
+    expect(ctx.dshRemote.currentIdentity()).toEqual(original)
+
     expect(identityReadyWhenControlRegistered).toBe(false)
 
     await fiber.dispose()
@@ -210,7 +214,7 @@ describe('Cordis plugin lifecycle', () => {
     const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis delayed rc.2 host' })
 
     expect(ctx.get('dshRemote')).toBeUndefined()
-    expect(handlers).toHaveLength(1)
+    await vi.waitFor(() => expect(handlers).toHaveLength(1))
     expect(handlers[0]?.channel).toBe('/ds-harness-remote')
     await expect(handlers[0]?.handler('status', {}, new AbortController().signal)).resolves.toMatchObject({
       ok: true,

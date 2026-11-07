@@ -1,24 +1,18 @@
-import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
-import * as Haptics from 'expo-haptics'
-import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, Check, ChevronRight, Code2, FolderOpen, Laptop, MessageSquareText, Monitor, MoreVertical, Pencil, Server, ShieldCheck, Sparkles, Star, Trash2, X, type LucideIcon } from 'lucide-react-native'
+import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
-import { workspaceStableKey } from '../lib/workspace-key'
+import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice } from '../types'
 import {
   BlurHeaderFrame,
   Button,
-  EmptyState,
   GroupCard,
+  GroupRow,
   IconButton,
   KeyValue,
-  LoadingRows,
-  RefreshAction,
   Screen,
   SectionTitle,
-  StatusBadge,
   TopBar,
 } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
@@ -27,192 +21,8 @@ import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { resolveSessionDisplayTitle } from './session-title'
 import { DeviceRenameModal } from './device-rename-modal'
 import { ConnectionHero } from './connection-hero'
-
-export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
-  onDevice: (device: RemoteDevice) => void
-  onBack?: () => void
-  onMore?: () => void
-  onShortcut?: (shortcut: WorkspaceShortcut) => void
-}) {
-  const devices = useAppStore(state => state.devices)
-  const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
-  const recentWorkspaces = useAppStore(state => state.recentWorkspaces)
-  const removeFavoriteWorkspace = useAppStore(state => state.removeFavoriteWorkspace)
-  const connectedDevice = useAppStore(state => state.selectedDevice)
-  const connectedWorkspaces = useAppStore(state => state.workspaces)
-  const refreshing = useAppStore(state => state.refreshing)
-  const refresh = useAppStore(state => state.refreshDevices)
-  const forgetDevice = useAppStore(state => state.forgetDevice)
-  const mutationPending = useAppStore(state => state.busyAction?.startsWith('forget:') === true
-    || state.busyAction?.startsWith('rename-device:') === true)
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  const isHome = onBack === undefined
-  const [openRowId, setOpenRowId] = useState<string>()
-  // Removed rows stay mounted until their exit animation ends; the store drops them at once.
-  const [leaving, setLeaving] = useState<ReadonlyMap<string, LeavingDevice>>(() => new Map())
-  const initialDeviceIds = useRef(new Set(devices.map(device => device.deviceId)))
-  const deviceRows = mergeLeavingDevices(devices, leaving)
-
-  const forgetLeaving = (deviceId: string) => setLeaving(current => {
-    const next = new Map(current)
-    next.delete(deviceId)
-    return next
-  })
-  const removeDevice = async (device: RemoteDevice) => {
-    // Register before the request so the row keeps its instance when the store removes it.
-    const index = devices.findIndex(item => item.deviceId === device.deviceId)
-    setLeaving(current => new Map(current).set(device.deviceId, { device, index }))
-    const removed = await forgetDevice(device.deviceId)
-    if (!removed) forgetLeaving(device.deviceId)
-    setOpenRowId(undefined)
-    return removed
-  }
-
-  const shortcutDeviceName = (shortcut: WorkspaceShortcut) =>
-    devices.find(device => device.deviceId === shortcut.deviceId)?.name ?? shortcut.deviceName
-
-  // Prefer the live title once this phone is connected to the owning host.
-  const shortcutTitle = (shortcut: WorkspaceShortcut) => {
-    if (connectedDevice?.deviceId !== shortcut.deviceId) return shortcut.title
-    return connectedWorkspaces
-      .find(workspace => workspaceStableKey(workspace, connectedDevice.platform) === shortcut.key)
-      ?.title ?? shortcut.title
-  }
-
-  // Shortcuts are a home-screen surface; the secondary device page stays focused.
-  const favorites = isHome
-    ? [...favoriteWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
-    : []
-  const recents = isHome
-    ? [...recentWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
-    : []
-  // With nothing saved yet, fall back to the workspaces visited most recently.
-  const showingFavorites = favorites.length > 0
-  const shortcuts = showingFavorites ? favorites : recents
-
-  return (
-    <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar
-        title={isHome ? 'DSH Remote' : zhCN.devices.myDevices}
-        onBack={onBack}
-        action={isHome && onMore !== undefined
-          ? <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
-          : undefined}
-      />}>
-        <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
-          {isHome
-            ? <>
-                {shortcuts.length > 0 && onShortcut !== undefined && (
-                  <View>
-                    <SectionTitle>{showingFavorites ? zhCN.devices.favorites : zhCN.devices.recent}</SectionTitle>
-                    <GroupCard style={styles.flatCard}>
-                      {shortcuts.map((shortcut, index) => (
-                        <View key={`${shortcut.deviceId}:${shortcut.key}`} style={[styles.favoriteRow, index > 0 && styles.favoriteRowDivider]}>
-                          <Pressable
-                            accessibilityRole="link"
-                            accessibilityLabel={showingFavorites
-                              ? zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))
-                              : zhCN.devices.openRecent(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
-                            onPress={() => onShortcut(shortcut)}
-                            style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
-                          >
-                            {showingFavorites
-                              ? <Star size={19} color={colors.primary} fill={colors.primary} strokeWidth={1.8} />
-                              : <FolderOpen size={19} color={colors.muted} strokeWidth={1.8} />}
-                            <View style={styles.favoriteLinkContent}>
-                              <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
-                              <Text style={styles.favoriteLinkMeta} numberOfLines={1}>{shortcutDeviceName(shortcut)}</Text>
-                            </View>
-                            {!showingFavorites && <ChevronRight size={18} color={colors.subtle} />}
-                          </Pressable>
-                          {showingFavorites && (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
-                              hitSlop={8}
-                              onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
-                              style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
-                            >
-                              <X size={16} color={colors.muted} />
-                            </Pressable>
-                          )}
-                        </View>
-                      ))}
-                    </GroupCard>
-                  </View>
-                )}
-                <SectionTitle action={<RefreshAction refreshing={refreshing} onPress={() => void refresh()} />}>
-                  {zhCN.devices.myDevices}
-                  {deviceRows.length > 0 && (
-                    <Text style={styles.deviceSummary}>{'  '}{zhCN.devices.summary(devices.length, devices.filter(device => device.online).length)}</Text>
-                  )}
-                </SectionTitle>
-              </>
-            : <View style={styles.pageHeading}>
-                <View>
-                  <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
-                  <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
-                </View>
-                <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
-              </View>}
-
-          {refreshing && deviceRows.length === 0
-            ? <LoadingRows />
-            : deviceRows.length === 0
-              ? <EmptyState
-                  icon={Laptop}
-                  title={zhCN.devices.emptyTitle}
-                  body={zhCN.devices.emptyBody}
-                />
-              : <GroupCard style={styles.deviceCard}>{deviceRows.map(({ device, exiting }, index) => (
-                  <SwipeableDeviceRow
-                    key={device.deviceId}
-                    device={device}
-                    first={index === 0}
-                    open={openRowId === device.deviceId}
-                    exiting={exiting}
-                    animateIn={!initialDeviceIds.current.has(device.deviceId)}
-                    locked={mutationPending}
-                    onOpenChange={open => setOpenRowId(current => open
-                      ? device.deviceId
-                      : current === device.deviceId ? undefined : current)}
-                    onPress={() => {
-                      // With a row open, a tap only dismisses it, as in platform swipe lists.
-                      if (openRowId !== undefined) { setOpenRowId(undefined); return }
-                      onDevice(device)
-                    }}
-                    onRemove={() => removeDevice(device)}
-                    onExited={() => forgetLeaving(device.deviceId)}
-                  />
-                ))}</GroupCard>}
-        </Screen>
-      </BlurHeaderFrame>
-      {isHome && (
-        <View style={styles.homeFooter}>
-          <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
-        </View>
-      )}
-    </View>
-  )
-}
-
-interface LeavingDevice { device: RemoteDevice, index: number }
-
-function mergeLeavingDevices(devices: RemoteDevice[], leaving: ReadonlyMap<string, LeavingDevice>) {
-  const rows = devices.map(device => ({ device, exiting: false }))
-  const present = new Set(devices.map(device => device.deviceId))
-  const removed = [...leaving.values()]
-    .filter(item => !present.has(item.device.deviceId))
-    .sort((left, right) => left.index - right.index)
-  for (const item of removed) {
-    rows.splice(Math.max(0, Math.min(item.index, rows.length)), 0, { device: item.device, exiting: true })
-  }
-  return rows
-}
 
 function confirmDeviceUnbind(device: RemoteDevice): Promise<boolean> {
   return new Promise(resolve => {
@@ -229,259 +39,7 @@ function confirmDeviceUnbind(device: RemoteDevice): Promise<boolean> {
   })
 }
 
-function confirmSessionArchive(): Promise<boolean> {
-  return new Promise(resolve => {
-    let settled = false
-    const finish = (confirmed: boolean) => {
-      if (settled) return
-      settled = true
-      resolve(confirmed)
-    }
-    Alert.alert(zhCN.sessions.archiveTitle, zhCN.sessions.archiveBody, [
-      { text: zhCN.common.cancel, style: 'cancel', onPress: () => finish(false) },
-      { text: zhCN.sessions.archive, style: 'destructive', onPress: () => finish(true) },
-    ], { cancelable: true, onDismiss: () => finish(false) })
-  })
-}
-
-function useReduceMotion() {
-  const [reduceMotion, setReduceMotion] = useState(false)
-  useEffect(() => {
-    let mounted = true
-    void AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
-      if (mounted) setReduceMotion(enabled)
-    })
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
-    return () => {
-      mounted = false
-      subscription.remove()
-    }
-  }, [])
-  return reduceMotion
-}
-
 const SWIPE_ACTION_WIDTH = 96
-const SWIPE_SPRING = { damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: true } as const
-const nudge = (value: Animated.Value, toValue: number, duration: number) =>
-  Animated.timing(value, { toValue, duration, easing: Easing.inOut(Easing.quad), useNativeDriver: true })
-
-function SwipeableDeviceRow({ device, first = true, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onExited }: {
-  first?: boolean
-  device: RemoteDevice
-  open: boolean
-  exiting: boolean
-  animateIn: boolean
-  locked: boolean
-  onOpenChange: (open: boolean) => void
-  onPress: () => void
-  onRemove: () => Promise<boolean>
-  onExited: () => void
-}) {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  const busy = useAppStore(state => state.busyAction === `forget:${device.deviceId}`)
-  const reduceMotion = useReduceMotion()
-  const offset = useRef(new Animated.Value(0)).current
-  const armed = useRef(new Animated.Value(0)).current
-  const presence = useRef(new Animated.Value(animateIn ? 0 : 1)).current
-  const height = useRef(new Animated.Value(0)).current
-  const [rowWidth, setRowWidth] = useState(360)
-  const [collapsing, setCollapsing] = useState(false)
-  const measuredHeight = useRef(0)
-  const isOpen = useRef(false)
-  const isArmed = useRef(false)
-  const confirming = useRef(false)
-
-  // The PanResponder is created once, so it reads the latest props through this ref.
-  const latest = useRef({ rowWidth, reduceMotion, locked, busy, exiting, onOpenChange, requestRemove: async () => {} })
-
-  const animate = (animation: Animated.CompositeAnimation, apply: () => void, done?: () => void) => {
-    if (latest.current.reduceMotion) { apply(); done?.(); return }
-    animation.start(({ finished }) => { if (finished) done?.() })
-  }
-  const settle = (toValue: number) =>
-    animate(Animated.spring(offset, { ...SWIPE_SPRING, toValue }), () => offset.setValue(toValue))
-  const setArmed = (next: boolean) => {
-    if (isArmed.current === next) return
-    isArmed.current = next
-    if (next) void Haptics.selectionAsync().catch(() => undefined)
-    animate(Animated.spring(armed, { ...SWIPE_SPRING, toValue: next ? 1 : 0 }), () => armed.setValue(next ? 1 : 0))
-  }
-  const setOpen = (next: boolean) => {
-    isOpen.current = next
-    settle(next ? -SWIPE_ACTION_WIDTH : 0)
-    latest.current.onOpenChange(next)
-  }
-
-  const requestRemove = async () => {
-    const state = latest.current
-    if (confirming.current || state.locked || state.busy || state.exiting) return
-    confirming.current = true
-    setArmed(false)
-    setOpen(true)
-    try {
-      if (!await confirmDeviceUnbind(device)) {
-        setOpen(false)
-        return
-      }
-      if (await onRemove()) return
-      // A failed request keeps the row: close it with a short shake so the failure is felt.
-      isOpen.current = false
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined)
-      animate(Animated.sequence([
-        Animated.spring(offset, { ...SWIPE_SPRING, toValue: 0 }),
-        nudge(offset, -10, 60),
-        nudge(offset, 8, 70),
-        nudge(offset, -4, 60),
-        nudge(offset, 0, 60),
-      ]), () => offset.setValue(0))
-    } finally {
-      confirming.current = false
-    }
-  }
-  latest.current = { rowWidth, reduceMotion, locked, busy, exiting, onOpenChange, requestRemove }
-
-  const dragPosition = (dx: number) => {
-    const raw = (isOpen.current ? -SWIPE_ACTION_WIDTH : 0) + dx
-    if (raw > 0) return Math.min(12, raw * 0.15)
-    if (raw >= -SWIPE_ACTION_WIDTH) return raw
-    // Rubber band past the action so a long pull feels deliberate.
-    return Math.max(-latest.current.rowWidth * 0.8, -SWIPE_ACTION_WIDTH + (raw + SWIPE_ACTION_WIDTH) * 0.6)
-  }
-  const responder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gesture) => {
-      const state = latest.current
-      if (state.locked || state.busy || state.exiting || confirming.current) return false
-      return Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: () => {
-      offset.stopAnimation()
-      latest.current.onOpenChange(true)
-    },
-    onPanResponderMove: (_, gesture) => {
-      const next = dragPosition(gesture.dx)
-      offset.setValue(next)
-      setArmed(next <= -latest.current.rowWidth * 0.55)
-    },
-    onPanResponderRelease: (_, gesture) => {
-      if (isArmed.current) { void latest.current.requestRemove(); return }
-      const next = dragPosition(gesture.dx)
-      setOpen(gesture.vx < -0.5 || (gesture.vx <= 0.5 && next < -SWIPE_ACTION_WIDTH / 2))
-    },
-    onPanResponderTerminate: () => {
-      setArmed(false)
-      setOpen(false)
-    },
-  })).current
-
-  // Another row opened or the list was tapped: close this one.
-  useEffect(() => {
-    if (!open && isOpen.current && !confirming.current && !exiting) setOpen(false)
-  }, [open])
-
-  useEffect(() => {
-    if (!animateIn) return
-    animate(Animated.timing(presence, {
-      toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true,
-    }), () => presence.setValue(1))
-  }, [])
-
-  useEffect(() => {
-    if (!exiting) return
-    // Slide out first, then close the gap so the rows below glide up instead of jumping.
-    animate(Animated.parallel([
-      Animated.timing(offset, { toValue: -rowWidth, duration: 200, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(presence, { toValue: 0, duration: 200, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-    ]), () => { offset.setValue(-rowWidth); presence.setValue(0) }, () => {
-      height.setValue(measuredHeight.current)
-      setCollapsing(true)
-      animate(Animated.timing(height, {
-        toValue: 0, duration: 180, easing: Easing.inOut(Easing.cubic), useNativeDriver: false,
-      }), () => height.setValue(0), onExited)
-    })
-  }, [exiting])
-
-  const travel = Math.max(SWIPE_ACTION_WIDTH + 1, rowWidth * 0.8)
-  const iconOpacity = offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH * 0.7, -16, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' })
-  const iconScale = Animated.multiply(
-    offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH, -16, 0], outputRange: [1, 0.6, 0.6], extrapolate: 'clamp' }),
-    armed.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }),
-  )
-  // Keep the icon centred in the revealed area while the row is pulled past the action width.
-  const actionShift = offset.interpolate({
-    inputRange: [-travel, -SWIPE_ACTION_WIDTH, 0],
-    outputRange: [-(travel - SWIPE_ACTION_WIDTH) / 2, 0, 0],
-    extrapolate: 'clamp',
-  })
-  const enterShift = presence.interpolate({ inputRange: [0, 1], outputRange: [exiting ? 0 : 8, 0] })
-  const disabled = busy || locked || exiting
-
-  return (
-    <Animated.View
-      style={collapsing ? { height, overflow: 'hidden' } : undefined}
-      onLayout={event => {
-        if (!collapsing) measuredHeight.current = event.nativeEvent.layout.height
-        setRowWidth(event.nativeEvent.layout.width)
-      }}
-    >
-      <Animated.View style={[styles.swipeRow, { opacity: presence, transform: [{ translateY: enterShift }] }]}>
-        <View style={[styles.swipeDeleteAction, styles.swipeDeleteActionCard]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={zhCN.devices.forgetTitle(device.name)}
-            disabled={disabled}
-            onPress={() => void requestRemove()}
-            style={styles.swipeDeleteButton}
-          >
-            <Animated.View style={[styles.swipeDeleteInner, { opacity: iconOpacity, transform: [{ translateX: actionShift }, { scale: iconScale }] }]}>
-              {busy || exiting
-                ? <ActivityIndicator size="small" color={colors.white} />
-                : <Trash2 size={20} color={colors.white} />}
-              <Text style={styles.swipeDeleteText} numberOfLines={1}>{zhCN.devices.forget}</Text>
-            </Animated.View>
-          </Pressable>
-        </View>
-        <Animated.View style={[styles.swipeContent, styles.swipeContentCard, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
-          <View style={[styles.deviceRow, !first && styles.deviceRowDivider]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={device.name}
-              accessibilityActions={[{ name: 'delete', label: zhCN.devices.forget }]}
-              onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'delete') void requestRemove() }}
-              disabled={busy || exiting}
-              onPress={onPress}
-              style={({ pressed }) => [styles.deviceRowInner, pressed && styles.listRowPressed, busy && styles.swipeContentBusy]}
-            >
-              {(() => {
-                const PlatformIcon = platformIcon(device.platform)
-                return (
-                  <View style={styles.deviceGlyph}>
-                    <PlatformIcon size={22} color={colors.ink} strokeWidth={1.8} />
-                  </View>
-                )
-              })()}
-              <View style={styles.deviceRowCopy}>
-                <View style={styles.rowTitleLine}>
-                  <Text style={styles.deviceRowName} numberOfLines={1}>{device.name}</Text>
-                  <Text style={[styles.deviceStatus, device.online && styles.deviceStatusOnline]}>
-                    {device.online ? zhCN.status.online : zhCN.status.offline}
-                  </Text>
-                </View>
-                <View style={styles.rowDetailLine}>
-                  <Text style={styles.deviceRowSubtitle} numberOfLines={1}>{deviceSubtitle(device)}</Text>
-                  <Text style={styles.deviceRowMeta} numberOfLines={1}>{lastSeenText(device.lastSeenAt)}</Text>
-                </View>
-              </View>
-              <ChevronRight size={18} color={colors.subtle} />
-            </Pressable>
-          </View>
-        </Animated.View>
-      </Animated.View>
-    </Animated.View>
-  )
-}
 
 /** Keep visible session lists honest: refresh execution status while mounted. */
 export function useLiveSessionStatus(enabled = true): void {
@@ -492,205 +50,6 @@ export function useLiveSessionStatus(enabled = true): void {
     const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
     return () => clearInterval(timer)
   }, [phase, enabled])
-}
-
-export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, first = false, title, meta, onOpenChange, onPress, onArchive }: {
-  /** Compact rows draw a divider above every row but the first in a folder. */
-  first?: boolean
-  session: RemoteSession
-  open: boolean
-  locked: boolean
-  busy: boolean
-  /** Session history is still loading after the tap (openSession runs before navigation). */
-  opening?: boolean
-  compact?: boolean
-  title?: string
-  meta?: string
-  onOpenChange: (open: boolean) => void
-  onPress: () => void
-  onArchive: () => Promise<boolean>
-}) {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  const reduceMotion = useReduceMotion()
-  // Live turn lifecycle beats the session-list snapshot for the running mark.
-  const liveRunning = useAppStore(state => state.sessionLifecycles[session.sessionId]?.running)
-  const finished = useAppStore(state => state.sessionLifecycles[session.sessionId]?.finished)
-  const running = liveRunning ?? session.running
-  // Official-style row status: spinner while running, red for a failed finish,
-  // green for the "done" reminder until the session is opened.
-  const mark = running ? 'running' : finished
-  const offset = useRef(new Animated.Value(0)).current
-  const armed = useRef(new Animated.Value(0)).current
-  const [rowWidth, setRowWidth] = useState(360)
-  const isOpen = useRef(false)
-  const isArmed = useRef(false)
-  const confirming = useRef(false)
-  const latest = useRef({ rowWidth, reduceMotion, locked, busy, onOpenChange, requestArchive: async () => {} })
-
-  const animate = (animation: Animated.CompositeAnimation, apply: () => void) => {
-    if (latest.current.reduceMotion) { apply(); return }
-    animation.start(({ finished }) => { if (finished) apply() })
-  }
-  const settle = (toValue: number) => animate(
-    Animated.spring(offset, { ...SWIPE_SPRING, toValue }),
-    () => offset.setValue(toValue),
-  )
-  const setArmed = (next: boolean) => {
-    if (isArmed.current === next) return
-    isArmed.current = next
-    if (next) void Haptics.selectionAsync().catch(() => undefined)
-    animate(Animated.spring(armed, { ...SWIPE_SPRING, toValue: next ? 1 : 0 }), () => armed.setValue(next ? 1 : 0))
-  }
-  const setOpen = (next: boolean) => {
-    isOpen.current = next
-    settle(next ? -SWIPE_ACTION_WIDTH : 0)
-    latest.current.onOpenChange(next)
-  }
-  const requestArchive = async () => {
-    const state = latest.current
-    if (confirming.current || state.locked || state.busy) return
-    confirming.current = true
-    setArmed(false)
-    setOpen(true)
-    try {
-      if (!await confirmSessionArchive()) {
-        setOpen(false)
-        return
-      }
-      if (await onArchive()) return
-      setOpen(false)
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined)
-    } finally {
-      confirming.current = false
-    }
-  }
-  latest.current = { rowWidth, reduceMotion, locked, busy, onOpenChange, requestArchive }
-
-  const dragPosition = (dx: number) => {
-    const raw = (isOpen.current ? -SWIPE_ACTION_WIDTH : 0) + dx
-    if (raw > 0) return Math.min(12, raw * 0.15)
-    if (raw >= -SWIPE_ACTION_WIDTH) return raw
-    return Math.max(-latest.current.rowWidth * 0.8, -SWIPE_ACTION_WIDTH + (raw + SWIPE_ACTION_WIDTH) * 0.6)
-  }
-  const responder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gesture) => {
-      const state = latest.current
-      if (state.locked || state.busy || confirming.current) return false
-      return Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2
-    },
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: () => {
-      offset.stopAnimation()
-      latest.current.onOpenChange(true)
-    },
-    onPanResponderMove: (_, gesture) => {
-      const next = dragPosition(gesture.dx)
-      offset.setValue(next)
-      setArmed(next <= -latest.current.rowWidth * 0.55)
-    },
-    onPanResponderRelease: (_, gesture) => {
-      if (isArmed.current) { void latest.current.requestArchive(); return }
-      const next = dragPosition(gesture.dx)
-      setOpen(gesture.vx < -0.5 || (gesture.vx <= 0.5 && next < -SWIPE_ACTION_WIDTH / 2))
-    },
-    onPanResponderTerminate: () => {
-      setArmed(false)
-      setOpen(false)
-    },
-  })).current
-
-  useEffect(() => {
-    if (!open && isOpen.current && !confirming.current) setOpen(false)
-  }, [open])
-
-  const iconOpacity = offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH * 0.7, -16, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' })
-  const iconScale = Animated.multiply(
-    offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH, -16, 0], outputRange: [1, 0.6, 0.6], extrapolate: 'clamp' }),
-    armed.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }),
-  )
-  const actionShift = offset.interpolate({
-    inputRange: [-rowWidth * 0.8, -SWIPE_ACTION_WIDTH, 0],
-    outputRange: [-(rowWidth * 0.8 - SWIPE_ACTION_WIDTH) / 2, 0, 0],
-    extrapolate: 'clamp',
-  })
-  const disabled = locked || busy || opening
-
-  const displayTitle = title ?? sessionTitle(session)
-  const displayMeta = meta ?? updatedText(session.updatedAt)
-  const SessionIcon = session.backend === 'codex'
-    ? Code2
-    : session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi'
-      ? Sparkles
-      : MessageSquareText
-
-  return (
-    <View
-      style={styles.swipeRow}
-      onLayout={event => setRowWidth(event.nativeEvent.layout.width)}
-    >
-      <View style={styles.swipeDeleteAction}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={zhCN.sessions.archive}
-          disabled={disabled}
-          onPress={() => void requestArchive()}
-          style={styles.swipeDeleteButton}
-        >
-          <Animated.View style={[styles.swipeDeleteInner, { opacity: iconOpacity, transform: [{ translateX: actionShift }, { scale: iconScale }] }]}>
-            {busy ? <ActivityIndicator size="small" color={colors.white} /> : <Archive size={20} color={colors.white} />}
-            <Text style={styles.swipeDeleteText} numberOfLines={1}>{zhCN.sessions.archive}</Text>
-          </Animated.View>
-        </Pressable>
-      </View>
-      <Animated.View style={[styles.swipeContent, compact && styles.compactSessionContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
-        <View style={compact ? styles.compactSessionRow : styles.listRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={displayTitle}
-            accessibilityActions={[{ name: 'archive', label: zhCN.sessions.archive }]}
-            onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'archive') void requestArchive() }}
-            disabled={disabled}
-            onPress={onPress}
-            style={({ pressed }) => [styles.swipeContentInner, compact && styles.compactSessionPressTarget, pressed && (compact ? styles.compactSessionPressed : styles.listRowPressed), disabled && styles.swipeContentBusy]}
-          >
-            {mark === 'running'
-              ? (compact
-                ? <View style={styles.compactStatusSlot}><ActivityIndicator size="small" color={colors.primary} /></View>
-                : <View style={styles.rowIcon}><ActivityIndicator size="small" color={colors.primary} /></View>)
-              : mark === 'failed'
-                ? (compact
-                  ? <View style={styles.compactStatusSlot}><View style={styles.statusDotFailed} /></View>
-                  : <View style={styles.rowIcon}><View style={styles.statusDotFailedLarge} /></View>)
-                : mark === 'completed'
-                  ? (compact
-                    ? <View style={styles.compactStatusSlot}><View style={styles.statusDotDone} /></View>
-                    : <View style={styles.rowIcon}><View style={styles.statusDotDoneLarge} /></View>)
-                  : (compact
-                    ? <View style={styles.compactStatusSlot}><SessionIcon size={17} color={colors.muted} /></View>
-                    : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
-            <View style={compact ? [styles.compactSessionCopy, !first && styles.compactSessionDivider] : styles.rowCopy}>
-              <View style={styles.rowTitleLine}>
-                <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
-                {!compact && running && <StatusBadge status="running" />}
-                {compact && (opening
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <Text style={[styles.compactSessionMeta, running && styles.compactSessionRunning]}>{running ? zhCN.status.running : displayMeta}</Text>)}
-              </View>
-              {!compact && <View style={styles.rowDetailLine}>
-                <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
-                <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
-              </View>}
-            </View>
-            {!compact && (opening
-              ? <ActivityIndicator size="small" color={colors.primary} />
-              : <ChevronRight size={20} color={colors.subtle} />)}
-          </Pressable>
-        </View>
-      </Animated.View>
-    </View>
-  )
 }
 
 const connectionStages = ['authenticating', 'transport', 'secure', 'loading'] as const satisfies readonly ConnectionStage[]
@@ -897,6 +256,8 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const descriptor = useAppStore(state => state.hostDescriptor)
   const workspaces = useAppStore(state => state.workspaces)
   const trust = useAppStore(state => state.trustDevice)
+  const forgetDevice = useAppStore(state => state.forgetDevice)
+  const forgetBusy = useAppStore(state => state.busyAction === `forget:${device.deviceId}`)
   const reconnect = useAppStore(state => state.reconnect)
   const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
@@ -904,6 +265,10 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
   const trustAndContinue = async () => {
     if (await trust(device) && device.online) onConnect()
+  }
+  const handleForgetDevice = async () => {
+    if (!await confirmDeviceUnbind(device)) return
+    if (await forgetDevice(device.deviceId)) onBack()
   }
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -967,6 +332,20 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
                     {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
                   </>}
+
+            <View style={styles.primaryArea}>
+              <GroupCard>
+                <GroupRow
+                  first
+                  icon={Trash2}
+                  label={zhCN.devices.forget}
+                  danger
+                  chevron={false}
+                  disabled={forgetBusy}
+                  onPress={() => void handleForgetDevice()}
+                />
+              </GroupCard>
+            </View>
           </View>
         </Screen>
       </BlurHeaderFrame>
@@ -1022,12 +401,6 @@ export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
   </>
 }
 
-function sessionTitle(session: RemoteSession): string {
-  const resolvedTitle = resolveSessionDisplayTitle(session)
-  if (resolvedTitle !== undefined) return resolvedTitle
-  return isSubagentSession(session) ? zhCN.sessions.child : zhCN.sessions.untitled
-}
-
 function platformName(platform: string): string {
   const names: Record<string, string> = { darwin: 'macOS', win32: 'Win', linux: 'Linux', android: 'Android' }
   return names[platform] ?? platform
@@ -1037,32 +410,6 @@ function platformIcon(platform: string): LucideIcon {
   if (platform === 'win32') return Monitor
   if (platform === 'linux') return Server
   return Laptop
-}
-
-function deviceSubtitle(device: RemoteDevice): string {
-  return [
-    platformName(device.platform),
-    device.harnessVersion,
-  ].filter(Boolean).join(' · ')
-}
-
-function updatedText(timestamp?: number): string {
-  if (timestamp === undefined) return zhCN.time.unavailable
-  const delta = Math.max(0, Date.now() - timestamp)
-  if (delta < 60_000) return zhCN.time.justNow
-  if (delta < 3_600_000) return `${zhCN.time.minutesAgo(Math.floor(delta / 60_000))}${zhCN.time.updatedSuffix}`
-  if (delta < 86_400_000) return `${zhCN.time.hoursAgo(Math.floor(delta / 3_600_000))}${zhCN.time.updatedSuffix}`
-  return `${new Date(timestamp).toLocaleDateString(zhCN.time.locale)} ${zhCN.time.updatedSuffix}`
-}
-
-function lastSeenText(value?: number): string {
-  if (value === undefined) return zhCN.time.lastSeenUnavailable
-  if (!Number.isFinite(value)) return zhCN.time.lastSeenUnavailable
-  const delta = Math.max(0, Date.now() - value)
-  if (delta < 60_000) return zhCN.time.lastActive(zhCN.time.now)
-  if (delta < 3_600_000) return zhCN.time.lastActive(zhCN.time.minutesAgo(Math.floor(delta / 60_000)))
-  if (delta < 86_400_000) return zhCN.time.lastActive(zhCN.time.hoursAgo(Math.floor(delta / 3_600_000)))
-  return zhCN.time.lastActive(new Date(value).toLocaleDateString(zhCN.time.locale))
 }
 
 function connectionPath(mode: string | undefined): string {
@@ -1183,10 +530,10 @@ function createStyles(colors: ThemeColors) {
   rowInlineSubtitle: { flex: 1 },
   rowMeta: { ...type.caption, color: colors.muted },
   compactSessionContent: { backgroundColor: colors.background },
-  compactSessionPressTarget: { minHeight: 56, paddingLeft: 52, paddingRight: spacing.xs, alignItems: 'stretch' },
+  compactSessionPressTarget: { minHeight: 64, paddingLeft: 32, paddingRight: spacing.xs, alignItems: 'stretch' },
   compactSessionPressed: { backgroundColor: colors.surfaceStrong },
   compactSessionRow: { flexDirection: 'row', alignItems: 'stretch' },
-  compactSessionCopy: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: spacing.sm },
+  compactSessionCopy: { flex: 1, minWidth: 0, gap: 4, justifyContent: 'center', paddingVertical: spacing.sm },
   compactSessionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   compactSessionTitle: { ...type.body, fontSize: 16, color: colors.ink, flex: 1 },
   compactSessionMeta: { ...type.small, fontSize: 13, color: colors.subtle },

@@ -8,7 +8,7 @@ import type {
   RtcStats,
   RtcStatsEntry,
 } from '../src/rtc-adapter.js'
-import { stunOnlyIceServers } from '../src/rtc-adapter.js'
+import { browserRtcFactory, stunOnlyIceServers } from '../src/rtc-adapter.js'
 import {
   detectSelectedPath,
   detectSelectedTransport,
@@ -604,5 +604,31 @@ describe('RtcDataChannelTransport responder', () => {
 describe('RtcConnectError', () => {
   it('carries a stable code', () => {
     expect(new RtcConnectError('RTC_CONNECT_TIMEOUT', 'x').code).toBe('RTC_CONNECT_TIMEOUT')
+  })
+})
+
+
+describe('browser/native RTC policy', () => {
+  it('passes relay-only ICE to the native peer connection', () => {
+    let configuration: unknown
+    class NativePeerConnection {
+      constructor(value: unknown) { configuration = value }
+    }
+    vi.stubGlobal('RTCPeerConnection', NativePeerConnection)
+    try {
+      new RtcDataChannelTransport({
+        role: 'initiator',
+        factory: browserRtcFactory(),
+        iceTransportPolicy: 'relay',
+        iceServers: [{ urls: 'turn:turn.example.test' }],
+        onSignal: () => {},
+      })
+      expect(configuration).toEqual({
+        iceTransportPolicy: 'relay',
+        iceServers: [{ urls: 'turn:turn.example.test' }],
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

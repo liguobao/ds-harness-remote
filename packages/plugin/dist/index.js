@@ -78407,20 +78407,47 @@ var BOT_REMOTE_OPERATIONS = [
   "state",
   "models",
   "efforts",
+  "providers",
+  "local-agents",
   "exchange",
+  "exchange-text",
+  "file-text",
   "earlier",
+  "chat",
+  "run-stats",
+  "thinking",
   "usage",
   "room-progress",
   "schedules",
+  "schedule-create",
+  "schedule-delete",
+  "memory-view",
+  "memory-history",
+  "memory-ask",
+  "memory-forget",
+  "memory-restore",
+  "folders",
+  "folder-list",
+  "team-workspace",
+  "set-prefs",
+  "browser-takeover",
+  "browser-give-back",
+  "browser-stop",
   "create-bot",
   "duplicate-bot",
   "update-bot",
   "delete-bot",
   "set-main",
   "set-flags",
+  "resume",
+  "bot-new-part",
+  "bot-open-part",
   "create-room",
   "update-room",
   "delete-room",
+  "stop-room-work",
+  "goal-draft",
+  "goal-control",
   "add-agent",
   "agent-session",
   "agent-adopt",
@@ -78430,9 +78457,15 @@ var BOT_REMOTE_OPERATIONS = [
   "send",
   "btw",
   "btw-cancel",
+  "btw-delete",
+  "side-new",
+  "side-ask",
+  "side-cancel",
+  "side-close",
   "room-continue",
   "answer-question",
   "dismiss-question",
+  "dismiss-view",
   "view-reply",
   "approval-answer",
   "stop-member-work"
@@ -81653,27 +81686,76 @@ async function readHarnessManifestVersion(manifestPath) {
     return void 0;
   }
 }
-async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
-  if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
-  let resolvedEntrypoint = entrypoint;
-  try {
-    resolvedEntrypoint = await realpathEntrypoint(entrypoint);
-  } catch {
+function globalNpmRoots(context, execPath, cwd2) {
+  const roots = [];
+  const add3 = (value) => {
+    if (typeof value === "string" && value.length > 0) roots.push(value);
+  };
+  const env = context.env ?? process.env;
+  if (isAbsolute(execPath)) {
+    add3(dirname(execPath));
+    add3(join(dirname(execPath), "..", "lib"));
   }
-  if (!isAbsolute(resolvedEntrypoint)) return void 0;
-  let directory = dirname(resolvedEntrypoint);
-  for (let depth = 0; depth < 8; depth += 1) {
-    const version2 = await readHarnessManifestVersion(join(directory, "package.json"));
+  const prefix = env.npm_config_prefix;
+  if (prefix !== void 0 && prefix.length > 0) {
+    add3(prefix);
+    add3(join(prefix, "lib"));
+  }
+  const appData = env.APPDATA;
+  if (appData !== void 0 && appData.length > 0) add3(join(appData, "npm"));
+  for (const base of ["/usr/local/lib", "/usr/lib", "/opt/homebrew/lib"]) add3(base);
+  return roots;
+}
+async function readHarnessDistributionVersion(entrypoint = process.argv[1], context = {}) {
+  const cwd2 = context.cwd ?? process.cwd();
+  const execPath = context.execPath ?? (typeof process.execPath === "string" ? process.execPath : "");
+  const globalRoots = context.globalRoots ?? globalNpmRoots(context, execPath, cwd2);
+  const manifests = [];
+  const seen = /* @__PURE__ */ new Set();
+  const addManifest = (value) => {
+    if (typeof value !== "string" || value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    manifests.push(value);
+  };
+  const addAncestors = (start) => {
+    let directory = start;
+    for (let depth = 0; depth < 8; depth += 1) {
+      addManifest(join(directory, "package.json"));
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  };
+  const addResolved = (base) => {
+    try {
+      addManifest(createRequire(base).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+    } catch {
+    }
+  };
+  if (typeof entrypoint === "string" && entrypoint.length > 0 && isAbsolute(entrypoint)) {
+    let resolvedEntrypoint = entrypoint;
+    try {
+      resolvedEntrypoint = await realpathEntrypoint(entrypoint);
+    } catch {
+    }
+    if (isAbsolute(resolvedEntrypoint)) {
+      addAncestors(dirname(resolvedEntrypoint));
+      addResolved(resolvedEntrypoint);
+    }
+  }
+  if (isAbsolute(execPath)) {
+    addAncestors(dirname(execPath));
+    addResolved(execPath);
+  }
+  for (const root of globalRoots) addManifest(join(root, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addManifest(join(cwd2, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addResolved(join(cwd2, "package.json"));
+  addResolved(cwd2);
+  for (const manifest of manifests) {
+    const version2 = await readHarnessManifestVersion(manifest);
     if (version2 !== void 0) return version2;
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
   }
-  try {
-    return await readHarnessManifestVersion(createRequire(resolvedEntrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
-  } catch {
-    return void 0;
-  }
+  return void 0;
 }
 
 // src/ids.ts
@@ -84184,9 +84266,33 @@ var HostServerApi = class {
     });
   }
   async listDevices(signal) {
-    const result = await this.request("/api/v1/devices", { signal });
-    if (!Array.isArray(result.items)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list.", false);
-    return result.items.map(parseHostDevice);
+    const devices = [];
+    for await (const page of this.devicePages(signal)) devices.push(...page);
+    return devices;
+  }
+  async *devicePages(signal) {
+    let cursor3;
+    const cursors = /* @__PURE__ */ new Set();
+    const ids = /* @__PURE__ */ new Set();
+    do {
+      signal?.throwIfAborted();
+      const query = new URLSearchParams({ limit: "50" });
+      if (cursor3 !== void 0) query.set("cursor", cursor3);
+      const result = await this.request(`/api/v1/devices?${query}`, { signal });
+      if (!Array.isArray(result.items)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list.", false);
+      const page = result.items.map(parseHostDevice);
+      const next = result.nextCursor;
+      if (next !== void 0 && next !== null && (typeof next !== "string" || next.length === 0 || next.length > 512 || cursors.has(next) || page.length === 0)) {
+        throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid device list cursor.", false);
+      }
+      for (const device of page) {
+        if (ids.has(device.deviceId)) throw new ServerApiError("INVALID_MESSAGE", "The Server returned a duplicate device.", false);
+        ids.add(device.deviceId);
+      }
+      cursor3 = typeof next === "string" ? next : void 0;
+      if (cursor3 !== void 0) cursors.add(cursor3);
+      yield page;
+    } while (cursor3 !== void 0);
   }
   async deviceFor(peerDeviceId, signal) {
     const result = await this.request(`/api/v1/devices/${encodeURIComponent(peerDeviceId)}`, { signal });
@@ -86255,22 +86361,39 @@ var ClientModeRuntime = class {
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     this.assertHostAuthorizationForDeviceDiscovery();
     this.requireIdentity();
-    const serverDevices = await this.server.listDevices(signal);
-    signal?.throwIfAborted();
-    const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
-    const results = await Promise.allSettled(remoteDevices.map(async (device) => {
-      signal?.throwIfAborted();
-      await this.connection.authorizeHostPeer(device, signal);
-      const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }));
-      signal?.throwIfAborted();
+    const devices = [];
+    for await (const page of this.server.devicePages(signal)) {
+      const remoteDevices = page.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
+      const resolved = new Array(remoteDevices.length);
+      let next = 0;
+      let failed = false;
+      const workers = await Promise.allSettled(Array.from({ length: Math.min(8, remoteDevices.length) }, async () => {
+        try {
+          while (!failed && next < remoteDevices.length) {
+            signal.throwIfAborted();
+            this.assertHostAuthorizationForDeviceDiscovery();
+            const index = next++;
+            const device = remoteDevices[index];
+            await this.connection.authorizeHostPeer(device, signal);
+            const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }));
+            signal.throwIfAborted();
+            this.assertHostAuthorizationForDeviceDiscovery();
+            resolved[index] = { ...device, ...presence };
+          }
+        } catch (error62) {
+          failed = true;
+          throw error62;
+        }
+      }));
+      signal.throwIfAborted();
       this.assertHostAuthorizationForDeviceDiscovery();
-      return { ...device, ...presence };
-    }));
+      const failure5 = workers.find((result) => result.status === "rejected");
+      if (failure5?.status === "rejected") throw failure5.reason;
+      devices.push(...resolved);
+    }
     signal.throwIfAborted();
     this.assertHostAuthorizationForDeviceDiscovery();
-    const failure5 = results.find((result) => result.status === "rejected");
-    if (failure5?.status === "rejected") throw failure5.reason;
-    return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    return devices;
   }
   /**
    * Device discovery is exposed through the local app control route. When this
@@ -86880,7 +87003,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 
 // src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -86900,21 +87023,28 @@ var trustedPeerSchema = external_exports.object({
 }).strict();
 var trustedPeersSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
-  peers: external_exports.array(trustedPeerSchema).max(256)
+  // Discovery can persist multiple pages; reading must accept every record we write.
+  peers: external_exports.array(trustedPeerSchema)
 }).strict();
 var IdentityInvalidError = class extends Error {
   code = "IDENTITY_INVALID";
 };
 var IdentityStore = class {
-  directory;
+  storageDirectory;
+  get directory() {
+    return this.storageDirectory;
+  }
   identity;
   peers = /* @__PURE__ */ new Map();
+  defaultOptions;
   constructor(options = {}) {
     const env = options.env ?? process.env;
     const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    this.directory = options.directory ?? join5(dshHome, "remote");
+    this.storageDirectory = options.directory ?? join5(dshHome, "ds-harness-remote");
+    this.defaultOptions = options.directory === void 0 ? options : void 0;
   }
   async loadOrCreate(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
   }
@@ -86968,6 +87098,7 @@ var IdentityStore = class {
    * lock another process holds — and cannot leave itself unprotected either.
    */
   async reset(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, async () => {
       this.identity = void 0;
@@ -87025,6 +87156,144 @@ var IdentityStore = class {
     }, 384);
   }
 };
+var legacyRootPinSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  dev: external_exports.number().int().nonnegative(),
+  ino: external_exports.number().int().nonnegative()
+}).strict();
+async function prepareDefaultIdentityDirectory(options = {}) {
+  if (options.directory !== void 0) return options.directory;
+  const env = options.env ?? process.env;
+  const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+  const source = join5(home, "remote");
+  const target3 = join5(home, "ds-harness-remote");
+  await mkdir3(home, { recursive: true, mode: 448 });
+  const lockDirectory = join5(home, ".ds-harness-remote-migration");
+  await storageDirectoryStat(lockDirectory);
+  await ensureDirectory(lockDirectory);
+  return withIdentityLock(lockDirectory, async () => {
+    const old = await storageDirectoryStat(source);
+    const current = await storageDirectoryStat(target3);
+    const pinPath = join5(lockDirectory, "legacy-root.json");
+    const pinMetadata = await lstat(pinPath).catch((error62) => {
+      if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+      throw error62;
+    });
+    let pin;
+    if (pinMetadata !== void 0) {
+      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.");
+      }
+      await assertPrivateMode2(pinPath);
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+    }
+    if (old !== void 0) {
+      if (current !== void 0) {
+        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.");
+      }
+      await assertOwnedRemoteStorage(source);
+      await assertStorageIdle(source);
+      if (pin !== void 0) {
+        if (pin.dev !== old.dev || pin.ino !== old.ino) throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.");
+        return source;
+      }
+      try {
+        await rename2(source, target3);
+      } catch (error62) {
+        if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
+        const remaining = await storageDirectoryStat(source);
+        if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
+        await assertOwnedRemoteStorage(source);
+        await assertStorageIdle(source);
+        await atomicJsonWrite(pinPath, { schemaVersion: 1, dev: old.dev, ino: old.ino }, 384);
+        return source;
+      }
+    } else if (pin !== void 0) {
+      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.");
+      await assertOwnedRemoteStorage(target3);
+    }
+    return target3;
+  });
+}
+async function assertOwnedRemoteStorage(root) {
+  const rejected = () => new IdentityInvalidError("Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.");
+  const identityFiles = /* @__PURE__ */ new Set(["device.json", "device.key", "trusted-peers.json", "server-credentials.json"]);
+  let identities = 0;
+  const checkIdentity = async (directory, scope2) => {
+    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root && entry.name === "servers" && entry.isDirectory()));
+    for (const entry of entries) {
+      if (!entry.isFile() || !identityFiles.has(entry.name)) throw rejected();
+      const metadata = await lstat(join5(directory, entry.name));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) throw rejected();
+    }
+    const names = new Set(entries.map((entry) => entry.name));
+    if (!names.has("device.json") || !names.has("device.key")) throw rejected();
+    await assertPrivateMode2(join5(directory, "device.key"));
+    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) throw rejected();
+    if (names.has("trusted-peers.json")) {
+      const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+      const ids = /* @__PURE__ */ new Set();
+      for (const peer of peers) {
+        if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected();
+        ids.add(peer.deviceId);
+      }
+    }
+    if (names.has("server-credentials.json")) {
+      const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
+      if (typeof raw.serverUrl !== "string") throw rejected();
+      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record11.deviceId);
+      if (credentials === void 0) throw rejected();
+      const origin = new URL(credentials.serverUrl);
+      if (!["http:", "https:"].includes(origin.protocol)) throw rejected();
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) throw rejected();
+    }
+    identities++;
+  };
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const flat = entries.filter((entry) => entry.name !== "servers");
+    if (flat.length > 0) {
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected();
+      await checkIdentity(root);
+    }
+    const servers = entries.find((entry) => entry.name === "servers");
+    if (servers !== void 0) {
+      if (!servers.isDirectory()) throw rejected();
+      for (const scope2 of await readdir(join5(root, "servers"), { withFileTypes: true })) {
+        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected();
+        for (const role2 of await readdir(join5(root, "servers", scope2.name), { withFileTypes: true })) {
+          if (!role2.isDirectory() || !["host", "client"].includes(role2.name)) throw rejected();
+          await checkIdentity(join5(root, "servers", scope2.name, role2.name), scope2.name);
+        }
+      }
+    }
+    if (identities === 0) throw rejected();
+  } catch {
+    throw rejected();
+  }
+}
+async function storageDirectoryStat(path) {
+  try {
+    const entry = await lstat(path);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.");
+    }
+    return entry;
+  } catch (error62) {
+    if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+    throw error62;
+  }
+}
+async function assertStorageIdle(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+      throw new IdentityInvalidError("Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.");
+    }
+    if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
+  }
+}
 function serverStorageDirectory(root, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
   const scope2 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
@@ -87312,7 +87581,7 @@ var ControlStatusStream = class {
 
 // src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
+import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
@@ -89092,7 +89361,14 @@ function findImageBlock(value, attachmentId) {
   return void 0;
 }
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "darwin") return macOSCodexBinaryCandidates(userHome);
+  if (hostPlatform === "win32") {
+    return [.../* @__PURE__ */ new Set([...windowsBundledCodexCandidates(userHome), configured])];
+  }
+  return [configured];
+}
+function macOSCodexBinaryCandidates(userHome) {
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
     join6(userHome, "Applications", "ChatGPT.app")
@@ -89115,8 +89391,23 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
+    "codex"
   ])];
+}
+function windowsBundledCodexCandidates(userHome) {
+  const localAppData = process.env.LOCALAPPDATA ?? join6(userHome, "AppData", "Local");
+  const binRoot = join6(localAppData, "OpenAI", "Codex", "bin");
+  try {
+    return readdirSync2(binRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(binRoot, entry.name, "codex.exe")).filter((candidate) => existsSync2(candidate)).map((candidate) => {
+      try {
+        return { candidate, mtime: statSync2(candidate).mtimeMs };
+      } catch {
+        return { candidate, mtime: 0 };
+      }
+    }).sort((left, right) => right.mtime - left.mtime).map((entry) => entry.candidate);
+  } catch {
+    return [];
+  }
 }
 function parseCallEnvelope(input4) {
   if (!isRecord13(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
@@ -90160,7 +90451,7 @@ var IsolatedAcpClient = class {
 };
 
 // src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/remote-terminal-controller.ts
@@ -90843,7 +91134,7 @@ var WorkspaceBridge = class {
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
-          const info2 = await lstat(item);
+          const info2 = await lstat2(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
         }
@@ -90942,7 +91233,7 @@ var WorkspaceBridge = class {
     const rel = relative2(root, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
-      const info = await lstat(candidate);
+      const info = await lstat2(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
       const canonicalRel = relative2(root, canonical);
@@ -94915,7 +95206,7 @@ function isRecord18(value) {
 
 // src/acp/backend-installer.ts
 import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
 import { promisify as promisify4 } from "node:util";
@@ -94974,7 +95265,7 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat10 = statSync2(candidate);
+    const stat10 = statSync3(candidate);
     if (!stat10.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
@@ -95440,13 +95731,15 @@ var PluginControlRuntime = class {
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const value = record9(payload);
+    if (value.debugLogging !== void 0 && typeof value.debugLogging !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The debug logging switch must be a boolean.");
     if (value.remoteToolsEnabled !== void 0 && typeof value.remoteToolsEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The Remote Tools switch must be a boolean.");
     if (value.terminalEnabled !== void 0 && typeof value.terminalEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The terminal switch must be a boolean.");
     if (value.ports !== void 0 && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError("INVALID_MESSAGE", "Loopback ports must be integers.");
-    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
+    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0 && value.debugLogging === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
+      logLevel: value.debugLogging === void 0 ? current.logLevel : value.debugLogging ? "debug" : "info",
       terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? true : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === void 0 ? current.remoteTools?.enabled ?? true : value.remoteToolsEnabled },
       loopback: { ports: value.ports === void 0 ? current.loopback?.ports ?? [] : value.ports }
@@ -95789,9 +96082,10 @@ var SafeLogger = class {
     this.write("error", message, fields);
   }
   write(level, message, fields) {
-    if (levels.indexOf(level) < levels.indexOf(this.threshold)) return;
+    const threshold = typeof this.threshold === "function" ? this.threshold() : this.threshold;
+    if (levels.indexOf(level) < levels.indexOf(threshold)) return;
     const safeFields = fields === void 0 ? "" : ` ${JSON.stringify(redact(fields))}`;
-    this.sink[level](`[dsh-remote] ${message}${safeFields}`);
+    this.sink[level](`[ds-harness-remote] ${message}${safeFields}`);
   }
 };
 function redact(value, key = "") {
@@ -95804,7 +96098,7 @@ function redact(value, key = "") {
 // src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -95920,7 +96214,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat2(upload.temp);
+    const temp = await lstat3(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -95979,8 +96273,8 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root = await lstat2(upload.root);
-      const temp = await lstat2(upload.temp);
+      const root = await lstat3(upload.root);
+      const temp = await lstat3(upload.temp);
       if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
@@ -96766,11 +97060,11 @@ var HostServerConnection = class {
     let messageQueue = Promise.resolve();
     await new Promise((resolve9, reject) => {
       let settled = false;
-      const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
+      let helloTimer;
       const finish = (error62) => {
         if (settled) return;
         settled = true;
-        clearTimeout(helloTimer);
+        if (helloTimer !== void 0) clearTimeout(helloTimer);
         this.online = false;
         if (this.socket === socket) this.socket = void 0;
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
@@ -96778,6 +97072,7 @@ var HostServerConnection = class {
         void cleanup.finally(() => error62 === void 0 ? resolve9() : reject(error62));
       };
       socket.onopen = () => {
+        helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
         this.sendControl("hello", {
           role: "host",
           deviceId: this.identity.deviceId,
@@ -97757,7 +98052,7 @@ function closeCode(code) {
 
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/promises";
+import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
@@ -98061,7 +98356,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion);
+      nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
       if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
@@ -98524,7 +98819,7 @@ var HarnessRemoteBridge = class {
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
     }
     try {
-      const rootLstat = await lstat3(root);
+      const rootLstat = await lstat4(root);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
       }
@@ -98538,12 +98833,12 @@ var HarnessRemoteBridge = class {
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
         }
-        const dirLstat = await lstat3(currentPath);
+        const dirLstat = await lstat4(currentPath);
         if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.");
         }
       }
-      const targetLstat = await lstat3(candidate);
+      const targetLstat = await lstat4(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
       }
@@ -98611,15 +98906,108 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   }
   return payload;
 }
-function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion) {
+async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
   if (endpoint !== "session/attachment" || !isRecord21(payload) || !isRecord21(payload.args)) return payload;
   const request = isRecord21(payload.args.request) ? payload.args.request : void 0;
-  if (request === void 0 || isDshV022OrNewer(harnessVersion)) return payload;
+  if (request === void 0) return payload;
   const attachment = isRecord21(request.attachment) ? request.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
-  const sessionId = request.sessionId;
-  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  if (!isDshV022OrNewer(harnessVersion)) {
+    const sessionId = request.sessionId;
+    return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  }
+  if (attachment !== void 0 && isCompleteImageReference(attachment)) return payload;
+  const reference = await findSessionAttachmentReference(gateway, request.sessionId, attachmentId, signal);
+  if (reference === void 0) return payload;
+  const mergedAttachment = attachment !== void 0 ? { ...reference, ...attachment } : reference;
+  return { ...payload, args: { ...payload.args, request: { ...request, attachment: mergedAttachment } } };
+}
+async function findSessionAttachmentReference(gateway, sessionId, attachmentId, signal) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
+  try {
+    const result = await gateway.dispatch("session/events", { args: { request: { address: { kind: "session", sessionId } } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  let beforeSeq = void 0;
+  for (let page = 0; page < 10; page += 1) {
+    try {
+      const pageRequest = {
+        address: { kind: "session", sessionId },
+        maxMessages: 200,
+        ...beforeSeq !== void 0 ? { beforeSeq } : {}
+      };
+      const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
+      const reference = extractAttachmentReference(result, attachmentId);
+      if (reference !== void 0) return reference;
+      if (result.ok === true && isRecord21(result.value)) {
+        if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
+          beforeSeq = result.value.beforeSeq;
+          continue;
+        }
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+  try {
+    const result = await gateway.dispatch("session/history", { args: { request: { sessionId, maxMessages: 200 } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  return void 0;
+}
+function extractAttachmentReference(result, attachmentId) {
+  if (result.ok !== true) return void 0;
+  const value = result.value;
+  let records;
+  if (Array.isArray(value)) records = value;
+  else if (isRecord21(value)) {
+    if (Array.isArray(value.records)) records = value.records;
+    else if (Array.isArray(value.events)) records = value.events;
+  }
+  if (records === void 0) return void 0;
+  for (const record11 of records) {
+    const found = findImageReference(record11, attachmentId, 0);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function findImageReference(value, attachmentId, depth) {
+  if (depth > 12 || value === null || typeof value !== "object") return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findImageReference(item, attachmentId, depth + 1);
+      if (found !== void 0) return found;
+    }
+    return void 0;
+  }
+  const block = value;
+  const candidate = isRecord21(block.attachment) ? block.attachment : block;
+  const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
+  if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
+    return {
+      attachmentId,
+      mediaType: candidate.mediaType,
+      bytes: candidate.bytes,
+      width: candidate.width,
+      height: candidate.height,
+      ...typeof candidate.name === "string" ? { name: candidate.name } : {}
+    };
+  }
+  for (const nested of Object.values(block)) {
+    if (nested === null || typeof nested !== "object") continue;
+    const found = findImageReference(nested, attachmentId, depth + 1);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function isCompleteImageReference(value) {
+  return typeof value.mediaType === "string" && typeof value.bytes === "number" && typeof value.width === "number" && typeof value.height === "number";
 }
 function isDshV022OrNewer(version2) {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2?.trim() ?? "");
@@ -100015,7 +100403,7 @@ Waiting for authorization...
 async function status(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote status");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   const lines = [
     "Remote Host status",
@@ -100065,7 +100453,7 @@ Run "ds-harness-remote login" to authorize this Host.
 async function logout(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote logout");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   if (!await exists3(join16(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
@@ -100092,7 +100480,7 @@ async function logout(args, runtime) {
 }
 async function hostContext(runtime) {
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
@@ -100227,7 +100615,6 @@ var AcpGateway = class {
 var name = "ds-harness-remote";
 var legacyLoaderModuleNames = /* @__PURE__ */ new Set(["@dsh-remote/plugin"]);
 var pluginSettingsNamespace = "ds-harness-remote";
-var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
 function apply(ctx, entry = void 0) {
@@ -100238,7 +100625,8 @@ function apply(ctx, entry = void 0) {
     if (isLegacySettingsProvider(settings)) return;
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
-  const activateWhenCarrierReady = (runtimeContext) => {
+  const activateWhenCarrierReady = async (runtimeContext) => {
+    const identityDirectory = await prepareDefaultIdentityDirectory();
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
     const webServer = runtimeContext.get("webServer");
@@ -100248,13 +100636,13 @@ function apply(ctx, entry = void 0) {
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
-          new IdentityStore().directory,
+          identityDirectory,
           void 0,
           void 0,
           void 0
         );
         return control.register(connection, webServer);
-      }, "dsh-remote pending control");
+      }, "ds-harness-remote pending control");
     };
     const startActiveRuntime = async (activeContext) => {
       await disposePendingControl?.();
@@ -100274,11 +100662,11 @@ async function activate(ctx, readConfig, entryId) {
   const connection = ctx.get("connection");
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const defaultIdentityDirectory = new IdentityStore().directory;
+  const defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
   if (!config2.enabled) {
     if (connection !== void 0) {
       const controlRuntime2 = new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, void 0, void 0);
-      ctx.effect(() => controlRuntime2.register(connection, webServer), "dsh-remote disabled control");
+      ctx.effect(() => controlRuntime2.register(connection, webServer), "ds-harness-remote disabled control");
     }
     return;
   }
@@ -100299,7 +100687,7 @@ async function activate(ctx, readConfig, entryId) {
       ctx.logger.error(message);
       console.error(message);
     }
-  }, config2.logLevel);
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const pluginUpgrade = new LocalPluginUpgrade(
     updateChecker,
@@ -100326,7 +100714,7 @@ async function activate(ctx, readConfig, entryId) {
     const peer = fallbackPeer;
     fallbackPeer = void 0;
     return peer?.dispose?.();
-  }, "dsh-remote fallback owner peer");
+  }, "ds-harness-remote fallback owner peer");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
   const localTypertGateway = hostGateway.local();
   localTypertGateway.createPeer = () => {
@@ -100447,7 +100835,7 @@ async function activate(ctx, readConfig, entryId) {
       await clientRuntime?.close();
       await runtime.close();
     };
-  }, "dsh-remote lifecycle");
+  }, "ds-harness-remote lifecycle");
   if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? void 0 : clientRuntime);
 }
 function readEntryConfig(entry) {
@@ -100491,7 +100879,6 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
       resolveConfig(value);
     }
   });
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope2, hmr));
   return {
     get: () => scope2.get(),
     replace: (section) => runHmrSafe(async () => {
@@ -100501,39 +100888,6 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
 }
 function isLegacySettingsProvider(value) {
   return typeof value === "object" && value !== null && typeof value.register === "function";
-}
-function reportSettingsMigration(ctx, migration) {
-  if (migration === "migrated") ctx.logger.info("migrated legacy Remote settings namespace");
-  if (migration === "failed") ctx.logger.warn("failed to migrate legacy Remote settings namespace");
-}
-async function migrateLegacySettings(settings, currentScope, hmr) {
-  if (typeof settings.describe !== "function") return "skipped";
-  try {
-    let descriptors = settings.describe();
-    const current = descriptors.find((descriptor) => descriptor.ns === pluginSettingsNamespace);
-    if (isPlainRecord2(current?.user)) return "skipped";
-    let legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    if (legacy === void 0) {
-      settings.register(legacySettingsNamespace, Config, {
-        applies: "restart",
-        validate: (value) => {
-          resolveConfig(value);
-        }
-      });
-      descriptors = settings.describe();
-      legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    }
-    if (!isPlainRecord2(legacy?.user) || Object.keys(legacy.user).length === 0) return "skipped";
-    await runHmrSafe(async () => {
-      await currentScope.replace(legacy.user);
-    }, hmr);
-    return "migrated";
-  } catch {
-    return "failed";
-  }
-}
-function isPlainRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 async function disableLegacyLoaderEntries(ctx, logger2) {
   const loader = ctx.get("loader");
@@ -100597,8 +100951,8 @@ export {
   apply,
   createRemoteFileContentProvider,
   fingerprint2 as fingerprint,
-  migrateLegacySettings,
   name,
+  prepareDefaultIdentityDirectory,
   resolveConfig,
   runCli,
   serverStorageDirectory

@@ -13,7 +13,7 @@ import {
 } from './config.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from './control-runtime.js'
 import type { HostWebServerLike } from './control-route.js'
-import { IdentityStore, serverStorageDirectory } from './identity-store.js'
+import { IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
 import type { ScheduleCreateService } from './harness-remote-bridge.js'
@@ -52,7 +52,6 @@ const legacyLoaderModuleNames = new Set(['@dsh-remote/plugin'])
 // Settings-registry generation (≤0.1.6). The branded `SettingsNamespace` type
 // was removed with the registry in rc.1, so the literals stay plain strings.
 const pluginSettingsNamespace = 'ds-harness-remote'
-const legacySettingsNamespace = 'dsh-remote'
 
 /** Fallback entry id when the Loader cannot locate this plugin's entry. */
 const DEFAULT_ENTRY_ID = 'ds-harness-remote'
@@ -75,7 +74,6 @@ interface LegacySettingsProviderLike {
     applies?: 'live' | 'restart'
     validate?: (value: ConfigInput) => void
   }): LegacySettingsScopeLike
-  describe?(): Array<{ ns: string; user?: unknown }>
 }
 
 /** Union of the two settings service generations this plugin must activate on. */
@@ -122,7 +120,8 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   // Harness `connection` service is required before the runtime starts. dsh-TUI
   // support is deferred to a later release and no terminal-specific services
   // are resolved here.
-  const activateWhenCarrierReady = (runtimeContext: Context): void | Promise<void> => {
+  const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
+    const identityDirectory = await prepareDefaultIdentityDirectory()
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
     const webServer = runtimeContext.get('webServer') as HostWebServerLike | undefined
@@ -132,13 +131,13 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
-          new IdentityStore().directory,
+          identityDirectory,
           undefined,
           undefined,
           undefined,
         )
         return control.register(connection, webServer)
-      }, 'dsh-remote pending control')
+      }, 'ds-harness-remote pending control')
     }
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
       await disposePendingControl?.()
@@ -166,11 +165,11 @@ async function activate(
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
   const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
-  const defaultIdentityDirectory = new IdentityStore().directory
+  const defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
   if (!config.enabled) {
     if (connection !== undefined) {
       const controlRuntime = new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, undefined, undefined)
-      ctx.effect(() => controlRuntime.register(connection, webServer), 'dsh-remote disabled control')
+      ctx.effect(() => controlRuntime.register(connection, webServer), 'ds-harness-remote disabled control')
     }
     return
   }
@@ -182,7 +181,7 @@ async function activate(
     info: message => { ctx.logger.info(message); console.info(message) },
     warn: message => { ctx.logger.warn(message); console.warn(message) },
     error: message => { ctx.logger.error(message); console.error(message) },
-  }, config.logLevel)
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
   const updateChecker = new PluginUpdateChecker(logger)
@@ -225,7 +224,7 @@ async function activate(
     const peer = fallbackPeer
     fallbackPeer = undefined
     return peer?.dispose?.()
-  }, 'dsh-remote fallback owner peer')
+  }, 'ds-harness-remote fallback owner peer')
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer)
   const localTypertGateway = hostGateway.local()
   localTypertGateway.createPeer = () => {
@@ -367,7 +366,7 @@ async function activate(
       await clientRuntime?.close()
       await runtime.close()
     }
-  }, 'dsh-remote lifecycle')
+  }, 'ds-harness-remote lifecycle')
   if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? undefined : clientRuntime)
 }
 
@@ -450,7 +449,6 @@ async function createSettingsBinding(
     applies: 'restart',
     validate: value => { resolveConfig(value) },
   })
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope, hmr))
   return {
     get: () => scope.get(),
     replace: section => runHmrSafe<void>(async () => { await scope.replace(section) }, hmr),
@@ -461,52 +459,6 @@ async function createSettingsBinding(
 function isLegacySettingsProvider(value: unknown): value is LegacySettingsProviderLike {
   return typeof value === 'object' && value !== null
     && typeof (value as { register?: unknown }).register === 'function'
-}
-
-function reportSettingsMigration(
-  ctx: Context,
-  migration: 'migrated' | 'skipped' | 'failed',
-): void {
-  if (migration === 'migrated') ctx.logger.info('migrated legacy Remote settings namespace')
-  if (migration === 'failed') ctx.logger.warn('failed to migrate legacy Remote settings namespace')
-}
-
-/**
- * Preserve existing installs after the package/settings namespace rename. The
- * old section remains untouched as a rollback source; only its raw user layer
- * is copied, once, when the current namespace has no user layer of its own.
- * Only reachable on the ≤0.1.6 registry generation.
- */
-export async function migrateLegacySettings(
-  settings: LegacySettingsProviderLike,
-  currentScope: LegacySettingsScopeLike,
-  hmr?: HmrContextLike,
-): Promise<'migrated' | 'skipped' | 'failed'> {
-  if (typeof settings.describe !== 'function') return 'skipped'
-  try {
-    let descriptors = settings.describe()
-    const current = descriptors.find(descriptor => descriptor.ns === pluginSettingsNamespace)
-    if (isPlainRecord(current?.user)) return 'skipped'
-
-    let legacy = descriptors.find(descriptor => descriptor.ns === legacySettingsNamespace)
-    if (legacy === undefined) {
-      settings.register(legacySettingsNamespace, Config, {
-        applies: 'restart',
-        validate: value => { resolveConfig(value) },
-      })
-      descriptors = settings.describe()
-      legacy = descriptors.find(descriptor => descriptor.ns === legacySettingsNamespace)
-    }
-    if (!isPlainRecord(legacy?.user) || Object.keys(legacy.user).length === 0) return 'skipped'
-    await runHmrSafe<void>(async () => { await currentScope.replace(legacy!.user as Config) }, hmr)
-    return 'migrated'
-  } catch {
-    return 'failed'
-  }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 async function disableLegacyLoaderEntries(ctx: Context, logger: SafeLogger): Promise<void> {
@@ -542,7 +494,7 @@ export type { ResolvedConfig } from './config.js'
 export { resolveConfig } from './config.js'
 export { ConnectionController, ConnectionRejectedError } from './connection-controller.js'
 export type { PeerConnectionContext, RpcRouterFactory } from './connection-controller.js'
-export { fingerprint, IdentityInvalidError, IdentityStore } from './identity-store.js'
+export { fingerprint, IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory } from './identity-store.js'
 export { serverStorageDirectory } from './identity-store.js'
 export type { HostIdentity, RemoteDeviceRole, TrustedPeer } from './identity-store.js'
 export { ClientServerApi, HostServerApi, ServerApiError } from './server-api.js'

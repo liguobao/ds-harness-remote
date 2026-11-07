@@ -563,12 +563,23 @@ export class HarnessAlphaClient {
     if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the stop request.')
   }
 
-  async sessionAttachment(sessionId: string, attachmentId: string): Promise<{ attachment: unknown; data: string }> {
+  async sessionAttachment(
+    sessionId: string,
+    attachment: string | Record<string, unknown>,
+  ): Promise<{ attachment: unknown; data: string }> {
+    const reference = typeof attachment === 'string' ? undefined : attachment
+    const attachmentId = typeof attachment === 'string'
+      ? attachment
+      : typeof attachment.attachmentId === 'string' ? attachment.attachmentId : undefined
     const result = await this.callValue<{ attachment?: unknown; data?: string; mediaType?: string }>('session/attachment', {
-      request: { sessionId, attachmentId },
+      request: {
+        sessionId,
+        ...(attachmentId === undefined ? {} : { attachmentId }),
+        ...(reference === undefined ? {} : { attachment: reference }),
+      },
     })
     return {
-      attachment: result.attachment ?? { mediaType: result.mediaType },
+      attachment: result.attachment ?? reference ?? { mediaType: result.mediaType },
       data: result.data ?? '',
     }
   }
@@ -672,11 +683,25 @@ export class HarnessAlphaClient {
 
   async scheduleCatalog(): Promise<ScheduleCatalogEntry[]> {
     const result = await this.callValue<ScheduleCatalogEntry[] | { items: ScheduleCatalogEntry[] }>('schedule/catalog', {})
-    if (Array.isArray(result)) return result
-    if (result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)) {
-      return (result as { items: ScheduleCatalogEntry[] }).items
+    const list = Array.isArray(result)
+      ? result
+      : result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)
+        ? (result as { items: ScheduleCatalogEntry[] }).items
+        : null
+    if (list === null) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
     }
-    throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
+    return list.map(entry => {
+      if (typeof entry.sessionId === 'string' && entry.sessionId.length > 0) return entry
+      const target = (entry as unknown as Record<string, unknown>).target
+      if (target && typeof target === 'object' && !Array.isArray(target)) {
+        const targetObj = target as Record<string, unknown>
+        if (targetObj.kind === 'session' && typeof targetObj.sessionId === 'string' && targetObj.sessionId.length > 0) {
+          return { ...entry, sessionId: targetObj.sessionId }
+        }
+      }
+      return entry
+    })
   }
 
   async scheduleCreate(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord> {

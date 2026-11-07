@@ -376,9 +376,36 @@ export class HostServerApi {
   }
 
   async listDevices(signal?: AbortSignal): Promise<ServerHostDevice[]> {
-    const result = await this.request<{ items?: unknown }>('/api/v1/devices', { signal })
-    if (!Array.isArray(result.items)) throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid device list.', false)
-    return result.items.map(parseHostDevice)
+    const devices: ServerHostDevice[] = []
+    for await (const page of this.devicePages(signal)) devices.push(...page)
+    return devices
+  }
+
+  async *devicePages(signal?: AbortSignal): AsyncGenerator<ServerHostDevice[]> {
+    let cursor: string | undefined
+    const cursors = new Set<string>()
+    const ids = new Set<string>()
+    do {
+      signal?.throwIfAborted()
+      const query = new URLSearchParams({ limit: '50' })
+      if (cursor !== undefined) query.set('cursor', cursor)
+      const result = await this.request<{ items?: unknown; nextCursor?: unknown }>(`/api/v1/devices?${query}`, { signal })
+      if (!Array.isArray(result.items)) throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid device list.', false)
+      const page = result.items.map(parseHostDevice)
+      const next = result.nextCursor
+      if (next !== undefined && next !== null
+        && (typeof next !== 'string' || next.length === 0 || next.length > 512 || cursors.has(next) || page.length === 0)) {
+        throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid device list cursor.', false)
+      }
+      for (const device of page) {
+        if (ids.has(device.deviceId)) throw new ServerApiError('INVALID_MESSAGE', 'The Server returned a duplicate device.', false)
+        ids.add(device.deviceId)
+      }
+      cursor = typeof next === 'string' ? next : undefined
+      if (cursor !== undefined) cursors.add(cursor)
+      // Older Servers may ignore limit and return all devices with no cursor.
+      yield page
+    } while (cursor !== undefined)
   }
 
   async deviceFor(peerDeviceId: string, signal?: AbortSignal): Promise<AuthorizedPeerDevice> {

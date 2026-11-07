@@ -40,7 +40,7 @@ Omit `sudo -H` when already in a root shell. For a repository checkout, replace 
 The installer:
 
 1. Reuses `DSH_COMMAND` or an existing DSH on PATH without upgrading it.
-2. If absent, installs official Node.js 24.9.0, DSH and private pnpm 9.15.4 under `/opt/dsh-remote/runtime.*`. The Node.js archive is pinned to the [official SHA-256 checksums](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt). The stable launcher is `/opt/dsh-remote/bin/dsh`, reused on subsequent runs.
+2. If absent, installs official Node.js 24.9.0, DSH and private pnpm 9.15.4 under `/opt/ds-harness-remote/runtime.*`. The Node.js archive is pinned to the [official SHA-256 checksums](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt). The stable launcher is `/opt/ds-harness-remote/bin/dsh`, reused on subsequent runs.
 3. Installs/updates Remote using official `dsh plugin` management, defaulting to the `web` profile and npm `latest`.
 4. If a token is supplied, exchanges it through the existing Host registration-code API and persists device credentials. The token is not written to logs, service configuration or persistent device-credential fields. It is not a model API key.
 5. Verifies the profile has an active official Web Host startup, configures a systemd **system service**, enables boot startup, and starts/restarts the matching installer-managed instance. No login or linger is needed.
@@ -54,13 +54,21 @@ Without a token, registration is skipped; sign in through Remote later. A runnin
 For the default profile:
 
 ```sh
-sudo systemctl status dsh-remote-web.service
-sudo systemctl is-enabled dsh-remote-web.service
+sudo systemctl status ds-harness-remote-web.service
+sudo systemctl is-enabled ds-harness-remote-web.service
 ```
 
 Web binds only to `127.0.0.1`. The installer checks systemd process state, not end-to-end Host availability in a client.
 
 ### Reinstallation and safety
+
+Remote credentials live under `$DSH_HOME/ds-harness-remote` (default `~/.dsh/ds-harness-remote`). Installation credential setup and the first startup after an upgrade automatically move the old `remote` directory before reading or creating credentials. No manual migration command or re-pairing is needed.
+
+Before moving, migration verifies the known Remote layout, device key pairs, trusted-peer fingerprints, credential device IDs and Server scope hashes. Unknown files or inconsistent records stop migration; a directory name alone is not treated as proof of ownership. The entire directory moves together, retaining identities, Server scopes, tokens and trusted peers.
+
+If a verified directory cannot be moved because of permissions, a busy filesystem or a filesystem boundary, Remote records the fallback choice outside the credential tree, and this and subsequent processes continue using the same legacy directory. It does not create replacement identities or clear authorization. If this record cannot be saved, startup stops without changing credentials. This fallback requires the original directory to remain intact and the destination to remain absent. Stop old Harness instances as part of upgrading/restarting; if both directories exist, or locks or symlinks are found, migration stops without merging or overwriting credentials.
+
+Older installer releases used `/opt/dsh-remote` and `dsh-remote-<profile>.service`. These names are not automatically migrated. The installer refuses to proceed if an owned legacy service is still active or enabled. Before reinstalling with the new defaults, stop and disable the old service (for the default profile: `sudo systemctl disable --now dsh-remote-web.service`). Old `dsh-remote` settings are no longer imported; configure Remote again after reinstalling.
 
 - Routine updates do not need another token. A consumed one-time token cannot be reused.
 - Existing Host credentials are never silently replaced. Stop the original Host and sign out through official controls before changing accounts with a fresh token.
@@ -103,7 +111,7 @@ An ordinary standalone CLI cannot manage the reserved `desktop` profile; use Des
 | `DSH_VERSION` | New Linux DSH installation version, default npm `latest`; does not upgrade an existing DSH |
 | `DSH_REMOTE_REGISTRATION_TOKEN` | One-time Host token; private interactive input is recommended |
 | `DSH_REMOTE_AUTOSTART=0` | Skip Linux service setup/start; root is still required |
-| `DSH_INSTALL_ROOT` | Linux private bootstrap root, default `/opt/dsh-remote`; absolute path required |
+| `DSH_INSTALL_ROOT` | Linux private bootstrap root, default `/opt/ds-harness-remote`; absolute path required |
 | `DSH_SYSTEMD_DIR` | System unit directory, default `/etc/systemd/system`; leave unchanged for ordinary deployments |
 
 `bash install.sh --token '<one-time-token>'` and a positional token are also accepted, but may expose it through process listings or shell history. Do not use shell tracing/debugging with credentials. Invalid, expired or consumed tokens fail registration.
@@ -113,13 +121,13 @@ An ordinary standalone CLI cannot manage the reserved `desktop` profile; use Des
 Disable the Linux system service first, replacing `web` with the actual profile:
 
 ```sh
-sudo systemctl disable --now dsh-remote-web.service
+sudo systemctl disable --now ds-harness-remote-web.service
 ```
 
 Then use the same launcher, profile and `DSH_HOME` with official plugin removal. For the default newly bootstrapped launcher:
 
 ```sh
-sudo -H /opt/dsh-remote/bin/dsh plugin --profile web remove -w ds-harness-remote
+sudo -H /opt/ds-harness-remote/bin/dsh plugin --profile web remove -w ds-harness-remote
 ```
 
 Use Desktop Plugin management on Desktop. Runtime directories, profiles, device credentials and unit files are not automatically deleted. Windows users can still use official Plugin management or an existing Harness CLI, but no Windows installer is maintained here.

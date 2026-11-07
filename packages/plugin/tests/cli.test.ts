@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rename, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,11 @@ import { IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { HostServerApi } from '../src/server-api.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
+
 const directories: string[] = []
 
 afterEach(async () => {
@@ -14,6 +19,25 @@ afterEach(async () => {
 })
 
 describe('Remote CLI', () => {
+  it('automatically migrates storage before normal CLI commands without an extra migration step', async () => {
+    const dshHome = join(tmpdir(), `ds-harness-remote-cli-migration-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const legacy = join(dshHome, 'remote')
+    const original = await new IdentityStore({ directory: legacy }).loadOrCreate('Legacy Host')
+    const output = writer()
+    const errors = writer()
+    const createHostApi = vi.fn()
+    const dependencies = { env: { DSH_HOME: dshHome }, stdout: output, stderr: errors, createHostApi }
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect(errors.text).toBe('')
+    expect(createHostApi).not.toHaveBeenCalled()
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect((await readFile(join(dshHome, 'ds-harness-remote', 'device.key'), 'utf8')).trim()).toBe(original.privateKey)
+    await expect(stat(legacy)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(output.text).not.toContain(original.privateKey)
+  })
+
   it('authorizes the Host through the selected OAuth QR provider', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-${crypto.randomUUID()}`)
     directories.push(dshHome)
@@ -63,7 +87,7 @@ describe('Remote CLI', () => {
     expect(output.text).not.toContain('access-token-value')
     expect(errors.text).toBe('')
 
-    const directory = serverStorageDirectory(join(dshHome, 'remote'), 'https://dsh.r2049.cn', 'host')
+    const directory = serverStorageDirectory(join(dshHome, 'ds-harness-remote'), 'https://dsh.r2049.cn', 'host')
     const device = JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')) as { deviceId: string }
     await expect(new ServerCredentialStore(directory).load('https://dsh.r2049.cn', device.deviceId))
       .resolves.toMatchObject({ authorizationMethod: 'account', account: 'host@example.com' })
@@ -142,11 +166,11 @@ describe('Remote CLI', () => {
     expect(output.text).toContain('local device identity was rotated')
   })
 
-  it('reports Host authorization and credential readiness without exposing tokens', async () => {
+  it('keeps Host authorization ready on verified legacy storage when migration fails without exposing tokens', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-status-${crypto.randomUUID()}`)
     directories.push(dshHome)
     const env = { DSH_HOME: dshHome }
-    const root = new IdentityStore({ env }).directory
+    const root = join(dshHome, 'remote')
     const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
     const identity = await new IdentityStore({ directory, env }).loadOrCreate('CLI status Host')
     await new ServerCredentialStore(directory).save({
@@ -159,11 +183,17 @@ describe('Remote CLI', () => {
     const output = writer()
     const fetchMock = vi.fn(async () => { throw new Error('valid local credentials must not need a request') }) as unknown as typeof fetch
 
+    const credentialBytes = await readFile(join(directory, 'server-credentials.json'))
+    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('move unavailable'), { code: 'EACCES' }))
+
     await expect(runCli(['status'], {
       env,
       stdout: output,
       createHostApi: (serverUrl, store) => new HostServerApi(serverUrl, store, fetchMock),
     })).resolves.toBe(0)
+
+    expect(await readFile(join(directory, 'server-credentials.json'))).toEqual(credentialBytes)
+    await expect(stat(join(dshHome, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
 
     expect(output.text).toContain('Host control: enabled')
     expect(output.text).toContain('Authorization: logged in (account)')

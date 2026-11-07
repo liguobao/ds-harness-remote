@@ -108,6 +108,24 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+  it('gives TURN-only attempts an allocation budget without slowing automatic routing', async () => {
+    await runScenarios([
+      { name: 'automatic', preferred: ['lan', 'p2p', 'turn', 'relay'] as const, timeout: 6000 },
+      { name: 'TURN', preferred: ['turn', 'relay'] as const, timeout: 12000 },
+      { name: 'forced Relay', preferred: ['turn', 'relay'] as const, forceRelay: true, timeout: 6000 },
+      { name: 'default automatic', preferred: undefined, timeout: 6000 },
+    ].map(row => ({ name: row.name, run: async () => {
+      prepareScenario1()
+      const connection = new AndroidRemoteConnection()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, {
+        preferredTransports: row.preferred === undefined ? undefined : [...row.preferred],
+        forceRelay: 'forceRelay' in row ? row.forceRelay : false,
+      })
+      expect(testState.transportOptions[0]?.negotiateTimeoutMs).toBe(row.timeout)
+      await connection.close()
+    } })))
+  })
+
   it('uses the native Typert attachment contract and rejects late images from retired connections', async () => {
     await runScenarios(['direct', 'business-result', 'denied', 'disconnected', 'cancelled'].map(mode => ({ name: mode, run: async () => {
       prepareScenario1()
@@ -123,7 +141,7 @@ afterEach(async () => {
         if (method !== 'harness.remote.call') return rpc(method, params)
         expect(params).toEqual({
           endpoint: 'session/attachment',
-          payload: { args: { request: { sessionId: 's1', attachment } } },
+          payload: { args: { request: { sessionId: 's1', attachmentId: 'a1', attachment } } },
         })
         if (mode === 'disconnected') await connection.close()
         if (mode === 'cancelled') controller.abort()

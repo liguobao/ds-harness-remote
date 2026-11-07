@@ -1,3 +1,4 @@
+import { connectionLog } from './connection-log'
 import appConfig from '../../app.json'
 import { MAX_DEVICE_NAME_LENGTH, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import { RemoteApiError } from '../lib/errors'
@@ -305,6 +306,9 @@ export class RemoteServerApi {
     }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    const requestGroup = path.split('/')[3]
+    const request = ['auth', 'devices', 'account', 'turn'].includes(requestGroup ?? '') ? requestGroup : 'other'
+    const startedAt = Date.now()
     let response: Response
     try {
       response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
@@ -319,6 +323,7 @@ export class RemoteServerApi {
       })
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError'
+      connectionLog('http', { request, method: init.method ?? 'GET', reason: timedOut ? 'timeout' : 'network', durationMs: Date.now() - startedAt })
       throw new RemoteApiError(
         'CONNECTION_FAILED',
         timedOut ? 'The server request timed out.' : error instanceof Error ? error.message : 'Server request failed.',
@@ -329,6 +334,7 @@ export class RemoteServerApi {
       clearTimeout(timer)
     }
 
+    connectionLog('http', { request, method: init.method ?? 'GET', status: response.status, durationMs: Date.now() - startedAt })
     const text = await response.text()
     let body: unknown = undefined
     if (text.length > 0) {

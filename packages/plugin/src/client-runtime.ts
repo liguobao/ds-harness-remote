@@ -308,22 +308,38 @@ export class ClientModeRuntime {
     if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
     this.assertHostAuthorizationForDeviceDiscovery()
     this.requireIdentity()
-    const serverDevices = await this.server.listDevices(signal)
-    signal?.throwIfAborted()
-    const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
-    const results = await Promise.allSettled(remoteDevices.map(async device => {
-      signal?.throwIfAborted()
-      await this.connection.authorizeHostPeer(device, signal)
-      const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }))
-      signal?.throwIfAborted()
+    const devices: RemoteDeviceView[] = []
+    for await (const page of this.server.devicePages(signal)) {
+      const remoteDevices = page.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
+      const resolved: RemoteDeviceView[] = new Array(remoteDevices.length)
+      let next = 0
+      let failed = false
+      // Bound authorization/presence fan-out even when an older Server ignores
+      // pagination. Finish this page before fetching the next one.
+      const workers = await Promise.allSettled(Array.from({ length: Math.min(8, remoteDevices.length) }, async () => {
+        try {
+          while (!failed && next < remoteDevices.length) {
+            signal.throwIfAborted()
+            this.assertHostAuthorizationForDeviceDiscovery()
+            const index = next++
+            const device = remoteDevices[index]!
+            await this.connection.authorizeHostPeer(device, signal)
+            const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }))
+            signal.throwIfAborted()
+            this.assertHostAuthorizationForDeviceDiscovery()
+            resolved[index] = { ...device, ...presence }
+          }
+        } catch (error) { failed = true; throw error }
+      }))
+      signal.throwIfAborted()
       this.assertHostAuthorizationForDeviceDiscovery()
-      return { ...device, ...presence }
-    }))
+      const failure = workers.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+      devices.push(...resolved)
+    }
     signal.throwIfAborted()
     this.assertHostAuthorizationForDeviceDiscovery()
-    const failure = results.find(result => result.status === 'rejected')
-    if (failure?.status === 'rejected') throw failure.reason
-    return results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    return devices
   }
 
   /**

@@ -440,6 +440,40 @@ describe('HostServerApi', () => {
     await expect(api.authenticate(hostIdentity())).rejects.toMatchObject({ code: 'ACCOUNT_AUTH_REQUIRED', retryable: false })
   })
 
+  it('reads all membership pages, supports legacy Servers and rejects broken continuations', async () => {
+    const host = (id: number) => ({ deviceId: `host-${id}`, role: 'host', name: `Host ${id}`, platform: 'linux', membershipId: `member-${id}` })
+    await runScenarios([
+      { name: 'multiple pages', bodies: [{ items: [host(0)], nextCursor: 'cursor+/=' }, { items: [host(1)], nextCursor: null }], count: 2 },
+      { name: 'legacy ignores limit', bodies: [{ items: Array.from({ length: 301 }, (_, i) => host(i)) }], count: 301 },
+      { name: 'empty list', bodies: [{ items: [], nextCursor: null }], count: 0 },
+      { name: 'repeated cursor', bodies: [{ items: [host(0)], nextCursor: 'same' }, { items: [host(1)], nextCursor: 'same' }] },
+      { name: 'invalid cursor type', bodies: [{ items: [host(0)], nextCursor: 42 }] },
+      { name: 'empty continuation', bodies: [{ items: [], nextCursor: 'next' }] },
+      { name: 'duplicate device', bodies: [{ items: [host(0)], nextCursor: 'next' }, { items: [host(0)], nextCursor: null }] },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'dsh-device-pages-'))
+      directories.push(directory)
+      const identity = hostIdentity(), store = new ServerCredentialStore(directory)
+      const origin = 'https://example.invalid'
+      await store.save({ serverUrl: origin, deviceId: identity.deviceId, authorizationMethod: 'account', ...tokens() })
+      let index = 0
+      const fetchMock = vi.fn<typeof fetch>(async input => {
+        const url = new URL(String(input))
+        expect(url.pathname).toBe('/api/v1/devices')
+        expect(url.searchParams.get('limit')).toBe('50')
+        expect(url.searchParams.get('cursor')).toBe(index === 0 ? null : (scenario.bodies[index - 1] as { nextCursor?: unknown }).nextCursor)
+        return json(scenario.bodies[index++]!)
+      })
+      const api = new ClientServerApi(origin, store, fetchMock)
+      api.bindIdentity(identity)
+      try {
+        if (scenario.count === undefined) await expect(api.listDevices()).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        else expect(await api.listDevices()).toHaveLength(scenario.count)
+        expect(fetchMock).toHaveBeenCalledTimes(scenario.bodies.length)
+      } finally { api.close() }
+    } })), cleanupContract1)
+  })
+
   it('refreshes a server-rejected access token once for a read before requiring a login', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-read-refresh-'))
     directories.push(directory)

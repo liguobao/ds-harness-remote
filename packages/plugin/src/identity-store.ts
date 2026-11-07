@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
+import { ServerCredentialStore } from './server-credentials.js'
 
 const identitySchema = z.object({
   schemaVersion: z.literal(1),
@@ -25,7 +26,8 @@ const trustedPeerSchema = z.object({
 
 const trustedPeersSchema = z.object({
   schemaVersion: z.literal(1),
-  peers: z.array(trustedPeerSchema).max(256),
+  // Discovery can persist multiple pages; reading must accept every record we write.
+  peers: z.array(trustedPeerSchema),
 }).strict()
 
 export interface HostIdentity {
@@ -60,17 +62,21 @@ export class IdentityInvalidError extends Error {
 }
 
 export class IdentityStore {
-  readonly directory: string
+  private storageDirectory: string
+  get directory(): string { return this.storageDirectory }
   private identity?: HostIdentity
   private peers = new Map<string, TrustedPeer>()
+  private readonly defaultOptions?: IdentityStoreOptions
 
   constructor(options: IdentityStoreOptions = {}) {
     const env = options.env ?? process.env
     const dshHome = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
-    this.directory = options.directory ?? join(dshHome, 'remote')
+    this.storageDirectory = options.directory ?? join(dshHome, 'ds-harness-remote')
+    this.defaultOptions = options.directory === undefined ? options : undefined
   }
 
   async loadOrCreate(deviceName: string): Promise<HostIdentity> {
+    if (this.defaultOptions !== undefined) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions)
     await ensureDirectory(this.directory)
     // Creation writes two files that must agree. Without a cross-process lock a
     // Desktop restart overlapping the previous Host reaches the "create" branch
@@ -141,6 +147,7 @@ export class IdentityStore {
    * lock another process holds — and cannot leave itself unprotected either.
    */
   async reset(deviceName: string): Promise<HostIdentity> {
+    if (this.defaultOptions !== undefined) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions)
     await ensureDirectory(this.directory)
     return withIdentityLock(this.directory, async () => {
       this.identity = undefined
@@ -203,6 +210,169 @@ export class IdentityStore {
       schemaVersion: 1,
       peers: [...this.peers.values()],
     }, 0o600)
+  }
+}
+
+const legacyRootPinSchema = z.object({
+  schemaVersion: z.literal(1),
+  dev: z.number().int().nonnegative(),
+  ino: z.number().int().nonnegative(),
+}).strict()
+
+/** Resolve storage and migrate legacy data before startup or installation uses it.
+ * Upgrade/restart must stop old instances: idle old processes do not hold file locks.
+ */
+export async function prepareDefaultIdentityDirectory(
+  options: IdentityStoreOptions = {},
+): Promise<string> {
+  if (options.directory !== undefined) return options.directory
+  const env = options.env ?? process.env
+  const home = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
+  const source = join(home, 'remote')
+  const target = join(home, 'ds-harness-remote')
+  await mkdir(home, { recursive: true, mode: 0o700 })
+  // Kept outside the renamed tree so competing new-version migrators share one lock.
+  const lockDirectory = join(home, '.ds-harness-remote-migration')
+  await storageDirectoryStat(lockDirectory)
+  await ensureDirectory(lockDirectory)
+  return withIdentityLock(lockDirectory, async () => {
+    const old = await storageDirectoryStat(source)
+    const current = await storageDirectoryStat(target)
+    const pinPath = join(lockDirectory, 'legacy-root.json')
+    const pinMetadata = await lstat(pinPath).catch(error => {
+      if (isNodeError(error) && error.code === 'ENOENT') return undefined
+      throw error
+    })
+    let pin: z.infer<typeof legacyRootPinSchema> | undefined
+    if (pinMetadata !== undefined) {
+      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+        throw new IdentityInvalidError('Remote storage fallback record is invalid; no credentials were changed.')
+      }
+      await assertPrivateMode(pinPath)
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile(pinPath, 'utf8')))
+    }
+    if (old !== undefined) {
+      if (current !== undefined) {
+        throw new IdentityInvalidError('Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.')
+      }
+      await assertOwnedRemoteStorage(source)
+      await assertStorageIdle(source)
+      // Persist the choice across processes. A later installer/CLI must not move
+      // storage out from under a Host that is already using the fallback.
+      if (pin !== undefined) {
+        if (pin.dev !== old.dev || pin.ino !== old.ino) throw new IdentityInvalidError('Legacy Remote storage changed after fallback; inspect it before reconnecting.')
+        return source
+      }
+      try {
+        // Same parent/filesystem: preserve every byte, mode, Server scope and role in one rename.
+        await rename(source, target)
+      } catch (error) {
+        if (!isNodeError(error) || !['EACCES', 'EPERM', 'EBUSY', 'EXDEV', 'EROFS', 'EEXIST', 'ENOTEMPTY', 'ENOSPC', 'EDQUOT'].includes(error.code ?? '')) throw error
+        const remaining = await storageDirectoryStat(source)
+        // A failed move is compatible only if the same verified tree still exists
+        // and no destination appeared. Never fall back from an ambiguous outcome.
+        if (remaining === undefined || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target) !== undefined) throw error
+        await assertOwnedRemoteStorage(source)
+        await assertStorageIdle(source)
+        // If the fallback choice cannot be recorded, stop rather than risk
+        // another process moving a directory this process starts using.
+        await atomicJsonWrite(pinPath, { schemaVersion: 1, dev: old.dev, ino: old.ino }, 0o600)
+        return source
+      }
+    } else if (pin !== undefined) {
+      if (current === undefined) throw new IdentityInvalidError('Pinned Remote storage is missing; no replacement identity was created.')
+      await assertOwnedRemoteStorage(target)
+    }
+    return target
+  })
+}
+
+/** Legacy storage has no owner marker. Require its complete known layout and
+ * cryptographically consistent identities, rather than trusting the directory name.
+ * Read-only: never repair, create peers, rename devices or refresh tokens here.
+ */
+export async function assertOwnedRemoteStorage(root: string): Promise<void> {
+  const rejected = () => new IdentityInvalidError('Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.')
+  const identityFiles = new Set(['device.json', 'device.key', 'trusted-peers.json', 'server-credentials.json'])
+  let identities = 0
+  const checkIdentity = async (directory: string, scope?: string): Promise<void> => {
+    const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
+    for (const entry of entries) {
+      if (!entry.isFile() || !identityFiles.has(entry.name)) throw rejected()
+      const metadata = await lstat(join(directory, entry.name))
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) throw rejected()
+    }
+    const names = new Set(entries.map(entry => entry.name))
+    if (!names.has('device.json') || !names.has('device.key')) throw rejected()
+    await assertPrivateMode(join(directory, 'device.key'))
+    const record = identitySchema.parse(JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')))
+    const key = (await readFile(join(directory, 'device.key'), 'utf8')).trim()
+    if (generateKeyPair(fromBase64Url(key)).publicKey !== record.publicKey) throw rejected()
+    if (names.has('trusted-peers.json')) {
+      const peers = trustedPeersSchema.parse(JSON.parse(await readFile(join(directory, 'trusted-peers.json'), 'utf8'))).peers
+      const ids = new Set<string>()
+      for (const peer of peers) {
+        if (peer.fingerprint !== fingerprint(peer.publicKey) || ids.has(peer.deviceId)) throw rejected()
+        ids.add(peer.deviceId)
+      }
+    }
+    if (names.has('server-credentials.json')) {
+      // Use the existing strict schema and permission checks without refreshing or writing.
+      const raw = JSON.parse(await readFile(join(directory, 'server-credentials.json'), 'utf8')) as { serverUrl?: unknown }
+      if (typeof raw.serverUrl !== 'string') throw rejected()
+      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record.deviceId)
+      if (credentials === undefined) throw rejected()
+      const origin = new URL(credentials.serverUrl)
+      if (!['http:', 'https:'].includes(origin.protocol)) throw rejected()
+      if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) throw rejected()
+    }
+    identities++
+  }
+  try {
+    const entries = await readdir(root, { withFileTypes: true })
+    const flat = entries.filter(entry => entry.name !== 'servers')
+    if (flat.length > 0) {
+      // Validate a historical unscoped identity without including the servers container.
+      if (flat.some(entry => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected()
+      await checkIdentity(root)
+    }
+    const servers = entries.find(entry => entry.name === 'servers')
+    if (servers !== undefined) {
+      if (!servers.isDirectory()) throw rejected()
+      for (const scope of await readdir(join(root, 'servers'), { withFileTypes: true })) {
+        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected()
+        for (const role of await readdir(join(root, 'servers', scope.name), { withFileTypes: true })) {
+          if (!role.isDirectory() || !['host', 'client'].includes(role.name)) throw rejected()
+          await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name)
+        }
+      }
+    }
+    if (identities === 0) throw rejected()
+  } catch {
+    // Do not surface schema errors or file contents that might contain secrets.
+    throw rejected()
+  }
+}
+
+async function storageDirectoryStat(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+  try {
+    const entry = await lstat(path)
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new IdentityInvalidError('Remote storage must be a real directory; symbolic links are not migrated.')
+    }
+    return entry
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+async function assertStorageIdle(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes('.refresh-lock') || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+      throw new IdentityInvalidError('Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.')
+    }
+    if (entry.isDirectory()) await assertStorageIdle(join(directory, entry.name))
   }
 }
 
