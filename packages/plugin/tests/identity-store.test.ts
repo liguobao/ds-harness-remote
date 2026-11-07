@@ -325,8 +325,8 @@ describe('IdentityStore', () => {
           deviceId: first.deviceId,
           name: 'Client',
           publicKey: first.publicKey,
-        }))
-        await writeFile(join(legacyClientDir, 'device.key'), `${second.privateKey}\n`)
+        }), { mode: 0o600 })
+        await writeFile(join(legacyClientDir, 'device.key'), `${second.privateKey}\n`, { mode: 0o600 })
 
         const migratedRoot = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
         expect(migratedRoot).toBe(join(home, 'ds-harness-remote'))
@@ -371,8 +371,8 @@ describe('IdentityStore', () => {
         deviceId: first.deviceId,
         name: 'Device',
         publicKey: first.publicKey,
-      }))
-      await writeFile(join(directory, 'device.key'), `${second.privateKey}\n`)
+      }), { mode: 0o600 })
+      await writeFile(join(directory, 'device.key'), `${second.privateKey}\n`, { mode: 0o600 })
       if (scenario === 'credentials') {
         await new ServerCredentialStore(directory).save({
           serverUrl: 'https://dsh.r2049.cn',

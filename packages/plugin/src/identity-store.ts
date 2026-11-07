@@ -137,7 +137,6 @@ export class IdentityStore {
     const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
     const isClientRole = this.role === 'client' || (this.role === undefined && isScopedClientDirectory(this.directory))
     if (hasDevice !== hasKey) {
-      if (hasKey) await assertPrivateMode(keyPath)
       if (isClientRole && await canAutoHealClientIdentity(this.directory)) {
         await removeIdentityRecords(this.directory)
         return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName)
@@ -154,7 +153,6 @@ export class IdentityStore {
       identity = await this.readIdentity(devicePath, keyPath, deviceName)
     } catch (error) {
       if (error instanceof IdentityInvalidError
-        && !error.message.startsWith('private key permissions must be 0600')
         && isClientRole
         && await canAutoHealClientIdentity(this.directory)) {
         await removeIdentityRecords(this.directory)
