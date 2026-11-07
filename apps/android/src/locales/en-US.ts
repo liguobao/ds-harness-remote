@@ -109,7 +109,25 @@ const enUS = {
     "resetEffort": "Reset to default",
     "viaPlatform": (platform: string) => `via ${platform}`,
     "relayFailed": (name: string, reason: string) => `${name} stopped: ${reason}. Switch its model or ask it to go on.`,
-    "desktopActionRequired": "This request (connector, mail, or computer use) requires confirmation on the Host desktop."
+    "desktopActionRequired": "This request (connector, mail, or computer use) requires confirmation on the Host desktop.",
+    "askBot": (name: string) => `Ask ${name}`,
+    "orAnswerInChat": "Or answer in the chat below",
+    "configureBot": "Configure Bot",
+    "computer": "Computer",
+    "computerIdle": "Idle",
+    "computerActive": "Active",
+    "computerDisabled": "Off",
+    "computerDesc": "Desktop computer-use status for this Bot appears here. Screen control is authorized on the Host desktop.",
+    "imAndConnectors": "Channels & Connectors",
+    "imAndConnectorsDesc": "External IM platforms and connector credentials are configured on the Host desktop.",
+    "schedulesEnabled": (n: number) => `${n} enabled`,
+    "schedulesEmpty": "Scheduled tasks for this Bot will appear here",
+    "sessionsCount": (n: number) => `${n} parts`,
+    "pinChat": "Pin conversation",
+    "pinChatHint": "Keep this conversation pinned to the top of the DS-Bot list.",
+    "replaceMain": "Switch Main Bot…",
+    "copyId": "Copy ID",
+    "filterAll": "All"
 },
 
   comfort: {

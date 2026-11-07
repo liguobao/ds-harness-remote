@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
-import { Image } from 'react-native'
+import { Image, StyleSheet, View } from 'react-native'
+import { Star } from 'lucide-react-native'
 import Svg, { Defs, G, LinearGradient, Mask, Path, Rect, Stop } from 'react-native-svg'
 import type { BotEntry } from '../../services/bot-catalog'
 import { useTheme } from '../../ui/theme-context'
@@ -59,3 +60,76 @@ export function BotAvatar({ bot, size = 40 }: { bot: Pick<BotEntry, 'id' | 'avat
     </G>
   </Svg>
 }
+
+export function BotAvatarWithBadge({
+  bot,
+  size = 48,
+  showMainStar = false,
+  statusColor,
+  badgeBorderColor,
+}: {
+  bot: Pick<BotEntry, 'id' | 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel' | 'main'>
+  size?: number
+  showMainStar?: boolean
+  statusColor?: string
+  badgeBorderColor?: string
+}) {
+  const { colors } = useTheme()
+  const borderCol = badgeBorderColor ?? colors.surface
+  const isMain = showMainStar && Boolean(bot.main)
+  const badgeSize = Math.max(16, Math.round(size * 0.31))
+  const starSize = Math.max(9, Math.round(badgeSize * 0.56))
+  const dotSize = Math.max(11, Math.round(size * 0.24))
+
+  return (
+    <View style={{ width: size, height: size, position: 'relative' }}>
+      <BotAvatar bot={bot} size={size} />
+      {isMain ? (
+        <View
+          style={[
+            badgeStyles.starBadge,
+            {
+              width: badgeSize,
+              height: badgeSize,
+              borderRadius: badgeSize / 2,
+              borderColor: borderCol,
+              borderWidth: size >= 72 ? 2.5 : 1.75,
+            },
+          ]}
+        >
+          <Star size={starSize} color="#FFFFFF" fill="#FFFFFF" strokeWidth={1.8} />
+        </View>
+      ) : statusColor !== undefined ? (
+        <View
+          style={[
+            badgeStyles.statusDot,
+            {
+              width: dotSize,
+              height: dotSize,
+              borderRadius: dotSize / 2,
+              backgroundColor: statusColor,
+              borderColor: borderCol,
+            },
+          ]}
+        />
+      ) : null}
+    </View>
+  )
+}
+
+const badgeStyles = StyleSheet.create({
+  starBadge: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    backgroundColor: '#F5A623',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    borderWidth: 2,
+  },
+})

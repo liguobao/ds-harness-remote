@@ -109,7 +109,25 @@ const esES = {
     "resetEffort": "Restablecer predeterminado",
     "viaPlatform": (platform: string) => `vía ${platform}`,
     "relayFailed": (name: string, reason: string) => `${name} se detuvo: ${reason}. Cambia su modelo o pídele que continúe.`,
-    "desktopActionRequired": "Esta solicitud (conector, correo o uso del equipo) requiere confirmación en el escritorio del Host."
+    "desktopActionRequired": "Esta solicitud (conector, correo o uso del equipo) requiere confirmación en el escritorio del Host.",
+    "askBot": (name: string) => `Preguntar a ${name}`,
+    "orAnswerInChat": "O responde en el chat de abajo",
+    "configureBot": "Configurar Bot",
+    "computer": "Ordenador",
+    "computerIdle": "Inactivo",
+    "computerActive": "En uso",
+    "computerDisabled": "Desactivado",
+    "computerDesc": "El estado de control del equipo de este Bot aparece aquí. El control de pantalla se autoriza en el escritorio del Host.",
+    "imAndConnectors": "Canales y conectores",
+    "imAndConnectorsDesc": "Las plataformas de mensajería y credenciales de conectores se gestionan en el escritorio del Host.",
+    "schedulesEnabled": (n: number) => `${n} activas`,
+    "schedulesEmpty": "Las tareas programadas de este Bot aparecerán aquí",
+    "sessionsCount": (n: number) => `${n} partes`,
+    "pinChat": "Fijar conversación",
+    "pinChatHint": "Mantén esta conversación fijada arriba en la lista de DS-Bot.",
+    "replaceMain": "Cambiar Bot principal…",
+    "copyId": "Copiar ID",
+    "filterAll": "Todos"
 },
 
   comfort: {

@@ -109,7 +109,25 @@ const frFR = {
     "resetEffort": "Réinitialiser par défaut",
     "viaPlatform": (platform: string) => `via ${platform}`,
     "relayFailed": (name: string, reason: string) => `${name} s’est arrêté : ${reason}. Changez son modèle ou demandez-lui de continuer.`,
-    "desktopActionRequired": "Cette demande (connecteur, e-mail ou contrôle de l’ordinateur) nécessite une confirmation sur le bureau de l’hôte."
+    "desktopActionRequired": "Cette demande (connecteur, e-mail ou contrôle de l’ordinateur) nécessite une confirmation sur le bureau de l’hôte.",
+    "askBot": (name: string) => `Demander à ${name}`,
+    "orAnswerInChat": "Ou répondez dans le chat ci-dessous",
+    "configureBot": "Configurer le Bot",
+    "computer": "Ordinateur",
+    "computerIdle": "Inactif",
+    "computerActive": "Actif",
+    "computerDisabled": "Désactivé",
+    "computerDesc": "L’état du contrôle de l’ordinateur de ce Bot s’affiche ici. L’autorisation se fait sur le bureau de l’hôte.",
+    "imAndConnectors": "Canaux et connecteurs",
+    "imAndConnectorsDesc": "Les plateformes de messagerie et identifiants des connecteurs se gèrent sur le bureau de l’hôte.",
+    "schedulesEnabled": (n: number) => `${n} activées`,
+    "schedulesEmpty": "Les tâches planifiées de ce Bot s’afficheront ici",
+    "sessionsCount": (n: number) => `${n} parties`,
+    "pinChat": "Épingler la conversation",
+    "pinChatHint": "Garder cette conversation épinglée en haut de la liste DS-Bot.",
+    "replaceMain": "Changer de Bot principal…",
+    "copyId": "Copier l’ID",
+    "filterAll": "Tous"
 },
 
   comfort: {

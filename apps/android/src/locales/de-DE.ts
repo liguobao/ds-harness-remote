@@ -109,7 +109,25 @@ const deDE = {
     "resetEffort": "Auf Standard zurücksetzen",
     "viaPlatform": (platform: string) => `über ${platform}`,
     "relayFailed": (name: string, reason: string) => `${name} gestoppt: ${reason}. Modell wechseln oder zum Fortfahren auffordern.`,
-    "desktopActionRequired": "Diese Anfrage (Konnektor, E-Mail oder Computersteuerung) erfordert eine Bestätigung auf dem Host-Desktop."
+    "desktopActionRequired": "Diese Anfrage (Konnektor, E-Mail oder Computersteuerung) erfordert eine Bestätigung auf dem Host-Desktop.",
+    "askBot": (name: string) => `${name} fragen`,
+    "orAnswerInChat": "Oder unten im Chat antworten",
+    "configureBot": "Bot konfigurieren",
+    "computer": "Computer",
+    "computerIdle": "Bereit",
+    "computerActive": "Aktiv",
+    "computerDisabled": "Aus",
+    "computerDesc": "Der Desktop-Steuerungsstatus dieses Bots wird hier angezeigt. Die Bildschirmfreigabe erfolgt auf dem Host-Desktop.",
+    "imAndConnectors": "Kanäle & Konnektoren",
+    "imAndConnectorsDesc": "Externe Messaging-Kanäle und Konnektor-Zugangsdaten werden auf dem Host-Desktop verwaltet.",
+    "schedulesEnabled": (n: number) => `${n} aktiv`,
+    "schedulesEmpty": "Geplante Aufgaben für diesen Bot werden hier angezeigt",
+    "sessionsCount": (n: number) => `${n} Abschnitte`,
+    "pinChat": "Unterhaltung anheften",
+    "pinChatHint": "Diese Unterhaltung oben in der DS-Bot-Liste anheften.",
+    "replaceMain": "Haupt-Bot wechseln…",
+    "copyId": "ID kopieren",
+    "filterAll": "Alle"
 },
 
   comfort: {

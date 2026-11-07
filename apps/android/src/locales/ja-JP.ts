@@ -109,7 +109,25 @@ const jaJP = {
     "resetEffort": "デフォルトに戻す",
     "viaPlatform": (platform: string) => `${platform} 経由`,
     "relayFailed": (name: string, reason: string) => `${name} が停止しました：${reason}。モデルを切り替えるか、続行を指示してください。`,
-    "desktopActionRequired": "このリクエスト（コネクタ / メール / PC 操作）はホストのデスクトップで確認が必要です。"
+    "desktopActionRequired": "このリクエスト（コネクタ / メール / PC 操作）はホストのデスクトップで確認が必要です。",
+    "askBot": (name: string) => `${name} に質問`,
+    "orAnswerInChat": "または下のチャットで回答",
+    "configureBot": "Bot を設定",
+    "computer": "コンピュータ",
+    "computerIdle": "アイドル",
+    "computerActive": "使用中",
+    "computerDisabled": "オフ",
+    "computerDesc": "この Bot のデスクトップ操作ステータスがここに表示されます。画面操作はホスト側で承認されます。",
+    "imAndConnectors": "チャネルとコネクタ",
+    "imAndConnectorsDesc": "外部メッセージ連携やコネクタ資格情報はホストのデスクトップで管理します。",
+    "schedulesEnabled": (n: number) => `${n} 件有効`,
+    "schedulesEmpty": "この Bot のスケジュールタスクがここに表示されます",
+    "sessionsCount": (n: number) => `${n} 件`,
+    "pinChat": "会話をピン留め",
+    "pinChatHint": "この会話を DS-Bot リストの上部に固定します。",
+    "replaceMain": "メイン Bot を切り替え…",
+    "copyId": "ID をコピー",
+    "filterAll": "すべて"
 },
 
   comfort: {

@@ -545,12 +545,12 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             onPress={() => setPlusMenuOpen(true)}
             style={({ pressed }) => [styles.plusCircle, pressed && { opacity: 0.72 }, disabled && { opacity: 0.4 }]}
           >
-            <Plus size={16} color={colors.muted} strokeWidth={2.2} />
+            <Plus size={18} color={colors.ink} strokeWidth={2.1} />
           </Pressable>
           <TextInput
             ref={inputRef}
-            accessibilityLabel={bot ? `给 ${bot.name} 发消息` : room ? `给 ${room.name} 发消息` : s.bots.message}
-            placeholder={bot ? `给 ${bot.name} 发消息` : room ? `给 ${room.name} 发消息` : s.bots.message}
+            accessibilityLabel={bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message}
+            placeholder={bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message}
             placeholderTextColor={colors.muted}
             style={styles.composerInput}
             multiline
@@ -580,7 +580,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
           )}
           {busy ? (
             <View style={styles.sendCircle}>
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={colors.surface} />
             </View>
           ) : (
             <Pressable
@@ -594,7 +594,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
                 pressed && { opacity: 0.82 },
               ]}
             >
-              <ArrowUp size={16} color="#FFFFFF" strokeWidth={2.4} />
+              <ArrowUp size={18} color={colors.surface} strokeWidth={2.4} />
             </Pressable>
           )}
         </View>

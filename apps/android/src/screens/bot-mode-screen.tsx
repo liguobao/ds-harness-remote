@@ -1,7 +1,22 @@
-import { useEffect, useState } from 'react'
-import { ActivityIndicator, AppState, Pressable, ScrollView, Text, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ArrowRight, Bot, Menu, MoreVertical, Users } from 'lucide-react-native'
+import {
+  ArrowLeftRight,
+  Bot,
+  ChevronLeft,
+  Copy,
+  Info,
+  Menu,
+  MoreHorizontal,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Square,
+  Trash2,
+  Users,
+} from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
 import { objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
@@ -15,6 +30,7 @@ import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
+import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
 import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamPolling } from './bot-sidebar-section'
 
@@ -85,11 +101,24 @@ export function BotModeScreen({
 
   const [active, setActive] = useState(AppState.currentState === 'active')
   const [rosterSearch, setRosterSearch] = useState('')
+  const [chatMoreOpen, setChatMoreOpen] = useState(false)
+  const enterAnim = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => setActive(next === 'active'))
     return () => sub.remove()
   }, [])
+
+  useEffect(() => {
+    if (!selectedId) return
+    enterAnim.setValue(0)
+    Animated.timing(enterAnim, {
+      toValue: 1,
+      duration: 210,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start()
+  }, [selectedId, enterAnim])
 
   let clientValue: BotRemoteClient | undefined
   let clientInitError: string | undefined
@@ -122,9 +151,84 @@ export function BotModeScreen({
   const goalDoneCount = goalSteps.filter(step => text(step.status) === 'done').length
   const goalTitle = text(room?.goal?.title)
   const roomLeadBot = room && state ? state.bots.find(entry => entry.id === room.members[0]) : undefined
+  const mainCount = state?.bots.filter(b => b.main).length ?? 0
+
+  const headerMoreActions: BotPopoverAction[] = []
+  if (bot || room) {
+    headerMoreActions.push({
+      key: 'profile',
+      icon: Info,
+      label: s.bots.details,
+      onPress: () => setDetailsOpen(true),
+    })
+    if (bot) {
+      headerMoreActions.push({
+        key: 'new-session',
+        icon: Plus,
+        label: s.bots.newSession,
+        disabled: busy || Boolean(state?.readOnly),
+        onPress: () => void perform('bot-new-part', { botId: bot.id }),
+      })
+    }
+    headerMoreActions.push({
+      key: 'edit',
+      icon: Pencil,
+      label: s.bots.edit,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => setEditor({ kind: bot ? 'bot' : 'room', id: selectedId }),
+    })
+    if (bot && (!bot.main || mainCount > 1)) {
+      headerMoreActions.push({
+        key: 'main',
+        icon: ArrowLeftRight,
+        label: bot.main ? s.bots.removeMain : s.bots.replaceMain,
+        disabled: busy || Boolean(state?.readOnly),
+        onPress: () => void perform('set-main', { id: bot.id, main: !bot.main }),
+      })
+    }
+    if (room) {
+      headerMoreActions.push({
+        key: 'stop-room',
+        icon: Square,
+        label: s.bots.stop,
+        disabled: busy || Boolean(state?.readOnly),
+        onPress: () => void perform('stop-room-work', { roomId: room.id }),
+      })
+    }
+    headerMoreActions.push({
+      key: 'copy-id',
+      icon: Copy,
+      label: s.bots.copyId,
+      onPress: () => {
+        const id = bot?.id ?? room?.id ?? ''
+        if (id) void Clipboard.setStringAsync(id)
+      },
+    })
+    if ((bot && !bot.main) || room) {
+      headerMoreActions.push({
+        key: 'delete',
+        icon: Trash2,
+        label: s.bots.delete,
+        danger: true,
+        disabled: busy || Boolean(state?.readOnly),
+        onPress: () => {
+          const targetId = bot?.id ?? room?.id
+          if (!targetId) return
+          Alert.alert(s.bots.delete, s.bots.deleteHint, [
+            { text: s.bots.cancel, style: 'cancel' },
+            {
+              text: s.bots.delete,
+              style: 'destructive',
+              onPress: () => void perform(bot ? 'delete-bot' : 'delete-room', { id: targetId }),
+            },
+          ])
+        },
+      })
+    }
+  }
 
   const header = selectedId && (bot || room) ? (
-    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 52 + insets.top }]}>
+    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 54 + insets.top }]}>
       <View style={styles.headerSide}>
         {navBack !== undefined && (
           <Pressable
@@ -134,7 +238,7 @@ export function BotModeScreen({
             hitSlop={8}
             style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
           >
-            <Menu size={20} color={colors.ink} />
+            <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
           </Pressable>
         )}
       </View>
@@ -143,12 +247,12 @@ export function BotModeScreen({
         accessibilityRole="button"
         accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
         onPress={() => setDetailsOpen(true)}
-        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] }]}
+        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] }]}
       >
         {bot ? (
-          <BotAvatar bot={bot} size={24} />
+          <BotAvatar bot={bot} size={26} />
         ) : roomLeadBot ? (
-          <BotAvatar bot={roomLeadBot} size={24} />
+          <BotAvatar bot={roomLeadBot} size={26} />
         ) : (
           <Users size={18} color={colors.primary} />
         )}
@@ -161,18 +265,17 @@ export function BotModeScreen({
             {goalDoneCount}/{goalSteps.length}
           </Text>
         )}
-        <ArrowRight size={14} color={colors.muted} />
       </Pressable>
 
       <View style={styles.headerSide}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={s.bots.details}
-          onPress={() => setDetailsOpen(true)}
+          accessibilityLabel={s.sessions.moreActions}
+          onPress={() => setChatMoreOpen(true)}
           hitSlop={8}
           style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
         >
-          <MoreVertical size={18} color={colors.ink} />
+          <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
         </Pressable>
       </View>
     </View>
@@ -197,6 +300,9 @@ export function BotModeScreen({
     />
   )
 
+  const slideX = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] })
+  const fadeOpacity = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1] })
+
   return (
     <KeyboardInset>
       <View style={styles.flex}>
@@ -205,11 +311,10 @@ export function BotModeScreen({
             <BotSidebarSection
               searchQuery={rosterSearch}
               onSearchChange={setRosterSearch}
-              showSearch
               onSelectBot={id => handleSelect(id)}
             />
           ) : (
-            <View style={styles.flex}>
+            <Animated.View style={[styles.flex, { opacity: fadeOpacity, transform: [{ translateX: slideX }] }]}>
               {visibleError !== undefined && (
                 <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 6 }}>
                   <Text accessibilityRole="alert" style={styles.error}>{visibleError}</Text>
@@ -258,9 +363,15 @@ export function BotModeScreen({
                   action={<Button label={s.bots.back} onPress={() => handleSelect(undefined)} />}
                 />
               )}
-            </View>
+            </Animated.View>
           )}
         </BlurHeaderFrame>
+        <BotFloatingPopover
+          visible={chatMoreOpen}
+          actions={headerMoreActions}
+          onClose={() => setChatMoreOpen(false)}
+          anchor="top-right"
+        />
         {!drawerOpen && <BotModalsHost />}
       </View>
     </KeyboardInset>

@@ -107,7 +107,25 @@ const zhCN = {
     "resetEffort": "恢复默认",
     "viaPlatform": (platform: string) => `来自 ${platform}`,
     "relayFailed": (name: string, reason: string) => `${name} 停下了：${reason}。换个模型，或让它继续。`,
-    "desktopActionRequired": "此请求（连接器 / 邮件 / 电脑操控）需在主机桌面端确认。"
+    "desktopActionRequired": "此请求（连接器 / 邮件 / 电脑操控）需在主机桌面端确认。",
+    "askBot": (name: string) => `向 ${name} 提问`,
+    "orAnswerInChat": "或在下方聊天中回答",
+    "configureBot": "配置 Bot",
+    "computer": "电脑",
+    "computerIdle": "空闲",
+    "computerActive": "使用中",
+    "computerDisabled": "未开启",
+    "computerDesc": "此 Bot 在主机桌面端的电脑操控状态会显示在这里。出于安全边界，屏幕控制需在主机端授权。",
+    "imAndConnectors": "消息平台与连接器",
+    "imAndConnectorsDesc": "外部消息平台（Slack / 飞书 / Telegram 等）及连接器凭据在主机桌面端配置与管理。",
+    "schedulesEnabled": (n: number) => `${n} 已开启`,
+    "schedulesEmpty": "此 Bot 的定时任务会显示在这里",
+    "sessionsCount": (n: number) => `${n} 段`,
+    "pinChat": "置顶对话",
+    "pinChatHint": "将此对话固定在 DS-Bot 列表顶部，方便随时快速进入。",
+    "replaceMain": "替换主 Bot...",
+    "copyId": "复制 ID",
+    "filterAll": "全部"
 },
 
   comfort: {

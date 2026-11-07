@@ -910,54 +910,18 @@ export function HostSessionsDrawer({
       </View>
 
       {drawerMode === 'bot' ? (
-        <>
-          <View style={styles.workspacesToolbarArea}>
-            <View style={styles.workspacesToolbar}>
-              <Text style={styles.workspacesTitle}>{strings.bots.title}</Text>
-              <View style={styles.toolbarActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.bots.search}
-                  hitSlop={6}
-                  onPress={() => setShowBotSearch(prev => !prev)}
-                  style={styles.iconBtn}
-                >
-                  <Search size={17} color={showBotSearch ? colors.ink : colors.muted} />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.bots.newBot}
-                  hitSlop={6}
-                  onPress={() => useBotTeamStore.getState().setEditor({ kind: 'bot' })}
-                  style={styles.iconBtn}
-                >
-                  <Plus size={17} color={colors.muted} />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.bots.newGroup}
-                  hitSlop={6}
-                  onPress={() => useBotTeamStore.getState().setEditor({ kind: 'room' })}
-                  style={styles.iconBtn}
-                >
-                  <Users size={17} color={colors.muted} />
-                </Pressable>
-              </View>
-            </View>
-          </View>
-          <BotSidebarSection
-            searchQuery={botSearchQuery}
-            onSearchChange={setBotSearchQuery}
-            showSearch={showBotSearch}
-            onSelectBot={id => {
-              saveHostMode(hostScope, 'bot')
-              onBotModeChange?.(true)
-              useBotTeamStore.getState().setSelectedId(id)
-              onSelectBot?.(id)
-              if (!inline) closeDrawer()
-            }}
-          />
-        </>
+        <BotSidebarSection
+          searchQuery={botSearchQuery}
+          onSearchChange={setBotSearchQuery}
+          showSearch={showBotSearch}
+          onSelectBot={id => {
+            saveHostMode(hostScope, 'bot')
+            onBotModeChange?.(true)
+            useBotTeamStore.getState().setSelectedId(id)
+            onSelectBot?.(id)
+            if (!inline) closeDrawer()
+          }}
+        />
       ) : (
         <>
           {/* 智能体导航卡片区 (GroupCard / GroupRow 设计风格) */}

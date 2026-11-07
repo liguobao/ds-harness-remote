@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -14,25 +14,24 @@ import {
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import {
+  AlignLeft,
+  ArrowLeftRight,
   Bot,
   CalendarDays,
   ChartNoAxesColumn,
   Check,
-  ChevronRight,
-  CirclePlus,
+  ChevronDown,
   Copy,
+  CopyPlus,
   Download,
-  MoreHorizontal,
-  Pause,
+  LayoutGrid,
   Pencil,
   Pin,
-  Play,
   Plus,
   RefreshCw,
   Search,
   Sparkles,
   Square,
-  Star,
   Trash2,
   Users,
   X,
@@ -44,14 +43,13 @@ import {
   objects,
   text,
   type BotEntry,
-  type BotObject,
   type BotRemoteClient,
   type BotRoom,
   type BotState,
 } from '../services/bot-catalog'
 import { requireBotClient, useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
-import { Button, EmptyState, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
+import { Button, EmptyState, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -60,8 +58,10 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { ModalSurface } from './chat/modal'
 import { resolveSessionDisplayTitle } from './session-title'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
-import { BotAvatar } from './bot/avatar'
+import { BotAvatar, BotAvatarWithBadge } from './bot/avatar'
 import { BotEditor, type BotPerform } from './bot/editor'
+import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
+import { BotProfilePage } from './bot/profile-page'
 
 /** Shared polling hook so the sidebar and main Bot screen stay in sync. */
 export function useBotTeamPolling(enabled: boolean): void {
@@ -162,18 +162,38 @@ export function roomLiveStatus(state: BotState, room: BotRoom): { working: boole
   }
 }
 
+function formatBotListTimestamp(updatedAt?: number): string {
+  if (!updatedAt || !Number.isFinite(updatedAt) || updatedAt <= 0) return ''
+  const date = new Date(updatedAt)
+  const now = new Date()
+  if (
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  ) {
+    const hh = String(date.getHours()).padStart(2, '0')
+    const mm = String(date.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${date.getMonth() + 1}月${date.getDate()}日`
+  }
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+}
+
+type RosterFilter = 'all' | 'bots' | 'rooms' | 'agents'
+
 export function BotSidebarSection({
   searchQuery,
   onSearchChange,
-  showSearch,
   onSelectBot,
 }: {
   searchQuery: string
   onSearchChange: (q: string) => void
-  showSearch: boolean
+  showSearch?: boolean
   onSelectBot: (id: string) => void
 }) {
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const styles = useThemedStyles(createStyles)
   const sessions = useAppStore(state => state.sessions)
   const state = useBotTeamStore(store => store.state)
@@ -187,497 +207,497 @@ export function BotSidebarSection({
   const setEditor = useBotTeamStore(store => store.setEditor)
   const setContextMenu = useBotTeamStore(store => store.setContextMenu)
 
+  const [filter, setFilter] = useState<RosterFilter>('all')
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
+
   const query = searchQuery.trim().toLocaleLowerCase()
   const visibleError = actionError ?? error
 
-  const visibleBots = (state?.bots ?? [])
-    .filter(entry => !(entry.hidden && entry.id !== selectedId && !entry.main))
-    .filter(entry => !query || `${entry.name} ${entry.role} ${entry.preview ?? ''}`.toLocaleLowerCase().includes(query))
+  const sessionMap = useMemo(() => {
+    const map = new Map<string, (typeof sessions)[number]>()
+    for (const item of sessions) map.set(item.sessionId, item)
+    return map
+  }, [sessions])
 
-  const mainBots = visibleBots.filter(entry => entry.main)
-  const regularBots = [...visibleBots.filter(entry => !entry.main)].sort(
-    (a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)),
-  )
+  const visibleBots = useMemo(() => {
+    return (state?.bots ?? [])
+      .filter(entry => !(entry.hidden && entry.id !== selectedId && !entry.main))
+      .filter(entry => !query || `${entry.name} ${entry.role} ${entry.preview ?? ''}`.toLocaleLowerCase().includes(query))
+      .sort((a, b) => {
+        if (Boolean(a.main) !== Boolean(b.main)) return Number(Boolean(b.main)) - Number(Boolean(a.main))
+        if (Boolean(a.pinned) !== Boolean(b.pinned)) return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+        const ta = sessionMap.get(a.sessionId)?.updatedAt ?? 0
+        const tb = sessionMap.get(b.sessionId)?.updatedAt ?? 0
+        return tb - ta
+      })
+  }, [state?.bots, selectedId, query, sessionMap])
 
-  const visibleRooms = [...(state?.rooms ?? [])]
-    .filter(entry => !(entry.hidden && entry.id !== selectedId))
-    .filter(entry => !query || `${entry.name} ${entry.preview ?? ''}`.toLocaleLowerCase().includes(query))
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+  const visibleRooms = useMemo(() => {
+    return [...(state?.rooms ?? [])]
+      .filter(entry => !(entry.hidden && entry.id !== selectedId))
+      .filter(entry => !query || `${entry.name} ${entry.preview ?? ''}`.toLocaleLowerCase().includes(query))
+      .sort((a, b) => {
+        if (Boolean(a.pinned) !== Boolean(b.pinned)) return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+        const ta = sessionMap.get(a.sessionId || a.id)?.updatedAt ?? 0
+        const tb = sessionMap.get(b.sessionId || b.id)?.updatedAt ?? 0
+        return tb - ta
+      })
+  }, [state?.rooms, selectedId, query, sessionMap])
 
   const agents = state?.agents ?? []
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      {showSearch && (
-        <View style={styles.searchContainer}>
-          <Search size={16} color={colors.muted} />
-          <TextInput
-            value={searchQuery}
-            onChangeText={onSearchChange}
-            placeholder={s.bots.search}
-            placeholderTextColor={colors.muted}
-            style={styles.searchInput}
-            autoFocus
-          />
-          {searchQuery.length > 0 && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.common.close}
-              hitSlop={8}
-              onPress={() => onSearchChange('')}
-            >
-              <X size={15} color={colors.muted} />
-            </Pressable>
-          )}
-        </View>
-      )}
+  const filterLabel =
+    filter === 'bots'
+      ? s.bots.all
+      : filter === 'rooms'
+        ? s.bots.groups
+        : filter === 'agents'
+          ? 'DSH Agent'
+          : s.bots.filterAll
 
-      {visibleError !== undefined && state !== undefined && (
-        <View style={styles.errorBanner}>
-          <Text accessibilityRole="alert" style={styles.errorText}>{visibleError}</Text>
+  const filterActions: BotPopoverAction[] = [
+    {
+      key: 'all',
+      icon: Bot,
+      label: s.bots.filterAll,
+      selected: filter === 'all',
+      onPress: () => setFilter('all'),
+    },
+    {
+      key: 'bots',
+      icon: Bot,
+      label: `${s.bots.all} (${state?.bots.length ?? 0})`,
+      selected: filter === 'bots',
+      onPress: () => setFilter('bots'),
+    },
+    {
+      key: 'rooms',
+      icon: Users,
+      label: `${s.bots.groups} (${state?.rooms.length ?? 0})`,
+      selected: filter === 'rooms',
+      onPress: () => setFilter('rooms'),
+    },
+    ...(agents.length > 0
+      ? [
+          {
+            key: 'agents',
+            icon: Sparkles,
+            label: 'DSH Agent',
+            selected: filter === 'agents',
+            onPress: () => setFilter('agents'),
+          },
+        ]
+      : []),
+  ]
+
+  const createActions: BotPopoverAction[] = [
+    {
+      key: 'new-bot',
+      icon: Plus,
+      label: s.bots.newBot,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => setEditor({ kind: 'bot' }),
+    },
+    {
+      key: 'new-room',
+      icon: Users,
+      label: s.bots.newGroup,
+      disabled: busy || Boolean(state?.readOnly) || (state?.bots.length ?? 0) < 2,
+      onPress: () => setEditor({ kind: 'room' }),
+    },
+    {
+      key: 'new-agent',
+      icon: Sparkles,
+      label: agents.length > 0 ? `DSH Agent · ${s.sessions.newSession}` : 'DSH Agent',
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => {
+        if (agents[0]) void perform('agent-session', { agentId: agents[0].id })
+        else void perform('add-agent')
+      },
+    },
+  ]
+
+  const toolsActions: BotPopoverAction[] = [
+    {
+      key: 'usage',
+      icon: ChartNoAxesColumn,
+      label: s.bots.usage,
+      disabled: busy,
+      onPress: () => void perform('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+    },
+    {
+      key: 'schedules',
+      icon: CalendarDays,
+      label: s.bots.schedules,
+      disabled: busy,
+      onPress: () => void perform('schedules'),
+    },
+    {
+      key: 'create-bot',
+      icon: Plus,
+      label: s.bots.newBot,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => setEditor({ kind: 'bot' }),
+    },
+    {
+      key: 'create-room',
+      icon: Users,
+      label: s.bots.newGroup,
+      disabled: busy || Boolean(state?.readOnly) || (state?.bots.length ?? 0) < 2,
+      onPress: () => setEditor({ kind: 'room' }),
+    },
+  ]
+
+  const surfaceBg = scheme === 'light' ? '#FFFFFF' : colors.surface
+  const filterPillBg = scheme === 'light' ? '#F2F2F7' : colors.grouped
+
+  const showBots = filter === 'all' || filter === 'bots'
+  const showRooms = filter === 'all' || filter === 'rooms'
+  const showAgents = filter === 'all' || filter === 'agents'
+
+  return (
+    <View style={styles.container}>
+      {state !== undefined && (
+        <View style={styles.topActionRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={s.bots.retry}
-            onPress={() => void refresh(true)}
-            style={({ pressed }) => [styles.retryPill, pressed && styles.pressedFade]}
+            accessibilityLabel={filterLabel}
+            onPress={() => setFilterMenuOpen(true)}
+            style={({ pressed }) => [
+              styles.filterPill,
+              { backgroundColor: filterPillBg },
+              pressed && styles.pressedFade,
+            ]}
           >
-            <RefreshCw size={13} color={colors.primary} />
-            <Text style={styles.retryPillText}>{s.bots.retry}</Text>
+            <Text style={styles.filterPillText}>{filterLabel}</Text>
+            <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={s.bots.add}
+            disabled={busy || Boolean(state.readOnly)}
+            onPress={() => setCreateMenuOpen(true)}
+            style={({ pressed }) => [
+              styles.plusCircleBtn,
+              { backgroundColor: surfaceBg },
+              pressed && styles.pressedFade,
+              (busy || Boolean(state.readOnly)) && styles.disabled,
+            ]}
+          >
+            <Plus size={19} color={colors.ink} strokeWidth={2.1} />
           </Pressable>
         </View>
       )}
 
-      {state?.readOnly !== undefined && (
-        <View style={styles.readOnlyBadge}>
-          <Text style={styles.readOnlyText}>{s.bots.readOnly}: {state.readOnly}</Text>
-        </View>
-      )}
-
-      {loading && state === undefined && (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      )}
-
-      {!loading && state === undefined && (
-        <DsBotInstallCard error={visibleError} onRetry={() => void refresh(true)} />
-      )}
-
-      {state !== undefined && state.bots.length === 0 && (
-        <View style={styles.emptyWrap}>
-          <EmptyState
-            icon={Bot}
-            title={s.bots.empty}
-            body={s.bots.emptyHint}
-            action={
-              <Button
-                label={s.bots.newBot}
-                disabled={busy || Boolean(state.readOnly)}
-                onPress={() => setEditor({ kind: 'bot' })}
-              />
-            }
-          />
-        </View>
-      )}
-
-      {/* 主 Bot 卡片区 (对齐 DS-Bot sidebar.js Main Tile + GroupCard 风格) */}
-      {mainBots.length > 0 && (
-        <View style={styles.sectionBlock}>
-          <View style={styles.sidebarSectionHeader}>
-            <Text style={styles.sidebarSectionTitle}>{s.bots.mainTitle}</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {visibleError !== undefined && state !== undefined && (
+          <View style={styles.errorBanner}>
+            <Text accessibilityRole="alert" style={styles.errorText}>{visibleError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={s.bots.retry}
+              onPress={() => void refresh(true)}
+              style={({ pressed }) => [styles.retryPill, pressed && styles.pressedFade]}
+            >
+              <RefreshCw size={13} color={colors.primary} />
+              <Text style={styles.retryPillText}>{s.bots.retry}</Text>
+            </Pressable>
           </View>
-          <GroupCard>
-            {mainBots.map((entry, index) => {
-              const isSelected = selectedId === entry.id
-              const live = state ? botLiveStatus(state, entry) : { kind: 'idle' as const, label: s.bots.idle }
-              const subtitle = live.kind !== 'idle'
-                ? live.label
-                : (entry.preview || entry.role || s.bots.idle)
-              const dotColor = live.kind === 'waiting'
-                ? colors.warning
-                : live.kind === 'working' || live.kind === 'away'
-                  ? colors.success
-                  : colors.subtle
+        )}
+
+        {state?.readOnly !== undefined && (
+          <View style={styles.readOnlyBadge}>
+            <Text style={styles.readOnlyText}>{s.bots.readOnly}: {state.readOnly}</Text>
+          </View>
+        )}
+
+        {loading && state === undefined && (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        )}
+
+        {!loading && state === undefined && (
+          <DsBotInstallCard error={visibleError} onRetry={() => void refresh(true)} />
+        )}
+
+        {state !== undefined && state.bots.length === 0 && state.rooms.length === 0 && (
+          <View style={styles.emptyWrap}>
+            <EmptyState
+              icon={Bot}
+              title={s.bots.empty}
+              body={s.bots.emptyHint}
+              action={
+                <Button
+                  label={s.bots.newBot}
+                  disabled={busy || Boolean(state.readOnly)}
+                  onPress={() => setEditor({ kind: 'bot' })}
+                />
+              }
+            />
+          </View>
+        )}
+
+        {state !== undefined && showBots && visibleBots.map(entry => {
+          const isSelected = selectedId === entry.id
+          const live = botLiveStatus(state, entry)
+          const pendingQ = object(state.questions[entry.sessionId])
+          const pendingQText = text(pendingQ.question) || text(pendingQ.header)
+          const hasSnippetIcon = Boolean(pendingQText || entry.preview)
+          const subtitle = pendingQText
+            || (live.kind !== 'idle' ? live.label : (entry.preview || entry.role || s.bots.idle))
+          const dotColor = live.kind === 'waiting'
+            ? colors.warning
+            : live.kind === 'working' || live.kind === 'away'
+              ? colors.success
+              : undefined
+          const timeStr = formatBotListTimestamp(sessionMap.get(entry.sessionId)?.updatedAt)
+
+          return (
+            <Pressable
+              key={entry.id}
+              accessibilityRole="button"
+              accessibilityLabel={entry.main ? `${entry.name}, ${s.bots.main}` : entry.name}
+              accessibilityState={{ selected: isSelected }}
+              onPress={() => onSelectBot(entry.id)}
+              onLongPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+                setContextMenu({ kind: 'bot', id: entry.id })
+              }}
+              style={({ pressed }) => [
+                styles.inboxRow,
+                isSelected && styles.rowSelected,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <BotAvatarWithBadge
+                bot={entry}
+                size={50}
+                showMainStar
+                statusColor={dotColor}
+                badgeBorderColor={colors.surface}
+              />
+
+              <View style={styles.rowBody}>
+                <View style={styles.rowTopLine}>
+                  <View style={styles.rowTitleLeft}>
+                    <Text numberOfLines={1} style={[styles.inboxTitle, isSelected && styles.rowNameSelected]}>
+                      {entry.name}
+                    </Text>
+                    <BotAgentBadge engine={entry.engine ?? engineOfModel(entry.model || entry.appliedModel)} size={14} />
+                    {entry.pinned && <OfficialMenuIcons.pinFill size={11} color={colors.muted} />}
+                  </View>
+                  {Boolean(timeStr) && <Text style={styles.inboxDate}>{timeStr}</Text>}
+                </View>
+
+                <View style={styles.rowSnippetLine}>
+                  {hasSnippetIcon && (
+                    <AlignLeft size={13} color={colors.muted} strokeWidth={1.8} style={styles.snippetIcon} />
+                  )}
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.inboxSubtitle,
+                      !pendingQText && (live.kind === 'working' || live.kind === 'away') && styles.rowSubtitleActive,
+                      !pendingQText && live.kind === 'waiting' && styles.rowSubtitleWarning,
+                    ]}
+                  >
+                    {subtitle}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          )
+        })}
+
+        {state !== undefined && showRooms && visibleRooms.map(entry => {
+          const isSelected = selectedId === entry.id
+          const live = roomLiveStatus(state, entry)
+          const timeStr = formatBotListTimestamp(sessionMap.get(entry.sessionId || entry.id)?.updatedAt)
+
+          return (
+            <Pressable
+              key={entry.id}
+              accessibilityRole="button"
+              accessibilityLabel={entry.name}
+              accessibilityState={{ selected: isSelected }}
+              onPress={() => onSelectBot(entry.id)}
+              onLongPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+                setContextMenu({ kind: 'room', id: entry.id })
+              }}
+              style={({ pressed }) => [
+                styles.inboxRow,
+                isSelected && styles.rowSelected,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
+                {entry.members.slice(0, 3).map((id, idx) => {
+                  const member = state.bots.find(b => b.id === id)
+                  return member ? (
+                    <View key={id} style={{ position: 'absolute', left: 5 + idx * 8, top: 7 + (idx % 2) * 11 }}>
+                      <BotAvatar bot={member} size={24} />
+                    </View>
+                  ) : null
+                })}
+                {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
+              </View>
+
+              <View style={styles.rowBody}>
+                <View style={styles.rowTopLine}>
+                  <View style={styles.rowTitleLeft}>
+                    <Text numberOfLines={1} style={[styles.inboxTitle, isSelected && styles.rowNameSelected]}>
+                      {entry.name}
+                    </Text>
+                    {entry.pinned && <OfficialMenuIcons.pinFill size={11} color={colors.muted} />}
+                  </View>
+                  {Boolean(timeStr) && <Text style={styles.inboxDate}>{timeStr}</Text>}
+                </View>
+
+                <View style={styles.rowSnippetLine}>
+                  <Users size={13} color={colors.muted} strokeWidth={1.8} style={styles.snippetIcon} />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.inboxSubtitle,
+                      live.working && styles.rowSubtitleActive,
+                      live.waiting && styles.rowSubtitleWarning,
+                    ]}
+                  >
+                    {live.label}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          )
+        })}
+
+        {state !== undefined && showAgents && agents.map(agent =>
+          agent.sessions
+            .filter(sid => {
+              if (!query) return true
+              const matched = sessionMap.get(sid)
+              const title = (matched ? resolveSessionDisplayTitle(matched) : undefined) ?? s.sessions.untitled
+              return title.toLocaleLowerCase().includes(query)
+            })
+            .slice(0, 8)
+            .map(sid => {
+              const matched = sessionMap.get(sid)
+              const title = (matched ? resolveSessionDisplayTitle(matched) : undefined) ?? s.sessions.untitled
+              const isSelected = selectedId === sid
+              const timeStr = formatBotListTimestamp(matched?.updatedAt)
               return (
                 <Pressable
-                  key={entry.id}
+                  key={sid}
                   accessibilityRole="button"
-                  accessibilityLabel={`${entry.name}, ${s.bots.main}`}
+                  accessibilityLabel={title}
                   accessibilityState={{ selected: isSelected }}
-                  onPress={() => onSelectBot(entry.id)}
+                  onPress={() => onSelectBot(sid)}
                   onLongPress={() => {
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                    setContextMenu({ kind: 'bot', id: entry.id })
+                    setContextMenu({ kind: 'agent', id: agent.id })
                   }}
                   style={({ pressed }) => [
-                    styles.botRow,
-                    styles.mainBotRow,
-                    index > 0 && styles.rowDivider,
+                    styles.inboxRow,
                     isSelected && styles.rowSelected,
                     pressed && styles.rowPressed,
                   ]}
                 >
-                  <View style={styles.avatarWrap}>
-                    <BotAvatar bot={entry} size={44} />
-                    <View style={[styles.avatarStatusDot, { backgroundColor: dotColor }]} />
+                  <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
+                    <Sparkles size={22} color={colors.primary} />
                   </View>
                   <View style={styles.rowBody}>
-                    <View style={styles.rowTitleLine}>
-                      <Text numberOfLines={1} style={[styles.mainBotName, isSelected && styles.rowNameSelected]}>
-                        {entry.name}
+                    <View style={styles.rowTopLine}>
+                      <Text numberOfLines={1} style={[styles.inboxTitle, isSelected && styles.rowNameSelected]}>
+                        {title}
                       </Text>
-                      <BotAgentBadge engine={entry.engine ?? engineOfModel(entry.model || entry.appliedModel)} size={15} />
-                      <Star size={13} color={colors.primary} fill={colors.primary} />
-                      {Boolean(entry.role) && (
-                        <View style={styles.roleChip}>
-                          <Text numberOfLines={1} style={styles.roleChipText}>{entry.role}</Text>
-                        </View>
-                      )}
+                      {Boolean(timeStr) && <Text style={styles.inboxDate}>{timeStr}</Text>}
                     </View>
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.rowSubtitle,
-                        (live.kind === 'working' || live.kind === 'away') && styles.rowSubtitleActive,
-                        live.kind === 'waiting' && styles.rowSubtitleWarning,
-                      ]}
-                    >
-                      {subtitle}
+                    <Text numberOfLines={1} style={styles.inboxSubtitle}>
+                      DSH Agent
                     </Text>
                   </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={s.sessions.moreActions}
-                    hitSlop={8}
-                    onPress={e => {
-                      e.stopPropagation()
-                      setContextMenu({ kind: 'bot', id: entry.id })
-                    }}
-                    style={styles.moreBtn}
-                  >
-                    <MoreHorizontal size={17} color={colors.muted} />
-                  </Pressable>
                 </Pressable>
               )
-            })}
-          </GroupCard>
-        </View>
-      )}
+            }),
+        )}
+      </ScrollView>
 
-      {/* 机器人列表 (Bots) */}
       {state !== undefined && (
-        <View style={styles.sectionBlock}>
-          <View style={styles.sidebarSectionHeader}>
-            <Text style={styles.sidebarSectionTitle}>
-              {s.bots.all}
-              {regularBots.length > 0 ? ` (${regularBots.length})` : ''}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.bots.newBot}
-              disabled={busy || Boolean(state.readOnly)}
-              onPress={() => setEditor({ kind: 'bot' })}
-              hitSlop={8}
-              style={({ pressed }) => [styles.sectionActionBtn, pressed && styles.pressedFade]}
-            >
-              <CirclePlus size={15} color={colors.primary} strokeWidth={2} />
-              <Text style={styles.sectionActionText}>{s.bots.newBot}</Text>
-            </Pressable>
-          </View>
-          <GroupCard>
-            {regularBots.length === 0 ? (
-              <GroupRow
-                first
-                icon={Plus}
-                label={s.bots.newBot}
-                detail={s.bots.emptyHint}
-                disabled={busy || Boolean(state.readOnly)}
-                onPress={() => setEditor({ kind: 'bot' })}
-              />
-            ) : (
-              regularBots.map((entry, index) => {
-                const isSelected = selectedId === entry.id
-                const live = botLiveStatus(state, entry)
-                const subtitle = live.kind !== 'idle'
-                  ? live.label
-                  : (entry.preview || entry.role || s.bots.idle)
-                const dotColor = live.kind === 'waiting'
-                  ? colors.warning
-                  : live.kind === 'working' || live.kind === 'away'
-                    ? colors.success
-                    : undefined
-                return (
-                  <Pressable
-                    key={entry.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={entry.name}
-                    accessibilityState={{ selected: isSelected }}
-                    onPress={() => onSelectBot(entry.id)}
-                    onLongPress={() => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                      setContextMenu({ kind: 'bot', id: entry.id })
-                    }}
-                    style={({ pressed }) => [
-                      styles.botRow,
-                      index > 0 && styles.rowDivider,
-                      isSelected && styles.rowSelected,
-                      pressed && styles.rowPressed,
-                    ]}
-                  >
-                    <View style={styles.avatarWrap}>
-                      <BotAvatar bot={entry} size={36} />
-                      {dotColor !== undefined && (
-                        <View style={[styles.avatarStatusDotSmall, { backgroundColor: dotColor }]} />
-                      )}
-                    </View>
-                    <View style={styles.rowBody}>
-                      <View style={styles.rowTitleLine}>
-                        <Text numberOfLines={1} style={[styles.rowName, isSelected && styles.rowNameSelected]}>
-                          {entry.name}
-                        </Text>
-                        <BotAgentBadge engine={entry.engine ?? engineOfModel(entry.model || entry.appliedModel)} size={14} />
-                        {entry.pinned && (
-                          <OfficialMenuIcons.pinFill size={12} color={colors.muted} />
-                        )}
-                      </View>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.rowSubtitle,
-                          (live.kind === 'working' || live.kind === 'away') && styles.rowSubtitleActive,
-                          live.kind === 'waiting' && styles.rowSubtitleWarning,
-                        ]}
-                      >
-                        {subtitle}
-                      </Text>
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={s.sessions.moreActions}
-                      hitSlop={8}
-                      onPress={e => {
-                        e.stopPropagation()
-                        setContextMenu({ kind: 'bot', id: entry.id })
-                      }}
-                      style={styles.moreBtn}
-                    >
-                      <MoreHorizontal size={17} color={colors.muted} />
-                    </Pressable>
-                  </Pressable>
-                )
-              })
-            )}
-          </GroupCard>
-        </View>
-      )}
+        <View style={styles.bottomDock}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={s.bots.manage}
+            onPress={() => setToolsMenuOpen(true)}
+            style={({ pressed }) => [
+              styles.dockGridBtn,
+              { backgroundColor: surfaceBg },
+              pressed && styles.pressedFade,
+            ]}
+          >
+            <LayoutGrid size={19} color={colors.ink} strokeWidth={1.9} />
+          </Pressable>
 
-      {/* 群聊列表 (Rooms) */}
-      {state !== undefined && (
-        <View style={styles.sectionBlock}>
-          <View style={styles.sidebarSectionHeader}>
-            <Text style={styles.sidebarSectionTitle}>
-              {s.bots.groups}
-              {visibleRooms.length > 0 ? ` (${visibleRooms.length})` : ''}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.bots.newGroup}
-              disabled={busy || Boolean(state.readOnly) || state.bots.length < 2}
-              onPress={() => setEditor({ kind: 'room' })}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.sectionActionBtn,
-                (busy || Boolean(state.readOnly) || state.bots.length < 2) && styles.disabled,
-                pressed && styles.pressedFade,
-              ]}
-            >
-              <CirclePlus size={15} color={colors.primary} strokeWidth={2} />
-              <Text style={styles.sectionActionText}>{s.bots.newGroup}</Text>
-            </Pressable>
-          </View>
-          <GroupCard>
-            {visibleRooms.length === 0 ? (
-              <GroupRow
-                first
-                icon={Users}
-                label={s.bots.newGroup}
-                detail={state.bots.length < 2 ? '至少需要 2 个 Bot 才能创建协同群聊' : s.bots.none}
-                disabled={busy || Boolean(state.readOnly) || state.bots.length < 2}
-                onPress={() => setEditor({ kind: 'room' })}
-              />
-            ) : (
-              visibleRooms.map((entry, index) => {
-                const isSelected = selectedId === entry.id
-                const live = roomLiveStatus(state, entry)
-                return (
-                  <Pressable
-                    key={entry.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={entry.name}
-                    accessibilityState={{ selected: isSelected }}
-                    onPress={() => onSelectBot(entry.id)}
-                    onLongPress={() => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                      setContextMenu({ kind: 'room', id: entry.id })
-                    }}
-                    style={({ pressed }) => [
-                      styles.botRow,
-                      index > 0 && styles.rowDivider,
-                      isSelected && styles.rowSelected,
-                      pressed && styles.rowPressed,
-                    ]}
-                  >
-                    <View style={styles.groupAvatar}>
-                      {entry.members.slice(0, 3).map((id, idx) => {
-                        const member = state.bots.find(b => b.id === id)
-                        return member ? (
-                          <View key={id} style={{ position: 'absolute', left: idx * 7, top: (idx % 2) * 9 }}>
-                            <BotAvatar bot={member} size={22} />
-                          </View>
-                        ) : null
-                      })}
-                      {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
-                    </View>
-                    <View style={styles.rowBody}>
-                      <View style={styles.rowTitleLine}>
-                        <Text numberOfLines={1} style={[styles.rowName, isSelected && styles.rowNameSelected]}>
-                          {entry.name}
-                        </Text>
-                        {entry.pinned && (
-                          <OfficialMenuIcons.pinFill size={12} color={colors.muted} />
-                        )}
-                      </View>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.rowSubtitle,
-                          live.working && styles.rowSubtitleActive,
-                          live.waiting && styles.rowSubtitleWarning,
-                        ]}
-                      >
-                        {live.label}
-                      </Text>
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={s.sessions.moreActions}
-                      hitSlop={8}
-                      onPress={e => {
-                        e.stopPropagation()
-                        setContextMenu({ kind: 'room', id: entry.id })
-                      }}
-                      style={styles.moreBtn}
-                    >
-                      <MoreHorizontal size={17} color={colors.muted} />
-                    </Pressable>
-                  </Pressable>
-                )
-              })
-            )}
-          </GroupCard>
-        </View>
-      )}
-
-      {/* DSH Agent 行 (对齐 DS-Bot v0.2.7 AgentRow) */}
-      {state !== undefined && agents.length > 0 && (
-        <View style={styles.sectionBlock}>
-          <View style={styles.sidebarSectionHeader}>
-            <Text style={styles.sidebarSectionTitle}>DSH Agent</Text>
-          </View>
-          <GroupCard>
-            {agents.map(agent => (
-              <View key={agent.id}>
-                <GroupRow
-                  first
-                  icon={Sparkles}
-                  label="DSH Agent"
-                  detail={`${agent.sessions.length} ${s.devices.conversations}`}
-                  chevron={false}
-                  accessory={
-                    <View style={styles.agentActions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={s.sessions.newSession}
-                        disabled={busy || Boolean(state.readOnly)}
-                        onPress={() => void perform('agent-session', { agentId: agent.id })}
-                        style={styles.moreBtn}
-                      >
-                        <Plus size={17} color={colors.primary} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={s.sessions.moreActions}
-                        onPress={() => setContextMenu({ kind: 'agent', id: agent.id })}
-                        style={styles.moreBtn}
-                      >
-                        <MoreHorizontal size={17} color={colors.muted} />
-                      </Pressable>
-                    </View>
-                  }
-                />
-                {agent.sessions.slice(0, 5).map(sid => {
-                  const matched = sessions.find(item => item.sessionId === sid)
-                  const title = (matched ? resolveSessionDisplayTitle(matched) : undefined) ?? s.sessions.untitled
-                  const isSelected = selectedId === sid
-                  return (
-                    <GroupRow
-                      key={sid}
-                      label={title}
-                      selected={isSelected}
-                      onPress={() => onSelectBot(sid)}
-                    />
-                  )
-                })}
-              </View>
-            ))}
-          </GroupCard>
-        </View>
-      )}
-
-      {/* 团队工具 (Usage & Schedules) */}
-      {state !== undefined && (
-        <View style={styles.sectionBlock}>
-          <View style={styles.sidebarSectionHeader}>
-            <Text style={styles.sidebarSectionTitle}>{s.bots.manage}</Text>
-          </View>
-          <GroupCard>
-            <GroupRow
-              first
-              icon={ChartNoAxesColumn}
-              label={s.bots.usage}
-              disabled={busy}
-              onPress={() => void perform('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })}
+          <View style={[styles.dockSearchCapsule, { backgroundColor: surfaceBg }]}>
+            <Search size={17} color={colors.ink} strokeWidth={1.9} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={onSearchChange}
+              placeholder={s.bots.search}
+              placeholderTextColor={colors.muted}
+              style={styles.dockSearchInput}
+              returnKeyType="search"
             />
-            <GroupRow
-              icon={CalendarDays}
-              label={s.bots.schedules}
-              disabled={busy}
-              onPress={() => void perform('schedules')}
-            />
-            {agents.length === 0 && !state.readOnly && (
-              <GroupRow
-                icon={Sparkles}
-                label="DSH Agent"
-                detail={s.sessions.newSession}
-                disabled={busy}
-                onPress={() => void perform('add-agent')}
-              />
+            {searchQuery.length > 0 && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={s.common.close}
+                hitSlop={8}
+                onPress={() => onSearchChange('')}
+              >
+                <X size={15} color={colors.muted} />
+              </Pressable>
             )}
-          </GroupCard>
+          </View>
         </View>
       )}
-    </ScrollView>
+
+      <BotFloatingPopover
+        visible={filterMenuOpen}
+        actions={filterActions}
+        onClose={() => setFilterMenuOpen(false)}
+        anchor="top-left"
+        topOffset={104}
+      />
+      <BotFloatingPopover
+        visible={createMenuOpen}
+        actions={createActions}
+        onClose={() => setCreateMenuOpen(false)}
+        anchor="top-right"
+        topOffset={104}
+      />
+      <BotFloatingPopover
+        visible={toolsMenuOpen}
+        actions={toolsActions}
+        onClose={() => setToolsMenuOpen(false)}
+        anchor="bottom-left"
+        bottomOffset={68}
+      />
+    </View>
   )
 }
 
-/** Shared modals for DS-Bot (Editor, Context Menu, Details, Usage/Schedules Report). */
+/** Shared modals for DS-Bot (Editor, Context Menu, Full-Screen Profile Page, Usage/Schedules Report). */
 export function BotModalsHost() {
-  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
   const state = useBotTeamStore(store => store.state)
@@ -696,7 +716,6 @@ export function BotModalsHost() {
   const setContextMenu = useBotTeamStore(store => store.setContextMenu)
   const perform = useBotTeamStore(store => store.perform)
   const loadRunStats = useBotTeamStore(store => store.loadRunStats)
-  const appSessions = useAppStore(store => store.sessions)
 
   const visibleError = actionError ?? error
   const detailBot = state?.bots.find(entry => entry.id === selectedId)
@@ -734,6 +753,100 @@ export function BotModalsHost() {
   const menuAgent = contextMenu?.kind === 'agent' ? state?.agents.find(a => a.id === contextMenu.id) : undefined
   const mainCount = state?.bots.filter(b => b.main).length ?? 0
 
+  const contextActions: BotPopoverAction[] = []
+  if (menuBot && !menuBot.tile) {
+    contextActions.push({
+      key: 'pin',
+      icon: Pin,
+      label: menuBot.pinned ? s.sessions.unpinSession : s.sessions.pinSession,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('set-flags', { id: menuBot.id, pinned: !menuBot.pinned }),
+    })
+  }
+  if (menuRoom) {
+    contextActions.push({
+      key: 'pin',
+      icon: Pin,
+      label: menuRoom.pinned ? s.sessions.unpinSession : s.sessions.pinSession,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('set-flags', { id: menuRoom.id, pinned: !menuRoom.pinned }),
+    })
+  }
+  if (menuBot || menuRoom) {
+    contextActions.push({
+      key: 'edit',
+      icon: Pencil,
+      label: s.bots.edit,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () =>
+        setEditor({
+          kind: contextMenu?.kind === 'bot' ? 'bot' : 'room',
+          id: contextMenu?.id,
+        }),
+    })
+  }
+  if (menuBot && (!menuBot.main || mainCount > 1)) {
+    contextActions.push({
+      key: 'main',
+      icon: ArrowLeftRight,
+      label: menuBot.main ? s.bots.removeMain : s.bots.replaceMain,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('set-main', { id: menuBot.id, main: !menuBot.main }),
+    })
+  }
+  if (menuBot) {
+    contextActions.push({
+      key: 'duplicate',
+      icon: CopyPlus,
+      label: s.bots.duplicate,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('duplicate-bot', { id: menuBot.id }),
+    })
+  }
+  if (menuRoom) {
+    contextActions.push({
+      key: 'stop',
+      icon: Square,
+      label: s.bots.stop,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('stop-room-work', { roomId: menuRoom.id }),
+    })
+  }
+  if (menuBot || menuRoom) {
+    contextActions.push({
+      key: 'copy-id',
+      icon: Copy,
+      label: s.bots.copyId,
+      onPress: () => {
+        const targetId = menuBot?.id ?? menuRoom?.id ?? ''
+        if (targetId) void Clipboard.setStringAsync(targetId)
+      },
+    })
+  }
+  if (menuAgent) {
+    contextActions.push({
+      key: 'new-agent-session',
+      icon: Plus,
+      label: s.sessions.newSession,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => void perform('agent-session', { agentId: menuAgent.id }),
+    })
+  }
+  if ((menuBot && !menuBot.main) || menuRoom || menuAgent) {
+    contextActions.push({
+      key: 'delete',
+      icon: Trash2,
+      label: s.bots.delete,
+      danger: true,
+      disabled: busy || Boolean(state?.readOnly),
+      onPress: () => {
+        if (!contextMenu) return
+        if (contextMenu.kind === 'agent') void perform('remove-agent', { agentId: contextMenu.id })
+        else confirmDelete(contextMenu.kind, contextMenu.id)
+      },
+    })
+  }
+
   return (
     <>
       {editor !== undefined && state !== undefined && clientInstance !== undefined && (
@@ -751,394 +864,30 @@ export function BotModalsHost() {
         />
       )}
 
-      {/* Bot / Room / Agent 上下文菜单 Sheet */}
-      {contextMenu !== undefined && (menuBot || menuRoom || menuAgent) && (
-        <Modal
-          transparent
-          visible
-          animationType="fade"
-          onRequestClose={() => setContextMenu(undefined)}
-          statusBarTranslucent
-        >
-          <ModalSurface onClose={() => setContextMenu(undefined)}>
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeaderTitleWrap}>
-                {menuBot && <BotAvatar bot={menuBot} size={36} />}
-                <View style={styles.grow}>
-                  <Text style={styles.sheetTitle} numberOfLines={1}>
-                    {menuBot?.name ?? menuRoom?.name ?? 'DSH Agent'}
-                  </Text>
-                  {Boolean(menuBot?.role ?? menuRoom?.notice) && (
-                    <Text style={styles.sheetSubtitle} numberOfLines={1}>
-                      {menuBot?.role ?? menuRoom?.notice}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              <IconButton label={s.common.close} icon={X} onPress={() => setContextMenu(undefined)} />
-            </View>
-            <ScrollView style={{ maxHeight: sheetMaxHeight }} contentContainerStyle={styles.sheetBody}>
-              <GroupCard>
-                {menuBot && !menuBot.tile && (
-                  <GroupRow
-                    first
-                    icon={Pin}
-                    label={menuBot.pinned ? s.sessions.unpinSession : s.sessions.pinSession}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuBot
-                      setContextMenu(undefined)
-                      void perform('set-flags', { id: target.id, pinned: !target.pinned })
-                    }}
-                  />
-                )}
-                {menuRoom && (
-                  <GroupRow
-                    first
-                    icon={Pin}
-                    label={menuRoom.pinned ? s.sessions.unpinSession : s.sessions.pinSession}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuRoom
-                      setContextMenu(undefined)
-                      void perform('set-flags', { id: target.id, pinned: !target.pinned })
-                    }}
-                  />
-                )}
-                {(menuBot || menuRoom) && (
-                  <GroupRow
-                    first={Boolean(menuBot?.tile)}
-                    icon={Pencil}
-                    label={s.bots.edit}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = contextMenu
-                      setContextMenu(undefined)
-                      setEditor({ kind: target.kind === 'bot' ? 'bot' : 'room', id: target.id })
-                    }}
-                  />
-                )}
-                {menuBot && (!menuBot.main || mainCount > 1) && (
-                  <GroupRow
-                    icon={Star}
-                    label={menuBot.main ? s.bots.removeMain : s.bots.makeMain}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuBot
-                      setContextMenu(undefined)
-                      void perform('set-main', { id: target.id, main: !target.main })
-                    }}
-                  />
-                )}
-                {menuBot && (
-                  <GroupRow
-                    icon={Copy}
-                    label={s.bots.duplicate}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuBot
-                      setContextMenu(undefined)
-                      void perform('duplicate-bot', { id: target.id })
-                    }}
-                  />
-                )}
-                {menuRoom && (
-                  <GroupRow
-                    icon={Square}
-                    label={s.bots.stop}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuRoom
-                      setContextMenu(undefined)
-                      void perform('stop-room-work', { roomId: target.id })
-                    }}
-                  />
-                )}
-                {(menuBot || menuRoom) && (
-                  <GroupRow
-                    icon={Copy}
-                    label={s.sessions.copySessionId}
-                    onPress={() => {
-                      const sid = menuBot?.sessionId ?? menuRoom?.sessionId ?? menuRoom?.id ?? ''
-                      setContextMenu(undefined)
-                      if (sid) void Clipboard.setStringAsync(sid)
-                    }}
-                  />
-                )}
-                {menuAgent && (
-                  <GroupRow
-                    first
-                    icon={Plus}
-                    label={s.sessions.newSession}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = menuAgent
-                      setContextMenu(undefined)
-                      void perform('agent-session', { agentId: target.id })
-                    }}
-                  />
-                )}
-              </GroupCard>
+      <BotFloatingPopover
+        visible={contextMenu !== undefined && contextActions.length > 0}
+        actions={contextActions}
+        onClose={() => setContextMenu(undefined)}
+        anchor="top-right"
+        topOffset={120}
+      />
 
-              {((menuBot && !menuBot.main) || menuRoom || menuAgent) && (
-                <GroupCard>
-                  <GroupRow
-                    first
-                    icon={Trash2}
-                    label={s.bots.delete}
-                    danger
-                    chevron={false}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      const target = contextMenu
-                      setContextMenu(undefined)
-                      if (target.kind === 'agent') {
-                        void perform('remove-agent', { agentId: target.id })
-                      } else {
-                        confirmDelete(target.kind, target.id)
-                      }
-                    }}
-                  />
-                </GroupCard>
-              )}
-            </ScrollView>
-          </ModalSurface>
-        </Modal>
+      {state !== undefined && (
+        <BotProfilePage
+          visible={detailsOpen && Boolean(detailBot || detailRoom)}
+          bot={detailBot}
+          room={detailRoom}
+          state={state}
+          client={clientInstance}
+          busy={busy}
+          error={visibleError}
+          runStats={runStats}
+          onClose={() => setDetailsOpen(false)}
+          onEdit={() => setEditor({ kind: detailBot ? 'bot' : 'room', id: selectedId })}
+          perform={performAdapter}
+        />
       )}
 
-      {/* Bot / Room 详情 Sheet (GroupCard / GroupRow 风格 + v0.2.7 run-stats & room goal) */}
-      {detailsOpen && (detailBot || detailRoom) && (
-        <Modal
-          transparent
-          visible
-          animationType="slide"
-          onRequestClose={() => setDetailsOpen(false)}
-          statusBarTranslucent
-        >
-          <ModalSurface onClose={() => setDetailsOpen(false)}>
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeaderTitleWrap}>
-                {detailBot ? <BotAvatar bot={detailBot} size={44} /> : <Users size={32} color={colors.primary} />}
-                <View style={styles.grow}>
-                  <View style={styles.rowTitleLine}>
-                    <Text style={styles.sheetTitle}>{detailBot?.name ?? detailRoom?.name}</Text>
-                    {detailBot && (
-                      <BotAgentBadge
-                        engine={detailBot.engine ?? engineOfModel(detailBot.model || detailBot.appliedModel)}
-                        size={16}
-                      />
-                    )}
-                  </View>
-                  {Boolean(detailBot?.role ?? detailRoom?.notice) && (
-                    <Text numberOfLines={2} style={styles.sheetSubtitle}>
-                      {detailBot?.role ?? detailRoom?.notice}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              <IconButton label={s.common.close} icon={X} onPress={() => setDetailsOpen(false)} />
-            </View>
-            <ScrollView style={{ maxHeight: sheetMaxHeight }} contentContainerStyle={styles.sheetBody}>
-              {visibleError && <Text style={styles.errorText}>{visibleError}</Text>}
-
-              {/* v0.2.7 Run Stats (tokenUsage) */}
-              {detailBot && runStats && isNonEmptyObject(object(runStats.tokenUsage)) && (
-                <GroupCard>
-                  <View style={styles.statsBlock}>
-                    <Text style={styles.statsHeading}>{s.bots.usage}</Text>
-                    <Text style={styles.statsBody}>
-                      {s.bots.inputTokens}: {Number(object(runStats.tokenUsage).inputTokens ?? 0).toLocaleString()} · {s.bots.outputTokens}: {Number(object(runStats.tokenUsage).outputTokens ?? 0).toLocaleString()}
-                    </Text>
-                  </View>
-                </GroupCard>
-              )}
-
-              {/* v0.2.7 Room Goal 控制 */}
-              {detailRoom?.goal && isNonEmptyObject(detailRoom.goal) && (
-                <GroupCard>
-                  <View style={styles.statsBlock}>
-                    <Text style={styles.statsHeading}>
-                      {s.sessionActivity.goal}: {text(detailRoom.goal.title) || text(detailRoom.goal.status)}
-                    </Text>
-                    <View style={styles.goalButtonsRow}>
-                      {text(detailRoom.goal.status) === 'running' ? (
-                        <Button
-                          variant="secondary"
-                          icon={Pause}
-                          label={s.automation.pauseTask}
-                          disabled={busy || Boolean(state?.readOnly)}
-                          onPress={() => void perform('goal-control', { roomId: detailRoom.id, action: 'pause' })}
-                        />
-                      ) : text(detailRoom.goal.status) === 'paused' ? (
-                        <Button
-                          variant="secondary"
-                          icon={Play}
-                          label={s.automation.resumeTask}
-                          disabled={busy || Boolean(state?.readOnly)}
-                          onPress={() => void perform('goal-control', { roomId: detailRoom.id, action: 'resume' })}
-                        />
-                      ) : null}
-                      <Button
-                        variant="secondary"
-                        icon={Square}
-                        label={s.bots.stop}
-                        disabled={busy || Boolean(state?.readOnly)}
-                        onPress={() => void perform('goal-control', { roomId: detailRoom.id, action: 'stop' })}
-                      />
-                    </View>
-                  </View>
-                </GroupCard>
-              )}
-
-              <GroupCard>
-                <GroupRow
-                  first
-                  icon={Pencil}
-                  label={s.bots.edit}
-                  disabled={busy || Boolean(state?.readOnly)}
-                  onPress={() => {
-                    setDetailsOpen(false)
-                    setEditor({ kind: detailBot ? 'bot' : 'room', id: selectedId })
-                  }}
-                />
-                {detailBot && !detailBot.tile && (
-                  <GroupRow
-                    icon={Pin}
-                    label={detailBot.pinned ? s.sessions.unpinSession : s.sessions.pinSession}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => void perform('set-flags', { id: detailBot.id, pinned: !detailBot.pinned })}
-                  />
-                )}
-                {detailRoom && (
-                  <GroupRow
-                    icon={Pin}
-                    label={detailRoom.pinned ? s.sessions.unpinSession : s.sessions.pinSession}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => void perform('set-flags', { id: detailRoom.id, pinned: !detailRoom.pinned })}
-                  />
-                )}
-                {detailBot && (!detailBot.main || mainCount > 1) && (
-                  <GroupRow
-                    icon={Star}
-                    label={detailBot.main ? s.bots.removeMain : s.bots.makeMain}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => void perform('set-main', { id: detailBot.id, main: !detailBot.main })}
-                  />
-                )}
-                {detailBot && (
-                  <GroupRow
-                    icon={Copy}
-                    label={s.bots.duplicate}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => void perform('duplicate-bot', { id: detailBot.id })}
-                  />
-                )}
-              </GroupCard>
-
-              {detailBot && (
-                <>
-                  <View style={styles.sidebarSectionHeader}>
-                    <Text style={styles.sidebarSectionTitle}>{s.bots.sessions}</Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={s.bots.newSession}
-                      disabled={busy || Boolean(state?.readOnly)}
-                      onPress={() => void perform('bot-new-part', { botId: detailBot.id })}
-                      hitSlop={8}
-                      style={({ pressed }) => [
-                        styles.sectionActionBtn,
-                        (busy || Boolean(state?.readOnly)) && styles.disabled,
-                        pressed && styles.pressedFade,
-                      ]}
-                    >
-                      <CirclePlus size={15} color={colors.primary} strokeWidth={2} />
-                      <Text style={styles.sectionActionText}>{s.bots.newSession}</Text>
-                    </Pressable>
-                  </View>
-                  <GroupCard>
-                    {[
-                      detailBot.sessionId,
-                      ...(detailBot.parts ?? []).filter(id => id !== detailBot.sessionId).slice().reverse(),
-                    ].map((partId, index, list) => {
-                      const current = index === 0
-                      const matched = appSessions.find(item => item.sessionId === partId)
-                      const label =
-                        matched?.title && matched.title.trim() !== ''
-                          ? matched.title
-                          : s.bots.sessionNumber(list.length - index)
-                      return (
-                        <GroupRow
-                          key={partId}
-                          first={index === 0}
-                          label={label}
-                          detail={current ? s.bots.currentSession : s.bots.openEarlierSession}
-                          selected={current}
-                          chevron={!current}
-                          disabled={current || busy || Boolean(state?.readOnly)}
-                          onPress={
-                            current
-                              ? undefined
-                              : () => void perform('bot-open-part', { botId: detailBot.id, sessionId: partId })
-                          }
-                        />
-                      )
-                    })}
-                  </GroupCard>
-                </>
-              )}
-
-              {detailRoom && detailRoom.members.length > 0 && (
-                <>
-                  <SectionTitle>{s.bots.members}</SectionTitle>
-                  <GroupCard>
-                    {detailRoom.members.map((memberId, index) => {
-                      const memberBot = state?.bots.find(entry => entry.id === memberId)
-                      return (
-                        <GroupRow
-                          key={memberId}
-                          first={index === 0}
-                          label={memberBot?.name ?? memberId}
-                          detail={memberBot?.role || undefined}
-                          chevron={false}
-                          accessory={
-                            <IconButton
-                              dense
-                              label={s.bots.stop}
-                              icon={Square}
-                              disabled={busy || Boolean(state?.readOnly)}
-                              onPress={() => void perform('stop-member-work', { roomId: detailRoom.id, botId: memberId })}
-                            />
-                          }
-                        />
-                      )
-                    })}
-                  </GroupCard>
-                </>
-              )}
-
-              {((detailBot && !detailBot.main) || detailRoom) && (
-                <GroupCard>
-                  <GroupRow
-                    first
-                    icon={Trash2}
-                    label={s.bots.delete}
-                    danger
-                    chevron={false}
-                    disabled={busy || Boolean(state?.readOnly)}
-                    onPress={() => {
-                      if (selectedId) confirmDelete(detailBot ? 'bot' : 'room', selectedId)
-                    }}
-                  />
-                </GroupCard>
-              )}
-
-              <Text style={styles.detailHint}>{s.bots.hostSettings}</Text>
-            </ScrollView>
-          </ModalSurface>
-        </Modal>
-      )}
-
-      {/* 用量与定时任务报表 Sheet */}
       {report !== undefined && (
         <Modal
           transparent
@@ -1208,10 +957,6 @@ function BotReportView({ value, kind, state }: { value: unknown; kind: 'usage' |
       })}
     </GroupCard>
   )
-}
-
-function isNonEmptyObject(value: BotObject): boolean {
-  return Object.keys(value).length > 0
 }
 
 export function DsBotInstallCard({ error, onRetry }: { error?: string; onRetry: () => void }) {
@@ -1286,28 +1031,182 @@ function DsBotInstallCopyRow({ label, value }: { label: string; value: string })
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    scroll: { flex: 1 },
-    scrollContent: {
-      paddingHorizontal: spacing.md,
-      paddingBottom: spacing.xxl,
-      gap: spacing.sm,
+    container: {
+      flex: 1,
     },
-    searchContainer: {
+    topActionRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.xs,
-      marginBottom: spacing.xs,
-      paddingHorizontal: spacing.md,
-      height: 42,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 6,
+      paddingBottom: 6,
     },
-    searchInput: { flex: 1, ...type.body, fontSize: 15, color: colors.ink, paddingVertical: 0 },
+    filterPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      height: 36,
+      paddingHorizontal: 14,
+      borderRadius: 18,
+    },
+    filterPillText: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.muted,
+    },
+    plusCircleBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    scroll: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingHorizontal: 10,
+      paddingTop: 4,
+      paddingBottom: 16,
+      gap: 2,
+    },
+    inboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingHorizontal: 10,
+      paddingVertical: 11,
+      minHeight: 72,
+      borderRadius: 18,
+    },
+    rowSelected: {
+      backgroundColor: colors.primarySoft,
+    },
+    rowPressed: {
+      backgroundColor: colors.grouped,
+    },
+    groupAvatarBox: {
+      width: 50,
+      height: 50,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    rowBody: {
+      flex: 1,
+      minWidth: 0,
+      gap: 4,
+    },
+    rowTopLine: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    rowTitleLeft: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minWidth: 0,
+    },
+    inboxTitle: {
+      fontSize: 16.5,
+      fontWeight: '600',
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    rowNameSelected: {
+      color: colors.primary,
+    },
+    inboxDate: {
+      fontSize: 13,
+      color: colors.muted,
+      flexShrink: 0,
+    },
+    rowSnippetLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      minWidth: 0,
+    },
+    snippetIcon: {
+      flexShrink: 0,
+    },
+    inboxSubtitle: {
+      flex: 1,
+      fontSize: 14,
+      lineHeight: 19,
+      color: colors.muted,
+    },
+    rowSubtitleActive: {
+      color: colors.primary,
+      fontWeight: '500',
+    },
+    rowSubtitleWarning: {
+      color: colors.warning,
+      fontWeight: '500',
+    },
+    bottomDock: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingTop: 6,
+      paddingBottom: 10,
+    },
+    dockGridBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    dockSearchCapsule: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      height: 44,
+      paddingHorizontal: 14,
+      borderRadius: 22,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    dockSearchInput: {
+      flex: 1,
+      fontSize: 15.5,
+      color: colors.ink,
+      paddingVertical: 0,
+    },
     errorBanner: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: spacing.xs,
+      marginHorizontal: 6,
+      marginBottom: 4,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
       borderRadius: radius.lg,
@@ -1325,6 +1224,7 @@ function createStyles(colors: ThemeColors) {
     },
     retryPillText: { ...type.caption, color: colors.primary, fontWeight: '600' },
     readOnlyBadge: {
+      marginHorizontal: 6,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
       borderRadius: radius.lg,
@@ -1332,154 +1232,14 @@ function createStyles(colors: ThemeColors) {
     },
     readOnlyText: { ...type.caption, color: colors.muted },
     loadingWrap: { paddingVertical: spacing.xxl, alignItems: 'center' },
-    emptyWrap: { paddingVertical: spacing.lg },
-    sectionBlock: { gap: 4, marginTop: 4 },
-    sidebarSectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.xs,
-      paddingTop: spacing.xs,
-      paddingBottom: 2,
-    },
-    sidebarSectionTitle: {
-      ...type.smallStrong,
-      fontSize: 13,
-      color: colors.muted,
-    },
-    sectionActionBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingVertical: 2,
-      paddingHorizontal: 6,
-      borderRadius: radius.pill,
-    },
-    sectionActionText: { ...type.caption, color: colors.primary, fontWeight: '600' },
-    botRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 10,
-      minHeight: 58,
-    },
-    mainBotRow: {
-      minHeight: 68,
-      paddingVertical: 12,
-    },
+    emptyWrap: { paddingVertical: spacing.lg, paddingHorizontal: 8 },
+    sectionBlock: { gap: 4, marginTop: 4, paddingHorizontal: 6 },
     rowDivider: {
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.separator,
     },
-    rowSelected: {
-      backgroundColor: colors.primarySoft,
-    },
-    rowPressed: {
-      backgroundColor: colors.surfaceStrong,
-    },
-    pressedFade: { opacity: 0.7 },
+    pressedFade: { opacity: 0.72 },
     disabled: { opacity: 0.45 },
-    avatarWrap: {
-      position: 'relative',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarStatusDot: {
-      position: 'absolute',
-      right: -1,
-      bottom: -1,
-      width: 11,
-      height: 11,
-      borderRadius: 6,
-      borderWidth: 2,
-      borderColor: colors.surface,
-    },
-    avatarStatusDotSmall: {
-      position: 'absolute',
-      right: -1,
-      bottom: -1,
-      width: 9,
-      height: 9,
-      borderRadius: 5,
-      borderWidth: 1.5,
-      borderColor: colors.surface,
-    },
-    groupAvatar: {
-      width: 38,
-      height: 34,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    rowBody: {
-      flex: 1,
-      minWidth: 0,
-      gap: 2,
-    },
-    rowTitleLine: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      minWidth: 0,
-    },
-    mainBotName: {
-      ...type.bodyStrong,
-      fontSize: 16,
-      color: colors.ink,
-      flexShrink: 1,
-    },
-    rowName: {
-      ...type.bodyStrong,
-      fontSize: 15,
-      color: colors.ink,
-      flexShrink: 1,
-    },
-    rowNameSelected: {
-      color: colors.primary,
-    },
-    roleChip: {
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
-      maxWidth: 96,
-    },
-    roleChipText: {
-      ...type.caption,
-      fontSize: 11,
-      color: colors.muted,
-    },
-    rowSubtitle: {
-      ...type.caption,
-      fontSize: 12.5,
-      lineHeight: 17,
-      color: colors.muted,
-    },
-    rowSubtitleActive: {
-      color: colors.primary,
-      fontWeight: '500',
-    },
-    rowSubtitleWarning: {
-      color: colors.warning,
-      fontWeight: '500',
-    },
-    moreBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: radius.pill,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    agentActions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 2,
-    },
-    emptyCardBlock: {
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.md,
-      alignItems: 'center',
-    },
     emptyCardText: {
       ...type.small,
       color: colors.muted,
@@ -1491,13 +1251,6 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'space-between',
       gap: spacing.sm,
       paddingBottom: spacing.xs,
-    },
-    sheetHeaderTitleWrap: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      minWidth: 0,
     },
     sheetTitle: {
       ...type.heading,
@@ -1515,11 +1268,6 @@ function createStyles(colors: ThemeColors) {
       paddingBottom: spacing.lg,
     },
     grow: { flex: 1, minWidth: 0 },
-    statsBlock: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
-      gap: 4,
-    },
     statsHeading: {
       ...type.bodyStrong,
       color: colors.ink,
@@ -1528,21 +1276,10 @@ function createStyles(colors: ThemeColors) {
       ...type.small,
       color: colors.ink,
     },
-    goalButtonsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.xs,
-      marginTop: spacing.xs,
-    },
     reportRow: {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
       gap: 4,
-    },
-    detailHint: {
-      ...type.caption,
-      color: colors.muted,
-      paddingHorizontal: spacing.xs,
     },
     installCardBody: {
       paddingHorizontal: spacing.md,
