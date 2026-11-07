@@ -6,7 +6,7 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
@@ -859,8 +859,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   <GroupRow
                     key={option.value}
                     first={index === 0}
-                    icon={index === 0 ? Route : undefined}
-                    iconSpace
+                    icon={option.value === 'auto' ? Route : option.value === 'turn' ? Network : Server}
                     label={option.name}
                     detail={option.description}
                     selected={chosen}
