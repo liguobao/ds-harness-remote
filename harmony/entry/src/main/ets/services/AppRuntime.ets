@@ -645,14 +645,20 @@ export class AppRuntime {
         ? relay.connect().then(() => true).catch(() => false)
         : Promise.resolve(false);
       const host: AuthorizedPeerDevice = await this.deviceForWithRetry(deviceId);
-      if (!host.presenceKnown) {
+      // 恢复场景（刚断线重连/网络刚恢复）不再单独探一次在线状态：
+      // 我们几十秒前还连着这台主机，而 Wi-Fi 刚关联上时每个额外 HTTP 往返都要几秒。
+      const recovering: boolean = this.autoRecovering || this.reconnectAttempt > 0;
+      if (!host.presenceKnown && !recovering) {
         this.setConnectStage('检查主机在线状态…');
         const presence: HostPresence = await this.presenceWithRetry(host.deviceId);
         host.online = presence.online;
         host.presenceKnown = true;
       }
-      if (!host.online) {
+      if (!host.online && !recovering) {
         throw new Error('设备不在线');
+      }
+      if (recovering) {
+        LinkLog.write('conn', '恢复场景：跳过在线探测，直接用列表里的状态连接（online=true 视为可试）');
       }
       const pinnedHostKey: string = await this.enforceHostPin(host);
       // ensureApi() may have renewed the credentials above: the relay handshake must use
@@ -3405,7 +3411,9 @@ export class AppRuntime {
       this.pushLinkEvent('网络已恢复');
       this.networkType = networkTypeLabel(monitor.type);
       logInfo('runtime: 网络已恢复 type=' + this.networkType);
-      LinkLog.write('net', '网络恢复 type=' + (monitor.type.length > 0 ? monitor.type : 'unknown')
+      const typeText: string = networkTypeLabel(monitor.type);
+      LinkLog.write('net', '网络恢复 type=' + (typeText.length > 0 ? typeText
+        : (monitor.type.length > 0 ? monitor.type : '未知'))
         + ' phase=' + this.phase + ' reconnecting=' + this.reconnecting
         + ' wasOffline=' + wasOffline);
       if (this.reconnectStatus.indexOf('网络已断开') >= 0) {

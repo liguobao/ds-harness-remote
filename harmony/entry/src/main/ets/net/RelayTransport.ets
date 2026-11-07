@@ -1153,9 +1153,11 @@ export class RelayTransport {
       const verdict: CloseVerdict = new CloseVerdict();
       verdict.code = 1006;
       verdict.reason = 'transport-error';
-      verdict.message = '网络中断，连接被异常关闭（' + error.message + '）';
+      // 界面文案只留人话，底层那句英文（含 ws 地址）进日志就够，别糊到用户脸上
+      verdict.message = '网络中断，连接被异常关闭';
       this.closeVerdict = verdict;
     }
+    logWarn('relay fail: ' + error.message + ' transport=' + this.transportKind());
     this.clearHandshakeTimer();
     const reject = this.connectReject;
     this.connectResolve = undefined;
