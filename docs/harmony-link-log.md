@@ -134,3 +134,73 @@ hdc -t <serial> file recv /data/app/el2/100/base/cn.r2049.dshremote/haps/entry/f
 
 - 断网期间本地没有「离线队列」：重连后消息要用户重发（目前不改语义）。
 - 若中继节点本身抖动，客户端只能快速失败 + 重连，换节点依赖服务端 `relayCandidates`。
+
+
+---
+
+# 稳定性这一批（0.17.69–0.17.75，2026-11-08 夜间）
+
+用户的原话：**「如果连局域网都不能保证网络链接，真的就是太差了。」** 这一批就是照这句话做的。
+
+## 1. 直连（LAN DataChannel）以前一次都没跑过
+
+`startRtcAttempt()` 被写在「服务器下发了 `relayEndpoint`」的分支里，而本机服务器的
+`connect.accepted` **从来不带** `relayEndpoint`：
+
+```
+ctl frame len=169 type=connect.accepted
+connect.accepted hints=[] relay= ticket=无   ← 没有端点
+```
+
+于是每次都直接 `finishConnect('relay')`，数据面挂在 **Control WS** 上（控制帧和 64KB 数据帧
+共用一条 TCP WebSocket）。这就是「局域网里也又慢又容易断」的结构性原因。
+
+- 改为：先试直连，与有没有中继端点无关；没有端点时回落就是「Control WS 承载」。
+- 实测（手机 + Edge，同一局域网）：`transport=lan`，连接耗时 ~6s（其中 WebRTC 协商 ~5s）。
+
+## 2. 熄屏 / 后台被冻结 = 心跳回不了 = 服务端踢人
+
+```
+03:41:02.258 [disc] 链路断开 #1 code=1006 reason=transport-error · 本次在线 219.5s transport=lan
+03:41:06.562 [stat] 连接 #2 · transport=lan · 恢复耗时 4.3s
+```
+
+在线 219.5 秒后断一次，恢复只用 4.3 秒（这是 0.17.66 那批的功劳）。
+断开发生在手机熄屏闲置期间：**进程被系统冻结 → 回不了服务端 25s 心跳 → 75s 后服务端断开**。
+
+- 新增 `services/KeepAlive.ets`：连着主机期间申请长时任务（`dataTransfer`），断开即释放；
+  `module.json5` 增加 `backgroundModes` 与 `ohos.permission.KEEP_BACKGROUND_RUNNING`。
+- 日志：`[life] 保活开始（长时任务 dataTransfer）：熄屏/后台不再冻结`。
+
+## 3. 断线检测：从 45~90 秒压到 35 秒
+
+- **应用层心跳探测**：空闲 ≥35 秒（服务端 25 秒一跳，说明漏了一拍）就主动发一个便宜 RPC
+  （`harness.transport.describe`，6 秒预算）。有回包 = 链路活着；超时 = 立刻判死走重连。
+  主机不认识这个 RPC 时收到「method not found」也算活着。
+- 直连入站数据也计入「链路还活着」（否则直连会被误判静默，进而反复重连）。
+- 直连数据面报错/关闭 → 立刻 `failStale`，不再等任何超时。
+
+## 4. 失败要快
+
+- 桥里 `connectionState/iceConnectionState` 进 `failed/closed`、`DataChannel close` 立刻上报；
+  以前只能等 DataChannel 25 秒超时 → 现在 12 秒，且通常 1~2 秒就知道。
+- 直连连续失败 2 次 → 冷却 10 分钟，主机不支持直连时不会每次连接都白等。
+- `session/follow` 首帧偶发丢失 → 自动重开一次（600ms 后），不再直接甩红条。
+
+## 5. 连接到底慢在哪（打点）
+
+```
+trace connect 分段 6102ms (设备信息 13ms · 中继+握手 96ms · 订阅 1079ms)
+trace session/list 5466ms (发出 2ms · 等回 5464ms · 重发 0)
+trace session/follow 91ms / 首帧 1362ms      ← 直连下
+```
+
+结论：连接时间主要花在 **WebRTC 协商（~5s）** 与 **主机回 session/list（3~9s）**，
+不是网络抖动。所以重连策略要「不重来一遍全部」而不是「更快超时」。
+
+## 6. 诊断面板新增
+
+```
+稳定：连接 3 次 · 断线 2 次 · 本次已在线 128 秒 · 上次恢复 4.3s
+日志：link.log（已落盘，重启也保留）
+```
