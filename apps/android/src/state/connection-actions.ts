@@ -10,6 +10,9 @@ import type { AppState } from './store-state'
 import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
+// A network where P2P cannot establish usually stays that way for a while, but
+// the downgrade must expire so a recovered or changed network retries the
+// faster P2P/TURN paths instead of staying on Relay for the whole session.
 const RELAY_DOWNGRADE_MS = 10 * 60_000
 
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
@@ -72,7 +75,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           ? ['relay'] as const
           : preference === 'turn'
             ? ['turn', 'relay'] as const
-            : await resolveAutomaticPreferredTransports()
+            : await resolveAutomaticPreferredTransports({ skipP2pOnRemote: get().cellularSkipP2p })
         if (generation !== runtime.connectionGeneration) return false
         set({ connectionStage: 'transport', connectionProbeOrder: initialProbeTransports(preferredTransports) })
         await runtime.connection.connect(

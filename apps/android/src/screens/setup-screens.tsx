@@ -6,7 +6,7 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Signal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
@@ -605,6 +605,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const comfort = useBrowseMemory()
   const preference = useAppStore(state => state.transportPreference)
   const setPreference = useAppStore(state => state.setTransportPreference)
+  const cellularSkipP2p = useAppStore(state => state.cellularSkipP2p)
+  const setCellularSkipP2p = useAppStore(state => state.setCellularSkipP2p)
+  const [cellularSkipSaving, setCellularSkipSaving] = useState(false)
   const languagePreference = useAppStore(state => state.languagePreference)
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false)
@@ -651,6 +654,14 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
     try { await setCompactHistory(value) }
     catch { Alert.alert(zhCN.settings.compactHistorySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setCompactSaving(false) }
+  }
+
+  const toggleCellularSkipP2p = async (value: boolean) => {
+    if (cellularSkipSaving) return
+    setCellularSkipSaving(true)
+    try { await setCellularSkipP2p(value) }
+    catch { Alert.alert(zhCN.settings.cellularSkipP2p, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setCellularSkipSaving(false) }
   }
 
   const toggleTypographyDensity = async (value: TypographyDensity) => {
@@ -872,6 +883,16 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               })}
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
+            <GroupCard style={styles.settingsGap}>
+              <GroupRow
+                first
+                icon={Signal}
+                label={zhCN.settings.cellularSkipP2p}
+                detail={zhCN.settings.cellularSkipP2pDetail}
+                accessory={<Toggle accessibilityLabel={zhCN.settings.cellularSkipP2p} value={cellularSkipP2p} disabled={cellularSkipSaving}
+                  onValueChange={value => void toggleCellularSkipP2p(value)} {...switchColors} />}
+              />
+            </GroupCard>
 
             <SectionTitle>{zhCN.settings.identity}</SectionTitle>
             <GroupCard>

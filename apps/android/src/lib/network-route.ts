@@ -28,9 +28,19 @@ export function shouldReconnectForNetworkRoute(
  * Keep LAN first whenever the device is on a local-capable network. ICE still
  * validates the candidate pair; this only expresses the preferred order to
  * the Host and Server control plane.
+ *
+ * `skipP2pOnRemote` is an explicit user opt-in for carriers whose CGNAT /
+ * firewall blocks every P2P attempt: on a remote network the transport list
+ * then goes straight to Relay instead of spending the WebRTC budget first.
+ * Local-capable networks are unaffected.
  */
-export function automaticPreferredTransports(route: NetworkRoute): PreferredTransport[] {
-  if (route === 'remote') return ['p2p', 'turn', 'relay']
+export function automaticPreferredTransports(
+  route: NetworkRoute,
+  options: { skipP2pOnRemote?: boolean } = {},
+): PreferredTransport[] {
+  if (route === 'remote') {
+    return options.skipP2pOnRemote === true ? ['relay'] : ['p2p', 'turn', 'relay']
+  }
   return ['lan', 'p2p', 'turn', 'relay']
 }
 
