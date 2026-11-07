@@ -1125,13 +1125,111 @@ export class AppRuntime {
       this.hydrateHistoryImages().catch(() => undefined);
       this.clearRetry();
     } catch (error) {
-      this.errorMsg = errorMessage(error);
-      this.setRetry('重新打开会话', () => {
-        this.openSession(sessionId);
+      this.errorMsg = this.sessionStreamHint(error);
+      this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
+        if (isTransportFailure(error)) {
+          this.reconnectAndReopen(sessionId);
+        } else {
+          this.reopenCurrentSession(sessionId);
+        }
       });
     }
     this.setBusy(false);
     this.notify();
+  }
+
+  /**
+   * 「重新打开会话」：重开当前会话的 follow 流（不动连接）。
+   * 注意不能用 openSession —— 它看到 sessionId === currentSessionId 会直接 return，
+   * 这正是以前点「重新打开」毫无反应、只能重启 App 的原因。
+   */
+  async reopenCurrentSession(target?: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) {
+      return;
+    }
+    const sessionId: string = target !== undefined && target.length > 0 ? target : this.currentSessionId;
+    if (sessionId.length === 0) {
+      // 连会话都没选中：重新拉一次列表并挑一个
+      await this.loadSessionsAfterConnect();
+      return;
+    }
+    if (this.busy) {
+      return;
+    }
+    this.setBusy(true);
+    this.errorMsg = '';
+    this.clearRetry();
+    this.notify();
+    try {
+      let title: string = this.currentSessionTitle;
+      for (const session of this.sessions) {
+        if (session.sessionId === sessionId) {
+          title = sessionTitle(session);
+          break;
+        }
+      }
+      await this.openSessionInternal(harness, sessionId, title);
+      this.rememberRecentSession(sessionId);
+      this.hydrateHistoryImages().catch(() => undefined);
+      logInfo('session reopened -> ' + sessionId);
+    } catch (error) {
+      const text: string = errorMessage(error);
+      logWarn('reopen session failed: ' + text);
+      this.nudgeLink();
+      this.errorMsg = this.sessionStreamHint(error);
+      this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
+        if (isTransportFailure(error)) {
+          this.reconnectAndReopen(sessionId);
+        } else {
+          this.reopenCurrentSession(sessionId);
+        }
+      });
+    }
+    this.setBusy(false);
+    this.notify();
+  }
+
+  /**
+   * 传输层已经不健康（TURN 半开、中继换节点、数据面 stall）时：
+   * 直接换一条新连接，再用 pendingResumeSessionId 回到同一个会话。
+   * 光重开流只会一遍遍失败，用户看到的就是「点了没用」。
+   */
+  async reconnectAndReopen(sessionId: string): Promise<void> {
+    if (this.lastDeviceId.length === 0) {
+      return;
+    }
+    this.pendingResumeSessionId = sessionId;
+    this.reconnecting = true;
+    this.errorMsg = '';
+    this.clearRetry();
+    this.pushLinkEvent('会话流失败 → 重连并重新打开');
+    this.teardownConnection();
+    this.notify();
+    await this.connectDevice(this.lastDeviceId);
+  }
+
+  /** 主动体检一次链路：会话流/RPC 失败时先用它把半开连接判死，别干等看门狗。 */
+  private nudgeLink(): void {
+    const relay: RelayTransport | undefined = this.activeRelay;
+    if (relay === undefined) {
+      return;
+    }
+    try {
+      relay.recheckLink();
+    } catch (error) {
+      logWarn('recheck link failed: ' + errorMessage(error));
+    }
+  }
+
+  /** 会话流失败时给用户看的文案：区分「传输断了」和「主机拒绝」。 */
+  private sessionStreamHint(error: Object): string {
+    const text: string = errorMessage(error);
+    if (isTransportFailure(error)) {
+      return '会话流断了（传输层已不可用）：点「重连并重新打开」换一条链路再进来，'
+        + '不用退出 App。原始错误：' + text;
+    }
+    return '打开会话失败：' + text;
   }
 
   /**
@@ -3429,6 +3527,24 @@ function asError(error: Object): Error {
     return error;
   }
   return new Error(String(error));
+}
+
+/**
+ * 是否是「传输层坏了」这一类失败（可以靠换链路恢复），而不是主机业务拒绝。
+ * 覆盖：RPC 超时 / 发送失败、通道已关闭、连接失败、链路静默判死。
+ */
+function isTransportFailure(error: Object): boolean {
+  if (error instanceof RemoteGatewayError || error instanceof RemoteClientError) {
+    const code: string = error.code;
+    if (code === 'TRANSPORT_CLOSED' || code === 'CONNECTION_FAILED' || code === 'TIMEOUT'
+      || code === 'transport_closed' || code === 'timeout' || code === 'closed') {
+      return true;
+    }
+  }
+  const text: string = errorMessage(error).toLowerCase();
+  return text.indexOf('timed out') >= 0 || text.indexOf('send failed') >= 0
+    || text.indexOf('连接已断开') >= 0 || text.indexOf('链路静默') >= 0
+    || text.indexOf('transport') >= 0 || text.indexOf('closed') >= 0;
 }
 
 /** True when the Server rejected our credentials (as opposed to a network/transport fault). */
