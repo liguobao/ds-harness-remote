@@ -7,7 +7,7 @@ import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '..
 import { workspaceStableKey } from '../src/lib/workspace-key'
 import { ForegroundConnectionRecovery } from '../src/services/connection-recovery'
 
-const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
+const { proxy, transport, storage, authenticate, acp, codex, botDispatch } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn() },
@@ -15,37 +15,43 @@ const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() =>
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
   authenticate: vi.fn(),
+  botDispatch: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
 vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => ['relay'] }))
-vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
-  async configureHistory() {}
-  requireProxy() { return proxy }
-  connect = transport.connect
-  close = transport.close
-  checkHealth = transport.checkHealth
-  refreshBackends = transport.refreshBackends
-  hasCodex = transport.hasCodex
-  requireCodex() { return codex }
-  hasCursor = transport.hasCursor
-  hasPi = transport.hasPi
-  hasAntigravity = transport.hasAntigravity
-  hasOpencode = transport.hasOpencode
-  hasClaude = transport.hasClaude
-  hasHermes = transport.hasHermes
-  requireCursor() { return acp }
-  requireAntigravity() { return acp }
-  requirePi() { return acp }
-  requireOpencode() { return acp }
-  requireClaude() { transport.requireClaude(); return acp }
-  requireHermes() { transport.requireHermes(); return acp }
-  getNetworkDetails() { return Promise.resolve(undefined) }
-  getStats() { return { mode: 'Relay', connected: true } }
-} }))
+vi.mock('../src/services/connection', async () => {
+  const { BotRemoteClient } = await import('../src/services/bot-catalog')
+  return { AndroidRemoteConnection: class {
+    async configureHistory() {}
+    requireProxy() { return proxy }
+    requireBotClient() { return new BotRemoteClient(botDispatch, () => proxy.sessionList(), () => undefined) }
+    connect = transport.connect
+    close = transport.close
+    checkHealth = transport.checkHealth
+    refreshBackends = transport.refreshBackends
+    hasCodex = transport.hasCodex
+    requireCodex() { return codex }
+    hasCursor = transport.hasCursor
+    hasPi = transport.hasPi
+    hasAntigravity = transport.hasAntigravity
+    hasOpencode = transport.hasOpencode
+    hasClaude = transport.hasClaude
+    hasHermes = transport.hasHermes
+    requireCursor() { return acp }
+    requireAntigravity() { return acp }
+    requirePi() { return acp }
+    requireOpencode() { return acp }
+    requireClaude() { transport.requireClaude(); return acp }
+    requireHermes() { transport.requireHermes(); return acp }
+    getNetworkDetails() { return Promise.resolve(undefined) }
+    getStats() { return { mode: 'Relay', connected: true } }
+  } }
+})
 vi.mock('../src/services/storage', () => storage)
 vi.mock('../src/services/login', () => ({}))
 vi.mock('../src/services/server-session', () => ({ serverSession: { authenticate } }))
 import { useAppStore } from '../src/state/store'
+import { useBotTeamStore } from '../src/state/bot-store'
 
 const session: RemoteSession = { sessionId: 's1', updatedAt: 1, running: false, blank: false,
   projections: { values: { permissions: { currentValue: 'default' } } } }
@@ -1182,6 +1188,195 @@ describe('authoritative permission projection', () => {
         await prepareScenario1()
       },
     )
+  }, 15000)
+
+  it('opens Bot sessions only on identity, part, or connection/Host changes without disrupting pagination on status polls', async () => {
+    const chiefPart1: RemoteSession = { sessionId: 'chief-part-1', title: 'Chief Part 1', updatedAt: 1, running: false, blank: false }
+    const chiefPart2: RemoteSession = { sessionId: 'chief-part-2', title: 'Chief Part 2', updatedAt: 2, running: false, blank: false }
+    const writerPart1: RemoteSession = { sessionId: 'writer-part-1', title: 'Writer Part 1', updatedAt: 3, running: false, blank: false }
+
+    await runScenarios([
+      {
+        name: 'repeated status polls keep the current Bot session without re-calling openSession, aborting older-history pagination, or resetting sessionModels',
+        run: async () => {
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [chiefPart1, chiefPart2, writerPart1],
+          })
+          useBotTeamStore.getState().ensureScope('reset-poll-test')
+          proxy.sessionList.mockResolvedValue([chiefPart1, chiefPart2, writerPart1])
+          proxy.sessionModels.mockResolvedValue({
+            current: { model: 'deepseek-chat' },
+            routable: true,
+            groups: [],
+            failures: [],
+          })
+          proxy.sessionHistory.mockResolvedValueOnce({ events: [call(10, 1, 'tail-call'), result(11, 1, 'tail-call')], throughSeq: 11, hasMore: true })
+          botDispatch.mockImplementation(async ({ endpoint }: { endpoint: string }) => ({
+            status: 200,
+            json: {
+              ok: true,
+              value: endpoint === 'state'
+                ? {
+                    mainBotId: 'chief',
+                    bots: [
+                      { id: 'chief', sessionId: 'chief-part-2', parts: ['chief-part-1'], name: 'Chief', role: 'Lead', main: true },
+                      { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs', main: false },
+                    ],
+                    rooms: [],
+                  }
+                : {},
+            },
+          }))
+
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('chief-part-2')
+          expect(useAppStore.getState().selectedSession?.sessionId).toBe('chief-part-2')
+          expect(useAppStore.getState().sessionModels?.current?.model).toBe('deepseek-chat')
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(1)
+
+          // Start an in-flight older history pagination read while 3s Bot status polls arrive.
+          let resolveOlderPage!: (value: { events: HistoryEntry[]; throughSeq: number; hasMore: boolean }) => void
+          proxy.sessionHistory.mockImplementationOnce(
+            () => new Promise(resolve => { resolveOlderPage = resolve }),
+          )
+          const olderFlight = useAppStore.getState().loadOlderHistory()
+          expect(useAppStore.getState().historyLoadingOlder).toBe(true)
+
+          // Three consecutive status polls allocate fresh bots/rooms arrays for the same Bot/sessionId.
+          for (let i = 0; i < 3; i++) {
+            await useBotTeamStore.getState().refresh()
+            await useBotTeamStore.getState().syncSelectedSession()
+          }
+
+          // openSession must not have been re-invoked: pagination stays in flight and sessionModels stays intact.
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(2)
+          expect(useAppStore.getState().historyLoadingOlder).toBe(true)
+          expect(useAppStore.getState().sessionModels?.current?.model).toBe('deepseek-chat')
+
+          resolveOlderPage({
+            events: [call(4, 0, 'older-call'), result(5, 0, 'older-call')],
+            throughSeq: 5,
+            hasMore: false,
+          })
+          await olderFlight
+          expect(useAppStore.getState().historyLoadingOlder).toBe(false)
+          expect(useAppStore.getState().oldestLoadedSeq).toBe(4)
+          expect(useAppStore.getState().messages['chief-part-2']?.map(item => item.id)).toEqual(['older-call', 'tail-call'])
+        },
+      },
+      {
+        name: 'switches Bot or historical part and opens the corresponding session',
+        run: async () => {
+          let activeChiefSessionId = 'chief-part-2'
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [chiefPart1, chiefPart2, writerPart1],
+          })
+          useBotTeamStore.getState().ensureScope('reset-switch-test')
+          proxy.sessionList.mockResolvedValue([chiefPart1, chiefPart2, writerPart1])
+          botDispatch.mockImplementation(async ({ endpoint, payload }: { endpoint: string; payload?: Record<string, unknown> }) => {
+            if (endpoint === 'bot-open-part' && typeof payload?.sessionId === 'string') {
+              activeChiefSessionId = payload.sessionId
+              return { status: 200, json: { ok: true, value: true } }
+            }
+            return {
+              status: 200,
+              json: {
+                ok: true,
+                value: {
+                  mainBotId: 'chief',
+                  bots: [
+                    { id: 'chief', sessionId: activeChiefSessionId, parts: ['chief-part-1', 'chief-part-2'], name: 'Chief', role: 'Lead', main: true },
+                    { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs', main: false },
+                  ],
+                  rooms: [],
+                },
+              },
+            }
+          })
+
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('chief-part-2')
+          expect(proxy.sessionHistory).toHaveBeenLastCalledWith('chief-part-2', undefined, 16, undefined)
+
+          // Switch Chief to its earlier historical part.
+          await useBotTeamStore.getState().perform('bot-open-part', { botId: 'chief', sessionId: 'chief-part-1' })
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('chief-part-1')
+          expect(useAppStore.getState().selectedSession?.sessionId).toBe('chief-part-1')
+          expect(proxy.sessionHistory).toHaveBeenLastCalledWith('chief-part-1', undefined, 16, undefined)
+
+          // Switch to another Bot.
+          useBotTeamStore.getState().setSelectedId('writer')
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('writer-part-1')
+          expect(useAppStore.getState().selectedSession?.sessionId).toBe('writer-part-1')
+          expect(proxy.sessionHistory).toHaveBeenLastCalledWith('writer-part-1', undefined, 16, undefined)
+        },
+      },
+      {
+        name: 're-establishes the Bot session after disconnect recovery or switching to another Host with the same sessionId',
+        run: async () => {
+          const hostAChief: RemoteSession = { sessionId: 'chief-part-1', title: 'Host A Chief', updatedAt: 1, running: false, blank: false }
+          const hostBChief: RemoteSession = { sessionId: 'chief-part-1', title: 'Host B Chief', updatedAt: 2, running: false, blank: false }
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [hostAChief],
+          })
+          useBotTeamStore.getState().ensureScope('reset-reconnect-test')
+          proxy.sessionList.mockImplementation(async () =>
+            useAppStore.getState().selectedDevice?.deviceId === 'host-b' ? [hostBChief] : [hostAChief],
+          )
+          botDispatch.mockResolvedValue({
+            status: 200,
+            json: {
+              ok: true,
+              value: {
+                mainBotId: 'chief',
+                bots: [{ id: 'chief', sessionId: 'chief-part-1', name: 'Chief', role: 'Lead', main: true }],
+                rooms: [],
+              },
+            },
+          })
+
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session?.title).toBe('Host A Chief')
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(1)
+
+          // Disconnect and recover on Host A: same Bot and sessionId must re-open on the recovered connection.
+          useAppStore.getState().setOffline()
+          expect(useAppStore.getState().connection.phase).toBe('offline')
+          expect(await useAppStore.getState().connectDevice({
+            deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true,
+          } as never)).toBe(true)
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(2)
+          expect(useBotTeamStore.getState().session?.title).toBe('Host A Chief')
+
+          // Switch to Host B which happens to use the same Bot id ('chief') and sessionId ('chief-part-1').
+          expect(await useAppStore.getState().connectDevice({
+            deviceId: 'host-b', name: 'Host B', identityKey: 'key-b', online: true, trusted: true,
+          } as never)).toBe(true)
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(proxy.sessionHistory).toHaveBeenCalledTimes(3)
+          expect(useBotTeamStore.getState().session?.title).toBe('Host B Chief')
+          expect(useAppStore.getState().selectedSession?.title).toBe('Host B Chief')
+        },
+      },
+    ], async () => {
+      await prepareScenario1()
+    })
   }, 15000)
 
 })

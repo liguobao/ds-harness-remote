@@ -8,8 +8,10 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
+import { useBotTeamStore } from '../state/bot-store'
+import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { foregroundService } from '../services/foreground-service'
@@ -648,6 +650,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const defaultPermission = useAppStore(state => state.defaultPermissionPreset)
   const setDefaultPermission = useAppStore(state => state.setDefaultPermissionPreset)
   const [permissionSaving, setPermissionSaving] = useState(false)
+  const [dsBotSettingsOpen, setDsBotSettingsOpen] = useState(false)
+  const botTeamState = useBotTeamStore(state => state.state)
+  const mainBotName = botTeamState?.bots.find(b => b.main)?.name ?? botTeamState?.bots[0]?.name ?? 'Chief'
   const reset = useAppStore(state => state.resetLocalData)
   const signOut = useAppStore(state => state.signOut)
   const { colors } = useTheme()
@@ -833,6 +838,21 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
 
+            <SectionTitle>{zhCN.bots.dsBotSettings}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Bot}
+                label={zhCN.bots.dsBotSettings}
+                detail={
+                  botTeamState
+                    ? zhCN.bots.dsBotSettingsSummary(mainBotName, botTeamState.bots.length)
+                    : zhCN.bots.dsBotSettingsDisconnected
+                }
+                onPress={() => setDsBotSettingsOpen(true)}
+              />
+            </GroupCard>
+
             <SectionTitle>{zhCN.settings.defaultPermission}</SectionTitle>
             <GroupCard>
               <View accessibilityRole="radiogroup">
@@ -949,6 +969,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
           </View>
         </View>
       </Modal>
+      <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
       <Modal visible={densityPickerOpen} transparent animationType="fade" onRequestClose={() => setDensityPickerOpen(false)} statusBarTranslucent>
         <View style={styles.languageBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setDensityPickerOpen(false)} />

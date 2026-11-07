@@ -166,6 +166,8 @@ function botSessionIds(endpoint: unknown, value: Record<string, unknown>): Set<s
   const room = (input: unknown) => {
     if (!isRecord(input)) throw new Error('Invalid Bot room entry.')
     add(input.id)
+    add(input.sessionId)
+    addArray(input.ownParts)
     addArray(input.parts)
     if (isRecord(input.sessions)) Object.values(input.sessions).forEach(add)
   }
@@ -182,7 +184,7 @@ function botSessionIds(endpoint: unknown, value: Record<string, unknown>): Set<s
     }
   }
   switch (endpoint) {
-    case 'state': case 'delete-bot': case 'delete-room': case 'set-main': case 'remove-agent': roster(); break
+    case 'state': case 'delete-bot': case 'delete-room': case 'set-main': case 'remove-agent': case 'goal-draft': case 'goal-control': roster(); break
     case 'create-bot': case 'duplicate-bot': case 'update-bot': bot(value); break
     case 'create-room': room(value); break
     case 'update-room': room(value.room); break
