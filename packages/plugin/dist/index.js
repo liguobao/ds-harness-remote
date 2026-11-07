@@ -100605,9 +100605,29 @@ async function activate(ctx, readConfig, entryId) {
   };
   let { runtime, clientRuntime } = createRuntimes(config2);
   let closed = false;
-  let clientServiceProvided = clientRuntime !== void 0;
+  let hostServiceProvided = false;
+  let clientServiceProvided = false;
   let startup;
   let replacement;
+  const syncOptionalService = (serviceName, value, owned) => {
+    try {
+      if (serviceName === "dshRemote") {
+        if (owned) ctx.dshRemote = value;
+        else ctx.provide("dshRemote", value);
+      } else if (owned) {
+        ctx.dshRemoteClient = value;
+      } else {
+        ctx.provide("dshRemoteClient", value);
+      }
+      return true;
+    } catch {
+      logger2.warn("failed to provide remote service", {
+        service: serviceName,
+        code: "SERVICE_PROVIDE_CONFLICT"
+      });
+      return false;
+    }
+  };
   const replaceServer = (next) => {
     const operation = async () => {
       await startup;
@@ -100627,13 +100647,9 @@ async function activate(ctx, readConfig, entryId) {
       }
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
-      ctx.dshRemote = runtime;
+      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
       if (clientRuntime !== void 0) {
-        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
-        else {
-          ctx.provide("dshRemoteClient", clientRuntime);
-          clientServiceProvided = true;
-        }
+        clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
       }
       return { client: clientRuntime, host: runtime };
     };
@@ -100641,8 +100657,10 @@ async function activate(ctx, readConfig, entryId) {
     return replacement;
   };
   const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
-  ctx.provide("dshRemote", runtime);
-  if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
+  hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  if (clientRuntime !== void 0) {
+    clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+  }
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection, webServer);
