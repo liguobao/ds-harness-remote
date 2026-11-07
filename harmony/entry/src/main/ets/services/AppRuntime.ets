@@ -3270,11 +3270,15 @@ export class AppRuntime {
 
   private handleDisconnect(): void {
     if (this.phase !== PHASE_CHAT) {
+      LinkLog.write('disc', '链路断开但当前不在会话页（phase=' + this.phase + '），不回连');
       return;
     }
     // 关闭判词必须在 teardown 之前取：teardown 会把 activeRelay 清掉。
     const verdict: CloseVerdict | undefined = this.activeRelay !== undefined
       ? this.activeRelay.closeVerdict : undefined;
+    LinkLog.write('disc', '链路断开 code=' + (verdict !== undefined ? verdict.code : -1)
+      + ' reason=' + (verdict !== undefined && verdict.reason.length > 0 ? verdict.reason : '—')
+      + ' attempt=' + this.reconnectAttempt);
     this.teardownConnection();
     const target: string = this.lastDeviceId;
     if (verdict !== undefined && verdict.reason === 'link-silent') {
@@ -3393,7 +3397,8 @@ export class AppRuntime {
       this.pushLinkEvent('网络已恢复');
       this.networkType = networkTypeLabel(monitor.type);
       logInfo('runtime: 网络已恢复 type=' + this.networkType);
-      LinkLog.write('net', '网络恢复 type=' + this.networkType + ' phase=' + this.phase
+      LinkLog.write('net', '网络恢复 type=' + (monitor.type.length > 0 ? monitor.type : 'unknown')
+        + ' phase=' + this.phase + ' reconnecting=' + this.reconnecting
         + ' wasOffline=' + wasOffline);
       if (this.reconnectStatus.indexOf('网络已断开') >= 0) {
         this.reconnectStatus = '';
@@ -3409,10 +3414,11 @@ export class AppRuntime {
       logInfo('runtime: 网络类型 ' + (this.networkType.length > 0 ? this.networkType : type));
       LinkLog.write('net', '承载变化 ' + (previous.length > 0 ? previous : '—') + ' → '
         + (nextLabel.length > 0 ? nextLabel : type));
-      // Wi-Fi ↔ 移动数据：旧 socket 的源地址已经不存在了，这条连接基本必死。
+      // Wi-Fi ↔ 移动数据这类**真实承载**切换：旧 socket 的源地址已经不存在，连接基本必死，
       // 直接判死比等看门狗快得多（看门狗要 90 秒才认定）。
-      if (previous.length > 0 && nextLabel.length > 0 && previous !== nextLabel
-        && type !== 'none' && this.phase === PHASE_CHAT) {
+      // 注意别把「无网络 → Wi-Fi」这种「重新出现」当成切换：那不是换承载，是刚恢复。
+      if (isRealBearer(previous) && isRealBearer(nextLabel) && previous !== nextLabel
+        && this.phase === PHASE_CHAT) {
         this.markLinkSuspect('网络从 ' + previous + ' 切到 ' + nextLabel);
       }
       this.notify();
@@ -3527,7 +3533,11 @@ export class AppRuntime {
     if (target.length === 0) {
       return;
     }
-    const inChatRetrying: boolean = this.phase === PHASE_CHAT && this.reconnecting;
+    // 会话页「重连中」，或者会话页但已经没有传输对象（链路已判死）——两种都必须重连。
+    // 后者是 0.17.65 的新坑：判死链路后如果 onClose 没到上层，reconnecting 还是 false，
+    // 恢复事件来了却什么都不做，用户就卡在「看着连着、其实没有连接」。
+    const inChatRetrying: boolean = this.phase === PHASE_CHAT
+      && (this.reconnecting || this.activeRelay === undefined);
     const onDeviceList: boolean = this.phase === PHASE_DEVICES;
     if (this.phase === PHASE_CONNECTING) {
       // 已经在连了，别重入
@@ -3895,6 +3905,11 @@ function builtinSlashCommands(): SlashCommand[] {
     out.push(entry);
   }
   return out;
+}
+
+export /** 真实承载（用于区分「换网」和「网络刚恢复」）。 */
+function isRealBearer(label: string): boolean {
+  return label === 'Wi-Fi' || label === '移动数据' || label === '有线网络';
 }
 
 export function errorMessage(error: Object): string {

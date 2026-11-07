@@ -15,6 +15,33 @@
    （设计上为了「再进去不重新握手」）。这时点「连接」走的是复用分支——直接回到那条死连接，
    于是「连上了但点不动」。杀掉进程后这些对象才被清掉，所以「必须删后台任务」。
 
+## 真正的根因（0.17.66，实测日志定位）
+
+上面两条只是「为什么点不动」。实测 link.log 暴露了更致命的一条：
+
+```
+03:15:14.945 [net]  网络断开（phase=chat transport=relay）
+03:15:22.947 [net]  掉网 8 秒仍未恢复，主动判死链路（不等 WebSocket close）
+03:15:22.949 [link] 判死链路：网络已断开 8 秒
+03:15:36.637 [net]  网络恢复 type=无网络 phase=chat wasOffline=true
+（之后就什么都没有了：没有断线事件、没有重连、没有报错）
+```
+
+**`RelayTransport.onClosed` 从来没人订阅。** `SecureTransport` 只在自己被 `close()` 时
+才往上抛关闭事件，底层中继自己死掉（WS close/error/看门狗判死）时，事件到 `RelayTransport`
+就断了。后果：
+
+- `AppRuntime.handleDisconnect()` 在这条路径上**是死代码**：判词、退避重连、`pendingResumeSessionId` 全都不会发生；
+- UI 一直显示「已连接」，直到用户发消息撞上 RPC 超时才露馅；
+- 杀掉进程之所以「能修好」，是因为重启把这条死连接的对象全清了。
+
+修法：`SecureTransport.connect()` 订阅 `inner.onClosed`，非主动关闭时清 Noise 状态并向上抛一次
+（`handleInnerClosed`），再顺带修两处把恢复卡死的地方：
+
+- `retryNow()` 现在也接受「会话页 + 没有传输对象」——只认 `reconnecting` 是不够的，
+  因为判死链路时 `handleDisconnect` 还没跑，`reconnecting` 仍是 false；
+- 承载切换判定只认真实承载之间（Wi-Fi / 移动数据 / 有线），「无网络 → Wi-Fi」属于刚恢复，不再误判。
+
 ## 修法
 
 | 改动 | 作用 |

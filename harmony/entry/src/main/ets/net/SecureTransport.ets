@@ -35,6 +35,12 @@ export class SecureTransport {
     this.closed = false;
     this.incoming.reset();
     this.outgoing.reset();
+    // 中继自己死掉（WS close/error、看门狗判死、静默判死）必须往上报。
+    // 这里以前没人订阅 inner.onClosed —— 于是断线是「无声」的：UI 一直显示已连接，
+    // 只有发消息超时才露馅，用户只能杀进程重进。上层的判词、退避重连全靠这条链。
+    this.inner.onClosed = () => {
+      this.handleInnerClosed();
+    };
     if (this.pinnedHostKey.length > 0 && this.pinnedHostKey !== this.host.identityKey) {
       logError('secure transport: host identity key differs from local pin, aborting handshake');
       this.inner.close();
@@ -146,6 +152,21 @@ export class SecureTransport {
         this.close();
       }
     };
+  }
+
+  /** 底层中继没了：清掉噪声状态并把关闭事件往上报（只会报一次）。 */
+  private handleInnerClosed(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.incoming.reset();
+    this.outgoing.reset();
+    this.noise = undefined;
+    const cb = this.onClosed;
+    if (cb !== undefined) {
+      cb();
+    }
   }
 
   close(): void {
