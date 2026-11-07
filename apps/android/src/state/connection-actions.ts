@@ -10,11 +10,10 @@ import type { AppState } from './store-state'
 import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
-// Once P2P fails on this network, stay on Relay for the whole app session.
-// The store is in-memory, so relaunching the app is the natural retry point:
-// a plain restart re-attempts P2P, while normal reconnects skip the
-// multi-second ICE penalty entirely.
-const RELAY_DOWNGRADE_MS = 100 * 365 * 24 * 60 * 60_000
+// A network where P2P cannot establish usually stays that way for a while, but
+// the downgrade must expire so a recovered or changed network retries the
+// faster P2P/TURN paths instead of staying on Relay for the whole session.
+const RELAY_DOWNGRADE_MS = 10 * 60_000
 
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
   'connectDevice' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
