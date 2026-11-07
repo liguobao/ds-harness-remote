@@ -4469,17 +4469,17 @@ struct Index {
     if (this.compactDock() && this.generating) {
       Column() {
         Column()
-          .width(10)
-          .height(10)
+          .width(11)
+          .height(11)
           .borderRadius(2)
           .backgroundColor('#F85749')
       }
-      .width(26)
-      .height(26)
+      .width(30)
+      .height(30)
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .backgroundColor('rgba(248,87,73,0.14)')
-      .borderRadius(13)
+      .borderRadius(15)
       .border({ width: 1, color: 'rgba(248,87,73,0.40)' })
       .onClick(() => {
         this.runtime.stopGeneration();
@@ -4743,8 +4743,8 @@ struct Index {
               top: 10, bottom: 10 })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
-            // 手机上生成中：停止键缩成框内右上角的小方块，把整列宽度还给输入框
-            .overlay(this.StopChipOverlay(), { align: Alignment.TopEnd, offset: { x: -4, y: 4 } })
+            // 手机上生成中：停止键缩成框内右侧的小方块，垂直居中（贴右边不留上下偏移）
+            .overlay(this.StopChipOverlay(), { align: Alignment.End, offset: { x: -6 } })
             .onTouch((event: TouchEvent) => {
               this.trackDockLight(event);
             })
