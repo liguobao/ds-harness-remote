@@ -85582,11 +85582,12 @@ function buildNativeRtcFactory(RTCPeerConnection3) {
 function buildWeriftFactory(werift, options = {}) {
   return {
     create(configuration) {
-      const hostIpv4Candidates = detectHostIpv4Candidates(
-        options.interfaces ?? networkInterfaces2(),
-        options.preferredHostIpv4Candidates
-      );
+      const interfaces = options.interfaces ?? networkInterfaces2();
+      const hostIpv4Candidates = detectHostIpv4Candidates(interfaces, options.preferredHostIpv4Candidates);
       const allowedHostIpv4 = new Set(hostIpv4Candidates);
+      const hostIpv6Candidates = options.iceIpv6 === true ? detectHostIpv6Candidates(interfaces) : [];
+      const allowedHostIpv6 = new Set(hostIpv6Candidates);
+      const additionalHostAddresses = [...hostIpv4Candidates, ...hostIpv6Candidates];
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []),
         iceUseIpv4: true,
@@ -85595,10 +85596,10 @@ function buildWeriftFactory(werift, options = {}) {
         // default historically; callers opt in through the plugin config.
         iceUseIpv6: options.iceIpv6 === true,
         iceUseLinkLocalAddress: false,
-        ...hostIpv4Candidates.length === 0 ? {} : {
-          iceAdditionalHostAddresses: hostIpv4Candidates,
+        ...additionalHostAddresses.length === 0 ? {} : {
+          iceAdditionalHostAddresses: additionalHostAddresses,
           iceFilterCandidatePair: (pair) => {
-            const allowed = shouldUseCandidatePair(pair, allowedHostIpv4);
+            const allowed = shouldUseCandidatePair(pair, allowedHostIpv4, allowedHostIpv6);
             if (!allowed) {
               configuration.onDiagnostic?.({
                 type: "candidate-pair-filtered",
@@ -85615,7 +85616,7 @@ function buildWeriftFactory(werift, options = {}) {
       raw.onicecandidate = (event) => {
         if (onIceCandidate === null) return;
         const candidate = event.candidate === void 0 ? null : event.candidate.toJSON();
-        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4)) {
+        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4, allowedHostIpv6)) {
           configuration.onDiagnostic?.({
             type: "local-candidate-filtered",
             candidate: summarizeIceCandidate(candidate),
@@ -85864,6 +85865,19 @@ function detectHostIpv4Candidates(interfaces, preferredHostIpv4Candidates = []) 
   });
   return [...new Set(candidates.map((candidate) => candidate.ip))];
 }
+function detectHostIpv6Candidates(interfaces) {
+  const candidates = [];
+  for (const [name2, addresses] of Object.entries(interfaces)) {
+    if (physicalInterfaceScore(name2) === void 0) continue;
+    for (const address2 of addresses ?? []) {
+      if (address2.internal || !isIpv6Family(address2.family)) continue;
+      const ip = address2.address;
+      if (!isGlobalUnicastIpv6(ip)) continue;
+      if (!candidates.includes(ip)) candidates.push(ip);
+    }
+  }
+  return candidates;
+}
 async function detectRouteHostIpv4Candidates(targets, timeoutMs = 500) {
   const detected = await Promise.all(targets.map(async (target3) => {
     const routeTarget = parseRouteTarget(target3);
@@ -85871,22 +85885,26 @@ async function detectRouteHostIpv4Candidates(targets, timeoutMs = 500) {
   }));
   return [...new Set(detected.filter((ip) => ip !== void 0 && isUsableIpv4(ip)))];
 }
-function shouldUseCandidatePair(pair, allowedHostIpv4) {
-  if (allowedHostIpv4.size === 0) return true;
+function shouldUseCandidatePair(pair, allowedHostIpv4, allowedHostIpv6) {
+  if (allowedHostIpv4.size === 0 && allowedHostIpv6.size === 0) return true;
   const candidate = localCandidate(pair);
   if (candidate === void 0) return true;
-  return shouldUseLocalCandidate(candidate, allowedHostIpv4);
+  return shouldUseLocalCandidate(candidate, allowedHostIpv4, allowedHostIpv6);
 }
-function shouldAdvertiseCandidate(candidate, allowedHostIpv4) {
-  if (allowedHostIpv4.size === 0) return true;
+function shouldAdvertiseCandidate(candidate, allowedHostIpv4, allowedHostIpv6 = /* @__PURE__ */ new Set()) {
+  if (allowedHostIpv4.size === 0 && allowedHostIpv6.size === 0) return true;
   const parsed = parseIceCandidate(candidate);
   if (parsed === void 0) return true;
-  return shouldUseLocalCandidate(parsed, allowedHostIpv4);
+  return shouldUseLocalCandidate(parsed, allowedHostIpv4, allowedHostIpv6);
 }
-function shouldUseLocalCandidate(candidate, allowedHostIpv4) {
-  if (candidate.type === "host") return candidate.host !== void 0 && allowedHostIpv4.has(candidate.host);
+function shouldUseLocalCandidate(candidate, allowedHostIpv4, allowedHostIpv6) {
+  const hostAllowed = (host) => {
+    if (host === void 0) return false;
+    return host.includes(":") ? allowedHostIpv6.has(host) : allowedHostIpv4.has(host);
+  };
+  if (candidate.type === "host") return hostAllowed(candidate.host);
   if (candidate.type === "srflx" && candidate.relatedAddress !== void 0) {
-    return allowedHostIpv4.has(candidate.relatedAddress);
+    return hostAllowed(candidate.relatedAddress);
   }
   return true;
 }
@@ -85990,6 +86008,14 @@ function physicalInterfaceScore(name2) {
 }
 function isIpv4Family(family) {
   return family === "IPv4" || family === 4;
+}
+function isIpv6Family(family) {
+  return family === "IPv6" || family === 6;
+}
+function isGlobalUnicastIpv6(ip) {
+  const lower = ip.toLowerCase();
+  if (lower.includes("::ffff:")) return false;
+  return /^[23][0-9a-f]{3}:/.test(lower);
 }
 function isUsableIpv4(ip) {
   const parts = ip.split(".").map(Number);

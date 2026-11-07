@@ -230,12 +230,15 @@ export interface WeriftFactoryOptions {
 /** Synchronous factory for tests and callers that already resolved werift. */
 export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryOptions = {}): RtcPeerConnectionFactory {
   return {
-    create(configuration) {
-      const hostIpv4Candidates = detectHostIpv4Candidates(
-        options.interfaces ?? networkInterfaces(),
-        options.preferredHostIpv4Candidates,
-      )
-      const allowedHostIpv4 = new Set(hostIpv4Candidates)
+      create(configuration) {
+        const interfaces = options.interfaces ?? networkInterfaces()
+        const hostIpv4Candidates = detectHostIpv4Candidates(interfaces, options.preferredHostIpv4Candidates)
+        const allowedHostIpv4 = new Set(hostIpv4Candidates)
+        // IPv6 host candidates are opt-in; only global unicast addresses are
+        // eligible so a dual-stack peer can take a direct path.
+        const hostIpv6Candidates = options.iceIpv6 === true ? detectHostIpv6Candidates(interfaces) : []
+        const allowedHostIpv6 = new Set(hostIpv6Candidates)
+        const additionalHostAddresses = [...hostIpv4Candidates, ...hostIpv6Candidates]
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []) as RtcIceServer[],
         iceUseIpv4: true,
@@ -244,12 +247,12 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
         // default historically; callers opt in through the plugin config.
         iceUseIpv6: options.iceIpv6 === true,
         iceUseLinkLocalAddress: false,
-        ...(hostIpv4Candidates.length === 0
+        ...(additionalHostAddresses.length === 0
           ? {}
           : {
-              iceAdditionalHostAddresses: hostIpv4Candidates,
+              iceAdditionalHostAddresses: additionalHostAddresses,
               iceFilterCandidatePair: pair => {
-                const allowed = shouldUseCandidatePair(pair, allowedHostIpv4)
+                const allowed = shouldUseCandidatePair(pair, allowedHostIpv4, allowedHostIpv6)
                 if (!allowed) {
                   configuration.onDiagnostic?.({
                     type: 'candidate-pair-filtered',
@@ -267,7 +270,7 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
       raw.onicecandidate = event => {
         if (onIceCandidate === null) return
         const candidate = event.candidate === undefined ? null : event.candidate.toJSON()
-        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4)) {
+        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4, allowedHostIpv6)) {
           configuration.onDiagnostic?.({
             type: 'local-candidate-filtered',
             candidate: summarizeIceCandidate(candidate),
@@ -442,6 +445,30 @@ export function detectHostIpv4Candidates(
   })
   return [...new Set(candidates.map(candidate => candidate.ip))]
 }
+  /**
+   * Safe global IPv6 host addresses for ICE gathering (opt-in via `iceIpv6`).
+   *
+   * IPv6 host candidates let a dual-stack peer take a direct path without
+   * NAT hole punching. Only global unicast addresses (2000::/3) are offered:
+   * loopback, link-local (needs a zone id), unique-local and IPv4-mapped
+   * addresses are not routable from the peer. Returns an empty list when the
+   * host has no usable IPv6 address.
+   */
+  export function detectHostIpv6Candidates(
+    interfaces: NodeJS.Dict<NetworkInterfaceInfo[] | undefined>,
+  ): string[] {
+    const candidates: string[] = []
+    for (const [name, addresses] of Object.entries(interfaces)) {
+      if (physicalInterfaceScore(name) === undefined) continue
+      for (const address of addresses ?? []) {
+        if (address.internal || !isIpv6Family(address.family)) continue
+        const ip = address.address
+        if (!isGlobalUnicastIpv6(ip)) continue
+        if (!candidates.includes(ip)) candidates.push(ip)
+      }
+    }
+    return candidates
+  }
 
 export async function detectRouteHostIpv4Candidates(
   targets: readonly string[],
@@ -454,24 +481,42 @@ export async function detectRouteHostIpv4Candidates(
   return [...new Set(detected.filter((ip): ip is string => ip !== undefined && isUsableIpv4(ip)))]
 }
 
-function shouldUseCandidatePair(pair: WeriftCandidatePair, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (allowedHostIpv4.size === 0) return true
+function shouldUseCandidatePair(
+  pair: WeriftCandidatePair,
+  allowedHostIpv4: ReadonlySet<string>,
+  allowedHostIpv6: ReadonlySet<string>,
+): boolean {
+  if (allowedHostIpv4.size === 0 && allowedHostIpv6.size === 0) return true
   const candidate = localCandidate(pair)
   if (candidate === undefined) return true
-  return shouldUseLocalCandidate(candidate, allowedHostIpv4)
+  return shouldUseLocalCandidate(candidate, allowedHostIpv4, allowedHostIpv6)
 }
 
-export function shouldAdvertiseCandidate(candidate: RtcIceCandidateInit, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (allowedHostIpv4.size === 0) return true
+export function shouldAdvertiseCandidate(
+  candidate: RtcIceCandidateInit,
+  allowedHostIpv4: ReadonlySet<string>,
+  allowedHostIpv6: ReadonlySet<string> = new Set(),
+): boolean {
+  if (allowedHostIpv4.size === 0 && allowedHostIpv6.size === 0) return true
   const parsed = parseIceCandidate(candidate)
   if (parsed === undefined) return true
-  return shouldUseLocalCandidate(parsed, allowedHostIpv4)
+  return shouldUseLocalCandidate(parsed, allowedHostIpv4, allowedHostIpv6)
 }
 
-function shouldUseLocalCandidate(candidate: WeriftCandidate, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (candidate.type === 'host') return candidate.host !== undefined && allowedHostIpv4.has(candidate.host)
+function shouldUseLocalCandidate(
+  candidate: WeriftCandidate,
+  allowedHostIpv4: ReadonlySet<string>,
+  allowedHostIpv6: ReadonlySet<string>,
+): boolean {
+  const hostAllowed = (host: string | undefined): boolean => {
+    if (host === undefined) return false
+    // IPv6 addresses contain a colon; keep the two allowed sets separate so an
+    // IPv4 allow-list cannot accidentally accept an IPv6 candidate.
+    return host.includes(':') ? allowedHostIpv6.has(host) : allowedHostIpv4.has(host)
+  }
+  if (candidate.type === 'host') return hostAllowed(candidate.host)
   if (candidate.type === 'srflx' && candidate.relatedAddress !== undefined) {
-    return allowedHostIpv4.has(candidate.relatedAddress)
+    return hostAllowed(candidate.relatedAddress)
   }
   return true
 }
@@ -601,6 +646,18 @@ function physicalInterfaceScore(name: string): number | undefined {
 
 function isIpv4Family(family: string | number): boolean {
   return family === 'IPv4' || family === 4
+}
+
+function isIpv6Family(family: string | number): boolean {
+  return family === 'IPv6' || family === 6
+}
+
+function isGlobalUnicastIpv6(ip: string): boolean {
+  const lower = ip.toLowerCase()
+  if (lower.includes('::ffff:')) return false
+  // Global unicast is 2000::/3 (first nibble 2 or 3); loopback, link-local,
+  // unique-local and multicast addresses are not routable to the peer.
+  return /^[23][0-9a-f]{3}:/.test(lower)
 }
 
 function isUsableIpv4(ip: string): boolean {
