@@ -1,4 +1,6 @@
-# DeepSeek 远程连接
+# DS Harness Remote
+
+[官方网站](https://dsh.r2049.cn/) · [Web 客户端](https://dsh.r2049.cn/app) · [iOS 内测](https://github.com/liguobao/ds-harness-remote/issues/20) · [Android 下载](https://github.com/liguobao/ds-harness-remote/releases/latest)
 
 通过 **P2P 网络直连**，从另一台电脑、浏览器或手机，继续使用工作电脑上的 DeepSeek Harness。工作区、会话、工具和项目配置仍保留在原来的电脑上。
 
