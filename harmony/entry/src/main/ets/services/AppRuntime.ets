@@ -19,6 +19,7 @@ import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
 import { NetTrace } from '../util/NetTrace';
+import { LinkLog } from './LinkLog';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -138,6 +139,13 @@ export class AppRuntime {
   private static readonly PRESENCE_BUDGET_MS: number = 4000;
   /** session/list 的单次预算：中继下主机实测 9 秒上下，给足 20 秒再用重试兜底。 */
   private static readonly SESSION_LIST_BUDGET_MS: number = 20000;
+  /**
+   * 链路「算活着」的最大静默：服务端 25 秒一跳心跳，两个周期没消息就当作可疑。
+   * 复用连接、回前台体检都用这个阈值——以前只有 90 秒看门狗，用户早就点不动了。
+   */
+  private static readonly LINK_STALE_MS: number = 45000;
+  /** 一次连接（含握手、能力探测、订阅）的总预算：卡住就判超时，别让界面永远停在「正在连接」。 */
+  private static readonly CONNECT_DEADLINE_MS: number = 30000;
   private refreshTimer: number = -1;
   /** In-flight credential renewal. The Server rotates the refresh token on every call and
    *  invalidates every token of this device when a spent one is presented again, so two
@@ -167,6 +175,16 @@ export class AppRuntime {
   private featuresCacheValue: RemoteHostFeatures | undefined = undefined;
   private reconnectAttempt: number = 0;
   private reconnectTimer: number = -1;
+  /** 退避耗尽后仍允许「网络恢复/回前台」再试一轮，否则用户只能手点或杀进程。 */
+  private reconnectExhausted: boolean = false;
+  /** 当前这次连接的看门狗（CONNECT_DEADLINE_MS 到点判超时）。 */
+  private connectDeadlineTimer: number = -1;
+  /** 系统网络是否掉过（掉过之后要把链路当作可疑，别信「WebSocket 还开着」）。 */
+  private awaitingNetwork: boolean = false;
+  /** 掉网 8 秒后主动判死的那次定时器。 */
+  private netLossTimer: number = -1;
+  /** 最近一次拉会话列表的失败原因（复用时判定「链路是不是真的死了」用）。 */
+  private lastListError: Object | undefined = undefined;
   /** 错误条上「重试」按钮的文案与要重跑的动作：失败时登记，成功或手动关闭时清掉。 */
   private retryText: string = '';
   private retryAction: (() => void) | undefined = undefined;
@@ -419,6 +437,7 @@ export class AppRuntime {
     if (this.phase !== PHASE_BOOT) {
       return;
     }
+    LinkLog.init(context);
     this.startNetworkMonitor();
     try {
       await initClientVersion();
@@ -558,12 +577,28 @@ export class AppRuntime {
     }
     // 刚从这台主机的会话页退回来（连接还活着）：不重新认证，直接回聊天
     if (this.keepAliveDeviceId === deviceId && this.core !== undefined && this.harness !== undefined) {
-      logInfo('reuse live connection to ' + deviceId);
-      this.phase = PHASE_CHAT;
-      this.errorMsg = '';
-      this.notify();
-      this.loadSessionsAfterConnect().catch(() => undefined);
-      return;
+      // 复用前必须体检：飞行模式/切网之后 WebSocket 常常不报 close，
+      // 这时 core/harness 还在，直接「复用」就是回到一条死连接——
+      // 用户看到「连上了但点不动」，只能杀进程重进（这就是线上的主症状）。
+      const aliveRelay: RelayTransport | undefined = this.activeRelay;
+      const healthy: boolean = aliveRelay !== undefined && this.networkOnline
+        && aliveRelay.isHealthy(AppRuntime.LINK_STALE_MS);
+      if (healthy) {
+        logInfo('reuse live connection to ' + deviceId);
+        LinkLog.write('conn', '复用现有连接 device=' + deviceId
+          + ' transport=' + this.transportLabel);
+        this.phase = PHASE_CHAT;
+        this.errorMsg = '';
+        this.notify();
+        this.reuseThenVerify(deviceId);
+        return;
+      }
+      LinkLog.write('conn', '放弃复用（链路不健康：socket=' + (aliveRelay !== undefined)
+        + ' online=' + this.networkOnline + ' silence='
+        + (aliveRelay !== undefined ? aliveRelay.linkSilenceMs() : -1) + 'ms）→ 重新连接');
+      this.pushLinkEvent('旧链路已不可用，重新连接');
+      this.teardownConnection();
+      this.keepAliveDeviceId = '';
     }
     // 之前连着别的设备：先干净断开再连新的
     if (this.core !== undefined) {
@@ -575,6 +610,7 @@ export class AppRuntime {
     this.phase = PHASE_CONNECTING;
     this.errorMsg = '';
     this.notify();
+    this.armConnectDeadline(deviceId);
     try {
       const config: StoredServerConfig | undefined = this.config;
       const identity: DeviceIdentity | undefined = this.identity;
@@ -692,10 +728,18 @@ export class AppRuntime {
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
-      this.loadWorkspaces().catch(() => undefined);
+      // 工作区快照实测要 6.4 秒，且与会话列表/首帧抢同一条中继：挪到首屏之后再做，
+      // 抽屉打开时也会各自再拉一次，用户几乎察觉不到。
+      setTimeout(() => {
+        if (this.phase === PHASE_CHAT) {
+          this.loadWorkspaces().catch(() => undefined);
+        }
+      }, 4000);
       return;
     } catch (error) {
       logError('connect failed: ' + errorMessage(error));
+      LinkLog.write('conn', '连接失败 device=' + deviceId + '：' + errorMessage(error)
+        + '（attempt=' + this.reconnectAttempt + '）');
       const autoRetry: boolean = !this.connectCancelled && deviceId === this.lastDeviceId
         && this.reconnectAttempt > 0 && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
       if (!this.connectCancelled && !autoRetry) {
@@ -715,10 +759,73 @@ export class AppRuntime {
         this.reconnectAttempt += 1;
         this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '
           + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+        LinkLog.write('conn', '自动重连失败，' + Math.round(delay / 1000) + 's 后第 '
+          + this.reconnectAttempt + ' 次');
         this.scheduleReconnect(deviceId, delay);
       }
+    } finally {
+      this.clearConnectDeadline();
     }
     this.notify();
+  }
+
+  /** 起连接看门狗：不这么做的话，某条路径卡住会让界面永远停在「正在连接」。 */
+  private armConnectDeadline(deviceId: string): void {
+    this.clearConnectDeadline();
+    this.connectDeadlineTimer = setTimeout(() => {
+      this.connectDeadlineTimer = -1;
+      if (this.phase !== PHASE_CONNECTING) {
+        return;
+      }
+      const seconds: number = Math.round(AppRuntime.CONNECT_DEADLINE_MS / 1000);
+      logWarn('connect deadline hit after ' + seconds + 's');
+      LinkLog.write('conn', '连接超过 ' + seconds + ' 秒没完成，判超时并放弃（stage='
+        + (this.connectStage.length > 0 ? this.connectStage : '—') + '）');
+      this.connectCancelled = true;
+      this.teardownConnection();
+      this.connectStage = '';
+      this.phase = PHASE_DEVICES;
+      this.errorMsg = '连接超时（' + seconds + ' 秒没走完握手）：已主动断开。请检查网络后点「连接」重试。';
+      this.setRetry('重新连接', () => {
+        this.connectDevice(deviceId);
+      });
+      this.notify();
+    }, AppRuntime.CONNECT_DEADLINE_MS);
+  }
+
+  private clearConnectDeadline(): void {
+    if (this.connectDeadlineTimer !== -1) {
+      clearTimeout(this.connectDeadlineTimer);
+      this.connectDeadlineTimer = -1;
+    }
+  }
+
+  /**
+   * 复用连接后做一次真实体检：拉会话列表。
+   * 拉不到（传输类失败）说明这条链路其实是死的——干净重连一次，
+   * 而不是把「会话列表加载失败」甩给用户让他自己杀进程。
+   */
+  private reuseThenVerify(deviceId: string): void {
+    this.loadSessionsAfterConnect().then(() => {
+      if (!this.sessionsLoadFailed) {
+        return;
+      }
+      const cause: Object | undefined = this.lastListError;
+      if (cause !== undefined && !isTransportFailure(cause)) {
+        // 主机拒绝（业务类）不是链路问题：重连也白搭，交给用户看红条
+        LinkLog.write('conn', '复用后列表被主机拒绝（业务类），不重连：' + errorMessage(cause));
+        return;
+      }
+      LinkLog.write('conn', '复用后列表拉不到，判定链路已死 → 干净重连');
+      this.pushLinkEvent('复用连接不可用，已自动重连');
+      this.teardownConnection();
+      this.keepAliveDeviceId = '';
+      this.connectDevice(deviceId).catch((error: Error) => {
+        logWarn('auto reconnect after failed reuse: ' + errorMessage(error));
+      });
+    }).catch((error: Error) => {
+      logWarn('reuse verify failed: ' + errorMessage(error));
+    });
   }
 
   cancelConnect(): void {
@@ -751,9 +858,13 @@ export class AppRuntime {
     if (this.phase !== PHASE_CHAT && this.phase !== PHASE_DEVICES) {
       return;
     }
+    LinkLog.write('conn', '用户主动断开连接');
     this.teardownConnection();
     this.keepAliveDeviceId = '';
     this.clearReconnectTimer();
+    this.clearNetLossCheck();
+    this.clearConnectDeadline();
+    this.reconnectExhausted = false;
     this.reconnectAttempt = 0;
     this.reconnectStatus = '';
     this.phase = PHASE_DEVICES;
@@ -2912,6 +3023,7 @@ export class AppRuntime {
       }
       this.sessions = sortSessions(sessions);
       this.rememberSessions(this.sessions);
+      this.lastListError = undefined;
       this.setBusy(false);
       this.sessionsLoadFailed = false;
       this.notify();
@@ -2922,6 +3034,7 @@ export class AppRuntime {
       }
       await this.pickInitialSession();
     } catch (error) {
+      this.lastListError = error;
       logError('session list failed after connect: ' + errorMessage(error));
       if (this.harness !== harness || this.phase !== PHASE_CHAT) {
         return;
@@ -3202,7 +3315,9 @@ export class AppRuntime {
       return;
     }
     // 退避耗尽：这时确实要交回用户，文案带上原因和下一步动作
+    // （reconnectExhausted=true 让「网络恢复/回前台」还能再自动试一轮，不必手点或杀进程）
     this.reconnecting = false;
+    this.reconnectExhausted = this.reconnectAttempt > 0;
     this.pendingResumeSessionId = '';
     this.phase = PHASE_DEVICES;
     this.reconnectStatus = '';
@@ -3252,35 +3367,118 @@ export class AppRuntime {
     const monitor: NetworkMonitor = new NetworkMonitor();
     monitor.onLost = () => {
       this.networkOnline = false;
+      this.awaitingNetwork = true;
       NetTrace.netFlap();
       this.pushLinkEvent('网络断开');
       this.networkType = '无网络';
       logWarn('runtime: 网络已断开');
+      LinkLog.write('net', '网络断开（phase=' + this.phase + ' transport='
+        + (this.transportLabel.length > 0 ? this.transportLabel : '—') + '）');
       if (this.phase === PHASE_CHAT && this.reconnectStatus.length === 0) {
-        // 只是提示，不拆连接：半开的 socket 由看门狗按预算处理
+        // 先给提示，不立刻拆连接（用户切一下 Wi-Fi 就回来的情况别吓人）；
+        // 但 WebSocket 在半开状态下往往不报 close，所以 8 秒还没回来就主动判死。
         this.reconnectStatus = '网络已断开，恢复后自动重连';
       }
+      this.scheduleNetLossCheck();
       this.notify();
     };
     monitor.onAvailable = () => {
+      const wasOffline: boolean = !this.networkOnline;
       this.networkOnline = true;
+      this.awaitingNetwork = false;
+      this.clearNetLossCheck();
+      // 网络条件变了：退避从头算，否则「6 次用尽」之后永远轮不到自动重连
+      this.reconnectAttempt = 0;
+      this.reconnectExhausted = false;
       this.pushLinkEvent('网络已恢复');
       this.networkType = networkTypeLabel(monitor.type);
       logInfo('runtime: 网络已恢复 type=' + this.networkType);
+      LinkLog.write('net', '网络恢复 type=' + this.networkType + ' phase=' + this.phase
+        + ' wasOffline=' + wasOffline);
       if (this.reconnectStatus.indexOf('网络已断开') >= 0) {
         this.reconnectStatus = '';
       }
       this.notify();
-      this.retryNow('net-available');
+      this.recoverAfterNetwork();
     };
     monitor.onTypeChange = (type: string) => {
+      const previous: string = this.networkType;
+      const nextLabel: string = networkTypeLabel(type);
       this.networkOnline = type !== 'none';
-      this.networkType = networkTypeLabel(type);
+      this.networkType = nextLabel;
       logInfo('runtime: 网络类型 ' + (this.networkType.length > 0 ? this.networkType : type));
+      LinkLog.write('net', '承载变化 ' + (previous.length > 0 ? previous : '—') + ' → '
+        + (nextLabel.length > 0 ? nextLabel : type));
+      // Wi-Fi ↔ 移动数据：旧 socket 的源地址已经不存在了，这条连接基本必死。
+      // 直接判死比等看门狗快得多（看门狗要 90 秒才认定）。
+      if (previous.length > 0 && nextLabel.length > 0 && previous !== nextLabel
+        && type !== 'none' && this.phase === PHASE_CHAT) {
+        this.markLinkSuspect('网络从 ' + previous + ' 切到 ' + nextLabel);
+      }
       this.notify();
     };
     this.netMonitor = monitor;
     monitor.start();
+  }
+
+  /**
+   * 掉网 8 秒还没回来：不再指望 WebSocket 自己报 close（半开时它不会报），
+   * 主动把链路判死，让状态机进入「重连中」。这样网络一回来就能立刻连上。
+   */
+  private scheduleNetLossCheck(): void {
+    this.clearNetLossCheck();
+    this.netLossTimer = setTimeout(() => {
+      this.netLossTimer = -1;
+      if (this.networkOnline) {
+        return;
+      }
+      LinkLog.write('net', '掉网 8 秒仍未恢复，主动判死链路（不等 WebSocket close）');
+      this.markLinkSuspect('网络已断开 8 秒');
+    }, 8000);
+  }
+
+  private clearNetLossCheck(): void {
+    if (this.netLossTimer !== -1) {
+      clearTimeout(this.netLossTimer);
+      this.netLossTimer = -1;
+    }
+  }
+
+  /**
+   * 链路可疑（切网、长时间静默、复用时体检不过）：能判死就判死，
+   * 走统一的断线 + 自动重连；没连接就只把状态提示出来。
+   */
+  private markLinkSuspect(reason: string): void {
+    const relay: RelayTransport | undefined = this.activeRelay;
+    if (relay === undefined || this.phase !== PHASE_CHAT) {
+      return;
+    }
+    if (this.reconnecting) {
+      return;
+    }
+    LinkLog.write('link', '判死链路：' + reason);
+    this.pushLinkEvent('链路判定不可用：' + reason);
+    relay.failStale(reason);
+  }
+
+  /** 网络恢复之后：能立刻连就连，会话页则先确认旧链路真死了再换。 */
+  private recoverAfterNetwork(): void {
+    if (this.phase === PHASE_CHAT && !this.reconnecting) {
+      const relay: RelayTransport | undefined = this.activeRelay;
+      const silence: number = relay !== undefined ? relay.linkSilenceMs() : -1;
+      LinkLog.write('net', '网络恢复，链路静默 ' + silence + 'ms（阈值 '
+        + AppRuntime.LINK_STALE_MS + 'ms）');
+      if (relay !== undefined && silence < AppRuntime.LINK_STALE_MS) {
+        // 看起来很新鲜：先体检，不折腾用户
+        relay.recheckLink();
+        return;
+      }
+      if (relay !== undefined) {
+        this.markLinkSuspect('网络恢复但链路已静默 ' + Math.round(silence / 1000) + ' 秒');
+        return;
+      }
+    }
+    this.retryNow('net-available');
   }
 
   /** 回前台：补一次网络状态查询，并对已有连接做一次链路体检。 */
@@ -3290,14 +3488,22 @@ export class AppRuntime {
     if (!wasBackground) {
       return;
     }
+    LinkLog.write('life', '回前台（phase=' + this.phase + ' reconnecting=' + this.reconnecting
+      + ' transport=' + (this.transportLabel.length > 0 ? this.transportLabel : '—') + '）');
     const monitor: NetworkMonitor | undefined = this.netMonitor;
     if (monitor !== undefined) {
       monitor.refreshDefaultNet();
     }
     const relay: RelayTransport | undefined = this.activeRelay;
-    if (relay !== undefined) {
+    if (relay !== undefined && this.phase === PHASE_CHAT) {
       const silence: number = relay.linkSilenceMs();
       logInfo('runtime: 回前台，链路静默 ' + silence + 'ms，触发体检');
+      // 后台待久了 socket 基本都是死的，而且不报 close：静默超阈值直接判死重连，
+      // 别再让它慢慢等 90 秒看门狗（用户以为「连上了但点不动」）。
+      if (silence >= AppRuntime.LINK_STALE_MS) {
+        this.markLinkSuspect('回前台时链路已静默 ' + Math.round(silence / 1000) + ' 秒');
+        return;
+      }
       relay.recheckLink();
       return;
     }
@@ -3307,30 +3513,46 @@ export class AppRuntime {
   /**
    * 不等退避档位，立刻按原目标重试一次。
    * 网络刚恢复、刚回前台这类「外部条件已经变好」的时机用它，用户不用干等 30 秒。
+   *
+   * 这里放宽了三处以前把恢复卡死的限制（飞行模式恢复不了的主因）：
+   * - 以前只认 PHASE_DEVICES：会话页里「重连中」的那次永远等不到立刻重连；
+   * - 以前要求 reconnectTimer !== -1：退避耗尽（timer 已清）之后就再也不会自动试；
+   * - 以前不重置退避计数：6 次用尽后即使网络恢复也没有下一轮。
    */
   private retryNow(reason: string): void {
-    if (this.phase !== PHASE_DEVICES || this.connectCancelled) {
-      return;
-    }
-    if (!this.networkOnline) {
-      return;
-    }
-    if (this.reconnectTimer === -1) {
+    if (this.connectCancelled || !this.networkOnline) {
       return;
     }
     const target: string = this.lastDeviceId;
     if (target.length === 0) {
       return;
     }
+    const inChatRetrying: boolean = this.phase === PHASE_CHAT && this.reconnecting;
+    const onDeviceList: boolean = this.phase === PHASE_DEVICES;
+    if (this.phase === PHASE_CONNECTING) {
+      // 已经在连了，别重入
+      return;
+    }
+    if (!inChatRetrying && !onDeviceList) {
+      return;
+    }
+    if (onDeviceList && !this.reconnecting && !this.reconnectExhausted && this.reconnectTimer === -1) {
+      // 用户自己停在主机列表、也没在重连：不要擅自替他连
+      return;
+    }
     this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.reconnectExhausted = false;
+    LinkLog.write('retry', '立即重连（' + reason + '）phase=' + this.phase + ' target=' + target);
     logInfo('runtime: 立即重连（' + reason + '）target=' + target);
     this.connectDevice(target).catch((error: Error) => {
       logWarn('retryNow failed: ' + errorMessage(error));
+      LinkLog.write('retry', '立即重连失败：' + errorMessage(error));
     });
   }
 
   /** 用户主动取消自动重连（例如要切换到另一台主机）。 */
-  /** 记一条链路事件（诊断面板与导出用）。 */
+  /** 记一条链路事件（界面上 20 条 + 落盘的链路日志）。 */
   private pushLinkEvent(text: string): void {
     const clock: Date = new Date();
     const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
@@ -3341,6 +3563,18 @@ export class AppRuntime {
       next.shift();
     }
     this.linkEvents = next;
+    // 同一句也进落盘日志：重启 App 之后还能看到这次断线发生过什么
+    LinkLog.write('event', text);
+  }
+
+  /** 诊断面板展示的链路日志尾行（落盘日志的内存镜像）。 */
+  linkLogTail(): string[] {
+    return LinkLog.tail(12);
+  }
+
+  /** 链路日志文件路径（面板「复制」里带上，方便一条命令拉走）。 */
+  linkLogPath(): string {
+    return LinkLog.pathText();
   }
 
   /** 诊断面板的行内容（也用于「复制全部」）。 */
@@ -3365,7 +3599,9 @@ export class AppRuntime {
       ? Math.round(relay.heartbeatIntervalMs() / 1000) + ' 秒（服务端心跳）'
       : '未读到';
     rows.push('心跳：' + heartbeat);
-    rows.push('网络：' + (this.networkOnline ? (this.networkType.length > 0 ? this.networkType : '在线') : '已断开'));
+    rows.push('网络：' + (this.networkOnline
+      ? (this.networkType.length > 0 ? this.networkType : '在线')
+      : '已断开' + (this.awaitingNetwork ? '（等待恢复，恢复后自动重连）' : '')));
     rows.push('重连：' + (this.reconnecting
       ? (this.reconnectStatus.length > 0 ? this.reconnectStatus : '进行中')
       : '无'));
@@ -3380,6 +3616,7 @@ export class AppRuntime {
       rows.push(slowest);
     }
     rows.push(NetTrace.jitterLine());
+    rows.push('日志：' + (LinkLog.pathText().length > 0 ? 'link.log（已落盘，重启也保留）' : '未启用'));
     rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
     return rows;
   }
@@ -3480,6 +3717,7 @@ export class AppRuntime {
     this.reconnectAttempt = 0;
     this.reconnectStatus = '';
     this.reconnecting = false;
+    this.reconnectExhausted = false;
     this.pendingResumeSessionId = '';
     if (this.phase === PHASE_CHAT) {
       // 从会话页点「停止重连」等于放弃这次会话，回设备列表让用户重新选

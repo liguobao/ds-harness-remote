@@ -1072,6 +1072,41 @@ export class RelayTransport {
     return this.lastInboundAt > 0 ? Date.now() - this.lastInboundAt : -1;
   }
 
+  /**
+   * 这条链路现在还算健康吗：socket 在、中继已授权、最近 maxSilenceMs 内收到过服务器帧。
+   *
+   * 用途：飞行模式/切网之后 WebSocket 常常**不报 close**（半开），上层如果只看
+   * 「对象还在」就会把它当成「还连着」，于是点「连接」走复用路径回到一个死连接——
+   * 用户看到的就是「连上了但点不动，必须杀进程」。
+   */
+  isHealthy(maxSilenceMs: number): boolean {
+    if (this.socket === undefined) {
+      return false;
+    }
+    if (this.connectionId === undefined) {
+      return false;
+    }
+    const silence: number = this.linkSilenceMs();
+    return silence >= 0 && silence <= maxSilenceMs;
+  }
+
+  /**
+   * 上层判定这条链路已经不可用（切网、回前台发现长时间静默、复用时体检不过）：
+   * 立刻按「静默」判死，交给统一的断线 + 自动重连流程，别等 90 秒看门狗。
+   */
+  failStale(reason: string): void {
+    if (this.socket === undefined) {
+      return;
+    }
+    const verdict: CloseVerdict = new CloseVerdict();
+    verdict.code = 0;
+    verdict.reason = 'stale';
+    verdict.message = reason;
+    this.closeVerdict = verdict;
+    logWarn('link state=stale-forced reason=' + reason + ' transport=' + this.transportKind());
+    this.fail(new Error(reason));
+  }
+
   private stopLinkWatchdog(): void {
     if (this.linkTimer !== -1) {
       clearInterval(this.linkTimer);

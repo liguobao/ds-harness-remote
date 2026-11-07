@@ -7356,7 +7356,9 @@ struct Index {
             .onClick(() => {
               const lines: string[] = this.runtime.diagnosticsLines()
                 .concat(['', this.tr('最近事件：')])
-                .concat(this.runtime.linkEvents);
+                .concat(this.runtime.linkEvents)
+                .concat(['', 'link.log: ' + this.runtime.linkLogPath()])
+                .concat(this.runtime.linkLogTail());
               const data: pasteboard.PasteData = pasteboard.createData(
                 pasteboard.MIMETYPE_TEXT_PLAIN, lines.join('\n'));
               pasteboard.getSystemPasteboard().setData(data).then(() => {
@@ -7402,6 +7404,31 @@ struct Index {
                 Text(line)
                   .fontSize(this.fs(11))
                   .fontColor(this.pal().text2)
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+              }, (line: string) => line)
+            }
+            Column()
+              .width('100%')
+              .height(0.5)
+              .backgroundColor(this.pal().border)
+              .margin({ top: 4, bottom: 4 })
+            Text(this.tr('链路日志（已落盘，重启 App 也保留）'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .width('100%')
+              .textAlign(TextAlign.Start)
+            if (this.runtime.linkLogTail().length === 0) {
+              Text(this.tr('还没有记录'))
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            } else {
+              ForEach(this.runtime.linkLogTail(), (line: string) => {
+                Text(line)
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
                   .width('100%')
                   .textAlign(TextAlign.Start)
               }, (line: string) => line)
