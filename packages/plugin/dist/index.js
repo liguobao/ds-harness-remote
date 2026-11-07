@@ -96983,11 +96983,11 @@ var HostServerConnection = class {
     let messageQueue = Promise.resolve();
     await new Promise((resolve9, reject) => {
       let settled = false;
-      const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
+      let helloTimer;
       const finish = (error62) => {
         if (settled) return;
         settled = true;
-        clearTimeout(helloTimer);
+        if (helloTimer !== void 0) clearTimeout(helloTimer);
         this.online = false;
         if (this.socket === socket) this.socket = void 0;
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
@@ -96995,6 +96995,7 @@ var HostServerConnection = class {
         void cleanup.finally(() => error62 === void 0 ? resolve9() : reject(error62));
       };
       socket.onopen = () => {
+        helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
         this.sendControl("hello", {
           role: "host",
           deviceId: this.identity.deviceId,
