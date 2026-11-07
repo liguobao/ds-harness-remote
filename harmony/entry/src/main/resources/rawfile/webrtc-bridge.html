@@ -192,6 +192,7 @@
     };
     dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
     dc.onerror = function (e) { log('dc error ' + (e && e.message ? e.message : e)); call('onError', 'data channel error'); };
+    dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
     dc.onmessage = function (event) {
       try {
         var data = event.data;
@@ -241,8 +242,18 @@
       log('local candidate ' + String(c.type || '?') + ' ' + String(c.candidate).slice(0, 96));
       call('onIce', JSON.stringify(out));
     };
-    pc.onconnectionstatechange = function () { call('onState', String(pc.connectionState)); };
-    pc.oniceconnectionstatechange = function () { call('onIceState', String(pc.iceConnectionState)); };
+    pc.onconnectionstatechange = function () {
+      var st = String(pc.connectionState);
+      call('onState', st);
+      // failed/closed 基本等于「这条路走不通了」：立刻报错，让客户端马上回落中继。
+      // 不报的话客户端只能在 DataChannel 超时（25 秒）之后才回落，用户白等。
+      if (st === 'failed' || st === 'closed') { call('onError', 'connection ' + st); }
+    };
+    pc.oniceconnectionstatechange = function () {
+      var st = String(pc.iceConnectionState);
+      call('onIceState', st);
+      if (st === 'failed') { call('onError', 'ice failed'); }
+    };
     pc.ondatachannel = function (event) { attachChannel(event.channel); };
     return pc;
   }

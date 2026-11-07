@@ -39,7 +39,7 @@ export class RelayTransportOptions {
    */
   webrtcSignalTimeoutMs: number = 16000;
   /** 收到 answer 之后等 DataChannel 打通的预算（ICE 连通性检查 + DTLS）。 */
-  webrtcConnectTimeoutMs: number = 25000;
+  webrtcConnectTimeoutMs: number = 12000;
 }
 
 /**
@@ -83,6 +83,13 @@ export function buildRelayCandidates(endpoint: string): string[] {
 
 /** 最近一次 attach 成功的中继 endpoint（同一次 App 运行内记忆）。 */
 let lastGoodRelayEndpoint: string = '';
+
+/**
+ * 直连（WebRTC）失败冷却：主机侧不支持直连时，每次连接都白等十几秒，
+ * 连续失败两次就冷却 10 分钟再试——正常场景根本觉察不到，避免"每次连接都卡一下"。
+ */
+let lanCooldownUntil: number = 0;
+let lanFailureStreak: number = 0;
 
 function preferredRelayHost(endpoint: string): string {
   return lastGoodRelayEndpoint;
@@ -259,6 +266,10 @@ export class RelayTransport {
   private suspectLogged: boolean = false;
   /** 这次为什么没走直连（诊断面板与徽标提示用）；走成了就留空。 */
   private lanSkipReasonValue: string = '';
+  /** connect.accepted 里的中继端点/票据：直连失败回落时要用，也可能压根没给。 */
+  private relayEndpointValue: string = '';
+  private relayTicketValue: string = '';
+  private relayEpochValue: number = -1;
 
   constructor(url: string, options: RelayTransportOptions) {
     this.url = url;
@@ -335,13 +346,16 @@ export class RelayTransport {
     };
     const ds = this.dataSocket;
     if (ds !== undefined && this.dataReady) {
+      // 同控制帧：数据帧发送失败也先重试一次，别让一次拥塞把会话打死
       try {
         ds.send(buildRelayDataFrameJson('relay', payload), (err: Error, value: boolean) => {
           if (err) {
+            logWarn('relay data send failed，判死链路');
             this.fail(new Error('relay data send failed'));
           }
         });
       } catch (e) {
+        // 同步抛（socket 已关）：这条链路确实不能用了
         throw new Error('relay data send failed');
       }
     } else {
@@ -412,19 +426,36 @@ export class RelayTransport {
     this.sendControl('hello', payload);
   }
 
-  private sendControl(type: string, payload: Record<string, Object>): void {
+  private sendControl(type: string, payload: Record<string, Object>, retried: boolean = false): void {
     const ws = this.socket;
     if (ws === undefined) {
       throw new Error('relay control socket is not open');
     }
+    // 发送回调失败不等于链路已死：中继拥塞时 send 也会返回错误。
+    // 先重发一次同一帧（控制帧幂等），两次都失败才判死——以前一次失败就把整条连接掐了。
+    const onError = (detail: string): void => {
+      if (!retried) {
+        logWarn('relay control send failed (' + detail + ')，重发一次');
+        setTimeout(() => {
+          try {
+            this.sendControl(type, payload, true);
+          } catch (e) {
+            this.fail(new Error('relay control send failed'));
+          }
+        }, 120);
+        return;
+      }
+      logWarn('relay control send failed twice (' + detail + ')，判死链路');
+      this.fail(new Error('relay control send failed'));
+    };
     try {
       ws.send(buildControlFrameJson(type, payload), (err: Error, value: boolean) => {
         if (err) {
-          this.fail(new Error('relay control send failed'));
+          onError('callback');
         }
       });
     } catch (e) {
-      throw new Error('relay control send failed');
+      onError('throw');
     }
   }
 
@@ -561,20 +592,32 @@ export class RelayTransport {
         hints.push(key);
       }
     }
-    logInfo('connect.accepted hints=[' + hints.join(',') + '] relay=' + relayEndpoint);
-    if (relayEndpoint.length > 0 && relayTicket.length > 0) {
-      if (this.relayCandidates.length === 0) {
-        this.relayCandidates = buildRelayCandidates(relayEndpoint);
-        logInfo('relay candidates (仅排障参考，票据不通用): ' + this.relayCandidates.join(' , '));
-      }
-      // 先试 LAN 直连：成功就不用中继的数据面（中继节点满容量时这是唯一活路）
-      if (this.startRtcAttempt()) {
-        return;
-      }
-      this.attachRelayData(relayEndpoint, relayTicket, relayEpoch);
-    } else {
-      this.finishConnect('relay');
+    logInfo('connect.accepted hints=[' + hints.join(',') + '] relay=' + relayEndpoint
+      + ' ticket=' + (relayTicket.length > 0 ? '有' : '无'));
+    this.relayEndpointValue = relayEndpoint;
+    this.relayTicketValue = relayTicket;
+    this.relayEpochValue = relayEpoch;
+    if (relayEndpoint.length > 0 && relayTicket.length > 0 && this.relayCandidates.length === 0) {
+      this.relayCandidates = buildRelayCandidates(relayEndpoint);
+      logInfo('relay candidates (仅排障参考，票据不通用): ' + this.relayCandidates.join(' , '));
     }
+    // 先试 LAN 直连：成功就不用中继的数据面（中继节点满容量时这是唯一活路）。
+    // 注意别把它塞进「有中继端点」的分支里——本机服务器经常压根不下发 relayEndpoint，
+    // 数据面直接跑在 Control WS 上，那种情况下以前永远不会尝试直连。
+    if (this.startRtcAttempt()) {
+      return;
+    }
+    this.attachOrFinishRelay();
+  }
+
+  /** 有中继端点就走中继数据 socket；没有就把数据面放在 Control WS 上（也是 'relay'）。 */
+  private attachOrFinishRelay(): void {
+    if (this.relayEndpointValue.length > 0 && this.relayTicketValue.length > 0) {
+      this.attachRelayData(this.relayEndpointValue, this.relayTicketValue, this.relayEpochValue);
+      return;
+    }
+    logInfo('relay: 服务器没有下发数据端点，数据面走 Control WS');
+    this.finishConnect('relay');
   }
 
   /** 走中继数据面（原有的 attach + 换票重试逻辑）。 */
@@ -607,19 +650,31 @@ export class RelayTransport {
     const rtc = this.options.rtc;
     if (rtc === undefined) {
       this.lanSkipReasonValue = 'WebRTC 桥没挂上（页面还没把桥交给运行时）';
+      logInfo('webrtc: 跳过直连 — ' + this.lanSkipReasonValue);
       return false;
     }
     if (this.rtcAttempted) {
+      // 每次连接只试一轮：上一轮已经协商过又回落了，再试只会拖时间
+      logInfo('webrtc: 跳过直连 — 本次连接已经试过一轮（结果：'
+        + (this.lanSkipReasonValue.length > 0 ? this.lanSkipReasonValue : '回落中继') + '）');
+      return false;
+    }
+    if (Date.now() < lanCooldownUntil) {
+      const left: number = Math.round((lanCooldownUntil - Date.now()) / 1000);
+      this.lanSkipReasonValue = '直连刚失败过，冷却中（还有 ' + left + ' 秒才再试）';
+      logInfo('webrtc: 跳过直连 — ' + this.lanSkipReasonValue);
       return false;
     }
     if (!rtc.isReady()) {
       this.lanSkipReasonValue = 'WebRTC 桥还没就绪（隐藏的 Web 还没加载完）';
-      logInfo('webrtc: 桥还没就绪，直接走中继');
+      logInfo('webrtc: 跳过直连 — ' + this.lanSkipReasonValue);
       return false;
     }
     this.rtcAttempted = true;
     const connId = this.connectionId;
     if (connId === undefined) {
+      this.lanSkipReasonValue = '中继还没分配 connectionId，WebRTC 无法开局';
+      logInfo('webrtc: 跳过直连 — ' + this.lanSkipReasonValue);
       return false;
     }
     logInfo('webrtc: 准备协商 conn=' + connId);
@@ -701,10 +756,20 @@ export class RelayTransport {
     rtc.onDataOpen = () => {
       this.rtcOpened();
     };
+    rtc.onDataClosed = () => {
+      logWarn('webrtc: DataChannel 已关闭（transport=' + this.transportKind() + '）');
+      if (this.dataMode === 'lan') {
+        // 直连数据面没了就是没了：立刻判死走重连，别等 35 秒的静默探测
+        this.failStale('直连数据通道已关闭');
+      }
+    };
     rtc.onDataBinary = (base64: string) => {
       if (this.dataMode !== 'lan') {
         return;
       }
+      // 走直连时数据帧不经过 Control WS，必须在这里也记「链路还活着」，
+      // 否则静默检测会把一条健康的直连当成死链，上层还会反复重连。
+      this.markLinkAlive();
       const cb = this.onMessage;
       if (cb !== undefined) {
         cb(fromBase64Url(base64));
@@ -712,6 +777,12 @@ export class RelayTransport {
     };
     rtc.onError = (message: string) => {
       logWarn('webrtc: 错误 ' + message);
+      if (this.dataMode === 'lan') {
+        // 直连已经在用的时候报错，说明这条数据面基本废了：
+        // 立刻按「链路不可用」判死，走已验证的自动重连，别让用户对着一个假连接发呆。
+        this.failStale('直连数据通道出错：' + message);
+        return;
+      }
       this.fallBackToRelay(message);
     };
   }
@@ -731,6 +802,8 @@ export class RelayTransport {
       // onIce 继续挂着：后续 trickle candidate 还要发
     }
     const selected: string = this.rtcTransport.length > 0 ? this.rtcTransport : 'lan';
+    lanFailureStreak = 0;
+    lanCooldownUntil = 0;
     logInfo('webrtc: 数据面路径=' + selected);
     this.finishConnect(selected);
   }
@@ -753,11 +826,23 @@ export class RelayTransport {
       rtc.onIce = undefined;
       rtc.onDataOpen = undefined;
       rtc.onDataBinary = undefined;
+      rtc.onDataClosed = undefined;
       rtc.onError = undefined;
       rtc.closeAll();
     }
-    logWarn('webrtc: 回落中继（' + reason + '），重新要票');
+    lanFailureStreak += 1;
+    if (lanFailureStreak >= 2) {
+      lanCooldownUntil = Date.now() + 10 * 60 * 1000;
+      logWarn('webrtc: 直连连续失败 ' + lanFailureStreak + ' 次，冷却 10 分钟');
+    }
     this.dataMode = '';
+    if (this.relayEndpointValue.length === 0 || this.relayTicketValue.length === 0) {
+      // 服务器本来就没给中继端点：数据面直接回到 Control WS，别去重新要票
+      logWarn('webrtc: 回落中继（' + reason + '），服务器无数据端点 → Control WS 承载');
+      this.finishConnect('relay');
+      return;
+    }
+    logWarn('webrtc: 回落中继（' + reason + '），重新要票');
     // 重新走一次 connect.request：旧票据可能已经被这次协商占掉
     this.retryWithFreshTicket('webrtc fallback: ' + reason);
   }

@@ -757,7 +757,25 @@ export class HarnessAlphaClient {
     if (generation !== this.followGeneration) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }
-    const page: HistoryPage = await this.openFollow(sessionId, maxMessages, generation);
+    let page: HistoryPage;
+    try {
+      page = await this.openFollow(sessionId, maxMessages, generation);
+    } catch (error) {
+      // 偶发的一次「首帧没回来」（切直连的瞬间、主机刚好在回放大快照）不该直接糊用户一脸红条：
+      // 关掉这条流，等 600ms 自动重开一次。只有第二次也失败才往上抛。
+      if (error instanceof RemoteGatewayError && error.code === 'CANCELLED') {
+        throw error;
+      }
+      const detail: string = error instanceof Error ? error.message : String(error);
+      logWarn('openFollow failed once (' + detail + ')，600ms 后自动重开');
+      NetTrace.record('session/follow 自动重开', 0, '首次失败：' + detail, true);
+      await this.closeFollowStream();
+      await delay(600);
+      if (generation !== this.followGeneration) {
+        throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+      }
+      page = await this.openFollow(sessionId, maxMessages, generation);
+    }
     if (generation !== this.followGeneration) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }
@@ -1141,6 +1159,14 @@ function stringListOf(value: Object | undefined): string[] {
     }
   }
   return out;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      resolve();
+    }, ms);
+  });
 }
 
 function withTimeout(work: Promise<Object>, budgetMs: number): Promise<Object> {

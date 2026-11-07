@@ -1,7 +1,8 @@
-import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want, common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { getAppRuntime } from '../services/AppRuntime';
+import { KeepAlive } from '../services/KeepAlive';
 
 const DOMAIN = 0x0000;
 const BG_DARK = '#070B16';
@@ -33,6 +34,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
 
     this.mainWindow = windowStage.getMainWindowSync();
+    // 长时任务要用 UIAbilityContext：交给保活模块，连着主机时申请、断开时释放
+    KeepAlive.bind(this.context as common.UIAbilityContext);
     this.applyWindowTheme();
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {

@@ -20,6 +20,7 @@ import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
 import { NetTrace } from '../util/NetTrace';
 import { LinkLog } from './LinkLog';
+import { KeepAlive } from './KeepAlive';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -188,8 +189,24 @@ export class AppRuntime {
   private awaitingNetwork: boolean = false;
   /** 掉网 8 秒后主动判死的那次定时器。 */
   private netLossTimer: number = -1;
+  /**
+   * 空闲多久才值得探一次：服务端心跳 25 秒一跳，超过 35 秒没动静
+   * 说明至少漏了一拍（正常情况永远探不到，不产生额外流量）。
+   */
+  private static readonly PROBE_IDLE_MS: number = 35000;
+  /** 探测间隔：每 5 秒看一次要不要探，不空转。 */
+  private static readonly PROBE_TICK_MS: number = 5000;
   /** 最近一次拉会话列表的失败原因（复用时判定「链路是不是真的死了」用）。 */
   private lastListError: Object | undefined = undefined;
+  /** 应用层心跳探测：空闲一段时间就主动要一个回包，把「静默判死」从 45~90 秒压到 20 秒级。 */
+  private probeTimer: number = -1;
+  private probeInFlight: boolean = false;
+  /** 稳定性统计（诊断面板 + 落盘日志用）。 */
+  private connectCount: number = 0;
+  private disconnectCount: number = 0;
+  private connectedAt: number = 0;
+  private lastDisconnectAt: number = 0;
+  private lastRecoveryMs: number = -1;
   /** 错误条上「重试」按钮的文案与要重跑的动作：失败时登记，成功或手动关闭时清掉。 */
   private retryText: string = '';
   private retryAction: (() => void) | undefined = undefined;
@@ -444,6 +461,7 @@ export class AppRuntime {
     }
     LinkLog.init(context);
     this.startNetworkMonitor();
+    this.startLinkProbe();
     try {
       await initClientVersion();
       await this.store.init(context);
@@ -644,7 +662,9 @@ export class AppRuntime {
       const relayWarm: Promise<boolean> = tokenFresh
         ? relay.connect().then(() => true).catch(() => false)
         : Promise.resolve(false);
+      const t0: number = Date.now();
       const host: AuthorizedPeerDevice = await this.deviceForWithRetry(deviceId);
+      const tDevice: number = Date.now();
       // 恢复场景（刚断线重连/网络刚恢复）不再单独探一次在线状态：
       // 我们几十秒前还连着这台主机，而 Wi-Fi 刚关联上时每个额外 HTTP 往返都要几秒。
       const recovering: boolean = this.autoRecovering || this.reconnectAttempt > 0;
@@ -687,7 +707,9 @@ export class AppRuntime {
         this.handleDisconnect();
       });
       this.setConnectStage('建立加密通道（Noise IK 握手）…');
+      const tRelay: number = Date.now();
       await core.connect();
+      const tSecure: number = Date.now();
       if (this.connectCancelled) {
         return;
       }
@@ -718,6 +740,10 @@ export class AppRuntime {
       this.harness = harness;
       this.setConnectStage('订阅会话事件…');
       await harness.start();
+      const tHarness: number = Date.now();
+      NetTrace.record('connect 分段', tHarness - t0,
+        '设备信息 ' + (tDevice - t0) + 'ms · 中继+握手 ' + (tSecure - tRelay) + 'ms'
+        + ' · 订阅 ' + (tHarness - tSecure) + 'ms', true);
       if (this.connectCancelled) {
         return;
       }
@@ -730,6 +756,18 @@ export class AppRuntime {
       const lanSkip: string = relay.lanSkipReason();
       this.pushLinkEvent('已连接 · ' + this.transportLabel
         + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? '（' + lanSkip + '）' : ''));
+      // 连着主机时申请长时任务：熄屏/后台不再被系统冻结，心跳与直连都活着
+      KeepAlive.start().catch(() => undefined);
+      this.connectCount += 1;
+      this.connectedAt = Date.now();
+      if (this.lastDisconnectAt > 0) {
+        this.lastRecoveryMs = this.connectedAt - this.lastDisconnectAt;
+      }
+      LinkLog.write('stat', '连接 #' + this.connectCount
+        + ' · transport=' + this.transportLabel
+        + (this.lastRecoveryMs > 0 ? ' · 恢复耗时 ' + (Math.round(this.lastRecoveryMs / 100) / 10) + 's' : '')
+        + ' · 本次运行断线 ' + this.disconnectCount + ' 次'
+        + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? ' · 没直连：' + lanSkip : ''));
       this.reconnectAttempt = 0;
       this.reconnectExhausted = false;
       this.autoRecovering = false;
@@ -3247,6 +3285,8 @@ export class AppRuntime {
   }
 
   private teardownConnection(): void {
+    // 连接没了就别再占着长时任务（通知栏那条也会跟着消失）
+    KeepAlive.stop().catch(() => undefined);
     const unsubscribe: (() => void) | undefined = this.unsubscribeClose;
     this.unsubscribeClose = undefined;
     if (unsubscribe !== undefined) {
@@ -3290,8 +3330,17 @@ export class AppRuntime {
     // 关闭判词必须在 teardown 之前取：teardown 会把 activeRelay 清掉。
     const verdict: CloseVerdict | undefined = this.activeRelay !== undefined
       ? this.activeRelay.closeVerdict : undefined;
-    LinkLog.write('disc', '链路断开 code=' + (verdict !== undefined ? verdict.code : -1)
+    this.disconnectCount += 1;
+    this.lastDisconnectAt = Date.now();
+    const uptimeMs: number = this.connectedAt > 0 ? this.lastDisconnectAt - this.connectedAt : -1;
+    const relayNow: RelayTransport | undefined = this.activeRelay;
+    const silenceNow: number = relayNow !== undefined ? relayNow.linkSilenceMs() : -1;
+    LinkLog.write('disc', '链路断开 #' + this.disconnectCount
+      + ' code=' + (verdict !== undefined ? verdict.code : -1)
       + ' reason=' + (verdict !== undefined && verdict.reason.length > 0 ? verdict.reason : '—')
+      + (uptimeMs >= 0 ? ' · 本次在线 ' + (Math.round(uptimeMs / 100) / 10) + 's' : '')
+      + (silenceNow >= 0 ? ' · 断开前静默 ' + silenceNow + 'ms' : '')
+      + ' transport=' + (this.transportLabel.length > 0 ? this.transportLabel : '—')
       + ' attempt=' + this.reconnectAttempt);
     this.teardownConnection();
     const target: string = this.lastDeviceId;
@@ -3449,6 +3498,66 @@ export class AppRuntime {
     };
     this.netMonitor = monitor;
     monitor.start();
+  }
+
+  /**
+   * 应用层心跳探测（稳定性核心）：空闲 20 秒就主动要一个回包。
+   *
+   * 为什么必须有：服务端心跳 25 秒一跳，但链路半开时**收不到就是收不到**，
+   * 我们只能靠"多久没消息"来推断。不做探测的话只能等看门狗（45/90 秒），
+   * 用户早就以为卡死了。探测有回应 = 链路活着；探测超时 = 立刻判死走已验证的重连。
+   * 代价是每 20 秒一个极小的 RPC，换来的是「断了 20 秒内必被发现」。
+   */
+  private startLinkProbe(): void {
+    if (this.probeTimer !== -1) {
+      return;
+    }
+    this.probeTimer = setInterval(() => {
+      this.onProbeTick();
+    }, AppRuntime.PROBE_TICK_MS);
+  }
+
+  private stopLinkProbe(): void {
+    if (this.probeTimer !== -1) {
+      clearInterval(this.probeTimer);
+      this.probeTimer = -1;
+    }
+  }
+
+  private onProbeTick(): void {
+    if (this.phase !== PHASE_CHAT || this.appBackground) {
+      return;
+    }
+    const relay: RelayTransport | undefined = this.activeRelay;
+    const core: RemoteClientCore | undefined = this.core;
+    if (relay === undefined || core === undefined || this.probeInFlight) {
+      return;
+    }
+    const silence: number = relay.linkSilenceMs();
+    if (silence >= 0 && silence < AppRuntime.PROBE_IDLE_MS) {
+      return;
+    }
+    this.probeInFlight = true;
+    const startedAt: number = Date.now();
+    // 用一个只读、便宜的传输层 RPC 当探针；老主机不认识也没关系——
+    // 「主机回了错误」同样证明链路活着。
+    core.rpc('harness.transport.describe', {}, 6000, 'probe').then(() => {
+      this.probeInFlight = false;
+      LinkLog.write('probe', '空闲 ' + silence + 'ms，探测成功（' + (Date.now() - startedAt) + 'ms）');
+    }).catch((error: Object) => {
+      this.probeInFlight = false;
+      const text: string = errorMessage(error);
+      const linkAlive: boolean = text.toLowerCase().indexOf('method') >= 0
+        || text.indexOf('不支持') >= 0 || text.toLowerCase().indexOf('unknown') >= 0;
+      if (linkAlive) {
+        // 主机不认识这个 RPC，但「有回包」就说明链路是通的
+        LinkLog.write('probe', '空闲 ' + silence + 'ms，探测得到主机回包（' + text + '），链路正常');
+        return;
+      }
+      LinkLog.write('probe', '空闲 ' + silence + 'ms，探测失败：' + text + ' → 判死链路');
+      NetTrace.linkDeath();
+      this.markLinkSuspect('心跳探测无响应（静默 ' + Math.round(silence / 1000) + ' 秒）');
+    });
   }
 
   /**
@@ -3652,6 +3761,12 @@ export class AppRuntime {
       rows.push(slowest);
     }
     rows.push(NetTrace.jitterLine());
+    const uptime: string = this.connectedAt > 0
+      ? (Math.round((Date.now() - this.connectedAt) / 1000) + ' 秒')
+      : '—';
+    rows.push('稳定：连接 ' + this.connectCount + ' 次 · 断线 ' + this.disconnectCount
+      + ' 次 · 本次已在线 ' + uptime
+      + (this.lastRecoveryMs > 0 ? ' · 上次恢复 ' + (Math.round(this.lastRecoveryMs / 100) / 10) + 's' : ''));
     rows.push('日志：' + (LinkLog.pathText().length > 0 ? 'link.log（已落盘，重启也保留）' : '未启用'));
     rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
     return rows;

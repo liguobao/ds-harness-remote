@@ -4683,18 +4683,20 @@ struct Index {
               ? (this.compactDock() ? this.tr('正在生成…') : this.tr('正在生成，可插话…'))
               : (this.runtime.steerMode
                 ? (this.compactDock() ? this.tr('插话发送…') : this.tr('插话发送（长按发送键切换）'))
-                : this.tr('发送消息…')) })
+                : (this.isWideLayout() ? this.tr('发送消息…（Enter 换行 · Ctrl+Enter 发送）')
+                  : this.tr('发送消息…'))) })
             .layoutWeight(1)
             .constraintSize({ minHeight: this.compactDock() ? 44 : 46,
               maxHeight: this.isWideLayout() ? 240 : 132 })
-            // PC：Ctrl+Enter 发送（普通 Enter 仍按输入法/换行走，不抢）
+            // PC 键盘约定：Enter 换行，Ctrl+Enter（或 ⌘+Enter）发送，Shift+Enter 也按换行。
+            // 这里只拦「修饰键+Enter」，其余一律交给 TextArea 默认行为，换行不会被吃掉。
             .onKeyEvent((event: KeyEvent) => {
               if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ENTER) {
                 return;
               }
               // ArkUI 的 KeyEvent 没有 ctrlKey 字段，修饰键要走 getModifierKeyState
               const ctrl: boolean = event.getModifierKeyState !== undefined
-                ? event.getModifierKeyState(['Ctrl']) : false;
+                ? event.getModifierKeyState(['Ctrl', 'Meta']) : false;
               if (ctrl) {
                 this.sendTap();
               }
@@ -4814,7 +4816,9 @@ struct Index {
             .clip(true)
             .opacity(this.reconnecting ? 0.45 : 1)
             .overlay(this.DockSpot(52), { align: Alignment.Center })
-            .focusable(true)
+            // 不给键盘焦点：焦点落到发送键上时，Enter/Space 会变成「发送」，
+            // PC 用户按 Enter 想换行却把消息发出去了。鼠标点它照样能发。
+            .focusable(false)
             .onTouch((event: TouchEvent) => {
               this.trackDockLight(event);
             })
@@ -7486,9 +7490,20 @@ struct Index {
         }
         .width('100%')
         TextArea({ text: this.promptInput,
-          placeholder: this.tr('在这里写长消息，换行不会丢') })
+          placeholder: this.tr('在这里写长消息，换行不会丢（Ctrl+Enter 发送）') })
           .layoutWeight(1)
           .width('100%')
+          .onKeyEvent((event: KeyEvent) => {
+            if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ENTER) {
+              return;
+            }
+            const ctrl: boolean = event.getModifierKeyState !== undefined
+              ? event.getModifierKeyState(['Ctrl', 'Meta']) : false;
+            if (ctrl) {
+              this.composerExpanded = false;
+              this.sendTap();
+            }
+          })
           .backgroundColor(this.pal().inputBg)
           .fontColor(this.pal().text)
           .fontSize(this.fs(15))

@@ -25,6 +25,9 @@
         "name": "ohos.permission.GET_NETWORK_INFO"
       },
       {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
+      },
+      {
         "name": "ohos.permission.MICROPHONE",
         "reason": "$string:microphone_reason",
         "usedScene": {
@@ -46,6 +49,9 @@
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
         "orientation": "auto_rotation_restricted",
+        "backgroundModes": [
+          "dataTransfer"
+        ],
         "exported": true,
         "skills": [
           {
