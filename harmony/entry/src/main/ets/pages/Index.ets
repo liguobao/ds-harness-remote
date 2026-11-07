@@ -164,6 +164,8 @@ struct Index {
   @State composerExpanded: boolean = false;
   /** 登录页：密码登录默认收起（有扫码/授权方式时），对齐上游 #335。 */
   @State passwordLoginOpen: boolean = false;
+  /** 发送方式面板（长按发送键）。 */
+  @State sendModeOpen: boolean = false;
   /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
   @State archivedIds: string[] = [];
   @State pinnedIds: string[] = [];
@@ -339,6 +341,10 @@ struct Index {
     }
     if (this.filePreviewOpen) {
       this.filePreviewOpen = false;
+      return true;
+    }
+    if (this.sendModeOpen) {
+      this.sendModeOpen = false;
       return true;
     }
     if (this.schedulesOpen) {
@@ -1952,6 +1958,9 @@ struct Index {
       }
       if (this.schedulesOpen) {
         this.SchedulesOverlay()
+      }
+      if (this.sendModeOpen) {
+        this.SendModeOverlay()
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
@@ -4252,22 +4261,118 @@ struct Index {
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
+  /** 发送方式：排队 / 插话。自定义面板替掉系统 ActionSheet（后者样式和信息层级都别扭）。 */
+  @Builder
+  SendModeOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.45)')
+        .onClick(() => {
+          this.sendModeOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(this.tr('发送方式'))
+              .fontSize(this.fs(16))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.pal().text)
+            Text(this.runtime.generating
+              ? this.tr('正在生成：插话会立刻打断当前这一轮')
+              : this.tr('空闲时两种方式没有区别'))
+              .fontSize(this.fs(11))
+              .fontColor(this.pal().text3)
+              .maxLines(2)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text3)
+            .width(30)
+            .height(30)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.sendModeOpen = false;
+            })
+        }
+        .width('100%')
+        this.SendModeRow(this.tr('排队发送'), this.tr('本轮结束后再发，不打断'),
+          !this.runtime.steerMode, false)
+        this.SendModeRow(this.tr('插话打断'), this.tr('立刻发出去，打断当前这一轮'),
+          this.runtime.steerMode, true)
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 460 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 240 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 180, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 发送方式的一行：左侧标题+说明，右侧选中标记。 */
+  @Builder
+  SendModeRow(title: string, hint: string, selected: boolean, steer: boolean) {
+    Row({ space: 10 }) {
+      Column({ space: 2 }) {
+        Text(title)
+          .fontSize(this.fs(14))
+          .fontColor(this.pal().text)
+        Text(hint)
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Text(selected ? '✓' : '')
+        .fontSize(this.fs(14))
+        .fontColor(steer ? '#F5A623' : '#22D3EE')
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .backgroundColor(selected
+      ? (steer ? 'rgba(245,166,35,0.14)' : 'rgba(34,211,238,0.12)')
+      : this.pal().inputBg)
+    .borderRadius(14)
+    .border({ width: 1,
+      color: selected ? (steer ? 'rgba(245,166,35,0.45)' : 'rgba(34,211,238,0.45)') : this.pal().border })
+    .onClick(() => {
+      this.runtime.setSteerMode(steer);
+      this.sendModeOpen = false;
+    })
+  }
+
   /** 手机上生成中的「停止」小方块：贴在输入框内部右上角，不额外占一行宽度。 */
   @Builder
   StopChipOverlay() {
     if (this.compactDock() && this.generating) {
-      Text('■')
-        .fontSize(this.fs(12))
-        .fontColor('#F85749')
-        .width(26)
-        .height(26)
-        .textAlign(TextAlign.Center)
-        .backgroundColor('rgba(248,87,73,0.14)')
-        .borderRadius(13)
-        .border({ width: 1, color: 'rgba(248,87,73,0.40)' })
-        .onClick(() => {
-          this.runtime.stopGeneration();
-        })
+      Column() {
+        Column()
+          .width(10)
+          .height(10)
+          .borderRadius(2)
+          .backgroundColor('#F85749')
+      }
+      .width(26)
+      .height(26)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .backgroundColor('rgba(248,87,73,0.14)')
+      .borderRadius(13)
+      .border({ width: 1, color: 'rgba(248,87,73,0.40)' })
+      .onClick(() => {
+        this.runtime.stopGeneration();
+      })
     }
   }
 
@@ -4433,6 +4538,28 @@ struct Index {
             this.promptDraftInput = '';
             this.promptPanelOpen = true;
           })
+          .gesture(LongPressGesture().onAction(() => {
+            // 手机上把「全屏编辑」收到这里，省一行宽度
+            ActionSheet.show({
+              title: this.tr('写作辅助'),
+              message: this.tr('选一个动作'),
+              sheets: [
+                {
+                  title: this.tr('提示词库'),
+                  action: () => {
+                    this.promptDraftInput = '';
+                    this.promptPanelOpen = true;
+                  }
+                },
+                {
+                  title: this.tr('全屏编辑'),
+                  action: () => {
+                    this.composerExpanded = true;
+                  }
+                }
+              ]
+            });
+          }))
           // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
           if (!this.compactDock()) {
           Row() {
@@ -4588,24 +4715,7 @@ struct Index {
               }
             })
             .gesture(LongPressGesture().onAction(() => {
-              ActionSheet.show({
-                title: this.tr('发送方式'),
-                message: this.runtime.steerMode ? this.tr('当前：插话（立刻打断当前轮）') : this.tr('当前：排队（本轮结束后再发）'),
-                sheets: [
-                  {
-                    title: this.tr('排队发送'),
-                    action: () => {
-                      this.runtime.setSteerMode(false);
-                    }
-                  },
-                  {
-                    title: this.tr('插话打断'),
-                    action: () => {
-                      this.runtime.setSteerMode(true);
-                    }
-                  }
-                ]
-              });
+              this.sendModeOpen = true;
             }))
         }
         .width('100%')
@@ -5160,7 +5270,7 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
 
       // 定时任务摘要：最多两条，其余进面板看
-      if (this.runtime.schedules.length > 0) {
+      if (this.runtime.schedulesSupported && this.runtime.schedules.length > 0) {
         Column({ space: 4 }) {
           Row({ space: 6 }) {
             Text(this.tr('定时任务'))
@@ -6970,7 +7080,18 @@ struct Index {
         .width('100%')
         Scroll() {
           Column({ space: 8 }) {
-            if (this.runtime.schedules.length === 0) {
+            if (!this.runtime.schedulesSupported) {
+              Text(this.tr('这台主机没有开启定时任务'))
+                .fontSize(this.fs(13))
+                .fontColor(this.pal().text2)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+              Text(this.tr('Host 侧的 Remote 插件没有导出 schedule/* 端点，升级插件后这里会自动出现列表。'))
+                .fontSize(this.fs(11))
+                .fontColor(this.pal().text3)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            } else if (this.runtime.schedules.length === 0) {
               Text(this.tr('还没有定时任务'))
                 .fontSize(this.fs(13))
                 .fontColor(this.pal().text2)

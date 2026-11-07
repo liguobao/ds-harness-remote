@@ -208,6 +208,8 @@ export class AppRuntime {
   scheduleHistory: HarnessScheduleDelivery[] = [];
   scheduleHistoryId: string = '';
   schedulesLoading: boolean = false;
+  /** 该主机是否导出 `schedule/*`：老插件会回「no active Remote method exports this endpoint」。 */
+  schedulesSupported: boolean = true;
   serverUrl: string = '';
   email: string = '';
   devices: RemoteHostDevice[] = [];
@@ -3141,9 +3143,20 @@ export class AppRuntime {
     } catch (error) {
       const text: string = errorMessage(error);
       logWarn('schedule/list failed: ' + text);
-      // 老插件不放行 schedule/list 时会回「unknown endpoint」，说清楚比红条好
-      this.errorMsg = text.toLowerCase().indexOf('unknown') >= 0 || text.indexOf('不支持') >= 0
-        ? '这台主机没有开启定时任务（Host 侧插件不支持 schedule/list）' : text;
+      const lower: string = text.toLowerCase();
+      const unsupported: boolean = lower.indexOf('unknown') >= 0
+        || lower.indexOf('no active remote method') >= 0
+        || lower.indexOf('exports this endpoint') >= 0
+        || text.indexOf('不支持') >= 0;
+      if (unsupported) {
+        // 老插件不放行 schedule/* 时不弹红条（它只是在右栏出现时顺手拉的），
+        // 记成「不支持」，右栏与面板据此显示说明，不再每次重试。
+        this.schedulesSupported = false;
+        this.schedules = [];
+        this.errorMsg = '';
+      } else {
+        this.errorMsg = text;
+      }
     }
     this.schedulesLoading = false;
     this.notify();
