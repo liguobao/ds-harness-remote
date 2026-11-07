@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ActivityIndicator, AppState, Pressable, ScrollView, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ArrowRight, Bot, Menu, MoreVertical, Users } from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
-import { objects, text, type BotRemoteClient } from '../services/bot-catalog'
-import { requireBotClient, useAppStore } from '../state/store'
-import { markBotSessionId, useBotTeamStore } from '../state/bot-store'
-import type { RemoteSession } from '../types'
+import { browseScope } from '../services/browse-memory'
+import { objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
+import { getConnectionGeneration, requireBotClient, useAppStore } from '../state/store'
+import { useBotTeamStore } from '../state/bot-store'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
@@ -42,11 +42,16 @@ export function BotModeScreen({
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
   const device = useAppStore(store => store.selectedDevice)
-  const openSession = useAppStore(store => store.openSession)
+  const connectionPhase = useAppStore(store => store.connection.phase)
+  const hostScope = useAppStore(browseScope)
+  const connectionGen = getConnectionGeneration()
 
   useBotTeamPolling(true)
 
   const state = useBotTeamStore(store => store.state)
+  const session = useBotTeamStore(store => store.session)
+  const openError = useBotTeamStore(store => store.openError)
+  const openAttempt = useBotTeamStore(store => store.openAttempt)
   const loading = useBotTeamStore(store => store.loading)
   const busy = useBotTeamStore(store => store.busy)
   const error = useBotTeamStore(store => store.error)
@@ -55,8 +60,8 @@ export function BotModeScreen({
   const setSelectedId = useBotTeamStore(store => store.setSelectedId)
   const setEditor = useBotTeamStore(store => store.setEditor)
   const setDetailsOpen = useBotTeamStore(store => store.setDetailsOpen)
-  const clearErrors = useBotTeamStore(store => store.clearErrors)
-  const refresh = useBotTeamStore(store => store.refresh)
+  const syncSelectedSession = useBotTeamStore(store => store.syncSelectedSession)
+  const retryOpenSession = useBotTeamStore(store => store.retryOpenSession)
   const performStore = useBotTeamStore(store => store.perform)
 
   const selectedId = propSelectedId ?? storeSelectedId
@@ -79,13 +84,7 @@ export function BotModeScreen({
   }
 
   const [active, setActive] = useState(AppState.currentState === 'active')
-  const [session, setSession] = useState<RemoteSession>()
-  const [openError, setOpenError] = useState<string>()
-  const [openAttempt, setOpenAttempt] = useState(0)
   const [rosterSearch, setRosterSearch] = useState('')
-  const sessionOwner = useRef<string | undefined>(undefined)
-  const selectedRef = useRef(selectedId)
-  selectedRef.current = selectedId
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => setActive(next === 'active'))
@@ -102,51 +101,19 @@ export function BotModeScreen({
 
   const bot = state?.bots.find(entry => entry.id === selectedId)
   const room = state?.rooms.find(entry => entry.id === selectedId)
-  const isAgentSession = Boolean(selectedId && state?.agents.some(a => a.sessions.includes(selectedId)))
-  const targetSessionId = bot?.sessionId ?? room?.sessionId ?? room?.id ?? (isAgentSession ? selectedId : undefined)
+  const targetSessionId = resolveBotTargetSessionId(state, selectedId)
 
+  // Only resolve and open when session identity, Host/connection epoch, or explicit retry changes — never on 3s roster array reference refreshes.
   useEffect(() => {
-    setOpenError(undefined)
-    if (!clientValue || !selectedId || !targetSessionId) {
-      setSession(undefined)
-      return
-    }
-    let cancelled = false
-    const control = new AbortController()
-    if (sessionOwner.current !== `${selectedId}:${targetSessionId}`) {
-      setSession(undefined)
-    }
-    void (async () => {
-      try {
-        const resolved = await clientValue.resolveSession(selectedId, control.signal)
-        markBotSessionId(resolved.session.sessionId)
-        if (cancelled) return
-        if (await openSession(resolved.session) && !cancelled && selectedRef.current === selectedId) {
-          sessionOwner.current = `${selectedId}:${targetSessionId}`
-          setSession(resolved.session)
-        } else if (!cancelled) {
-          setOpenError(useAppStore.getState().error ?? s.bots.sessionUnavailable)
-        }
-      } catch (reason) {
-        if (!cancelled) {
-          setOpenError(reason instanceof Error ? reason.message : s.bots.unavailable)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-      control.abort()
-    }
-  }, [selectedId, targetSessionId, openSession, openAttempt, state?.bots, state?.rooms])
+    if (connectionPhase !== 'connected') return
+    void syncSelectedSession({ selectedId })
+  }, [hostScope, connectionPhase, connectionGen, selectedId, targetSessionId, openAttempt, syncSelectedSession])
 
   const perform: BotPerform = (operation, payload) => performStore(operation, payload)
   const visibleError = actionError ?? openError ?? error ?? clientInitError
 
   const retry = () => {
-    clearErrors()
-    setOpenError(undefined)
-    setOpenAttempt(v => v + 1)
-    void refresh(true)
+    void retryOpenSession()
   }
 
   const insets = useSafeAreaInsets()

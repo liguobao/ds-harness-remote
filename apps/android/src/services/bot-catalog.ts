@@ -331,3 +331,26 @@ export function isScopedKnownBotSessionId(
   }
   return knownBotSessionIdsByScope.get(scope)?.has(sessionId) ?? false
 }
+
+export function resolveBotTargetSessionId(
+  state: BotState | undefined,
+  selectedId: string | undefined,
+): string | undefined {
+  if (!state || !selectedId) return undefined
+  const bot = state.bots.find(entry => entry.id === selectedId)
+  if (bot) return bot.sessionId
+  const room = state.rooms.find(entry => entry.id === selectedId)
+  if (room) return room.sessionId || room.id
+  const isAgentSession = state.agents.some(agent => agent.sessions.includes(selectedId))
+  return isAgentSession ? selectedId : undefined
+}
+
+export function botSessionOwnerKey(
+  scope: string,
+  connectionEpoch: number,
+  selectedId: string | undefined,
+  targetSessionId: string | undefined,
+): string | undefined {
+  if (!scope || !selectedId || !targetSessionId) return undefined
+  return `${scope}|epoch:${connectionEpoch}|${selectedId}|${targetSessionId}`
+}

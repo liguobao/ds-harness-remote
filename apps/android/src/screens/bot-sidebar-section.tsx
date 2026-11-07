@@ -38,6 +38,7 @@ import {
   X,
 } from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
+import { browseScope } from '../services/browse-memory'
 import {
   object,
   objects,
@@ -65,7 +66,7 @@ import { BotEditor, type BotPerform } from './bot/editor'
 /** Shared polling hook so the sidebar and main Bot screen stay in sync. */
 export function useBotTeamPolling(enabled: boolean): void {
   const connected = useAppStore(state => state.connection.phase === 'connected')
-  const botScope = useAppStore(state => JSON.stringify([state.config?.baseUrl, state.account, state.selectedDevice?.deviceId]))
+  const botScope = useAppStore(browseScope)
   const ensureScope = useBotTeamStore(state => state.ensureScope)
   const refresh = useBotTeamStore(state => state.refresh)
 

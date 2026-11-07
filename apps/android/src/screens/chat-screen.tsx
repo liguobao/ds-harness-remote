@@ -187,6 +187,13 @@ export function ChatScreen({
   // or pressing back must not drop the user into an arbitrary conversation.
   const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
   const markConversationChosen = () => setDrawerSwipeUnlocked(true)
+  const lastHostIdRef = useRef(hostId)
+  useEffect(() => {
+    if (hostId === lastHostIdRef.current) return
+    lastHostIdRef.current = hostId
+    setDrawerSwipeUnlocked(false)
+    setSessionsOpen(true)
+  }, [hostId])
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
@@ -515,12 +522,10 @@ export function ChatScreen({
         }}
       onOpenDeviceInfo={() => {
         Keyboard.dismiss()
-        if (!inlineMode) setSessionsOpen(false)
         onOpenDeviceInfo?.()
       }}
       onOpenWorkspaces={() => {
         Keyboard.dismiss()
-        if (!inlineMode) setSessionsOpen(false)
         if (onOpenWorkspaces) onOpenWorkspaces()
       }}
       onBack={inlineMode ? undefined : () => {
@@ -533,19 +538,19 @@ export function ChatScreen({
         else setSessionsOpen(false)
       }}
       onOpenAutomationTasks={() => {
-        if (!inlineMode) setSessionsOpen(false)
+        Keyboard.dismiss()
         setAutomationTasksOpen(true)
       }}
       onOpenPlugins={pluginsAvailable ? () => {
-        if (!inlineMode) setSessionsOpen(false)
+        Keyboard.dismiss()
         setPluginsOpen(true)
       } : undefined}
       onOpenHostSwitcher={onOpenHostSwitcher ? () => {
-        if (!inlineMode) setSessionsOpen(false)
+        Keyboard.dismiss()
         onOpenHostSwitcher()
       } : undefined}
       onOpenSettings={() => {
-        if (!inlineMode) setSessionsOpen(false)
+        Keyboard.dismiss()
         onOpenSettings?.()
       }}
       onSelect={async next => {
@@ -588,11 +593,15 @@ export function ChatScreen({
           onClose={() => setAutomationTasksOpen(false)}
           onOpenSession={async targetSession => {
             setAutomationTasksOpen(false)
+            markConversationChosen()
+            setSessionsOpen(false)
             onBotModeChange?.(false)
             await openSession(targetSession)
           }}
           onNewTask={async () => {
             setAutomationTasksOpen(false)
+            markConversationChosen()
+            setSessionsOpen(false)
             onBotModeChange?.(false)
             await createSession(workspaces[0]?.workspaceId)
           }}
@@ -660,10 +669,14 @@ export function ChatScreen({
           onClose={() => setAutomationTasksOpen(false)}
           onOpenSession={async targetSession => {
             setAutomationTasksOpen(false)
+            markConversationChosen()
+            setSessionsOpen(false)
             await openSession(targetSession)
           }}
           onNewTask={async () => {
             setAutomationTasksOpen(false)
+            markConversationChosen()
+            setSessionsOpen(false)
             await createSession(workspaces[0]?.workspaceId)
           }}
         />
