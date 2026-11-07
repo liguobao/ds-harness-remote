@@ -2,6 +2,8 @@ import { SecureTransport } from './SecureTransport';
 import { buildRpcRequestMessage, decodeRemoteMessage } from '../protocol/Protocol';
 import { ParsedFrame, jsonStr, jsonValue } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
+import { NetTrace } from '../util/NetTrace';
+import { logInfo } from '../util/Log';
 
 /** Wire-protocol level error raised by RemoteClientCore. */
 export class RemoteClientError extends Error {
@@ -66,19 +68,50 @@ export class RemoteClientCore {
     this.connected = true;
   }
 
-  rpc(method: string, params: Record<string, Object>, timeoutMs?: number): Promise<Object> {
+  /**
+   * One RPC round trip. `traceLabel` 是打点用的标签（上层传 endpoint 名），
+   * 缺省就用 method：'harness.remote.call' 这个外号对排障没意义。
+   */
+  rpc(method: string, params: Record<string, Object>, timeoutMs?: number,
+    traceLabel?: string): Promise<Object> {
+    const startedAt: number = Date.now();
+    const label: string = traceLabel !== undefined && traceLabel.length > 0 ? traceLabel : method;
     const effectiveTimeout: number =
       timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : this.timeoutMs;
     const requestId: string = randomId();
     return new Promise<Object>((resolve, reject) => {
+      let sentAt: number = 0;
+      let retries: number = 0;
+      let finished: boolean = false;
+      // 打点把「发出花了多久（含授权重发等待）」和「主机多久才回」分开记：
+      // 前者大说明是链路授权窗口在拖，后者大说明是主机在算——收紧预算的位置不一样。
+      const finish = (ok: boolean, detail: string): void => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        const now: number = Date.now();
+        const wait: string = sentAt > 0
+          ? '发出 ' + (sentAt - startedAt) + 'ms · 等回 ' + (now - sentAt) + 'ms'
+          : '一直没发出';
+        NetTrace.record(label + (ok ? '' : ' ✗'), now - startedAt,
+          wait + ' · 重发 ' + retries + (detail.length > 0 ? ' · ' + detail : ''), retries > 0);
+      };
       const timer: number = setTimeout(() => {
+        finish(false, '超时');
         this.rejectPending(requestId, new RemoteClientError('RPC_TIMEOUT',
           `RPC ${method} timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
       const pending: PendingCall = {
         method: method,
-        resolve: resolve,
-        reject: reject,
+        resolve: (value: Object) => {
+          finish(true, '');
+          resolve(value);
+        },
+        reject: (error: RemoteClientError) => {
+          finish(false, error.code);
+          reject(error);
+        },
         timer: timer
       };
       this.pending.set(requestId, pending);
@@ -86,7 +119,11 @@ export class RemoteClientCore {
       // 「relay connection has not been authorized」。这不是业务失败，等一小会儿重发同一帧即可；
       // 以前直接把它抛给上层，用户看到的就是「会话列表加载失败：… relay connection has not been authorized」。
       const message: Object = buildRpcRequestMessage(method, params, requestId);
-      this.sendWithAuthRetry(message).catch((error: Error) => {
+      this.sendWithAuthRetry(message, (usedRetries: number) => {
+        sentAt = Date.now();
+        retries = usedRetries;
+      }).catch((error: Error) => {
+        finish(false, 'send failed');
         this.rejectPending(requestId, new RemoteClientError('CONNECTION_FAILED',
           `RPC ${method} send failed: ${error.message}`));
       });
@@ -96,13 +133,15 @@ export class RemoteClientCore {
   /**
    * 发送一帧 RPC；传输层「还没授权」时最多等 3 次（250ms 间隔）再重发。
    * 只在明文同一帧上重发，不会重复业务请求（requestId 不变，主机按 requestId 去重）。
+   * `onSent(用掉的重发次数)` 在真正发出后回调一次，供上层打点。
    */
-  private async sendWithAuthRetry(message: Object): Promise<void> {
+  private async sendWithAuthRetry(message: Object, onSent: (retries: number) => void): Promise<void> {
     const data: Uint8Array = message as Uint8Array;
     let lastError: Error = new Error('send failed');
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         await this.transport.send(data);
+        onSent(attempt);
         return;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -112,6 +151,8 @@ export class RemoteClientCore {
         if (!retriable || attempt === 3) {
           throw lastError;
         }
+        NetTrace.authRetry();
+        logInfo('rpc send: relay 还没授权，等 250ms 重发同一帧（第 ' + (attempt + 1) + '/3 次）');
         await new Promise<void>((resolve) => {
           setTimeout(() => {
             resolve();

@@ -257,6 +257,8 @@ export class RelayTransport {
   private serverHeartbeatMs: number = 25000;
   private linkTimer: number = -1;
   private suspectLogged: boolean = false;
+  /** 这次为什么没走直连（诊断面板与徽标提示用）；走成了就留空。 */
+  private lanSkipReasonValue: string = '';
 
   constructor(url: string, options: RelayTransportOptions) {
     this.url = url;
@@ -362,6 +364,11 @@ export class RelayTransport {
     };
     this.sendControl('secure.handshake', payload);
     return Promise.resolve();
+  }
+
+  /** 本次连接没走直连的原因（空串 = 直连成功或未判定）。 */
+  lanSkipReason(): string {
+    return this.lanSkipReasonValue;
   }
 
   /** 中继是否已拿到 connectionId（connect.accepted 之后才算授权）。 */
@@ -598,10 +605,15 @@ export class RelayTransport {
    */
   private startRtcAttempt(): boolean {
     const rtc = this.options.rtc;
-    if (rtc === undefined || this.rtcAttempted) {
+    if (rtc === undefined) {
+      this.lanSkipReasonValue = 'WebRTC 桥没挂上（页面还没把桥交给运行时）';
+      return false;
+    }
+    if (this.rtcAttempted) {
       return false;
     }
     if (!rtc.isReady()) {
+      this.lanSkipReasonValue = 'WebRTC 桥还没就绪（隐藏的 Web 还没加载完）';
       logInfo('webrtc: 桥还没就绪，直接走中继');
       return false;
     }
@@ -727,6 +739,9 @@ export class RelayTransport {
   private fallBackToRelay(reason: string): void {
     if (this.dataMode === 'lan' || this.notifiedClosed) {
       return;
+    }
+    if (this.lanSkipReasonValue.length === 0) {
+      this.lanSkipReasonValue = '直连失败：' + reason;
     }
     if (this.dataMode === 'relay' && this.dataReady) {
       return;

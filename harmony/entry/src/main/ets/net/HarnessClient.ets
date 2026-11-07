@@ -2,6 +2,7 @@ import { RemoteClientCore } from './RemoteClientCore';
 import { logInfo, logWarn, logError } from '../util/Log';
 import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
 import { jsonStr, asRecord, asArray, asBool } from '../protocol/Types';
+import { NetTrace } from '../util/NetTrace';
 
 /** 目录项（`host/listDirectory`）。 */
 export class DirectoryEntry {
@@ -817,15 +818,34 @@ export class HarnessAlphaClient {
     // `assistantStream` is a response-side snapshot field, never a request flag.
     const inner: Record<string, Object> = { 'request': request };
     const payload: Record<string, Object> = { 'args': inner };
-    // 流打开给 20 秒预算：TURN 半开时 45 秒才失败会让用户干等；
-    // 快速失败才能尽快走「重连并重新打开」。
-    const stream: RemoteGatewayStream = await this.gateway.open('session/follow', payload, handler, 20000);
+    // 流打开给 12 秒、首帧 20 秒：TURN 半开时干等会让用户以为卡死，
+    // 快速失败才能尽快走「重连并重新打开」。实测（中继下）打开 0.85s、首帧 0.77s，
+    // 留 14 倍以上余量，正常慢也不会误判。
+    // 打点分两段：打开 RPC（谁在拖：链路还是主机）与首帧快照（主机回放历史要多久）。
+    // 打开 RPC 本身的耗时由 RemoteClientCore 以 endpoint 为标签记，这里只补首帧这一段。
+    const openStartedAt: number = Date.now();
+    const stream: RemoteGatewayStream = await this.gateway.open('session/follow', payload, handler, 12000);
+    const openMs: number = Date.now() - openStartedAt;
     if (generation !== this.followGeneration) {
       stream.close(false);
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }
     this.followStream = stream;
-    const first: Object = await withTimeout(firstFrame, 25000);
+    const firstFrameAt: number = Date.now();
+    let first: Object;
+    try {
+      first = await withTimeout(firstFrame, 20000);
+    } catch (error) {
+      // ArkTS 不允许 throw 任意类型（arkts-limited-throw），统一归一成 RemoteGatewayError
+      const detail: string = error instanceof Error ? error.message : String(error);
+      NetTrace.record('session/follow 首帧 ✗', Date.now() - firstFrameAt,
+        '打开 ' + openMs + 'ms · ' + detail, true);
+      if (error instanceof RemoteGatewayError) {
+        throw error;
+      }
+      throw new RemoteGatewayError('FOLLOW_TIMEOUT', 'session/follow 首帧没回来：' + detail);
+    }
+    NetTrace.record('session/follow 首帧', Date.now() - firstFrameAt, '打开 ' + openMs + 'ms', true);
     if (generation !== this.followGeneration) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
     }

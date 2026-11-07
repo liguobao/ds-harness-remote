@@ -18,6 +18,7 @@ import { logInfo, logWarn, logError } from '../util/Log';
 import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
+import { NetTrace } from '../util/NetTrace';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -135,6 +136,8 @@ export class AppRuntime {
   private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
   /** 在线状态探测预算（毫秒）：超时按「未知」处理，不挡连接。 */
   private static readonly PRESENCE_BUDGET_MS: number = 4000;
+  /** session/list 的单次预算：中继下主机实测 9 秒上下，给足 20 秒再用重试兜底。 */
+  private static readonly SESSION_LIST_BUDGET_MS: number = 20000;
   private refreshTimer: number = -1;
   /** In-flight credential renewal. The Server rotates the refresh token on every call and
    *  invalidates every token of this device when a spent one is presented again, so two
@@ -154,6 +157,9 @@ export class AppRuntime {
   private lastDeviceId: string = '';
   /** 会话列表失败后是否已经排过一次自动重试（防抖，别循环）。 */
   private sessionListAutoRetried: boolean = false;
+  /** 上一次成功拉到的会话列表（按主机记）：抖动时侧栏不要一下清空。 */
+  private sessionsSnapshot: HarnessRemoteSession[] = [];
+  private sessionsSnapshotHost: string = '';
   /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
   private pendingResumeSessionId: string = '';
   /** 主机能力探测结果缓存：同一版本的主机能力是固定的，重连不必再问一遍（上游 #326 同一思路）。 */
@@ -517,6 +523,28 @@ export class AppRuntime {
     this.notify();
   }
 
+  /**
+   * 等隐藏 WebRTC 桥就绪（最多 budgetMs，100ms 轮询）。
+   * 桥没挂上（页面还没渲染到这里）就直接返回，让连接照常走中继。
+   */
+  private async waitForRtcBridge(budgetMs: number): Promise<void> {
+    const bridge: RtcBridge | undefined = this.rtcBridge;
+    if (bridge === undefined) {
+      return;
+    }
+    const deadline: number = Date.now() + budgetMs;
+    while (!bridge.isReady() && Date.now() < deadline) {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          resolve();
+        }, 100);
+      });
+    }
+    if (!bridge.isReady()) {
+      logInfo('webrtc: 桥在 ' + budgetMs + 'ms 内没就绪，本次连接走中继');
+    }
+  }
+
   /** 页面把 WebRTC 桥交给运行时；没挂上时连接一律走中继。 */
   attachRtcBridge(bridge: RtcBridge): void {
     this.rtcBridge = bridge;
@@ -560,6 +588,9 @@ export class AppRuntime {
       relayOptions.deviceId = identity.deviceId;
       relayOptions.accessToken = credentials.accessToken;
       relayOptions.targetDeviceId = deviceId;
+      // 隐藏的 Web 桥要 onPageEnd 之后才算 ready；刚启动就点「连接」时它常常还没好，
+      // 那样会直接判「桥未就绪」回落中继，用户看到的就是"明明同网段却显示中继"。
+      await this.waitForRtcBridge(2500);
       relayOptions.rtc = this.rtcBridge;
       // WebRTC 要 TURN/STUN 配置时现取：接口要求 active connection，正好在 connect.accepted 之后
       relayOptions.fetchIceServers = (connectionId: string): Promise<string> => {
@@ -649,7 +680,9 @@ export class AppRuntime {
       this.connectedDeviceId = host.deviceId;
       this.transportLabel = relay.transportKind();
       logInfo('connected to host ' + host.deviceId + ' transport=' + this.transportLabel);
-      this.pushLinkEvent('已连接 · ' + this.transportLabel);
+      const lanSkip: string = relay.lanSkipReason();
+      this.pushLinkEvent('已连接 · ' + this.transportLabel
+        + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? '（' + lanSkip + '）' : ''));
       this.reconnectAttempt = 0;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
@@ -768,6 +801,10 @@ export class AppRuntime {
 
   async logout(): Promise<void> {
     this.teardownConnection();
+    // 换账号/换服务器就把打点与抖动计数清零，别把上一台的数字带到下一台上看
+    NetTrace.reset();
+    this.sessionsSnapshot = [];
+    this.sessionsSnapshotHost = '';
     // 退出前先把手上的登录态存成 profile：以后在设置里一键切回来，不用重输密码
     await this.rememberProfile();
     this.phase = PHASE_SETUP;
@@ -1146,6 +1183,8 @@ export class AppRuntime {
    * 这正是以前点「重新打开」毫无反应、只能重启 App 的原因。
    */
   async reopenCurrentSession(target?: string): Promise<void> {
+    NetTrace.streamReopen();
+    this.pushLinkEvent('重新打开会话流（累计 ' + NetTrace.stats().streamReopens + ' 次）');
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined) {
       return;
@@ -1202,6 +1241,7 @@ export class AppRuntime {
       return;
     }
     this.pendingResumeSessionId = sessionId.length > 0 ? sessionId : this.currentSessionId;
+    NetTrace.streamReopen();
     this.reconnecting = true;
     this.errorMsg = '';
     this.clearRetry();
@@ -1334,6 +1374,10 @@ export class AppRuntime {
     this.email = config.email;
     this.phase = PHASE_DEVICES;
     this.devices = [];
+    // 换到另一套服务器/账号：打点与抖动计数清零，否则数字会串到上一台头上
+    NetTrace.reset();
+    this.sessionsSnapshot = [];
+    this.sessionsSnapshotHost = '';
     this.setBusy(true);
     this.notify();
     // 旧连接是同步拆的（关闭 WS、销毁 core），丢到下一帧别挡点击响应
@@ -2421,6 +2465,16 @@ export class AppRuntime {
     return host.identityKey;
   }
 
+  /**
+   * 记住上一次成功拉到的会话列表，并绑定当时的主机。
+   * 用途：抖动导致列表拉不到时，侧栏还能显示上次的结果，
+   * 而不是「会话列表加载失败 + 空白侧栏」让人以为会话没了。
+   */
+  private rememberSessions(sessions: HarnessRemoteSession[]): void {
+    this.sessionsSnapshot = sessions;
+    this.sessionsSnapshotHost = this.lastDeviceId;
+  }
+
   private async refreshSessions(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined || this.phase !== PHASE_CHAT) {
@@ -2430,6 +2484,7 @@ export class AppRuntime {
       const sessions: HarnessRemoteSession[] = await harness.sessionList(12000);
       if (this.harness === harness && this.phase === PHASE_CHAT) {
         this.sessions = sortSessions(sessions);
+        this.rememberSessions(this.sessions);
         this.notify();
       }
     } catch (error) {
@@ -2802,6 +2857,31 @@ export class AppRuntime {
   }
 
   /**
+   * 重连后立刻回到原会话，不等会话列表。
+   * 失败时按「传输类 / 业务类」决定按钮文案，跟 openSession 一致，不再静默。
+   */
+  private async resumeSessionEarly(harness: HarnessAlphaClient, sessionId: string,
+    title: string): Promise<void> {
+    try {
+      await this.openSessionInternal(harness, sessionId, title);
+      this.rememberRecentSession(sessionId);
+      this.hydrateHistoryImages().catch(() => undefined);
+      logInfo('resumed early -> ' + sessionId);
+    } catch (error) {
+      logWarn('early resume failed: ' + errorMessage(error));
+      this.errorMsg = this.sessionStreamHint(error);
+      this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
+        if (isTransportFailure(error)) {
+          this.reconnectAndReopen(sessionId);
+        } else {
+          this.reopenCurrentSession(sessionId);
+        }
+      });
+      this.notify();
+    }
+  }
+
+  /**
    * Load the session list right after entering the chat phase. A slow or stuck
    * Host must not fail the whole connection: on failure the chat stays usable
    * and the user can retry from the empty-state entry point.
@@ -2814,42 +2894,67 @@ export class AppRuntime {
     this.setBusy(true);
     this.sessionsLoadFailed = false;
     this.notify();
+    // 重连回来的场景已经知道要回哪个会话：不要先干等会话列表
+    // （中继下实测 session/list 要 9 秒，而 session/follow 打开只要 0.3 秒）。
+    // 两件事并行跑：内容先出来，侧栏列表随后补上。
+    const resume: string = this.pendingResumeSessionId;
+    this.pendingResumeSessionId = '';
+    let earlyResume: Promise<void> | undefined = undefined;
+    if (resume.length > 0) {
+      const resumeTitle: string = this.currentSessionTitle.length > 0
+        ? this.currentSessionTitle : '正在恢复会话';
+      earlyResume = this.resumeSessionEarly(harness, resume, resumeTitle);
+    }
     try {
       const sessions: HarnessRemoteSession[] = await this.sessionListWithRetry(harness);
       if (this.harness !== harness || this.phase !== PHASE_CHAT) {
         return;
       }
       this.sessions = sortSessions(sessions);
+      this.rememberSessions(this.sessions);
       this.setBusy(false);
       this.sessionsLoadFailed = false;
       this.notify();
+      if (earlyResume !== undefined) {
+        // 已经在原会话里了，不再按更新时间另挑一个（那会把用户切到别的会话）
+        await earlyResume;
+        return;
+      }
       await this.pickInitialSession();
     } catch (error) {
       logError('session list failed after connect: ' + errorMessage(error));
       if (this.harness !== harness || this.phase !== PHASE_CHAT) {
         return;
       }
-      this.sessions = [];
+      // 同一台主机的上一次结果还留着：显示它并标成「待刷新」，
+      // 别把侧栏清空——抖动几秒就恢复的情况下，清空比不动更吓人。
+      const keepSnapshot: boolean = this.sessionsSnapshot.length > 0
+        && this.sessionsSnapshotHost === this.lastDeviceId;
+      this.sessions = keepSnapshot ? this.sessionsSnapshot : [];
       this.sessionsLoadFailed = true;
       this.currentSessionId = '';
-      this.currentSessionTitle = '会话列表加载失败';
+      this.currentSessionTitle = keepSnapshot ? '会话列表待刷新' : '会话列表加载失败';
       this.messages = [];
       this.generating = false;
       this.setBusy(false);
       if (isTransportFailure(error)) {
         // 加密通道还没就绪/已经断了：先体检链路，3 秒后自动重拉一次（用户不用手点）
         this.nudgeLink();
-        this.errorMsg = '会话列表没拉到：与主机的加密通道还没就绪或已断开，正在自动重试…';
+        NetTrace.listAutoRetry();
+        this.errorMsg = '会话列表没拉到：与主机的加密通道还没就绪或已断开，正在自动重试…'
+          + '（本机累计自动重拉 ' + NetTrace.stats().listAutoRetries + ' 次）';
         this.setRetry('重连并重试', () => {
           this.reconnectAndReopen('');
         });
+        this.pushLinkEvent('会话列表没拉到 · 3 秒后自动重拉（第 '
+          + NetTrace.stats().listAutoRetries + ' 次）');
         if (!this.sessionListAutoRetried) {
           this.sessionListAutoRetried = true;
           setTimeout(() => {
             this.sessionListAutoRetried = false;
             const harnessNow: HarnessAlphaClient | undefined = this.harness;
             if (harnessNow !== undefined && this.phase === PHASE_CHAT) {
-              this.retrySessionLoad().catch(() => undefined);
+              this.retrySessionLoad(true).catch(() => undefined);
             }
           }, 3000);
         }
@@ -2860,8 +2965,11 @@ export class AppRuntime {
     }
   }
 
-  /** User-triggered retry for a failed session-list load; keeps the live connection. */
-  async retrySessionLoad(): Promise<void> {
+  /**
+   * Retry a failed session-list load; keeps the live connection.
+   * `auto` = 由「3 秒后自动重拉」发起，成功时要记一条「已自动恢复」事件。
+   */
+  async retrySessionLoad(auto: boolean = false): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined || this.phase !== PHASE_CHAT || this.busy) {
       return;
@@ -2876,7 +2984,13 @@ export class AppRuntime {
         return;
       }
       this.sessions = sortSessions(sessions);
+      this.rememberSessions(this.sessions);
       this.setBusy(false);
+      if (auto) {
+        // 抖一下自己好了：明确告诉用户「抖过、已恢复」，方便判断链路质量
+        NetTrace.listAutoRecovered();
+        this.pushLinkEvent('会话列表已自动恢复（累计 ' + NetTrace.stats().listAutoRecovered + ' 次）');
+      }
       this.notify();
       await this.pickInitialSession();
     } catch (error) {
@@ -2891,8 +3005,10 @@ export class AppRuntime {
   }
 
   private async sessionListWithRetry(harness: HarnessAlphaClient): Promise<HarnessRemoteSession[]> {
+    // 预算 20 秒：TURN/中继下实测主机回 session/list 要 9 秒上下（打点见诊断面板），
+    // 12 秒太紧——稍慢一点就白超时一次、再花 12 秒重试，用户看到的就是「列表一直转」。
     try {
-      return await harness.sessionList(12000);
+      return await harness.sessionList(AppRuntime.SESSION_LIST_BUDGET_MS);
     } catch (error) {
       const wrapped: Error = asError(error);
       if (!(wrapped instanceof RemoteGatewayError) || wrapped.code !== 'RPC_TIMEOUT') {
@@ -2900,7 +3016,7 @@ export class AppRuntime {
       }
       logWarn('session/list timed out, retrying once');
       await delay(1500);
-      return await harness.sessionList(12000);
+      return await harness.sessionList(AppRuntime.SESSION_LIST_BUDGET_MS);
     }
   }
 
@@ -3048,6 +3164,9 @@ export class AppRuntime {
       ? this.activeRelay.closeVerdict : undefined;
     this.teardownConnection();
     const target: string = this.lastDeviceId;
+    if (verdict !== undefined && verdict.reason === 'link-silent') {
+      NetTrace.linkDeath();
+    }
     if (verdict !== undefined && verdict.stopAutoReconnect) {
       // 4003 连接被顶掉 / 4001 授权失败 / 未知关闭码：自动重连只会让用户以为在恢复。
       this.clearReconnectTimer();
@@ -3075,8 +3194,9 @@ export class AppRuntime {
         ? verdict.message : '与主机的连接已断开';
       this.reconnectStatus = cause + '，' + Math.round(delay / 1000)
         + ' 秒后自动重连（第 ' + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+      NetTrace.autoReconnect();
       this.pushLinkEvent('断线：' + cause + ' → ' + Math.round(delay / 1000) + 's 后第 '
-        + this.reconnectAttempt + ' 次重连');
+        + this.reconnectAttempt + ' 次重连（累计 ' + NetTrace.stats().autoReconnects + ' 次）');
       this.notify();
       this.scheduleReconnect(target, delay);
       return;
@@ -3132,6 +3252,7 @@ export class AppRuntime {
     const monitor: NetworkMonitor = new NetworkMonitor();
     monitor.onLost = () => {
       this.networkOnline = false;
+      NetTrace.netFlap();
       this.pushLinkEvent('网络断开');
       this.networkType = '无网络';
       logWarn('runtime: 网络已断开');
@@ -3234,6 +3355,11 @@ export class AppRuntime {
     const rows: string[] = [];
     rows.push('主机：' + (this.connectedHostDisplayName().length > 0 ? this.connectedHostDisplayName() : '—'));
     rows.push('传输：' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
+    if (relay !== undefined) {
+      const skip: string = relay.lanSkipReason();
+      rows.push('直连：' + (this.transportLabel === 'lan' || this.transportLabel === 'p2p'
+        ? '已直连' : (skip.length > 0 ? skip : '未尝试')));
+    }
     rows.push('链路：' + silence);
     const heartbeat: string = relay !== undefined && relay.heartbeatIntervalMs() > 0
       ? Math.round(relay.heartbeatIntervalMs() / 1000) + ' 秒（服务端心跳）'
@@ -3243,6 +3369,17 @@ export class AppRuntime {
     rows.push('重连：' + (this.reconnecting
       ? (this.reconnectStatus.length > 0 ? this.reconnectStatus : '进行中')
       : '无'));
+    // 打点：把「慢在哪一段」量化，用户复现时直接读这两行回报，
+    // 不用再让他去电脑上抓 hilog（TURN 下 session/list 与 session/follow 的耗时最可疑）。
+    const trace: string = NetTrace.summaryLine();
+    if (trace.length > 0) {
+      rows.push(trace);
+    }
+    const slowest: string = NetTrace.slowestLine();
+    if (slowest.length > 0) {
+      rows.push(slowest);
+    }
+    rows.push(NetTrace.jitterLine());
     rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
     return rows;
   }

@@ -166,7 +166,7 @@ export class RemoteGateway {
     };
     let response: Object;
     try {
-      response = await this.client.rpc('harness.remote.call', params, timeoutMs);
+      response = await this.client.rpc('harness.remote.call', params, timeoutMs, endpoint);
     } catch (error) {
       throw toGatewayError(error);
     }
@@ -184,7 +184,7 @@ export class RemoteGateway {
       'payload': payload
     };
     try {
-      await this.client.rpc('harness.remote.stream.open', params, timeoutMs);
+      await this.client.rpc('harness.remote.stream.open', params, timeoutMs, endpoint);
     } catch (error) {
       // The Host registers the stream before the open RPC settles: a failed
       // open must still release the slot or it leaks until disconnect.
