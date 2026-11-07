@@ -8,8 +8,10 @@ import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ModalSurface } from '../chat/modal'
+import { Toggle } from '../../ui/toggle'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
 import { BotChoice } from './controls'
+import { BotFolderPickerModal, folderBasename } from './shared-panels'
 import { createBotStyles } from './styles'
 
 export type BotPerform = (operation: BotOperation, payload?: BotObject) => Promise<{ ok: boolean; value?: unknown }>
@@ -157,6 +159,12 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
   const [admin, setAdmin] = useState(room?.admin ?? '')
   const [model, setModel] = useState(bot?.model ?? '')
   const [effort, setEffort] = useState(bot?.effort ?? '')
+  const [workDir, setWorkDir] = useState(bot?.workDir ?? room?.workDir ?? '')
+  const [permission, setPermission] = useState(bot?.permission ?? text(state.permissions?.defaultPreset) ?? 'workspace-write')
+  const [isPrivate, setIsPrivate] = useState(Boolean(bot?.private))
+  const [pinned, setPinned] = useState(Boolean(bot?.pinned ?? room?.pinned))
+  const [hidden, setHidden] = useState(Boolean(bot?.hidden ?? room?.hidden))
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [efforts, setEfforts] = useState<BotObject[]>([])
   const [defaultEffort, setDefaultEffort] = useState<string | undefined>(undefined)
   useEffect(() => {
@@ -184,12 +192,35 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
   const selectedModelEntry = state.models.find(entry => text(entry.ref) === model)
   const selectedModelEngine = engineOfModel(model)
   const field = (label: string, value: string, change: (value: string) => void, multiline = false) => <View style={styles.field}><Text style={styles.heading}>{label}</Text><TextInput accessibilityLabel={label} style={[styles.input, multiline && styles.multiline]} value={value} onChangeText={change} editable={!busy} multiline={multiline} placeholderTextColor={colors.muted} maxLength={multiline ? 12000 : label === s.bots.name && kind === 'bot' ? 40 : 200} /></View>
+  const inRooms = useMemo(
+    () => (bot ? state.rooms.filter(r => r.members.includes(bot.id)) : []),
+    [bot, state.rooms],
+  )
+  const canBePrivate = Boolean(bot && !bot.main && inRooms.length === 0 && workDir.trim() !== '')
   const save = async () => {
     const operation = kind === 'bot' ? bot ? 'update-bot' : 'create-bot' : room ? 'update-room' : 'create-room'
     const payload = kind === 'bot'
-      ? { ...(bot ? { id: bot.id } : {}), name: name.trim(), ...(bot ? { role, instructions } : {}), ...(bot || model ? { model: model || null } : {}), ...(bot || effort ? { effort } : {}) }
-      : { ...(room ? { id: room.id, notice, admin: members.includes(admin) ? admin : members[0] } : {}), name: name.trim(), members }
-    if ((await perform(operation, payload)).ok) onClose()
+      ? {
+          ...(bot ? { id: bot.id } : {}),
+          name: name.trim(),
+          ...(bot ? { role, instructions, workDir, permission, private: canBePrivate ? isPrivate : false } : {}),
+          ...(bot || model ? { model: model || null } : {}),
+          ...(bot || effort ? { effort } : {}),
+        }
+      : {
+          ...(room ? { id: room.id, notice, workDir, admin: members.includes(admin) ? admin : members[0] } : {}),
+          name: name.trim(),
+          members,
+        }
+    const res = await perform(operation, payload)
+    if (res.ok) {
+      if (bot && (pinned !== Boolean(bot.pinned) || (!bot.main && hidden !== Boolean(bot.hidden)))) {
+        await perform('set-flags', { id: bot.id, pinned, ...(!bot.main ? { hidden } : {}) })
+      } else if (room && (pinned !== Boolean(room.pinned) || hidden !== Boolean(room.hidden))) {
+        await perform('set-flags', { id: room.id, pinned, hidden })
+      }
+      onClose()
+    }
   }
   return <Modal visible transparent animationType="slide" onRequestClose={() => { if (!busy) onClose() }}>
     <ModalSurface onClose={() => { if (!busy) onClose() }}>
@@ -205,15 +236,68 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
           {modelPicker && <View style={styles.field}><BotChoice label={s.bots.defaultModel} checked={model === ''} disabled={busy} onPress={() => { setModel(''); setEffort(''); setModelPicker(false) }} />{groupedModels.map(group => <View key={group.provider} style={localStyles.providerGroup}><View style={localStyles.providerHeader}><BotAgentBadge engine={group.provider} size={14} /><Text style={localStyles.providerTitle}>{group.label}</Text></View>{group.items.map((entry, i) => { const ref = text(entry.ref); const isDefault = state.defaultModel !== undefined && ref === state.defaultModel; const labelText = text(entry.name) || text(entry.label) || ref; return <BotChoice key={ref || i} label={isDefault ? `${labelText} (${s.bots.defaultEffort})` : labelText} checked={model === ref} disabled={busy || ref === ''} onPress={() => { setModel(ref); setEffort(''); setModelPicker(false) }} /> })}</View>)}</View>}
           {state.models.length === 0 && <Text style={styles.muted}>{s.bots.noModel}</Text>}
           {efforts.length > 0 && <BotEffortBar efforts={efforts} defaultEffort={defaultEffort} current={effort} disabled={busy} onPick={setEffort} />}
+          {editing && bot && <>
+            <Text style={styles.heading}>{s.bots.workingFolder}</Text>
+            <Pressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerOpen(true)}>
+              <Text style={[styles.body, styles.grow]} numberOfLines={1}>{workDir ? folderBasename(workDir) : s.bots.teamWorkspace}</Text>
+              <ChevronDown size={18} color={colors.muted} />
+            </Pressable>
+            <Text style={styles.heading}>{s.bots.permissions}</Text>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {([
+                ['read-only', s.bots.permReadOnly],
+                ['workspace-write', s.bots.permWorkspace],
+                ['danger-full-access', s.bots.permFullAccess],
+              ] as const).map(([val, label]) => (
+                <BotChoice key={val} label={label} checked={permission === val} disabled={busy} onPress={() => setPermission(val)} />
+              ))}
+            </View>
+            <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.heading}>{s.bots.privateBot}</Text>
+                <Text style={styles.muted}>
+                  {bot.main
+                    ? s.bots.privateMainDisabled
+                    : inRooms.length > 0
+                      ? s.bots.privateGroupDisabled
+                      : !workDir.trim()
+                        ? s.bots.privateFolderDisabled
+                        : s.bots.privateBotDesc}
+                </Text>
+              </View>
+              <Toggle value={canBePrivate && isPrivate} disabled={busy || !canBePrivate} onValueChange={setIsPrivate} accessibilityLabel={s.bots.privateBot} />
+            </View>
+            <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+              <Text style={styles.heading}>{s.bots.pinChat}</Text>
+              <Toggle value={pinned} disabled={busy} onValueChange={setPinned} accessibilityLabel={s.bots.pinChat} />
+            </View>
+            {!bot.main && (
+              <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+                <Text style={styles.heading}>{s.bots.hideFromSidebar}</Text>
+                <Toggle value={hidden} disabled={busy} onValueChange={setHidden} accessibilityLabel={s.bots.hideFromSidebar} />
+              </View>
+            )}
+          </>}
         </> : <>
           {room && field(s.bots.notice, notice, setNotice, true)}
           <Text style={styles.heading}>{s.bots.members}</Text><Text style={styles.muted}>{s.bots.membersHint}</Text>
           <View style={styles.field}>{state.bots.map(entry => <BotChoice key={entry.id} label={entry.name} multiple checked={members.includes(entry.id)} disabled={busy} onPress={() => setMembers(current => current.includes(entry.id) ? current.filter(id => id !== entry.id) : [...current, entry.id])} />)}</View>
           {editing && <View style={styles.field}><Text style={styles.heading}>{s.bots.admin}</Text>{state.bots.filter(entry => members.includes(entry.id)).map(entry => <BotChoice key={entry.id} label={entry.name} checked={(members.includes(admin) ? admin : members[0]) === entry.id} disabled={busy} onPress={() => setAdmin(entry.id)} />)}</View>}
+          {editing && room && <>
+            <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+              <Text style={styles.heading}>{s.bots.pinChat}</Text>
+              <Toggle value={pinned} disabled={busy} onValueChange={setPinned} accessibilityLabel={s.bots.pinChat} />
+            </View>
+            <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+              <Text style={styles.heading}>{s.bots.hideFromSidebar}</Text>
+              <Toggle value={hidden} disabled={busy} onValueChange={setHidden} accessibilityLabel={s.bots.hideFromSidebar} />
+            </View>
+          </>}
         </>}
 
       </ScrollView>
       <View style={styles.actions}><Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} /><Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} /></View>
+      <BotFolderPickerModal visible={folderPickerOpen} value={workDir} client={client} onClose={() => setFolderPickerOpen(false)} onPick={setWorkDir} />
     </ModalSurface>
   </Modal>
 }

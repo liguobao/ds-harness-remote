@@ -17,16 +17,15 @@ import {
   AlignLeft,
   ArrowLeftRight,
   Bot,
-  CalendarDays,
-  ChartNoAxesColumn,
   Check,
   ChevronDown,
+  CircleAlert,
   Copy,
   CopyPlus,
   Download,
-  LayoutGrid,
   Pencil,
   Pin,
+  PinOff,
   Plus,
   RefreshCw,
   Search,
@@ -210,7 +209,6 @@ export function BotSidebarSection({
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
-  const [toolsMenuOpen, setToolsMenuOpen] = useState(false)
 
   const query = searchQuery.trim().toLocaleLowerCase()
   const visibleError = actionError ?? error
@@ -319,37 +317,6 @@ export function BotSidebarSection({
     },
   ]
 
-  const toolsActions: BotPopoverAction[] = [
-    {
-      key: 'usage',
-      icon: ChartNoAxesColumn,
-      label: s.bots.usage,
-      disabled: busy,
-      onPress: () => void perform('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
-    },
-    {
-      key: 'schedules',
-      icon: CalendarDays,
-      label: s.bots.schedules,
-      disabled: busy,
-      onPress: () => void perform('schedules'),
-    },
-    {
-      key: 'create-bot',
-      icon: Plus,
-      label: s.bots.newBot,
-      disabled: busy || Boolean(state?.readOnly),
-      onPress: () => setEditor({ kind: 'bot' }),
-    },
-    {
-      key: 'create-room',
-      icon: Users,
-      label: s.bots.newGroup,
-      disabled: busy || Boolean(state?.readOnly) || (state?.bots.length ?? 0) < 2,
-      onPress: () => setEditor({ kind: 'room' }),
-    },
-  ]
-
   const surfaceBg = scheme === 'light' ? '#FFFFFF' : colors.surface
   const filterPillBg = scheme === 'light' ? '#F2F2F7' : colors.grouped
 
@@ -374,6 +341,28 @@ export function BotSidebarSection({
             <Text style={styles.filterPillText}>{filterLabel}</Text>
             <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />
           </Pressable>
+
+          <View style={[styles.topSearchCapsule, { backgroundColor: filterPillBg }]}>
+            <Search size={15} color={colors.muted} strokeWidth={2} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={onSearchChange}
+              placeholder={s.bots.search}
+              placeholderTextColor={colors.muted}
+              style={styles.topSearchInput}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={s.common.close}
+                hitSlop={8}
+                onPress={() => onSearchChange('')}
+              >
+                <X size={14} color={colors.muted} />
+              </Pressable>
+            )}
+          </View>
 
           <Pressable
             accessibilityRole="button"
@@ -632,45 +621,6 @@ export function BotSidebarSection({
         )}
       </ScrollView>
 
-      {state !== undefined && (
-        <View style={styles.bottomDock}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={s.bots.manage}
-            onPress={() => setToolsMenuOpen(true)}
-            style={({ pressed }) => [
-              styles.dockGridBtn,
-              { backgroundColor: surfaceBg },
-              pressed && styles.pressedFade,
-            ]}
-          >
-            <LayoutGrid size={19} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
-
-          <View style={[styles.dockSearchCapsule, { backgroundColor: surfaceBg }]}>
-            <Search size={17} color={colors.ink} strokeWidth={1.9} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={onSearchChange}
-              placeholder={s.bots.search}
-              placeholderTextColor={colors.muted}
-              style={styles.dockSearchInput}
-              returnKeyType="search"
-            />
-            {searchQuery.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={s.common.close}
-                hitSlop={8}
-                onPress={() => onSearchChange('')}
-              >
-                <X size={15} color={colors.muted} />
-              </Pressable>
-            )}
-          </View>
-        </View>
-      )}
-
       <BotFloatingPopover
         visible={filterMenuOpen}
         actions={filterActions}
@@ -684,13 +634,6 @@ export function BotSidebarSection({
         onClose={() => setCreateMenuOpen(false)}
         anchor="top-right"
         topOffset={104}
-      />
-      <BotFloatingPopover
-        visible={toolsMenuOpen}
-        actions={toolsActions}
-        onClose={() => setToolsMenuOpen(false)}
-        anchor="bottom-left"
-        bottomOffset={68}
       />
     </View>
   )
@@ -1037,8 +980,8 @@ function createStyles(colors: ThemeColors) {
     topActionRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 16,
+      gap: 8,
+      paddingHorizontal: 14,
       paddingTop: 6,
       paddingBottom: 6,
     },
@@ -1046,19 +989,38 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      height: 36,
-      paddingHorizontal: 14,
-      borderRadius: 18,
+      height: 38,
+      paddingHorizontal: 13,
+      borderRadius: 19,
+      flexShrink: 0,
     },
     filterPillText: {
       fontSize: 14,
       fontWeight: '500',
       color: colors.muted,
     },
+    topSearchCapsule: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      height: 38,
+      paddingHorizontal: 12,
+      borderRadius: 19,
+      minWidth: 0,
+    },
+    topSearchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.ink,
+      paddingVertical: 0,
+      minWidth: 0,
+    },
     plusCircleBtn: {
       width: 38,
       height: 38,
       borderRadius: 19,
+      flexShrink: 0,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: '#000',

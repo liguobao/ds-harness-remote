@@ -13,6 +13,11 @@ export interface BotEntry {
   appliedModel?: string
   effort: string
   engine?: string
+  workDir?: string
+  permission?: string
+  private?: boolean
+  browserGrants?: BotObject[]
+  capabilities?: string[]
   color?: string
   avatar?: { shape?: string; image?: string }
   preview?: string
@@ -28,10 +33,14 @@ export interface BotRoom {
   id: string
   sessionId: string
   ownParts?: string[]
+  parts?: string[]
   name: string
   members: string[]
   notice: string
   admin: string
+  mode?: string
+  workDir?: string
+  permission?: string
   paused?: boolean
   pinned?: boolean
   hidden?: boolean
@@ -45,7 +54,9 @@ export interface BotAgent {
   createdAt?: number
 }
 export interface BotState {
+  workspaceId?: string
   mainBotId?: string
+  mainBotIds?: string[]
   bots: BotEntry[]
   rooms: BotRoom[]
   agents: BotAgent[]
@@ -69,6 +80,18 @@ export interface BotState {
   mailRequests: BotObject
   computer?: BotObject
   computerLive?: BotObject
+  prefs?: BotObject
+  browser?: boolean
+  memory?: boolean
+  permissions?: BotObject
+  secrets?: BotObject[]
+  capabilities?: BotObject[]
+  capabilityStatuses?: BotObject
+  connectors?: BotObject
+  im?: BotObject
+  imStatus?: BotObject
+  privateArchives?: BotObject[]
+  colors?: string[]
   approvals: BotObject[]
   models: BotObject[]
   defaultModel?: string
@@ -77,7 +100,12 @@ export interface BotState {
 
 // Android only exposes the reviewed Bot workflows, never arbitrary plugin routes.
 export const BOT_OPERATIONS = [
-  'state', 'models', 'efforts', 'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'schedules',
+  'state', 'models', 'efforts', 'providers', 'local-agents',
+  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress',
+  'schedules', 'schedule-create', 'schedule-delete',
+  'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore',
+  'folders', 'folder-list', 'team-workspace', 'set-prefs',
+  'browser-takeover', 'browser-give-back', 'browser-stop',
   'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags', 'resume', 'bot-new-part', 'bot-open-part',
   'create-room', 'update-room', 'delete-room', 'stop-room-work', 'goal-draft', 'goal-control',
   'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
@@ -170,6 +198,11 @@ export function parseBotState(value: unknown): BotState {
       ...(nonempty(entry.appliedModel) ? { appliedModel: entry.appliedModel } : {}),
       effort: text(entry.effort),
       ...(nonempty(entry.engine) ? { engine: entry.engine } : {}),
+      ...(nonempty(entry.workDir) ? { workDir: entry.workDir } : {}),
+      ...(nonempty(entry.permission) ? { permission: entry.permission } : {}),
+      ...(entry.private === true ? { private: true } : {}),
+      ...(Array.isArray(entry.browserGrants) ? { browserGrants: objects(entry.browserGrants) } : {}),
+      ...(Array.isArray(entry.capabilities) ? { capabilities: entry.capabilities.filter(nonempty) } : {}),
       main: mainBotIds.includes(entry.id),
       tile: mainBotId === entry.id,
       ...(entry.pinned === true ? { pinned: true } : {}),
@@ -186,10 +219,14 @@ export function parseBotState(value: unknown): BotState {
       id: entry.id,
       sessionId,
       ...(Array.isArray(entry.ownParts) ? { ownParts: entry.ownParts.filter(nonempty) } : {}),
+      ...(Array.isArray(entry.parts) ? { parts: entry.parts.filter(nonempty) } : {}),
       name: text(entry.name) || entry.id,
       members: entry.members as string[],
       notice: text(entry.notice),
       admin: text(entry.admin),
+      ...(nonempty(entry.mode) ? { mode: entry.mode } : {}),
+      ...(nonempty(entry.workDir) ? { workDir: entry.workDir } : {}),
+      ...(nonempty(entry.permission) ? { permission: entry.permission } : {}),
       paused: objects(entry.paused).length > 0 || entry.paused === true,
       ...(entry.pinned === true ? { pinned: true } : {}),
       ...(entry.hidden === true ? { hidden: true } : {}),
@@ -209,7 +246,9 @@ export function parseBotState(value: unknown): BotState {
   if (new Set(ids).size !== ids.length) throw new Error(strings.bots.invalid)
   const workObj = object(value.work)
   return {
+    ...(nonempty(value.workspaceId) ? { workspaceId: value.workspaceId } : {}),
     ...(mainBotId !== undefined ? { mainBotId } : {}),
+    ...(mainBotIds.length > 0 ? { mainBotIds } : {}),
     bots,
     rooms,
     agents,
@@ -233,6 +272,18 @@ export function parseBotState(value: unknown): BotState {
     mailRequests: object(value.mailRequests),
     ...(isBotObject(value.computer) ? { computer: value.computer } : {}),
     ...(isBotObject(value.computerLive) ? { computerLive: value.computerLive } : {}),
+    ...(isBotObject(value.prefs) ? { prefs: value.prefs } : {}),
+    ...(typeof value.browser === 'boolean' ? { browser: value.browser } : {}),
+    ...(typeof value.memory === 'boolean' ? { memory: value.memory } : {}),
+    ...(isBotObject(value.permissions) ? { permissions: value.permissions } : {}),
+    ...(Array.isArray(value.secrets) ? { secrets: objects(value.secrets) } : {}),
+    ...(Array.isArray(value.capabilities) ? { capabilities: objects(value.capabilities) } : {}),
+    ...(isBotObject(value.capabilityStatuses) ? { capabilityStatuses: value.capabilityStatuses } : {}),
+    ...(isBotObject(value.connectors) ? { connectors: value.connectors } : {}),
+    ...(isBotObject(value.im) ? { im: value.im } : {}),
+    ...(isBotObject(value.imStatus) ? { imStatus: value.imStatus } : {}),
+    ...(Array.isArray(value.privateArchives) ? { privateArchives: objects(value.privateArchives) } : {}),
+    ...(Array.isArray(value.colors) ? { colors: value.colors.filter(nonempty) } : {}),
     approvals: objects(workObj.approvals),
     models: objects(value.models),
     ...(nonempty(value.defaultModel) ? { defaultModel: value.defaultModel } : {}),

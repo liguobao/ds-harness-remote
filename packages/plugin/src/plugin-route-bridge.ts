@@ -9,7 +9,12 @@ export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot'] as const
 
 /** Reviewed DS Bot operations; new upstream operations stay local by default. */
 export const BOT_REMOTE_OPERATIONS = [
-  'state', 'models', 'efforts', 'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'schedules',
+  'state', 'models', 'efforts', 'providers', 'local-agents',
+  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress',
+  'schedules', 'schedule-create', 'schedule-delete',
+  'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore',
+  'folders', 'folder-list', 'team-workspace', 'set-prefs',
+  'browser-takeover', 'browser-give-back', 'browser-stop',
   'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags', 'resume', 'bot-new-part', 'bot-open-part',
   'create-room', 'update-room', 'delete-room', 'stop-room-work', 'goal-draft', 'goal-control',
   'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',

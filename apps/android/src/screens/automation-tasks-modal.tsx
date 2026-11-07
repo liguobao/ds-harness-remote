@@ -34,6 +34,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
+import { useBotTeamStore } from '../state/bot-store'
 import type {
   RemoteSession,
   ScheduleCatalogEntry,
@@ -124,6 +125,7 @@ export function AutomationTasksModal({
   const language = useAppStore(state => state.language)
   const sessionModels = useAppStore(state => state.sessionModels)
   const createSession = useAppStore(state => state.createSession)
+  const botTeamState = useBotTeamStore(state => state.state)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -186,11 +188,38 @@ export function AutomationTasksModal({
   }, [selectedTask, sessions])
 
   const availableSessions = useMemo(() => {
-    return sessions.filter(s => {
+    const base = sessions.filter(s => {
       const b = s.backend ?? workspaces.find(w => w.sessionIds.includes(s.sessionId))?.backend
       return b === undefined || b === 'harness'
     })
-  }, [sessions, workspaces])
+    const seen = new Set(base.map(item => item.sessionId))
+    const botExtras: RemoteSession[] = []
+    for (const b of botTeamState?.bots ?? []) {
+      if (b.sessionId && !seen.has(b.sessionId)) {
+        seen.add(b.sessionId)
+        botExtras.push({
+          sessionId: b.sessionId,
+          title: `DS-Bot · ${b.name}`,
+          running: false,
+          blank: false,
+          updatedAt: Date.now(),
+        })
+      }
+    }
+    for (const r of botTeamState?.rooms ?? []) {
+      if (r.sessionId && !seen.has(r.sessionId)) {
+        seen.add(r.sessionId)
+        botExtras.push({
+          sessionId: r.sessionId,
+          title: `DS-Bot · ${r.name}`,
+          running: false,
+          blank: false,
+          updatedAt: Date.now(),
+        })
+      }
+    }
+    return [...botExtras, ...base]
+  }, [sessions, workspaces, botTeamState])
 
   const localizedWeekdays = useMemo(() => {
     try {
@@ -230,10 +259,21 @@ export function AutomationTasksModal({
   }, [tasks, search, statusFilter])
 
   /** Sessions without a human title carry the raw id as their title. */
-  const sessionLabel = (sessionId: string, title?: string | null): string =>
-    title !== undefined && title !== null && title.trim() !== '' && title !== sessionId
+  const sessionLabel = (sessionId: string, title?: string | null): string => {
+    if (botTeamState) {
+      const bot = botTeamState.bots.find(
+        b => b.sessionId === sessionId || (b.parts ?? []).includes(sessionId) || b.id === sessionId,
+      )
+      if (bot) return `DS-Bot · ${bot.name}`
+      const room = botTeamState.rooms.find(
+        r => r.sessionId === sessionId || (r.ownParts ?? []).includes(sessionId) || r.id === sessionId,
+      )
+      if (room) return `DS-Bot · ${room.name}`
+    }
+    return title !== undefined && title !== null && title.trim() !== '' && title !== sessionId
       ? title
       : sessionId.slice(-8)
+  }
 
   const [formModel, setFormModel] = useState('')
   const [formWorkspaceId, setFormWorkspaceId] = useState('')
