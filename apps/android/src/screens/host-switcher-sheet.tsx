@@ -7,7 +7,7 @@ import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
 import { platformIcon, switcherDeviceSubtitle } from '../lib/device-display'
-import { GroupCard, GroupRow, IconButton } from '../ui/components'
+import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
@@ -34,6 +34,8 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   const connection = useAppStore(state => state.connection)
   const refreshing = useAppStore(state => state.refreshing)
   const refreshDevices = useAppStore(state => state.refreshDevices)
+  const error = useAppStore(state => state.error)
+  const clearError = useAppStore(state => state.clearError)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
@@ -70,6 +72,13 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
               <IconButton label={strings.common.close} icon={X} onPress={onClose} />
             </View>
           </View>
+          {error !== undefined && (
+            <ErrorBanner
+              message={error}
+              onRetry={() => void refreshDevices()}
+              onDismiss={clearError}
+            />
+          )}
           <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}

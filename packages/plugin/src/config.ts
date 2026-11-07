@@ -260,9 +260,17 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
-/** IPv4 hosts that are only reachable on loopback, a LAN, link-local, or CGNAT/VPN networks. */
+function isPrivateIpv6(hostname: string): boolean {
+  const host = (hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname).toLowerCase()
+  if (!host.includes(':') || !/^[0-9a-f:]+$/.test(host)) return false
+  if (host === '::1') return true
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)
+}
+
+/** IPv4/IPv6 hosts that are only reachable on loopback, a LAN, link-local, or CGNAT/VPN networks. */
 function isPrivateNetworkHostname(hostname: string): boolean {
   if (LOCAL_HOSTS.has(hostname)) return true
+  if (isPrivateIpv6(hostname)) return true
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
   if (match === null) return false
   const octets = match.slice(1).map(Number)

@@ -1,6 +1,7 @@
 import { identityFingerprint } from '@dsh-remote/crypto'
 import type { DevicePresence, RemoteDevice } from '../types'
 import type { AuthorizedPeerDevice } from './api'
+import { connectionLog } from './connection-log'
 
 export interface DeviceDirectoryApi {
   listDevices(): Promise<RemoteDevice[]>
@@ -14,6 +15,12 @@ export interface ReconciledDevices {
   missingTrustedDeviceIds: string[]
   /** Hosts the account can see that are not yet pinned on this phone. */
   unpinnedDeviceIds: string[]
+  /** Locally pinned hosts whose Server identity key no longer matches. */
+  keyMismatchDeviceIds: string[]
+  /** Hosts whose descriptor lookup failed. */
+  lookupFailedDeviceIds: string[]
+  /** First descriptor lookup failure, if any. */
+  lookupError?: unknown
 }
 
 /**
@@ -37,6 +44,20 @@ export async function reconcileTrustedDevices(
 
   const devices: RemoteDevice[] = []
   const unpinnedDeviceIds: string[] = []
+  const keyMismatchDeviceIds: string[] = []
+  const lookupFailedDeviceIds: string[] = []
+  let lookupError: unknown
+
+  const lookup = async (deviceId: string): Promise<AuthorizedPeerDevice | undefined> => {
+    try {
+      return await api.deviceFor(deviceId)
+    } catch (error) {
+      lookupError ??= error
+      lookupFailedDeviceIds.push(deviceId)
+      return undefined
+    }
+  }
+
   for (const membership of memberships) {
     const local = trusted.find(device => device.deviceId === membership.deviceId)
     if (local !== undefined) {
@@ -44,9 +65,10 @@ export async function reconcileTrustedDevices(
         unpinnedDeviceIds.push(membership.deviceId)
         continue
       }
-      const descriptor = await api.deviceFor(membership.deviceId).catch(() => undefined)
+      const descriptor = await lookup(membership.deviceId)
       if (descriptor !== undefined && descriptor.identityKey !== local.identityKey) {
         // The Host re-registered with a different key: refuse to trust it.
+        keyMismatchDeviceIds.push(membership.deviceId)
         continue
       }
       const presence = await api.getPresence(membership.deviceId).catch(() => undefined)
@@ -61,7 +83,7 @@ export async function reconcileTrustedDevices(
       })
       continue
     }
-    const descriptor = await api.deviceFor(membership.deviceId).catch(() => undefined)
+    const descriptor = await lookup(membership.deviceId)
     if (descriptor === undefined || descriptor.role !== 'host' || descriptor.identityKey.length === 0) {
       unpinnedDeviceIds.push(membership.deviceId)
       continue
@@ -76,7 +98,22 @@ export async function reconcileTrustedDevices(
       trusted: false,
     })
   }
-  return { devices, missingTrustedDeviceIds, unpinnedDeviceIds }
+  connectionLog('devices', {
+    listed: memberships.length,
+    resolved: devices.length,
+    unpinned: unpinnedDeviceIds.length,
+    keyMismatch: keyMismatchDeviceIds.length,
+    lookupFailed: lookupFailedDeviceIds.length,
+    missingTrusted: missingTrustedDeviceIds.length,
+  })
+  return {
+    devices,
+    missingTrustedDeviceIds,
+    unpinnedDeviceIds,
+    keyMismatchDeviceIds,
+    lookupFailedDeviceIds,
+    ...(lookupError === undefined ? {} : { lookupError }),
+  }
 }
 
 function formatFingerprint(value: string): string {
