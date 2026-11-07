@@ -11,6 +11,8 @@ import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
 const RELAY_DOWNGRADE_MS = 10 * 60_000
+/** Host description is presentation data; it must never delay a usable link. */
+const HOST_DESCRIBE_TIMEOUT_MS = 2_000
 
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
   'connectDevice' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
@@ -18,6 +20,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
     async connectDevice(device, options = {}) {
       const { config, identity } = get()
       if (config === undefined || identity === undefined) return false
+      // Stage timings for the Settings diagnostics line (no payload data).
+      const connectStartedAt = Date.now()
       const generation = ++runtime.connectionGeneration
       ++runtime.sessionLoadGeneration
       runtime.sessionReadAbort?.abort()
@@ -64,7 +68,9 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         if (generation !== runtime.connectionGeneration) return false
         await runtime.closeActiveCodexStream(false)
         await runtime.closeActiveCursorStream(false)
+        const authStartedAt = Date.now()
         const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
+        const authMs = Date.now() - authStartedAt
         const preference = get().transportPreference
         const relayOnlyActive = (get().relayOnlyUntil ?? 0) > Date.now()
         const forceRelay = options.forceRelay === true || preference === 'relay' || relayOnlyActive
@@ -75,6 +81,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             : await resolveAutomaticPreferredTransports()
         if (generation !== runtime.connectionGeneration) return false
         set({ connectionStage: 'transport', connectionProbeOrder: initialProbeTransports(preferredTransports) })
+        const transportStartedAt = Date.now()
         await runtime.connection.connect(
           config.baseUrl,
           identity,
@@ -148,8 +155,21 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         set({ connectionStage: 'loading' })
         const proxy = runtime.connection.requireProxy()
         // Catalogs belong to the category the user opens, not connection setup.
-        const hostDescriptor = await proxy.hostDescribe()
-        const connectionNetworkDetails = await runtime.connection.getNetworkDetails().catch(() => undefined)
+        // Both reads are independent: run them together instead of paying two
+        // sequential round trips before the session can open. The Host
+        // description is presentation data: when it is slow, fall back to the
+        // previous value instead of delaying a usable connection.
+        const describeStartedAt = Date.now()
+        const fallbackDescriptor = get().hostDescriptor
+        const describeTimeout = new Promise<undefined>(resolve => {
+          setTimeout(() => resolve(undefined), HOST_DESCRIBE_TIMEOUT_MS)
+        })
+        const [hostDescriptor, connectionNetworkDetails] = await Promise.all([
+          Promise.race([proxy.hostDescribe().catch(() => undefined), describeTimeout])
+            .then(value => value ?? fallbackDescriptor),
+          runtime.connection.getNetworkDetails().catch(() => undefined),
+        ])
+        const describeMs = Date.now() - describeStartedAt
         if (generation !== runtime.connectionGeneration) return false
         const connectedStats = runtime.connection.getStats() ?? { mode: 'Relay', connected: true }
         runtime.webRtcFallbackStreak = 0
@@ -164,6 +184,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         hermesAvailable: runtime.connection.hasHermes(),
           connectionStage: 'ready',
           connectionNetworkDetails,
+          connectionTimings: {
+            total: Date.now() - connectStartedAt,
+            auth: authMs,
+            transport: Date.now() - transportStartedAt - describeMs,
+            describe: describeMs,
+          },
           lastConnectedDeviceId: device.deviceId,
           pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: connectedStats },
