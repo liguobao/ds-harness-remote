@@ -8,9 +8,10 @@ import {
   saveStatusBarVisible,
   saveTransportPreference,
 } from '../services/storage'
-import type { AppState, StoreAccess } from './store-state'
+import type { AppState } from './store-state'
+import type { SessionAccess } from './session-runtime'
 
-export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppState,
+export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
   'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
@@ -19,9 +20,22 @@ export function createPreferenceActions({ set, get }: StoreAccess): Pick<AppStat
     },
     async setTransportPreference(preference) {
       await saveTransportPreference(preference)
-      const wasConnected = get().connection.phase === 'connected' || get().connection.phase === 'reconnecting'
-      set({ transportPreference: preference })
-      if (wasConnected) await get().reconnect()
+      const phase = get().connection.phase
+      const wasActive = phase === 'connected' || phase === 'connecting' || phase === 'reconnecting'
+      // An explicit choice starts a fresh attempt, including when reselecting
+      // the same mode after an automatic Relay downgrade.
+      runtime.webRtcFallbackStreak = 0
+      if (wasActive) {
+        ++runtime.connectionGeneration
+        ++runtime.sessionLoadGeneration
+        runtime.reconnectFlight = undefined
+      }
+      set(state => ({
+        transportPreference: preference,
+        relayOnlyUntil: undefined,
+        ...(wasActive ? { connection: { ...state.connection, phase: 'offline' as const } } : {}),
+      }))
+      if (wasActive) await get().reconnect()
     },
 
     async setLanguagePreference(languagePreference) {

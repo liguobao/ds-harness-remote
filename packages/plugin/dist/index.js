@@ -68222,7 +68222,10 @@ var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers });
+      const raw = new RTCPeerConnection({
+        iceServers: configuration.iceServers,
+        iceTransportPolicy: configuration.iceTransportPolicy
+      });
       return {
         get connectionState() {
           return raw.connectionState;
@@ -68606,6 +68609,7 @@ var RtcDataChannelTransport = class {
     this.onDiagnostic = options.onDiagnostic;
     this.pc = options.factory.create({
       iceServers: options.iceServers,
+      iceTransportPolicy: options.iceTransportPolicy,
       onDiagnostic: (event) => this.handlePeerDiagnostic(event)
     });
     this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
@@ -69650,7 +69654,8 @@ var AdaptiveTransport = class extends BaseTransport {
       const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
       if (!("code" in failure5))
         Object.assign(failure5, { code: "INVALID_MESSAGE" });
-      this.failConnection(failure5, { reason: "invalid-control-frame" });
+      const code = errorCodeSchema.safeParse(failure5.code);
+      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
     }
   }
   handleRelay(payload) {
@@ -69751,6 +69756,9 @@ var AdaptiveTransport = class extends BaseTransport {
       role: "initiator",
       factory,
       iceServers,
+      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
+      // direct pair wins, then gets rejected as an unnegotiated transport.
+      iceTransportPolicy: this.negotiatedTransports().includes("turn") && !this.negotiatedTransports().some((transport) => transport === "lan" || transport === "p2p") ? "relay" : "all",
       onSignal: (signal2) => this.sendRtcSignal(signal2),
       negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,

@@ -34,7 +34,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createPromptActions({ set, get, runtime }),
   ...createSessionEventActions({ set, get, runtime }),
   ...createAccountActions({ set, get }),
-  ...createPreferenceActions({ set, get }),
+  ...createPreferenceActions({ set, get, runtime }),
   ...createScheduleActions({
     set,
     get,

@@ -450,7 +450,7 @@ const zhCN = {
     hourUnit: '小时',
   },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
-  transport: { auto: '自动（推荐）', autoDescription: '优先尝试P2P直连，自动选择TURN中转或者服务器转发。', turn: 'TURN 优先', turnDescription: '网络受限时，优先使用 TURN 转发以提高稳定性', relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
+  transport: { auto: '自动（推荐）', autoDescription: "自动选择局域网、P2P 或 TURN；连接失败时使用服务器转发。", turn: "优先中转（TURN）", turnDescription: "跳过直连，优先使用 TURN 中转；失败后使用服务器转发。", relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
   workspaces: {
     loadFailed: '工作区加载失败',
     offlineBody: '重新连接电脑后，即可查看工作区和对话。',

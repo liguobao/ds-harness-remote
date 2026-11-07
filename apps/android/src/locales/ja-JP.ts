@@ -452,7 +452,7 @@ const jaJP = {
     hourUnit: '時間',
   },
   time: { unavailable: "更新時間が利用できません", lastSeenUnavailable: "アクティブ時間が利用できません", lastActive: (value: string) => `最終アクティブ: ${value}`, now: "たった今", justNow: "たった今更新", minutesAgo: (n: number) => `${n} 分前`, hoursAgo: (n: number) => `${n} 時間前`, updatedSuffix: "", locale: "ja-JP" },
-  transport: { auto: "自動 (推奨)", autoDescription: "最初に直接 P2P を試行し、次に必要に応じて TURN またはサーバーリレーを試行します", turn: "ターンを好む", turnDescription: "制限されたネットワークでの安定性のために TURN リレーを優先します", relay: "サーバーリレーのみ", relayDescription: "すべてのデータを DSH リモート サーバー リレー経由でルーティングします。" },
+  transport: { auto: "自動 (推奨)", autoDescription: "LAN・P2P・TURN を自動選択し、接続できない場合はサーバー経由に切り替えます。", turn: "中継優先（TURN）", turnDescription: "直接接続せず TURN を使用し、失敗した場合はサーバー経由に切り替えます。", relay: "サーバーリレーのみ", relayDescription: "すべてのデータを DSH リモート サーバー リレー経由でルーティングします。" },
   workspaces: {
     loadFailed: "ワークスペースを読み込めませんでした",
     offlineBody: "コンピューターに再接続して、ワークスペースと会話を表示します。",

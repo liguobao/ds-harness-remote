@@ -452,7 +452,7 @@ const deDE = {
     hourUnit: 'Std',
   },
   time: { unavailable: "Aktualisierungszeit nicht verfügbar", lastSeenUnavailable: "Aktive Zeit nicht verfügbar", lastActive: (value: string) => `Aktiv ${value}`, now: "soeben", justNow: "Gerade erst aktualisiert", minutesAgo: (n: number) => `Vor ${n} Min`, hoursAgo: (n: number) => `Vor ${n} Stunden`, updatedSuffix: "", locale: "de-DE" },
-  transport: { auto: "Automatisch (empfohlen)", autoDescription: "Versucht zuerst direktes P2P, dann bei Bedarf TURN oder das Server-Relay", turn: "Bevorzugen Sie TURN", turnDescription: "Priorisiert das TURN-Relais für Stabilität in eingeschränkten Netzwerken", relay: "Nur Server-Relay", relayDescription: "Leitet alle Daten über das DSH-Remote-Server-Relay weiter" },
+  transport: { auto: "Automatisch (empfohlen)", autoDescription: "Wählt automatisch LAN, P2P oder TURN; nutzt bei Bedarf das Server-Relay.", turn: "Relay bevorzugen (TURN)", turnDescription: "Überspringt direkte Verbindungen; versucht TURN und nutzt bei Bedarf das Server-Relay.", relay: "Nur Server-Relay", relayDescription: "Leitet alle Daten über das DSH-Remote-Server-Relay weiter" },
   workspaces: {
     loadFailed: "Arbeitsbereiche konnten nicht geladen werden",
     offlineBody: "Stellen Sie eine erneute Verbindung zu Ihrem Computer her, um Arbeitsbereiche und Konversationen anzuzeigen.",

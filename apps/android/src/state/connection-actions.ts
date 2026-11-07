@@ -25,6 +25,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
+      if (!sameHost) runtime.webRtcFallbackStreak = 0
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
       const recovering = sameHost && get().connection.phase === 'reconnecting'

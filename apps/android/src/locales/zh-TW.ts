@@ -450,7 +450,7 @@ const zhTW = {
     hourUnit: '小時',
   },
   time: { unavailable: '更新時間不可用', lastSeenUnavailable: '活躍時間不可用', lastActive: (value: string) => `${value}活躍`, now: '剛剛', justNow: '剛剛更新', minutesAgo: (n: number) => `${n} 分鐘前`, hoursAgo: (n: number) => `${n} 小時前`, updatedSuffix: '更新', locale: 'zh-TW' },
-  transport: { auto: '自動（推薦）', autoDescription: '優先嚐試P2P直連，自動選擇TURN中轉或者伺服器轉發。', turn: 'TURN 優先', turnDescription: '網路受限時，優先使用 TURN 轉發以提高穩定性', relay: '僅伺服器轉發', relayDescription: '所有資料都透過 DSH Remote 伺服器轉發' },
+  transport: { auto: '自動（推薦）', autoDescription: "自動選擇區域網路、P2P 或 TURN；連線失敗時使用伺服器轉發。", turn: "優先中轉（TURN）", turnDescription: "略過直連，優先使用 TURN 中轉；失敗後使用伺服器轉發。", relay: '僅伺服器轉發', relayDescription: '所有資料都透過 DSH Remote 伺服器轉發' },
   workspaces: {
     loadFailed: '工作區載入失敗',
     offlineBody: '重新連線電腦後，即可檢視工作區和對話。',

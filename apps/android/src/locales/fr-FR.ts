@@ -452,7 +452,7 @@ const frFR = {
     hourUnit: 'heures',
   },
   time: { unavailable: "Heure de mise à jour indisponible", lastSeenUnavailable: "Temps d'activité indisponible", lastActive: (value: string) => `Actif ${value}`, now: "tout à l' heure", justNow: "Mis à jour tout à l'heure", minutesAgo: (n: number) => `Il y a ${n} minutes`, hoursAgo: (n: number) => `Il y a ${n} heures`, updatedSuffix: "", locale: "fr-FR" },
-  transport: { auto: "Automatique (recommandé)", autoDescription: "Essaie d'abord le P2P direct, puis TURN ou le relais du serveur si nécessaire", turn: "Préférer TOUR", turnDescription: "Donne la priorité au relais TURN pour la stabilité sur les réseaux restreints", relay: "Relais serveur uniquement", relayDescription: "Achemine toutes les données via le relais du serveur distant DSH" },
+  transport: { auto: "Automatique (recommandé)", autoDescription: "Sélectionne automatiquement LAN, P2P ou TURN ; utilise le relais serveur en cas d’échec.", turn: "Privilégier le relais (TURN)", turnDescription: "Ignore les connexions directes ; essaie TURN, puis le relais serveur en cas d’échec.", relay: "Relais serveur uniquement", relayDescription: "Achemine toutes les données via le relais du serveur distant DSH" },
   workspaces: {
     loadFailed: "Impossible de charger les espaces de travail",
     offlineBody: "Reconnectez-vous à votre ordinateur pour afficher les espaces de travail et les conversations.",

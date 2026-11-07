@@ -76,9 +76,13 @@ export class AndroidRemoteConnection {
       preferredTransports: options.forceRelay || relayOnly
         ? ['relay']
         : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
-      // Mobile hole punching either succeeds quickly or not at all; 6s keeps
-      // a failed P2P attempt from stalling the whole connect pipeline.
-      negotiateTimeoutMs: 6_000,
+      // TURN-only attempts may need extra time for relay allocation and TCP
+      // fallback. Keep automatic hole punching on its shorter mobile budget.
+      negotiateTimeoutMs: !options.forceRelay && !relayOnly
+        && options.preferredTransports?.includes('turn')
+        && !options.preferredTransports.some(transport => transport === 'lan' || transport === 'p2p')
+        ? 12_000
+        : 6_000,
       iceServersTimeoutMs: 5_000,
       fetchIceServers: options.fetchIceServers,
       onDisconnect: event => {
@@ -90,11 +94,16 @@ export class AndroidRemoteConnection {
         if (event.transport !== undefined) lastTransport = event.transport
         console.warn('[dsh-remote] Carrier closed:', JSON.stringify(event))
       },
-      onWebRtcFallback: error => {
+      onWebRtcFallback: (error, diagnostics) => {
         webRtcFallback = true
         options.onWebRtcFallback?.()
         // Do not include credentials, SDP, prompts, or tunnel payloads.
-        console.warn('[dsh-remote] WebRTC fallback:', error.message)
+        console.warn('[dsh-remote] WebRTC fallback:', error.message, JSON.stringify(diagnostics === undefined ? {} : {
+          connectionState: diagnostics.connectionState,
+          iceConnectionState: diagnostics.iceConnectionState,
+          localCandidates: diagnostics.localCandidates.byType,
+          remoteCandidates: diagnostics.remoteCandidates.byType,
+        }))
       },
       onWebRtcDiagnostic: event => {
         if (event.type !== 'selected-path') return

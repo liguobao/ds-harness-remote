@@ -452,7 +452,7 @@ const esES = {
     hourUnit: 'horas',
   },
   time: { unavailable: "Hora de actualización no disponible", lastSeenUnavailable: "Tiempo activo no disponible", lastActive: (value: string) => `Activo ${value}`, now: "En este momento", justNow: "Actualizado hace un momento", minutesAgo: (n: number) => `Hace ${n} minutos`, hoursAgo: (n: number) => `Hace ${n} hora`, updatedSuffix: "", locale: "es-ES" },
-  transport: { auto: "Automático (recomendado)", autoDescription: "Primero intenta P2P directo, luego TURN o la retransmisión del servidor cuando sea necesario", turn: "Prefiero TURNO", turnDescription: "Prioriza la retransmisión TURN para la estabilidad en redes restringidas", relay: "Sólo retransmisión del servidor", relayDescription: "Enruta todos los datos a través del relé del servidor remoto DSH" },
+  transport: { auto: "Automático (recomendado)", autoDescription: "Selecciona LAN, P2P o TURN automáticamente; si falla, usa el servidor de retransmisión.", turn: "Preferir retransmisión (TURN)", turnDescription: "Omite las conexiones directas; intenta TURN y, si falla, usa el servidor de retransmisión.", relay: "Sólo retransmisión del servidor", relayDescription: "Enruta todos los datos a través del relé del servidor remoto DSH" },
   workspaces: {
     loadFailed: "No se pudieron cargar los espacios de trabajo",
     offlineBody: "Vuelva a conectarse a su computadora para ver espacios de trabajo y conversaciones.",
