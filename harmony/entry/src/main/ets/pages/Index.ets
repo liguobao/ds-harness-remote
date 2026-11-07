@@ -4252,6 +4252,25 @@ struct Index {
   }
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
+  /** 手机上生成中的「停止」小方块：贴在输入框内部右上角，不额外占一行宽度。 */
+  @Builder
+  StopChipOverlay() {
+    if (this.compactDock() && this.generating) {
+      Text('■')
+        .fontSize(this.fs(12))
+        .fontColor('#F85749')
+        .width(26)
+        .height(26)
+        .textAlign(TextAlign.Center)
+        .backgroundColor('rgba(248,87,73,0.14)')
+        .borderRadius(13)
+        .border({ width: 1, color: 'rgba(248,87,73,0.40)' })
+        .onClick(() => {
+          this.runtime.stopGeneration();
+        })
+    }
+  }
+
   @Builder
   ComposerDock() {
     Column() {
@@ -4378,11 +4397,11 @@ struct Index {
             blurOptions: { grayscale: [0, 12] }
           })
           .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
           .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
-          .shadow({ radius: 12,
-            color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
-            offsetX: 0, offsetY: 5 })
+          .shadow({ radius: 14,
+            color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.22)',
+            offsetX: 0, offsetY: 6 })
           .clip(true)
           .overlay(this.DockSpot(52), { align: Alignment.Center })
           .onTouch((event: TouchEvent) => {
@@ -4409,7 +4428,7 @@ struct Index {
             blurOptions: { grayscale: [0, 12] }
           })
           .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
           .onClick(() => {
             this.promptDraftInput = '';
             this.promptPanelOpen = true;
@@ -4433,7 +4452,7 @@ struct Index {
             blurOptions: { grayscale: [0, 12] }
           })
           .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
           .onClick(() => {
             this.composerExpanded = true;
           })
@@ -4473,7 +4492,7 @@ struct Index {
             .caretColor('#22D3EE')
             .borderRadius(23)
             .border({ width: 1,
-              color: this.isDarkUi ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)' })
+              color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
             .padding({ left: 18, right: 18, top: 12, bottom: 12 })
             .clip(true)
             // 生成中保持可输入：否则「插话」无从谈起。
@@ -4503,15 +4522,20 @@ struct Index {
             .onPaste(() => {
               this.pasteImageFromClipboard();
             })
+            // 内边距不对称：左边留多点好读，右边贴着发送键留少点
+            .padding({ left: this.compactDock() ? 14 : 12, right: this.compactDock() ? 8 : 12,
+              top: 10, bottom: 10 })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
+            // 手机上生成中：停止键缩成框内右上角的小方块，把整列宽度还给输入框
+            .overlay(this.StopChipOverlay(), { align: Alignment.TopEnd, offset: { x: -4, y: 4 } })
             .onTouch((event: TouchEvent) => {
               this.trackDockLight(event);
             })
             .onMouse((event: MouseEvent) => {
               this.trackDockMouse(event);
             })
-          if (this.generating) {
+          if (this.generating && !this.compactDock()) {
             Text('■')
               .fontSize(this.fs(16))
               .fontColor('#F85749')
@@ -4527,7 +4551,7 @@ struct Index {
                 blurOptions: { grayscale: [0, 12] }
               })
               .shadow({ radius: 12,
-                color: this.isDarkUi ? 'rgba(0,0,0,0.45)' : 'rgba(31,45,90,0.16)',
+                color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.22)',
                 offsetX: 0, offsetY: 5 })
               .clip(true)
               .overlay(this.DockSpot(52), { align: Alignment.Center })
