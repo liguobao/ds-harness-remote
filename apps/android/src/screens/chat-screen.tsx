@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, FileText, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
+import { ArrowDown, ArrowLeft, FileText, ListTree, Menu, MessageSquare, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -976,16 +976,19 @@ export function ChatScreen({
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
           <IconButton label={strings.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
-          {!connected && <IconButton label={strings.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
       />
       {!connected && (
-        <View style={styles.connectionBanner} accessibilityRole="alert">
+        <Pressable style={styles.connectionBanner} accessibilityRole="button"
+          accessibilityLabel={connectionRetrying ? strings.chat.reconnecting : strings.chat.offline}
+          accessibilityState={{ disabled: connectionRetrying, busy: connectionRetrying }}
+          accessibilityLiveRegion="polite" disabled={connectionRetrying}
+          onPress={() => void reconnectCurrentSession()}>
           <View style={styles.connectionDot} />
           <Text style={styles.connectionBannerText}>
-            {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offlineNotice}
+            {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
           </Text>
-        </View>
+        </Pressable>
       )}
       {connected && busy === `session:${session.sessionId}` && (
         <View style={styles.connectionBanner} accessibilityRole="summary">
