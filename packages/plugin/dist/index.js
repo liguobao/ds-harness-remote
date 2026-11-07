@@ -87376,14 +87376,20 @@ async function assertOwnedRemoteStorage(root) {
     if (!names.has("device.json") && !names.has("device.key")) throw rejected("STORAGE_CONFLICT");
     failureCode = "IDENTITY_INVALID";
     if (!names.has("device.json") || !names.has("device.key")) {
-      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) return;
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
       throw rejected("IDENTITY_INVALID");
     }
     await assertPrivateMode2(join5(directory, "device.key"));
     const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
     const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
     if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
-      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) return;
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
       throw rejected("IDENTITY_INVALID");
     }
     if (names.has("trusted-peers.json")) {

@@ -300,7 +300,29 @@ describe('IdentityStore', () => {
     const first = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 1')
     const second = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 2')
 
-    for (const scenario of ['mismatched', 'device-only', 'key-only', 'legacy-upgrade'] as const) {
+    for (const scenario of ['mismatched', 'device-only', 'key-only', 'legacy-upgrade', 'legacy-client-only'] as const) {
+      if (scenario === 'legacy-client-only') {
+        const home = await temporaryDirectory()
+        const legacyRoot = join(home, 'remote')
+        const serverUrl = 'https://dsh.r2049.cn'
+        const legacyClientDir = serverStorageDirectory(legacyRoot, serverUrl, 'client')
+        await mkdir(legacyClientDir, { recursive: true })
+        await writeFile(join(legacyClientDir, 'device.json'), JSON.stringify({
+          schemaVersion: 1,
+          deviceId: first.deviceId,
+          name: 'Client',
+          publicKey: first.publicKey,
+        }), { mode: 0o600 })
+        await writeFile(join(legacyClientDir, 'device.key'), `${second.privateKey}\n`, { mode: 0o600 })
+
+        const migratedRoot = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+        expect(migratedRoot).toBe(join(home, 'ds-harness-remote'))
+        const migratedClientDir = serverStorageDirectory(migratedRoot, serverUrl, 'client')
+        const healedClient = await new IdentityStore({ directory: migratedClientDir, role: 'client' }).loadOrCreate('Client')
+        expect(healedClient.deviceId).not.toBe(first.deviceId)
+        expect(await new IdentityStore({ directory: migratedClientDir, role: 'client' }).loadOrCreate('Client')).toEqual(healedClient)
+        continue
+      }
       if (scenario === 'legacy-upgrade') {
         const home = await temporaryDirectory()
         const legacyRoot = join(home, 'remote')
