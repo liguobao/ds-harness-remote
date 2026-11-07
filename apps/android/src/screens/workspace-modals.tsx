@@ -250,7 +250,7 @@ export function CreateWorkspaceModal({
 
   const backendItems: Array<{ value: AgentBackend; label: string; detail: string; icon: LucideIcon }> = [
     { value: 'harness', label: strings.workspaces.dsh, detail: strings.devices.harness, icon: FolderOpen },
-    ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI CodeX', icon: Code2 }] : []),
+    ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI Codex', icon: Code2 }] : []),
     ...(claudeAvailable ? [{ value: 'claude' as const, label: strings.workspaces.claude, detail: 'Anthropic Claude', icon: Sparkles }] : []),
     ...(hermesAvailable ? [{ value: 'hermes' as const, label: strings.workspaces.hermes, detail: 'Nous Research Hermes', icon: Sparkles }] : []),
     ...(cursorAvailable ? [{ value: 'cursor' as const, label: strings.workspaces.cursor, detail: 'Cursor ACP', icon: Sparkles }] : []),

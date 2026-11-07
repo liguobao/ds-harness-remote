@@ -111,7 +111,7 @@ interface HarnessOption {
 
 const HARNESS_OPTIONS: HarnessOption[] = [
   { value: 'harness', name: 'DeepSeek Harness', desc: '官方 DeepSeek 智能体框架' },
-  { value: 'codex', name: 'CodeX', desc: 'OpenAI CodeX 编程智能体' },
+  { value: 'codex', name: 'Codex', desc: 'OpenAI Codex 编程智能体' },
   { value: 'claude', name: 'Claude', desc: 'Anthropic Claude 智能体' },
   { value: 'hermes', name: 'Hermes', desc: 'Nous Research Hermes Agent 智能体' },
   { value: 'cursor', name: 'Cursor', desc: 'Cursor IDE 交互智能体' },
@@ -123,7 +123,7 @@ const HARNESS_OPTIONS: HarnessOption[] = [
 function harnessDisplayName(value: AgentBackend): string {
   switch (value) {
     case 'harness': return 'DeepSeek'
-    case 'codex': return 'CodeX'
+    case 'codex': return 'Codex'
     case 'claude': return 'Claude'
     case 'hermes': return 'Hermes'
     case 'cursor': return 'Cursor'
