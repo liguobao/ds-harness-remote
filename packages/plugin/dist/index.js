@@ -95705,13 +95705,15 @@ var PluginControlRuntime = class {
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const value = record9(payload);
+    if (value.debugLogging !== void 0 && typeof value.debugLogging !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The debug logging switch must be a boolean.");
     if (value.remoteToolsEnabled !== void 0 && typeof value.remoteToolsEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The Remote Tools switch must be a boolean.");
     if (value.terminalEnabled !== void 0 && typeof value.terminalEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The terminal switch must be a boolean.");
     if (value.ports !== void 0 && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError("INVALID_MESSAGE", "Loopback ports must be integers.");
-    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
+    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0 && value.debugLogging === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
+      logLevel: value.debugLogging === void 0 ? current.logLevel : value.debugLogging ? "debug" : "info",
       terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? true : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === void 0 ? current.remoteTools?.enabled ?? true : value.remoteToolsEnabled },
       loopback: { ports: value.ports === void 0 ? current.loopback?.ports ?? [] : value.ports }
@@ -96036,7 +96038,8 @@ var SafeLogger = class {
     this.write("error", message, fields);
   }
   write(level, message, fields) {
-    if (levels.indexOf(level) < levels.indexOf(this.threshold)) return;
+    const threshold = typeof this.threshold === "function" ? this.threshold() : this.threshold;
+    if (levels.indexOf(level) < levels.indexOf(threshold)) return;
     const safeFields = fields === void 0 ? "" : ` ${JSON.stringify(redact(fields))}`;
     this.sink[level](`[ds-harness-remote] ${message}${safeFields}`);
   }
@@ -100491,7 +100494,7 @@ async function activate(ctx, readConfig, entryId) {
       ctx.logger.error(message);
       console.error(message);
     }
-  }, config2.logLevel);
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const nativeTypertGateway = ctx.get("typertGateway");
   const connectionExports = DshConnection;

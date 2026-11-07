@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { exportConnectionLog } from '../services/export-connection-log'
 import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
+import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
@@ -613,6 +615,27 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const typographyDensity = useAppStore(state => state.typographyDensity)
   const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
+  const showIdentity = (label: string, value?: string) => {
+    if (!value) return
+    Alert.alert(label, value, [
+      { text: zhCN.common.close, style: 'cancel' },
+      { text: zhCN.settings.copyIdentity, onPress: () => {
+        void Clipboard.setStringAsync(value).then(
+          () => Alert.alert(zhCN.diagram.copied),
+          () => Alert.alert(zhCN.settings.identityCopyFailed),
+        )
+      } },
+    ])
+  }
+  const [exportingLog, setExportingLog] = useState(false)
+  const exportLog = async () => {
+    if (exportingLog) return
+    setExportingLog(true)
+    try {
+      if (await exportConnectionLog()) Alert.alert(zhCN.settings.logExported)
+    } catch { Alert.alert(zhCN.settings.logExportFailed, zhCN.settings.logExportRetry) }
+    finally { setExportingLog(false) }
+  }
   const [densitySaving, setDensitySaving] = useState(false)
   const [densityPickerOpen, setDensityPickerOpen] = useState(false)
   const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
@@ -718,11 +741,6 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
-            <View style={styles.accountPill}>
-              <Text style={styles.accountPillTitle} numberOfLines={1}>{account ?? zhCN.settings.notSignedIn}</Text>
-              <Text style={styles.accountPillMeta} numberOfLines={1}>{[loginMethodLabel(config?.loginMethod), config?.baseUrl?.replace(/^https?:\/\//, '')].filter(Boolean).join(' · ')}</Text>
-            </View>
-
             <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
             <GroupCard style={styles.themeCard}>
               <View style={styles.themeTiles} accessibilityRole="radiogroup">
@@ -843,7 +861,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
 
-            <SectionTitle>{zhCN.settings.connection}</SectionTitle>
+            <SectionTitle>{zhCN.settings.accountAndServer}</SectionTitle>
             <GroupCard>
               <GroupRow first icon={Globe} label={zhCN.settings.server} value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured} />
               <GroupRow icon={UserRound} label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
@@ -872,12 +890,24 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
 
+            {Platform.OS === 'android' && <>
+              <SectionTitle>{zhCN.settings.diagnostics}</SectionTitle>
+              <GroupCard>
+                <GroupRow first icon={Download}
+                  label={exportingLog ? zhCN.settings.logExporting : zhCN.settings.exportLog}
+                  detail={zhCN.settings.exportLogNote} disabled={exportingLog}
+                  accessory={exportingLog ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                  chevron={!exportingLog} onPress={() => void exportLog()} />
+              </GroupCard>
+            </>}
+
             <SectionTitle>{zhCN.settings.identity}</SectionTitle>
             <GroupCard>
-              <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} />
-              <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} />
-              <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} />
+              <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
+              <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
+              <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
             </GroupCard>
+            <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
             <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
 
             <GroupCard style={styles.signOutCard}>
@@ -1252,16 +1282,6 @@ function SettingsLink({ label, url, value }: { label: string; url: string; value
   )
 }
 
-function shorten(value?: string): string {
-  if (value === undefined) return zhCN.common.unavailable
-  return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-7)}` : value
-}
-
-function fingerprint(value?: string): string {
-  if (value === undefined || value.length === 0) return zhCN.common.unavailable
-  return value.slice(0, 24).toUpperCase().match(/.{1,4}/g)?.join(' ') ?? value
-}
-
 function languageOptions(): Array<{ value: LanguagePreference; name: string }> {
   return [
     { value: 'system', name: zhCN.settings.languageSystem },
@@ -1370,9 +1390,6 @@ function createStyles(colors: ThemeColors) {
   segmentButtonText: { ...type.small, fontSize: 15, color: colors.muted, textAlign: 'center' },
   segmentButtonTextActive: { color: colors.ink, fontWeight: '600' },
   keyNote: { flexDirection: 'row', gap: spacing.xs, paddingVertical: spacing.md },
-  accountPill: { marginTop: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, gap: 3 },
-  accountPillTitle: { ...type.bodyStrong, fontSize: 17, color: colors.ink },
-  accountPillMeta: { ...type.small, fontSize: 13, color: colors.muted },
   settingsGap: { marginTop: spacing.sm },
   themeCard: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   themeTiles: { flexDirection: 'row', gap: spacing.sm },

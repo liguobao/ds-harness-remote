@@ -59,6 +59,8 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [writable, setWritable] = React.useState(false)
     const [busy, setBusy] = React.useState(false)
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
+    const [debugBusy, setDebugBusy] = React.useState(false)
+    const [debugLogging, setDebugLogging] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
@@ -106,6 +108,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       setSettingsView(view)
       setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
       setTerminalEnabled(view.config.terminal?.enabled ?? true)
+      setDebugLogging(view.config.logLevel === 'debug')
       setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? true)
       setSidebarEntry(view.config.sidebar?.entry ?? 'standard')
       props.sidebarEntry?.publish(view.config.sidebar?.entry ?? 'standard')
@@ -481,7 +484,26 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
+    const setDebug = async (enabled: boolean): Promise<void> => {
+      if (debugBusy) return
+      setDebugBusy(true)
+      setError(undefined)
+      try {
+        applyView(await props.control<PluginSettingsView>('settings.development.set', { debugLogging: enabled }))
+      } catch (reason) { setError(messageOf(reason, t)) }
+      finally { setDebugBusy(false) }
+    }
+
     const developmentSetting = React.createElement('section', { className: 'dshRemoteDevelopmentSettings' },
+      React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+        React.createElement('div', null,
+          React.createElement('strong', null, t('debugLogging')),
+          React.createElement('p', null, t('debugLoggingHint'))),
+        React.createElement('input', {
+          type: 'checkbox', role: 'switch', checked: debugLogging,
+          disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
+          onChange: (event: Event) => void setDebug((event.target as HTMLInputElement).checked),
+        })),
       React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
         React.createElement('div', null,
           React.createElement('strong', null, t('terminalRemote')),

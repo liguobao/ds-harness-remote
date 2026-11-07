@@ -1,6 +1,7 @@
 import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
+import { connectionFailure, connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
@@ -60,6 +61,7 @@ export class AndroidRemoteConnection {
     // Replacing a connection must not wait for a graceful stream-close RPC:
     // the old data path may be exactly what is being recovered from.
     const attempt = ++this.connectionAttempt
+    connectionLog('connect', { attempt, phase: 'starting', forceRelay: options.forceRelay === true })
     await this.clearConnection()
     if (attempt !== this.connectionAttempt) throw new Error('The connection attempt was superseded.')
     this.muxHandler = onFrame
@@ -92,31 +94,25 @@ export class AndroidRemoteConnection {
           && !(event.closeCode !== undefined && (event.closeCode >= 4000
             || [1002, 1003, 1007, 1008, 1009].includes(event.closeCode)))
         if (event.transport !== undefined) lastTransport = event.transport
-        console.warn('[dsh-remote] Carrier closed:', JSON.stringify(event))
+        connectionLog('disconnect', { reason: event.reason, closeCode: event.closeCode, transport: event.transport })
       },
       onWebRtcFallback: (error, diagnostics) => {
         webRtcFallback = true
         options.onWebRtcFallback?.()
         // Do not include credentials, SDP, prompts, or tunnel payloads.
-        console.warn('[dsh-remote] WebRTC fallback:', error.message, JSON.stringify(diagnostics === undefined ? {} : {
-          connectionState: diagnostics.connectionState,
-          iceConnectionState: diagnostics.iceConnectionState,
-          localCandidates: diagnostics.localCandidates.byType,
-          remoteCandidates: diagnostics.remoteCandidates.byType,
-        }))
+        connectionLog('fallback', { reason: connectionFailure(error),
+          connectionState: diagnostics?.connectionState,
+          iceConnectionState: diagnostics?.iceConnectionState,
+          localCandidates: diagnostics?.localCandidates.byType,
+          remoteCandidates: diagnostics?.remoteCandidates.byType,
+        })
       },
       onWebRtcDiagnostic: event => {
         if (event.type !== 'selected-path') return
         // Selected-path telemetry contains candidate types and address scopes,
         // never the candidate IPs, SDP, credentials, or tunnel payloads.
-        console.info('[dsh-remote] WebRTC selected path:', JSON.stringify({
-          ...event.selectedPath,
-          signaledRemoteCandidates: {
-            total: event.diagnostics.remoteCandidates.total,
-            byType: event.diagnostics.remoteCandidates.byType,
-            byScope: event.diagnostics.remoteCandidates.byScope,
-          },
-        }))
+        connectionLog('selected-path', { transport: event.selectedPath.mode, protocol: event.selectedPath.protocol, localCandidateType: event.selectedPath.localCandidateType, remoteCandidateType: event.selectedPath.remoteCandidateType, localCandidates: event.diagnostics.localCandidates.byType,
+          remoteCandidates: event.diagnostics.remoteCandidates.byType })
       },
     })
     const connectCore = async (relayOnly: boolean) => {
@@ -163,7 +159,7 @@ export class AndroidRemoteConnection {
       const emitFrame = (frame: MuxStreamFrame) => {
         if (this.core !== core) return
         if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'failed') {
-          console.warn('[dsh-remote] Harness stream failed; closing carrier')
+          connectionLog('stream-failed')
           // A live carrier failure is an offline channel, even if its socket
           // still answers. Reconnect will create a fresh follow subscription.
           void this.close()
@@ -195,7 +191,9 @@ export class AndroidRemoteConnection {
         throw new Error('The remote Host exposes no supported Harness transport.')
       }
       this.scheduleHealthCheck(core)
+      connectionLog('connect', { attempt, phase: 'ready' })
     } catch (error) {
+      connectionLog('connect', { attempt, phase: 'failed', reason: connectionFailure(error) })
       if (attempt === this.connectionAttempt) await this.clearConnection()
       throw error
     }
@@ -408,12 +406,12 @@ export class AndroidRemoteConnection {
         // streaming resumes. Confirm with one fast retry first.
         this.healthCheckFailures += 1
         if (this.healthCheckFailures >= 2) {
-          console.info('[dsh-remote] Carrier health check failed repeatedly; closing carrier')
+          connectionLog('health-failed', { phase: 'closed' })
           // close() on the core publishes the same offline/recovery transition
           // as a socket close, including when the OS never delivered onclose.
           void core.close().catch(() => undefined)
         } else {
-          console.info('[dsh-remote] Carrier health check failed once; re-probing shortly')
+          connectionLog('health-failed', { phase: 'checking' })
           this.scheduleHealthCheck(core, 5_000)
         }
       })
