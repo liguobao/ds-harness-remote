@@ -1,4 +1,4 @@
-import { readFile, rename, rm, stat } from 'node:fs/promises'
+import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -203,6 +203,46 @@ describe('Remote CLI', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(output.text).not.toContain('access-token-value')
     expect(output.text).not.toContain('refresh-token-value')
+  })
+
+  it('resets local device identity via reset-identity command', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-reset-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const env = { DSH_HOME: dshHome }
+    const root = new IdentityStore({ env }).directory
+    const hostDir = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const originalHost = await new IdentityStore({ directory: hostDir, env, role: 'host' }).loadOrCreate('Host')
+    const output = writer()
+
+    await expect(runCli(['reset-identity', 'all'], { env, stdout: output })).resolves.toBe(0)
+    expect(output.text).toContain('Remote host identity was reset')
+    expect(output.text).toContain('Remote client identity was reset')
+
+    const newHost = JSON.parse(await readFile(join(hostDir, 'device.json'), 'utf8')) as { deviceId: string }
+    expect(newHost.deviceId).not.toBe(originalHost.deviceId)
+  })
+
+  it('succeeds on logout even when local device identity is corrupt', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-corrupt-logout-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const env = { DSH_HOME: dshHome }
+    const root = new IdentityStore({ env }).directory
+    const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const identities = new IdentityStore({ directory, env, role: 'host' })
+    const original = await identities.loadOrCreate('CLI test Host')
+    // Corrupt the key file
+    await writeFile(join(directory, 'device.key'), 'corrupted-private-key\n')
+    await new ServerCredentialStore(directory).save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: original.deviceId,
+      authorizationMethod: 'account',
+      account: 'host@example.com',
+      ...tokens(),
+    })
+    const output = writer()
+
+    await expect(runCli(['logout'], { env, stdout: output })).resolves.toBe(0)
+    expect(output.text).toContain('Remote Host logged out and its local device identity was rotated')
   })
 })
 

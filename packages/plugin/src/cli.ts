@@ -3,11 +3,13 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_REMOTE_SERVER_URL, normalizeServerUrl } from './config.js'
 import {
+  IdentityInvalidError,
   IdentityStore,
   prepareDefaultIdentityDirectory,
   serverStorageDirectory,
   type HostIdentity,
   type IdentityStoreOptions,
+  type RemoteDeviceRole,
 } from './identity-store.js'
 import {
   HostServerApi,
@@ -76,6 +78,7 @@ export async function runCli(
     if (command === 'register') return await register(rest, runtime)
     if (command === 'status') return await status(rest, runtime)
     if (command === 'logout') return await logout(rest, runtime)
+    if (command === 'reset-identity') return await resetIdentity(rest, runtime)
     if (command === 'help' || command === '--help' || command === '-h' || command === undefined) {
       write(runtime.stdout, helpText())
       return 0
@@ -202,21 +205,42 @@ async function logout(args: readonly string[], runtime: CliRuntime): Promise<num
   }
 
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env })
-  const identity = await identities.loadOrCreate(deviceName)
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
-  api.bindIdentity(identity)
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: 'host' })
   let revokeFailure: unknown
   try {
+    const identity = await identities.loadOrCreate(deviceName)
+    const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
+    api.bindIdentity(identity)
     await api.revokeCurrentDevice()
   } catch (error) {
     revokeFailure = error
   }
   await identities.reset(deviceName)
-  if (revokeFailure !== undefined) {
+  await new ServerCredentialStore(directory).clear()
+  if (revokeFailure !== undefined && !(revokeFailure instanceof IdentityInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`)
   }
   write(runtime.stdout, 'Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n')
+  return 0
+}
+
+async function resetIdentity(args: readonly string[], runtime: CliRuntime): Promise<number> {
+  const roleArg = args[0]
+  if (roleArg !== undefined && !['host', 'client', 'all'].includes(roleArg)) {
+    throw new CliUsageError('Usage: ds-harness-remote reset-identity [host|client|all]')
+  }
+  const serverUrl = selectedServer()
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
+  const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
+  for (const role of roles) {
+    const directory = serverStorageDirectory(root, serverUrl, role)
+    const identities = runtime.createIdentityStore({ directory, env: runtime.env, role })
+    await identities.reset(deviceName)
+    await new ServerCredentialStore(directory).clear()
+    write(runtime.stdout, `Remote ${role} identity was reset and a new key pair was created.\n`)
+  }
+  write(runtime.stdout, 'Restart the Harness instance to use the fresh identity.\n')
   return 0
 }
 
@@ -306,6 +330,7 @@ function helpText(): string {
     '  ds-harness-remote register <server-token>',
     '  ds-harness-remote status',
     '  ds-harness-remote logout',
+    '  ds-harness-remote reset-identity [host|client|all]',
     '',
     'login uses an available QR provider (preferring Zhihu). Use login list to see available providers.',
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
@@ -53,6 +53,7 @@ export interface IdentityStoreOptions {
   directory?: string
   env?: NodeJS.ProcessEnv
   homeDirectory?: string
+  role?: RemoteDeviceRole
 }
 
 export type RemoteDeviceRole = 'host' | 'client'
@@ -67,12 +68,14 @@ export class IdentityStore {
   private identity?: HostIdentity
   private peers = new Map<string, TrustedPeer>()
   private readonly defaultOptions?: IdentityStoreOptions
+  readonly role?: RemoteDeviceRole
 
   constructor(options: IdentityStoreOptions = {}) {
     const env = options.env ?? process.env
     const dshHome = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
     this.storageDirectory = options.directory ?? join(dshHome, 'ds-harness-remote')
     this.defaultOptions = options.directory === undefined ? options : undefined
+    this.role = options.role
   }
 
   async loadOrCreate(deviceName: string): Promise<HostIdentity> {
@@ -91,7 +94,12 @@ export class IdentityStore {
     const devicePath = join(this.directory, 'device.json')
     const keyPath = join(this.directory, 'device.key')
     const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
+    const isClientRole = this.role === 'client' || basename(this.directory) === 'client'
     if (hasDevice !== hasKey) {
+      if (isClientRole && !(await hasStoredCredentials(this.directory)) && !(await hasTrustedPeers(this.directory))) {
+        await removeIdentityRecords(this.directory)
+        return this.loadOrCreateLocked(deviceName)
+      }
       throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
     }
 
@@ -101,11 +109,24 @@ export class IdentityStore {
       // Write the key first: a crash between the two leaves device.key alone,
       // which the incomplete-pair guard above reports explicitly, instead of
       // leaving a device.json whose published public key has no private half.
-      await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
+      await atomicTextWrite(keyPath, `${keys.privateKey}
+`, 0o600)
       await atomicJsonWrite(devicePath, record, 0o600)
     }
 
-    const identity = await this.readIdentity(devicePath, keyPath, deviceName)
+    let identity: HostIdentity
+    try {
+      identity = await this.readIdentity(devicePath, keyPath, deviceName)
+    } catch (error) {
+      if (error instanceof IdentityInvalidError
+        && isClientRole
+        && !(await hasStoredCredentials(this.directory))
+        && !(await hasTrustedPeers(this.directory))) {
+        await removeIdentityRecords(this.directory)
+        return this.loadOrCreateLocked(deviceName)
+      }
+      throw error
+    }
     // Only a verified pair makes the leftovers dead weight. In the #276 residue
     // the surviving device.key.*.tmp is the only private key that still matches
     // device.json, so a failed verification keeps it for manual recovery.
@@ -215,8 +236,8 @@ export class IdentityStore {
 
 const legacyRootPinSchema = z.object({
   schemaVersion: z.literal(1),
-  dev: z.number().int().nonnegative(),
-  ino: z.number().int().nonnegative(),
+  dev: z.number().nonnegative(),
+  ino: z.number().nonnegative(),
 }).strict()
 
 /** Resolve storage and migrate legacy data before startup or installation uses it.
@@ -540,6 +561,21 @@ function ownerExited(record: string): boolean {
     // ESRCH proves the process is gone; EPERM means it exists under another
     // user and must be treated as a live owner.
     return isNodeError(error) && error.code === 'ESRCH'
+  }
+}
+
+async function hasStoredCredentials(directory: string): Promise<boolean> {
+  return exists(join(directory, 'server-credentials.json'))
+}
+
+async function hasTrustedPeers(directory: string): Promise<boolean> {
+  const path = join(directory, 'trusted-peers.json')
+  if (!(await exists(path))) return false
+  try {
+    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile(path, 'utf8')))
+    return parsed.peers.length > 0
+  } catch {
+    return false
   }
 }
 

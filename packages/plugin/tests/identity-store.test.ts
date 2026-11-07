@@ -282,6 +282,107 @@ describe('IdentityStore', () => {
     const remaining = (await readdir(directory)).filter(name => name.endsWith('.tmp'))
     expect(remaining).toEqual([])
   })
+
+  it('self-heals uncredentialed unpeered corrupt client identity on loadOrCreate', async () => {
+    const directory = await temporaryDirectory()
+    const first = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 1')
+    const second = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 2')
+    await writeFile(join(directory, 'device.json'), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: first.deviceId,
+      name: 'Client',
+      publicKey: first.publicKey,
+    }))
+    await writeFile(join(directory, 'device.key'), `${second.privateKey}\n`)
+
+    const clientStore = new IdentityStore({ directory, role: 'client' })
+    const healed = await clientStore.loadOrCreate('Client')
+    expect(healed.publicKey).toBeDefined()
+    expect(healed.privateKey).toBeDefined()
+    const reloaded = await new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+    expect(reloaded.publicKey).toBe(healed.publicKey)
+    expect(reloaded.deviceId).toBe(healed.deviceId)
+  })
+
+  it('self-heals uncredentialed unpeered incomplete client identity on loadOrCreate', async () => {
+    const directory = await temporaryDirectory()
+    const sample = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Sample')
+    await writeFile(join(directory, 'device.json'), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: sample.deviceId,
+      name: 'Client',
+      publicKey: sample.publicKey,
+    }))
+
+    const clientStore = new IdentityStore({ directory, role: 'client' })
+    const healed = await clientStore.loadOrCreate('Client')
+    expect(healed.publicKey).toBeDefined()
+    expect(healed.privateKey).toBeDefined()
+  })
+
+  it('refuses to auto-heal client identity when credentials or trusted peers exist', async () => {
+    const credDir = await temporaryDirectory()
+    const first = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 1')
+    const second = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Client 2')
+    await writeFile(join(credDir, 'device.json'), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: first.deviceId,
+      name: 'Client',
+      publicKey: first.publicKey,
+    }))
+    await writeFile(join(credDir, 'device.key'), `${second.privateKey}\n`)
+    await new ServerCredentialStore(credDir).save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: first.deviceId,
+      authorizationMethod: 'owned_device',
+      accessToken: 'token-access-12345',
+      accessTokenExpiresAt: Date.now() + 60000,
+      refreshToken: 'token-refresh-12345',
+      refreshTokenExpiresAt: Date.now() + 600000,
+    })
+
+    await expect(new IdentityStore({ directory: credDir, role: 'client' }).loadOrCreate('Client'))
+      .rejects.toThrow(IdentityInvalidError)
+
+    const peerDir = await temporaryDirectory()
+    await writeFile(join(peerDir, 'device.json'), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: first.deviceId,
+      name: 'Client',
+      publicKey: first.publicKey,
+    }))
+    await writeFile(join(peerDir, 'device.key'), `${second.privateKey}\n`)
+    await writeFile(join(peerDir, 'trusted-peers.json'), JSON.stringify({
+      schemaVersion: 1,
+      peers: [{
+        deviceId: 'peer-device-id',
+        name: 'Peer',
+        platform: 'linux',
+        publicKey: first.publicKey,
+        fingerprint: first.fingerprint,
+        trustedAt: Date.now(),
+      }],
+    }))
+
+    await expect(new IdentityStore({ directory: peerDir, role: 'client' }).loadOrCreate('Client'))
+      .rejects.toThrow(IdentityInvalidError)
+  })
+
+  it('refuses to auto-heal host role with mismatched keys', async () => {
+    const directory = await temporaryDirectory()
+    const first = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Host 1')
+    const second = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Host 2')
+    await writeFile(join(directory, 'device.json'), JSON.stringify({
+      schemaVersion: 1,
+      deviceId: first.deviceId,
+      name: 'Host',
+      publicKey: first.publicKey,
+    }))
+    await writeFile(join(directory, 'device.key'), `${second.privateKey}\n`)
+
+    await expect(new IdentityStore({ directory, role: 'host' }).loadOrCreate('Host'))
+      .rejects.toThrow(IdentityInvalidError)
+  })
 })
 
 async function temporaryDirectory(): Promise<string> {

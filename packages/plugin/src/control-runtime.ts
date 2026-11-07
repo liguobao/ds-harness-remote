@@ -9,7 +9,9 @@ import {
   type HostConnectionHandle,
   type HostAuthorizationControl,
 } from './client-runtime.js'
-import { IdentityStore, serverStorageDirectory } from './identity-store.js'
+import { IdentityInvalidError, IdentityStore, serverStorageDirectory, type RemoteDeviceRole } from './identity-store.js'
+import { safeErrorCode, safeErrorMessage } from './safe-error.js'
+import { join } from 'node:path'
 import { ClientServerApi, HostServerApi } from './server-api.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
@@ -31,6 +33,10 @@ export interface PluginSettingsView {
     backend: string
     action: 'configured' | 'installed' | 'download_required'
     downloadUrl?: string
+  }
+  startupError?: {
+    code: string
+    message: string
   }
 }
 
@@ -59,6 +65,15 @@ export interface PluginSettingsBinding {
 export class PluginControlRuntime {
   private logoutFlight?: Promise<PluginSettingsView>
   private serverSwitchFlight?: Promise<PluginSettingsView>
+  private startupFailure?: unknown
+
+  setStartupFailure(error: unknown): void {
+    this.startupFailure = error
+  }
+
+  clearStartupFailure(): void {
+    this.startupFailure = undefined
+  }
 
   constructor(
     private config: ResolvedConfig,
@@ -112,6 +127,7 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
       if (endpoint === 'settings.acp.installOrConfigure') return ok(await this.installOrConfigureAcp(payload))
       if (endpoint === 'settings.logout') return ok(await this.logout())
+      if (endpoint === 'settings.identity.reset') return ok(await this.resetIdentity(payload))
       if (endpoint === 'host.authorization.set' && this.client !== undefined) {
         const value = record(payload)
         if (typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
@@ -128,6 +144,20 @@ export class PluginControlRuntime {
         return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
       }
       if (endpoint === 'status') {
+        if (this.startupFailure !== undefined) {
+          const code = startupErrorCode(this.startupFailure)
+          const message = safeErrorMessage(this.startupFailure)
+          const failureStatus: Record<string, unknown> = {
+            mode: 'local',
+            available: false,
+            controlUnavailable: false,
+            connected: false,
+            transport: 'Disconnected',
+            startupError: { code, message },
+            hostAuthorizationAvailable: false,
+          }
+          return withUpdate(ok(failureStatus), this.updates?.snapshot())
+        }
         // Both mode paths merge the update snapshot here, so the SSE stream,
         // polling, and the unary call always observe the same payload shape.
         const base = this.client !== undefined
@@ -243,6 +273,29 @@ export class PluginControlRuntime {
       return { ...await this.settingsView(), applies: 'live' }
     }
     return this.settingsView()
+  }
+
+  private async resetIdentity(payload: unknown): Promise<PluginSettingsView> {
+    const value = typeof payload === 'object' && payload !== null ? payload as Record<string, unknown> : {}
+    const roleArg = typeof value.role === 'string' ? value.role : 'all'
+    const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
+    const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
+    const serverUrl = config.serverUrl
+    for (const role of roles) {
+      const directory = serverUrl === undefined
+        ? join(this.identityDirectory, role)
+        : serverStorageDirectory(this.identityDirectory, serverUrl, role)
+      const identities = new IdentityStore({ directory, role })
+      await identities.reset(hostname())
+      await new ServerCredentialStore(directory).clear()
+    }
+    this.startupFailure = undefined
+    if (this.switchServer !== undefined) {
+      const runtimes = await this.switchServer(config)
+      this.client = runtimes.client
+      this.host = runtimes.host
+    }
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async setRole(payload: unknown): Promise<PluginSettingsView> {
@@ -494,6 +547,12 @@ export class PluginControlRuntime {
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, backendCommandAvailable(item.id, item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
+      ...(this.startupFailure === undefined ? {} : {
+        startupError: {
+          code: startupErrorCode(this.startupFailure),
+          message: safeErrorMessage(this.startupFailure),
+        },
+      }),
     }
   }
 
@@ -510,15 +569,23 @@ export class PluginControlRuntime {
   }
 
   private async association(serverUrl: string, role: 'host' | 'client'): Promise<PluginAssociation | undefined> {
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
-    })
-    const identity = await identities.loadOrCreate(hostname())
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
-    if (credentials === undefined) return undefined
-    return {
-      method: credentials.authorizationMethod,
-      ...(credentials.account === undefined ? {} : { account: credentials.account }),
+    try {
+      const identities = new IdentityStore({
+        directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
+        role,
+      })
+      const identity = await identities.loadOrCreate(hostname())
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
+      if (credentials === undefined) return undefined
+      return {
+        method: credentials.authorizationMethod,
+        ...(credentials.account === undefined ? {} : { account: credentials.account }),
+      }
+    } catch (error) {
+      if (error instanceof IdentityInvalidError) {
+        return undefined
+      }
+      throw error
     }
   }
 
@@ -531,6 +598,14 @@ export class PluginControlRuntime {
       ...(this.host === undefined ? {} : { host: this.host.hostStatus() }),
     }
   }
+}
+
+function startupErrorCode(error: unknown): string {
+  if (error instanceof IdentityInvalidError) return error.code
+  if (typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code: unknown }).code === 'string') {
+    return (error as { code: string }).code
+  }
+  return safeErrorCode(error)
 }
 
 function backendCommandAvailable(backend: string, command: string): boolean {

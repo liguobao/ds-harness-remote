@@ -77918,6 +77918,9 @@ function safeErrorCode(error62) {
   if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
   return "INTERNAL_ERROR";
 }
+function safeErrorMessage(error62) {
+  return error62 instanceof Error ? error62.message : String(error62);
+}
 
 // src/loopback-host.ts
 var HOP_HEADERS = /* @__PURE__ */ new Set([
@@ -86980,7 +86983,7 @@ import { execFileSync as execFileSync2 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
 import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname4, join as join5 } from "node:path";
+import { basename as basename3, dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -87012,11 +87015,13 @@ var IdentityStore = class {
   identity;
   peers = /* @__PURE__ */ new Map();
   defaultOptions;
+  role;
   constructor(options = {}) {
     const env = options.env ?? process.env;
     const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
     this.storageDirectory = options.directory ?? join5(dshHome, "ds-harness-remote");
     this.defaultOptions = options.directory === void 0 ? options : void 0;
+    this.role = options.role;
   }
   async loadOrCreate(deviceName) {
     if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
@@ -87027,7 +87032,12 @@ var IdentityStore = class {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    const isClientRole = this.role === "client" || basename3(this.directory) === "client";
     if (hasDevice !== hasKey) {
+      if (isClientRole && !await hasStoredCredentials(this.directory) && !await hasTrustedPeers(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.loadOrCreateLocked(deviceName);
+      }
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
     }
     if (!hasDevice) {
@@ -87037,7 +87047,16 @@ var IdentityStore = class {
 `, 384);
       await atomicJsonWrite(devicePath, record11, 384);
     }
-    const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    let identity3;
+    try {
+      identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError && isClientRole && !await hasStoredCredentials(this.directory) && !await hasTrustedPeers(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.loadOrCreateLocked(deviceName);
+      }
+      throw error62;
+    }
     await removeStaleTemporaries(this.directory);
     return identity3;
   }
@@ -87059,7 +87078,7 @@ var IdentityStore = class {
       return this.identity;
     } catch (error62) {
       if (error62 instanceof IdentityInvalidError) throw error62;
-      throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error62)}`);
+      throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage2(error62)}`);
     }
   }
   current() {
@@ -87133,8 +87152,8 @@ var IdentityStore = class {
 };
 var legacyRootPinSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
-  dev: external_exports.number().int().nonnegative(),
-  ino: external_exports.number().int().nonnegative()
+  dev: external_exports.number().nonnegative(),
+  ino: external_exports.number().nonnegative()
 }).strict();
 async function prepareDefaultIdentityDirectory(options = {}) {
   if (options.directory !== void 0) return options.directory;
@@ -87309,7 +87328,7 @@ async function exists2(path) {
 function isNodeError(error62) {
   return error62 instanceof Error && "code" in error62;
 }
-function safeErrorMessage(error62) {
+function safeErrorMessage2(error62) {
   return error62 instanceof Error ? error62.message : "invalid identity data";
 }
 var LOCK_FILE_NAME = "device.lock";
@@ -87385,6 +87404,19 @@ function ownerExited(record11) {
     return isNodeError(error62) && error62.code === "ESRCH";
   }
 }
+async function hasStoredCredentials(directory) {
+  return exists2(join5(directory, "server-credentials.json"));
+}
+async function hasTrustedPeers(directory) {
+  const path = join5(directory, "trusted-peers.json");
+  if (!await exists2(path)) return false;
+  try {
+    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(path, "utf8")));
+    return parsed.peers.length > 0;
+  } catch {
+    return false;
+  }
+}
 async function ensureDirectory(directory) {
   await mkdir3(directory, { recursive: true, mode: 448 });
   await chmod2(directory, 448);
@@ -87410,6 +87442,9 @@ async function removeStaleTemporaries(directory) {
   }
   await Promise.all(entries.filter((name2) => name2.startsWith("device.json.") || name2.startsWith("device.key.")).filter((name2) => name2.endsWith(".tmp")).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
+
+// src/control-runtime.ts
+import { join as join14 } from "node:path";
 
 // src/control-stream.ts
 var STATUS_STREAM_SAMPLE_INTERVAL_MS = 1500;
@@ -87559,7 +87594,7 @@ import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -89497,7 +89532,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
+  const crumbs2 = [{ name: basename4(root) || root, path: root, hidden: false }];
   const remainder = relative(root, path);
   if (remainder === "") return crumbs2;
   let current = root;
@@ -91376,7 +91411,7 @@ var AcpWorkspaceTools = class {
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename6, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
 // src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -91703,7 +91738,7 @@ function agySelectionArgs(catalog, modelId, effort) {
 // src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants4 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join9, basename as basename4 } from "node:path";
+import { join as join9, basename as basename5 } from "node:path";
 import { createHash as createHash6, randomUUID as randomUUID14 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
@@ -91780,7 +91815,7 @@ function agyImageReferences(text) {
   }
 }
 async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
-  const name2 = basename4(path);
+  const name2 = basename5(path);
   if (!IMAGE_NAME.test(name2) || path !== join9(root, sessionFolder(sessionId), name2)) return void 0;
   try {
     await privateDirectory(root);
@@ -94119,7 +94154,7 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename6(path) || "workspace" }));
         if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
         const defaultCandidates = /* @__PURE__ */ new Set();
         const cwd3 = process.cwd();
@@ -94131,7 +94166,7 @@ var AcpRemoteGateway = class {
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        return [...defaultCandidates].map((path) => ({ path, title: basename6(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -94164,7 +94199,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename5(p) || "workspace",
+          title: basename6(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -95127,7 +95162,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename5(current) || current,
+      name: current === home ? "~" : basename6(current) || current,
       path: current,
       hidden: false
     });
@@ -95530,6 +95565,13 @@ var PluginControlRuntime = class {
   }
   logoutFlight;
   serverSwitchFlight;
+  startupFailure;
+  setStartupFailure(error62) {
+    this.startupFailure = error62;
+  }
+  clearStartupFailure() {
+    this.startupFailure = void 0;
+  }
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -95565,6 +95607,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
       if (endpoint === "settings.acp.installOrConfigure") return ok3(await this.installOrConfigureAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
+      if (endpoint === "settings.identity.reset") return ok3(await this.resetIdentity(payload));
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
         const value = record9(payload);
         if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
@@ -95581,6 +95624,20 @@ var PluginControlRuntime = class {
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
       if (endpoint === "status") {
+        if (this.startupFailure !== void 0) {
+          const code = startupErrorCode(this.startupFailure);
+          const message = safeErrorMessage(this.startupFailure);
+          const failureStatus = {
+            mode: "local",
+            available: false,
+            controlUnavailable: false,
+            connected: false,
+            transport: "Disconnected",
+            startupError: { code, message },
+            hostAuthorizationAvailable: false
+          };
+          return withUpdate(ok3(failureStatus), this.updates?.snapshot());
+        }
         const base = this.client !== void 0 ? await this.client.handleControl(endpoint, payload, signal) : ok3(this.hostOnlyStatus());
         return withUpdate(base, this.updates?.snapshot());
       }
@@ -95685,6 +95742,26 @@ var PluginControlRuntime = class {
       return { ...await this.settingsView(), applies: "live" };
     }
     return this.settingsView();
+  }
+  async resetIdentity(payload) {
+    const value = typeof payload === "object" && payload !== null ? payload : {};
+    const roleArg = typeof value.role === "string" ? value.role : "all";
+    const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+    const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
+    const serverUrl = config2.serverUrl;
+    for (const role2 of roles) {
+      const directory = serverUrl === void 0 ? join14(this.identityDirectory, role2) : serverStorageDirectory(this.identityDirectory, serverUrl, role2);
+      const identities = new IdentityStore({ directory, role: role2 });
+      await identities.reset(hostname4());
+      await new ServerCredentialStore(directory).clear();
+    }
+    this.startupFailure = void 0;
+    if (this.switchServer !== void 0) {
+      const runtimes = await this.switchServer(config2);
+      this.client = runtimes.client;
+      this.host = runtimes.host;
+    }
+    return { ...await this.settingsView(), applies: "live" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {
@@ -95908,7 +95985,13 @@ var PluginControlRuntime = class {
       applies: "restart",
       associations,
       acpAvailability: Object.fromEntries((config2.acp?.backends ?? []).map((item) => [item.id, backendCommandAvailable(item.id, item.command ?? "")])),
-      ...association === void 0 ? {} : { association }
+      ...association === void 0 ? {} : { association },
+      ...this.startupFailure === void 0 ? {} : {
+        startupError: {
+          code: startupErrorCode(this.startupFailure),
+          message: safeErrorMessage(this.startupFailure)
+        }
+      }
     };
   }
   async associations(config2) {
@@ -95923,16 +96006,24 @@ var PluginControlRuntime = class {
     };
   }
   async association(serverUrl, role2) {
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2)
-    });
-    const identity3 = await identities.loadOrCreate(hostname4());
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
-    if (credentials === void 0) return void 0;
-    return {
-      method: credentials.authorizationMethod,
-      ...credentials.account === void 0 ? {} : { account: credentials.account }
-    };
+    try {
+      const identities = new IdentityStore({
+        directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2),
+        role: role2
+      });
+      const identity3 = await identities.loadOrCreate(hostname4());
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
+      if (credentials === void 0) return void 0;
+      return {
+        method: credentials.authorizationMethod,
+        ...credentials.account === void 0 ? {} : { account: credentials.account }
+      };
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError) {
+        return void 0;
+      }
+      throw error62;
+    }
   }
   hostOnlyStatus() {
     return {
@@ -95944,6 +96035,13 @@ var PluginControlRuntime = class {
     };
   }
 };
+function startupErrorCode(error62) {
+  if (error62 instanceof IdentityInvalidError) return error62.code;
+  if (typeof error62 === "object" && error62 !== null && "code" in error62 && typeof error62.code === "string") {
+    return error62.code;
+  }
+  return safeErrorCode(error62);
+}
 function backendCommandAvailable(backend, command) {
   if (!command || typeof command !== "string" || command.trim().length === 0) return false;
   const trimmed = command.trim();
@@ -96055,7 +96153,7 @@ function redact(value, key = "") {
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
+import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
@@ -96134,7 +96232,7 @@ var WorkspaceUploadHost = class {
     const root = await realpath6(sourceRoot);
     const directory = await stat6(root);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join14(root, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join15(root, `.dsh-upload-${randomUUID16()}.part`);
     const handle = await open5(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
     const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
     this.uploads.set(p.uploadId, upload);
@@ -96178,7 +96276,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link(upload.temp, join14(upload.root, name2));
+        await link(upload.temp, join15(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -98009,12 +98107,12 @@ function closeCode(code) {
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename7, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
@@ -98052,7 +98150,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root) {
-    segments.unshift(basename6(current));
+    segments.unshift(basename7(current));
     current = dirname6(current);
   }
   for (const segment of segments) {
@@ -98784,7 +98882,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
       let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join15(currentPath, parts[i]);
+        currentPath = join16(currentPath, parts[i]);
         const dirRel = relative5(base, currentPath);
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
@@ -100126,7 +100224,7 @@ function decodeBase64(value) {
 // src/cli.ts
 import { stat as stat9 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -100137,6 +100235,7 @@ async function runCli(args = process.argv.slice(2), dependencies = {}) {
     if (command === "register") return await register(rest, runtime);
     if (command === "status") return await status(rest, runtime);
     if (command === "logout") return await logout(rest, runtime);
+    if (command === "reset-identity") return await resetIdentity(rest, runtime);
     if (command === "help" || command === "--help" || command === "-h" || command === void 0) {
       write2(runtime.stdout, helpText());
       return 0;
@@ -100217,7 +100316,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join16(directory, "device.json"))) {
+  if (!await exists3(join17(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -100262,27 +100361,48 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join16(directory, "device.json"))) {
+  if (!await exists3(join17(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write2(runtime.stdout, "This Host is already logged out.\n");
     return 0;
   }
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity3 = await identities.loadOrCreate(deviceName);
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  api.bindIdentity(identity3);
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   let revokeFailure;
   try {
+    const identity3 = await identities.loadOrCreate(deviceName);
+    const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
+    api.bindIdentity(identity3);
     await api.revokeCurrentDevice();
   } catch (error62) {
     revokeFailure = error62;
   }
   await identities.reset(deviceName);
-  if (revokeFailure !== void 0) {
+  await new ServerCredentialStore(directory).clear();
+  if (revokeFailure !== void 0 && !(revokeFailure instanceof IdentityInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`);
   }
   write2(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n");
+  return 0;
+}
+async function resetIdentity(args, runtime) {
+  const roleArg = args[0];
+  if (roleArg !== void 0 && !["host", "client", "all"].includes(roleArg)) {
+    throw new CliUsageError("Usage: ds-harness-remote reset-identity [host|client|all]");
+  }
+  const serverUrl = selectedServer();
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
+  const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+  for (const role2 of roles) {
+    const directory = serverStorageDirectory(root, serverUrl, role2);
+    const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: role2 });
+    await identities.reset(deviceName);
+    await new ServerCredentialStore(directory).clear();
+    write2(runtime.stdout, `Remote ${role2} identity was reset and a new key pair was created.
+`);
+  }
+  write2(runtime.stdout, "Restart the Harness instance to use the fresh identity.\n");
   return 0;
 }
 async function hostContext(runtime) {
@@ -100350,6 +100470,7 @@ function helpText() {
     "  ds-harness-remote register <server-token>",
     "  ds-harness-remote status",
     "  ds-harness-remote logout",
+    "  ds-harness-remote reset-identity [host|client|all]",
     "",
     "login uses an available QR provider (preferring Zhihu). Use login list to see available providers.",
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
@@ -100527,7 +100648,8 @@ async function activate(ctx, readConfig, entryId) {
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
     const hostIdentities = new IdentityStore({
-      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host")
+      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
+      role: "host"
     });
     const runtime2 = new HostPluginRuntime(
       config3,
@@ -100546,7 +100668,8 @@ async function activate(ctx, readConfig, entryId) {
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {
       const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client")
+        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client"),
+        role: "client"
       });
       clientRuntime2 = new ClientModeRuntime(
         config3,
@@ -100566,7 +100689,7 @@ async function activate(ctx, readConfig, entryId) {
   let replacement;
   const replaceServer = (next) => {
     const operation = async () => {
-      await startup;
+      await startup?.catch(() => void 0);
       if (closed) throw new Error("Remote plugin is closed");
       const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()]);
       const failure5 = shutdown.find((result) => result.status === "rejected");
@@ -100583,6 +100706,7 @@ async function activate(ctx, readConfig, entryId) {
       }
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
+      controlRuntime?.clearStartupFailure();
       ctx.dshRemote = runtime;
       if (clientRuntime !== void 0) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
@@ -100618,10 +100742,12 @@ async function activate(ctx, readConfig, entryId) {
       await startup;
       if (connection !== void 0) updateChecker.start();
     } catch (error62) {
-      await disposeControl?.();
-      await clientRuntime?.close();
-      await runtime.close();
-      throw error62;
+      logger2.error("Remote plugin startup failed", {
+        error: error62 instanceof Error ? error62.message : String(error62),
+        code: error62 instanceof Error && "code" in error62 && typeof error62.code === "string" ? error62.code : safeErrorCode(error62)
+      });
+      controlRuntime?.setStartupFailure(error62);
+      await Promise.allSettled([clientRuntime?.close(), runtime.close()]);
     }
     return async () => {
       closed = true;

@@ -9,7 +9,7 @@ import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
-import { serverStorageDirectory } from '../src/identity-store.js'
+import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
 const directories: string[] = []
@@ -426,6 +426,93 @@ describe('PluginControlRuntime settings setup', () => {
     expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({
       device: { name: hostname(), role: 'client' },
     })
+  })
+  it('surfaces startup failure in status and settings without disabling control plane', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined)
+    const handler = register(control)
+
+    control.setStartupFailure(new IdentityInvalidError('device public and private keys do not match'))
+
+    const statusResult = await handler('status', {}, signal())
+    expect(statusResult).toMatchObject({
+      ok: true,
+      value: {
+        mode: 'local',
+        available: false,
+        controlUnavailable: false,
+        startupError: {
+          code: 'IDENTITY_INVALID',
+          message: 'device public and private keys do not match',
+        },
+      },
+    })
+
+    const settingsResult = await handler('settings.get', {}, signal())
+    expect(settingsResult).toMatchObject({
+      ok: true,
+      value: {
+        startupError: {
+          code: 'IDENTITY_INVALID',
+          message: 'device public and private keys do not match',
+        },
+      },
+    })
+  })
+
+  it('resets identity and clears startup failure via settings.identity.reset', async () => {
+    const root = await temporaryDirectory()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const settings = settingsBinding({ serverUrl })
+    const switchServer = vi.fn(async () => ({
+      client: undefined,
+      host: {
+        hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+        reconnectHost: vi.fn(),
+        clearHostAuthorization: vi.fn(),
+        authorizeHostAsOwned: vi.fn(),
+        authorizeHostWithAccount: vi.fn(),
+        authorizeHostWithCode: vi.fn(),
+      } satisfies HostAuthorizationControl,
+    }))
+
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined, switchServer)
+    const handler = register(control)
+    control.setStartupFailure(new IdentityInvalidError('device public and private keys do not match'))
+
+    const result = await handler('settings.identity.reset', { role: 'all' }, signal())
+    expect(result).toMatchObject({ ok: true })
+    expect(switchServer).toHaveBeenCalledOnce()
+
+    const statusAfter = await handler('status', {}, signal())
+    expect((statusAfter as any).value?.startupError).toBeUndefined()
+  })
+
+  it('tolerates corrupt identity in settingsView without throwing', async () => {
+    const root = await temporaryDirectory()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const settings = settingsBinding({ serverUrl })
+    const clientDir = serverStorageDirectory(root, serverUrl, 'client')
+    await new IdentityStore({ directory: clientDir, role: 'client' }).loadOrCreate('Client')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(join(clientDir, 'device.key'), 'corrupted-key\n')
+    await new ServerCredentialStore(clientDir).save({
+      serverUrl,
+      deviceId: 'client-id',
+      authorizationMethod: 'owned_device',
+      accessToken: '{{SECRET_d1eimftm}}',
+      accessTokenExpiresAt: Date.now() + 60000,
+      refreshToken: '{{SECRET_e4kefhsu}}',
+      refreshTokenExpiresAt: Date.now() + 600000,
+    })
+
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined)
+    const handler = register(control)
+
+    const view = await handler('settings.get', {}, signal())
+    expect(view).toMatchObject({ ok: true, value: { deviceName: expect.any(String) } })
+    expect((view as any).value?.associations?.client).toBeUndefined()
   })
 })
 

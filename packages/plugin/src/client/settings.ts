@@ -61,6 +61,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [debugBusy, setDebugBusy] = React.useState(false)
     const [debugLogging, setDebugLogging] = React.useState(false)
+    const [resetBusy, setResetBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
@@ -529,6 +530,40 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     // The entry style is presentation only, so it lives beside the development
+    const resetIdentity = async (): Promise<void> => {
+      if (!window.confirm(t('resetIdentityConfirm'))) return
+      setResetBusy(true)
+      setError(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.identity.reset', {})
+        applyView(view)
+        setNotice({ key: 'resetIdentitySuccess' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+      } finally {
+        setResetBusy(false)
+      }
+    }
+
+    const resetIdentitySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+      React.createElement('div', null,
+        React.createElement('strong', null, t('resetIdentity')),
+        React.createElement('p', null, t('resetIdentityHint'))),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteDiscard',
+        disabled: busy || resetBusy || !writable,
+        onClick: () => void resetIdentity(),
+      }, t(resetBusy ? 'resettingAction' : 'resetIdentity')),
+    )
+
+    const startupErrorBanner = settingsView?.startupError !== undefined
+      ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' },
+          settingsView.startupError.code === 'IDENTITY_INVALID'
+            ? t('identityCorrupted')
+            : (settingsView.startupError.message || t('remoteStartupFailed')))
+      : null
+
     // switches instead of inside the Host-facing settings block.
     const sidebarEntrySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
       React.createElement('div', null,
@@ -738,8 +773,10 @@ export function createRemotePluginOptions(React: ClientReact) {
                 React.createElement('div', null,
                   React.createElement('span', null, t('deviceId')),
                   React.createElement('code', null, hostDeviceId || '—'))),
+              startupErrorBanner,
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
                 React.createElement('div', null,
@@ -792,6 +829,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                   onClick: () => void logout(),
                 }, t(busy ? 'signingOut' : 'signOut'))))
             : React.createElement('div', { className: 'dshRemoteSettings' },
+              startupErrorBanner,
               React.createElement('div', { className: 'dshRemoteHostIdentity' },
                 React.createElement('div', null,
                   React.createElement('span', null, t('hostName')),
@@ -801,6 +839,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteSettingsSignIn' },
                 React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),

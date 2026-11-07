@@ -578,6 +578,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setError(t('remoteControlUnavailable'))
           return
         }
+        if (nextStatus.startupError !== undefined) {
+          setNeedsAuthorization(undefined)
+          setError(nextStatus.startupError.code === 'IDENTITY_INVALID'
+            ? t('identityCorrupted')
+            : (nextStatus.startupError.message || t('remoteStartupFailed')))
+          return
+        }
         if (!nextStatus.available) {
           setDevices([])
           setNeedsAuthorization(false)

@@ -1705,6 +1705,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signedOut: "Signed out and disconnected from Remote.",
     remoteRequestFailed: "Remote mode request failed.",
     remoteControlUnavailable: "Remote plugin control is still starting. Restart DSH if it stays unavailable.",
+    identityCorrupted: "Local Remote identity is corrupted. Reset the identity in Settings to recover.",
+    resetIdentity: "Reset Remote Identity",
+    resetIdentityHint: "Recreate local device key pairs if they are corrupted. You will need to sign in again.",
+    resetIdentityConfirm: "Are you sure you want to reset the local Remote identity? You will need to sign in again.",
+    resetIdentitySuccess: "Remote identity has been reset.",
+    resettingAction: "Resetting\u2026",
+    remoteStartupFailed: "Remote plugin failed to start.",
     switchTarget: "Switch Local / Remote Harness target",
     harnessTarget: "Harness target",
     close: "Close",
@@ -2016,6 +2023,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
     signedOut: "\u5DF2\u9000\u51FA\u8D26\u53F7\u5E76\u65AD\u5F00 Remote \u8FDE\u63A5\u3002",
     remoteRequestFailed: "\u8FDC\u7A0B\u6A21\u5F0F\u8BF7\u6C42\u5931\u8D25\u3002",
     remoteControlUnavailable: "Remote \u63D2\u4EF6\u63A7\u5236\u901A\u9053\u4ECD\u5728\u542F\u52A8\uFF1B\u5982\u679C\u4E00\u76F4\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u542F DSH\u3002",
+    identityCorrupted: "\u672C\u673A Remote \u8EAB\u4EFD\u6587\u4EF6\u635F\u574F\uFF0C\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u91CD\u7F6E\u8EAB\u4EFD\u3002",
+    resetIdentity: "\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD",
+    resetIdentityHint: "\u5F53\u672C\u673A\u8EAB\u4EFD\u5BC6\u94A5\u5BF9\u635F\u574F\u65F6\u91CD\u5EFA\u8EAB\u4EFD\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
+    resetIdentityConfirm: "\u786E\u5B9A\u8981\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD\u5417\uFF1F\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
+    resetIdentitySuccess: "\u672C\u673A Remote \u8EAB\u4EFD\u5DF2\u91CD\u7F6E\u3002",
+    resettingAction: "\u6B63\u5728\u91CD\u7F6E\u2026",
+    remoteStartupFailed: "Remote \u63D2\u4EF6\u542F\u52A8\u5931\u8D25\u3002",
     switchTarget: "\u5207\u6362\u672C\u5730\u6216\u8FDC\u7A0B Harness",
     harnessTarget: "Harness \u76EE\u6807",
     close: "\u5173\u95ED",
@@ -2749,7 +2763,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [resetBusy, setResetBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
         setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association }));
       }, applyView = (view, updateAssociations = !0) => {
         setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setDebugLogging(view.config.logLevel === "debug"), setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? !0), setSidebarEntry(view.config.sidebar?.entry ?? "standard"), props.sidebarEntry?.publish(view.config.sidebar?.entry ?? "standard"), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
@@ -3038,7 +3052,38 @@ Minimum version required to store current data is: ` + bestVersion + `.
             }
           })
         )
-      ), sidebarEntrySetting = React.createElement(
+      ), resetIdentity = async () => {
+        if (window.confirm(t("resetIdentityConfirm"))) {
+          setResetBusy(!0), setError(void 0);
+          try {
+            let view = await props.control("settings.identity.reset", {});
+            applyView(view), setNotice({ key: "resetIdentitySuccess" });
+          } catch (reason) {
+            setError(messageOf(reason, t));
+          } finally {
+            setResetBusy(!1);
+          }
+        }
+      }, resetIdentitySetting = React.createElement(
+        "div",
+        { className: "dshRemoteAuthorizationSetting" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("strong", null, t("resetIdentity")),
+          React.createElement("p", null, t("resetIdentityHint"))
+        ),
+        React.createElement("button", {
+          type: "button",
+          className: "dshRemoteDiscard",
+          disabled: busy || resetBusy || !writable,
+          onClick: () => void resetIdentity()
+        }, t(resetBusy ? "resettingAction" : "resetIdentity"))
+      ), startupErrorBanner = settingsView?.startupError !== void 0 ? React.createElement(
+        "p",
+        { className: "dshRemoteError", role: "alert" },
+        settingsView.startupError.code === "IDENTITY_INVALID" ? t("identityCorrupted") : settingsView.startupError.message || t("remoteStartupFailed")
+      ) : null, sidebarEntrySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },
         React.createElement(
@@ -3332,8 +3377,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
                 React.createElement("code", null, hostDeviceId || "\u2014")
               )
             ),
+            startupErrorBanner,
             developmentSetting,
             sidebarEntrySetting,
+            resetIdentitySetting,
             acpSetting,
             React.createElement(
               "div",
@@ -3403,6 +3450,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           ) : React.createElement(
             "div",
             { className: "dshRemoteSettings" },
+            startupErrorBanner,
             React.createElement(
               "div",
               { className: "dshRemoteHostIdentity" },
@@ -3421,6 +3469,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             ),
             developmentSetting,
             sidebarEntrySetting,
+            resetIdentitySetting,
             acpSetting,
             React.createElement(
               "div",
@@ -3866,6 +3915,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
           let nextStatus = await props.control("status");
           if (setStatus(nextStatus), nextStatus.controlUnavailable) {
             setNeedsAuthorization(void 0), setError(t("remoteControlUnavailable"));
+            return;
+          }
+          if (nextStatus.startupError !== void 0) {
+            setNeedsAuthorization(void 0), setError(nextStatus.startupError.code === "IDENTITY_INVALID" ? t("identityCorrupted") : nextStatus.startupError.message || t("remoteStartupFailed"));
             return;
           }
           if (!nextStatus.available) {

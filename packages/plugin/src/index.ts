@@ -15,6 +15,7 @@ import { PluginControlRuntime, type PluginSettingsBinding } from './control-runt
 import type { HostWebServerLike } from './control-route.js'
 import { IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
+import { safeErrorCode } from './safe-error.js'
 import { HostPluginRuntime } from './service.js'
 import type { ScheduleCreateService } from './harness-remote-bridge.js'
 import { ClientServerApi } from './server-api.js'
@@ -239,6 +240,7 @@ async function activate(
       directory: config.serverUrl === undefined
         ? defaultIdentityDirectory
         : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'host'),
+      role: 'host',
     })
     const runtime = new HostPluginRuntime(
       config,
@@ -259,6 +261,7 @@ async function activate(
     if (config.serverUrl !== undefined && connection !== undefined) {
       const clientIdentities = new IdentityStore({
         directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'client'),
+        role: 'client',
       })
       clientRuntime = new ClientModeRuntime(
         config,
@@ -279,7 +282,7 @@ async function activate(
   let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
   const replaceServer = (next: ResolvedConfig) => {
     const operation = async () => {
-      await startup
+      await startup?.catch(() => undefined)
       if (closed) throw new Error('Remote plugin is closed')
       // Stop both authorities before loading identities scoped to another Server.
       const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()])
@@ -297,6 +300,7 @@ async function activate(
       }
       runtime = fresh.runtime
       clientRuntime = fresh.clientRuntime
+      controlRuntime?.clearStartupFailure()
       ctx.dshRemote = runtime
       if (clientRuntime !== undefined) {
         if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
@@ -338,10 +342,12 @@ async function activate(
       // Host composition without it skips the registry calls.
       if (connection !== undefined) updateChecker.start()
     } catch (error) {
-      await disposeControl?.()
-      await clientRuntime?.close()
-      await runtime.close()
-      throw error
+      logger.error('Remote plugin startup failed', {
+        error: error instanceof Error ? error.message : String(error),
+        code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : safeErrorCode(error),
+      })
+      controlRuntime?.setStartupFailure(error)
+      await Promise.allSettled([clientRuntime?.close(), runtime.close()])
     }
     return async () => {
       closed = true
