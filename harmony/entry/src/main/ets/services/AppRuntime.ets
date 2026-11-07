@@ -1199,7 +1199,7 @@ export class AppRuntime {
     if (this.lastDeviceId.length === 0) {
       return;
     }
-    this.pendingResumeSessionId = sessionId;
+    this.pendingResumeSessionId = sessionId.length > 0 ? sessionId : this.currentSessionId;
     this.reconnecting = true;
     this.errorMsg = '';
     this.clearRetry();
@@ -2834,7 +2834,15 @@ export class AppRuntime {
       this.messages = [];
       this.generating = false;
       this.setBusy(false);
-      this.errorMsg = '会话列表加载失败：' + errorMessage(error);
+      if (isTransportFailure(error)) {
+        // 加密通道还没就绪/已经断了：重连一次再拉列表，别让用户以为会话丢了
+        this.errorMsg = '会话列表没拉到：与主机的加密通道还没就绪或已断开。点重试会重连后再拉一次。';
+        this.setRetry('重连并重试', () => {
+          this.reconnectAndReopen('');
+        });
+      } else {
+        this.errorMsg = '会话列表加载失败：' + errorMessage(error);
+      }
       this.notify();
     }
   }
@@ -3543,6 +3551,7 @@ function isTransportFailure(error: Object): boolean {
   }
   const text: string = errorMessage(error).toLowerCase();
   return text.indexOf('timed out') >= 0 || text.indexOf('send failed') >= 0
+    || text.indexOf('not been authorized') >= 0 || text.indexOf('relay connection') >= 0
     || text.indexOf('连接已断开') >= 0 || text.indexOf('链路静默') >= 0
     || text.indexOf('transport') >= 0 || text.indexOf('closed') >= 0;
 }

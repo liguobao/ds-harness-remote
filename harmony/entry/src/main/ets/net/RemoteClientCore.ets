@@ -82,12 +82,44 @@ export class RemoteClientCore {
         timer: timer
       };
       this.pending.set(requestId, pending);
-      const sendFuture: Promise<void> = this.transport.send(buildRpcRequestMessage(method, params, requestId));
-      sendFuture.catch((error: Error) => {
+      // 中继刚 attach/换票、或重连间隙里 connectionId 还没就位时，send 会抛
+      // 「relay connection has not been authorized」。这不是业务失败，等一小会儿重发同一帧即可；
+      // 以前直接把它抛给上层，用户看到的就是「会话列表加载失败：… relay connection has not been authorized」。
+      const message: Object = buildRpcRequestMessage(method, params, requestId);
+      this.sendWithAuthRetry(message).catch((error: Error) => {
         this.rejectPending(requestId, new RemoteClientError('CONNECTION_FAILED',
           `RPC ${method} send failed: ${error.message}`));
       });
     });
+  }
+
+  /**
+   * 发送一帧 RPC；传输层「还没授权」时最多等 3 次（250ms 间隔）再重发。
+   * 只在明文同一帧上重发，不会重复业务请求（requestId 不变，主机按 requestId 去重）。
+   */
+  private async sendWithAuthRetry(message: Object): Promise<void> {
+    const data: Uint8Array = message as Uint8Array;
+    let lastError: Error = new Error('send failed');
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        await this.transport.send(data);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const text: string = lastError.message.toLowerCase();
+        const retriable: boolean = text.indexOf('not been authorized') >= 0
+          || text.indexOf('relay connection') >= 0;
+        if (!retriable || attempt === 3) {
+          throw lastError;
+        }
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            resolve();
+          }, 250);
+        });
+      }
+    }
+    throw lastError;
   }
 
   onEvent(handler: (event: RemoteEvent) => void): () => void {

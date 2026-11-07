@@ -364,6 +364,11 @@ export class RelayTransport {
     return Promise.resolve();
   }
 
+  /** 中继是否已拿到 connectionId（connect.accepted 之后才算授权）。 */
+  isAuthorized(): boolean {
+    return this.connectionId !== undefined;
+  }
+
   /** 'lan' | 'p2p' | 'turn' | 'relay'（未连上时为空串）。 */
   transportKind(): string {
     if (this.dataMode === 'lan') {

@@ -38,3 +38,19 @@ harness.remote.stream.open
 - TURN 模式下断链：红条 →「重连并重新打开」→ 一次点击后**回到同一会话**（不退出、不丢当前选中）。
 - hilog 关键行：`reopen session failed: RPC harness.remote.stream.open …` 之后出现
   `会话流失败 → 重连并重新打开`、`connected to host … transport=turn`、`session reopened -> session-…`。
+
+## 姊妹问题：`relay connection has not been authorized`
+
+现象：偶发「会话列表加载失败：RPC harness.remote.call send failed: relay connection has not been authorized」。
+
+根因：`RelayTransport.send()` 要求 `connectionId` 已就位（`connect.accepted` 之后才有）。
+重连间隙 / 中继换票重 attach / LAN 回落中继那一瞬间，加密通道已经是"连上"状态，
+但数据面还没拿到新的 connectionId，此时任何 RPC（第一个通常就是 `session/list`）的发送会直接抛这句话；
+旧逻辑把它当成普通业务错误抛给上层，于是整页显示「会话列表加载失败」，用户只能退出重进。
+
+修法：
+- `RemoteClientCore.sendWithAuthRetry()`：识别「not been authorized / relay connection」这类**可重发**失败，
+  同一帧最多重发 4 次、每次等 250ms（requestId 不变，主机按 requestId 去重，不会重复业务请求）。
+- `RelayTransport.isAuthorized()`：暴露"是否已拿到 connectionId"，排障与后续 gating 用。
+- `isTransportFailure()` 把这句话也算传输类失败：会话列表没拉到时的按钮变成「重连并重试」，
+  文案改为「与主机的加密通道还没就绪或已断开」，不再说"会话列表加载失败"这种误导。
