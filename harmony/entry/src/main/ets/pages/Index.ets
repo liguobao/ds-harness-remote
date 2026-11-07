@@ -1277,6 +1277,11 @@ struct Index {
   }
 
   /** 宽屏判断统一入口，避免页面里到处散落 width >= 900 之类的魔法数。 */
+  /** 手机窄屏（xs/sm）：输入坞按紧凑口径排，别把输入框挤成一条缝。 */
+  private compactDock(): boolean {
+    return isCompactWidth(this.breakpoint);
+  }
+
   private isWideLayout(): boolean {
     return isExpandedWidth(this.breakpoint);
   }
@@ -4346,7 +4351,7 @@ struct Index {
           .padding({ top: 2, bottom: 2 })
         }
         // 每颗控件各自一块玻璃，中间留缝断开，不再连成一整条
-        Row({ space: 12 }) {
+        Row({ space: this.compactDock() ? 6 : 12 }) {
           // 图片：选相册里的图，压完挂在输入框上方，随下一次发送一起交给主机
           Row() {
             if (this.pickingImages) {
@@ -4361,11 +4366,11 @@ struct Index {
                 .fillColor(this.pal().text2)
             }
           }
-          .width(46)
-          .height(46)
+          .width(this.compactDock() ? 40 : 46)
+          .height(this.compactDock() ? 40 : 46)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .borderRadius(23)
+          .borderRadius(this.compactDock() ? 20 : 23)
           // 对齐资讯类 App 的底栏光感：厚材质 + 低白度过衬，让下层内容模糊透上来
           .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
             colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
@@ -4392,11 +4397,11 @@ struct Index {
               .fontSize(this.fs(15))
               .fontColor(this.pal().text2)
           }
-          .width(34)
-          .height(46)
+          .width(this.compactDock() ? 30 : 34)
+          .height(this.compactDock() ? 40 : 46)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .borderRadius(23)
+          .borderRadius(this.compactDock() ? 20 : 23)
           .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
           .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
             colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
@@ -4409,17 +4414,18 @@ struct Index {
             this.promptDraftInput = '';
             this.promptPanelOpen = true;
           })
-          // 展开：小屏上长文容易被候选条和输入坞挤扁，切到全屏编辑面板写
+          // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
+          if (!this.compactDock()) {
           Row() {
             Text('⤢')
               .fontSize(this.fs(15))
               .fontColor(this.pal().text2)
           }
-          .width(34)
-          .height(46)
+          .width(this.compactDock() ? 30 : 34)
+          .height(this.compactDock() ? 40 : 46)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .borderRadius(23)
+          .borderRadius(this.compactDock() ? 20 : 23)
           .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
           .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
             colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
@@ -4431,12 +4437,17 @@ struct Index {
           .onClick(() => {
             this.composerExpanded = true;
           })
+          }
           // 输入框自己就是一块玻璃；换行靠回车，高度随内容长到 5 行再内部滚动
           TextArea({ text: this.promptInput,
-            placeholder: this.generating ? this.tr('正在生成，可插话…')
-              : (this.runtime.steerMode ? this.tr('插话发送（长按发送键切换）') : this.tr('发送消息…')) })
+            placeholder: this.generating
+              ? (this.compactDock() ? this.tr('正在生成…') : this.tr('正在生成，可插话…'))
+              : (this.runtime.steerMode
+                ? (this.compactDock() ? this.tr('插话发送…') : this.tr('插话发送（长按发送键切换）'))
+                : this.tr('发送消息…')) })
             .layoutWeight(1)
-            .constraintSize({ minHeight: 46, maxHeight: this.isWideLayout() ? 240 : 132 })
+            .constraintSize({ minHeight: this.compactDock() ? 44 : 46,
+              maxHeight: this.isWideLayout() ? 240 : 132 })
             // PC：Ctrl+Enter 发送（普通 Enter 仍按输入法/换行走，不抢）
             .onKeyEvent((event: KeyEvent) => {
               if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ENTER) {
@@ -4531,8 +4542,8 @@ struct Index {
             .fontSize(this.fs(20))
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
-            .width(46)
-            .height(46)
+            .width(this.compactDock() ? 42 : 46)
+            .height(this.compactDock() ? 42 : 46)
             .textAlign(TextAlign.Center)
             .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
             .borderRadius(23)
