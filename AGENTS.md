@@ -1,5 +1,15 @@
 # Repository Guide for Agents
 
+## Operator-configured extra workspace read roots (2026-11-08)
+
+远端文件读取原先只允许会话工作区（`cwd` 与 `root`），Host 在工作区之外产出的文件（例如写入临时目录的图片）在手机等远端客户端无法打开，桌面端因为走官方 `/api/file` 不受影响。新增 Host 本地配置 `workspaceFiles.extraReadRoots`：列出允许远端客户端读取的额外绝对路径根目录，默认为空，默认行为完全不变。
+
+安全模型不变且默认更严：配置项只能在 Host 本地设置，远端无法改写；额外根目录先 `realpath` 规范化，只保留真实存在的目录，无法解析的配置按缺失处理（收窄而非放宽）；目标自身不得是符号链接，规范化后的目标必须落在所列根目录之内（指向根目录外的链接被拒绝），非 `workspaceFiles/stat` 端点要求目标是普通文件，`readAll` 仍受 `MAX_READ_BYTES` 限制，请求里的 `..` 仍在闸门前被拒绝。命中额外根目录时下发规范化绝对路径（工作区根无法表达外部路径），工作区内文件仍按工作区相对路径下发，既有行为不变。
+
+只影响既有 `workspaceFiles/read|readBytes|readAll|stat` allowlist，不新增端点、不新增文件系统写入能力，符合实现规则 6 与 8。配置项经 `resolveConfig` 校验：条目必须是绝对路径，相对路径在启动时即报错；通过 live settings binding 读取，改动即时生效，无需重载插件。
+
+验证：Plugin check（tsc）、74 个测试文件 / 554 tests、共享包 build、生产 Plugin bundle、`verify-dsh-plugin.mjs` 与 `git diff --check` 通过；新增 9 条命名场景覆盖“未配置时拒绝、命中额外根目录可读、嵌套文件可读、工作区文件仍相对下发、根目录外仍拒绝、根目录内指向外部的链接仍拒绝、`..` 仍拒绝、根目录不存在时忽略、配置读取异常时仍拒绝”，并用禁用实现的对照跑确认断言非空转。未做真实 Desktop/Android、跨设备加密 E2E 与真机验收；`workspaceFiles/list` 与 `changes` 仍受官方工作区范围约束，额外根目录不改变目录列举。
+
 ## Self-hosted refresh response recovery (2026-11-06)
 
 `apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间

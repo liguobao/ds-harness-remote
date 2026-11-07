@@ -564,6 +564,7 @@ function editableConfig(config: ResolvedConfig): Config {
     sidebar: config.sidebar,
     hostControl: config.hostControl ?? { enabled: true },
     loopback: config.loopback,
+    workspaceFiles: config.workspaceFiles,
     forceRelay: config.forceRelay,
     logLevel: config.logLevel,
     reconnect: config.reconnect.enabled

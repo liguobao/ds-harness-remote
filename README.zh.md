@@ -208,6 +208,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 - 不开放通用工具 RPC 或远程桌面。
 - Workspace 选择器只列出文件夹，并且只返回受限的只读目录元数据。
 - 远端文件预览不能写入、删除、上传、执行文件，也不能调用远端系统的“外部打开”。
+- 远端文件读取默认限制在会话工作区根目录内。当 Host 在工作区之外产出文件时，Host 管理员可在 `workspaceFiles.extraReadRoots` 中列出额外的绝对路径根目录（默认为空）；目标必须解析到这些根目录之内，其余路径一律拒绝。
 - Codex Remote / Agent ACP是可选功能，可以关闭，并遵循与 Remote 其他能力相同的加密 Host 权限边界。
 - 移除设备后，其凭证、membership 和已建立的 Remote 连接均会失效。
 

@@ -253,6 +253,14 @@ async function activate(
         peer,
       ),
       schedule,
+      // Read live, so a settings change applies without reloading the plugin.
+      () => {
+        try {
+          return resolveConfig(settingsBinding?.get() ?? readConfig()).workspaceFiles.extraReadRoots
+        } catch {
+          return []
+        }
+      },
     )
 
     let clientRuntime: ClientModeRuntime | undefined

@@ -207,6 +207,7 @@ See [Network and transport](docs/network.md) for the topology, control and data 
 - General tool RPC and remote desktop are not exposed.
 - The workspace picker lists folders only and returns bounded, read-only directory metadata.
 - Remote file preview cannot write, delete, upload, execute, or open a path in an external application.
+- Remote file reads are confined to the Session workspace root. The Host operator can name additional absolute roots in `workspaceFiles.extraReadRoots` (empty by default) when a Host produces files outside the workspace; the target must resolve inside a named root, and every other path stays denied.
 - Codex Remote / Agent ACP is optional, can be disabled, and follows the same encrypted Host permission boundary as the rest of Remote.
 - Removing a device revokes its credentials, membership, and active Remote connections.
 

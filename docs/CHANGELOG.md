@@ -1,3 +1,8 @@
+## Unreleased
+
+- Let the Host operator name extra absolute roots a Remote client may read from, with `workspaceFiles.extraReadRoots`. It is empty by default, so remote file reads stay confined to the Session workspace root. Use it when the Host produces files outside the workspace, for example an image written to a temporary directory; every path outside the named roots stays denied.
+- 允许 Host 管理员通过 `workspaceFiles.extraReadRoots` 指定远端客户端可读取的额外绝对路径根目录，默认值为空，因此远端文件读取仍限制在会话工作区根目录内。当 Host 在工作区之外产出文件（例如写入临时目录的图片）时可使用该配置；不在所列根目录内的路径一律拒绝。
+
 ## 0.6.3 — 2026-11-05
 
 Android build 71.

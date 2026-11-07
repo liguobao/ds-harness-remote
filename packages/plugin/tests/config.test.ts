@@ -22,6 +22,13 @@ describe('plugin config', () => {
     expect(resolveConfig({ remoteTools: { enabled: false } }, {}).remoteTools?.enabled).toBe(false)
   })
 
+  it('keeps extra workspace read roots empty unless the operator names absolute ones', () => {
+    expect(resolveConfig({}, {}).workspaceFiles.extraReadRoots).toEqual([])
+    expect(resolveConfig({ workspaceFiles: { extraReadRoots: ['/tmp/output', '/tmp/output'] } }, {}).workspaceFiles.extraReadRoots)
+      .toEqual(['/tmp/output'])
+    expect(() => resolveConfig({ workspaceFiles: { extraReadRoots: ['relative/output'] } }, {})).toThrow()
+  })
+
   it('allows the default-on Codex domain to be disabled and rejects obsolete workspace filters', () => {
     expect(resolveConfig({ codex: { enabled: false } }, {})).toMatchObject({
       codex: { enabled: false, binary: 'codex' },

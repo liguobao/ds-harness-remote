@@ -91,6 +91,8 @@ export class HostPluginRuntime {
     private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
     /** Host `schedule` service; absent on Hosts whose composition omits reminders. */
     private readonly schedule?: ScheduleCreateService,
+    /** Absolute roots a Remote client may read besides the Session workspace. */
+    private readonly extraWorkspaceReadRoots?: () => readonly string[],
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -118,6 +120,7 @@ export class HostPluginRuntime {
               sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
             ),
             this.schedule,
+            this.extraWorkspaceReadRoots,
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(

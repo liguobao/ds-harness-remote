@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import { isAbsolute } from 'node:path'
 import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
@@ -16,6 +17,12 @@ export interface Config {
   sidebar?: { entry?: 'standard' | 'compact' }
   hostControl?: { enabled?: boolean }
   loopback?: { ports?: number[] }
+  /**
+   * Extra directories a Remote client may read besides the Session workspace.
+   * Each entry is an absolute path. Off by default: the Session workspace root
+   * stays the only root a Remote client can read from.
+   */
+  workspaceFiles?: { extraReadRoots?: string[] }
   forceRelay?: boolean
   /**
    * When a known peer device presents a NEW identity key after re-authorizing with the
@@ -85,6 +92,7 @@ export interface ResolvedConfig {
   sidebar: { entry: 'standard' | 'compact' }
   hostControl?: { enabled: boolean }
   loopback: { ports: number[] }
+  workspaceFiles: { extraReadRoots: string[] }
   codex: ResolvedCodexConfig
   cursor: ResolvedCursorConfig
   acp?: ResolvedAcpConfig
@@ -114,6 +122,7 @@ const entryConfigSchema = s.object({
   sidebar: s.object({ entry: s.union(['standard', 'compact'] as const) }),
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
+  workspaceFiles: s.object({ extraReadRoots: s.array(s.string()) }),
   forceRelay: s.boolean(),
   rotatePinnedPeerKey: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
@@ -170,6 +179,11 @@ const configSchema = z.object({
   sidebar: z.object({ entry: z.enum(['standard', 'compact']).optional() }).strict().optional(),
   hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
+  workspaceFiles: z.object({
+    extraReadRoots: z.array(z.string().trim().min(1).max(4096)).max(16)
+      .refine((roots) => roots.every((root) => isAbsolute(root)), { message: 'workspaceFiles.extraReadRoots entries must be absolute paths' })
+      .optional(),
+  }).strict().optional(),
   forceRelay: z.boolean().optional(),
   rotatePinnedPeerKey: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -214,6 +228,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     remoteTools: { enabled: parsed.remoteTools?.enabled ?? true },
     sidebar: { entry: parsed.sidebar?.entry === 'compact' ? 'compact' : 'standard' },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
+    workspaceFiles: { extraReadRoots: [...new Set(parsed.workspaceFiles?.extraReadRoots ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? 'info',

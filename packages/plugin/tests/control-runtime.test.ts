@@ -225,6 +225,19 @@ describe('PluginControlRuntime settings setup', () => {
 
   })
 
+  it('keeps operator-configured extra workspace read roots across a settings write', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({
+      workspaceFiles: { extraReadRoots: ['/tmp/output'] },
+    })
+    const handler = register(new PluginControlRuntime(
+      resolveConfig(settings.get()), directory, settings, undefined, undefined,
+    ))
+
+    await expect(handler('settings.codex.set', { enabled: false }, signal())).resolves.toMatchObject({ ok: true })
+    expect(resolveConfig(settings.get()).workspaceFiles.extraReadRoots).toEqual(['/tmp/output'])
+  })
+
   it('exposes Host activity and starts a manual reconnect through loopback control', async () => {
     const reconnectHost = vi.fn()
     const host = {

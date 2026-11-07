@@ -1579,6 +1579,190 @@ describe('HarnessRemoteBridge', () => {
       await rm(outside, { recursive: true, force: true })
     }
   })
+
+  it('reads files under an operator-configured root and keeps every other path denied', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-native-ws-'))
+    const extra = await mkdtemp(join(tmpdir(), 'dsh-native-extra-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-native-outside-'))
+    try {
+      const insideFile = join(root, 'inside.txt')
+      const extraFile = join(extra, 'chart.png')
+      const extraNested = join(extra, 'sub', 'nested.png')
+      const outsideFile = join(outside, 'secret.txt')
+      const symlinkEscape = join(extra, 'escape.txt')
+      await writeFile(insideFile, 'inside content')
+      await mkdir(join(extra, 'sub'))
+      await writeFile(extraFile, 'png bytes')
+      await writeFile(extraNested, 'nested bytes')
+      await writeFile(outsideFile, 'secret outside')
+      await symlink(outsideFile, symlinkEscape, 'file')
+      const canonicalExtraFile = await realpath(extraFile)
+      const canonicalExtraNested = await realpath(extraNested)
+
+      const dispatch = vi.fn(async (_method?: string, payload?: unknown) => ({
+        ok: true as const,
+        value: { absolutePath: (payload as any)?.args?.path, text: 'ok', bytes: 9 },
+      }))
+      const bridgeWith = (roots: string[]) => new HarnessRemoteBridge(
+        gateway({ dispatch }),
+        vi.fn(async () => undefined),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => root,
+        undefined,
+        () => roots,
+      )
+
+      await runScenarios([
+        {
+          name: 'denies a file outside the workspace when no extra root is configured',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: extraFile } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'reads a file under the configured extra root',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: extraFile } },
+              }),
+            ).resolves.toMatchObject({ ok: true })
+            expect(dispatch).toHaveBeenLastCalledWith(
+              'workspaceFiles/read',
+              expect.objectContaining({ args: expect.objectContaining({ path: canonicalExtraFile }) }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'reads a nested file under the configured extra root',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/readBytes',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: extraNested } },
+              }),
+            ).resolves.toMatchObject({ ok: true })
+            expect(dispatch).toHaveBeenLastCalledWith(
+              'workspaceFiles/readBytes',
+              expect.objectContaining({ args: expect.objectContaining({ path: canonicalExtraNested }) }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'keeps dispatching workspace files workspace-relative when extra roots exist',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: 'inside.txt' } },
+              }),
+            ).resolves.toMatchObject({ ok: true })
+            expect(dispatch).toHaveBeenLastCalledWith(
+              'workspaceFiles/read',
+              expect.objectContaining({ args: expect.objectContaining({ path: 'inside.txt' }) }),
+              expect.any(AbortSignal),
+            )
+          },
+        },
+        {
+          name: 'still denies a file outside both the workspace and the extra root',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: outsideFile } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'still denies a symlink inside the extra root that points outside it',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: symlinkEscape } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'still denies parent traversal towards an extra root',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([extra]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: '../secret.txt' } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'ignores an extra root that does not exist',
+          run: async () => {
+            dispatch.mockClear()
+            await expect(
+              bridgeWith([join(extra, 'missing')]).call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: extraFile } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'keeps denying every path when the configured roots cannot be read',
+          run: async () => {
+            dispatch.mockClear()
+            const failing = new HarnessRemoteBridge(
+              gateway({ dispatch }),
+              vi.fn(async () => undefined),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              async () => root,
+              undefined,
+              () => { throw new Error('settings unavailable') },
+            )
+            await expect(
+              failing.call({
+                endpoint: 'workspaceFiles/read',
+                payload: { args: { workspaceFileScopeId: 'session-1', path: extraFile } },
+              }),
+            ).rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+            expect(dispatch).not.toHaveBeenCalled()
+          },
+        },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(extra, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
 })
 
 function stubTerminalSpawner(): RemoteTerminalSpawner {

@@ -1263,6 +1263,7 @@ function config(): ResolvedConfig {
     terminal: { enabled: false },
     sidebar: { entry: 'standard' },
     loopback: { ports: [] },
+    workspaceFiles: { extraReadRoots: [] },
     enabled: true,
     role: 'host',
     serverUrl: 'https://dsh.r2049.cn',

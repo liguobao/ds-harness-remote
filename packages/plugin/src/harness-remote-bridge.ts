@@ -301,6 +301,12 @@ export class HarnessRemoteBridge {
     private readonly codexWorkspace?: CodexWorkspaceBridge,
     private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
     private readonly schedule?: ScheduleCreateService,
+    /**
+     * Absolute roots the Host operator allows a Remote client to read besides
+     * the Session workspace. Read on every file call so a settings change
+     * applies live. Empty (the default) keeps the workspace the only root.
+     */
+    private readonly extraWorkspaceReadRoots?: () => readonly string[],
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
@@ -827,6 +833,73 @@ export class HarnessRemoteBridge {
     return isRecord(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs
   }
 
+  /**
+   * The roots the Host operator allows a Remote client to read besides the
+   * Session workspace. Each configured root is resolved to its canonical path
+   * and kept only when it is an existing directory, so a stale or broken
+   * setting narrows access instead of widening it.
+   */
+  private async resolveExtraWorkspaceReadRoots(): Promise<string[]> {
+    let configured: readonly string[] = []
+    try {
+      configured = this.extraWorkspaceReadRoots?.() ?? []
+    } catch {
+      return []
+    }
+    const roots: string[] = []
+    for (const entry of configured) {
+      if (!isAbsolute(entry)) continue
+      try {
+        const canonical = await realpath(entry)
+        const info = await stat(canonical)
+        if (!info.isDirectory()) continue
+        roots.push(canonical)
+      } catch {
+        continue
+      }
+    }
+    return roots
+  }
+
+  /**
+   * Validate one file under an operator-configured root. The rules mirror the
+   * Session workspace: the target itself must not be a symlink, it must resolve
+   * inside the root, and it must be a regular file. The canonical absolute
+   * path is returned, because the workspace root cannot express a path
+   * outside it.
+   */
+  private async verifyExtraWorkspaceFile(
+    extraRoot: string,
+    candidate: string,
+    canonical: string,
+    endpoint: string,
+  ): Promise<string> {
+    try {
+      if (process.platform === 'win32') {
+        const rootDrive = parse(extraRoot).root.toLowerCase()
+        const candDrive = parse(canonical).root.toLowerCase()
+        if (rootDrive !== candDrive) {
+          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        }
+      }
+      const targetLstat = await lstat(candidate)
+      if (targetLstat.isSymbolicLink()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+      const info = await stat(canonical)
+      if (endpoint !== 'workspaceFiles/stat' && !info.isFile()) {
+        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+      }
+      if (endpoint === 'workspaceFiles/readAll' && Number(info.size) > MAX_READ_BYTES) {
+        throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+      }
+      return canonical
+    } catch (error) {
+      if (error instanceof RpcError) throw error
+      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.')
+    }
+  }
+
   private async resolveWorkspaceRootForSession(
     sessionId: string,
     signal: AbortSignal,
@@ -856,6 +929,19 @@ export class HarnessRemoteBridge {
     endpoint: string,
   ): Promise<string> {
     const candidate = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+    // An operator-configured root may hold the target, so the Session workspace
+    // is not the only readable root. The extra root is canonicalized first, so
+    // the boundary stays exact even when the configured path is a symlink.
+    const extraRoots = await this.resolveExtraWorkspaceReadRoots()
+    if (extraRoots.length > 0) {
+      const canonical = await realpath(candidate).catch(() => undefined)
+      if (canonical !== undefined) {
+        for (const extraRoot of extraRoots) {
+          if (isPathOutside(relative(extraRoot, canonical))) continue
+          return await this.verifyExtraWorkspaceFile(extraRoot, candidate, canonical, endpoint)
+        }
+      }
+    }
     if (process.platform === 'win32') {
       const rootDrive = parse(root).root.toLowerCase()
       const candDrive = parse(candidate).root.toLowerCase()

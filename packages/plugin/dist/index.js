@@ -82986,6 +82986,7 @@ function safeMessage(error62) {
 
 // src/config.ts
 import { hostname as hostname3 } from "node:os";
+import { isAbsolute as isAbsolute3 } from "node:path";
 
 // node_modules/@deepseek-ai/cosmokit/lib/index.js
 function isNullable(value) {
@@ -83865,6 +83866,7 @@ var entryConfigSchema = Schema.object({
   sidebar: Schema.object({ entry: Schema.union(["standard", "compact"]) }),
   hostControl: Schema.object({ enabled: Schema.boolean() }),
   loopback: Schema.object({ ports: Schema.array(Schema.number()) }),
+  workspaceFiles: Schema.object({ extraReadRoots: Schema.array(Schema.string()) }),
   forceRelay: Schema.boolean(),
   rotatePinnedPeerKey: Schema.boolean(),
   logLevel: Schema.union(["debug", "info", "warn", "error"]),
@@ -83909,6 +83911,9 @@ var configSchema = external_exports.object({
   sidebar: external_exports.object({ entry: external_exports.enum(["standard", "compact"]).optional() }).strict().optional(),
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
+  workspaceFiles: external_exports.object({
+    extraReadRoots: external_exports.array(external_exports.string().trim().min(1).max(4096)).max(16).refine((roots) => roots.every((root) => isAbsolute3(root)), { message: "workspaceFiles.extraReadRoots entries must be absolute paths" }).optional()
+  }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
   rotatePinnedPeerKey: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
@@ -83949,6 +83954,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     remoteTools: { enabled: parsed.remoteTools?.enabled ?? true },
     sidebar: { entry: parsed.sidebar?.entry === "compact" ? "compact" : "standard" },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
+    workspaceFiles: { extraReadRoots: [...new Set(parsed.workspaceFiles?.extraReadRoots ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? "info",
@@ -87603,7 +87609,7 @@ import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename3, isAbsolute as isAbsolute4, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -89198,7 +89204,7 @@ var CodexRemoteDomain = class {
           ...cursor3 === void 0 ? {} : { cursor: cursor3 }
         }));
         for (const project2 of result.data) {
-          const projectRoots = project2.roots.map((root) => root.path).filter((path) => isAbsolute3(path));
+          const projectRoots = project2.roots.map((root) => root.path).filter((path) => isAbsolute4(path));
           if (projectRoots.length === 0) continue;
           projectIds.add(project2.id);
           roots.push(...projectRoots);
@@ -89227,7 +89233,7 @@ var CodexRemoteDomain = class {
       }
     }
     for (const workspace2 of deriveCodexCwdWorkspaces(threads)) {
-      if (isAbsolute3(workspace2.path)) roots.push(workspace2.path);
+      if (isAbsolute4(workspace2.path)) roots.push(workspace2.path);
     }
     return { projectIds, roots };
   }
@@ -89251,7 +89257,7 @@ var CodexRemoteDomain = class {
     return void 0;
   }
   async requireCodexWorkspacePath(path) {
-    if (!isAbsolute3(path)) {
+    if (!isAbsolute4(path)) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
     const paths = await this.listCodexWorkspacePaths();
@@ -89274,7 +89280,7 @@ var CodexRemoteDomain = class {
     throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
   }
   async requireNewCodexProjectPath(path) {
-    if (!isAbsolute3(path)) {
+    if (!isAbsolute4(path)) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
     }
     try {
@@ -89322,7 +89328,7 @@ var CodexRemoteDomain = class {
     };
   }
   async resolveCodexDirectory(path) {
-    if (!isAbsolute3(path)) {
+    if (!isAbsolute4(path)) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
     const authority = await this.readWorkspaceAuthority();
@@ -89497,7 +89503,7 @@ function sanitizeProject(value) {
   if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
     const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
-    return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
+    return path === void 0 || !isAbsolute4(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
   return {
@@ -90471,7 +90477,7 @@ var IsolatedAcpClient = class {
 
 // src/workspace-bridge.ts
 import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // src/remote-terminal-controller.ts
 var import_headless = __toESM(require_xterm_headless(), 1);
@@ -90482,7 +90488,7 @@ import { spawn as spawn4 } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as constants3 } from "node:fs";
 import { userInfo } from "node:os";
-import { delimiter as delimiter2, isAbsolute as isAbsolute4, join as join7 } from "node:path";
+import { delimiter as delimiter2, isAbsolute as isAbsolute5, join as join7 } from "node:path";
 import { PassThrough } from "node:stream";
 function profile(path) {
   const name2 = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
@@ -90492,7 +90498,7 @@ function profile(path) {
 async function localExecutable(file2, _env, signal) {
   signal?.throwIfAborted();
   const extensions = process.platform === "win32" && !/\.[^\\/]+$/.test(file2) ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""];
-  const paths = isAbsolute4(file2) ? [file2] : (process.env.PATH ?? "").split(delimiter2).filter(Boolean).map((dir) => join7(dir, file2));
+  const paths = isAbsolute5(file2) ? [file2] : (process.env.PATH ?? "").split(delimiter2).filter(Boolean).map((dir) => join7(dir, file2));
   for (const path of paths) for (const extension2 of extensions) {
     try {
       await access(path + extension2, process.platform === "win32" ? constants3.F_OK : constants3.X_OK);
@@ -91248,15 +91254,15 @@ var WorkspaceBridge = class {
     }
   }
   async safePath(root, path, directory) {
-    const candidate = isAbsolute5(path) ? resolve3(path) : resolve3(root, path);
+    const candidate = isAbsolute6(path) ? resolve3(path) : resolve3(root, path);
     const rel = relative2(root, candidate);
-    if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
+    if (rel.startsWith("..") || isAbsolute6(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
       const info = await lstat2(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
       const canonicalRel = relative2(root, canonical);
-      if (canonicalRel.startsWith("..") || isAbsolute5(canonicalRel)) throw new Error();
+      if (canonicalRel.startsWith("..") || isAbsolute6(canonicalRel)) throw new Error();
       if (directory && !info.isDirectory()) throw new Error();
       return canonical;
     } catch {
@@ -91420,7 +91426,7 @@ var AcpWorkspaceTools = class {
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename5, isAbsolute as isAbsolute8, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
 // src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -93255,7 +93261,7 @@ function isSessionMutation(method) {
 
 // src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep } from "node:path";
+import { isAbsolute as isAbsolute7, join as join11, relative as relative3, resolve as resolve4, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir5 } from "node:os";
 import { createRequire as createRequire2 } from "node:module";
@@ -93422,7 +93428,7 @@ async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemin
             try {
               const p = fileURLToPath2(u);
               const imageRelative = relative3(AGY_IMAGE_ROOT, p);
-              const imageCache = imageRelative === "" || !isAbsolute6(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
+              const imageCache = imageRelative === "" || !isAbsolute7(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
               if (!imageCache) paths.add(p);
             } catch {
             }
@@ -95051,7 +95057,7 @@ var AcpRemoteGateway = class {
     return canonical;
   }
   async requireExistingDirectory(path) {
-    if (!isAbsolute7(path)) {
+    if (!isAbsolute8(path)) {
       throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
     }
     try {
@@ -95069,7 +95075,7 @@ var AcpRemoteGateway = class {
   async listDirectory(path) {
     const home = homedir6();
     const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
-    const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve5(target3));
+    const canonical = await this.requireExistingDirectory(isAbsolute8(target3) ? target3 : resolve5(target3));
     const names = await readdir4(canonical);
     const entries = [];
     let truncated = false;
@@ -96016,6 +96022,7 @@ function editableConfig(config2) {
     sidebar: config2.sidebar,
     hostControl: config2.hostControl ?? { enabled: true },
     loopback: config2.loopback,
+    workspaceFiles: config2.workspaceFiles,
     forceRelay: config2.forceRelay,
     logLevel: config2.logLevel,
     reconnect: config2.reconnect.enabled ? {
@@ -96099,7 +96106,7 @@ function redact(value, key = "") {
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
+import { extname, isAbsolute as isAbsolute9, join as join14 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
@@ -96174,7 +96181,7 @@ var WorkspaceUploadHost = class {
     if (this.uploads.size >= 2) throw failure4("UPLOAD_LIMIT");
     const sourceRoot = await this.sessionRoot(p.sessionId);
     this.assertLive();
-    if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
+    if (!sourceRoot || !isAbsolute9(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const root = await realpath6(sourceRoot);
     const directory = await stat6(root);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
@@ -98053,15 +98060,15 @@ function closeCode(code) {
 // src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute11, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
 // src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute10, parse as parse3, resolve as resolve7 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
-  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
+  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute10(path) || resolve7(path) === parse3(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
   await mkdir4(path, { recursive: true });
@@ -98070,7 +98077,7 @@ async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
   const home = resolve7(homedir8());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve7(path);
-  if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
+  if (!isAbsolute10(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir5(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
@@ -98301,7 +98308,7 @@ var PUBLIC_SCHEDULE_ERRORS = {
 };
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, extraWorkspaceReadRoots) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -98310,6 +98317,7 @@ var HarnessRemoteBridge = class {
     this.codexWorkspace = codexWorkspace;
     this.resolveWorkspaceRoot = resolveWorkspaceRoot;
     this.schedule = schedule;
+    this.extraWorkspaceReadRoots = extraWorkspaceReadRoots;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
@@ -98786,6 +98794,66 @@ var HarnessRemoteBridge = class {
     }
     return isRecord21(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
+  /**
+   * The roots the Host operator allows a Remote client to read besides the
+   * Session workspace. Each configured root is resolved to its canonical path
+   * and kept only when it is an existing directory, so a stale or broken
+   * setting narrows access instead of widening it.
+   */
+  async resolveExtraWorkspaceReadRoots() {
+    let configured = [];
+    try {
+      configured = this.extraWorkspaceReadRoots?.() ?? [];
+    } catch {
+      return [];
+    }
+    const roots = [];
+    for (const entry of configured) {
+      if (!isAbsolute11(entry)) continue;
+      try {
+        const canonical = await realpath7(entry);
+        const info = await stat8(canonical);
+        if (!info.isDirectory()) continue;
+        roots.push(canonical);
+      } catch {
+        continue;
+      }
+    }
+    return roots;
+  }
+  /**
+   * Validate one file under an operator-configured root. The rules mirror the
+   * Session workspace: the target itself must not be a symlink, it must resolve
+   * inside the root, and it must be a regular file. The canonical absolute
+   * path is returned, because the workspace root cannot express a path
+   * outside it.
+   */
+  async verifyExtraWorkspaceFile(extraRoot, candidate, canonical, endpoint) {
+    try {
+      if (process.platform === "win32") {
+        const rootDrive = parse4(extraRoot).root.toLowerCase();
+        const candDrive = parse4(canonical).root.toLowerCase();
+        if (rootDrive !== candDrive) {
+          throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        }
+      }
+      const targetLstat = await lstat4(candidate);
+      if (targetLstat.isSymbolicLink()) {
+        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
+      }
+      const info = await stat8(canonical);
+      if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
+        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
+      }
+      if (endpoint === "workspaceFiles/readAll" && Number(info.size) > MAX_READ_BYTES2) {
+        throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
+      }
+      return canonical;
+    } catch (error62) {
+      if (error62 instanceof RpcError) throw error62;
+      throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");
+    }
+  }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
     if (this.resolveWorkspaceRoot === void 0) {
@@ -98805,7 +98873,17 @@ var HarnessRemoteBridge = class {
     }
   }
   async verifyWorkspacePathContainment(root, cwd2, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve8(path) : resolve8(cwd2, path);
+    const candidate = isAbsolute11(path) ? resolve8(path) : resolve8(cwd2, path);
+    const extraRoots = await this.resolveExtraWorkspaceReadRoots();
+    if (extraRoots.length > 0) {
+      const canonical = await realpath7(candidate).catch(() => void 0);
+      if (canonical !== void 0) {
+        for (const extraRoot of extraRoots) {
+          if (isPathOutside(relative5(extraRoot, canonical))) continue;
+          return await this.verifyExtraWorkspaceFile(extraRoot, candidate, canonical, endpoint);
+        }
+      }
+    }
     if (process.platform === "win32") {
       const rootDrive = parse4(root).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
@@ -98876,7 +98954,7 @@ var HarnessRemoteBridge = class {
   }
 };
 function isPathOutside(rel) {
-  if (rel === ".." || isAbsolute10(rel)) return true;
+  if (rel === ".." || isAbsolute11(rel)) return true;
   if (process.platform === "win32") {
     return rel.startsWith("..\\") || rel.startsWith("../");
   }
@@ -99251,7 +99329,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, extraWorkspaceReadRoots) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -99260,6 +99338,7 @@ var HostPluginRuntime = class {
     this.terminalSpawner = terminalSpawner;
     this.pluginRoutes = pluginRoutes;
     this.schedule = schedule;
+    this.extraWorkspaceReadRoots = extraWorkspaceReadRoots;
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
@@ -99284,7 +99363,8 @@ var HostPluginRuntime = class {
           (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
         ),
-        this.schedule
+        this.schedule,
+        this.extraWorkspaceReadRoots
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -100585,7 +100665,15 @@ async function activate(ctx, readConfig, entryId) {
         () => ctx.get("webServer")?.port,
         peer
       ),
-      schedule
+      schedule,
+      // Read live, so a settings change applies without reloading the plugin.
+      () => {
+        try {
+          return resolveConfig(settingsBinding?.get() ?? readConfig()).workspaceFiles.extraReadRoots;
+        } catch {
+          return [];
+        }
+      }
     );
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {
