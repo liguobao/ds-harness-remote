@@ -399,6 +399,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       Number(b.id === props.preferredQrProvider) - Number(a.id === props.preferredQrProvider))
     const selectedProvider = oauthProviders.find(item => `oauth:${item.id}` === loginMethod)
     const scanLabel = t('scanWithProvider', { provider: selectedProvider?.displayName ?? '' })
+    const passwordVisible = !savingServer && !serverDirty && loginMethod === 'password' && (
+      loginMethodManuallySelected.current || (!providersLoading && !providersFailed && oauthProviders.length === 0)
+    )
 
     const qrLoginTab = (provider: OAuthProviderInfo): unknown => React.createElement('button', {
       key: provider.id, type: 'button', role: 'tab', id: `dsh-remote-oauth:${provider.id}-tab`,
@@ -1234,8 +1237,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 ...orderedQrProviders.map(qrLoginTab),
                 React.createElement('button', {
                   type: 'button', role: 'tab', id: 'dsh-remote-password-tab',
-                  'aria-selected': loginMethod === 'password', 'aria-controls': 'dsh-remote-password-panel',
-                  className: loginMethod === 'password' ? 'isActive' : '', disabled: busy || savingServer || serverDirty,
+                  'aria-selected': passwordVisible, 'aria-controls': 'dsh-remote-password-panel',
+                  className: passwordVisible ? 'isActive' : '', disabled: busy || savingServer || serverDirty,
                   onClick: () => selectLoginMethod('password'),
                 }, t('accountPasswordLogin'))),
               providersLoading ? React.createElement('p', { role: 'status' }, t('loadingLoginProviders')) : null,
@@ -1245,32 +1248,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               }, t('retryLoginProviders')) : null,
               !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0
                 ? React.createElement('p', { role: 'status' }, t('noLoginProviders')) : null,
-              loginMethod !== 'password' && selectedProvider !== undefined
+              passwordVisible
                 ? React.createElement('div', {
-                  className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
-                  'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
-                },
-                  qrImage === undefined
-                    ? React.createElement('div', { className: 'dshRemoteQrPlaceholder', 'aria-busy': busy },
-                      qrExpired ? React.createElement('p', null, t('qrLoginExpired')) : React.createElement('span', null, t('checkingConnection')))
-                    : qrSession !== undefined
-                      ? React.createElement('a', {
-                        className: 'dshRemoteQrOpen', href: qrSession.scanUrl,
-                        target: '_blank', rel: 'noopener noreferrer',
-                        'aria-label': t('openInBrowser'),
-                      },
-                        React.createElement('img', {
-                          src: qrImage, width: 184, height: 184,
-                          alt: scanLabel,
-                        }),
-                        React.createElement('span', null, t('openInBrowser'), ' ↗'))
-                      : null,
-                  React.createElement('strong', null, scanLabel),
-                  React.createElement('p', null, t('scanLoginHint')),
-                  qrExpired ? React.createElement('button', {
-                    type: 'button', disabled: busy, onClick: () => setQrExpired(false),
-                  }, t('refreshQrCode')) : null)
-                : React.createElement('div', {
                   className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
                   'aria-labelledby': 'dsh-remote-password-tab',
                 },
@@ -1282,7 +1261,34 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                     type: 'password', value: password, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
                     'aria-label': t('password'), onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
                   }),
-                  React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn'))),
+                  React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')),
+                  React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))
+                : selectedProvider !== undefined
+                  ? React.createElement('div', {
+                    className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
+                    'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
+                  },
+                    qrImage === undefined
+                      ? React.createElement('div', { className: 'dshRemoteQrPlaceholder', 'aria-busy': busy },
+                        qrExpired ? React.createElement('p', null, t('qrLoginExpired')) : React.createElement('span', null, t('checkingConnection')))
+                      : qrSession !== undefined
+                        ? React.createElement('a', {
+                          className: 'dshRemoteQrOpen', href: qrSession.scanUrl,
+                          target: '_blank', rel: 'noopener noreferrer',
+                          'aria-label': t('openInBrowser'),
+                        },
+                          React.createElement('img', {
+                            src: qrImage, width: 184, height: 184,
+                            alt: scanLabel,
+                          }),
+                          React.createElement('span', null, t('openInBrowser'), ' ↗'))
+                        : null,
+                    React.createElement('strong', null, scanLabel),
+                    React.createElement('p', null, t('scanLoginHint')),
+                    qrExpired ? React.createElement('button', {
+                      type: 'button', disabled: busy, onClick: () => setQrExpired(false),
+                    }, t('refreshQrCode')) : null)
+                  : null,
               React.createElement('div', { className: 'dshRemoteServiceAddress' },
                 React.createElement('span', null, t('currentServiceAddress')),
                 editingServer

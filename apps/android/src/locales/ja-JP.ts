@@ -205,13 +205,13 @@ const jaJP = {
   },
   status: { online: "オンライン", offline: "オフライン", disconnected: "切断されました", lan: "直接LAN", relay: "サーバーリレー", p2p: "ダイレクト P2P", turn: "ターンリレー", waiting: "接続中", running: "実行中" },
   setup: {
-    or: 'または', heroSignIn: 'DeepSeek Harness Remote にサインイン', emailSignIn: 'メールでサインイン',
+    or: 'または', heroSignIn: 'DeepSeek Harness Remote にサインイン', emailSignIn: 'メールでサインイン', emailSignInCollapse: 'メールログインを閉じる',
     title: "サインイン", signIn: "アカウントにサインインする", signInAgain: "再度サインインしてください", lead: "リモートデバイスと同じログイン方法を選択して、作業を続けてください。",
     switchServer: "サーバーを切り替える", saveServer: "サーバーを保存", switchServerHint: "保存すると現在の接続が切断され、新しいサーバーへのログインが必要になります。",
     google: "Google でログイン",
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "電子メール", zhihu: "志胡を続ける", github: "GitHub を続ける", oauthHint: "ブラウザが開いて認証が完了し、自動的にここに戻ります。",
     qr: "QRコードでサインイン", qrEntryHint: "タップしてコードを表示し、携帯電話でスキャンします", qrScanTitle: "携帯電話でサインインする", qrScanHint: "このコードを携帯電話でスキャンし、認証ページで確認してください。このデバイスはその後自動的にサインインします。", qrWaiting: "電話を待っています…", qrExpired: "このQRコードは有効期限が切れています。更新して再試行してください。", qrRefresh: "リフレッシュコード", qrUnsupported: "このサーバーは QR サインインを提供しません。別のサインイン方法を使用してください。", qrFailed: "QRサインインが完了しませんでした。もう一度やり直してください。",
-    email: "電子メール", emailPlaceholder: "メールアドレスを入力してください", password: "パスワード", passwordPlaceholder: "パスワードを入力してください", passwordHint: "パスワードはこのサインインにのみ使用され、携帯電話には保存されません。",
+    email: "電子メール", emailPlaceholder: "メールアドレスを入力してください", password: "パスワード", passwordPlaceholder: "パスワードを入力してください", passwordHint: "招待コードまたは自作サーバー専用、公式非対応。",
     server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
   },
   settings: {

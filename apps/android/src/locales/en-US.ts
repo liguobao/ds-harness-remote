@@ -205,13 +205,13 @@ const enUS = {
   },
   status: { online: 'Online', offline: 'Offline', disconnected: 'Disconnected', lan: 'Direct LAN', relay: 'Server relay', p2p: 'Direct P2P', turn: 'TURN relay', waiting: 'Connecting', running: 'Running' },
   setup: {
-    or: 'or', heroSignIn: 'Sign in to DeepSeek Harness Remote', emailSignIn: 'Sign in with email',
+    or: 'or', heroSignIn: 'Sign in to DeepSeek Harness Remote', emailSignIn: 'Sign in with email', emailSignInCollapse: 'Hide email sign-in',
     title: 'Sign in', signIn: 'Sign in to your account', signInAgain: 'Sign in again', lead: 'Choose the same sign-in method as on your remote device to continue your work.',
     switchServer: "Switch server", saveServer: "Save server", switchServerHint: "Saving disconnects the current connection and requires signing in to the new server.",
     google: "Continue with Google",
     oauth: 'Zhihu', githubOAuth: 'GitHub', passwordMethod: 'Email', zhihu: 'Continue with Zhihu', github: 'Continue with GitHub', oauthHint: 'A browser will open to finish authorization, then return here automatically.',
     qr: 'Sign in with QR code', qrEntryHint: 'Tap to show the code, then scan it with your phone', qrScanTitle: 'Sign in with your phone', qrScanHint: 'Scan this code with your phone and confirm on the authorization page. This device signs in automatically afterward.', qrWaiting: 'Waiting for your phone…', qrExpired: 'This QR code expired. Refresh and try again.', qrRefresh: 'Refresh code', qrUnsupported: 'This server does not offer QR sign-in. Use another sign-in method.', qrFailed: 'QR sign-in did not complete. Try again.',
-    email: 'Email', emailPlaceholder: 'Enter your email', password: 'Password', passwordPlaceholder: 'Enter your password', passwordHint: 'Your password is used only for this sign-in and is not stored on your phone.',
+    email: 'Email', emailPlaceholder: 'Enter your email', password: 'Password', passwordPlaceholder: 'Enter your password', passwordHint: 'Invite or self-hosted accounts only; not DeepSeek official.',
     server: 'Server address', serverHint: 'Use an HTTPS address.', trustTitle: 'Protect your devices and conversations', trustBody: 'Conversation data is encrypted in transit. Only trusted devices signed in to the same account can access it.',
   },
   settings: {
