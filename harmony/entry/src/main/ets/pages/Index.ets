@@ -162,6 +162,8 @@ struct Index {
   @State heartbeatExpanded: string[] = [];
   /** 全屏编辑面板（长文写作时用，对齐 Android 的 composer expand）。 */
   @State composerExpanded: boolean = false;
+  /** 登录页：密码登录默认收起（有扫码/授权方式时），对齐上游 #335。 */
+  @State passwordLoginOpen: boolean = false;
   /** 归档 / 置顶集合的本地镜像（运行时对象不是可观察的，直接读不会触发重渲染）。 */
   @State archivedIds: string[] = [];
   @State pinnedIds: string[] = [];
@@ -2540,6 +2542,21 @@ struct Index {
     ];
   }
 
+  /**
+   * 登录页是否展开账号密码输入：没有可用的扫码/授权方式时必须露出；
+   * 有的话默认收起，用户点「用账号密码登录」再展开（对齐上游 #335）。
+   */
+  private showPasswordLogin(): boolean {
+    if (this.passwordLoginOpen) {
+      return true;
+    }
+    // 已经填了账号/密码就别收起来（providers 晚到时输入框突然消失最恼人）
+    if (this.emailInput.length > 0 || this.passwordInput.length > 0) {
+      return true;
+    }
+    return this.providers.length === 0;
+  }
+
   private choiceTitleText(): string {
     if (this.choiceKind === 'theme') {
       return this.tr('外观');
@@ -2950,6 +2967,7 @@ struct Index {
         .onChange((value: string) => {
           this.serverInput = value;
         })
+      if (this.showPasswordLogin()) {
       TextInput({ text: this.emailInput, placeholder: this.tr('邮箱') })
         .height(48)
         .backgroundColor(this.pal().chip)
@@ -2992,6 +3010,24 @@ struct Index {
         .onClick(() => {
           this.runtime.login(this.serverInput, this.emailInput, this.passwordInput);
         })
+      } else {
+        Row({ space: 6 }) {
+          Text(this.tr('用账号密码登录'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .onClick(() => {
+              this.passwordLoginOpen = true;
+            })
+          Text(this.tr('· DeepSeek 账号请用上面的扫码/授权'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Start)
+      }
       if (this.providers.length > 0) {
         Column({ space: 8 }) {
           Text(this.tr('扫码 / 浏览器授权登录（选账号对应的提供商）'))
@@ -3842,6 +3878,15 @@ struct Index {
                   .fontColor(this.transportBadgeColor())
                   .padding({ left: 5, right: 5, top: 1, bottom: 1 })
                   .backgroundColor(this.transportBadgeBg())
+                  .borderRadius(5)
+                  .margin({ left: 4 })
+              }
+              if (sessionBackendBadge(this.currentSessionId).length > 0) {
+                Text(sessionBackendBadge(this.currentSessionId))
+                  .fontSize(9)
+                  .fontColor('#8B5CF6')
+                  .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                  .backgroundColor('rgba(139,92,246,0.14)')
                   .borderRadius(5)
                   .margin({ left: 4 })
               }
@@ -4887,6 +4932,14 @@ struct Index {
                         .fontSize(this.fs(10))
                         .fontColor('#34D399')
                     }
+                  }
+                  if (sessionBackendBadge(session.sessionId).length > 0) {
+                    Text(sessionBackendBadge(session.sessionId))
+                      .fontSize(this.fs(9))
+                      .fontColor('#8B5CF6')
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                      .backgroundColor('rgba(139,92,246,0.14)')
+                      .borderRadius(5)
                   }
                   if (this.isPinnedSession(session.sessionId)) {
                     Text('置顶')
@@ -8026,6 +8079,32 @@ function formatSessionTitle(session: HarnessRemoteSession): string {
   }
   const shortId: string = session.sessionId.substring(0, 8);
   return english() ? `Session ${shortId}` : `会话 ${shortId}`;
+}
+
+/** 会话行的 Agent 后端徽标：按 sessionId 前缀投影（与上游 Android backend-groups 同口径）。 */
+function sessionBackendBadge(sessionId: string): string {
+  if (sessionId.startsWith('codex:')) {
+    return 'Codex';
+  }
+  if (sessionId.startsWith('claude:')) {
+    return 'Claude';
+  }
+  if (sessionId.startsWith('cursor:')) {
+    return 'Cursor';
+  }
+  if (sessionId.startsWith('opencode:')) {
+    return 'OpenCode';
+  }
+  if (sessionId.startsWith('antigravity:')) {
+    return 'AntiGravity';
+  }
+  if (sessionId.startsWith('hermes:')) {
+    return 'Hermes';
+  }
+  if (sessionId.startsWith('pi:')) {
+    return 'Pi';
+  }
+  return '';
 }
 
 /** 今天 / 昨天 / 更早 —— 会话列表分组用。 */

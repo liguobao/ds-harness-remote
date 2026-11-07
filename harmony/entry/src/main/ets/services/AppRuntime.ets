@@ -133,6 +133,8 @@ export class AppRuntime {
   /** 断线后的重连退避：逐次放大，最多 MAX_RECONNECT_ATTEMPTS 次后交回用户。 */
   private static readonly RECONNECT_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
   private static readonly MAX_RECONNECT_ATTEMPTS: number = 6;
+  /** 在线状态探测预算（毫秒）：超时按「未知」处理，不挡连接。 */
+  private static readonly PRESENCE_BUDGET_MS: number = 4000;
   private refreshTimer: number = -1;
   /** In-flight credential renewal. The Server rotates the refresh token on every call and
    *  invalidates every token of this device when a spent one is presented again, so two
@@ -152,6 +154,9 @@ export class AppRuntime {
   private lastDeviceId: string = '';
   /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
   private pendingResumeSessionId: string = '';
+  /** 主机能力探测结果缓存：同一版本的主机能力是固定的，重连不必再问一遍（上游 #326 同一思路）。 */
+  private featuresCacheKey: string = '';
+  private featuresCacheValue: RemoteHostFeatures | undefined = undefined;
   private reconnectAttempt: number = 0;
   private reconnectTimer: number = -1;
   /** 错误条上「重试」按钮的文案与要重跑的动作：失败时登记，成功或手动关闭时清掉。 */
@@ -608,7 +613,17 @@ export class AppRuntime {
       this.probeIceConfig(relay).catch(() => undefined);
       this.setConnectStage('读取主机能力…');
       const gateway: RemoteGateway = new RemoteGateway(core);
-      const features: RemoteHostFeatures = await gateway.probeHostFeatures();
+      // 能力探测是每次连接一个 RPC 往返；主机版本不变就没有重新探测的必要
+      const featureKey: string = host.clientVersion + '|' + host.harnessVersion;
+      let features: RemoteHostFeatures | undefined = this.featuresCacheKey === featureKey
+        ? this.featuresCacheValue : undefined;
+      if (features === undefined) {
+        features = await gateway.probeHostFeatures();
+        this.featuresCacheKey = featureKey;
+        this.featuresCacheValue = features;
+      } else {
+        logInfo('host features cached for ' + featureKey);
+      }
       logInfo('host features: sessionFormat=' + features.sessionFormat + ' apiProxy=' + features.apiProxy
         + ' remoteGateway=' + features.remoteGateway + ' caps=' + features.capabilities.join(','));
       if (this.connectCancelled) {
@@ -2339,18 +2354,36 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * 在线状态判断：给 4 秒预算（一次请求 + 一次仅针对鉴权失败的重试）。
+   * 这只是决定「能不能连」，超时就当未知，交给后续握手去暴露真实原因，
+   * 而不是在这里把连接失败拖到 30 秒（上游 #326 的 HOST_DESCRIBE_TIMEOUT_MS 同一思路）。
+   */
   private async presenceWithRetry(deviceId: string): Promise<HostPresence> {
     const api: RemoteServerApi = await this.ensureApi();
-    try {
-      return await api.presenceFor(deviceId);
-    } catch (error) {
-      if (!isAuthError(error)) {
-        throw asError(error);
+    const probe: Promise<HostPresence> = (async (): Promise<HostPresence> => {
+      try {
+        return await api.presenceFor(deviceId);
+      } catch (error) {
+        if (!isAuthError(error)) {
+          throw asError(error);
+        }
+        this.dropAccessToken();
+        const retried: RemoteServerApi = await this.ensureApi();
+        return await retried.presenceFor(deviceId);
       }
-      this.dropAccessToken();
-      const retried: RemoteServerApi = await this.ensureApi();
-      return await retried.presenceFor(deviceId);
-    }
+    })();
+    // 4 秒预算：在线状态只是「要不要连」的前置判断，超时就当未知（不拦连接），
+    // 让 Noise 握手去暴露真实原因，而不是把失败拖到 30 秒。
+    const timeout: Promise<HostPresence> = new Promise<HostPresence>((resolve) => {
+      setTimeout(() => {
+        const unknown: HostPresence = new HostPresence();
+        unknown.online = true;
+        unknown.lastSeenAt = 0;
+        resolve(unknown);
+      }, AppRuntime.PRESENCE_BUDGET_MS);
+    });
+    return Promise.race([probe, timeout]);
   }
 
   /** Start QR login against `baseUrl`; the UI renders `qrUrl` and polling runs by itself. */

@@ -274,13 +274,16 @@ export class RelayTransport {
     return new Promise<void>((resolve, reject) => {
       this.connectResolve = resolve;
       this.connectReject = reject;
-      this.handshakeTimer = setTimeout(() => {
-        this.fail(new Error('Relay control handshake timed out'));
-      }, this.options.handshakeTimeoutMs);
       const ws = webSocket.createWebSocket();
       this.socket = ws;
       ws.on('open', (err: Error, value: Object) => {
         logInfo('control socket open ' + this.url);
+        // 握手预算从 socket 打开才开始算：拨号本身慢（弱网/跨网）不该吃掉等 hello 的时间
+        if (this.handshakeTimer === -1) {
+          this.handshakeTimer = setTimeout(() => {
+            this.fail(new Error('Relay control handshake timed out'));
+          }, this.options.handshakeTimeoutMs);
+        }
         this.startLinkWatchdog();
         try {
           this.sendHello();
