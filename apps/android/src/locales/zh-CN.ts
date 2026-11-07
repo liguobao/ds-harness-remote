@@ -450,7 +450,7 @@ const zhCN = {
     hourUnit: '小时',
   },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
-  transport: { auto: "自动（推荐）", autoDescription: "自动选择直连或 TURN，失败时转服务器。", turn: "TURN 中转", turnDescription: "跳过直连，TURN 失败后转服务器。", relay: "服务器转发", relayDescription: "跳过直连和 TURN，全程由服务器转发。" },
+  transport: { auto: "自动（推荐）", autoDescription: "LAN/P2P 优先，TURN 转发，Relay 兜底。", turn: "TURN 中转", turnDescription: "优先 TURN，其次服务器 Relay。", relay: "服务器转发", relayDescription: "不使用 P2P、TURN 中转。" },
   workspaces: {
     loadFailed: '工作区加载失败',
     offlineBody: '重新连接电脑后，即可查看工作区和对话。',
