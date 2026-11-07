@@ -452,7 +452,7 @@ const frFR = {
     hourUnit: 'heures',
   },
   time: { unavailable: "Heure de mise à jour indisponible", lastSeenUnavailable: "Temps d'activité indisponible", lastActive: (value: string) => `Actif ${value}`, now: "tout à l' heure", justNow: "Mis à jour tout à l'heure", minutesAgo: (n: number) => `Il y a ${n} minutes`, hoursAgo: (n: number) => `Il y a ${n} heures`, updatedSuffix: "", locale: "fr-FR" },
-  transport: { auto: "Automatique (recommandé)", autoDescription: "Choisit une connexion directe ou un relais.", turn: "Relais TURN", turnDescription: "Sans connexion directe ; serveur en secours.", relay: "Relais serveur", relayDescription: "Connexion via le serveur uniquement." },
+  transport: { auto: "Automatique (recommandé)", autoDescription: "Direct ou TURN, sinon relais serveur.", turn: "Relais TURN", turnDescription: "TURN seul, sinon relais serveur.", relay: "Relais serveur", relayDescription: "Tout via le serveur, sans direct ni TURN." },
   workspaces: {
     loadFailed: "Impossible de charger les espaces de travail",
     offlineBody: "Reconnectez-vous à votre ordinateur pour afficher les espaces de travail et les conversations.",

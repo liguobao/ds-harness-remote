@@ -452,7 +452,7 @@ const enUS = {
     hourUnit: 'hours',
   },
   time: { unavailable: 'Update time unavailable', lastSeenUnavailable: 'Active time unavailable', lastActive: (value: string) => `Active ${value}`, now: 'just now', justNow: 'Updated just now', minutesAgo: (n: number) => `${n} min ago`, hoursAgo: (n: number) => `${n} hr ago`, updatedSuffix: '', locale: 'en-US' },
-  transport: { auto: "Automatic (recommended)", autoDescription: "Selects a direct or relayed path.", turn: "TURN relay", turnDescription: "Skips direct; falls back to the server.", relay: "Server relay", relayDescription: "Connects only through the server." },
+  transport: { auto: "Automatic (recommended)", autoDescription: "Direct or TURN; server relay on failure.", turn: "TURN relay", turnDescription: "TURN only; server relay on failure.", relay: "Server relay", relayDescription: "No direct or TURN; all data via server." },
   workspaces: {
     loadFailed: 'Could not load workspaces',
     offlineBody: 'Reconnect to your computer to view workspaces and conversations.',

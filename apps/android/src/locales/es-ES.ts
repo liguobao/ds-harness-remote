@@ -452,7 +452,7 @@ const esES = {
     hourUnit: 'horas',
   },
   time: { unavailable: "Hora de actualización no disponible", lastSeenUnavailable: "Tiempo activo no disponible", lastActive: (value: string) => `Activo ${value}`, now: "En este momento", justNow: "Actualizado hace un momento", minutesAgo: (n: number) => `Hace ${n} minutos`, hoursAgo: (n: number) => `Hace ${n} hora`, updatedSuffix: "", locale: "es-ES" },
-  transport: { auto: "Automático (recomendado)", autoDescription: "Elige conexión directa o retransmisión.", turn: "Retransmisión TURN", turnDescription: "Sin conexión directa; el servidor como respaldo.", relay: "Retransmisión del servidor", relayDescription: "Conecta solo a través del servidor." },
+  transport: { auto: "Automático (recomendado)", autoDescription: "Directa o TURN; servidor si falla.", turn: "Retransmisión TURN", turnDescription: "Solo TURN; servidor si falla.", relay: "Retransmisión del servidor", relayDescription: "Todo por servidor, sin directa ni TURN." },
   workspaces: {
     loadFailed: "No se pudieron cargar los espacios de trabajo",
     offlineBody: "Vuelva a conectarse a su computadora para ver espacios de trabajo y conversaciones.",

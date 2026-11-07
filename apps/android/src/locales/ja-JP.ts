@@ -452,7 +452,7 @@ const jaJP = {
     hourUnit: '時間',
   },
   time: { unavailable: "更新時間が利用できません", lastSeenUnavailable: "アクティブ時間が利用できません", lastActive: (value: string) => `最終アクティブ: ${value}`, now: "たった今", justNow: "たった今更新", minutesAgo: (n: number) => `${n} 分前`, hoursAgo: (n: number) => `${n} 時間前`, updatedSuffix: "", locale: "ja-JP" },
-  transport: { auto: "自動（推奨）", autoDescription: "直接接続か中継を自動選択。", turn: "TURN 中継", turnDescription: "直接接続せず、失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "常にサーバー経由で接続。" },
+  transport: { auto: "自動（推奨）", autoDescription: "直接接続か TURN を選び、失敗時はサーバー経由。", turn: "TURN 中継", turnDescription: "直接接続せず、TURN 失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "直接接続・TURN を使わず、常にサーバー経由。" },
   workspaces: {
     loadFailed: "ワークスペースを読み込めませんでした",
     offlineBody: "コンピューターに再接続して、ワークスペースと会話を表示します。",

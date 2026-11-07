@@ -450,7 +450,7 @@ const zhTW = {
     hourUnit: '小時',
   },
   time: { unavailable: '更新時間不可用', lastSeenUnavailable: '活躍時間不可用', lastActive: (value: string) => `${value}活躍`, now: '剛剛', justNow: '剛剛更新', minutesAgo: (n: number) => `${n} 分鐘前`, hoursAgo: (n: number) => `${n} 小時前`, updatedSuffix: '更新', locale: 'zh-TW' },
-  transport: { auto: "自動（推薦）", autoDescription: "自動選擇直連或中轉。", turn: "TURN 中轉", turnDescription: "略過直連，失敗時轉伺服器。", relay: "伺服器轉發", relayDescription: "僅透過伺服器連線。" },
+  transport: { auto: "自動（推薦）", autoDescription: "自動選擇直連或 TURN，失敗時轉伺服器。", turn: "TURN 中轉", turnDescription: "略過直連，TURN 失敗後轉伺服器。", relay: "伺服器轉發", relayDescription: "略過直連和 TURN，全程由伺服器轉發。" },
   workspaces: {
     loadFailed: '工作區載入失敗',
     offlineBody: '重新連線電腦後，即可檢視工作區和對話。',
