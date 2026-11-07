@@ -24,6 +24,8 @@ export interface Config {
    * account directory before this policy applies. Default: false (pin strictly).
    */
   rotatePinnedPeerKey?: boolean
+  /** Offer IPv6 ICE host candidates so dual-stack peers can take a direct path. */
+  iceIpv6?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
   reconnect?: boolean | {
     initialDelayMs?: number
@@ -73,6 +75,7 @@ export interface ResolvedConfig {
   deviceName: string
   forceRelay: boolean
   rotatePinnedPeerKey: boolean
+  iceIpv6: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   reconnect: {
     enabled: boolean
@@ -116,6 +119,7 @@ const entryConfigSchema = s.object({
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
   rotatePinnedPeerKey: s.boolean(),
+  iceIpv6: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
   reconnect: s.union([
     s.boolean(),
@@ -172,6 +176,7 @@ const configSchema = z.object({
   loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: z.boolean().optional(),
   rotatePinnedPeerKey: z.boolean().optional(),
+  iceIpv6: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   reconnect: reconnectSchema.optional(),
   codex: z.object({
@@ -216,6 +221,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
+  iceIpv6: parsed.iceIpv6 ?? false,
     logLevel: parsed.logLevel ?? 'info',
     reconnect: {
       enabled: parsed.reconnect !== false,

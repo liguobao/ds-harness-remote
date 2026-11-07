@@ -1260,6 +1260,7 @@ function helloAck(connectionSessionId: string) {
 
 function config(): ResolvedConfig {
   return {
+    iceIpv6: false,
     terminal: { enabled: false },
     sidebar: { entry: 'standard' },
     loopback: { ports: [] },

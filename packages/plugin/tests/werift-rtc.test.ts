@@ -10,6 +10,7 @@ import { buildExternalNativeRtcFactory, resolveNativeRtcRequireFrom } from '../s
 import {
   buildWeriftFactory,
   detectHostIpv4Candidates,
+    detectHostIpv6Candidates,
   loadNodeRtcFactory,
   loadWeriftFactory,
   orderIceServersForWerift,
@@ -349,3 +350,35 @@ function ipv4(address: string): NetworkInterfaceInfo {
     cidr: `${address}/24`,
   }
 }
+
+describe('IPv6 host candidate filtering', () => {
+  const interfaces = {
+    eth0: [
+      { address: '203.0.113.9', netmask: '255.255.255.0', family: 'IPv4', mac: '00:00:00:00:00:01', internal: false, cidr: '203.0.113.9/24' },
+      { address: '240e:3b0:1234::1', netmask: 'ffff:ffff:ffff::', family: 'IPv6', mac: '00:00:00:00:00:01', internal: false, cidr: '240e:3b0:1234::1/48', scopeid: 0 },
+      { address: 'fe80::1', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', mac: '00:00:00:00:00:01', internal: false, cidr: 'fe80::1/64', scopeid: 2 },
+      { address: '::1', netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', family: 'IPv6', mac: '00:00:00:00:00:00', internal: true, cidr: '::1/128', scopeid: 0 },
+    ],
+  } as unknown as NodeJS.Dict<NetworkInterfaceInfo[] | undefined>
+
+  const ipv6HostCandidate = {
+    candidate: 'candidate:1 1 udp 2122260223 240e:3b0:1234::1 50000 typ host',
+    sdpMid: '0',
+    sdpMLineIndex: 0,
+  } as unknown as Parameters<typeof shouldAdvertiseCandidate>[0]
+
+  it('offers only global unicast IPv6 addresses', () => {
+    expect(detectHostIpv6Candidates(interfaces)).toEqual(['240e:3b0:1234::1'])
+    // The IPv4 list still works on the same interfaces.
+    expect(detectHostIpv4Candidates(interfaces)).toEqual(['203.0.113.9'])
+  })
+
+  it('filters IPv6 candidates by the IPv6 allow-list, never by the IPv4 one', () => {
+    // An IPv4 allow-list must not accept an IPv6 candidate.
+    expect(shouldAdvertiseCandidate(ipv6HostCandidate, new Set(['203.0.113.9']))).toBe(false)
+    expect(shouldAdvertiseCandidate(ipv6HostCandidate, new Set(), new Set(['240e:3b0:1234::1']))).toBe(true)
+    expect(shouldAdvertiseCandidate(ipv6HostCandidate, new Set(), new Set(['240e:3b0:1234::2']))).toBe(false)
+    // Empty allow-lists keep the legacy "do not filter" behavior.
+    expect(shouldAdvertiseCandidate(ipv6HostCandidate, new Set())).toBe(true)
+  })
+})
