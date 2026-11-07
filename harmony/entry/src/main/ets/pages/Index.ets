@@ -4743,8 +4743,6 @@ struct Index {
               top: 10, bottom: 10 })
             // 跟手光斑：坐标就是这块自己的局部坐标
             .overlay(this.DockSpot(96), { align: Alignment.Center })
-            // 手机上生成中：停止键缩成框内右侧的小方块，垂直居中（贴右边不留上下偏移）
-            .overlay(this.StopChipOverlay(), { align: Alignment.End, offset: { x: -6 } })
             .onTouch((event: TouchEvent) => {
               this.trackDockLight(event);
             })
@@ -4778,6 +4776,27 @@ struct Index {
                 this.runtime.stopGeneration();
               })
           }
+          if (this.generating && this.compactDock() && this.promptInput.trim().length === 0
+            && this.pendingImages.length === 0) {
+            // 手机上生成中且没输入：最右边这颗键直接用成「停止」，垂直居中一颗键，不再另占位
+            Column() {
+              Column()
+                .width(13)
+                .height(13)
+                .borderRadius(3)
+                .backgroundColor('#FFFFFF')
+            }
+            .width(42)
+            .height(42)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .backgroundColor('#F85749')
+            .borderRadius(21)
+            .shadow({ radius: 12, color: 'rgba(248,87,73,0.40)', offsetX: 0, offsetY: 5 })
+            .onClick(() => {
+              this.runtime.stopGeneration();
+            })
+          } else {
           Text('↑')
             .fontSize(this.fs(20))
             .fontWeight(FontWeight.Bold)
@@ -4806,6 +4825,7 @@ struct Index {
             .gesture(LongPressGesture().onAction(() => {
               this.sendModeOpen = true;
             }))
+          }
         }
         .width('100%')
       }
