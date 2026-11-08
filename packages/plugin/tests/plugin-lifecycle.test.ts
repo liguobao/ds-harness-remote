@@ -53,6 +53,51 @@ describe('Cordis plugin lifecycle', () => {
     }
   })
 
+  it('keeps the entry Config on a registry that resolves a registration without a stored section', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-legacy-registry-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline fixture') }))
+    const config: Config = {
+      ...disabledAgentDomains,
+      serverUrl: 'https://legacy.example.com',
+      loopback: { ports: [8080] },
+      acp: { enabled: true },
+    }
+    // `dsh-settings@0.2.1-rc.3` resolves a registration as
+    // `schema(mergeLayers(base, user))`; a plugin with no stored section has no
+    // override layer, and `mergeLayers` then returns that layer unchanged, so
+    // `base` never reaches the schema. The registry also calls the schema
+    // directly, so a volatile entry schema resolves to a `{ get }` accessor.
+    let registerSchema: ((input?: unknown) => unknown) | undefined
+    let resolvedFromSchema: unknown
+    const register = vi.fn((_ns: string, schema: (input?: unknown) => unknown, options?: { validate?: (value: unknown) => void }) => {
+      registerSchema = schema
+      resolvedFromSchema = schema(undefined)
+      options?.validate?.(resolvedFromSchema)
+      return { get: () => resolvedFromSchema, replace: async () => undefined }
+    })
+    const ctx = new Context()
+    ctx.provide('settings', { register } as never)
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', connection())
+    const fiber = await ctx.plugin(remotePlugin, config)
+    try {
+      await vi.waitFor(() => { expect(ctx.get('dshRemote')).toBeDefined() })
+      expect(register).toHaveBeenCalledOnce()
+      expect(ctx.dshRemoteClient.status().serverUrl).toBe('https://legacy.example.com')
+      // Nested entry Config must survive: schemastery resolves `loopback` and
+      // `acp` to default-only containers, which previously overwrote the entry
+      // Config when it was merged as a flat layer on read.
+      expect(resolvedFromSchema).toMatchObject({ loopback: { ports: [8080] }, acp: { enabled: true } })
+      // A stored section still wins, including an explicit reset to an empty list.
+      expect(registerSchema?.({ loopback: { ports: [] } })).toMatchObject({ loopback: { ports: [] } })
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('switches Server authority live and cancels discovery belonging to the old Server', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-server-switch-'))
     directories.push(dshHome)

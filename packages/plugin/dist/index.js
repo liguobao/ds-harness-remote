@@ -101166,8 +101166,10 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
       }, hmr)
     };
   }
-  const scope2 = settings.register(pluginSettingsNamespace, Config, {
-    base: readConfig(),
+  const base = readConfig();
+  const resolveRegistration = (input4) => entryConfigSchema(input4 === void 0 ? base : input4);
+  const scope2 = settings.register(pluginSettingsNamespace, resolveRegistration, {
+    base,
     applies: "restart",
     validate: (value) => {
       resolveConfig(value);
