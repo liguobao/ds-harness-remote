@@ -4,7 +4,6 @@ import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
-import { fileIo } from '@kit.CoreFileKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
@@ -667,48 +666,6 @@ struct Index {
       this.scroller.scrollEdge(Edge.Bottom);
     } catch (error) {
       this.scroller.scrollToIndex(this.messages.length - 1, false);
-    }
-  }
-
-  /**
-   * 导出整段会话为可回放的单个 HTML 文件（对齐 dsh-Go 的对话回放，但不依赖服务端：
-   * 文件自带样式，浏览器直接打开即可回放）。
-   */
-  private exportReplayFile(): void {
-    try {
-      const context = getContext(this) as common.UIAbilityContext;
-      const html: string = this.runtime.sessionReplayHtml();
-      const path: string = context.filesDir + '/dsh-replay-' + Date.now() + '.html';
-      const file = fileIo.openSync(path,
-        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, html);
-      fileIo.closeSync(file);
-      promptAction.showToast({ message: this.tr('回放文件已生成，正在打开分享…') });
-      this.shareFile(path);
-    } catch (error) {
-      promptAction.showToast({ message: this.tr('导出失败：') + errorMessage(error) });
-    }
-  }
-
-  /** 分享一个本地文件（不可用时退回复制说明）。 */
-  private shareFile(path: string): void {
-    try {
-      const context = getContext(this) as common.UIAbilityContext;
-      // SharedRecord 是 interface（不是 class）：用对象字面量声明并显式标注类型
-      const record: systemShare.SharedRecord = {
-        utd: 'general.html',
-        uri: 'file://' + path
-      };
-      const data = new systemShare.SharedData(record);
-      const controller = new systemShare.ShareController(data);
-      controller.show(context, {
-        previewMode: systemShare.SharePreviewMode.DETAIL,
-        selectionMode: systemShare.SelectionMode.SINGLE
-      }).catch(() => {
-        promptAction.showToast({ message: this.tr('文件已保存：') + path });
-      });
-    } catch (error) {
-      promptAction.showToast({ message: this.tr('文件已保存：') + path });
     }
   }
 
@@ -2603,10 +2560,6 @@ struct Index {
                 false, () => {
                   this.runtime.setSecretMask(!this.runtime.secretMask);
                 })
-              this.SettingsRow(this.tr('导出对话回放'),
-                this.tr('生成可离线打开的 HTML'), false, () => {
-                  this.exportReplayFile();
-                })
               this.SettingsRow(this.tr('连接诊断'),
                 this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
                   const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
@@ -4430,6 +4383,14 @@ struct Index {
           this.anchorSaveTimer = -1;
           this.scrollAnchors[this.currentSessionId] = anchorId;
         }, 400);
+        // 轮次胶囊跟着滚动更新（第几轮）
+        const messageIndex: number = first - this.chatItemOffset();
+        if (messageIndex >= 0) {
+          const position: number = this.runtime.currentTurnPosition(messageIndex);
+          if (position > 0 && position !== this.turnPosition) {
+            this.turnPosition = position;
+          }
+        }
       })
       // 右往左横滑唤出会话抽屉：手势只挂在消息区，输入坞的触摸不再被抢
       .gesture(
@@ -4975,7 +4936,7 @@ struct Index {
                   : this.tr('发送消息…'))) })
             .layoutWeight(1)
             .constraintSize({ minHeight: this.compactDock() ? 44 : 46,
-              maxHeight: this.isWideLayout() ? 240 : 132 })
+              maxHeight: this.isLandscape ? 160 : (this.isWideLayout() ? 240 : 132) })
             // PC 键盘约定：Enter 换行，Ctrl+Enter（或 ⌘+Enter）发送，Shift+Enter 也按换行。
             // 这里只拦「修饰键+Enter」，其余一律交给 TextArea 默认行为，换行不会被吃掉。
             .onKeyEvent((event: KeyEvent) => {

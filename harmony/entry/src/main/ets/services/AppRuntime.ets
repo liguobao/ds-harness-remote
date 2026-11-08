@@ -4051,33 +4051,6 @@ export class AppRuntime {
     return lines.join('\n');
   }
 
-  /** 整段会话导出成可回放的单个 HTML 文件内容（无服务端依赖）。 */
-  sessionReplayHtml(): string {
-    const title: string = this.currentSessionTitle.length > 0 ? this.currentSessionTitle : 'DSH 会话';
-    const rows: string[] = [];
-    for (const item of this.messages) {
-      const text: string = this.secretMask ? maskSecrets(item.text) : item.text;
-      if (text.length === 0) {
-        continue;
-      }
-      const kind: string = item.kind === 'user' ? 'user' : (item.kind === 'tool' ? 'tool' : 'assistant');
-      const who: string = kind === 'user' ? '我' : (kind === 'tool' ? ('工具 · ' + item.toolName) : '助手');
-      rows.push('<div class="msg ' + kind + '"><div class="who">' + escapeHtml(who)
-        + '</div><div class="body">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div></div>');
-    }
-    return '<!doctype html><meta charset="utf-8"><title>' + escapeHtml(title) + '</title>'
-      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
-      + '<style>body{margin:0;background:#0b1020;color:#e8eefc;font:15px/1.65 -apple-system,"HarmonyOS Sans",system-ui,sans-serif}'
-      + '.wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}h1{font-size:20px;margin:0 0 4px}'
-      + '.meta{color:#8b97ad;font-size:12px;margin-bottom:18px}'
-      + '.msg{margin:14px 0;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.05)}'
-      + '.msg.user{background:rgba(77,107,254,.18)}.msg.tool{background:rgba(255,255,255,.03);color:#9fb0c9;font-size:13px}'
-      + '.who{font-size:11px;color:#8b97ad;margin-bottom:6px}.body{white-space:pre-wrap;word-break:break-word}'
-      + '</style><div class="wrap"><h1>' + escapeHtml(title) + '</h1>'
-      + '<div class="meta">导出时间 ' + new Date().toLocaleString() + ' · 共 ' + rows.length + ' 条</div>'
-      + rows.join('') + '</div>';
-  }
-
   /** 开关「敏感内容打码」。 */
   setSecretMask(enabled: boolean): void {
     this.secretMask = enabled;
@@ -4139,6 +4112,9 @@ export class AppRuntime {
       const path: string = relay.rtcPathText();
       if (path.length > 0) {
         rows.push('路径：' + path);
+      } else if (this.transportLabel !== 'relay') {
+        // 页面没上报选中候选对时也别空着：至少说明直连已经用上了
+        rows.push('路径：直连（' + this.transportLabel + '），浏览器未给出选中候选对');
       }
       const skip: string = relay.lanSkipReason();
       if (skip.length > 0 && this.transportLabel !== 'lan') {
@@ -4530,11 +4506,6 @@ const SECRET_PATTERNS: RegExp[] = [
 ];
 
 /** 把文本里像密钥的片段打码，返回新文本（原文不动，供「看原文」用）。 */
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 export function maskSecrets(text: string): string {
   if (text.length === 0) {
     return text;

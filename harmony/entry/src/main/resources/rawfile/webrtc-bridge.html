@@ -263,8 +263,11 @@
 
 
   // 报告一次「真正选中的候选对」：手机↔主机的地址、协议，排障时不用再猜走的哪条路。
+  var pathAttempts = 0;
   function reportSelectedPath() {
-    if (!pc || !pc.getStats) { return; }
+    if (!pc || !pc.getStats) { log('path: getStats 不可用'); return; }
+    pathAttempts += 1;
+    if (pathAttempts > 6) { return; }
     try {
       pc.getStats(null).then(function (stats) {
         var pairs = [];
@@ -276,7 +279,8 @@
           }
         });
         if (pairs.length === 0) {
-          log('path: 没有 nominated 候选对（ice=' + String(pc.iceConnectionState) + '）');
+          log('path: 第 ' + pathAttempts + ' 次没拿到候选对（ice=' + String(pc.iceConnectionState) + '）');
+          if (pathAttempts <= 5) { setTimeout(reportSelectedPath, 600); }
           return;
         }
         var best = pairs[pairs.length - 1];
