@@ -30,6 +30,10 @@ const KEY_HOST_INFO = 'dshremote.hostInfo.v1';
 const KEY_SESSION_SNAPSHOT = 'dshremote.sessionSnapshot.v1';
 /** 精简历史：主机把历史里的工具参数/输出转摘要，省流量。 */
 const KEY_COMPACT_HISTORY = 'dshremote.compactHistory.v1';
+/** 主题着色（0 默认/1 深海/2 森林/3 暖沙/4 玫紫）。 */
+const KEY_THEME_TINT = 'dshremote.themeTint.v1';
+/** 桌宠（鲸娘）：干活/等你确认/完成 四态小挂件。 */
+const KEY_PET = 'dshremote.pet.v1';
 /** 已发送文本里的 Key/Token 默认打码。 */
 const KEY_SECRET_MASK = 'dshremote.secretMask.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
@@ -801,6 +805,32 @@ export class SecureStore {
       this.putSync(KEY_SESSION_SNAPSHOT, json);
     } catch (error) {
       logWarn('session snapshot save failed');
+    }
+  }
+
+  loadPet(): boolean {
+    return this.getSync(KEY_PET, '1') === '1';
+  }
+
+  savePet(enabled: boolean): void {
+    try {
+      this.putSync(KEY_PET, enabled ? '1' : '0');
+    } catch (error) {
+      logWarn('pet save failed');
+    }
+  }
+
+  loadThemeTint(): number {
+    const raw: string = this.getSync(KEY_THEME_TINT, '0');
+    const value: number = parseInt(raw, 10);
+    return Number.isNaN(value) ? 0 : value;
+  }
+
+  saveThemeTint(tint: number): void {
+    try {
+      this.putSync(KEY_THEME_TINT, '' + tint);
+    } catch (error) {
+      logWarn('theme tint save failed');
     }
   }
 

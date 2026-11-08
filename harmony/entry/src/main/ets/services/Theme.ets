@@ -43,6 +43,51 @@ export function darkPalette(): Palette {
   return p;
 }
 
+/**
+ * 主题着色：在深/浅底色的基础上换一套「氛围色」（背景/面板/表面/分隔线），
+ * 强调色保持品牌蓝青，避免把整界面配色拆成两套维护。
+ * tint: 0 默认 · 1 深海 · 2 森林 · 3 暖沙 · 4 玫紫
+ */
+export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
+  if (tint === 0) {
+    return p;
+  }
+  const out: Palette = new Palette();
+  out.bg = p.bg;
+  out.panel = p.panel;
+  out.backdrop = p.backdrop;
+  out.card = p.card;
+  out.chip = p.chip;
+  out.inputBg = p.inputBg;
+  out.border = p.border;
+  out.borderStrong = p.borderStrong;
+  out.text = p.text;
+  out.text2 = p.text2;
+  out.text3 = p.text3;
+  if (tint === 1) {
+    out.bg = dark ? '#05101F' : '#EDF4FB';
+    out.panel = dark ? '#081A2E' : '#F7FBFF';
+    out.card = dark ? 'rgba(88,166,255,0.07)' : '#FFFFFF';
+    out.chip = dark ? 'rgba(88,166,255,0.10)' : 'rgba(30,90,160,0.06)';
+  } else if (tint === 2) {
+    out.bg = dark ? '#06140F' : '#EEF7F0';
+    out.panel = dark ? '#0A1C15' : '#F7FCF8';
+    out.card = dark ? 'rgba(52,211,153,0.07)' : '#FFFFFF';
+    out.chip = dark ? 'rgba(52,211,153,0.10)' : 'rgba(20,120,80,0.06)';
+  } else if (tint === 3) {
+    out.bg = dark ? '#17110A' : '#FBF4E9';
+    out.panel = dark ? '#1F1810' : '#FFFBF3';
+    out.card = dark ? 'rgba(240,180,90,0.08)' : '#FFFFFF';
+    out.chip = dark ? 'rgba(240,180,90,0.10)' : 'rgba(150,100,20,0.06)';
+  } else if (tint === 4) {
+    out.bg = dark ? '#140A16' : '#FAEFF7';
+    out.panel = dark ? '#1D0F1F' : '#FFFAFD';
+    out.card = dark ? 'rgba(217,120,220,0.08)' : '#FFFFFF';
+    out.chip = dark ? 'rgba(217,120,220,0.10)' : 'rgba(120,20,110,0.06)';
+  }
+  return out;
+}
+
 export function lightPalette(): Palette {
   const p: Palette = new Palette();
   p.bg = '#F2F5FA';

@@ -212,6 +212,11 @@ export class AppRuntime {
   compactHistory: boolean = false;
   /** 已发送文本里的 Key/Token 默认打码（点气泡可看原文）。 */
   secretMask: boolean = true;
+  /** 本轮开始时刻/步数：用来看「这一轮跑了多久、走了几步」。 */
+  private turnStartedAt: number = 0;
+  private turnSteps: number = 0;
+  /** 上一轮结束后展示的摘要（步数/耗时/用量），空串表示还没跑完一轮。 */
+  lastTurnSummary: string = '';
   /** 稳定性统计（诊断面板 + 落盘日志用）。 */
   private connectCount: number = 0;
   private disconnectCount: number = 0;
@@ -296,6 +301,12 @@ export class AppRuntime {
   deviceAliases: Record<string, string> = {};
   /** Theme preference: 0 = follow system, 1 = light, 2 = dark. */
   themeMode: number = 0;
+  /** 主题着色：0 默认 · 1 深海 · 2 森林 · 3 暖沙 · 4 玫紫 */
+  themeTint: number = 0;
+  /** 桌宠（鲸娘）开关。 */
+  petEnabled: boolean = true;
+  /** 桌宠「完成」动作只亮一会儿，记录时刻。 */
+  petDoneAt: number = 0;
   /** 会话输入草稿（sessionId -> 文本）。 */
   drafts: Record<string, string> = {};
   /** 本地提示词库。 */
@@ -360,6 +371,37 @@ export class AppRuntime {
   }
 
   /** Persist and apply a new theme preference. */
+  setPetEnabled(enabled: boolean): void {
+    this.petEnabled = enabled;
+    this.store.savePet(enabled);
+    this.notify();
+  }
+
+  /** 桌宠状态：'working' 干活 · 'waiting' 等你确认 · 'done' 刚做完 · 'idle' 待命。 */
+  petState(): string {
+    if (this.generating) {
+      return 'working';
+    }
+    for (const item of this.messages) {
+      if (item.kind === 'approval' && item.approvalOutcome.length === 0) {
+        return 'waiting';
+      }
+      if (item.kind === 'question' && item.questionOutcome.length === 0) {
+        return 'waiting';
+      }
+    }
+    if (this.petDoneAt > 0 && Date.now() - this.petDoneAt < 4000) {
+      return 'done';
+    }
+    return 'idle';
+  }
+
+  setThemeTint(tint: number): void {
+    this.themeTint = tint;
+    this.store.saveThemeTint(tint);
+    this.notify();
+  }
+
   setThemeMode(mode: number): void {
     this.themeMode = mode;
     const saving: Promise<void> = this.store.saveThemeMode(mode);
@@ -481,6 +523,8 @@ export class AppRuntime {
       this.credentials = await this.store.loadCredentials();
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
+      this.themeTint = this.store.loadThemeTint();
+      this.petEnabled = this.store.loadPet();
       this.languageMode = this.store.loadLanguageMode();
       this.textScaleMode = this.store.loadTextScale();
       this.splitWidth = this.store.loadSplitWidth();
@@ -3917,6 +3961,123 @@ export class AppRuntime {
     }
   }
 
+  /** 「第 i / n 轮」文本；没有用户消息时返回空串。 */
+  turnPositionText(): string {
+    const turns: number[] = this.userTurnIndexes();
+    if (turns.length === 0) {
+      return '';
+    }
+    return '1/' + turns.length;
+  }
+
+  /** 所有用户消息在 messages 里的下标（轮次导航用）。 */
+  userTurnIndexes(): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      const item: ChatItem = this.messages[i];
+      if (item.kind === 'user') {
+        out.push(i);
+      }
+    }
+    return out;
+  }
+
+  /** 当前看到的轮次位置（从 1 开始）；找不到就返回 0。 */
+  currentTurnPosition(scrollTopIndex: number): number {
+    const turns: number[] = this.userTurnIndexes();
+    let position: number = 0;
+    for (let i = 0; i < turns.length; i++) {
+      if (turns[i] <= scrollTopIndex) {
+        position = i + 1;
+      }
+    }
+    return position;
+  }
+
+  static durationText(ms: number): string {
+    const seconds: number = Math.round(ms / 1000);
+    if (seconds < 60) {
+      return seconds + 's';
+    }
+    const minutes: number = Math.floor(seconds / 60);
+    const rest: number = seconds % 60;
+    return minutes + 'm' + (rest > 0 ? rest + 's' : '');
+  }
+
+  /** 从 turn/end 的 data 里尽力取用量（不同主机版本字段名不一样，取不到就返回空串）。 */
+  private turnUsageText(data: Object | undefined): string {
+    const record: Record<string, Object> | undefined = asRecord(data);
+    if (record === undefined) {
+      return '';
+    }
+    const usage: Record<string, Object> | undefined = asRecord(record['usage']);
+    const source: Record<string, Object> = usage !== undefined ? usage : record;
+    const candidates: string[] = ['totalTokens', 'tokens', 'outputTokens', 'completionTokens'];
+    for (const key of candidates) {
+      const value: Object | undefined = source[key];
+      if (typeof value === 'number' && value > 0) {
+        return AppRuntime.tokensText(value);
+      }
+    }
+    return '';
+  }
+
+  static tokensText(count: number): string {
+    if (count < 1000) {
+      return count + ' tok';
+    }
+    return (Math.round(count / 100) / 10) + 'k tok';
+  }
+
+  /**
+   * 把一条消息做成可分享的卡片文本（对齐 dsh-Go 的分享卡；这里先出文本版，
+   * 走系统分享面板，不依赖任何服务端）。
+   */
+  shareCardText(item: ChatItem): string {
+    const title: string = this.currentSessionTitle.length > 0 ? this.currentSessionTitle : '会话';
+    const clock: Date = new Date(item.timestamp > 0 ? item.timestamp : Date.now());
+    const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
+    const stamp: string = pad(clock.getMonth() + 1) + '-' + pad(clock.getDate())
+      + ' ' + pad(clock.getHours()) + ':' + pad(clock.getMinutes());
+    const body: string = this.secretMask ? maskSecrets(item.text) : item.text;
+    const trimmed: string = body.length > 1200 ? body.slice(0, 1200) + '\n…（已截断）' : body;
+    const host: string = this.connectedHostDisplayName().length > 0 ? this.connectedHostDisplayName() : '远程主机';
+    const lines: string[] = [];
+    lines.push('《' + title + '》· ' + stamp);
+    lines.push('────────────');
+    lines.push(trimmed);
+    lines.push('────────────');
+    lines.push('来自 DSH 远程 · ' + host + (this.transportLabel.length > 0 ? ' · ' + this.transportLabel : ''));
+    return lines.join('\n');
+  }
+
+  /** 整段会话导出成可回放的单个 HTML 文件内容（无服务端依赖）。 */
+  sessionReplayHtml(): string {
+    const title: string = this.currentSessionTitle.length > 0 ? this.currentSessionTitle : 'DSH 会话';
+    const rows: string[] = [];
+    for (const item of this.messages) {
+      const text: string = this.secretMask ? maskSecrets(item.text) : item.text;
+      if (text.length === 0) {
+        continue;
+      }
+      const kind: string = item.kind === 'user' ? 'user' : (item.kind === 'tool' ? 'tool' : 'assistant');
+      const who: string = kind === 'user' ? '我' : (kind === 'tool' ? ('工具 · ' + item.toolName) : '助手');
+      rows.push('<div class="msg ' + kind + '"><div class="who">' + escapeHtml(who)
+        + '</div><div class="body">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div></div>');
+    }
+    return '<!doctype html><meta charset="utf-8"><title>' + escapeHtml(title) + '</title>'
+      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<style>body{margin:0;background:#0b1020;color:#e8eefc;font:15px/1.65 -apple-system,"HarmonyOS Sans",system-ui,sans-serif}'
+      + '.wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}h1{font-size:20px;margin:0 0 4px}'
+      + '.meta{color:#8b97ad;font-size:12px;margin-bottom:18px}'
+      + '.msg{margin:14px 0;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.05)}'
+      + '.msg.user{background:rgba(77,107,254,.18)}.msg.tool{background:rgba(255,255,255,.03);color:#9fb0c9;font-size:13px}'
+      + '.who{font-size:11px;color:#8b97ad;margin-bottom:6px}.body{white-space:pre-wrap;word-break:break-word}'
+      + '</style><div class="wrap"><h1>' + escapeHtml(title) + '</h1>'
+      + '<div class="meta">导出时间 ' + new Date().toLocaleString() + ' · 共 ' + rows.length + ' 条</div>'
+      + rows.join('') + '</div>';
+  }
+
   /** 开关「敏感内容打码」。 */
   setSecretMask(enabled: boolean): void {
     this.secretMask = enabled;
@@ -4260,6 +4421,10 @@ export class AppRuntime {
     if (event.type.length === 0) {
       return;
     }
+    // 步数：每次工具调用算一步，用于「本轮 12 步 · 1m20s」这样的摘要
+    if (event.type.indexOf('tool/') === 0) {
+      this.turnSteps += 1;
+    }
     this.messages = applySessionEvent(this.messages, event);
     if (event.type === 'user/message' || event.type === 'turn/end') {
       this.scheduleImageHydration();
@@ -4273,8 +4438,18 @@ export class AppRuntime {
     }
     if (event.type === 'turn/start') {
       this.generating = true;
+      this.turnStartedAt = Date.now();
+      this.turnSteps = 0;
+      this.lastTurnSummary = '';
     } else if (event.type === 'turn/end') {
       this.generating = false;
+      const elapsed: number = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
+      const usage: string = this.turnUsageText(event.data);
+      this.lastTurnSummary = (this.turnSteps > 0 ? this.turnSteps + ' 步 · ' : '')
+        + (elapsed > 0 ? AppRuntime.durationText(elapsed) : '')
+        + (usage.length > 0 ? ' · ' + usage : '');
+      this.turnStartedAt = 0;
+      this.petDoneAt = Date.now();
       // 一轮结束后刷新上下文占用（不阻塞 UI）。
       this.refreshProjections().catch(() => undefined);
       // 后台时给一条完成提醒；前台不打扰
@@ -4355,6 +4530,11 @@ const SECRET_PATTERNS: RegExp[] = [
 ];
 
 /** 把文本里像密钥的片段打码，返回新文本（原文不动，供「看原文」用）。 */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function maskSecrets(text: string): string {
   if (text.length === 0) {
     return text;

@@ -3,13 +3,16 @@ import { KeyCode } from '@ohos.multimodalInput.keyCode';
 import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
+import { systemShare } from '@kit.ShareKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage, maskSecrets } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
-import { darkPalette, lightPalette, Palette } from '../services/Theme';
+import { applyTint, darkPalette, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import {
@@ -53,6 +56,10 @@ struct Index {
   @State linkDetailOpen: boolean = false;
   /** 已手动「看原文」的气泡（打码的敏感内容点一下就能展开）。 */
   @State revealedSecrets: string[] = [];
+  /** 主题色选择面板。 */
+  @State tintPickerOpen: boolean = false;
+  /** 当前滚动位置对应的轮次（1 起），轮次导航胶囊显示用。 */
+  @State turnPosition: number = 1;
   /** 定时任务面板。 */
   @State schedulesOpen: boolean = false;
   @State devices: RemoteHostDevice[] = [];
@@ -361,6 +368,14 @@ struct Index {
       this.schedulesOpen = false;
       return true;
     }
+    if (this.tintPickerOpen) {
+      this.tintPickerOpen = false;
+      return true;
+    }
+    if (this.linkDetailOpen) {
+      this.linkDetailOpen = false;
+      return true;
+    }
     if (this.diagnosticsOpen) {
       this.diagnosticsOpen = false;
       return true;
@@ -653,6 +668,111 @@ struct Index {
     } catch (error) {
       this.scroller.scrollToIndex(this.messages.length - 1, false);
     }
+  }
+
+  /**
+   * 导出整段会话为可回放的单个 HTML 文件（对齐 dsh-Go 的对话回放，但不依赖服务端：
+   * 文件自带样式，浏览器直接打开即可回放）。
+   */
+  private exportReplayFile(): void {
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const html: string = this.runtime.sessionReplayHtml();
+      const path: string = context.filesDir + '/dsh-replay-' + Date.now() + '.html';
+      const file = fileIo.openSync(path,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, html);
+      fileIo.closeSync(file);
+      promptAction.showToast({ message: this.tr('回放文件已生成，正在打开分享…') });
+      this.shareFile(path);
+    } catch (error) {
+      promptAction.showToast({ message: this.tr('导出失败：') + errorMessage(error) });
+    }
+  }
+
+  /** 分享一个本地文件（不可用时退回复制说明）。 */
+  private shareFile(path: string): void {
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      // SharedRecord 是 interface（不是 class）：用对象字面量声明并显式标注类型
+      const record: systemShare.SharedRecord = {
+        utd: 'general.html',
+        uri: 'file://' + path
+      };
+      const data = new systemShare.SharedData(record);
+      const controller = new systemShare.ShareController(data);
+      controller.show(context, {
+        previewMode: systemShare.SharePreviewMode.DETAIL,
+        selectionMode: systemShare.SelectionMode.SINGLE
+      }).catch(() => {
+        promptAction.showToast({ message: this.tr('文件已保存：') + path });
+      });
+    } catch (error) {
+      promptAction.showToast({ message: this.tr('文件已保存：') + path });
+    }
+  }
+
+  /** 优先走系统分享面板；不可用就复制到剪贴板。 */
+  private shareText(text: string): void {
+    if (text.trim().length === 0) {
+      return;
+    }
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const data = new systemShare.SharedData({
+        utd: utd.UniformDataType.PLAIN_TEXT,
+        content: text
+      });
+      const controller = new systemShare.ShareController(data);
+      controller.show(context, {
+        previewMode: systemShare.SharePreviewMode.DETAIL,
+        selectionMode: systemShare.SelectionMode.SINGLE
+      }).catch(() => {
+        this.copyToClipboard(text);
+      });
+      return;
+    } catch (error) {
+      this.copyToClipboard(text);
+    }
+  }
+
+  private copyToClipboard(text: string): void {
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      promptAction.showToast({ message: this.tr('分享内容已复制') });
+    }).catch(() => undefined);
+  }
+
+  /** 列表里第一个消息项的下标（上面可能还有一个「加载更早」的行）。 */
+  private chatItemOffset(): number {
+    return this.historyHasMore || this.loadingOlderHistory ? 1 : 0;
+  }
+
+  /** 跳到上/下一个用户消息（轮次）；没有更多就提示。 */
+  private jumpTurn(delta: number): void {
+    const turns: number[] = this.runtime.userTurnIndexes();
+    if (turns.length === 0) {
+      return;
+    }
+    const current: number = this.runtime.currentTurnPosition(Math.max(0, this.turnPosition - 1));
+    let target: number = Math.min(turns.length, Math.max(1, (current === 0 ? turns.length : current) + delta));
+    this.turnPosition = target;
+    try {
+      this.scroller.scrollToIndex(this.chatItemOffset() + turns[target - 1], true);
+    } catch (error) {
+      this.scroller.scrollEdge(Edge.Top);
+    }
+  }
+
+  /** 轮次导航胶囊上的文字：`3/9 · 12 步 · 1m20s`。 */
+  private turnPillText(): string {
+    const turns: number[] = this.runtime.userTurnIndexes();
+    if (turns.length === 0) {
+      return '';
+    }
+    const position: number = Math.min(turns.length, Math.max(1, this.turnPosition));
+    const summary: string = this.runtime.lastTurnSummary;
+    return position + '/' + turns.length + (summary.length > 0 ? ' · ' + summary : '');
   }
 
   private sendTap(): void {
@@ -1374,6 +1494,52 @@ struct Index {
     return '';
   }
 
+  /** 桌宠表情：干活 🐳 · 等你确认 🙋 · 刚做完 ✨ · 待命 🌙。 */
+  private petFace(): string {
+    const state: string = this.runtime.petState();
+    if (state === 'working') {
+      return '🐳';
+    }
+    if (state === 'waiting') {
+      return '🙋';
+    }
+    if (state === 'done') {
+      return '✨';
+    }
+    return '🌙';
+  }
+
+  private petHint(): string {
+    const state: string = this.runtime.petState();
+    if (state === 'working') {
+      return this.tr('鲸娘在干活');
+    }
+    if (state === 'waiting') {
+      return this.tr('等你确认');
+    }
+    if (state === 'done') {
+      return this.tr('这轮做完了');
+    }
+    return '';
+  }
+
+  private themeTintLabel(): string {
+    const tint: number = this.runtime.themeTint;
+    if (tint === 1) {
+      return this.tr('深海');
+    }
+    if (tint === 2) {
+      return this.tr('森林');
+    }
+    if (tint === 3) {
+      return this.tr('暖沙');
+    }
+    if (tint === 4) {
+      return this.tr('玫紫');
+    }
+    return this.tr('默认');
+  }
+
   private transportBadgeColor(): string {
     return this.connectedTransport === 'relay' ? '#C88418' : '#1E9E6A';
   }
@@ -1457,7 +1623,7 @@ struct Index {
 
   /** Active palette, re-evaluated whenever the theme or system mode flips. */
   private pal(): Palette {
-    return this.isDarkUi ? darkPalette() : lightPalette();
+    return applyTint(this.isDarkUi ? darkPalette() : lightPalette(), this.runtime.themeTint, this.isDarkUi);
   }
 
   /** 读一下 languageMode 再取文案：让 Text 节点依赖到状态，切语言时才会重算。 */
@@ -1986,6 +2152,9 @@ struct Index {
       if (this.linkDetailOpen) {
         this.LinkDetailOverlay()
       }
+      if (this.tintPickerOpen) {
+        this.TintPickerOverlay()
+      }
       if (this.diagnosticsOpen) {
         this.DiagnosticsOverlay()
       }
@@ -2398,6 +2567,29 @@ struct Index {
                   }
                 });
               })
+              this.SettingsRow(this.tr('桌宠'),
+                this.runtime.petEnabled ? this.tr('开 · 干活/等确认/完成 四态') : this.tr('关'),
+                false, () => {
+                  this.runtime.setPetEnabled(!this.runtime.petEnabled);
+                })
+              this.SettingsRow(this.tr('主题色'), this.themeTintLabel(), false, () => {
+                AlertDialog.show({
+                  title: this.tr('主题色'),
+                  message: this.tr('换一套氛围色（背景/面板/表面），强调色保持不变'),
+                  autoCancel: true,
+                  primaryButton: {
+                    value: this.tr('取消'),
+                    action: () => {
+                    }
+                  },
+                  secondaryButton: {
+                    value: this.tr('选择'),
+                    action: () => {
+                      this.tintPickerOpen = true;
+                    }
+                  }
+                });
+              })
               this.SettingsRow(this.tr('精简历史'),
                 this.runtime.compactHistory ? this.tr('开 · 历史工具输出转摘要') : this.tr('关 · 传完整历史'),
                 false, () => {
@@ -2410,6 +2602,10 @@ struct Index {
                 this.runtime.secretMask ? this.tr('开 · 点气泡看原文') : this.tr('关 · 原文显示'),
                 false, () => {
                   this.runtime.setSecretMask(!this.runtime.secretMask);
+                })
+              this.SettingsRow(this.tr('导出对话回放'),
+                this.tr('生成可离线打开的 HTML'), false, () => {
+                  this.exportReplayFile();
                 })
               this.SettingsRow(this.tr('连接诊断'),
                 this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
@@ -4278,6 +4474,58 @@ struct Index {
       .height('100%')
 
 
+      // 桌宠：右下角一只鲸娘，状态跟着干活/等你确认/刚做完走（素材用 emoji，零资源成本）
+      if (this.runtime.petEnabled) {
+        Row({ space: 4 }) {
+          Text(this.petFace())
+            .fontSize(this.runtime.petState() === 'working' ? 22 : 20)
+          if (this.petHint().length > 0) {
+            Text(this.petHint())
+              .fontSize(10)
+              .fontColor(this.pal().text3)
+          }
+        }
+        .padding({ left: 8, right: 10, top: 4, bottom: 4 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .margin({ bottom: 4 })
+        .onClick(() => {
+          promptAction.showToast({ message: this.petHint().length > 0
+            ? this.petHint() : this.tr('鲸娘在待命（设置里可关掉）') });
+        })
+      }
+      // 轮次导航：↑ 上一轮 / ↓ 下一轮 + 当前位置与上一轮用量（对齐 dsh-Go 的轮次导航）
+      if (this.runtime.userTurnIndexes().length > 1) {
+        Row({ space: 6 }) {
+          Text('↑')
+            .fontSize(13)
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.jumpTurn(-1);
+            })
+          Text(this.turnPillText())
+            .fontSize(11)
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .onClick(() => {
+              this.stickToBottom = false;
+            })
+          Text('↓')
+            .fontSize(13)
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.jumpTurn(1);
+            })
+        }
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(14)
+        .border({ width: 1, color: this.pal().border })
+        .margin({ bottom: 4 })
+      }
       if (!this.stickToBottom) {
         Row() {
           Text('↓ ' + this.tr('回到最新'))
@@ -6737,6 +6985,17 @@ struct Index {
             promptAction.showToast({ message: this.tr('已引用到输入框') });
           })
       }
+      if (item.text.length > 0) {
+        Text(this.tr('分享'))
+          .fontSize(this.fs(10))
+          .fontColor(this.pal().text3)
+          .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+          .backgroundColor(this.pal().chip)
+          .borderRadius(7)
+          .onClick(() => {
+            this.shareText(this.runtime.shareCardText(item));
+          })
+      }
       if (item.seq > 0 && this.runtime.currentSessionId.length > 0) {
         Text(this.tr('分叉'))
           .fontSize(this.fs(10))
@@ -7383,6 +7642,83 @@ struct Index {
       parts.push(this.tr('上次 ') + formatSessionTime(schedule.lastDeliveredAt));
     }
     return parts.join(' · ');
+  }
+
+  /** 主题色选择：5 套氛围色，点一下立即生效。 */
+  @Builder
+  TintPickerOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.45)')
+        .onClick(() => {
+          this.tintPickerOpen = false;
+        })
+      Column({ space: 6 }) {
+        Row() {
+          Text(this.tr('主题色'))
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Blank()
+          Text(this.tr('收起'))
+            .fontSize(this.fs(13))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 2, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.tintPickerOpen = false;
+            })
+        }
+        .width('100%')
+        ForEach([0, 1, 2, 3, 4], (tint: number) => {
+          Row({ space: 10 }) {
+            Text(this.tintName(tint))
+              .fontSize(this.fs(14))
+              .fontColor(this.pal().text)
+            Blank()
+            if (this.runtime.themeTint === tint) {
+              Text('✓')
+                .fontSize(this.fs(14))
+                .fontColor('#22D3EE')
+            }
+          }
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .backgroundColor(this.runtime.themeTint === tint ? this.pal().inputBg : Color.Transparent)
+          .borderRadius(12)
+          .onClick(() => {
+            this.runtime.setThemeTint(tint);
+          })
+        }, (tint: number) => 'tint-' + tint)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 280 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  private tintName(tint: number): string {
+    if (tint === 1) {
+      return this.tr('深海');
+    }
+    if (tint === 2) {
+      return this.tr('森林');
+    }
+    if (tint === 3) {
+      return this.tr('暖沙');
+    }
+    if (tint === 4) {
+      return this.tr('玫紫');
+    }
+    return this.tr('默认');
   }
 
   /** 连接详情：传输路径 / 握手耗时 / 测延迟 / 回落原因（点顶栏传输徽标打开）。 */

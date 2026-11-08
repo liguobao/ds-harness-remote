@@ -189,10 +189,12 @@
         call('onTransport', kind);
       });
       call('onDataOpen', '1');
+      // DC 打开后再报一次选中路径：候选对通常在 DC 打通之后才 nominate
+      reportSelectedPath();
     };
+    // 去掉重复绑定：只留一个 onclose
     dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
     dc.onerror = function (e) { log('dc error ' + (e && e.message ? e.message : e)); call('onError', 'data channel error'); };
-    dc.onclose = function () { log('dc closed'); call('onDataClosed', '1'); };
     dc.onmessage = function (event) {
       try {
         var data = event.data;
@@ -273,7 +275,10 @@
             pairs.push(r);
           }
         });
-        if (pairs.length === 0) { return; }
+        if (pairs.length === 0) {
+          log('path: 没有 nominated 候选对（ice=' + String(pc.iceConnectionState) + '）');
+          return;
+        }
         var best = pairs[pairs.length - 1];
         var local = locals[best.localCandidateId] || {};
         var remote = locals[best.remoteCandidateId] || {};
