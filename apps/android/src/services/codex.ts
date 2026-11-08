@@ -212,7 +212,7 @@ export async function loadCodexModels(client: CodexRemoteClient, current?: Model
         : fallback.reasoning?.defaultEffort === undefined ? {} : { reasoningEffort: fallback.reasoning.defaultEffort }),
     },
     routable: true,
-    groups: [{ id: CODEX_PROVIDER, name: 'CodeX', models }],
+    groups: [{ id: CODEX_PROVIDER, name: 'Codex', models }],
     failures: [],
   }
 }

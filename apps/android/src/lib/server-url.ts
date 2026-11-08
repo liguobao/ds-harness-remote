@@ -1,14 +1,31 @@
 import type { PairLink } from '../types'
 import { strings as zhCN } from '../locales/i18n'
 
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '10.0.2.2'])
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '10.0.2.2', '::1', '[::1]'])
 
-/** Private-network IPv4 ranges reachable only on a LAN/VPN (RFC1918, link-local, CGNAT). */
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const host = stripIpv6Brackets(hostname).toLowerCase()
+  if (!host.includes(':') || !/^[0-9a-f:]+$/.test(host)) return false
+  if (host === '::1') return true
+  // Unique Local Addresses (fc00::/7) and link-local (fe80::/10)
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)
+}
+
+/** Private-network IPv4/IPv6 ranges reachable only on loopback, LAN, link-local, or CGNAT/VPN. */
 function isPrivateHostname(hostname: string): boolean {
   if (LOCAL_HOSTS.has(hostname)) return true
+  if (isPrivateIpv6(hostname)) return true
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
   if (match === null) return false
-  const [a, b] = [Number(match[1]), Number(match[2])]
+  const octets = match.slice(1).map(Number)
+  if (octets.some(value => value > 255)) return false
+  const [a = 0, b = 0] = octets
   return (
     a === 10 ||
     (a === 172 && b >= 16 && b <= 31) ||

@@ -387,3 +387,7 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 
 - [x] AGY 工作区/会话 catalog、空白新会话、历史/图片、流式、标题刷新与重连恢复
 - [ ] Android AGY APK 与真机/加密跨设备回归；每目录超过 100 个会话的分页体验
+
+## DSH-Go pairing acceptance
+
+Implement Dart mobile proof vectors, scanner/credential integration and Android end-to-end acceptance using docs/dsh-go-pairing-integration.md. C# Server/Remote integration uses a simulated Node phone, not an Android build. Local UI and `isTrusted` cannot establish genuine human presence against OS automation; use a trusted native primitive if Harness makes one available. No deployment/release is included.

@@ -7,7 +7,10 @@ const credentialSchema = z.object({
   schemaVersion: z.literal(1),
   serverUrl: z.string().url(),
   deviceId: z.string().min(1),
-  authorizationMethod: z.enum(['account', 'host_registration_code', 'owned_device']),
+  authorizationMethod: z.enum(['account', 'host_registration_code', 'owned_device', 'device_pairing']),
+  accountKind: z.enum(['standard', 'device_only']).optional(),
+  pairingRestricted: z.boolean().optional(),
+  inboundOnly: z.boolean().optional(),
   account: z.string().min(1).max(254).optional(),
   accessToken: z.string().min(16),
   accessTokenExpiresAt: z.number().int().positive(),
@@ -47,6 +50,17 @@ export class ServerCredentialStore {
     }
   }
 
+  async pairingHostOnly(): Promise<boolean> {
+    const policy = await readPrivateJson(join(dirname(this.path), 'pairing-host-only.json'))
+    if (policy === undefined) return false
+    z.object({ hostOnly: z.literal(true) }).strict().parse(policy)
+    return true
+  }
+
+  async restrictPairingHostOnly(): Promise<void> {
+    await atomicWritePrivate(join(dirname(this.path), 'pairing-host-only.json'), '{"hostOnly":true}')
+  }
+
   async load(serverUrl: string, deviceId: string): Promise<ServerCredentials | undefined> {
     if (!(await exists(this.path))) return undefined
     await assertPrivateMode(this.path)
@@ -61,7 +75,7 @@ export class ServerCredentialStore {
 
   async save(credentials: Omit<ServerCredentials, 'schemaVersion'>): Promise<ServerCredentials> {
     const record = credentialSchema.parse({ schemaVersion: 1, ...credentials })
-    await atomicWrite(this.path, `${JSON.stringify(record, null, 2)}\n`)
+    await atomicWritePrivate(this.path, `${JSON.stringify(record, null, 2)}\n`)
     return record
   }
 
@@ -81,7 +95,7 @@ export class ServerCredentialsBusyError extends Error {
   }
 }
 
-async function atomicWrite(path: string, contents: string): Promise<void> {
+export async function atomicWritePrivate(path: string, contents: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
   await writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
@@ -107,3 +121,9 @@ async function exists(path: string): Promise<boolean> {
 }
 
 function safeMessage(error: unknown): string { return error instanceof Error ? error.message : 'invalid credential data' }
+
+export async function readPrivateJson(path: string): Promise<unknown | undefined> {
+  if (!await exists(path)) return undefined
+  await assertPrivateMode(path)
+  return JSON.parse(await readFile(path, 'utf8')) as unknown
+}

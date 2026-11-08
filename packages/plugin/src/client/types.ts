@@ -62,6 +62,7 @@ export interface RemoteStatus {
   hostAuthorizationAvailable: boolean
   host?: {
     deviceId?: string
+    pairingHostOnly?: boolean
     configured: boolean
     online: boolean
     reconnecting: boolean
@@ -261,7 +262,7 @@ export interface PluginSettingsView {
 }
 
 export interface PluginAssociation {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
 }
 

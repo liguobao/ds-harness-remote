@@ -321,6 +321,29 @@ async function activate(
   let closed = false
   let startup: Promise<void> | undefined
   let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
+  const syncOptionalService = (
+    serviceName: 'dshRemote' | 'dshRemoteClient',
+    value: HostPluginRuntime | ClientModeRuntime,
+    owned: boolean,
+  ) => {
+    try {
+      if (serviceName === 'dshRemote') {
+        if (owned) ctx.dshRemote = value as HostPluginRuntime
+        else ctx.provide('dshRemote', value as HostPluginRuntime)
+      } else if (owned) {
+        ctx.dshRemoteClient = value as ClientModeRuntime
+      } else {
+        ctx.provide('dshRemoteClient', value as ClientModeRuntime)
+      }
+      return true
+    } catch {
+      logger.warn('failed to provide remote service', {
+        service: serviceName,
+        code: 'SERVICE_PROVIDE_CONFLICT',
+      })
+      return false
+    }
+  }
   const replaceServer = (next: ResolvedConfig) => {
     const previousReplacement = replacement
     const operation = async () => {
@@ -348,17 +371,9 @@ async function activate(
       clientRuntime = fresh.clientRuntime
       clientActive = clientRuntime !== undefined
       controlRuntime?.clearStartupFailure()
-      if (hostServiceProvided) ctx.dshRemote = runtime
-      else {
-        ctx.provide('dshRemote', runtime)
-        hostServiceProvided = true
-      }
+      hostServiceProvided = syncOptionalService('dshRemote', runtime, hostServiceProvided)
       if (clientRuntime !== undefined) {
-        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
-        else {
-          ctx.provide('dshRemoteClient', clientRuntime)
-          clientServiceProvided = true
-        }
+        clientServiceProvided = syncOptionalService('dshRemoteClient', clientRuntime, clientServiceProvided)
       }
       if (connection !== undefined) updateChecker.start()
       return { client: clientRuntime, host: runtime }
@@ -384,12 +399,10 @@ async function activate(
   }
 
   if (runtime !== undefined) {
-    ctx.provide('dshRemote', runtime)
-    hostServiceProvided = true
+    hostServiceProvided = syncOptionalService('dshRemote', runtime, hostServiceProvided)
   }
   if (clientRuntime !== undefined) {
-    ctx.provide('dshRemoteClient', clientRuntime)
-    clientServiceProvided = true
+    clientServiceProvided = syncOptionalService('dshRemoteClient', clientRuntime, clientServiceProvided)
   }
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {

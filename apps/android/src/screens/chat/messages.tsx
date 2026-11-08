@@ -191,6 +191,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
   const expanded = pending || open
   const tools = items.filter((item): item is ToolActivity => item.kind === 'tool')
+  const latestTool = tools.at(-1)
   const activeTool = closed ? undefined : tools.findLast(item => item.state === 'running')
   const runningReasoning = closed ? undefined : items.findLast(item => item.kind === 'message' && item.streamingPhase === 'reasoning')
   const running = activeTool !== undefined || runningReasoning !== undefined
@@ -208,7 +209,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     : primary === 'read' || primary === 'search' || primary === 'readImage' ? FileSearch
       : primary === 'edit' || primary === 'write' ? FilePenLine
         : primary === 'plan' ? ListTree : tools.length > 0 ? Wrench : Sparkles
-  const detail = activeTool !== undefined ? processDetail(activeTool)
+  const detail = latestTool !== undefined ? processDetail(latestTool)
     : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
   return <View style={styles.activityGroup}>
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
@@ -220,9 +221,11 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
       {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
     </Pressable>
-    {running && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
-      <ReplyStatusDots />
-      <Text style={styles.processCurrentText} numberOfLines={2}>{activeTool ? toolDisplayName(activeTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
+    {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
+      {latestTool === undefined || (!closed && latestTool.state === 'running')
+        ? <ReplyStatusDots />
+        : latestTool.state === 'failed' ? <X size={14} color={colors.muted} /> : <CircleCheck size={14} color={colors.muted} />}
+      <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
     {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
@@ -370,7 +373,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
     return <View style={styles.userBlock}>
-      <View style={styles.userBubble}>
+      <View style={styles.userContent}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
         {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>

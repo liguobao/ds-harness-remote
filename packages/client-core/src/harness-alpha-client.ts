@@ -683,11 +683,25 @@ export class HarnessAlphaClient {
 
   async scheduleCatalog(): Promise<ScheduleCatalogEntry[]> {
     const result = await this.callValue<ScheduleCatalogEntry[] | { items: ScheduleCatalogEntry[] }>('schedule/catalog', {})
-    if (Array.isArray(result)) return result
-    if (result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)) {
-      return (result as { items: ScheduleCatalogEntry[] }).items
+    const list = Array.isArray(result)
+      ? result
+      : result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)
+        ? (result as { items: ScheduleCatalogEntry[] }).items
+        : null
+    if (list === null) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
     }
-    throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
+    return list.map(entry => {
+      if (typeof entry.sessionId === 'string' && entry.sessionId.length > 0) return entry
+      const target = (entry as unknown as Record<string, unknown>).target
+      if (target && typeof target === 'object' && !Array.isArray(target)) {
+        const targetObj = target as Record<string, unknown>
+        if (targetObj.kind === 'session' && typeof targetObj.sessionId === 'string' && targetObj.sessionId.length > 0) {
+          return { ...entry, sessionId: targetObj.sessionId }
+        }
+      }
+      return entry
+    })
   }
 
   async scheduleCreate(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord> {

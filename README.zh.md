@@ -9,22 +9,20 @@
   <strong>中文</strong>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">文档</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.zh.md">自部署</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue?logo=googledocs&amp;logoColor=white" alt="文档"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.zh.md"><img src="https://img.shields.io/badge/%E8%87%AA%E9%83%A8%E7%BD%B2-Docker-2496ED?logo=docker&amp;logoColor=white" alt="自部署"></a>
+  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量"></a>
 </p>
 
 
@@ -316,3 +314,7 @@ Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效�
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### 与 DSH-Go 配对
+
+在电脑本机 Remote 设置的「登录账号 → DSH-Go 扫码」中生成二维码，使用支持此协议的 DSH-Go 扫码确认，再将手机验证码输入电脑。仅允许校验一次，错误后整个配对作废。新 Host 默认仅被控，新建 Device-only 账号无 Web/Admin 权限。需要完整 Server 配对 v1 API 及按[接入文档](docs/dsh-go-pairing-integration.md)改造的 DSH-Go；随仓库提供的最小 Server 暂不支持此流程。

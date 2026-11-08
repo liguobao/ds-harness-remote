@@ -1,5 +1,22 @@
 # Repository Guide for Agents
 
+## Oversized session catalogues (2026-11-07)
+
+Remote 的会话目录来自官方 `session/list`，覆盖整个账号，而客户端在
+`RemoteSessionTools.catalog()` 里用 `z.array(rowSchema).max(MAX_REMOTE_SESSIONS)` 校验这份共享列表。
+实测一台累计 5 431 行、其中 4 701 行是 subagent 会话的 Host 会让每个客户端在校验阶段抛 ZodError，
+异常被 Remote tool 包装器吞成 `REMOTE_SESSION_FAILED`，表现为手机「已连接」但会话列表永远空白，
+Desktop 面板的 Agent 工具同样失败。
+
+- Client：先按 workspace 归属与 subagent 过滤，再对结果施加行上限；超限时截断，不再整包失败。
+- Host：`session/list` 仅在超过 2 048 行预算时降级——只保留可列出的根会话（无 `parentSessionId` 且
+  `origin !== 'subagent'`），仍超预算时按 `updatedAt` 保留最新 2 048 行；正常规模账号行为不变。
+- 兼容：Harness 0.2.2 的 `SessionSummary` 去掉了顶层 `title`，标题只保留在
+  `projections.values.title`；Host 在 `session/list` 响应里把它提升回行字段，否则 Remote 列表全是空标题。
+- 实测：该账号由 5 431 行 / 5.13 MB 降到 717 行 / 643 KB，Android 与 Desktop 恢复正常；测试覆盖
+  子会话超预算、根会话超预算、正常规模与 `session/search` 不受影响四种场景。
+
+
 ## Self-hosted refresh response recovery (2026-11-06)
 
 `apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间
@@ -1070,3 +1087,30 @@ Remote 窗口先通过 loopback `client.authorization.status` 只读检查本地
 保留已知列表，不将失败解释为退出登录；明确授权错误码才回登录。空主机文案仅用于
 成功的空列表，不用于请求失败。Plugin check、client-runtime 17 个核心测试、build、
 DSH bundle 与 diff check 通过；未新增 Windows 首次安装或跨设备验收。
+
+## DSH-Go pairing v1 (2026-11-08)
+
+The local Remote settings support Host QR → phone confirmation → one local code
+submission. No phone code retrieval, CLI confirmation, model tool or tunnel route
+is added. The exact final request is encrypted with AES-GCM and retained for safe
+result recovery; retries cannot change its code or submission ID. New paired
+Hosts retain an inbound-only policy through refresh/logout/restart and cannot
+create a Client role. Existing credentials preserve their behavior. Strict legacy
+storage ownership validation now recognizes and validates the pairing records and
+Host-only policy rather than rejecting them as unknown files.
+
+Validation: 75 plugin test files / 559 tests, source/test typecheck, production
+bundle build and verify-dsh-plugin passed. The actual C# API/Gateway integration
+(script scripts/check-device-pairing.ts) verified pairing, independent credentials,
+restart recovery, Host hello, encrypted Noise/Relay RPC and scoped revocation.
+The phone is simulated in Node: this is not Dart/Android acceptance. The actual
+React pairing component was checked in an isolated desktop/narrow preview; not a
+full Harness UI acceptance. Loopback/isTrusted cannot prove human presence against
+OS automation; a trusted native user-presence primitive would be required.
+Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
+docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
+pairing approval was performed.
+
+## Pairing sign-in placement (2026-11-08)
+
+DSH-Go pairing lives in the local settings Sign in tab list, alongside existing OAuth/password methods, rather than above general settings. Authorized Hosts retain a pairing shortcut. Provider-loading failures do not reset a manually selected pairing tab; switching/closing the panel does not cancel the Server session or reopen its single attempt.

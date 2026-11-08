@@ -234,6 +234,47 @@ describe('HarnessRemoteBridge', () => {
     await expect(bridge.call({ endpoint: 'session/projections', payload: { args: {} } })).resolves.toEqual(original)
   })
 
+  it('keeps an oversized session catalogue listable by dropping non-root rows and lifting projected titles', async () => {
+    const row = (index: number, extra: Record<string, unknown> = {}) => ({
+      sessionId: `s${index}`,
+      updatedAt: index,
+      projections: { asOfSeq: 1, values: { title: `Titled ${index}` } },
+      ...extra,
+    })
+    await runScenarios(['subagent rows dropped', 'roots over budget', 'within budget', 'search rows'].map(name => ({ name, run: async () => {
+      const rows = name === 'within budget'
+        ? [row(1), row(2, { parentSessionId: 's1' })]
+        : name === 'subagent rows dropped'
+          ? Array.from({ length: 2_100 }, (_, index) => index < 2_000 ? row(index) : row(index, { parentSessionId: 's0' }))
+          : Array.from({ length: 2_100 }, (_, index) => row(index, name === 'roots over budget' ? {} : { parentSessionId: 's0' }))
+      const endpoint = name === 'search rows' ? 'session/search' : 'session/list'
+      const dispatch = vi.fn(async () => ({ ok: true as const, value: { items: rows } }))
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+      const result = await bridge.call({ endpoint, payload: { args: {} } }) as {
+        ok: true
+        value: { items: Array<{ sessionId: string; title?: string; parentSessionId?: string }> }
+      }
+      const items = result.value.items
+      if (name === 'subagent rows dropped') {
+        expect(items).toHaveLength(2_000)
+        expect(items.some(item => item.parentSessionId !== undefined)).toBe(false)
+      }
+      if (name === 'roots over budget') {
+        expect(items).toHaveLength(2_048)
+        expect(items[0]!.title).toBe('Titled 2099')
+      }
+      if (name === 'within budget') {
+        expect(items).toHaveLength(2)
+        expect(items.some(item => item.parentSessionId !== undefined)).toBe(true)
+      }
+      if (name === 'search rows') {
+        expect(items).toHaveLength(2_100)
+        return
+      }
+      expect(items.every(item => typeof item.title === 'string' && item.title !== '')).toBe(true)
+    } })))
+  })
+
   it('forwards only the fixed alpha Gateway endpoint allowlist', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: [{ id: 'session-1' }] }))
     const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))

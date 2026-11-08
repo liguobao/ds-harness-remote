@@ -6,7 +6,7 @@ import { NativeMarkdown } from '../../ui/markdown'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { createBotStyles } from './styles'
 
-export function BotAsideCard({ card, busy, cancel }: { card: BotObject; busy: boolean; cancel: () => void }) {
+export function BotAsideCard({ card, busy, cancel, onDelete }: { card: BotObject; busy: boolean; cancel: () => void; onDelete?: () => void }) {
   const styles = useThemedStyles(createBotStyles)
   const answering = card.status === 'answering'
   return <View style={styles.card} accessibilityLabel={s.bots.btw}>
@@ -18,5 +18,6 @@ export function BotAsideCard({ card, busy, cancel }: { card: BotObject; busy: bo
     {card.status === 'cancelled' && <Text style={styles.muted}>{s.bots.btwCancelled}</Text>}
     {card.status === 'failed' && <Text accessibilityRole="alert" style={styles.error}>{text(card.error) || s.bots.btwFailed}</Text>}
     {answering && <View style={styles.actions}><Button variant="quiet" label={s.bots.cancel} disabled={busy || !text(card.id)} onPress={cancel} /></View>}
+    {!answering && onDelete !== undefined && <View style={styles.actions}><Button variant="quiet" label={s.bots.delete} disabled={busy || !text(card.id)} onPress={onDelete} /></View>}
   </View>
 }

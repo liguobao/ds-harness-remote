@@ -111,6 +111,29 @@ describe('Native Remote session tool boundaries', () => {
     expect(f.dispatch).toHaveBeenCalledTimes(2)
   })
 
+  it('lists workspace sessions from a catalogue larger than the client row bound', async () => {
+    await runScenarios(['owned roots', 'subagent dominated'].map(name => ({ name, run: async () => {
+      const f = fixture()
+      const owned = Array.from({ length: 100 }, (_, index) => ({
+        sessionId: `owned-${index}`, title: `Owned ${index}`, running: false, blank: false, updatedAt: index,
+      }))
+      // A shared account catalogue: the workspace owns 100 roots while the rest
+      // belongs to other Workspaces and to subagent Sessions.
+      f.state.rows = [
+        ...owned,
+        ...Array.from({ length: 2_900 }, (_, index) => ({
+          sessionId: `foreign-${index}`, title: `Foreign ${index}`, running: false, blank: false, updatedAt: index,
+        })),
+      ]
+      f.state.ids = owned.map(row => row.sessionId)
+      const { sessionId: _, ...workspace } = target
+      const result = await f.tools.run('remote_list_sessions', workspace, signal()) as { sessions: { sessionId: string }[] }
+      expect(result.sessions.length).toBe(30)
+      expect(result.sessions.every(row => row.sessionId.startsWith('owned-'))).toBe(true)
+      expect(f.state.queries).toContain('session/list')
+    } })), cleanup)
+  })
+
   it('bounds history while preserving native paging and closes each snapshot subscription', async () => {
     const f = fixture()
     f.state.history = Array.from({ length: 10 }, (_, i) => event(i + 1, 'assistant/message', { message: { content: [{ type: 'text', text: 'x'.repeat(20_000) }] } }))

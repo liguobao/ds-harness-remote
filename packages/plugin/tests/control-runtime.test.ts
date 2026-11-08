@@ -31,6 +31,21 @@ describe('PluginControlRuntime settings setup', () => {
     expect(settings.get().logLevel).toBe('info')
   })
 
+  it('keeps pairing on local Host control and refuses Host-only role escalation', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const pairingControl = vi.fn(async () => ({ state: 'claimed', localSaved: false }))
+    const clientControl = vi.fn(async () => ({ ok: true, value: {} }))
+    const host = { hostStatus: () => ({ pairingHostOnly: true }), pairingControl } as unknown as HostAuthorizationControl
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings,
+      { handleControl: clientControl } as unknown as ClientModeRuntime, host))
+    await expect(handler('host.pairing.confirm', { sessionId: 'specific-session', verificationCode: '00123456' }, signal())).resolves.toMatchObject({ ok: true })
+    expect(pairingControl).toHaveBeenCalledWith('confirm', { sessionId: 'specific-session', verificationCode: '00123456' })
+    expect(clientControl).not.toHaveBeenCalled()
+    await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false, error: { details: { remoteCode: 'DEVICE_SCOPE_REQUIRED' } } })
+    await expect(handler('settings.configure', { role: 'client', serverUrl: 'https://dsh.r2049.cn', email: 'test@example.test', password: 'password' }, signal())).resolves.toMatchObject({ ok: false })
+  })
+
   it('holds login discovery until Server replacement settles and rejects overlapping saves', async () => {
     await runScenarios([false, true].map(fails => ({ name: fails ? 'replacement fails' : 'replacement succeeds', run: async () => {
       const directory = await temporaryDirectory()

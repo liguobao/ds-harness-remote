@@ -152,10 +152,11 @@ describe('browser plugin route authority', () => {
 
   it('checks Session references in each Bot response shape without treating roster Agent IDs as Sessions', async () => {
     await runScenarios([
-      { endpoint: 'state', value: { bots: [{ id: 'bot', sessionId: 'current', parts: ['part'] }], rooms: [{ id: 'room', parts: ['member'] }], agents: [{ id: 'agent-roster-id', sessions: ['agent-session'] }] }, ids: ['bot', 'current', 'part', 'room', 'member', 'agent-session'] },
+      { endpoint: 'state', value: { bots: [{ id: 'bot', sessionId: 'current', parts: ['part'] }], rooms: [{ id: 'room', sessionId: 'room-part', ownParts: ['room-old'], parts: ['member'] }], agents: [{ id: 'agent-roster-id', sessions: ['agent-session'] }] }, ids: ['bot', 'current', 'part', 'room', 'room-part', 'room-old', 'member', 'agent-session'] },
       { endpoint: 'create-bot', value: { id: 'bot', segments: [{ sessionId: 'current' }] }, ids: ['bot', 'current'] },
-      { endpoint: 'create-room', value: { id: 'room', sessions: { bot: 'member' } }, ids: ['room', 'member'] },
-      { endpoint: 'update-room', value: { room: { id: 'room', parts: ['member'] } }, ids: ['room', 'member'] },
+      { endpoint: 'create-room', value: { id: 'room', sessionId: 'room-part', sessions: { bot: 'member' } }, ids: ['room', 'room-part', 'member'] },
+      { endpoint: 'update-room', value: { room: { id: 'room', sessionId: 'room-part', ownParts: ['room-old'], parts: ['member'] } }, ids: ['room', 'room-part', 'room-old', 'member'] },
+      { endpoint: 'goal-control', value: { bots: [{ id: 'bot', sessionId: 'current' }], rooms: [{ id: 'room', sessionId: 'room-part' }], agents: [] }, ids: ['bot', 'current', 'room', 'room-part'] },
       { endpoint: 'add-agent', value: { id: 'agent-roster-id', sessions: ['agent-session'] }, ids: ['agent-session'] },
       { endpoint: 'agent-session', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },
       { endpoint: 'agent-adopt', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },

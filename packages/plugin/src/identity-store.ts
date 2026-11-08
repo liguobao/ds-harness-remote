@@ -1,3 +1,4 @@
+import { savedPairingSchema } from './pairing-contract.js'
 import { createHash } from 'node:crypto'
 import type { BigIntStats } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
@@ -444,7 +445,14 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.',
     code,
   )
-  const identityFiles = new Set(['device.json', 'device.key', 'trusted-peers.json', 'server-credentials.json'])
+  const identityFiles = new Set([
+    'device.json',
+    'device.key',
+    'trusted-peers.json',
+    'server-credentials.json',
+    'host-pairing.json',
+    'pairing-host-only.json',
+  ])
   let identities = 0
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
@@ -496,6 +504,20 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
         throw rejected('STORAGE_CONFLICT')
       }
     }
+    if (names.has('pairing-host-only.json')) {
+      await assertPrivateMode(join(directory, 'pairing-host-only.json'))
+      z.object({ hostOnly: z.literal(true) }).strict().parse(JSON.parse(await readFile(join(directory, 'pairing-host-only.json'), 'utf8')))
+    }
+    if (names.has('host-pairing.json')) {
+      await assertPrivateMode(join(directory, 'host-pairing.json'))
+      const pairing = savedPairingSchema.parse(JSON.parse(await readFile(join(directory, 'host-pairing.json'), 'utf8')))
+      if (pairing.deviceId !== record.deviceId || pairing.session.host.deviceId !== record.deviceId || pairing.session.host.identityKey !== record.publicKey || pairing.session.host.role !== 'host') throw rejected('IDENTITY_INVALID')
+      const origin = new URL(pairing.serverUrl)
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected('IDENTITY_INVALID')
+      if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) {
+        throw rejected('STORAGE_CONFLICT')
+      }
+    }
     identities++
   }
   try {
@@ -528,7 +550,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
 }
 
 async function isRepairableLegacyClientDirectory(directory: string, names: ReadonlySet<string>): Promise<boolean> {
-  if (names.has('server-credentials.json')) return false
+  if (names.has('server-credentials.json') || names.has('host-pairing.json') || names.has('pairing-host-only.json')) return false
   if (names.has('trusted-peers.json')) {
     const peers = trustedPeersSchema.parse(JSON.parse(await readFile(join(directory, 'trusted-peers.json'), 'utf8'))).peers
     if (peers.length > 0) return false
@@ -776,11 +798,12 @@ function isIdentityTempArtifact(name: string): boolean {
 }
 
 function isOwnedIdentityRecord(name: string): boolean {
-  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json') return true
+  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json' || name === 'host-pairing.json') return true
   return (
     name.startsWith('device.json.')
     || name.startsWith('device.key.')
     || name.startsWith('trusted-peers.json.')
+    || name.startsWith('host-pairing.json.')
   ) && name.endsWith('.tmp')
 }
 

@@ -9,22 +9,20 @@
   <a href="README.zh.md">中文</a>
   &nbsp;·&nbsp;
   <strong>日本語</strong>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">ドキュメント</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.md">セルフホスティング</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind ダウンロード数" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/%E3%83%89%E3%82%AD%E3%83%A5%E3%83%A1%E3%83%B3%E3%83%88-blue?logo=googledocs&amp;logoColor=white" alt="ドキュメント"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.md"><img src="https://img.shields.io/badge/%E3%82%BB%E3%83%AB%E3%83%95%E3%83%9B%E3%82%B9%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0-Docker-2496ED?logo=docker&amp;logoColor=white" alt="セルフホスティング"></a>
+  <a href="https://dshfind.com/ja/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=ja" alt="dshfind ダウンロード数"></a>
 </p>
 
 ## 一度つなげば、いつでも使える

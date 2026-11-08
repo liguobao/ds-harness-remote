@@ -186,6 +186,7 @@ export class ClientModeRuntime {
 
   async start(): Promise<void> {
     if (this.closed) throw new Error('client remote-mode runtime is closed')
+    if (this.host?.hostStatus().pairingHostOnly) { this.gatewaySwitch.install(); return }
     this.identity = await this.identities.loadOrCreate(this.config.deviceName)
     this.server.bindIdentity(this.identity)
     this.gatewaySwitch.install()
@@ -352,6 +353,7 @@ export class ClientModeRuntime {
    */
   private assertHostAuthorizationForDeviceDiscovery(): void {
     const status = this.host?.hostStatus()
+    if (status?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return
     const message = status.error === 'DEVICE_REVOKED'
       ? 'The local Host was revoked on the Server. Sign out and authorize this Host again.'
@@ -397,10 +399,11 @@ export class ClientModeRuntime {
   async clearClientAuthorization(): Promise<void> {
     const cleanup = this.leaveRemote()
     this.codexOpenedSessions.clear()
+    if (this.identity === undefined) { await Promise.all([cleanup, this.server.clearAuthorization()]); return }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()])
-    // Local identity rotation also completes when Server revocation fails.
-    this.identity = await this.identities.reset(this.config.deviceName)
-    this.server.bindIdentity(this.identity)
+    // A Host-only installation never creates a Client identity on logout.
+    if (this.host?.hostStatus().pairingHostOnly) this.identity = undefined
+    else { this.identity = await this.identities.reset(this.config.deviceName); this.server.bindIdentity(this.identity) }
     const failure = results.find(result => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
   }
@@ -978,6 +981,7 @@ export class ClientModeRuntime {
   }
 
   private requireIdentity(): HostIdentity {
+    if (this.host?.hostStatus().pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (this.identity === undefined) throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
     return this.identity
   }

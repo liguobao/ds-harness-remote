@@ -9,22 +9,20 @@
   <a href="README.zh.md">中文</a>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">Documentation</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.md">Self-hosting</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation-blue?logo=googledocs&amp;logoColor=white" alt="Documentation"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.md"><img src="https://img.shields.io/badge/Self--hosting-Docker-2496ED?logo=docker&amp;logoColor=white" alt="Self-hosting"></a>
+  <a href="https://dshfind.com/en/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=en" alt="dshfind downloads"></a>
 </p>
 
 ## Connect once. Ready whenever you are.
@@ -313,3 +311,7 @@ On the Host, enable **Debug logging** in **Plugins → Remote settings**. The se
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### Pair with DSH-Go
+
+Open Sign in → DSH-Go pairing in the local Remote settings and generate a QR code, scan and confirm on a compatible DSH-Go build, then enter the phone code on this computer. A wrong code invalidates the whole pairing. New Hosts accept incoming connections only; Device-only accounts have no Web/Admin access. Requires the full Server pairing v1 API and a DSH-Go build implementing [this integration](docs/dsh-go-pairing-integration.md). The bundled minimal Server does not support this workflow.
