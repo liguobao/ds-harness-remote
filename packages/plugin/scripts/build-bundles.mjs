@@ -30,6 +30,7 @@ async function buildBundle(options) {
         // the committed GitHub bundle stable when CI builds from the repo
         // root while local package builds run from packages/plugin.
         .replace(/^\/\/ src\//gm, '// packages/plugin/src/')
+        .replace(/^\/\/ \.\.\/(protocol|client-core|crypto|webrtc)\//gm, '// packages/$1/')
       : file.contents
     await mkdir(dirname(file.path), { recursive: true })
     await writeFile(file.path, content)
