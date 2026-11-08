@@ -1,0 +1,148 @@
+name: 🐛 缺陷反馈 (Bug Report)
+description: 提交 ds-harness-remote 的可复现缺陷或异常行为
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢帮助改进 ds-harness-remote！请提供简洁、可复现的问题报告。
+
+        **安全与隐私注意（重要）**：
+        - 请勿在此公开发布安全漏洞或未经脱敏的敏感信息。
+        - 提报前请务必抹去日志和截图中的 **Token、私钥、配对二维码、Agent 对话与提示词（Prompt）、本地绝对路径** 等敏感内容。
+        - 本 Issue 追踪器涵盖 Android 端、Web 端、自部署 Server、桌面插件、核心通信协议，以及与 dsh-go、ds-bot、intelligent ui 等生态插件的联动兼容性。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 受影响模块 (Affected area)
+      description: 哪个组件或模块出现了问题？
+      options:
+        - "Android App (apps/android)"
+        - "Web 客户端 / 浏览器端 (apps/browser)"
+        - "中继 / 信令服务端 (apps/server)"
+        - "VS Code 插件 (apps/vscode)"
+        - "DSH 桌面插件 (packages/plugin)"
+        - "联动插件与扩展 (dsh-go / ds-bot / intelligent ui 等)"
+        - "通信与核心协议 (client-core / webrtc / protocol)"
+        - "文档与部署示例 (docs / examples)"
+        - "其他 / 未知"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client-type
+    attributes:
+      label: 客户端 / 部署方式 (Installation method)
+      options:
+        - "Android APK (GitHub Release / Pre-release)"
+        - "DSH 桌面插件 (插件市场)"
+        - "官方托管 Web 端 (dsh.r2049.cn/app)"
+        - "自建 Docker 服务端 (Self-hosted Server)"
+        - "npm / CLI (ds-harness-remote 包)"
+        - "源码编译安装 (Built from source)"
+        - "其他"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或 Commit (Version or commit)
+      description: 客户端版本、插件版本或源码 commit SHA。
+      placeholder: "例如: 0.6.3 或 0123456"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 运行环境与操作系统 (Operating system)
+      description: 操作系统版本及 CPU 架构（如涉及 Android 请包含手机机型与系统版本）。
+      placeholder: "例如: Android 14 (HyperOS / Pixel), Windows 11 x64, macOS 15.0 arm64"
+    validations:
+      required: true
+
+  - type: input
+    id: backend-runtime
+    attributes:
+      label: 接入的 Agent / 后端运行环境 (Agent runtime)
+      description: 本地工作电脑上运行的 Agent 类型及版本。
+      placeholder: "例如: DeepSeek Harness Desktop 0.6.x, Codex CLI, Cursor, Antigravity"
+
+  - type: input
+    id: companion-plugins
+    attributes:
+      label: 联动插件与扩展版本 (Companion plugins)
+      description: 如问题涉及 dsh-go、ds-bot、deepseek-harness-intelligent-ui 等联动插件，请注明其名称与版本（不涉及可留空）。
+      placeholder: "例如: dsh-go v0.3.1, ds-bot v0.2.0, intelligent-ui v0.4.0"
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: 实际行为 (What happened?)
+      description: 描述具体发生了什么异常，以及造成了什么影响。
+      placeholder: 请清晰描述出现的错误或不符合预期的现象。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 期望行为 (What did you expect?)
+      description: 描述你期望的正常运行结果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤 (How to reproduce)
+      description: 提供最小化、稳定的复现步骤。
+      placeholder: |
+        1. 打开 ...
+        2. 连接到 Host / Agent ...
+        3. 执行操作 ...
+        4. 观察到错误 ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: 出现频率 (Reproducibility)
+      options:
+        - "每次必现 (Every time)"
+        - "偶发 / 间歇性出现 (Sometimes)"
+        - "仅出现一次 (Only once)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志输出 (Relevant log output)
+      description: 请粘贴脱敏后的关键日志片段（已自动设置代码高亮）。
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 补充信息与截图 (Additional context)
+      description: 截图、网络环境（局域网 / P2P / WebRTC 中继）或其他有助于排查的细节。请注意遮挡二维码与个人路径。
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: 提交前确认 (Before submitting)
+      options:
+        - label: 我已检索过既有 Issue，未发现重复报告。
+          required: true
+        - label: 该报告涉及本项目开源组件或支持的生态插件联动，而非第三方外部服务本身的故障。
+          required: true
+        - label: 本问题不是安全漏洞；若涉及安全漏洞已通过保密渠道报告。
+          required: true
+        - label: 我已脱敏并清除了所有 Token、私钥、配对二维码、对话敏感内容和个人隐私路径。
+          required: true

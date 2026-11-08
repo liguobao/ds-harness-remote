@@ -1,0 +1,75 @@
+name: 💡 Feature request
+description: Propose a new feature or improvement for ds-harness-remote
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape ds-harness-remote! Start with the problem and desired outcome; a complete implementation design is not required.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the project would this feature improve?
+      options:
+        - "Android App (apps/android)"
+        - "Web Client / Browser (apps/browser)"
+        - "Server / Relay / Signaling (apps/server)"
+        - "VS Code Extension (apps/vscode)"
+        - "DSH Desktop Plugin (packages/plugin)"
+        - "Companion plugins & integrations (dsh-go / ds-bot / intelligent ui)"
+        - "Connection & Core Protocols (client-core / webrtc / protocol)"
+        - "Documentation & DX (docs / dx)"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow pressure
+      description: What is difficult or impossible today? Describe the real-world scenario (specify any companion plugin interactions if applicable).
+      placeholder: Describe the concrete need rather than only naming a feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-outcome
+    attributes:
+      label: Desired outcome
+      description: What should become possible or easier once implemented?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: If you have an approach, messaging protocol, or architecture in mind, describe it here (optional).
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What have you tried, and why is it insufficient?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add mockups, references, links, or other useful context. Remove sensitive information first.
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and PRs and did not find a duplicate request.
+          required: true
+        - label: This request concerns the ds-harness-remote project scope or supported companion integrations.
+          required: true
+        - label: I removed credentials, prompts, and sensitive information.
+          required: true
