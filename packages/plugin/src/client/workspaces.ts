@@ -859,13 +859,14 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setNotice(undefined)
     }
 
-    const saveLoginServer = async (): Promise<void> => {
-      if (loginServerUrl.trim() === '' || savingServer) return
+    const saveLoginServer = async (serverUrlOverride?: string): Promise<void> => {
+      const nextServerUrl = (serverUrlOverride ?? loginServerUrl).trim()
+      if (nextServerUrl === '' || savingServer) return
       resetLoginFlow()
       setSavingServer(true)
       setBusy(true)
       try {
-        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: loginServerUrl.trim() })
+        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: nextServerUrl })
         if (view.applies !== 'live') {
           setNotice(t('serverSaved'))
           return
@@ -1375,7 +1376,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                     }, t(savingServer ? 'saving' : 'save')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer,
-                      onClick: () => { resetLoginFlow(); setLoginServerUrl('https://dsh.r2049.cn') },
+                      onClick: () => { resetLoginFlow(); setLoginServerUrl('https://dsh.r2049.cn'); void saveLoginServer('https://dsh.r2049.cn') },
                     }, t('restoreDefaultServiceAddress')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer,

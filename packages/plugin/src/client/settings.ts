@@ -312,8 +312,9 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }, [signInOpen, qrCompleted, completionReload, savingServer, serverDirty])
 
-    const saveLoginServer = async (): Promise<void> => {
-      if (busy || savingServer || !writable || serverUrl.trim() === '' || !serverDirty) return
+    const saveLoginServer = async (serverUrlOverride?: string): Promise<void> => {
+      const nextServerUrl = (serverUrlOverride ?? serverUrl).trim()
+      if (busy || savingServer || !writable || nextServerUrl === '' || serverUrlOverride === undefined && !serverDirty) return
       setSavingServer(true)
       setBusy(true)
       setError(undefined)
@@ -327,7 +328,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       setQrExpired(false)
       setQrBusy(false)
       try {
-        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: serverUrl.trim() })
+        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: nextServerUrl })
         serverDraftEdited.current = false
         setEditingServer(false)
         applyView(view)
@@ -813,7 +814,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                     }, t(savingServer ? 'saving' : 'save')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer || !writable,
-                      onClick: () => { serverDraftEdited.current = true; setServerUrl('https://dsh.r2049.cn') },
+                      onClick: () => { serverDraftEdited.current = true; setServerUrl('https://dsh.r2049.cn'); void saveLoginServer('https://dsh.r2049.cn') },
                     }, t('restoreDefaultServiceAddress')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer || !writable,

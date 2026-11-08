@@ -70,10 +70,11 @@ export function createHostPairingPanel(React: ClientReact) {
     const status = view === undefined ? 'pairingHint' : view.state === 'created' ? 'pairingScan'
       : view.state === 'claimed' ? 'pairingEnter' : view.state === 'completed' ? 'pairingComplete'
         : view.state === 'approved' ? 'pairingPending' : 'pairingClosed'
+    const instructionLines = t(status).split('\n')
     const countdown = !active ? null : React.createElement('span', { className: 'dshRemotePairingCountdown', role: 'timer' }, remaining > 0 ? t('pairingExpires', { time: remainingText }) : t('pairingExpired'))
     return React.createElement('section', { className: 'dshRemotePairing', 'aria-label': t('pairingTitle') },
       React.createElement('div', { className: 'dshRemotePairingHeading' },
-      React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, ...t(status).split('DSH Go').flatMap((part, index) => index === 0 ? [part] : [React.createElement('a', { key: index, href: 'https://github.com/ccch1mneyyy/dsh-go', target: '_blank', rel: 'noopener noreferrer' }, 'DSH Go'), part])),
+      React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, ...instructionLines.flatMap((line, lineIndex) => [React.createElement('span', { key: lineIndex, className: lineIndex === 0 ? 'dshRemotePairingInstructionPrimary' : 'dshRemotePairingInstructionSecondary' }, ...line.split('DSH Go').flatMap((part, index) => index === 0 ? [part] : [React.createElement('a', { key: index, href: 'https://github.com/ccch1mneyyy/dsh-go', target: '_blank', rel: 'noopener noreferrer' }, 'DSH Go'), part])), lineIndex < instructionLines.length - 1 ? React.createElement('br', { key: `break-${lineIndex}` }) : null])),
         active && view?.state !== 'created' ? countdown : null),
       props.disabled ? React.createElement('p', null, t('pairingSaveServer')) : null,
       image === undefined ? null : React.createElement('img', { src: image, width: 200, height: 200, alt: t('pairingQr'), className: 'dshRemotePairingQr' }),
