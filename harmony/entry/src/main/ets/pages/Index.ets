@@ -4463,6 +4463,13 @@ struct Index {
           promptAction.showToast({ message: this.petHint().length > 0
             ? this.petHint() : this.tr('鲸娘在待命（设置里可关掉）') });
         })
+        // 长按桌宠 = 导出诊断文件（现场排障的快捷键，不用翻抽屉找诊断面板）
+        .gesture(LongPressGesture().onAction(() => {
+          const path: string = this.runtime.exportDiagnosticsToFile();
+          promptAction.showToast({ message: path.length > 0
+            ? this.tr('诊断已导出，可 hdc file recv 拉走\n') + path
+            : this.tr('导出失败（存储不可用）') });
+        }))
       }
       // 轮次导航：↑ 上一轮 / ↓ 下一轮 + 当前位置与上一轮用量（对齐 dsh-Go 的轮次导航）
       if (this.runtime.userTurnIndexes().length > 1) {

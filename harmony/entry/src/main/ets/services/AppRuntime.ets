@@ -944,8 +944,16 @@ export class AppRuntime {
           ? Math.min(2000, AppRuntime.RECONNECT_DELAYS_MS[index])
           : AppRuntime.RECONNECT_DELAYS_MS[index];
         this.reconnectAttempt += 1;
-        this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '
-          + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+        if (hostOffline) {
+          // 主机侧还没回来时，说明「服务器通了、主机还没上线」，别用「重连失败」吓人
+          const waited: number = this.offlineWaitSince > 0
+            ? Math.round((Date.now() - this.offlineWaitSince) / 1000) : 0;
+          this.reconnectStatus = '主机还没重新上线，' + Math.round(delay / 1000)
+            + ' 秒后再试（已等 ' + waited + ' 秒）';
+        } else {
+          this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '
+            + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';
+        }
         LinkLog.write('conn', '自动重连失败，' + Math.round(delay / 1000) + 's 后第 '
           + this.reconnectAttempt + ' 次');
         this.scheduleReconnect(deviceId, delay);
