@@ -603,7 +603,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void }) {
+export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void; onOpenAbout?: () => void }) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -618,6 +618,10 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack:
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const typographyDensity = useAppStore(state => state.typographyDensity)
   const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
+  const { phase: updatePhase, progress: updateProgress, latestVersion, checkForUpdates } = useUpdateCheck()
+  const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
+  const buildVersion = Application.nativeBuildVersion
+  const versionLabel = buildVersion === null ? appVersion : `${appVersion} (${buildVersion})`
   const showIdentity = (label: string, value?: string) => {
     if (!value) return
     Alert.alert(label, value, [
@@ -631,6 +635,7 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack:
     ])
   }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
   useEffect(() => {
     setLogCount(connectionLogEntries().length)
@@ -741,6 +746,9 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack:
 
   if (diagnosticsOpen && !onOpenDiagnostics) {
     return <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
+  }
+  if (aboutOpen && !onOpenAbout) {
+    return <AboutScreen onBack={() => setAboutOpen(false)} />
   }
 
   return (
@@ -937,6 +945,41 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack:
             <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
             <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
 
+            <SectionTitle>{zhCN.settings.about}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Download}
+                label={zhCN.settings.checkUpdates}
+                detail={
+                  updatePhase === 'checking'
+                    ? zhCN.settings.checkingUpdates
+                    : updatePhase === 'downloading'
+                      ? updateProgress === null
+                        ? zhCN.settings.downloadingUpdate
+                        : `${zhCN.settings.downloadingUpdate} ${updateProgress}%`
+                      : latestVersion !== null
+                        ? `${zhCN.settings.updateFoundTitle} v${latestVersion}`
+                        : undefined
+                }
+                value={versionLabel}
+                disabled={updatePhase !== 'idle'}
+                chevron={updatePhase === 'idle'}
+                accessory={updatePhase !== 'idle' ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                onPress={() => void checkForUpdates()}
+              />
+              <GroupRow
+                icon={Info}
+                label={zhCN.settings.about}
+                detail={zhCN.settings.aboutLead}
+                chevron
+                onPress={() => {
+                  if (onOpenAbout) onOpenAbout()
+                  else setAboutOpen(true)
+                }}
+              />
+            </GroupCard>
+
             <GroupCard style={styles.signOutCard}>
               <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} onPress={confirmSignOut} />
               <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} onPress={confirmReset} />
@@ -1114,14 +1157,28 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   )
 }
 
+let cachedLatestVersion: string | null = null
+let startupUpdateChecked = false
+
+export function useStartupUpdateCheck(enabled = true) {
+  const { checkForUpdates } = useUpdateCheck()
+  useEffect(() => {
+    if (!enabled || startupUpdateChecked) return
+    startupUpdateChecked = true
+    void checkForUpdates({ silent: true })
+  }, [enabled])
+}
+
 function useUpdateCheck() {
   const [phase, setPhase] = useState<'idle' | 'checking' | 'downloading'>('idle')
   const [progress, setProgress] = useState<number | null>(null)
+  const [latestVersion, setLatestVersion] = useState<string | null>(() => cachedLatestVersion)
   const appVersion = Application.nativeApplicationVersion ?? ''
 
-  const checkForUpdates = async () => {
+  const checkForUpdates = async (options?: { silent?: boolean }) => {
     if (phase !== 'idle') return
-    setPhase('checking')
+    const silent = options?.silent === true
+    if (!silent) setPhase('checking')
     try {
       const response = await fetch(releaseApiUrl)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -1134,8 +1191,10 @@ function useUpdateCheck() {
         ? release.assets.find(asset => typeof asset.name === 'string' && asset.name.toLowerCase().endsWith('.apk'))
         : undefined
       const downloadUrl = typeof apkAsset?.browser_download_url === 'string' ? apkAsset.browser_download_url : undefined
-      setPhase('idle')
+      if (!silent) setPhase('idle')
       if (latest !== '' && isNewerVersion(latest, appVersion)) {
+        cachedLatestVersion = latest
+        setLatestVersion(latest)
         Alert.alert(
           zhCN.settings.updateFoundTitle,
           zhCN.settings.updateFoundBody(latest, appVersion),
@@ -1147,11 +1206,15 @@ function useUpdateCheck() {
           ],
         )
       } else {
-        Alert.alert(zhCN.settings.upToDateTitle, zhCN.settings.upToDateBody)
+        cachedLatestVersion = null
+        setLatestVersion(null)
+        if (!silent) Alert.alert(zhCN.settings.upToDateTitle, zhCN.settings.upToDateBody)
       }
     } catch {
-      setPhase('idle')
-      Alert.alert(zhCN.settings.checkFailedTitle, zhCN.settings.checkFailedBody)
+      if (!silent) {
+        setPhase('idle')
+        Alert.alert(zhCN.settings.checkFailedTitle, zhCN.settings.checkFailedBody)
+      }
     }
   }
 
@@ -1199,7 +1262,7 @@ function useUpdateCheck() {
     }
   }
 
-  return { phase, progress, checkForUpdates }
+  return { phase, progress, latestVersion, checkForUpdates }
 }
 
 function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, last = false }: {
@@ -1460,9 +1523,19 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
 export function AboutScreen({ onBack }: { onBack: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const { phase, progress, latestVersion, checkForUpdates } = useUpdateCheck()
   const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
   const buildVersion = Application.nativeBuildVersion
   const versionLabel = buildVersion === null ? appVersion : `${appVersion} (${buildVersion})`
+  const updateSubtitle = phase === 'checking'
+    ? zhCN.settings.checkingUpdates
+    : phase === 'downloading'
+      ? progress === null
+        ? zhCN.settings.downloadingUpdate
+        : `${zhCN.settings.downloadingUpdate} ${progress}%`
+      : latestVersion !== null
+        ? `${zhCN.settings.updateFoundTitle} v${latestVersion}`
+        : versionLabel
 
   return (
     <View style={styles.flex}>
@@ -1475,6 +1548,22 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
           </View>
 
           <View style={styles.group}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.settings.checkUpdates}
+              accessibilityState={{ disabled: phase !== 'idle', busy: phase !== 'idle' }}
+              disabled={phase !== 'idle'}
+              onPress={() => void checkForUpdates()}
+              style={({ pressed }) => [styles.settingsLink, pressed && phase === 'idle' && styles.settingsLinkPressed]}
+            >
+              <View style={styles.settingsLinkCopy}>
+                <Text style={styles.settingsLinkLabel}>{zhCN.settings.checkUpdates}</Text>
+                <Text style={styles.settingsLinkUrl}>{updateSubtitle}</Text>
+              </View>
+              {phase !== 'idle'
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Download size={18} color={colors.primary} />}
+            </Pressable>
             <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
             <SettingsLink label={zhCN.settings.twitter} url={twitterUrl} />
             <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />

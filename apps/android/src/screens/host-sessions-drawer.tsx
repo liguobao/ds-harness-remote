@@ -19,6 +19,7 @@ import {
 } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
+import Svg, { Path } from 'react-native-svg'
 import {
   ArrowLeft,
   Bot,
@@ -50,6 +51,7 @@ import { useAppStore } from '../state/store'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
+import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -847,7 +849,7 @@ export function HostSessionsDrawer({
 
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
-      {/* 当前主机 */}
+      {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
         <Pressable
           accessibilityRole="button"
@@ -861,7 +863,18 @@ export function HostSessionsDrawer({
           hitSlop={8}
           style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
         >
-          <Text style={styles.brandTitle} numberOfLines={1}>{deviceName ?? strings.devices.title}</Text>
+          <Svg
+            width={20}
+            height={(20 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+            accessible={false}
+          >
+            <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+          </Svg>
+          <Text style={styles.brandTitle} numberOfLines={1}>deepseek</Text>
+          <View style={styles.brandBadge}>
+            <Text style={styles.brandBadgeText}>HARNESS</Text>
+          </View>
         </Pressable>
         <View style={styles.brandRight}>
           <Pressable
@@ -1809,8 +1822,21 @@ const createStyles = (colors: ThemeColors) =>
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
-    brandLeft: { flex: 1, minWidth: 0, marginRight: spacing.sm, gap: 4 },
-    brandTitle: { ...type.heading, fontSize: 20, lineHeight: 26, fontWeight: '700', color: colors.ink },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 6 },
+    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
+    brandBadge: {
+      backgroundColor: colors.ink,
+      paddingHorizontal: 5,
+      paddingVertical: 1.5,
+      borderRadius: 4,
+    },
+    brandBadgeText: {
+      color: colors.background,
+      fontSize: 10,
+      lineHeight: 12,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     iconBtn: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
