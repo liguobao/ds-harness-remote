@@ -207,6 +207,13 @@ export function describeControlClose(code: number, reason: string): CloseVerdict
     verdict.message = '服务器正在重启，稍后自动重连';
     return verdict;
   }
+  // 4002 = 凭据失效（我们今晚真踩到：换服务器/凭据被清后连接中继会回这个码）。
+  // 重连没有意义，要用户去「设置 › 退出授权」后重新登录，所以文案必须写清楚动作。
+  if (code === 4002) {
+    verdict.message = '登录凭据已失效（4002）：请在设置的「远程」里退出授权后重新登录';
+    verdict.stopAutoReconnect = true;
+    return verdict;
+  }
   // 4009 = 服务器主动下线（server shutdown）：典型场景是运维重启 relay，
   // 属于「等一会儿就好」的瞬时状态，必须自动重连，不能交回用户手动点。
   // 实测：停服 12 秒后，此前被判成「不重连」，客户端一直停在设备列表，
