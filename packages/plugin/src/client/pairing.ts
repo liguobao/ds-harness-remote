@@ -63,8 +63,8 @@ export function createHostPairingPanel(React: ClientReact) {
         : view.state === 'approved' ? 'pairingPending' : 'pairingClosed'
     return React.createElement('section', { className: 'dshRemotePairing', 'aria-label': t('pairingTitle') },
       React.createElement('h3', null, t('pairingTitle')),
-      React.createElement('p', { role: 'status', 'aria-live': 'polite' }, t(status)),
-      React.createElement('p', null, t('pairingHostOnly')),
+      React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, t(status)),
+      React.createElement('p', { className: 'dshRemotePairingPolicy' }, t('pairingHostOnly')),
       props.disabled ? React.createElement('p', null, t('pairingSaveServer')) : null,
       view === undefined ? null : React.createElement('p', { className: 'dshRemotePairingIdentity' }, view.serverUrl, React.createElement('br'), React.createElement('code', null, view.hostFingerprint)),
       image === undefined ? null : React.createElement('img', { src: image, width: 320, height: 320, alt: t('pairingQr'), className: 'dshRemotePairingQr' }),

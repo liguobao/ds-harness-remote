@@ -2,9 +2,11 @@
 export const localeNamespace = 'ds-harness-remote'
 
 export const en = {
+  serverSavedLive: 'Server address saved and applied.',
+  saveServerBeforeLogin: 'Save the Server address before continuing sign-in or pairing.',
   pairingLoginTab: 'DSH-Go pairing',
   pairingTitle: "Pair with DSH-Go",
-  pairingHint: "Scan in DSH-Go, confirm on your phone, then enter the phone code on this computer.",
+  pairingHint: "Scan in DSH-Go and confirm on your phone.\nThen enter the phone code on this computer and confirm binding.",
   pairingHostOnly: "New Hosts accept connections only. Pairing does not enable control of other devices.",
   pairingSaveServer: "Save the Server address before pairing.",
   pairingScan: "Scan this QR code in DSH-Go and confirm on your phone.",
@@ -22,7 +24,7 @@ export const en = {
   pairingStart: "Generate pairing QR code",
   pairingBusy: "Please wait…",
   pairingUnsupported: "This Server does not support device pairing.",
-  pairingError: "Could not finish pairing. Check the connection; recover the original submission if a code was sent.",
+  pairingError: "Could not finish pairing. Check the connection.\nIf a code was sent, recover the original submission without changing it.",
 
   remoteTools: 'Inject Remote Tools',
   remoteToolsHint: 'Expose remote_* tools in sessions. On by default; turn it off when you do not need them. Changes apply after restarting the Host.',
@@ -338,9 +340,11 @@ export const en = {
 } as const
 
 export const zh: Record<keyof typeof en, string> = {
+  serverSavedLive: '服务器地址已保存并生效。',
+  saveServerBeforeLogin: '请先保存服务器地址，再继续登录或配对。',
   pairingLoginTab: 'DSH-Go 扫码',
   pairingTitle: "与 DSH-Go 配对",
-  pairingHint: "使用 DSH-Go 扫码并在手机确认，再将手机验证码输入本机。",
+  pairingHint: "使用 DSH-Go 扫码，并在手机上确认。\n再将手机显示的验证码输入本机，确认绑定。",
   pairingHostOnly: "新 Host 默认仅被控；配对不会授予主控其他设备的权限。",
   pairingSaveServer: "请先保存服务器地址，再开始配对。",
   pairingScan: "请使用 DSH-Go 扫码并在手机上确认。",
@@ -358,7 +362,7 @@ export const zh: Record<keyof typeof en, string> = {
   pairingStart: "生成配对二维码",
   pairingBusy: "请稍候…",
   pairingUnsupported: "当前服务器不支持设备扫码配对。",
-  pairingError: "暂时无法完成配对，请检查网络。若已提交验证码，请恢复原提交，不要更换验证码。",
+  pairingError: "暂时无法完成配对，请检查网络。\n若已提交验证码，请恢复原提交，不要更换验证码。",
 
   remoteTools: '注入 Remote Tools',
   remoteToolsHint: '在会话中注入 remote_* 工具。默认开启；不需要时可关闭，重启 Host 后生效。',
