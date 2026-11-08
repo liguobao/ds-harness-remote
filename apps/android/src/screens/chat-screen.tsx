@@ -403,6 +403,17 @@ export function ChatScreen({
   // Back inside a subagent child returns to its parent conversation (the
   // official subagent UI's navigation), instead of leaving the chat entirely.
   const backFromChat = () => {
+    // Bot mode keeps its own stack: conversation → roster → drawer → app back.
+    if (botMode) {
+      if (!tabletSplit && sessionsOpen) {
+        setSessionsOpen(false)
+        return
+      }
+      if (botConversationId !== undefined) {
+        onSelectBot?.(undefined)
+        return
+      }
+    }
     const parent = session !== undefined && isSubagentSession(session)
       ? sessions.find(item => item.sessionId === session.parentSessionId)
       : undefined

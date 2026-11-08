@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -456,9 +457,15 @@ export function DsBotCapabilitiesSubpage({
               disabled={!isLiveState || !targetBot}
               accessory={chosen ? <Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
               onPress={() => {
-                if (targetBot) {
-                  void perform('update-bot', { id: targetBot.id, permission: opt.id })
+                if (!targetBot) return
+                if (opt.id === 'danger-full-access') {
+                  Alert.alert(opt.label, s.chat.permissionFullAccessDescription, [
+                    { text: s.common.cancel, style: 'cancel' },
+                    { text: s.bots.confirm, style: 'destructive', onPress: () => void perform('update-bot', { id: targetBot.id, permission: opt.id }) },
+                  ])
+                  return
                 }
+                void perform('update-bot', { id: targetBot.id, permission: opt.id })
               }}
             />
           )

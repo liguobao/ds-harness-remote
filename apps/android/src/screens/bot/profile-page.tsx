@@ -650,9 +650,15 @@ export function BotProfilePage({
                             accessibilityState={{ checked: active }}
                             disabled={busy || Boolean(state.readOnly)}
                             onPress={() => {
-                              if (val !== currentPerm) {
-                                void perform('update-bot', { id: bot.id, permission: val })
+                              if (val === currentPerm) return
+                              if (val === 'danger-full-access') {
+                                Alert.alert(s.bots.permFullAccess, s.chat.permissionFullAccessDescription, [
+                                  { text: s.common.cancel, style: 'cancel' },
+                                  { text: s.bots.confirm, style: 'destructive', onPress: () => void perform('update-bot', { id: bot.id, permission: val }) },
+                                ])
+                                return
                               }
+                              void perform('update-bot', { id: bot.id, permission: val })
                             }}
                             style={[
                               styles.permOption,

@@ -90,6 +90,7 @@ let activeOpenAbort: AbortController | undefined
 let activeOpenKey: string | undefined
 let activeOpenPromise: Promise<RemoteSession | undefined> | undefined
 let actionLocked = false
+let actionToken = 0
 let sessionSyncActive = false
 let lastObservedScope = ''
 let lastObservedGen = -1
@@ -253,6 +254,12 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       }
     } catch (reason) {
       if (rev !== activeRevision || get().scope !== scope) return
+      // A cancelled poll (leaving the screen, backgrounding, connection reset)
+      // is not a Host failure and must not leave an error banner behind.
+      if (signal?.aborted) {
+        set({ loading: false })
+        return
+      }
       set({
         loading: false,
         error: reason instanceof Error ? reason.message : s.bots.unavailable,
@@ -275,7 +282,16 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       return undefined
     }
     if (!connected) {
-      return get().session
+      // Never carry another Bot's session across a disconnect or a selection
+      // made while offline: keep the selection, drop the stale conversation and
+      // surface the connection reason instead of an endless loading state.
+      const current = get().session
+      if (current === undefined || current.sessionId !== targetSessionId) {
+        if (get().session !== undefined || get().openedSessionKey !== undefined || get().openError !== s.runtime.connectHostFirst) {
+          set({ session: undefined, openedSessionKey: undefined, openError: s.runtime.connectHostFirst })
+        }
+      }
+      return undefined
     }
     const client = getClient()
     if (!client.value) {
@@ -381,6 +397,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
     const client = getClient()
     if (!client.value || actionLocked) return { ok: false }
     actionLocked = true
+    const token = ++actionToken
     ++activeRevision
     set({ busy: true, actionError: undefined })
     let result: { ok: boolean; value?: unknown } = { ok: false }
@@ -452,14 +469,16 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
         })
       }
     } catch (reason) {
-      if (get().scope === scope) {
+      if (get().scope === scope && signal?.aborted !== true) {
         set({ actionError: reason instanceof Error ? reason.message : s.bots.unknownOutcome })
       }
     } finally {
-      actionLocked = false
+      // Only the holder releases the lock: a scope reset or a newer mutation
+      // must not have its lock cleared by a late finisher.
+      if (actionToken === token) actionLocked = false
       if (get().scope === scope) {
         await get().refresh(true, signal)
-        if (get().scope === scope) set({ busy: false })
+        if (get().scope === scope && actionToken === token) set({ busy: false })
       }
     }
     return result

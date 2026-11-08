@@ -196,12 +196,17 @@ export function DsBotSettingsModal({
   const [usageLoading, setUsageLoading] = useState(false)
   const [usageRange, setUsageRange] = useState<UsageRangeId>('7d')
 
-  let clientInstance: BotRemoteClient | undefined
-  try {
-    clientInstance = requireBotClient()
-  } catch {
-    clientInstance = undefined
-  }
+  // Resolve once per connection. Building a client inside the render body put a
+  // fresh identity in the data effect's dependencies, so every response
+  // (providers/agents/usage) re-triggered the same fetches forever.
+  const clientInstance = useMemo<BotRemoteClient | undefined>(() => {
+    if (!connected) return undefined
+    try {
+      return requireBotClient()
+    } catch {
+      return undefined
+    }
+  }, [connected, selectedDevice?.deviceId])
 
   const checkDsBotPluginStatus = useCallback(async () => {
     if (!connected) {
@@ -240,11 +245,15 @@ export function DsBotSettingsModal({
   useEffect(() => {
     if (!visible) return
     setSubpage(initialTab ?? null)
+  }, [visible, initialTab])
+
+  useEffect(() => {
+    if (!visible) return
     void checkDsBotPluginStatus()
     if (connected && !state) {
       void refresh(true)
     }
-  }, [visible, initialTab, connected, state, checkDsBotPluginStatus, refresh])
+  }, [visible, connected, state, checkDsBotPluginStatus, refresh])
 
   useEffect(() => {
     if (!visible || !clientInstance) return

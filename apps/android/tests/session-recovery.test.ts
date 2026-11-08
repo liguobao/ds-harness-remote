@@ -1321,6 +1321,46 @@ describe('authoritative permission projection', () => {
         },
       },
       {
+        name: 'switching Bot while the Host is offline drops the previous session instead of reusing it',
+        run: async () => {
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [chiefPart1, chiefPart2, writerPart1],
+          })
+          useBotTeamStore.getState().ensureScope('offline-switch-test')
+          proxy.sessionList.mockResolvedValue([chiefPart1, chiefPart2, writerPart1])
+          botDispatch.mockImplementation(async ({ endpoint }: { endpoint: string }) => ({
+            status: 200,
+            json: {
+              ok: true,
+              value: endpoint === 'state'
+                ? {
+                    mainBotId: 'chief',
+                    bots: [
+                      { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', role: 'Lead', main: true },
+                      { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs', main: false },
+                    ],
+                    rooms: [],
+                  }
+                : {},
+            },
+          }))
+
+          await useBotTeamStore.getState().refresh()
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('chief-part-2')
+
+          // Selecting another Bot while offline must not keep rendering the old conversation.
+          useAppStore.getState().setOffline()
+          useBotTeamStore.getState().setSelectedId('writer')
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().session).toBeUndefined()
+          expect(useBotTeamStore.getState().openError).toBeTruthy()
+        },
+      },
+      {
         name: 're-establishes the Bot session after disconnect recovery or switching to another Host with the same sessionId',
         run: async () => {
           const hostAChief: RemoteSession = { sessionId: 'chief-part-1', title: 'Host A Chief', updatedAt: 1, running: false, blank: false }

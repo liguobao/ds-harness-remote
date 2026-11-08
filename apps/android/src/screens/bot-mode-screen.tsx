@@ -62,7 +62,9 @@ export function BotModeScreen({
   const hostScope = useAppStore(browseScope)
   const connectionGen = getConnectionGeneration()
 
-  useBotTeamPolling(true)
+  // The drawer runs the same poller while it is mounted (inline split view or an
+  // open sheet); a second loop just doubles traffic and cancels in-flight reads.
+  useBotTeamPolling(!drawerOpen)
 
   const state = useBotTeamStore(store => store.state)
   const session = useBotTeamStore(store => store.session)
@@ -229,7 +231,10 @@ export function BotModeScreen({
   }
 
   const insets = useSafeAreaInsets()
-  const navBack = splitView ? undefined : (onOpenDrawer ?? (selectedId ? () => handleSelect(undefined) : onBack))
+  // A Bot/group header goes back to the roster; the roster header opens the
+  // session drawer. The previous order made the roster branch unreachable
+  // because chat always passes onOpenDrawer.
+  const navBack = splitView ? undefined : (bot || room ? () => handleSelect(undefined) : (onOpenDrawer ?? onBack))
   const goalSteps = objects(room?.goal?.steps)
   const goalDoneCount = goalSteps.filter(step => text(step.status) === 'done').length
   const goalTitle = text(room?.goal?.title)
@@ -417,7 +422,7 @@ export function BotModeScreen({
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
                 />
-              ) : loading || (targetSessionId && !openError) ? (
+              ) : loading || (connectionPhase === 'connected' && targetSessionId && !openError) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>

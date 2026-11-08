@@ -39,7 +39,6 @@ import {
   type BotState,
 } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
-import type { ScheduleCreateRequest } from '../../types'
 import { Button } from '../../ui/components'
 import { radius } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -660,7 +659,6 @@ export function BotSchedulesPanel({
   const { colors } = useTheme()
   const styles = useThemedStyles(createSharedStyles)
   const loadDeviceSchedules = useAppStore(store => store.loadScheduleTasks)
-  const createDeviceSchedule = useAppStore(store => store.createScheduleTask)
   const deleteDeviceSchedule = useAppStore(store => store.deleteScheduleTask)
 
   const [tasks, setTasks] = useState<BotObject[]>([])
@@ -745,18 +743,14 @@ export function BotSchedulesPanel({
     const normalizedTime = /^\d{2}:\d{2}$/.test(timeText.trim()) ? timeText.trim() : '09:00'
 
     let whenPayload: BotObject
-    let fallbackReq: ScheduleCreateRequest
     if (kind === 'daily') {
       whenPayload = { kind: 'daily', time: normalizedTime, timeZone }
-      fallbackReq = { title: title.trim(), prompt: prompt.trim(), daily: { time: `${normalizedTime}:00`, time_zone: timeZone } }
     } else if (kind === 'weekly') {
       const days = weekdays.length > 0 ? weekdays : [1]
       whenPayload = { kind: 'weekly', time: normalizedTime, weekdays: days, timeZone }
-      fallbackReq = { title: title.trim(), prompt: prompt.trim(), weekly: { time: `${normalizedTime}:00`, time_zone: timeZone, weekdays: days } }
     } else if (kind === 'every') {
       const mins = Math.max(1, Math.min(7 * 24 * 60, Number.parseInt(everyMinutes, 10) || 60))
       whenPayload = { kind: 'every', minutes: mins, timeZone }
-      fallbackReq = { title: title.trim(), prompt: prompt.trim(), every_seconds: mins * 60 }
     } else {
       const parts = normalizedTime.split(':')
       const hh = Number.parseInt(parts[0] ?? '9', 10) || 9
@@ -766,32 +760,23 @@ export function BotSchedulesPanel({
       if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1)
       const iso = next.toISOString()
       whenPayload = { kind: 'at', at: iso, timeZone }
-      fallbackReq = { title: title.trim(), prompt: prompt.trim(), at: iso }
     }
 
     try {
-      let createdOk = false
+      // A failed or unknown Host result must not be re-created as a local device
+      // task: the Host may already have stored it, and the user would see two
+      // schedules. Report the failure and keep the form for an explicit retry.
       if (client) {
-        try {
-          await client.call('schedule-create', {
-            target: targetId,
-            title: title.trim(),
-            prompt: prompt.trim(),
-            timeZone,
-            when: whenPayload,
-          })
-          createdOk = true
-        } catch {
-          const resolvedSessionId =
-            state.bots.find(b => b.id === targetId)?.sessionId
-            ?? state.rooms.find(r => r.id === targetId)?.sessionId
-          if (resolvedSessionId) {
-            const rec = await createDeviceSchedule(resolvedSessionId, fallbackReq)
-            createdOk = Boolean(rec)
-          }
-        }
+        await client.call('schedule-create', {
+          target: targetId,
+          title: title.trim(),
+          prompt: prompt.trim(),
+          timeZone,
+          when: whenPayload,
+        })
+      } else {
+        throw new Error(s.bots.unavailable)
       }
-      if (!createdOk) throw new Error(s.bots.unavailable)
       setTitle('')
       setPrompt('')
       setCreating(false)
