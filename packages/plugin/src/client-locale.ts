@@ -90,7 +90,7 @@ export const en = {
   registrationCodeHint: 'Generate it after signing in on the Server website. Use it once to connect this device.',
   accountHint: 'The account must belong to the selected Server.',
   password: 'Password',
-  passwordHint: 'Only DSH Remote Web or self-hosted service accounts; not DeepSeek Harness official or other platforms.',
+  passwordHint: 'Only DSH Remote Web or self-hosted service accounts; not DeepSeek Harness official.',
   modeSavedNeedsAuthorization: 'Mode saved. Authorize {role} before connecting. Existing registrations were kept.',
   modeSavedReused: 'Mode saved. Existing registration reused. Restart Harness to apply.',
   modeSavedOwnedRole: 'Mode saved. This owned device was authorized automatically. Restart Harness to apply.',
