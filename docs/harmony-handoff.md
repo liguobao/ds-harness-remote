@@ -2,6 +2,25 @@
 
 > 触发词：用户说「**继续 dshre**」（或「继续 dsh-remote」）时，先读本文件，再按「待办」继续，不需要重新调研。
 
+## 2026-11-09 现状（先读这段，旧的 V0.03 段落只作历史）
+
+- **客户端**：`0.17.96-lan / 1000218`，源码在仓库根 `harmony/`；Edge(127.0.0.1:40601) 与手机(无线调试) 均已装
+- **实测状态**：手机/PC 均 `已连接 · lan`（局域网直连），180+ 会话，熄屏保活 8 分钟零断线
+- **仓库**：`main` 已对齐上游 `liguobao/ds-harness-remote`（0 behind），标签
+  `milestone-2026-11-09-lan` / `sync-upstream-2026-11-09` / `client-v0.17.96-lan`
+- **签名**：仓库里 `build-profile.json5` 的 `signingConfigs` 为空；本机签名在忽略的
+  `build-profile.local.json5`，构建用 `harmony/scripts/build-local.sh`
+- **自建 relay**：`~/.dsh-server.sh`（别名 `dshserver`）`start|stop|restart|status|log|watchdog`，
+  后台地址 `http://192.168.3.57:8080/app/login`；启动必须带 `DSH_SERVER_PUBLIC_URL`
+  （否则同源校验 403，表现为「后台点登录没反应」）
+- **主机插件**：`ds-harness-remote@0.6.4` + 三处 hmdfs 0600 容差补丁（`dist/index.js`、
+  `identity-store.js`、`server-credentials.js`）；配置 `role: both`，`reconnect.initialDelayMs: 1000`
+- **已知坑**：`dsh-ohos`（内置 dsh 0.2.0-rc.2）与用户实际运行的 `dsh`（0.2.2-rc.1）版本不同，
+  插件安装/诊断一律用 `dsh`；profile 被重置过一次（旧的留在 `profiles/web.bak`）
+- **工具**：`harmony/scripts/{build-local.sh,smoke.sh,check-i18n.mjs}`；vitest 在本机不可用
+  （rollup 原生绑定 Permission denied）
+
+
 ## 一句话状态
 
 鸿蒙客户端 V0.03 已完成 PR #242 全部审核整改 + 功能对齐 14 项，装在手机上可用；UI 打磨前 3 项已改完并本地提交（`9a80f1d`，因手机掉线尚未装机目视确认），剩主题页/多语言与上游主机缺口。
