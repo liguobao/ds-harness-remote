@@ -4440,6 +4440,14 @@ struct Index {
         Row({ space: 4 }) {
           Text(this.petFace())
             .fontSize(this.runtime.petState() === 'working' ? 22 : 20)
+            // 干活时轻微「呼吸」，待命时静止；用 iterations: -1 做无限往返，不额外开定时器
+            .scale(this.runtime.petState() === 'working' ? { x: 1.12, y: 1.12 } : { x: 1, y: 1 })
+            .animation({
+              duration: 1100,
+              curve: Curve.EaseInOut,
+              iterations: this.runtime.petState() === 'working' ? -1 : 1,
+              playMode: PlayMode.Alternate
+            })
           if (this.petHint().length > 0) {
             Text(this.petHint())
               .fontSize(10)
