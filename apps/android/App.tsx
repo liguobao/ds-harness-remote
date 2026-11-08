@@ -11,7 +11,7 @@ import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
-import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
+import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, useStartupUpdateCheck } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import { resolveStartupAutoConnect } from './src/lib/auto-connect'
@@ -112,6 +112,7 @@ function AppNavigator() {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  useStartupUpdateCheck(bootPhase === 'ready')
 
   useEffect(() => {
     if (bootPhase === 'error' || (bootPhase === 'ready' && browseReady)) {
@@ -475,6 +476,7 @@ function AppNavigator() {
           onBack={pop}
           onReset={() => reset({ name: 'server' })}
           onOpenDiagnostics={() => push({ name: 'diagnostics' })}
+          onOpenAbout={() => push({ name: 'about' })}
         />
       )}
       {route.name === 'diagnostics' && <DiagnosticsScreen onBack={pop} />}
