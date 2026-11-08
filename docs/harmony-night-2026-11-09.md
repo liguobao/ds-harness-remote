@@ -1,0 +1,63 @@
+# 2026-11-09 夜间自动迭代记录（02:22 → 07:30）
+
+用户休息期间的自主迭代：只做能验证的事，每步都构建 + 装机 + 留日志，全部提交推送。
+
+## 交付一览（版本 0.17.86 → 0.17.97）
+
+| 版本 | 内容 | 验证方式 |
+|---|---|---|
+| 0.17.86 | README 四语补回鸿蒙移植说明、签名材料出库（`build-profile.json5` 置空 + `build-local.sh`）、发行说明 | 装机 + `bm dump` 版本核对 |
+| 0.17.87 | **`4009 server shutdown` 改为自动重连**（此前被判「不重连」，必须人切前台才恢复） | 停 relay 12 秒实测：34.8s 自动回到 `lan`，全程不碰 App |
+| 0.17.88 | 主机未上线（`Host is offline.`）时退避封顶 5 秒 | 同上，27.1s |
+| 0.17.89 | **英文文案补齐 194 条**（UI 313 个文案，此前仅 106 条有英文） | `check-i18n.mjs` 静态校验 0 缺失 |
+| 0.17.90 | 新增 `check-i18n.mjs`，修重复 key（`连接` → `连接状态`） | 校验通过 |
+| 0.17.92 | 等主机重注册期间**不消耗重连次数**（窗口 90s）+ 2 秒快重试 | 实测客户端仅 2 次尝试即恢复 |
+| 0.17.96 | ArkWeb `getStats` 改无参调用 + 候选对宽松匹配 + 兜底信息 | Edge 上抓到真实报错并修掉 |
+| 0.17.97 | 诊断面板「存文件」（沙箱 txt，可 `hdc file recv` 拉走）；冒烟脚本只认本次运行日志 | Edge 冒烟通过 |
+
+## 关键实测数据
+
+**服务器重启恢复（停 relay 12 秒，客户端全程不碰）**
+
+```
+[disc]  链路断开 #2 code=4009 reason=server shutdown · 本次在线 708.5s transport=lan
+[event] 断线：服务器正在重启（4009 server shutdown），稍后自动重连
+[conn]  连接失败：Host is offline.（主机还没重注册）
+[conn]  自动重连失败，2s 后第 2 次
+[event] 已连接 · lan
+```
+
+- 0.17.87 前：4009 被判「不重连」，客户端停在设备列表，**只有 App 回前台才恢复（23 秒且需要人）**
+- 0.17.92 后：客户端自己回来，剩余耗时主要在**主机插件自身重注册**（插件 `reconnect.initialDelayMs` 已从 4s 调到 1s，下次重启 DSH 生效）
+
+**ArkWeb `getStats` 的坑（连接详情「路径」）**
+
+| 调用 | 结果 |
+|---|---|
+| `pc.getStats(callback)` | ❌ TypeError：callback 被当成非法 selector |
+| `pc.getStats()` | ✅ 返回 Promise |
+| 报告里的 `candidate-pair` | ⚠️ 字段不稳定；放宽匹配后仍可能为空 → 上报「ICE 状态 + 候选数量」兜底 |
+
+**自建 relay 看护**：`dshserver watchdog` 每 30 秒探活；实测 `kill -9` 后 45 秒内自动拉起（日志 `watchdog: 端口无响应，重启`）。
+
+## 工具沉淀
+
+| 脚本 | 用途 |
+|---|---|
+| `harmony/scripts/build-local.sh` | 本机签名构建，签名材料不入库 |
+| `harmony/scripts/smoke.sh <设备>` | 构建 → 装机 → 拉起 → 等「已连接」→ 崩溃检查（排除 ArkWeb crashpad 噪声） |
+| `harmony/scripts/check-i18n.mjs` | 文案完整性校验（未翻译 / 重复 key / 英文残留中文 / 空翻译） |
+| `~/.dsh-server.sh` | `start/stop/restart/status/log/watchdog`，含端口探测、cmdline+cwd 双重匹配、pidfile |
+
+## 仓库状态
+
+- `main` 对齐上游（0 behind），标签：`milestone-2026-11-09-lan`、`sync-upstream-2026-11-09`、
+  `client-v0.17.86-lan` … `client-v0.17.97-lan`
+- 三语文档 + 脱敏截图（`docs/images/harmony/`）
+- 无签名材料、无密钥、无个人绝对路径
+
+## 已知限制（本轮没解决）
+
+- 桌面端 App 的「上次主机」在若干次连接失败后会被清空 → 启动不再自动连（未定位到具体路径，非产品阻塞）
+- 手机端在锁屏/休眠时 LinkLog 不落盘（进程被冻住，保活只保证网络不被断）
+- vitest 在本机跑不了（rollup 原生绑定 `Permission denied`，noexec 文件系统）
