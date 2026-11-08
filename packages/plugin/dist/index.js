@@ -64530,6 +64530,7 @@ var MAX_AUTH_TOKEN_LENGTH = 8 * 1024;
 var MAX_REMOTE_CAPABILITY_ENTRIES = 128;
 var MAX_REMOTE_WORKSPACE_TYPE_ENTRIES = 32;
 var HOST_REGISTRATION_CODE_TTL_MS = 10 * 6e4;
+var DEFAULT_HEARTBEAT_INTERVAL_MS = 25e3;
 var MAX_ACTIVE_TRANSFERS_PER_DIRECTION = 2;
 var TRANSFER_IDLE_MS = 2 * 6e4;
 var MAX_RPC_TEXT_INPUT_BYTES = 64 * 1024;
@@ -69623,7 +69624,13 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "connect.rejected" || frame.type === "error") {
         const payload = frame.payload;
         const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const failure5 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const code = errorCodeSchema.safeParse(payload.code);
+        this.failConnection(failure5, {
+          reason: payload.retryable === true ? "control-error" : "invalid-control-frame",
+          ...code.success ? { errorCode: code.data } : {}
+        });
+        return;
       }
       if (frame.type === "relay") {
         if (this.dataSocket !== void 0)
@@ -97661,6 +97668,7 @@ var HostServerConnection = class {
     this.harnessVersion = harnessVersion;
   }
   socket;
+  forceCloseSocket;
   running;
   stopped = true;
   online = false;
@@ -97674,6 +97682,7 @@ var HostServerConnection = class {
   rtcFactory;
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
+  heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
   webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
   start() {
     if (this.running !== void 0) return;
@@ -97702,7 +97711,8 @@ var HostServerConnection = class {
     this.retryWake?.();
     this.retryWake = void 0;
     for (const tunnel of this.tunnels.values()) this.notifyTunnelClosed(tunnel);
-    this.socket?.close(1e3, "plugin stopped");
+    if (this.forceCloseSocket) this.forceCloseSocket(1e3, "plugin stopped");
+    else this.socket?.close(1e3, "plugin stopped");
     await this.running;
     await this.dropTunnels();
   }
@@ -97734,7 +97744,8 @@ var HostServerConnection = class {
     }
     this.reconnectRequested = true;
     this.retryWake?.();
-    this.socket?.close(4e3, "manual reconnect");
+    if (this.forceCloseSocket) this.forceCloseSocket(4e3, "manual reconnect");
+    else this.socket?.close(4e3, "manual reconnect");
     void this.running.finally(() => {
       if (!this.reconnectRequested || this.stopped) return;
       this.reconnectRequested = false;
@@ -97798,25 +97809,181 @@ var HostServerConnection = class {
     const socket = this.createWebSocket(websocketUrl2(this.api.baseUrl));
     this.socket = socket;
     this.controlFrameLimits = {};
+    this.heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
     let acknowledged = false;
     let retainOnClose = false;
     let invalidControl = false;
     let messageQueue = Promise.resolve();
     await new Promise((resolve9, reject) => {
       let settled = false;
+      let closing = false;
+      let upgradeTimer;
       let helloTimer;
+      let refreshTimer;
+      let livenessTimer;
+      const clearLiveness = () => {
+        if (livenessTimer === void 0) return;
+        clearTimeout(livenessTimer);
+        livenessTimer = void 0;
+      };
       const finish = (error62) => {
         if (settled) return;
         settled = true;
+        if (upgradeTimer !== void 0) clearTimeout(upgradeTimer);
         if (helloTimer !== void 0) clearTimeout(helloTimer);
+        if (refreshTimer !== void 0) clearTimeout(refreshTimer);
+        clearLiveness();
         this.online = false;
-        if (this.socket === socket) this.socket = void 0;
+        socket.onopen = socket.readyState === 0 ? () => {
+          socket.onopen = null;
+          try {
+            socket.close(1e3, "connection abandoned");
+          } catch {
+          }
+          ;
+          socket.terminate?.();
+        } : null;
+        socket.onmessage = null;
+        socket.onerror = () => void 0;
+        socket.onclose = () => {
+          socket.onopen = null;
+          socket.onerror = null;
+          socket.onclose = null;
+        };
+        if (this.socket === socket) {
+          this.socket = void 0;
+          this.forceCloseSocket = void 0;
+        }
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
         const cleanup = preserve ? Promise.all([...this.tunnels.values()].filter((tunnel) => !tunnel.lease?.canDetach()).map((tunnel) => this.dropTunnel(tunnel.connectionId))) : this.dropTunnels();
         void cleanup.finally(() => error62 === void 0 ? resolve9() : reject(error62));
       };
+      let forceDrainWake;
+      const handleClose = (event, forced = false) => {
+        if (settled || this.socket !== socket) return;
+        if (closing) {
+          if (forced) {
+            forceDrainWake?.();
+            if (this.stopped || this.reconnectRequested) finish();
+          }
+          return;
+        }
+        closing = true;
+        clearLiveness();
+        const closeSemantics = classifyControlClose(event.code, event.reason);
+        retainOnClose = [1e3, 1001, 4007].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
+        const close = async () => {
+          if (!forced) {
+            let drainTimer;
+            await Promise.race([
+              messageQueue.catch(() => void 0),
+              new Promise((resolve10) => {
+                forceDrainWake = resolve10;
+                drainTimer = setTimeout(resolve10, 50);
+              })
+            ]);
+            if (drainTimer !== void 0) clearTimeout(drainTimer);
+          }
+          forceDrainWake = void 0;
+          if (settled) return;
+          if (this.stopped) {
+            finish();
+            return;
+          }
+          if (event.code === 4003) {
+            finish(new ControlConnectionError("CONNECTION_REPLACED", "Another instance connected with this Host identity."));
+            return;
+          }
+          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code) || event.code === 4002 && event.reason === "recovery authorization rejected")) {
+            await this.dropTunnels();
+            if (settled) return;
+            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry control without recovery state."));
+            return;
+          }
+          if (event.code === 4002) {
+            if (this.authRecoveryAttempted) {
+              finish(new ControlConnectionError("AUTH_INVALID", "Server rejected refreshed credentials."));
+              return;
+            }
+            try {
+              await Promise.race([
+                this.api.refreshCredentials(credentials.accessToken),
+                new Promise((_, rejectRefresh) => {
+                  refreshTimer = setTimeout(
+                    () => rejectRefresh(new ControlConnectionError("CONNECTION_FAILED", "Credential refresh timed out.")),
+                    15e3
+                  );
+                })
+              ]);
+            } catch (error62) {
+              if (refreshTimer !== void 0) {
+                clearTimeout(refreshTimer);
+                refreshTimer = void 0;
+              }
+              if (settled) return;
+              finish(asError2(error62));
+              return;
+            }
+            if (refreshTimer !== void 0) {
+              clearTimeout(refreshTimer);
+              refreshTimer = void 0;
+            }
+            if (settled) return;
+            this.authRecoveryAttempted = true;
+            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry hello with refreshed credentials."));
+            return;
+          }
+          if (event.code === 4004 || this.terminalError === "DEVICE_REVOKED") {
+            finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
+            return;
+          }
+          if (event.code === 4011 || this.terminalError === "UNSUPPORTED_VERSION") {
+            finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
+            return;
+          }
+          if (acknowledged && this.terminalError === void 0) this.terminalError = closeCode(event.code);
+          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code), event.reason || "Server control connection closed."));
+        };
+        void close();
+      };
+      const closeSocket = (code, reason) => {
+        try {
+          socket.close(code, reason);
+        } catch {
+          try {
+            socket.close(1e3, reason);
+          } catch {
+          }
+        }
+        ;
+        socket.terminate?.();
+        handleClose({ code, reason }, true);
+      };
+      this.forceCloseSocket = closeSocket;
+      const armLiveness = () => {
+        clearLiveness();
+        const timeoutMs = Math.max(15e3, this.heartbeatIntervalMs * 3);
+        livenessTimer = setTimeout(() => {
+          livenessTimer = void 0;
+          if (this.stopped || settled || closing || this.socket !== socket) return;
+          const silentMs = this.lastActiveAt === void 0 ? timeoutMs : Math.max(0, Date.now() - this.lastActiveAt);
+          this.logger.warn("server control heartbeat timeout; reconnecting", {
+            silentMs,
+            heartbeatIntervalMs: this.heartbeatIntervalMs
+          });
+          closeSocket(4009, "heartbeat timeout");
+        }, timeoutMs);
+        livenessTimer.unref?.();
+      };
+      upgradeTimer = setTimeout(() => closeSocket(4001, "upgrade timeout"), 3e4);
+      upgradeTimer.unref?.();
       socket.onopen = () => {
-        helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
+        if (settled || closing || this.socket !== socket) return;
+        if (upgradeTimer !== void 0) {
+          clearTimeout(upgradeTimer);
+          upgradeTimer = void 0;
+        }
+        helloTimer = setTimeout(() => closeSocket(4001, "hello timeout"), 1e4);
         this.sendControl("hello", {
           role: "host",
           deviceId: this.identity.deviceId,
@@ -97829,13 +97996,25 @@ var HostServerConnection = class {
         });
       };
       socket.onmessage = (event) => {
-        if (this.socket !== socket) return;
+        if (settled || closing || this.socket !== socket) return;
+        try {
+          const preview = decodeControl(event.data, this.controlFrameLimits);
+          if (preview.type === "error") {
+            const payload = requireControlError(preview.payload);
+            if (payload.code === "DEVICE_REVOKED" || payload.connectionId === void 0) {
+              this.terminalError = payload.code;
+            }
+          }
+        } catch {
+        }
         messageQueue = messageQueue.then(async () => {
-          if (this.socket !== socket) return;
+          if (settled || this.socket !== socket) return;
           const frame = decodeControl(event.data, this.controlFrameLimits);
           this.lastActiveAt = Date.now();
+          if (acknowledged) armLiveness();
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
+            this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
             this.webRtcNegotiateTimeoutMs = Math.max(
               DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
               payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
@@ -97851,6 +98030,7 @@ var HostServerConnection = class {
             }
             acknowledged = true;
             clearTimeout(helloTimer);
+            armLiveness();
             if (this.rtcFactory === void 0 && this.rtcFactoryProvider !== void 0 && !this.config.forceRelay) {
               void this.rtcFactoryProvider().then((factory) => {
                 if (factory !== void 0) this.rtcFactory ??= factory;
@@ -97872,6 +98052,7 @@ var HostServerConnection = class {
           if (!acknowledged) throw new ControlConnectionError("INVALID_MESSAGE", "Server sent a frame before hello.ack.");
           await this.handleFrame(frame);
         }).catch((error62) => {
+          if (settled || this.socket !== socket) return;
           invalidControl = true;
           const code = errorCode4(error62);
           this.terminalError = code;
@@ -97879,58 +98060,14 @@ var HostServerConnection = class {
             code,
             reason: diagnosticReason3(error62)
           });
-          socket.close(4008, "invalid control frame");
+          closeSocket(4008, "invalid control frame");
         });
       };
       socket.onerror = () => {
         if (!acknowledged) finish(new ControlConnectionError("CONNECTION_FAILED", "Unable to open the Server WebSocket."));
       };
       socket.onclose = (event) => {
-        if (this.socket !== socket) return;
-        const closeSemantics = classifyControlClose(event.code, event.reason);
-        retainOnClose = [1e3, 1001, 4007].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
-        const close = async () => {
-          await messageQueue.catch(() => void 0);
-          if (this.stopped) {
-            finish();
-            return;
-          }
-          if (event.code === 4003) {
-            finish(new ControlConnectionError("CONNECTION_REPLACED", "Another instance connected with this Host identity."));
-            return;
-          }
-          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code) || event.code === 4002 && event.reason === "recovery authorization rejected")) {
-            await this.dropTunnels();
-            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry control without recovery state."));
-            return;
-          }
-          if (event.code === 4002) {
-            if (this.authRecoveryAttempted) {
-              finish(new ControlConnectionError("AUTH_INVALID", "Server rejected refreshed credentials."));
-              return;
-            }
-            try {
-              await this.api.refreshCredentials(credentials.accessToken);
-            } catch (error62) {
-              finish(asError2(error62));
-              return;
-            }
-            this.authRecoveryAttempted = true;
-            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry hello with refreshed credentials."));
-            return;
-          }
-          if (event.code === 4004) {
-            finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
-            return;
-          }
-          if (event.code === 4011) {
-            finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
-            return;
-          }
-          if (acknowledged) this.terminalError = closeCode(event.code);
-          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code), event.reason || "Server control connection closed."));
-        };
-        void close();
+        handleClose(event);
       };
     });
   }
@@ -97984,7 +98121,8 @@ var HostServerConnection = class {
       const payload = requireControlError(frame.payload);
       if (payload.code === "DEVICE_REVOKED") {
         this.terminalError = payload.code;
-        this.socket?.close(4004, "device revoked");
+        if (this.forceCloseSocket) this.forceCloseSocket(4004, "device revoked");
+        else this.socket?.close(4004, "device revoked");
       } else if (payload.connectionId !== void 0) {
         await this.dropTunnel(payload.connectionId, payload.code, {
           closedBy: "server",
@@ -98006,10 +98144,12 @@ var HostServerConnection = class {
     throw new ControlConnectionError("INVALID_MESSAGE", `Unexpected Server control frame: ${frame.type}`);
   }
   async handleConnectIncoming(payload) {
+    const sourceSocket = this.socket;
     let descriptor;
     try {
       descriptor = await this.api.deviceFor(payload.clientDeviceId);
     } catch (error62) {
+      if (this.socket !== sourceSocket) return;
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by account authorization", {
         clientDeviceId: shortId3(payload.clientDeviceId),
@@ -98017,6 +98157,7 @@ var HostServerConnection = class {
       });
       return;
     }
+    if (this.socket !== sourceSocket) return;
     if (descriptor.role !== "client" || descriptor.deviceId !== payload.clientDeviceId || descriptor.identityKey !== payload.clientIdentityKey) {
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by peer identity validation", {
@@ -98046,6 +98187,7 @@ var HostServerConnection = class {
       publicKey: descriptor.identityKey,
       membershipId: descriptor.membershipId
     });
+    if (this.socket !== sourceSocket) return;
     const previous = this.tunnels.get(payload.connectionId);
     previous?.noise.destroy();
     const noise = new NoiseIkSession({
@@ -98127,8 +98269,10 @@ var HostServerConnection = class {
     const leaseTicket = viaWebRtc ? tunnel.recoveryTicket : tunnel.transport === "relay" && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : void 0;
     if (leaseTicket) {
       tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, (payload2) => {
-        if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= 75e3) {
-          this.socket?.close(1012, "control heartbeat timeout");
+        const heartbeatTimeoutMs = Math.max(15e3, this.heartbeatIntervalMs * 3);
+        if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
+          if (this.forceCloseSocket) this.forceCloseSocket(4009, "heartbeat timeout");
+          else this.socket?.close(4009, "heartbeat timeout");
           throw new Error("Control heartbeat timed out");
         }
         this.sendControl("connection.lease.request", payload2);
@@ -98413,11 +98557,17 @@ var HostServerConnection = class {
     });
   }
   async sendRelay(tunnel, ciphertext) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel === void 0) {
+      throw new Error("Relay tunnel closed");
+    }
     const counter = Number(tunnel.noise.sendingCounter() - 1n);
     if (!Number.isSafeInteger(counter) || counter < 0) throw new ControlConnectionError("FRAME_TOO_LARGE", "Noise transport counter overflowed.");
     const socket = tunnel.dataSocket ?? this.socket;
     if (socket === void 0) throw new Error("Relay transport closed");
     await waitForRelayCapacity(socket);
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel === void 0) {
+      throw new Error("Relay tunnel closed");
+    }
     if (tunnel.dataSocket !== void 0) {
       if (tunnel.dataSocket !== socket || tunnel.dataSocket.readyState !== 1 || !tunnel.dataReady) {
         throw new Error("Relay data transport is not ready");
@@ -98626,7 +98776,10 @@ var ServerNoiseChannel = class {
     try {
       await this.sends.run(encoded.byteLength, async () => {
         if (this.closed) throw new Error("Secure channel closed");
-        for (const plaintext of this.outgoing.encode(encoded)) await this.transmit(this.tunnel.noise.encrypt(plaintext));
+        for (const plaintext of this.outgoing.encode(encoded)) {
+          if (this.closed) throw new Error("Secure channel closed");
+          await this.transmit(this.tunnel.noise.encrypt(plaintext));
+        }
       });
     } catch (error62) {
       await this.close().catch(() => void 0);
@@ -98683,7 +98836,7 @@ function decodeControl(data2, limits) {
 }
 function requireHelloAck(value) {
   const payload = requireObject(value);
-  if (payload.protocol !== PROTOCOL_VERSION || typeof payload.serverVersion !== "string" || typeof payload.connectionSessionId !== "string" || !Number.isSafeInteger(payload.heartbeatIntervalMs) || !Number.isSafeInteger(payload.maxControlFrameBytes) || !Number.isSafeInteger(payload.maxRelayFrameBytes)) {
+  if (payload.protocol !== PROTOCOL_VERSION || typeof payload.serverVersion !== "string" || typeof payload.connectionSessionId !== "string" || !Number.isSafeInteger(payload.heartbeatIntervalMs) || payload.heartbeatIntervalMs <= 0 || !Number.isSafeInteger(payload.maxControlFrameBytes) || !Number.isSafeInteger(payload.maxRelayFrameBytes)) {
     throw new ControlConnectionError("INVALID_MESSAGE", "hello.ack payload is invalid.");
   }
   return payload;
