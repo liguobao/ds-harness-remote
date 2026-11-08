@@ -673,10 +673,6 @@ export function createRemotePluginOptions(React: ClientReact) {
           onClick: () => selectLoginMethod('password'),
         }, t('accountPasswordLogin'))),
       providersLoading && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
-      providersFailed && loginMethod !== 'device_pairing' ? React.createElement('button', {
-        type: 'button', className: 'dshRemoteReconnect', disabled: busy,
-        onClick: () => { setError(undefined); setProviderReload(v => v + 1) },
-      }, t('retryLoginProviders')) : null,
       loginMethod === 'device_pairing'
         ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-settings-device-pairing-panel', 'aria-labelledby': 'dsh-remote-settings-device-pairing-tab' },
           React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => applyView(view)).catch(() => undefined) }))
