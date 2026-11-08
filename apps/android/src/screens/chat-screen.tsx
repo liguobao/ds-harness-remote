@@ -118,6 +118,7 @@ export function ChatScreen({
   onOpenDeviceInfo,
   onOpenHostSwitcher,
   onOpenSettings,
+  onOpenAbout,
   botMode = false,
   botConversationId,
   onBotModeChange,
@@ -130,6 +131,7 @@ export function ChatScreen({
   onOpenDeviceInfo?: () => void
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
+  onOpenAbout?: () => void
   botMode?: boolean
   botConversationId?: string
   onBotModeChange?: (botMode: boolean) => void
@@ -512,6 +514,7 @@ export function ChatScreen({
 
   const drawerElement = (inlineMode: boolean) => (
       <HostSessionsDrawer
+        key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
         inline={inlineMode}
         botMode={botMode}
         onBotModeChange={onBotModeChange}
@@ -549,6 +552,7 @@ export function ChatScreen({
         Keyboard.dismiss()
         onOpenHostSwitcher()
       } : undefined}
+      onOpenAbout={onOpenAbout}
       onOpenSettings={() => {
         Keyboard.dismiss()
         onOpenSettings?.()
@@ -570,8 +574,8 @@ export function ChatScreen({
 
   if (botMode) {
     return (
-      <KeyboardInset><>
-        <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
+      <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
+        <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
           {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
           <View style={styles.splitMain} {...swipeRightTouchProps}>
             <BotModeScreen
@@ -606,7 +610,7 @@ export function ChatScreen({
             await createSession(workspaces[0]?.workspaceId)
           }}
         />
-      </></KeyboardInset>
+      </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
     )
   }
 
@@ -643,8 +647,8 @@ export function ChatScreen({
       />
     )
     return (
-      <KeyboardInset><>
-        <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
+      <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
+        <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
           {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
           <View style={styles.splitMain} {...swipeRightTouchProps}>
             <BlurHeaderFrame header={emptyHeader}>
@@ -680,7 +684,7 @@ export function ChatScreen({
             await createSession(workspaces[0]?.workspaceId)
           }}
         />
-      </></KeyboardInset>
+      </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
     )
   }
 
@@ -1002,7 +1006,7 @@ export function ChatScreen({
   return (
     <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
       {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
-      <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
+      <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
         {tabletSplit && (
           <View style={styles.splitSidebar}>
             {drawerElement(true)}

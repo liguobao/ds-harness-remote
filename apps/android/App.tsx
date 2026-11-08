@@ -11,7 +11,7 @@ import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
-import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
+import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, useStartupUpdateCheck } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import { resolveStartupAutoConnect } from './src/lib/auto-connect'
@@ -35,7 +35,7 @@ type Route =
   | { name: 'server' }
   | { name: 'remote-hosts' }
   | { name: 'device'; deviceId: string }
-  | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
+  | { name: 'connecting'; deviceId: string; sheet?: boolean; focusWorkspaceKey?: string; sessionId?: string }
   | { name: 'chat'; botConversationId?: string }
   | { name: 'settings' }
   | { name: 'diagnostics' }
@@ -83,6 +83,7 @@ function ThemedStatusBar() {
 function AppNavigator() {
   const bootPhase = useAppStore(state => state.bootPhase)
   const browseReady = useBrowseMemory(state => state.ready)
+  const [bootstrapComplete, setBootstrapComplete] = useState(false)
   const [pendingConversation, setPendingConversation] = useState<{deviceId: string; sessionId: string}>()
   const [linksReady, setLinksReady] = useState(false)
   const autoRestored = useRef(false)
@@ -112,6 +113,7 @@ function AppNavigator() {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  useStartupUpdateCheck(bootPhase === 'ready')
 
   useEffect(() => {
     if (bootPhase === 'error' || (bootPhase === 'ready' && browseReady)) {
@@ -172,7 +174,14 @@ function AppNavigator() {
     reset({ name: 'chat' })
   }
 
-  useEffect(() => {void hydrateBrowseMemory(); void bootstrap()}, [bootstrap])
+  useEffect(() => {
+    let active = true
+    void hydrateBrowseMemory()
+    // bootPhase becomes ready before bootstrap's account wrapper finishes
+    // refreshing the device directory. Restore only after that refresh settles.
+    void bootstrap().then(() => { if (active) setBootstrapComplete(true) })
+    return () => { active = false }
+  }, [bootstrap])
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
   const openKnownSession = async (id: string) => {
@@ -201,7 +210,7 @@ function AppNavigator() {
     return () => subscription.remove()
   }, [])
   useEffect(() => {
-    if (bootPhase !== 'ready' || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
+    if (bootPhase !== 'ready' || !bootstrapComplete || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
     if (pendingConversation !== undefined && devices.length > 0) {
       autoRestored.current = true
       const target = pendingConversation
@@ -229,6 +238,7 @@ function AppNavigator() {
       push({
         name: 'connecting',
         deviceId: target.device.deviceId,
+        sheet: true,
         ...(target.sessionId === undefined ? {} : { sessionId: target.sessionId }),
       })
     } else if (useAppStore.getState().selectedDevice === undefined) {
@@ -243,7 +253,7 @@ function AppNavigator() {
         setHostSwitcherOpen(true)
       }
     }
-  }, [bootPhase, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
+  }, [bootPhase, bootstrapComplete, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
 
   // Zhihu OAuth deep link: dshremote://oauth?token=... completes the
   // account authorization started from the server setup screen.
@@ -402,6 +412,7 @@ function AppNavigator() {
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
     ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
     : undefined
+  const startupConnection = route.name === 'connecting' && route.sheet === true
   const homeMenuVisible = homeMenuOpen && route.name === 'server'
 
   return (
@@ -428,7 +439,7 @@ function AppNavigator() {
           onToggleAutoConnectHost={value => browsePreference({ autoConnectHost: value })}
         />
       )}
-      {route.name === 'connecting' && deviceForRoute !== undefined && (
+      {route.name === 'connecting' && !startupConnection && deviceForRoute !== undefined && (
         <ConnectionScreen
           device={deviceForRoute}
           onBack={() => {
@@ -452,10 +463,10 @@ function AppNavigator() {
         />
       )}
       {route.name === 'device' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'chat' })} />}
-      {route.name === 'chat' && (
+      {(route.name === 'chat' || startupConnection) && (
         <ChatScreen
           botMode={botMode}
-          botConversationId={route.botConversationId}
+          botConversationId={route.name === 'chat' ? route.botConversationId : undefined}
           onBotModeChange={next => {
             saveHostMode(hostScope, next ? 'bot' : 'agent')
             setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'chat' ? { ...entry, botConversationId: undefined } : entry))
@@ -464,6 +475,7 @@ function AppNavigator() {
           onBack={pop}
           onOpenHostSwitcher={() => setHostSwitcherOpen(true)}
           onOpenSettings={() => push({ name: 'settings' })}
+          onOpenAbout={() => push({ name: 'about' })}
           onOpenDeviceInfo={() => {
             if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId })
             else setHostSwitcherOpen(true)
@@ -475,6 +487,7 @@ function AppNavigator() {
           onBack={pop}
           onReset={() => reset({ name: 'server' })}
           onOpenDiagnostics={() => push({ name: 'diagnostics' })}
+          onOpenAbout={() => push({ name: 'about' })}
         />
       )}
       {route.name === 'diagnostics' && <DiagnosticsScreen onBack={pop} />}
@@ -485,8 +498,17 @@ function AppNavigator() {
         </View>
       )}
       <HostSwitcherSheet
-        visible={hostSwitcherOpen}
-        onClose={() => setHostSwitcherOpen(false)}
+        visible={hostSwitcherOpen || (startupConnection && deviceForRoute !== undefined)}
+        initialConnectingDevice={startupConnection ? deviceForRoute : undefined}
+        onClose={() => {
+          setHostSwitcherOpen(false)
+          if (startupConnection) pop()
+        }}
+        onConnected={() => {
+          setHostSwitcherOpen(false)
+          if (route.name === 'connecting' && route.sessionId !== undefined) void openKnownSession(route.sessionId)
+          else goHomeChat()
+        }}
         onSelectDevice={device => {
           setHostSwitcherOpen(false)
           openDevice(device)

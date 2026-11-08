@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
-import { objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
+import { canDeleteBot, objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
 import { getConnectionGeneration, requireBotClient, useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/components'
@@ -32,7 +32,7 @@ import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
-import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamPolling } from './bot-sidebar-section'
+import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
 
 export function BotModeScreen({
   selectedId: propSelectedId,
@@ -62,7 +62,7 @@ export function BotModeScreen({
   const hostScope = useAppStore(browseScope)
   const connectionGen = getConnectionGeneration()
 
-  useBotTeamPolling(true)
+  useBotTeamLoad(!drawerOpen)
 
   const state = useBotTeamStore(store => store.state)
   const session = useBotTeamStore(store => store.session)
@@ -80,23 +80,100 @@ export function BotModeScreen({
   const retryOpenSession = useBotTeamStore(store => store.retryOpenSession)
   const performStore = useBotTeamStore(store => store.perform)
 
-  const selectedId = propSelectedId ?? storeSelectedId
+  const prevPropRef = useRef(propSelectedId)
+  const prevStoreRef = useRef(storeSelectedId)
+  const pendingStoreTargetRef = useRef<{ active: boolean; value: string | undefined }>({
+    active: false,
+    value: undefined,
+  })
+  const pendingPropAcksRef = useRef<Array<string | undefined>>([])
+  const mountedSyncRef = useRef(false)
+
+  const emitOnSelect = (nextId: string | undefined) => {
+    const queue = pendingPropAcksRef.current
+    if (queue.length === 0 || queue[queue.length - 1] !== nextId) {
+      queue.push(nextId)
+    }
+    onSelect(nextId)
+  }
 
   useEffect(() => {
-    if (propSelectedId !== undefined && propSelectedId !== storeSelectedId) {
+    if (!mountedSyncRef.current) {
+      mountedSyncRef.current = true
+      prevPropRef.current = propSelectedId
+      prevStoreRef.current = storeSelectedId
+      if (propSelectedId !== undefined && propSelectedId !== storeSelectedId) {
+        pendingStoreTargetRef.current = { active: true, value: propSelectedId }
+        setSelectedId(propSelectedId)
+      } else if (propSelectedId === undefined && storeSelectedId !== undefined) {
+        emitOnSelect(storeSelectedId)
+      }
+      return
+    }
+    const propChanged = propSelectedId !== prevPropRef.current
+    const storeChanged = storeSelectedId !== prevStoreRef.current
+    prevPropRef.current = propSelectedId
+    prevStoreRef.current = storeSelectedId
+
+    let externalPropChange = propChanged
+    if (propChanged) {
+      const ackIdx = pendingPropAcksRef.current.indexOf(propSelectedId)
+      if (ackIdx !== -1) {
+        pendingPropAcksRef.current.splice(0, ackIdx + 1)
+        externalPropChange = false
+      } else {
+        pendingPropAcksRef.current.length = 0
+      }
+    }
+
+    if (pendingStoreTargetRef.current.active) {
+      if (storeSelectedId === pendingStoreTargetRef.current.value) {
+        pendingStoreTargetRef.current = { active: false, value: undefined }
+        if (externalPropChange && propSelectedId !== undefined && propSelectedId !== storeSelectedId) {
+          pendingStoreTargetRef.current = { active: true, value: propSelectedId }
+          setSelectedId(propSelectedId)
+        } else if (pendingPropAcksRef.current.length === 0 && storeSelectedId !== propSelectedId) {
+          emitOnSelect(storeSelectedId)
+        }
+        return
+      }
+      if (!externalPropChange && !storeChanged) {
+        setSelectedId(pendingStoreTargetRef.current.value)
+        return
+      }
+      pendingStoreTargetRef.current = { active: false, value: undefined }
+    }
+
+    if (storeChanged) {
+      if (storeSelectedId !== propSelectedId) {
+        emitOnSelect(storeSelectedId)
+      }
+      return
+    }
+    if (externalPropChange && propSelectedId !== undefined && propSelectedId !== storeSelectedId) {
+      pendingStoreTargetRef.current = { active: true, value: propSelectedId }
       setSelectedId(propSelectedId)
+    } else if (!externalPropChange && propChanged && pendingPropAcksRef.current.length === 0 && storeSelectedId !== propSelectedId) {
+      emitOnSelect(storeSelectedId)
     }
-  }, [propSelectedId, storeSelectedId, setSelectedId])
+  }, [propSelectedId, storeSelectedId, setSelectedId, onSelect])
 
-  useEffect(() => {
-    if (propSelectedId === undefined && storeSelectedId !== undefined) {
-      onSelect(storeSelectedId)
-    }
-  }, [propSelectedId, storeSelectedId, onSelect])
+  const isPendingPropAckInRender = propSelectedId !== prevPropRef.current
+    && pendingPropAcksRef.current.includes(propSelectedId)
+  const propChangedInRender = mountedSyncRef.current
+    ? propSelectedId !== prevPropRef.current
+      && !isPendingPropAckInRender
+      && (storeSelectedId === prevStoreRef.current
+        || (pendingStoreTargetRef.current.active && storeSelectedId === pendingStoreTargetRef.current.value))
+    : propSelectedId !== undefined && propSelectedId !== storeSelectedId
+  const selectedId = propChangedInRender && propSelectedId !== undefined
+    ? propSelectedId
+    : storeSelectedId
 
   const handleSelect = (id?: string) => {
+    pendingStoreTargetRef.current = { active: false, value: undefined }
     setSelectedId(id)
-    onSelect(id)
+    emitOnSelect(id)
   }
 
   const [active, setActive] = useState(AppState.currentState === 'active')
@@ -120,19 +197,25 @@ export function BotModeScreen({
     }).start()
   }, [selectedId, enterAnim])
 
-  let clientValue: BotRemoteClient | undefined
-  let clientInitError: string | undefined
-  try {
-    clientValue = requireBotClient()
-  } catch (reason) {
-    clientInitError = reason instanceof Error ? reason.message : s.bots.unavailable
-  }
+  const { clientValue, clientInitError } = useMemo(() => {
+    if (connectionPhase !== 'connected') {
+      return { clientValue: undefined, clientInitError: undefined }
+    }
+    try {
+      return { clientValue: requireBotClient(), clientInitError: undefined }
+    } catch (reason) {
+      return {
+        clientValue: undefined,
+        clientInitError: reason instanceof Error ? reason.message : s.bots.unavailable,
+      }
+    }
+  }, [connectionPhase, connectionGen, hostScope])
 
   const bot = state?.bots.find(entry => entry.id === selectedId)
   const room = state?.rooms.find(entry => entry.id === selectedId)
   const targetSessionId = resolveBotTargetSessionId(state, selectedId)
 
-  // Only resolve and open when session identity, Host/connection epoch, or explicit retry changes — never on 3s roster array reference refreshes.
+  // Only resolve and open when session identity, Host/connection epoch, or explicit retry changes — never on roster array reference changes.
   useEffect(() => {
     if (connectionPhase !== 'connected') return
     void syncSelectedSession({ selectedId })
@@ -142,7 +225,9 @@ export function BotModeScreen({
   const visibleError = actionError ?? openError ?? error ?? clientInitError
 
   const retry = () => {
-    void retryOpenSession()
+    if (loading) return
+    if (state === undefined) void useBotTeamStore.getState().refresh(true)
+    else void retryOpenSession()
   }
 
   const insets = useSafeAreaInsets()
@@ -204,7 +289,7 @@ export function BotModeScreen({
         if (id) void Clipboard.setStringAsync(id)
       },
     })
-    if ((bot && !bot.main) || room) {
+    if ((bot && canDeleteBot(state, bot)) || room) {
       headerMoreActions.push({
         key: 'delete',
         icon: Trash2,
@@ -306,7 +391,7 @@ export function BotModeScreen({
   return (
     <KeyboardInset>
       <View style={styles.flex}>
-        <BlurHeaderFrame header={header} inset={selectedId !== undefined}>
+        <BlurHeaderFrame header={header} inset>
           {selectedId === undefined ? (
             <BotSidebarSection
               searchQuery={rosterSearch}
@@ -334,13 +419,13 @@ export function BotModeScreen({
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
                 />
-              ) : loading || (targetSessionId && !openError) ? (
+              ) : (loading && visibleError === undefined) || (targetSessionId && !openError && state !== undefined) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>
               ) : state === undefined ? (
                 <ScrollView contentContainerStyle={{ padding: 16 }}>
-                  <DsBotInstallCard error={visibleError} onRetry={retry} />
+                  <DsBotInstallCard error={visibleError} loading={loading} onRetry={retry} />
                 </ScrollView>
               ) : state.bots.length === 0 ? (
                 <EmptyState

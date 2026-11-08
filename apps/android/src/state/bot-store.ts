@@ -227,19 +227,21 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       const next = await client.value.state(signal, true)
       if (rev !== activeRevision || get().scope !== scope) return
       trackBotStateSessions(next, scope)
+      const prevState = get().state
       const currentSelected = get().selectedId
       const validIds = new Set([
         ...next.bots.map(b => b.id),
         ...next.rooms.map(r => r.id),
         ...next.agents.flatMap(a => a.sessions),
       ])
-      const resolvedSelected = currentSelected !== undefined && validIds.has(currentSelected)
-        ? currentSelected
-        : (next.mainBotId
-          ?? next.bots.find(b => b.tile)?.id
-          ?? next.bots.find(b => b.main)?.id
-          ?? next.bots[0]?.id
-          ?? next.rooms[0]?.id)
+      const defaultSelected = next.mainBotId
+        ?? next.bots.find(b => b.tile)?.id
+        ?? next.bots.find(b => b.main)?.id
+        ?? next.bots[0]?.id
+        ?? next.rooms[0]?.id
+      const resolvedSelected = currentSelected !== undefined
+        ? (validIds.has(currentSelected) ? currentSelected : defaultSelected)
+        : (prevState === undefined ? defaultSelected : undefined)
       set({
         state: next,
         error: undefined,
@@ -383,6 +385,26 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
     set({ busy: true, actionError: undefined })
     let result: { ok: boolean; value?: unknown } = { ok: false }
     try {
+      if (operation === 'delete-bot') {
+        const targetId = text(payload?.id)
+        const currentState = get().state
+        const targetBot = currentState?.bots.find(entry => entry.id === targetId)
+        if (targetBot?.main && currentState) {
+          const mainBots = currentState.bots.filter(entry => entry.main)
+          if (mainBots.length > 1) {
+            await client.value.call('set-main', { id: targetId, main: false }, signal)
+          } else {
+            const replacement = currentState.bots.find(entry => entry.id !== targetId && !entry.private)
+            if (replacement) {
+              await client.value.call(
+                'set-main',
+                { id: replacement.id, main: true, primary: true, replace: targetId },
+                signal,
+              )
+            }
+          }
+        }
+      }
       const value = await client.value.call(operation, payload ?? null, signal)
       if (get().scope !== scope) return { ok: false }
       result = { ok: true, value }
@@ -400,9 +422,24 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       if (operation === 'delete-bot' || operation === 'delete-room') {
         const deletedId = text(payload?.id)
         if (!deletedId || get().selectedId === deletedId) {
-          set({ selectedId: undefined, detailsOpen: false })
+          resetOpenTracking()
+          sessionSyncActive = false
+          set({
+            selectedId: undefined,
+            session: undefined,
+            openedSessionKey: undefined,
+            openError: undefined,
+            detailsOpen: false,
+            editor: undefined,
+            contextMenu: undefined,
+            runStats: undefined,
+          })
         } else {
-          set({ detailsOpen: false })
+          set({
+            detailsOpen: false,
+            editor: undefined,
+            contextMenu: undefined,
+          })
         }
       }
       if (operation === 'usage' || operation === 'schedules') {

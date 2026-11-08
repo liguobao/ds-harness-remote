@@ -983,6 +983,8 @@ describe('HostServerConnection', () => {
   })
 
   it('closes retained tunnels and stops retrying when the Server rejects the protocol version', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(1)
     const sockets: FakeWebSocket[] = []
     const rtc = { close: vi.fn(async () => undefined) }
     const channel = { close: vi.fn(async () => undefined) }
@@ -1001,23 +1003,32 @@ describe('HostServerConnection', () => {
     lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
     try {
       server.start()
-      await flush()
+      await vi.advanceTimersByTimeAsync(0)
       sockets[0]!.open()
       sockets[0]!.receive(createControlFrame('hello.ack', { ...helloAck('control-rtc'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
-      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(server.isOnline()).toBe(true)
       const internals = server as unknown as { tunnels: Map<string, unknown> }
       internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
       sockets[0]!.close(1012, 'Server restart')
-      await vi.waitFor(() => expect(sockets).toHaveLength(2))
+      // Exercise the maximum jitter delay without racing a wall-clock timeout.
+      await vi.advanceTimersByTimeAsync(cfg.reconnect.maxDelayMs - 1)
+      expect(sockets).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sockets).toHaveLength(2)
       sockets[1]!.open()
       sockets[1]!.close(4011, 'unsupported protocol version')
-      await vi.waitFor(() => expect(channel.close).toHaveBeenCalledOnce())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(channel.close).toHaveBeenCalledOnce()
       expect(rtc.close).toHaveBeenCalledOnce()
       expect(internals.tunnels.size).toBe(0)
       expect(server.lastError()).toBe('UNSUPPORTED_VERSION')
-      await new Promise(resolve => setTimeout(resolve, 250))
+      await vi.advanceTimersByTimeAsync(cfg.reconnect.maxDelayMs * 2)
       expect(sockets).toHaveLength(2)
-    } finally { await server.stop(); lease.stop() }
+    } finally {
+      try { await server.stop(); lease.stop() }
+      finally { vi.useRealTimers(); vi.restoreAllMocks() }
+    }
   })
 
   it('keeps an authenticated Relay fallback when the parallel WebRTC negotiation later fails', async () => {
