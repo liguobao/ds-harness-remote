@@ -24,6 +24,10 @@ const KEY_PROMPTS = 'dshremote.prompts.v1';
 const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
 /** 上次连着的主机：下次启动自动连它（聊天客户端该有的行为）。 */
 const KEY_LAST_HOST = 'dshremote.lastHost.v1';
+/** 上次成功拉到的主机信息（deviceId/公钥/版本），重连时省掉一次设备查询往返。 */
+const KEY_HOST_INFO = 'dshremote.hostInfo.v1';
+/** 上次成功拉到的会话列表（只存侧栏要用的字段），启动/重连时先把列表画出来。 */
+const KEY_SESSION_SNAPSHOT = 'dshremote.sessionSnapshot.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
 const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
 
@@ -733,6 +737,66 @@ export class SecureStore {
       this.putSync(KEY_LAST_HOST, deviceId);
     } catch (error) {
       logWarn('last host save failed');
+    }
+  }
+
+  /** 缓存的主机信息（重连用）；没有就是空串。 */
+  loadHostInfo(deviceId: string): string {
+    const raw: string = this.getSync(KEY_HOST_INFO, '');
+    if (raw.length === 0) {
+      return '';
+    }
+    try {
+      const parsed: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const id: Object | undefined = parsed['deviceId'];
+      if (typeof id !== 'string' || id !== deviceId) {
+        return '';
+      }
+      return raw;
+    } catch (error) {
+      return '';
+    }
+  }
+
+  saveHostInfo(json: string): void {
+    try {
+      this.putSync(KEY_HOST_INFO, json);
+    } catch (error) {
+      logWarn('host info save failed');
+    }
+  }
+
+  clearHostInfo(): void {
+    try {
+      this.putSync(KEY_HOST_INFO, '');
+    } catch (error) {
+      logWarn('host info clear failed');
+    }
+  }
+
+  /** 会话列表快照（侧栏兜底/首屏秒开用）；空串表示没有。 */
+  loadSessionSnapshot(hostDeviceId: string): string {
+    const raw: string = this.getSync(KEY_SESSION_SNAPSHOT, '');
+    if (raw.length === 0) {
+      return '';
+    }
+    try {
+      const parsed: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const host: Object | undefined = parsed['host'];
+      if (typeof host !== 'string' || host !== hostDeviceId) {
+        return '';
+      }
+      return raw;
+    } catch (error) {
+      return '';
+    }
+  }
+
+  saveSessionSnapshot(json: string): void {
+    try {
+      this.putSync(KEY_SESSION_SNAPSHOT, json);
+    } catch (error) {
+      logWarn('session snapshot save failed');
     }
   }
 

@@ -679,11 +679,20 @@ export class AppRuntime {
         ? relay.connect().then(() => true).catch(() => false)
         : Promise.resolve(false);
       const t0: number = Date.now();
-      const host: AuthorizedPeerDevice = await this.deviceForWithRetry(deviceId);
+      const recovering: boolean = this.autoRecovering || this.reconnectAttempt > 0;
+      // 恢复场景优先用上次连上时缓存的主机信息（deviceId + 身份公钥 + 版本）：
+      // 刚断线重连时这些一定没变，省掉一次服务器往返；公钥仍要用本地 pin 校验（见 enforceHostPin），
+      // 主机真被重置过 → pin 不匹配 → 直接报错，不会拿错公钥硬连。
+      const cachedHost: AuthorizedPeerDevice | undefined = recovering
+        ? await this.cachedHostFor(deviceId) : undefined;
+      const host: AuthorizedPeerDevice = cachedHost !== undefined
+        ? cachedHost : await this.deviceForWithRetry(deviceId);
       const tDevice: number = Date.now();
+      if (cachedHost !== undefined) {
+        LinkLog.write('conn', '恢复场景：用缓存的主机信息建连（省掉一次设备查询）');
+      }
       // 恢复场景（刚断线重连/网络刚恢复）不再单独探一次在线状态：
       // 我们几十秒前还连着这台主机，而 Wi-Fi 刚关联上时每个额外 HTTP 往返都要几秒。
-      const recovering: boolean = this.autoRecovering || this.reconnectAttempt > 0;
       if (!host.presenceKnown && !recovering) {
         this.setConnectStage('检查主机在线状态…');
         const presence: HostPresence = await this.presenceWithRetry(host.deviceId);
@@ -774,6 +783,14 @@ export class AppRuntime {
         + (lanSkip.length > 0 && this.transportLabel !== 'lan' ? '（' + lanSkip + '）' : ''));
       // 记住这台主机：下次启动自动连它
       this.store.saveLastHost(host.deviceId);
+      this.store.saveHostInfo(JSON.stringify({
+        'deviceId': host.deviceId,
+        'name': host.name,
+        'platform': host.platform,
+        'identityKey': host.identityKey,
+        'clientVersion': host.clientVersion,
+        'harnessVersion': host.harnessVersion
+      }));
       this.autoConnectSuppressed = false;
       // 连着主机时申请长时任务：熄屏/后台不再被系统冻结，心跳与直连都活着
       KeepAlive.start().catch(() => undefined);
@@ -2661,6 +2678,76 @@ export class AppRuntime {
     this.sessionsSnapshotHost = this.lastDeviceId;
   }
 
+  /**
+   * 把会话列表存成本地快照（只存侧栏要用的字段）。
+   * 目的：启动或重连时列表能先画出来，不用干等主机那 3~9 秒的 session/list。
+   */
+  private persistSessionSnapshot(sessions: HarnessRemoteSession[]): void {
+    const host: string = this.lastDeviceId;
+    if (host.length === 0) {
+      return;
+    }
+    const rows: Record<string, Object>[] = [];
+    for (const item of sessions) {
+      rows.push({
+        'sessionId': item.sessionId,
+        'title': item.title,
+        'updatedAt': item.updatedAt,
+        'running': item.running,
+        'blank': item.blank,
+        'cwd': item.cwd,
+        'turns': item.turns,
+        'contextPercent': item.contextPercent
+      });
+    }
+    try {
+      this.store.saveSessionSnapshot(JSON.stringify({ 'host': host, 'at': Date.now(), 'items': rows }));
+    } catch (error) {
+      logWarn('snapshot save failed');
+    }
+  }
+
+  /** 读本地会话列表快照（启动预热用）；主机不一致或解析失败返回空数组。 */
+  private loadSessionSnapshot(host: string): HarnessRemoteSession[] {
+    const raw: string = this.store.loadSessionSnapshot(host);
+    if (raw.length === 0) {
+      return [];
+    }
+    const out: HarnessRemoteSession[] = [];
+    try {
+      const parsed: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const items: Object | undefined = parsed['items'];
+      if (items === undefined || !Array.isArray(items)) {
+        return [];
+      }
+      for (const entry of items as Object[]) {
+        const row: Record<string, Object> = entry as Record<string, Object>;
+        const session: HarnessRemoteSession = new HarnessRemoteSession();
+        const id: Object | undefined = row['sessionId'];
+        if (typeof id !== 'string' || id.length === 0) {
+          continue;
+        }
+        session.sessionId = id;
+        const title: Object | undefined = row['title'];
+        session.title = typeof title === 'string' ? title : '';
+        const updatedAt: Object | undefined = row['updatedAt'];
+        session.updatedAt = typeof updatedAt === 'number' ? updatedAt : 0;
+        session.running = row['running'] === true;
+        session.blank = row['blank'] === true;
+        const cwd: Object | undefined = row['cwd'];
+        session.cwd = typeof cwd === 'string' ? cwd : '';
+        const turns: Object | undefined = row['turns'];
+        session.turns = typeof turns === 'number' ? turns : 0;
+        const percent: Object | undefined = row['contextPercent'];
+        session.contextPercent = typeof percent === 'number' ? percent : 0;
+        out.push(session);
+      }
+    } catch (error) {
+      return [];
+    }
+    return out;
+  }
+
   private async refreshSessions(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined || this.phase !== PHASE_CHAT) {
@@ -2990,6 +3077,48 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * 读缓存的主机信息（恢复场景用）。只有本地 pin 与缓存公钥一致才返回，
+   * 否则视为缓存失效（主机可能重置过），回退到正常查询路径。
+   */
+  private async cachedHostFor(deviceId: string): Promise<AuthorizedPeerDevice | undefined> {
+    const raw: string = this.store.loadHostInfo(deviceId);
+    if (raw.length === 0) {
+      return undefined;
+    }
+    let record: Record<string, Object>;
+    try {
+      record = JSON.parse(raw) as Record<string, Object>;
+    } catch (error) {
+      return undefined;
+    }
+    const key: Object | undefined = record['identityKey'];
+    const identityKey: string = typeof key === 'string' ? key : '';
+    if (identityKey.length === 0) {
+      return undefined;
+    }
+    const pins: Record<string, string> = this.store.loadHostPins();
+    const pinned: string | undefined = pins[deviceId];
+    if (pinned !== undefined && pinned !== identityKey) {
+      LinkLog.write('conn', '缓存的主机公钥与本地固定记录不一致，改走正常查询');
+      return undefined;
+    }
+    const host: AuthorizedPeerDevice = new AuthorizedPeerDevice();
+    host.deviceId = deviceId;
+    host.identityKey = identityKey;
+    const name: Object | undefined = record['name'];
+    host.name = typeof name === 'string' ? name : '';
+    const platform: Object | undefined = record['platform'];
+    host.platform = typeof platform === 'string' ? platform : '';
+    const clientVersion: Object | undefined = record['clientVersion'];
+    host.clientVersion = typeof clientVersion === 'string' ? clientVersion : '';
+    const harnessVersion: Object | undefined = record['harnessVersion'];
+    host.harnessVersion = typeof harnessVersion === 'string' ? harnessVersion : '';
+    host.online = true;
+    host.presenceKnown = true;
+    return host;
+  }
+
   private async deviceForWithRetry(deviceId: string): Promise<AuthorizedPeerDevice> {
     const api: RemoteServerApi = await this.ensureApi();
     try {
@@ -3077,6 +3206,15 @@ export class AppRuntime {
     if (harness === undefined || this.phase !== PHASE_CHAT) {
       return;
     }
+    // 先把上次的列表画出来：主机的 session/list 实测 3~9 秒，
+    // 让用户立刻看到侧栏有东西，比空着等强得多（拉到新列表会覆盖它）。
+    if (this.sessions.length === 0) {
+      const snapshot: HarnessRemoteSession[] = this.loadSessionSnapshot(this.lastDeviceId);
+      if (snapshot.length > 0) {
+        this.sessions = sortSessions(snapshot);
+        LinkLog.write('conn', '先用本地快照铺开 ' + snapshot.length + ' 个会话（随后静默刷新）');
+      }
+    }
     this.setBusy(true);
     this.sessionsLoadFailed = false;
     this.notify();
@@ -3098,6 +3236,7 @@ export class AppRuntime {
       }
       this.sessions = sortSessions(sessions);
       this.rememberSessions(this.sessions);
+      this.persistSessionSnapshot(this.sessions);
       this.lastListError = undefined;
       this.setBusy(false);
       this.sessionsLoadFailed = false;
@@ -3116,9 +3255,12 @@ export class AppRuntime {
       }
       // 同一台主机的上一次结果还留着：显示它并标成「待刷新」，
       // 别把侧栏清空——抖动几秒就恢复的情况下，清空比不动更吓人。
-      const keepSnapshot: boolean = this.sessionsSnapshot.length > 0
+      const memorySnapshot: boolean = this.sessionsSnapshot.length > 0
         && this.sessionsSnapshotHost === this.lastDeviceId;
-      this.sessions = keepSnapshot ? this.sessionsSnapshot : [];
+      const diskSnapshot: HarnessRemoteSession[] = memorySnapshot ? []
+        : this.loadSessionSnapshot(this.lastDeviceId);
+      const keepSnapshot: boolean = memorySnapshot || diskSnapshot.length > 0;
+      this.sessions = memorySnapshot ? this.sessionsSnapshot : diskSnapshot;
       this.sessionsLoadFailed = true;
       this.currentSessionId = '';
       this.currentSessionTitle = keepSnapshot ? '会话列表待刷新' : '会话列表加载失败';
@@ -3173,6 +3315,7 @@ export class AppRuntime {
       }
       this.sessions = sortSessions(sessions);
       this.rememberSessions(this.sessions);
+      this.persistSessionSnapshot(this.sessions);
       this.setBusy(false);
       if (auto) {
         // 抖一下自己好了：明确告诉用户「抖过、已恢复」，方便判断链路质量
