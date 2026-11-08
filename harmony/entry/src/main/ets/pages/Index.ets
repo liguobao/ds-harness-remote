@@ -4467,7 +4467,7 @@ struct Index {
         .gesture(LongPressGesture().onAction(() => {
           const path: string = this.runtime.exportDiagnosticsToFile();
           promptAction.showToast({ message: path.length > 0
-            ? this.tr('诊断已导出，可 hdc file recv 拉走\n') + path
+            ? this.tr('诊断已导出，可 hdc file recv 拉走') + '\n' + path
             : this.tr('导出失败（存储不可用）') });
         }))
       }
@@ -7789,7 +7789,7 @@ struct Index {
             .onClick(() => {
               const path: string = this.runtime.exportDiagnosticsToFile();
               promptAction.showToast({ message: path.length > 0
-                ? this.tr('已保存，可用 hdc file recv 拉走\n') + path
+                ? this.tr('已保存，可用 hdc file recv 拉走') + '\n' + path
                 : this.tr('导出失败（存储不可用）') });
             })
           Text(this.tr('复制'))

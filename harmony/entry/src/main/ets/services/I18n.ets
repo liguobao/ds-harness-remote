@@ -234,6 +234,12 @@ function buildEnglish(): Map<string, string> {
   map.set('断开连接', 'Disconnect');
   map.set('新会话', 'New session');
 
+  // —— 诊断导出（0.17.97）——
+  map.set('存文件', 'Save to file');
+  map.set('导出失败（存储不可用）', 'Export failed (storage unavailable)');
+  map.set('已保存，可用 hdc file recv 拉走', 'Saved — pull it with hdc file recv');
+  map.set('诊断已导出，可 hdc file recv 拉走', 'Diagnostics exported — pull it with hdc file recv');
+
   // —— A 组 / 稳定性 / 诊断 新增文案（0.17.81–0.17.88）——
   map.set(' 个', '');
   map.set(' 字', ' chars');
