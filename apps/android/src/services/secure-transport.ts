@@ -1,6 +1,7 @@
 import { NoiseIkSession, createNoisePrologue } from '@dsh-remote/crypto'
 import { SecureMessageCodec } from '@dsh-remote/protocol'
 import type { RemoteTransport, SecureHandshakeTransport } from '@dsh-remote/webrtc'
+import { connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
 import type { DeviceIdentity, RemoteDevice } from '../types'
 
@@ -32,6 +33,7 @@ export class SecureTransport implements RemoteTransport {
       await this.inner.close()
       throw new Error(strings.runtime.unexpectedRelayDevice)
     }
+    connectionLog('handshake', { phase: 'starting' })
     this.onHandshakeStarting?.()
     const noise = new NoiseIkSession({
       role: 'initiator',
@@ -43,6 +45,8 @@ export class SecureTransport implements RemoteTransport {
     this.noise = noise
     try {
       await waitForResponder(this.inner, noise)
+      this.inner.markSecureReady?.()
+      connectionLog('handshake', { phase: 'ready' })
     } catch (error) {
       noise.destroy()
       this.noise = undefined
@@ -64,7 +68,7 @@ export class SecureTransport implements RemoteTransport {
         await this.inner.send(this.requireNoise().encrypt(plaintext))
       }
     } catch (error) {
-      console.warn('[dsh-remote] Secure send failed; closing carrier')
+      connectionLog('secure-send-failed')
       await this.close().catch(() => undefined)
       throw error
     }
@@ -90,10 +94,7 @@ export class SecureTransport implements RemoteTransport {
         const name = error instanceof Error
           && ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'ZodError'].includes(error.name)
           ? error.name : 'unknown'
-        const positions = error instanceof Error && typeof error.stack === 'string'
-          ? [...error.stack.matchAll(/index\.android\.bundle:(\d+):(\d+)/g)]
-            .slice(0, 12).map(match => `${match[1]}:${match[2]}`) : []
-        console.warn('[dsh-remote] Secure receive failed:', stage, name, JSON.stringify(positions))
+        connectionLog('secure-receive-failed', { stage, errorName: name })
         void this.close()
       }
     })

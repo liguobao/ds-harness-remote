@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Project Documentation / 项目文档
+    url: https://github.com/liguobao/ds-harness-remote/tree/main/docs
+    about: Read user guides, architecture overviews, and self-hosting docs / 查阅用户手册、架构设计与自部署文档
+  - name: 🌐 Web Client / 官方在线体验端
+    url: https://dsh.r2049.cn/app
+    about: Connect via the official web client / 在线访问或测试 Web 端
+  - name: 🔒 Security Vulnerability / 安全漏洞私密报告
+    url: https://github.com/liguobao/ds-harness-remote/security
+    about: Please report security vulnerabilities privately / 请勿在此公开发布漏洞，通过私密渠道提报

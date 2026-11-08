@@ -265,7 +265,17 @@ export function createHermesSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'hermes' },
+      values: {
+        backend: 'hermes',
+        imageLimits: {
+          maxImageBytes: 8 * 1024 * 1024,
+          maxImagesPerMessage: 4,
+          maxMessageImageBytes: 32 * 1024 * 1024,
+          maxImagePixels: 40_000_000,
+          maxImageDimension: 8192,
+          mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+        },
+      },
     },
   }
 }
@@ -640,7 +650,7 @@ function retireAssistantBeforeActivity(messages: ChatItem[]): ChatItem[] {
   return index >= 0 && index < messages.length - 1 ? finalizeAssistantLive(messages) : messages
 }
 
-function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
+export function finalizeAssistantLive(messages: ChatItem[]): ChatItem[] {
   let changed = false
   const next = messages.map(item => {
     if (item.kind !== 'message' || (item.id !== CURSOR_ASSISTANT_LIVE_ID && item.id !== 'cursor-user-live')) return item

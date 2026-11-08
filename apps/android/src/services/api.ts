@@ -1,3 +1,4 @@
+import { connectionLog } from './connection-log'
 import appConfig from '../../app.json'
 import { MAX_DEVICE_NAME_LENGTH, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import { RemoteApiError } from '../lib/errors'
@@ -305,6 +306,9 @@ export class RemoteServerApi {
     }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    const requestGroup = path.split('/')[3]
+    const request = ['auth', 'devices', 'account', 'turn'].includes(requestGroup ?? '') ? requestGroup : 'other'
+    const startedAt = Date.now()
     let response: Response
     try {
       response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
@@ -319,6 +323,7 @@ export class RemoteServerApi {
       })
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError'
+      connectionLog('http', { request, method: init.method ?? 'GET', reason: timedOut ? 'timeout' : 'network', durationMs: Date.now() - startedAt })
       throw new RemoteApiError(
         'CONNECTION_FAILED',
         timedOut ? 'The server request timed out.' : error instanceof Error ? error.message : 'Server request failed.',
@@ -329,12 +334,18 @@ export class RemoteServerApi {
       clearTimeout(timer)
     }
 
+    connectionLog('http', { request, method: init.method ?? 'GET', status: response.status, durationMs: Date.now() - startedAt })
     const text = await response.text()
     let body: unknown = undefined
     if (text.length > 0) {
       try {
         body = JSON.parse(text)
       } catch {
+        // Proxies can return HTML or plain text when throttling. Preserve the
+        // HTTP rate limit instead of disguising it as a protocol failure.
+        if (response.status === 429) {
+          throw new RemoteApiError('RATE_LIMITED', 'Too many requests. Please try again later.', 429, true)
+        }
         throw new RemoteApiError('INVALID_MESSAGE', 'The server returned invalid JSON.', response.status)
       }
     }
@@ -344,7 +355,7 @@ export class RemoteServerApi {
         ? errorBody.error.message
         : typeof errorBody.detail === 'string' ? errorBody.detail : 'The server rejected the request.'
       const code = mapStatus(response.status, detail, errorBody.error?.code ?? errorBody.code)
-      throw new RemoteApiError(code, detail, response.status, errorBody.error?.retryable === true || response.status >= 500)
+      throw new RemoteApiError(code, detail, response.status, errorBody.error?.retryable === true || response.status >= 500 || response.status === 429)
     }
     return body as TResult
   }
@@ -450,11 +461,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function mapStatus(status: number, detail: string, serverCode: unknown): string {
+  if (status === 429) return 'RATE_LIMITED'
   if (typeof serverCode === 'string') return serverCode
   if (status === 401) return 'AUTH_INVALID'
   if (status === 403) return 'AUTH_REQUIRED'
   if (status === 404) return 'DEVICE_NOT_FOUND'
   if (status === 409) return 'DEVICE_OWNERSHIP_REQUIRED'
-  if (status === 429) return 'RATE_LIMITED'
   return status >= 500 ? 'CONNECTION_FAILED' : 'INVALID_MESSAGE'
 }

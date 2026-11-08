@@ -69,6 +69,17 @@ export function processDetail(tool: ToolActivity): string | undefined {
   try {
     const args: unknown = JSON.parse(tool.arguments ?? tool.summary ?? '')
     if (args !== null && typeof args === 'object') {
+      if (
+        (tool.toolName === 'todo_write' || (tool.toolKey ?? '').endsWith('todo_write')) &&
+        Array.isArray((args as Record<string, unknown>).todos)
+      ) {
+        const rawTodos = (args as { todos: unknown[] }).todos
+        const validTodos = rawTodos.filter((t): t is { content?: string; status?: string } => typeof t === 'object' && t !== null)
+        const done = validTodos.filter(t => t.status === 'completed').length
+        const total = validTodos.length
+        const active = validTodos.find(t => t.status === 'in_progress')?.content
+        return active ? `${done}/${total} · ${normalize(active)}` : `${done}/${total}`
+      }
       for (const key of ['title', 'description', 'objective', 'task', 'task_name', 'name', 'question', 'questions', 'prompt',
         'message', 'command', 'cmd', 'queries', 'query', 'pattern', 'url', 'uri', 'file_path', 'path', 'target', 'action', 'status']) {
         const detail: unknown = Reflect.get(args, key)

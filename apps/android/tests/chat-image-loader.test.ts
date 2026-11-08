@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { chatImageWorkspacePath, createChatImageLoader, validatedImageDataUri } from '../src/services/chat-image-loader'
+import { chatImageAttachmentReference, chatImageWorkspacePath, createChatImageLoader, validatedImageDataUri } from '../src/services/chat-image-loader'
 
 const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
 const uri = `data:image/png;base64,${data}`
@@ -18,8 +18,9 @@ describe('chat image reads', () => {
     await runScenarios([
       { name: 'session attachment authority', run: async () => {
         const { load, attachment, workspace, controller } = setup()
-        expect(await load({ attachmentId: 'a1', sessionId: 'child' }, controller.signal)).toBe(uri)
-        expect(attachment).toHaveBeenCalledWith('child', 'a1', controller.signal)
+        const image = { attachmentId: 'a1', sessionId: 'child' }
+        expect(await load(image, controller.signal)).toBe(uri)
+        expect(attachment).toHaveBeenCalledWith('child', image, controller.signal)
         expect(workspace).not.toHaveBeenCalled()
       } },
       { name: 'Host path through authorized workspace reader', run: async () => {
@@ -37,6 +38,24 @@ describe('chat image reads', () => {
       })),
     ])
     expect(chatImageWorkspacePath('C:\\work\\image.png')).toBe('C:\\work\\image.png')
+  })
+
+  it('sends the full 0.2.2 reference and rejects a response that disagrees with it', async () => {
+    await runScenarios(['accepted', 'byte-length', 'dimensions'].map(mode => ({ name: mode, run: async () => {
+      const { load, attachment, controller } = setup()
+      const reference = { attachmentId: 'a1', mediaType: 'image/png', bytes: 79, width: 1, height: 1, name: 'a.png' }
+      attachment.mockImplementation(async () => ({
+        attachment: {
+          ...reference,
+          ...(mode === 'byte-length' ? { bytes: 80 } : {}),
+          ...(mode === 'dimensions' ? { width: 2 } : {}),
+        },
+        data,
+      }))
+      if (mode === 'accepted') expect(await load(reference, controller.signal)).toBe(uri)
+      else await expect(load(reference, controller.signal)).rejects.toThrow()
+      expect(attachment).toHaveBeenCalledWith('s1', reference, controller.signal)
+    } })))
   })
 
   it('rejects mismatched responses and stale or cancelled reads', async () => {
@@ -62,5 +81,25 @@ describe('chat image reads', () => {
     ].map((value, index) => ({ name: `invalid bytes or budget ${index}`, run: () => {
       expect(() => validatedImageDataUri(value)).toThrow()
     } })))
+  })
+})
+
+
+describe('chat image attachment reference and echo tolerance', () => {
+  it('retains every available reference field even when bytes are missing', () => {
+    expect(chatImageAttachmentReference({ attachmentId: 'a1' })).toEqual({ attachmentId: 'a1' })
+    expect(chatImageAttachmentReference({
+      attachmentId: 'a1', mediaType: 'image/png', width: 4, height: 2, name: 'a.png',
+    })).toEqual({ attachmentId: 'a1', mediaType: 'image/png', width: 4, height: 2, name: 'a.png' })
+    expect(chatImageAttachmentReference({ attachmentId: 'a1', bytes: 79 })).toEqual({ attachmentId: 'a1', bytes: 79 })
+    expect(chatImageAttachmentReference({ uri: 'file:///x.png' })).toEqual({})
+  })
+
+  it('tolerates an attachment echo that omits the verified fields', async () => {
+    const { load, attachment, controller } = setup()
+    const reference = { attachmentId: 'a1', mediaType: 'image/png', bytes: 79, width: 1, height: 1, name: 'a.png' }
+    // setup() echoes only { attachmentId, mediaType }; bytes/width/height are absent.
+    await expect(load(reference, controller.signal)).resolves.toBe(uri)
+    expect(attachment).toHaveBeenCalledWith('s1', reference, controller.signal)
   })
 })

@@ -20,7 +20,12 @@ import type {
   RemoteDevice,
   RemoteSession,
   ScheduleCatalogEntry,
+  ScheduleCreateRequest,
   ScheduleDeliveryRecord,
+  ScheduleRecord,
+  ScheduleTimingChange,
+  ScheduleUpdateRequest,
+  ScheduleUpdateResult,
   SendMessageResult,
   ServerConfig,
   SessionModels,
@@ -95,6 +100,12 @@ export interface AppState {
   previewImageUri?: string
   setPreviewImageUri(uri?: string): void
   transportPreference: TransportPreference
+  /**
+   * Until this timestamp, connections to the current host skip WebRTC and go
+   * straight to the relay data plane. Set when an established P2P path drops
+   * or WebRTC negotiation keeps failing; expires so 'auto' can retry P2P.
+   */
+  relayOnlyUntil?: number
   compactHistory: boolean
   setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference
@@ -124,6 +135,9 @@ export interface AppState {
   reauthRequired: boolean
 
   loadScheduleTasks(): Promise<void>
+  createScheduleTask(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord | null>
+  updateScheduleTask(sessionId: string, id: string, expected: ScheduleRecord, options?: { change?: ScheduleTimingChange; title?: string; prompt?: string }): Promise<ScheduleUpdateResult | null>
+  toggleScheduleTask(task: ScheduleCatalogEntry): Promise<boolean>
   deleteScheduleTask(sessionId: string, id: string): Promise<boolean>
   loadScheduleHistory(sessionId: string, id: string): Promise<ScheduleDeliveryRecord[]>
   bootstrap(): Promise<void>

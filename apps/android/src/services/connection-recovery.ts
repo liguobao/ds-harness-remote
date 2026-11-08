@@ -1,13 +1,24 @@
 import type { ConnectionPhase, TransportPreference } from '../types'
 
 interface RecoveryState {
-  connection: { phase: ConnectionPhase; stats: { mode: string }; retryable?: boolean }
+  connection: { phase: ConnectionPhase; stats: { mode: string }; retryable?: boolean; errorCode?: string }
   selectedDevice?: { deviceId: string }
   reauthRequired: boolean
   transportPreference: TransportPreference
 }
 
-const RETRY_DELAYS_MS = [1_000, 3_000, 8_000]
+// First retry is immediate: a dropped P2P path should recover in ~1s over
+// the relay, not after a fixed 1s timer plus the whole connect pipeline.
+const RETRY_DELAYS_MS = [0, 1_000, 3_000, 8_000, 15_000, 30_000, 30_000, 60_000]
+// When the Server explicitly reports HOST_OFFLINE / DEVICE_OFFLINE, skip the
+// 0ms P2P->Relay fast-retry and use jittered exponential backoff.
+const HOST_OFFLINE_RETRY_DELAYS_MS = [3_000, 6_000, 12_000, 24_000, 30_000, 60_000, 60_000, 60_000]
+/**
+ * A connection that never established gets fewer, faster retries: the first
+ * attempt already waited out its WebRTC budget, and every retry runs the
+ * full handshake. Relay-only retries here are cheap; endless retries are not.
+ */
+const FIRST_CONNECT_RETRY_COUNT = 2
 
 /** Recover a previously connected Host while its runtime is retained; never replay a mutation. */
 export class ForegroundConnectionRecovery {
@@ -27,19 +38,29 @@ export class ForegroundConnectionRecovery {
   ) {}
 
   setActive(active: boolean): void {
+    if (this.active === active) return
     this.active = active
+    if (active) {
+      // Returning to the foreground is a fresh chance (new network, better
+      // signal): re-arm even after the previous cycle exhausted itself.
+      this.attempts = 0
+      this.exhausted = false
+      this.cancelTimer()
+    }
     this.update()
   }
 
   update(): void {
     const state = this.read()
     const hostId = state.selectedDevice?.deviceId
+    let reset = false
     if (hostId !== this.hostId || state.connection.phase === 'disconnected' || state.reauthRequired) {
       this.cancelTimer()
       this.hostId = hostId
       this.armed = false
       this.attempts = 0
       this.exhausted = false
+      reset = true
     }
     if (state.reauthRequired) return
     if (state.connection.phase === 'connected') {
@@ -50,26 +71,43 @@ export class ForegroundConnectionRecovery {
         this.exhausted = false
       }
     }
-    if (!this.active || !this.armed || hostId === undefined || state.connection.phase !== 'offline'
+    // A reset means the lifecycle changed (new host, logout, sign-out): this
+    // call must not schedule a retry for state that no longer applies.
+    if (reset) return
+    if (!this.active || hostId === undefined || state.connection.phase !== 'offline'
       || state.connection.retryable === false) {
       this.cancelTimer()
-      // Setup can lose its carrier before the store ever published connected.
-      // There is then no armed retry owner to retain the native service.
+      // A refused (non-retryable) offline state has no retry owner; still
+      // release the retained native service exactly once.
       if (this.active && state.connection.phase === 'offline'
-        && (!this.armed || state.connection.retryable === false) && !this.exhausted) {
+        && state.connection.retryable === false && !this.exhausted) {
         this.exhausted = true
         this.onExhausted()
       }
       return
     }
     if (this.timer !== undefined || this.inFlight) return
-    if (this.attempts >= RETRY_DELAYS_MS.length) {
+    // Late-connected hosts use the full ladder; a first attempt that never
+    // established retries immediately over Relay before giving up.
+    const hostOffline = state.connection.errorCode === 'HOST_OFFLINE' || state.connection.errorCode === 'DEVICE_OFFLINE'
+    const maxAttempts = this.armed ? RETRY_DELAYS_MS.length : FIRST_CONNECT_RETRY_COUNT
+    if (this.attempts >= maxAttempts) {
       if (!this.exhausted) {
         this.exhausted = true
         this.onExhausted()
       }
-      return
+      // If a previously connected Host remains in any retryable offline state,
+      // keep a low-frequency probe (60s jittered for HOST_OFFLINE/DEVICE_OFFLINE,
+      // 120s for other retryable transport failures) so prolonged Host/Server
+      // outages recover automatically without manual intervention.
+      if (!this.armed) {
+        return
+      }
     }
+    const baseDelay = this.attempts >= maxAttempts
+      ? (hostOffline ? 60_000 : 120_000)
+      : ((hostOffline ? HOST_OFFLINE_RETRY_DELAYS_MS : RETRY_DELAYS_MS)[this.attempts] ?? 60_000)
+    const delayMs = hostOffline ? Math.round(baseDelay * (0.5 + Math.random() * 0.5)) : baseDelay
     this.timer = setTimeout(() => {
       this.timer = undefined
       // Recheck after the delay: logout, manual connection or a Host change
@@ -87,7 +125,7 @@ export class ForegroundConnectionRecovery {
           this.inFlight = false
           this.update()
         })
-    }, RETRY_DELAYS_MS[this.attempts])
+    }, delayMs)
   }
 
   private cancelTimer(): void {

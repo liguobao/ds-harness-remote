@@ -70,17 +70,21 @@ export const OFFICE_PREVIEW_MAX_RESPONSE_BYTES = 12 * 1024 * 1024
 /** Official Typert endpoints only; Host owns scope, device ownership and input authorization. */
 export interface BackgroundJob {
   startedAt?: number
+  finishedAt?: number
   id: string
   label: string
+  kind?: string
   owner?: string
   status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
   progress?: string
   detail?: string
+  output?: { total: number; earliest: number; spillPaths?: string[] }
 }
 
 export interface SessionTools {
   watchJobs?(sessionId: string, signal: AbortSignal): Promise<RemoteGatewayStream>
-  followJob?(sessionId: string, jobId: string, signal: AbortSignal): Promise<RemoteGatewayStream>
+  followJob?(sessionId: string, jobId: string, signal: AbortSignal, from?: number): Promise<RemoteGatewayStream>
+  killJob?(sessionId: string, jobId: string, signal?: AbortSignal): Promise<{ outcome: 'requested' | 'already-finished' }>
   permissionOptions(signal?: AbortSignal): Promise<PermissionSelect['options']>
   listSkills(sessionId: string, signal?: AbortSignal): Promise<SkillEntry[]>
   executeCommand(sessionId: string, line: string): Promise<CommandExecutionResult>
@@ -107,8 +111,16 @@ export class HarnessSessionTools implements SessionTools {
     return this.gateway.open('job/list', { args: { request: { sessionId } } }, signal)
   }
 
-  followJob(sessionId: string, jobId: string, signal: AbortSignal): Promise<RemoteGatewayStream> {
-    return this.gateway.open('job/follow', { args: { request: { sessionId, jobId } } }, signal)
+  followJob(sessionId: string, jobId: string, signal: AbortSignal, from?: number): Promise<RemoteGatewayStream> {
+    return this.gateway.open('job/follow', { args: { request: { sessionId, jobId, ...(typeof from === 'number' ? { from } : {}) } } }, signal)
+  }
+
+  async killJob(sessionId: string, jobId: string, signal?: AbortSignal): Promise<{ outcome: 'requested' | 'already-finished' }> {
+    const value = await this.gateway.call<{ outcome?: unknown }>('job/kill', { args: { request: { sessionId, jobId } } }, signal)
+    if (value && (value.outcome === 'requested' || value.outcome === 'already-finished')) {
+      return { outcome: value.outcome }
+    }
+    return { outcome: 'requested' }
   }
 
   async permissionOptions(signal?: AbortSignal): Promise<PermissionSelect['options']> {
@@ -222,7 +234,7 @@ export class HarnessSessionTools implements SessionTools {
 
 /** ACP workspace/terminal carrier. The Host keeps the same path and ownership checks. */
 export class AcpSessionTools implements SessionTools {
-  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity' | 'pi' | 'opencode') {}
+  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes') {}
   private call<T>(sessionId: string, endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const nativeId = sessionId.replace(/^\w+:/u, '')
     const scope = `${this.backend === 'antigravity' ? 'acp' : this.backend}:${nativeId}`
@@ -234,6 +246,7 @@ export class AcpSessionTools implements SessionTools {
     return this.client.workspaceToolCall(nativeId, this.backend, endpoint, scopedArgs, signal) as Promise<T>
   }
   permissionOptions(): Promise<PermissionSelect['options']> { return Promise.reject(Object.assign(new Error('Permission catalog is unavailable for ACP workspaces.'), { code: 'FEATURE_NOT_SUPPORTED' })) }
+  killJob(): Promise<{ outcome: 'requested' | 'already-finished' }> { return Promise.reject(Object.assign(new Error('Background jobs are unavailable for ACP workspaces.'), { code: 'FEATURE_NOT_SUPPORTED' })) }
   listSkills(): Promise<SkillEntry[]> { return Promise.resolve([]) }
   executeCommand(): Promise<CommandExecutionResult> { return Promise.reject(Object.assign(new Error('Commands are unavailable for ACP workspaces.'), { code: 'FEATURE_NOT_SUPPORTED' })) }
   listFiles(sessionId: string, path: string, signal?: AbortSignal): Promise<WorkspaceDirectory> {

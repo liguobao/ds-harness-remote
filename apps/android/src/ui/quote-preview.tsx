@@ -10,8 +10,11 @@ import {
 import Svg, { G, Path } from 'react-native-svg'
 import { X } from 'lucide-react-native'
 import { useTheme } from './theme-context'
+import { strings } from '../locales/i18n'
 import {
+  formatQuoteDraftSnippet,
   formatQuoteText,
+  formatTokens,
   messageQuoteRanges,
   parseMessageQuotes,
   quoteTextOf,
@@ -20,7 +23,9 @@ import {
 } from './quote-helpers'
 
 export {
+  formatQuoteDraftSnippet,
   formatQuoteText,
+  formatTokens,
   messageQuoteRanges,
   parseMessageQuotes,
   quoteTextOf,
@@ -143,5 +148,74 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginLeft: 4,
     flexShrink: 0,
+  },
+})
+
+/**
+ * Figure 3: In-composer inline quote preview.
+ * Displays inline at the top of the composer card with quote marks,
+ * truncated text in primary/brand color, and a quick remove button.
+ */
+export function InlineQuotePreview({
+  text,
+  onRemove,
+  removalLabel,
+  style,
+}: {
+  readonly key?: string | number
+  readonly text: string
+  readonly onRemove?: () => void
+  readonly removalLabel?: string
+  readonly style?: StyleProp<ViewStyle>
+}) {
+  const { colors } = useTheme()
+  const snippet = formatQuoteDraftSnippet(text)
+
+  return (
+    <View style={[inlineStyles.container, style]}>
+      <View style={inlineStyles.quoteRow}>
+        <QuoteMarkIcon size={13} color={colors.primary} />
+        <Text style={[inlineStyles.quoteText, { color: colors.primary }]} numberOfLines={1}>
+          “{snippet}”
+        </Text>
+      </View>
+      {onRemove !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={removalLabel ?? strings.chat.removeQuote}
+          hitSlop={8}
+          onPress={onRemove}
+          style={inlineStyles.closeButton}
+        >
+          <X size={13} color={colors.primary} />
+        </Pressable>
+      )}
+    </View>
+  )
+}
+
+const inlineStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  quoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  quoteText: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
   },
 })

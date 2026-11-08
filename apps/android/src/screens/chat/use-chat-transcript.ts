@@ -3,31 +3,8 @@ import { isSubagentSession } from '../../lib/session-kind'
 import { hasVisibleMessageText } from '../../state/event-reducer'
 import type { ChatSection } from '../../state/message-helpers'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../../state/message-helpers'
-import { placeUiArtifacts, projectUiArtifacts, type UiArtifact } from '../../state/ui-artifacts'
 import type { ChatItem, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
-
-const EMPTY_UI_BY_SECTION = new Map<string, SectionArtifacts>()
-const EMPTY_UI_IDS = new Set<string>()
-
-type SectionArtifacts = { cards: UiArtifact[]; pointers: UiArtifact[] }
-
-/**
- * Artifact identity is `uiId` plus `version`: a ui_patch can only advance the
- * version, so equal pairs mean equal content. Used to keep the per-section
- * buckets referentially stable across streaming deltas.
- */
-function sameArtifacts(a: readonly UiArtifact[], b: readonly UiArtifact[]): boolean {
-  if (a === b) return true
-  if (a.length !== b.length) return false
-  for (let index = 0;index < a.length;index += 1) {
-    const left = a[index]
-    const right = b[index]
-    if (left === right) continue
-    if (left === undefined || right === undefined) return false
-    if (left.uiId !== right.uiId || left.version !== right.version) return false
-  }
-  return true
-}
+import { useSessionUiArtifacts } from './use-session-ui-artifacts'
 
 export function useChatTranscript({ session, sessions, messages, hostId }: { session: RemoteSession | undefined; sessions: RemoteSession[]; messages: ChatItem[]; hostId: string | undefined }) {
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
@@ -47,62 +24,19 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
     previousSectionsRef.current = next
     return next
   }, [visibleMessages])
-  const uiBySectionCache = useRef<ReadonlyMap<string, SectionArtifacts>>(EMPTY_UI_BY_SECTION)
-  const uiBySection = useMemo<ReadonlyMap<string, SectionArtifacts>>(() => {
-    if (hostId === undefined || session === undefined
-      || (session.backend !== undefined && session.backend !== 'harness')) return EMPTY_UI_BY_SECTION
-    const next = placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
-    if (next.size === 0) {
-      uiBySectionCache.current = EMPTY_UI_BY_SECTION
-      return EMPTY_UI_BY_SECTION
-    }
-    const previous = uiBySectionCache.current
-    if (previous.size === 0) {
-      uiBySectionCache.current = next
-      return next
-    }
-    // `placeUiArtifacts` allocates a fresh bucket and fresh arrays on every run,
-    // so an unchanged card would still hand ChatProcessGroup a new prop and
-    // defeat its memo. An equal bucket is reusable as-is.
-    let changed = next.size !== previous.size
-    const stable = new Map<string, SectionArtifacts>()
-    for (const [key, bucket] of next) {
-      const old = previous.get(key)
-      if (old !== undefined && sameArtifacts(old.cards, bucket.cards) && sameArtifacts(old.pointers, bucket.pointers)) {
-        stable.set(key, old)
-      } else {
-        stable.set(key, bucket)
-        changed = true
-      }
-    }
-    if (!changed) return previous
-    uiBySectionCache.current = stable
-    return stable
-  }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
-  const visibleUiIdsCache = useRef<ReadonlySet<string>>(EMPTY_UI_IDS)
-  const visibleUiIds = useMemo(() => {
-    if (uiBySection.size === 0) return EMPTY_UI_IDS
-    const next = new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId)))
-    // Identical members -> identical reference, so memoized rows keep their props.
-    const cached = visibleUiIdsCache.current
-    if (cached.size === next.size) {
-      let identical = true
-      for (const id of next) {
-        if (!cached.has(id)) { identical = false; break }
-      }
-      if (identical) return cached
-    }
-    visibleUiIdsCache.current = next
-    return next
-  }, [uiBySection])
+  const { uiBySection, visibleUiIds } = useSessionUiArtifacts({
+    messages,
+    visibleSections,
+    hostId,
+    sessionId: session?.sessionId,
+    backend: session?.backend,
+  })
 
-  // The caches above describe one transcript. Switching sessions must drop them,
+  // The previousSectionsRef describes one transcript. Switching sessions must drop it,
   // otherwise the first render of the next session would compare against a
   // foreign list (harmless for correctness, wasteful for memory).
   useEffect(() => {
     previousSectionsRef.current = []
-    uiBySectionCache.current = EMPTY_UI_BY_SECTION
-    visibleUiIdsCache.current = EMPTY_UI_IDS
   }, [session?.sessionId])
   // Queued prompts: the Host `inbox` projection is authoritative (includes
   // items queued from other devices); local `queued` rows are the fallback for

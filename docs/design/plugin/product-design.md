@@ -10,7 +10,7 @@ Harness 通过官方 Typert Remote carrier 接入；CodeX 与 ACP 后端 保留�
 ## 用户路径
 
 1. 在 Desktop 插件管理或指定 dsh profile 安装 Plugin；GitHub 根包和 npm 子包均保留发布入口。
-2. Host 通过账号密码、GitHub/知乎授权或主机匹配码加入账号。dsh-TUI 可用 `/remote login|status|logout` 和终端二维码。
+2. Host 通过账号密码、GitHub/知乎授权或主机匹配码加入账号；终端二维码登录由独立 CLI 提供。dsh-TUI 的 `/remote login|status|logout` 集成计划在后续版本单独提供，本版本不包含。
 3. Client 使用同账号的独立设备身份登录，选择在线 Host；列表过滤本机，并展示系统、Harness / Plugin 版本及连接状态。
 4. 选择已就绪的 Harness / CodeX / ACP 工作区，或通过对应领域受限的目录入口添加。
 5. 打开或新建会话，发送 Prompt、查看历史和流式回复、执行受支持的模型/权限操作与单次审批。
@@ -53,7 +53,8 @@ Harness 通过官方 Typert Remote carrier 接入；CodeX 与 ACP 后端 保留�
 
 ## 安全与验收
 
-Server membership 与 Host 本地 pinned trust 同时成立；设备 identity 不匹配、未知连接、错误 target、篡改和重放均拒绝。
+同账号设备首次连接自动信任，无需额外确认；已知设备换钥默认拒绝。信任源、Web「仅受控」与终端开关的边界见[设备身份与信任](../../end-to-end-encryption.md#2-设备身份与信任)。
+未知连接、错误 target、篡改和重放均拒绝。
 业务仅进入认证后的 Noise channel；token、私钥、匹配码、Prompt、源码与工具输出不写日志。
 权限只允许单次允许/拒绝，连接结束后旧审批不能继续使用。
 

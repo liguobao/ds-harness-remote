@@ -1,5 +1,5 @@
 import React, { memo } from 'react'
-import Svg, { Path, G, Rect } from 'react-native-svg'
+import Svg, { Path, G, Rect, Circle } from 'react-native-svg'
 import {
   type DshLinkIconKind,
   type DshFileCategory,
@@ -93,6 +93,75 @@ export const DshLinkIcon = memo(function DshLinkIcon({
     )
   }
 
+  if (kind === 'folder') {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <Path
+          d="M1.50439 3.11059C1.50439 2.55831 1.95211 2.1106 2.50439 2.1106H5.43389C5.67773 2.1106 5.91318 2.19969 6.09593 2.36113L7.71649 3.79265C7.89924 3.95409 8.1347 4.04319 8.3785 4.04319H13.4958C14.0481 4.04319 14.4958 4.4909 14.4958 5.04319V12.8894C14.4958 13.4417 14.0481 13.8894 13.4958 13.8894H2.50439C1.95211 13.8894 1.50439 13.4417 1.50439 12.8894V4.04319V3.11059Z"
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+        <Path d="M3.63501 7.66614H12.3647" stroke={color} strokeWidth={strokeWidth} />
+      </Svg>
+    )
+  }
+
+  if (kind === 'globe') {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <Path
+          d="M7.99986 14.0887C11.3626 14.0887 14.0886 11.3627 14.0886 7.99998C14.0886 4.63727 11.3626 1.91125 7.99986 1.91125C4.63715 1.91125 1.91113 4.63727 1.91113 7.99998C1.91113 11.3627 4.63715 14.0887 7.99986 14.0887Z"
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+        <Path d="M2.34619 8H13.6538" stroke={color} strokeWidth={strokeWidth} strokeLinecap="square" />
+        <Path
+          d="M7.99976 14.0889C9.23509 14.0889 10.1743 11.3629 10.1743 8.00006C10.1743 4.63739 9.23509 1.91138 7.99976 1.91138"
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+        <Path
+          d="M7.99973 14.0889C6.76445 14.0889 5.8252 11.3629 5.8252 8.00006C5.8252 4.63739 6.76445 1.91138 7.99973 1.91138"
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+      </Svg>
+    )
+  }
+
+  if (kind === 'github') {
+    return (
+      <Svg width={size} height={size} viewBox="-2 -2 28 28" fill="none">
+        <Path
+          d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+          fill={color}
+        />
+      </Svg>
+    )
+  }
+
+  if (kind === 'google') {
+    return (
+      <Svg width={size} height={size} viewBox="-2 -2 28 28" fill="none">
+        <Path
+          d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"
+          fill={color}
+        />
+      </Svg>
+    )
+  }
+
+  if (kind === 'mdn') {
+    return (
+      <Svg width={size} height={size} viewBox="-2 -2 28 28" fill="none">
+        <Path
+          d="m21.538 1.1-6.745 21.8h-2.77L18.77 1.1ZM24 1.1v21.8h-2.462V1.1Zm-12 0v21.8H9.538V1.1Zm-2.462 0L2.77 22.9H0L6.746 1.1Z"
+          fill={color}
+        />
+      </Svg>
+    )
+  }
+
   return (
     <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <Path
@@ -154,6 +223,92 @@ export const IconCheckOutline = memo(function IconCheckOutline({ size = 14, colo
         d="M2.25 8.5L5.49732 11.7473C5.90519 12.1552 6.57263 12.1344 6.95426 11.7018L13.75 4"
         stroke={color}
         strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  )
+})
+
+/** Official DSH IconChecklistOutlineRegular from ui-primitives */
+export const IconChecklistOutline = memo(function IconChecklistOutline({
+  size = 14,
+  color = '#6E7681',
+  strokeWidth = 1.3,
+}: { size?: number; color?: string; strokeWidth?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M3.75 6.25C4.7165 6.25 5.5 5.4665 5.5 4.5C5.5 3.5335 4.7165 2.75 3.75 2.75C2.7835 2.75 2 3.5335 2 4.5C2 5.4665 2.7835 6.25 3.75 6.25Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Path d="M7.5 4.5H13.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M3.75 13.25C4.7165 13.25 5.5 12.4665 5.5 11.5C5.5 10.5335 4.7165 9.75 3.75 9.75C2.7835 9.75 2 10.5335 2 11.5C2 12.4665 2.7835 13.25 3.75 13.25Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Path d="M7.5 11.5H13.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  )
+})
+
+/** Background Job outline icon (terminal / command execution) */
+export const IconJobOutline = memo(function IconJobOutline({
+  size = 14,
+  color = '#6E7681',
+  strokeWidth = 1.3,
+}: { size?: number; color?: string; strokeWidth?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Rect x="2" y="2" width="12" height="12" rx="2.5" stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M5 5.5L7.5 8L5 10.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M8.5 10.5H11" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  )
+})
+
+/** Official DSH IconBranchOutlineRegular from TurnActions / MessageActions */
+export const IconBranchOutline = memo(function IconBranchOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M1.01503 8.0001L5.6964 8.0001C6.41913 8.0001 6.78049 8.0001 7.12115 7.91951C7.4232 7.84804 7.71233 7.73014 7.97821 7.57C8.27809 7.38939 8.5364 7.13669 9.05303 6.63129L11.3281 4.40564"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path
+        d="M1.01221 7.9999L5.6964 7.9999C6.41913 7.9999 6.78049 7.9999 7.12115 8.08049C7.4232 8.15196 7.71233 8.26986 7.97821 8.43C8.27809 8.61061 8.5364 8.86331 9.05303 9.36871L11.3281 11.5944"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Circle cx="12.4502" cy="3.3079" r="1.56962" stroke={color} strokeWidth={1.2} />
+      <Circle cx="12.4502" cy="12.6921" r="1.56962" stroke={color} strokeWidth={1.2} />
+    </Svg>
+  )
+})
+
+/** Official DSH IconDatabaseOutlineRegular from TurnUsagePanel.tsx */
+export const IconDatabaseOutline = memo(function IconDatabaseOutline({ size = 14, color = '#6E7681' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path
+        d="M13.1967 5.1869C13.7232 4.77378 14.0003 4.30517 14.0001 3.82819C14.0003 3.3512 13.7232 2.88259 13.1967 2.46947C12.6702 2.05635 11.9128 1.71328 11.0006 1.47475C10.0885 1.23621 9.05371 1.11062 8.00039 1.1106C6.94707 1.11057 5.9123 1.23612 5.00009 1.47461C4.08742 1.71301 3.32948 2.05604 2.80249 2.46919C2.2755 2.88235 1.99805 3.35106 1.99805 3.82819C1.99805 4.30531 2.2755 4.77402 2.80249 5.18718C3.32948 5.60033 4.08742 5.94336 5.00009 6.18176C5.9123 6.42025 6.94707 6.5458 8.00039 6.54578C9.05371 6.54575 10.0885 6.42016 11.0006 6.18163C11.9128 5.94309 12.6702 5.60002 13.1967 5.1869Z"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path d="M2 3.80371V11.7848" stroke={color} strokeWidth={1.2} />
+      <Path d="M14 3.80371V11.7848" stroke={color} strokeWidth={1.2} />
+      <Path
+        d="M2 7.81396C2 8.60524 2.63214 9.36411 3.75736 9.92363C4.88258 10.4832 6.4087 10.7975 8 10.7975C9.5913 10.7975 11.1174 10.4832 12.2426 9.92363C13.3679 9.36411 14 8.60524 14 7.81396"
+        stroke={color}
+        strokeWidth={1.2}
+      />
+      <Path
+        d="M2 11.7847C2 12.6081 2.63214 13.3977 3.75736 13.98C4.88258 14.5622 6.4087 14.8893 8 14.8893C9.5913 14.8893 11.1174 14.5622 12.2426 13.98C13.3679 13.3977 14 12.6081 14 11.7847"
+        stroke={color}
+        strokeWidth={1.2}
       />
     </Svg>
   )

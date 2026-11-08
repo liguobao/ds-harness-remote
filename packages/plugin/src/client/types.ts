@@ -20,11 +20,16 @@ export interface RemoteStatus {
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
   controlUnavailable?: boolean
+  startupError?: {
+    code: string
+    message: string
+  }
   deviceName?: string
   deviceId?: string
   serverUrl?: string
   connected?: boolean
   recoveryGeneration?: number
+  clientAuthRequired?: boolean
   connectedTargetDeviceId?: string
   transport?: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'
   preferredTransports?: RemoteTransportPreference[]
@@ -48,12 +53,20 @@ export interface RemoteStatus {
     workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
   }
   network?: RemoteNetworkDetails
+  /** npm dist-tags lookup result; present after the plugin's first successful registry check. */
+  update?: {
+    currentVersion: string
+    latestVersion: string
+    checkedAt: number
+  }
   hostAuthorizationAvailable: boolean
   host?: {
     deviceId?: string
+    pairingHostOnly?: boolean
     configured: boolean
     online: boolean
     reconnecting: boolean
+    recoveryExpiresAt?: number
     lastActiveAt?: number
     error?: string
     account?: string
@@ -71,6 +84,7 @@ export interface RemoteStatus {
 interface RemoteNetworkDetails {
   connectionId?: string
   connectedAt?: number
+  recoveryExpiresAt?: number
   controlChannelUrl: string
   controlChannelState: 'connecting' | 'open' | 'closing' | 'closed'
   preferredTransports: RemoteTransportPreference[]
@@ -236,10 +250,19 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations?: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpInstallResult?: {
+    backend: string
+    action: 'configured' | 'installed' | 'download_required'
+    downloadUrl?: string
+  }
+  startupError?: {
+    code: string
+    message: string
+  }
 }
 
 export interface PluginAssociation {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
 }
 

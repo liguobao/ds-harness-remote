@@ -26,7 +26,7 @@ os=$(uname -s)
 if [[ "$os" = Linux ]]; then
   [[ $EUID = 0 ]] || fail 'Linux installation requires root (including with autostart disabled).'
 fi
-DSH_INSTALL_ROOT=${DSH_INSTALL_ROOT:-/opt/dsh-remote}
+DSH_INSTALL_ROOT=${DSH_INSTALL_ROOT:-/opt/ds-harness-remote}
 DSH_SYSTEMD_DIR=${DSH_SYSTEMD_DIR:-/etc/systemd/system}
 [[ "$DSH_INSTALL_ROOT" = /* && "$DSH_SYSTEMD_DIR" = /* ]] || fail 'Installation and systemd directories must be absolute.'
 autostart=0
@@ -59,8 +59,8 @@ elif [[ "$os" = Linux && -x "$DSH_INSTALL_ROOT/bin/dsh" ]]; then
 elif [[ "$os" = Linux ]]; then
   for prerequisite in curl tar sha256sum; do command -v "$prerequisite" >/dev/null || fail "Required command missing: $prerequisite"; done
   case "$(uname -m)" in
-    x86_64) arch=x64; sha=535eeb608ca1e0b71d49a0e36991d449d5f935fbb04eca61677519b010cd673a ;;
-    aarch64|arm64) arch=arm64; sha=0c96aa074abd109e0b5da8d10202a9bbcea9bcf9ddb587b20944f71b8f21f8c8 ;;
+    x86_64) arch=x64; sha=d57d6c28a35785f58f33899a0aa0bfc83f7a8ef4448b6cf3f7d0961efc7b9189 ;;
+    aarch64|arm64) arch=arm64; sha=dab232a90169737a48149149dd6707e7fdcbaefbaa94b4871047a38e93db947f ;;
     *) fail 'Private Node bootstrap supports Linux x64 and arm64 only.' ;;
   esac
   version=${DSH_VERSION:-latest}
@@ -69,16 +69,16 @@ elif [[ "$os" = Linux ]]; then
   mkdir -p "$DSH_INSTALL_ROOT/bin"
   chmod 755 "$DSH_INSTALL_ROOT" "$DSH_INSTALL_ROOT/bin"
   runtime=$(mktemp -d "$DSH_INSTALL_ROOT/runtime.XXXXXXXX")
-  say 'Installing private Node.js 22.23.0, Harness and pnpm (system runtime is unchanged).'
+  say 'Installing private Node.js 24.9.0, Harness and pnpm (system runtime is unchanged).'
   archive=$runtime/node.tar.gz
-  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "https://nodejs.org/dist/v22.23.0/node-v22.23.0-linux-${arch}.tar.gz"
+  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "https://nodejs.org/dist/v24.9.0/node-v24.9.0-linux-${arch}.tar.gz"
   printf '%s  %s\n' "$sha" "$archive" | sha256sum --check --status || fail 'Node archive checksum mismatch.'
   mkdir "$runtime/node"
   tar -xzf "$archive" --strip-components=1 -C "$runtime/node"
   PATH="$runtime/node/bin:$PATH" "$runtime/node/bin/npm" install --prefix "$runtime/harness" --engine-strict "@deepseek-ai/dsh@$version" pnpm@9.15.4
   DSH_COMMAND=$DSH_INSTALL_ROOT/bin/dsh
   [[ ! -e "$DSH_COMMAND" && ! -L "$DSH_COMMAND" ]] || fail 'Refusing to replace an existing runtime wrapper.'
-  { printf '#!/usr/bin/env bash\n# dsh-remote managed private runtime\n'; printf 'export PATH=%q:"$PATH"\n' "$runtime/node/bin:$runtime/harness/node_modules/.bin"; printf 'exec %q "$@"\n' "$runtime/harness/node_modules/.bin/dsh"; } > "$DSH_COMMAND"
+  { printf '#!/usr/bin/env bash\n# ds-harness-remote managed private runtime\n'; printf 'export PATH=%q:"$PATH"\n' "$runtime/node/bin:$runtime/harness/node_modules/.bin"; printf 'exec %q "$@"\n' "$runtime/harness/node_modules/.bin/dsh"; } > "$DSH_COMMAND"
   chmod 755 "$DSH_COMMAND"
 else
   fail "No existing dsh command found. Install via Desktop Extensions / Plugin management (https://github.com/liguobao/ds-harness-remote), or enable Desktop's official dsh launcher."
@@ -109,7 +109,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 function abort(message) { const error = new Error(message); error.installerSafe = true; throw error; }
 (async () => {
   const [command, profile, mode, autostart, systemdDir] = process.argv.slice(1);
@@ -117,10 +117,21 @@ function abort(message) { const error = new Error(message); error.installerSafe 
   const home = fs.realpathSync(path.resolve(process.cwd(), '../..'));
   if (path.basename(process.cwd()) !== profile || path.basename(path.dirname(process.cwd())) !== 'profiles') abort('Unexpected profile working directory');
   process.env.DSH_HOME = home;
-  const unit = `dsh-remote-${profile}.service`;
+  const unit = `ds-harness-remote-${profile}.service`;
   const unitPath = path.join(systemdDir, unit);
-  const marker = `# dsh-remote managed home=${JSON.stringify(home)}`;
+  const marker = `# ds-harness-remote managed home=${JSON.stringify(home)}`;
   function checkOwner() {
+    // A renamed service must not leave our old Host running against the legacy
+    // credentials while the new package migrates them. Never stop unknown units.
+    const legacyUnit = `dsh-remote-${profile}.service`;
+    const legacyPath = path.join(systemdDir, legacyUnit);
+    let legacy; try { legacy = fs.lstatSync(legacyPath); } catch(e) { if(e.code !== 'ENOENT') throw e; }
+    if (legacy?.isFile() && !legacy.isSymbolicLink() && fs.readFileSync(legacyPath, 'utf8').split('\n').includes(`# dsh-remote managed home=${JSON.stringify(home)}`)) {
+      const active = spawnSync('systemctl', ['is-active', '--quiet', legacyUnit]);
+      const enabled = spawnSync('systemctl', ['is-enabled', '--quiet', legacyUnit]);
+      if (active.error || enabled.error || ![0, 3, 4].includes(active.status) || ![0, 1, 3, 4].includes(enabled.status)) abort('Could not inspect the old managed Remote service; no migration was attempted');
+      if (active.status === 0 || enabled.status === 0) abort(`Stop and disable the old managed service before upgrading: systemctl disable --now ${legacyUnit}`);
+    }
     let st; try { st = fs.lstatSync(unitPath); } catch(e) { if(e.code !== 'ENOENT') throw e; }
     if (st && (!st.isFile() || st.isSymbolicLink() || !fs.readFileSync(unitPath, 'utf8').split('\n').includes(marker))) abort('Refusing unmanaged, symlinked or other-home systemd unit; inspect it, stop/disable it and migrate manually, or set DSH_REMOTE_AUTOSTART=0');
     const fragment = execFileSync('systemctl', ['show', unit, '--property=FragmentPath', '--value'], {encoding:'utf8'}).trim();
@@ -154,22 +165,11 @@ function abort(message) { const error = new Error(message); error.installerSafe 
     }
   }
   walk(tree);
-  function normalizeExpression(source) {
-    if (typeof source !== 'string') return '';
-    // Ignore formatting whitespace, but never whitespace inside quoted literals.
-    return source.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\s+/g, part => /^\s/.test(part) ? '' : part);
-  }
-  const stock = "[...ctx.loader.entries()].some(entry => (entry.options.id === 'dsh-tui' || entry.options.name === '@deepseek-harness-tui/dsh-tui') && !entry.disabled )".replace(/\s/g,'');
-  const remotes = entries.filter(e => e.node.name === 'ds-harness-remote' && !e.off);
-  let candidates = remotes.filter(e => !e.uncertain);
-  let complementaryPair = false;
-  if (!candidates.length && remotes.length === 2) {
-    const ordinary = remotes.find(e => e.node.id === 'ds-harness-remote');
-    const tui = remotes.find(e => e.node.id === 'ds-harness-remote-tui');
-    if (ordinary && tui && !ordinary.ancestorUncertain && !tui.ancestorUncertain && ordinary.node.disabled instanceof Expression && tui.node.disabled instanceof Expression && normalizeExpression(ordinary.node.disabled.source) === stock && normalizeExpression(tui.node.disabled.source) === '!'+stock && JSON.stringify(ordinary.node.config) === JSON.stringify(tui.node.config)) { candidates = [ordinary]; complementaryPair = true; }
-  }
-  if (candidates.length !== 1 || (!complementaryPair && remotes.length !== 1)) abort('Remote configuration is missing, ambiguous or dynamically enabled');
-  const input = candidates[0].node.config || {};
+  // The bundle inserts exactly one static Host entry in this release (dsh-TUI
+  // integration is deferred, so no complementary terminal row exists).
+  const remotes = entries.filter(e => e.node.name === 'ds-harness-remote' && !e.off && !e.uncertain);
+  if (remotes.length !== 1) abort('Remote configuration is missing, ambiguous or dynamically enabled');
+  const input = remotes[0].node.config || {};
   function staticValue(value) { if(value instanceof Expression) abort('Dynamic Remote configuration is unsupported'); if(value && typeof value === 'object') Object.values(value).forEach(staticValue); }
   staticValue(input);
   const config = remote.resolveConfig(input);
@@ -182,7 +182,9 @@ function abort(message) { const error = new Error(message); error.installerSafe 
   if (mode === 'preflight') return;
   if (mode === 'register') {
     const token = fs.readFileSync(0, 'utf8').trim();
-    const directory = remote.serverStorageDirectory(new remote.IdentityStore().directory, config.serverUrl, 'host');
+    const root = typeof remote.prepareDefaultIdentityDirectory === 'function'
+      ? await remote.prepareDefaultIdentityDirectory() : new remote.IdentityStore().directory;
+    const directory = remote.serverStorageDirectory(root, config.serverUrl, 'host');
     const identity = await new remote.IdentityStore({directory}).loadOrCreate(config.deviceName);
     const store = new remote.ServerCredentialStore(directory);
     if(typeof store.withRefreshLock !== 'function') abort('Remote version lacks credential locking');

@@ -28,7 +28,6 @@
 - [更新记录](CHANGELOG.md)：记录版本变更。
 - [隐私说明](PRIVACY.md)：说明数据处理与隐私边界。
 - [插件安装指南](installation.zh.md)（[English](installation.md)）：已有 Harness 插件安装、Desktop 插件管理、profile 选择与插件卸载。
-- [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、Typert carrier 兼容与排障。
 - [Codex Remote 技术说明](codex-remote.md)：说明 Codex 工作区展示、数据边界、配置、安全限制和当前验证状态。
 - [Agent 工作区接入指南](acp-integration.md)：启用 Cursor / AGY / Pi / OpenCode / Claude / Codex，以及新增 ACP adapter 的接入点。
 - [ACP Remote / Agent adapters](acp-remote.md)：说明 Agent ACP gateway、后端 adapter、allowlist 与配置。
@@ -45,7 +44,7 @@
 ## 阅读路径
 
 - **项目介绍与快速开始**：默认入口为[English README](../README.md)，中文版见[中文 README](../README.zh.md)。
-- **在 dsh-TUI 中使用 Remote**：先读[dsh-TUI Remote 使用指南](dsh-tui.md)，再按需查看[插件包说明](../packages/plugin/README.md)。
+- **在终端中使用 Remote**：当前版本只提供独立 CLI（`ds-harness-remote login|status|logout`）与浏览器/Desktop Host；dsh-TUI 集成计划在后续版本单独提供。
 - **安装或使用其他 Plugin 入口**：先读[根 README](../README.md)，再读[插件包说明](../packages/plugin/README.md)。
 - **了解 Codex Remote 的实现边界**：先读[Codex Remote 技术说明](codex-remote.md)，需要实现级字段时再查[协议](protocol.md)。
 - **了解安全与网络边界**：先读[端到端加密](end-to-end-encryption.md)和[网络与传输](network.md)，需要实现级字段时再查[协议](protocol.md)。

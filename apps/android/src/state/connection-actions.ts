@@ -10,6 +10,8 @@ import type { AppState } from './store-state'
 import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
+const RELAY_DOWNGRADE_MS = 10 * 60_000
+
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
   'connectDevice' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
   return {
@@ -23,13 +25,14 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
+      if (!sameHost) runtime.webRtcFallbackStreak = 0
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
       const recovering = sameHost && get().connection.phase === 'reconnecting'
       // In-memory catalogs belong to one Host; keep them only across its reconnect.
       set(state => ({
         ...(!recovering ? { currentWorkSessionIds: [] } : {}),
-        ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
+        ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {}, relayOnlyUntil: undefined } : {}),
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
         permissionSelecting: false,
@@ -64,7 +67,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         await runtime.closeActiveCursorStream(false)
         const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
         const preference = get().transportPreference
-        const forceRelay = options.forceRelay === true || preference === 'relay'
+        const relayOnlyActive = (get().relayOnlyUntil ?? 0) > Date.now()
+        const forceRelay = options.forceRelay === true || preference === 'relay' || relayOnlyActive
         const preferredTransports = forceRelay
           ? ['relay'] as const
           : preference === 'turn'
@@ -79,9 +83,19 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           credentials.accessToken,
           frame => runtime.enqueueMuxFrame(generation, frame),
           {
+            refreshAccessToken: async () => (await serverSession.authenticate(config.baseUrl, identity)).credentials.accessToken,
             fetchIceServers: async connectionId => api.turnCredentials(connectionId),
             preferredTransports: [...preferredTransports],
             forceRelay,
+            onWebRtcFallback: () => {
+              if (generation !== runtime.connectionGeneration) return
+              // Repeated negotiation failures on this host: remember to go
+              // straight to the relay data plane for a while.
+              runtime.webRtcFallbackStreak += 1
+              if (runtime.webRtcFallbackStreak >= 2) {
+                set({ relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS })
+              }
+            },
             onOpencodeArchived: nativeId => {
               if (generation !== runtime.connectionGeneration) return
               const sessionId = `opencode:${nativeId}`
@@ -107,9 +121,17 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
               if (get().connection.phase !== 'disconnected') {
                 ++runtime.connectionGeneration
                 ++runtime.sessionLoadGeneration
+                // An established P2P/LAN/TURN path dropping is the unstable
+                // network case: remember relay-only for a while so recovery
+                // reconnects instantly over the relay instead of re-climbing
+                // LAN -> P2P -> TURN every time.
+                if (closeOptions?.lastTransport === 'lan' || closeOptions?.lastTransport === 'p2p' || closeOptions?.lastTransport === 'turn') {
+                  set({ relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS })
+                }
                 set({
                   connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed,
                     retryable: closeOptions?.retryable !== false },
+                  connectionStage: undefined,
                   codexAvailable: false,
                   cursorAvailable: false,
                   antigravityAvailable: false,
@@ -130,6 +152,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         const hostDescriptor = await proxy.hostDescribe()
         const connectionNetworkDetails = await runtime.connection.getNetworkDetails().catch(() => undefined)
         if (generation !== runtime.connectionGeneration) return false
+        const connectedStats = runtime.connection.getStats() ?? { mode: 'Relay', connected: true }
+        runtime.webRtcFallbackStreak = 0
         set({
           hostDescriptor,
           codexAvailable: runtime.connection.hasCodex(),
@@ -143,22 +167,42 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           connectionNetworkDetails,
           lastConnectedDeviceId: device.deviceId,
           pendingAutoConnectDeviceId: undefined,
-          connection: { phase: 'connected', stats: runtime.connection.getStats() ?? { mode: 'Relay', connected: true } },
+          connection: { phase: 'connected', stats: connectedStats },
+          ...(connectedStats.mode !== 'Relay' && connectedStats.mode !== 'Disconnected' ? { relayOnlyUntil: undefined } : {}),
         })
         runtime.connectionStartedAt = Date.now()
         await saveLastConnectedDeviceId(device.deviceId)
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
-        console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage, error)
+        // Capture before close(): the carrier's close handler clears it.
+        const failedStage = get().connectionStage
+        console.warn('[dsh-remote] Connection setup failed at stage:', failedStage, error)
         await runtime.connection.close({ preserveRecovery: recovering && !isSessionAuthError(error) })
         if (isSessionAuthError(error)) {
           await get().requireReauth(friendlyError(error))
           return false
         }
         const message = friendlyError(error)
+        const errorCode = error instanceof Error && typeof (error as Error & { code?: unknown }).code === 'string'
+          ? (error as Error & { code: string }).code
+          : undefined
+        const retryable = error instanceof Error && typeof (error as Error & { retryable?: unknown }).retryable === 'boolean'
+          ? (error as Error & { retryable: boolean }).retryable
+          : undefined
+        // Failure inside transport negotiation means P2P/TURN could not
+        // establish: remember relay-only so the automatic retry (and the next
+        // manual attempt) skips the multi-second WebRTC wait entirely.
         set({
-          connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: message },
+          connection: {
+            phase: 'offline',
+            stats: { mode: 'Disconnected', connected: false },
+            error: message,
+            ...(errorCode !== undefined ? { errorCode } : {}),
+            ...(retryable !== undefined ? { retryable } : {}),
+          },
+          connectionStage: undefined,
+          ...(failedStage === 'transport' ? { relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS } : {}),
           codexAvailable: false,
           cursorAvailable: false,
           antigravityAvailable: false,

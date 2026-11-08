@@ -1,5 +1,248 @@
 # Repository Guide for Agents
 
+## Oversized session catalogues (2026-11-07)
+
+Remote 的会话目录来自官方 `session/list`，覆盖整个账号，而客户端在
+`RemoteSessionTools.catalog()` 里用 `z.array(rowSchema).max(MAX_REMOTE_SESSIONS)` 校验这份共享列表。
+实测一台累计 5 431 行、其中 4 701 行是 subagent 会话的 Host 会让每个客户端在校验阶段抛 ZodError，
+异常被 Remote tool 包装器吞成 `REMOTE_SESSION_FAILED`，表现为手机「已连接」但会话列表永远空白，
+Desktop 面板的 Agent 工具同样失败。
+
+- Client：先按 workspace 归属与 subagent 过滤，再对结果施加行上限；超限时截断，不再整包失败。
+- Host：`session/list` 仅在超过 2 048 行预算时降级——只保留可列出的根会话（无 `parentSessionId` 且
+  `origin !== 'subagent'`），仍超预算时按 `updatedAt` 保留最新 2 048 行；正常规模账号行为不变。
+- 兼容：Harness 0.2.2 的 `SessionSummary` 去掉了顶层 `title`，标题只保留在
+  `projections.values.title`；Host 在 `session/list` 响应里把它提升回行字段，否则 Remote 列表全是空标题。
+- 实测：该账号由 5 431 行 / 5.13 MB 降到 717 行 / 643 KB，Android 与 Desktop 恢复正常；测试覆盖
+  子会话超预算、根会话超预算、正常规模与 `session/search` 不受影响四种场景。
+
+
+## Self-hosted refresh response recovery (2026-11-06)
+
+`apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间
+离线恢复；后继再次轮换后拒绝祖先 token，不撤销当前有效凭据。HMAC 以旧 bearer 为
+密钥，nonce/设备/用途域分离；只持久化摘要与恢复元数据，不能从磁盘记录还原 bearer。
+消耗旧 token 和签发后继一起提交，失败回滚内存。保持绝对到期时间、撤销及账号隔离；
+旧版已消耗且无恢复元数据的 token 不能恢复，损坏的恢复记录返回可重试 503。
+
+验证：Protocol build、Server check、58 个测试与 Server build 通过。真实本地 HTTP
+丢响应/重启、并发重试，以及 Plugin ClientServerApi 即时重试/模拟两小时离线后无需
+再次登录恢复通过；覆盖过期、撤销、旧数据、写入失败和容量边界。未部署生产 Server，
+未进行跨机或长期真实断网验收。
+
+## Canonical Remote naming and credential migration (2026-11-06)
+
+按用户要求移除旧 `dsh-remote` 设置命名空间的自动导入，不再注册旧 section；保留旧
+Harness settings provider 接口。日志前缀与生命周期标签统一 `ds-harness-remote`。
+共享包 `@dsh-remote/*` 与防止重复 Host 的旧 loader 禁用逻辑保留。
+
+Linux 新安装默认使用 `/opt/ds-harness-remote` 与 `ds-harness-remote-<profile>.service`，
+不自动迁移旧 runtime 或服务。安装器在改包前检测归属本项目的旧服务，若仍运行或启用则
+拒绝继续，要求先停用；不停止、不删除未知服务。中英文安装指南同步。
+
+凭据根改为 `$DSH_HOME/ds-harness-remote`（默认 `~/.dsh/ds-harness-remote`）。安装器
+处理凭据及升级后首次启动时自动整体迁移旧 `remote` 目录，先于凭据读写及身份创建。
+迁移先只读校验整个旧目录：已知布局/文件白名单、公私钥配对、信任指纹、凭据 schema、
+deviceId 与 Server scope 哈希；未知文件、混合数据、不一致记录、锁和符号链接均拒绝。
+根目录外的跨进程锁序列化迁移；新旧根同时存在时不合并、不覆盖。升级需停止旧实例，
+不能依赖空闲旧进程持锁检测。自定义 IdentityStore.directory 保持原路径。
+
+已确认归属的旧目录 rename 遇权限/占用/只读/空间等错误时，复核同一原目录仍在且目标
+不存在后回退旧根。在 `.ds-harness-remote-migration/legacy-root.json` 私有记录原目录的
+设备号/inode，当前与后续新版进程都沿用旧根，避免活跃存储分裂；不自动重试移动已固定的
+旧根。无法持久化回退记录、固定目录消失或被替换时停止，不创建替代身份。Host、安装器、
+CLI 与默认 IdentityStore 均采用实际选定根；不重新生成密钥、不清除 Token/信任记录。
+
+验证：Plugin 源码/test 类型检查、全量 73 文件 / 537 tests、生产构建、DSH bundle、安装
+脚本语法与 diff check 通过。生产 CLI 在隔离目录验证成功自动迁移、未知目录拒绝、真实
+父目录权限拒绝后仍有授权，以及权限恢复后另一个进程仍沿用旧根；凭据字节不变。安装器
+真实 helper 在隔离 profile / 模拟 systemctl 中验证归属旧服务的 active/enabled 拦截，
+以及停用服务/无关服务不被改写。本机 `~/.dsh/remote` 只读归属检查通过，未打印私密内容
+或执行真实迁移。Windows、Linux systemd 实装与跨设备未验收。
+
+本机 hoisted 安装遗留的子包 bin wrapper 指向旧 isolated 路径，类型检查直接调用根 tsc。
+
+## Claude / Hermes direct workspace tools (2026-11-05)
+
+Claude 与 Hermes 的 Desktop/Android 直接 Files/Terminal 已接入现有 ACP workspace tools。
+Desktop 不再拦截文件调用及终端/文件变化流；Android 使用对应后端客户端与 session scope，
+开放工具入口与 Markdown 文件链接。Host 继续以可信 cwd、连接归属、路径 containment、
+终端 enabled 设置及设备/attachment 归属校验授权，不增加通用 exec 或文件写入端点。
+Claude 图片输入仍未开放。Plugin/Android check、相关 33 tests、生产 Plugin bundle 与
+Android Hermes export、DSH bundle 校验通过；文件监听测试复验时 Antigravity 场景
+偶发超时，单独重跑通过。`verify-packed-webrtc.mjs` 在本机 isolated 安装下因
+Schemastery 的 `@standard-schema/spec` closure 校验失败（既有边界）；Host bundle 重建
+存在本机依赖展开顺序差异。真实 Desktop/Android、APK 与跨设备 E2E 尚待验收。
+
+## Self-hosted WebRTC/TURN connection support (2026-11-05)
+
+`apps/server` 从 Relay-only 扩展为可选的 WebRTC 四路协调：`hello.ack` 按 Client 声明与部署配置返回 `transport.lan/p2p/turn/relay` 交集；转发 `signal.offer|answer|ice`（按 connection/角色/阶段校验，每连接 ICE 上限 256，安全通道建立后忽略迟到信令；未声明 WebRTC 的 Host 不接收 offer，Client 自然超时回落 Relay），转发 `transport.selected`（含旧 Host 的 `lan -> p2p` 降级，并容忍 responder 侧 selection 而不丢 link），并新增 `GET /api/v1/turn/credentials`，仅向正在建立的连接双方按 coturn REST API 签发短期 STUN/TURN credential（`DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` / `DSH_SERVER_TURN_TTL_SECONDS`）。TURN capability 仅在 URL 与 secret 同时配置时宣告，二者不齐全时启动失败；未配置 ICE 时保持原 Relay-only 行为。Server 仍只转发密文、不解密；未实现独立 Relay attach/resume、多账号、主机匹配码、OAuth/Browser 授权与 Admin。验证：Server check、新增 8 条 WebRTC/TURN 用例与全量 test 通过；容器镜像构建后经真实 REST/WS 冒烟验证 capability、signaling、selection 与 TURN HMAC；用户已在自建环境完成公网 P2P 实测。未做 coturn/TURN 跨机与长期连接验收。
+
+## Harness 0.2.2 compatibility (2026-11-05)
+
+开发基线升级到 `dsh-v0.2.2-rc.1`，随附 Cordis `4.1.0`、Loader `1.1.0`、Include `1.1.0`
+与 `@types/node` 24；0.2.2 要求 Node.js `>=24.9`，CI 四个 job、`scripts/install.sh` 私有
+runtime（含 x64/arm64 SHA-256）与安装文档同步到 Node.js 24.9.0。peer range 原本已接纳
+`0.2.2` 预发布版，本轮不改范围。
+
+适配内容：Android 的 `session/attachment` 改发完整 `ImageAttachmentRef`（从消息 content 保留
+`bytes`，并校验返回引用）；Host 桥按 `harnessVersion` 把完整引用降级为旧 Host 的
+`attachmentId`，旧客户端对新 Host 无法补齐校验字段时由官方 Gateway 显式拒绝。CodeX/ACP 虚拟
+control 帧同时发送旧 `key/value` 与新 `changes`，虚拟 `session/page` 补 `cursor` 并接受
+`session/events` 别名；两边虚拟 `session/attachment` 同时接受 id 与完整引用。Remote allowlist
+增加 `toolResults/watch`、`schedule/edit|run|deleteInactive|deliveryLimits`、
+`pluginManager/listVersions|readBundleDetail|updateBundle`、`session/events`；
+`pluginManager/updateBundle` 复用 Remote 自有组合包保护，允许第三方组合包受信任更新。
+
+0.2.2 的官方 Gateway 对每条本地 carrier 都读取调用 Peer（`peer.signal`/`peer.principal`/
+`peer.interactions`），缺失时 `$events` 打开会抛 `TypeError`。插件激活时改为始终为本地
+carrier 准备 owner Peer：优先官方 `Peer`/`OperatorPeer` 导出，缺失或构造失败时回退官方
+Connection Host 服务的 `createPeer`，`TypertGatewaySwitch.local()` 在未显式传入 Peer 时
+使用该共享 fallback；两者都不可用时报明确错误而不是让官方 Gateway 抛 TypeError。新增
+`owner-peer.test.ts` 与 switch 回归覆盖该边界，并在独立 DSH 0.2.2-rc.1 上确认激活、
+control/status 与远程工作区建立不受影响。
+
+验证：全仓 `pnpm --filter './packages/**' -r build`、`pnpm -r check`、`pnpm -r test`、
+`pnpm install --frozen-lockfile`、串行生产 build（含 Android Expo export）、
+`verify-dsh-plugin.mjs`、`verify-packed-webrtc.mjs` 与 `git diff --check` 通过；其中 Plugin
+73 文件 / 531 tests、Android 54 文件 / 520 tests。另在
+独立 DSH 0.2.2-rc.1（Node 24.9.0、独立 DSH_HOME）安装本仓库构建产物，经本仓库开源自部署
+Server 完成 Host 激活、Web UI 渲染、control/status 与 settings 读写、远程工作区建立烟测；
+其中 `account/watch` 被 allowlist 拒绝属预期。同一构建另在独立 DSH `0.2.1-rc.5` Host（全新
+profile 安装、复制既有凭据）上完成激活、control/status 与 0.2.2-rc.1 Client → 0.2.1 Host
+的加密远程工作区打开，确认 owner Peer 修复同时覆盖上一版（两版 `Peer`/`createPeer` 契约
+相同）。未做真实 Desktop/Android APK、原生真机、加密跨设备 E2E 或 0.2.2 新 UI 的人工验收；官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案仍
+待补齐，`$events` 在缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合上不可用（Desktop 客户端
+会重连循环）也尚未在插件侧做降级提示。
+
+## Host bundle load fix and dsh-TUI deferral (2026-11-05)
+
+`packages/plugin/dist/index.js` 曾以裸 ESM import 引用 `ws`（以及动态 import `qrcode`）。
+在只携带 bundle 文件、未安装包运行时依赖的安装方式（本地路径 link、手工复制包、解包后的
+GitHub/生成式安装等）中，DSH 加载 Host entry 会以 `Cannot find package 'ws'` 失败，插件无法
+激活；内联 `ws` 后同类安装会继续在 `@deepseek-ai/schemastery` 上失败。构建脚本现把全部
+运行时依赖（`ws`、`qrcode`、`schemastery` 及其闭包）内联进 Host bundle，仅保留
+`@deepseek-ai/dsh-client-connection`（Host 组合必须提供的 peer 单例）与可选
+`@roamhq/wrtc` 外部；`verify-dsh-plugin.mjs` 断言 Host bundle 的裸 import 只剩官方
+Connection peer，阻止运行时 npm 依赖重新进入 bundle。
+
+同一版本按用户要求移除 dsh-TUI 集成，下一版本单独提供：删除 `src/tui-command.ts` 与
+`index.ts` 的 TUI 激活分支，Host 激活只要求官方 `connection` 服务；两个 `cordis.patch.yml`
+只插入一个静态 Host entry（不再使用 `!!js` disabled 表达式与 `ds-harness-remote-tui` 行）；
+`dsh-plugin.json` 不再声明 `commands` 契约、`/remote` 命令与 `commands.invoke` 权限；
+installer helper 只接受唯一静态 Remote entry；`ds-harness-remote` CLI 保留为无 Desktop/Web
+时的账号入口，但不再提示 dsh-TUI。README（含 ja/zh）、兼容性、安装、设计文档与
+`docs/dsh-tui.md`（已删除）同步；`docs/TODO.md` 记录后续版本恢复项。旧 profile 中已保存
+的 `ds-harness-remote-tui` 行不会被自动启用，升级后由新 bundle patch 的单 entry 取代。
+
+验证：Plugin check、build、`verify-dsh-plugin.mjs` 与 `git diff --check` 通过；Plugin
+73 文件 / 529 tests（移除 2 条 dsh-TUI 生命周期测试）。同一构建在独立 DSH 0.2.2-rc.1 +
+Node 24.9 的三种安装形态上启动验证：pnpm tarball 安装、本地路径 link（插件目录没有任何
+node_modules）、手工复制包到 profile node_modules（不带依赖）均能激活 Host；对照旧 bundle
+在无依赖情形下以 `Cannot find package 'ws'` 失败。installer helper 的 preflight 逻辑以真实
+`--dump-config` 树验证单静态 entry 校验通过。未做真实 Desktop/Android APK、跨设备或
+install.sh 完整 token 注册验收；install.sh helper 直接 import 插件 entry 时仍依赖 profile
+内可解析的官方 peer（既有行为，不受本次内联影响）。
+
+## Legacy loader ownership (2026-11-04, Issue #244)
+
+启动迁移仅自动禁用项目自有的 `@dsh-remote/plugin` 旧名；不再按裸名 `dsh-remote`
+禁用条目，该 npm 包属于另一发布者。旧本地别名没有可确认的来源时保持用户状态，
+由用户核对后手动禁用。新增一条生命周期契约验证跨插件写入边界，以及自身、已禁用
+条目和无关插件的状态保持，不新增 UI 或配置布局断言。
+
+Windows Node 22.23.4 / pnpm 9.15.4：五个 packages 构建、Plugin check 和 8 条生命周期
+测试通过；Host 发布 bundle 仅一行变化，Client bundle 无变化。Node 24.11.1 下四个
+共享包 193 tests 通过；Plugin 全套 482 pass / 8 fail，另有一个依赖加载错误。
+同环境原始基线加新测试为 481 pass / 9 fail，失败名称的唯一差异即本条回归；
+`verify-dsh-plugin.mjs` 的根 TUI patch 断言在原始基线也失败。冻结安装因 lockfile
+缺失依赖记录失败，验证时只在本地修复安装并在安装后恢复原 lockfile 字节，不提交
+依赖变化。未做真实 DSH profile、Desktop/Android 或跨设备验收。
+
+## Native subscription recovery (2026-11-03)
+
+Remote transport loss must not become a terminal wire error for native Harness
+snapshot consumers: `RemoteSnapshotStream` stops consuming after such an error,
+so a later `ctx.connection.reconnect()` cannot restore workspace/session updates.
+The selected Harness gateway now defers transport-close failures until its caller
+is cancelled by the existing post-authentication carrier reset (or disposal).
+It does not reopen streams or replay RPCs. One-shot gateways and Host business
+failures retain their normal error behavior. `native-stream-recovery.test.ts`
+uses the native snapshot consumer to cover recovery, cancellation during open,
+permission refusal and queue overflow; `client-reconnect.test.ts` covers the
+runtime's cancellation boundary and fresh Host history reads.
+
+## Client reauthorization after disconnect
+
+Surface terminal Client authorization failures separately from Host status and transient
+carrier loss. Reuse the existing Client sign-in dialog; keep Host selection and fail
+closed until the user reconnects. A protocol 401 rejecting a Client GET bearer can
+refresh and retry that read once. Do not retry mutations, refresh rejections or peer
+trust failures as business requests. The self-hosted Server consumes a refresh token
+before sending its successor: loss of that response can require a new account login.
+
+## werift 0.26.0 upgrade (2026-11-03, Issue #259)
+
+按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted
+node_modules 双版本），不再需要 `patches/werift@0.24.4.patch`（#245 的止血补丁，随分支基线
+移除）。0.26 的 `StreamTransport` 重写移除了 `end` 后的静默自动重拨（#241 崩溃类的根源），
+改为失败即 terminal，并内置连接超时（`connectTimeoutMs`，bundle 内可见 `connect timed out
+after` 标记）。插件使用的全部 ICE 配置键（`iceUseIpv4`/`iceFilterCandidatePair` 等）在 0.26
+类型中保持不变。回归测试改为 0.26 语义（`werift-turn-transport.test.ts`）：连接拒绝与连接中
+RST 均不产生 unhandled rejection、无重拨代际、`send()` 对调用方 reject；bundle 守卫断言
+0.26 标记存在且旧补丁守卫不存在。验证：plugin 481 tests、四共享包 186 tests、vscode check、
+`NODE_ENV=production` 重建与 `verify-dsh-plugin` 通过；`verify-packed-webrtc.mjs` 在 main
+上因 schemastery 新增 `@standard-schema/spec` 闭包失败（存量问题，未在本轮处理）。
+`orderIceServersForWerift` 的 TURN TCP 优先排序本轮保持不变，待真机验证后再评估。
+
+## Android Mermaid rendering (2026-11-02, Issue #255)
+
+Android 聊天 Markdown 的 ```mermaid 代码块改为图表。`scripts/build-mermaid.mjs` 将固定版本
+`mermaid@12.2.0` 与 `scripts/mermaid-renderer.js` 打包为忽略的 `src/generated/mermaid-html.ts`
+（已加入 `build:renderers`）；App 根部的单例隐藏 WebView 在首次出现 mermaid 块时才创建，
+串行渲染并按「源码 + 主题」缓存（LRU 48），源码稳定 700ms 后才渲染以避开流式中间态。
+页面 CSP 禁网络/worker，屏蔽 console、弹窗与跳转，`securityLevel: 'strict'`、`htmlLabels: false`、
+`look: 'classic'`；源码上限 20K 字符、SVG 上限 1 MiB、单图 20 秒超时，崩溃/超时重建页面。
+
+内联图用 react-native-svg 原生绘制，但其 Android 渲染器遇到无法解析的属性值会抛异常并
+使整个 App 闪退（实测 marker `orient="auto-start-reverse"`、`AlignmentBaseline` 未知值）。
+因此内联 SVG 不得透传 mermaid 输出：渲染页按白名单重建元素与属性，逐值正则校验，计算样式
+写为属性（仅写与父元素不同的值），marker/渐变提升到 `<defs>` 且其子树写完整样式。
+含 `foreignObject` 的图（journey）只走全屏查看：Modal 中 `javaScriptEnabled={false}` 的
+WebView 以 `<img src="data:image/svg+xml">` 显示原始 SVG，支持双指缩放与复制源码。
+图表与分类色板跟随亮/暗主题；7 种语言补齐 `diagram` 文案。不执行插件 JS，不改 Host/协议。
+
+本轮验证：Android check、49 文件 / 447 tests、production Hermes export（bundle 29.6 MB，
+其中 Mermaid 页面约 5.7 MB）与 diff check 通过；浏览器中 16 种图的白名单内联 SVG 均可解析，
+与原图像素差 ≤2.2%。模拟器（Android 15，WebView 124）以临时本地样例页（未提交）人工检查
+flowchart/sequence/class/state/ER/gantt/pie/mindmap/xychart 亮暗两色、journey 全屏与语法错误
+回退。未在真实 Host 会话或真机验证，未测流式过程、TalkBack、大字体与抓包。
+
+## Startup plugin update check (2026-11-02)
+
+启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags
+端点做一次匿名查询：npmjs.org 与 npmmirror **并发竞速**，首个有效应胜出（国内网络不再等
+npmjs 超时）。结果 `{currentVersion, latestVersion, checkedAt}` 经 `withUpdate` 合并进
+control `status`、`host.reconnect` 与 `mode.set local`，随既有 SSE 推送；失败仅记 debug
+日志，不阻塞启动。无 connection 的 dsh-TUI Host 与 disabled 插件不发起请求。semver 比较在
+client-safe 的 `version-compare.ts`（无法解析的版本比较为相等，不产生提示），host 与
+client bundle 共用。不新增配置项与自动化测试（非核心展示功能，按测试政策）。
+
+UI 展示：侧栏 Remote 入口（保持 0.6.0 的内容自适应几何）在本地版本落后时套用宿主
+DesktopUpdateIndicator 的品牌色外观（8% 底 + 20% 描边），标准形态标签右侧追加
+「⬆ {latest}」后缀，轨/紧凑形态为官方同款 6px 品牌色圆点；Remote 弹窗账号 footer 行内
+追加「{latest} 可用」品牌色链接（title 为完整版本信息），点击直达 GitHub Releases；
+主机列表与所选主机详情对 `clientVersion` 落后的远端主机追加「⬆ 可更新」文本标记。
+不写「设置 → 插件」指引：官方一键更新仅覆盖 npm registry 安装，GitHub/本地安装无入口，
+且第三方插件无法直达宿主设置分区（launcher 座位官方占用，`openSettings()` 无分区参数）。
+
+客户端 statusFeed 订阅由「弹窗打开时」改为挂载即生效：此前侧栏入口只在挂载时拉一次
+status，启动后的 registry 结果推送到不了按钮，直至打开弹窗才重放最新状态。
+
+本轮验证：Plugin check/build（bundle 字节复现）、DSH bundle 校验、67 文件 / 469 tests、
+checker 注入 fetch 冒烟与 compareVersions 语义 15 项（scratch，未提交）通过；以临时
+0.5.90 演示构建经 tarball 安装到真实 Desktop profile，人工确认启动数秒内入口自动出现
+更新态、弹窗 footer 链接与跳转正常。未做跨设备回归验收。
 ## Remote popup portals (2026-11-01, Issue #222)
 
 Workspace、连接线路、Host reference 和旧模式切换面板复用宿主 ReactDOM Portal，
@@ -75,11 +318,11 @@ Desktop，探测超时关闭 stdout 后可能触发 `write EPIPE`。探测脚本
 
 当前仓库实现：
 
-- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口 + dsh-TUI `/remote` 管理命令；无用户可见的 Client 模式）
+- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口；dsh-TUI 集成自 0.6.3 起移除，计划下一版本单独提供；无用户可见的 Client 模式）
 - Android Client（账号授权 + Adaptive transport + v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote + 可选 CodeX Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
-- 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding/opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
+- 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding、WebRTC signaling/TURN credential 协调与 opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
 - 依赖外部 Server 的 Mock Host/Smoke Client
 - Server 设计与跨仓库协议契约
 
@@ -98,7 +341,7 @@ apps/
   android/             React Native / Expo Android Client（账号授权 + Typert/CodeX Remote tunnel）
   vscode/              VS Code Extension Client（Host 列表、加密连接与远程会话）
   browser/             Chrome/Edge MV3 入口（Web 授权换取独立凭证 + 在线 Host + 打开 Remote Web）
-  server/              开源自部署 Server（单账号 Relay、登录/设备状态页、Docker 部署）
+  server/              开源自部署 Server（单账号 WebRTC/Relay、登录/设备状态页、Docker 部署）
 packages/
   plugin/              Host runtime、Remote 工作区入口与原生 API 代理
   protocol/            Remote/Control frame 类型和运行时校验
@@ -135,7 +378,7 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 
 | 模块 | 状态 | 主要剩余工作 |
 | --- | --- | --- |
-| Plugin Host | 账号密码/主机匹配码接入、dsh-TUI 无 browser connection 时默认开启 Host、GitHub/知乎二维码授权与可点击 URL、原生 `/remote` login/status/logout 与 Tab 补全、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop/dsh-TUI 跨机 E2E 已验证；无自定义 Harness 业务适配层 | v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
+| Plugin Host | 账号密码/主机匹配码接入、GitHub/知乎二维码授权与可点击 URL、同账号 peer 校验、隔离身份/凭证、Relay/Noise IK、并发 Client 与按连接隔离的 v0.1.2 alpha.1–rc.1 Typert Remote allowlist bridge 已实现；v0.1.5 rc.1 Session V3 与 v0.1.6 alpha.1 支持已接入，并已在独立 `dsh-v0.1.6-alpha.1` 实例上验证 Web → Host 主链路；真实 Desktop 跨机 E2E 已验证；Host bundle 已内联运行时依赖，dsh-TUI 集成自 0.6.3 移除；无自定义 Harness 业务适配层 | 恢复 dsh-TUI 集成（下一版本）、v0.1.5/v0.1.6 跨机 E2E、legacy owner 恢复体验、allowlist 覆盖审计、跨平台 picker 边界 |
 | Plugin Remote Client | 与 Host runtime 同时启动，无需 Client 模式；Remote 模态框支持 GitHub/知乎扫码与账号密码登录、本机过滤、主机/版本信息、已有 Harness/CodeX Workspace、远端目录浏览与 CodeX Project 注册、Typert 图片 Prompt/回显，以及配合 dsh-file-viewer 的受限只读文件预览，随后复用原生 Harness UI；加密通道 capability 探测拒绝 ApiProxy-only Host；Web → Host 主链路已在 v0.1.5 rc.1 与 v0.1.6 alpha.1 上验证 | CodeX Project 新建跨设备 E2E、断线重连恢复、页面级导航接口、长期稳定性 |
 | Android | 使用 v0.1.2+ Typert Remote 数据面，并直接接入可选 `codex.app.*`：账号登录注册、成员设备列表与 identity key 固定、Adaptive transport + Noise、capability 探测、Harness/CodeX Workspace 与 Session、远端目录选择与 CodeX Project 注册、工作区收藏与首页快捷链接（点击直达该工作区最近会话）、分页 History/live frame、模型/权限、文字/图片 Prompt、interrupt 与审批，以及跟随系统/英文/简体中文/日语/繁体中文/西语/德语/法语界面；启动时仅有一台设备且在线、已信任时自动进入其工作区列表，否则进入设备列表；会话链接与用户开启的上次会话恢复优先，返回设备列表不重复自动跳转；历史 rc.2/v0.1.2/CodeX 真机跨机 E2E、图片分块、重连和 WebRTC 已验证 | CodeX Project 新建跨设备 E2E、协议 conformance fixtures、长期稳定性与跨设备回归 |
 | VS Code | Extension 基础已实现：SecretStorage 身份/凭证、账号/扫码登录、Host 指纹固定、Adaptive transport + Noise、rc.2 ApiProxy / v0.1.2 Typert Remote Host→Workspace→Session 导航、Prompt、permission command 与编辑区会话面板 | Extension Host 跨机 E2E、实时流式更新、question 界面与重连恢复 |
@@ -148,14 +391,14 @@ Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm iso
 | Codex Remote 领域 | 作为现有 Remote Plugin 内部可选领域：Host stdio App Server、默认开启且可在设置中关闭、固定 allowlist 与连接隔离已实现；Desktop 以 v0.1.2 Typert 内存载体复用 DSH 原生 UI，Android 直接消费同一 `codex.app.*` 并复用移动端 Workspace/Session/Chat；两端可通过受限 `project/create` 将 Host 上已存在的真实目录注册为 Project，并都只保留内存展示投影；既有 Desktop 与 Android 真机 E2E、大 History、断线恢复和多 Client 观察已验证 | Project 新建跨设备 E2E、长期稳定性、跨版本回归和安全审查 |
 | Mock Host | 旧 Android Remote RPC 联调工具，当前冻结 | 若恢复 Android 再迁移或替换 |
 | Desktop | Host 设置、Remote 工作区模态框、远程 Header、连接链路与加密状态已接入 Harness Web UI，Host status 由 loopback SSE 推送（无固定间隔的 status 轮询），原生窗口跨机 E2E 已验证 | 多窗口、休眠/唤醒和代理网络回归 |
-| 开源自部署 Server | `apps/server` 已实现单账号授权、设备凭据持久化与刷新、Control/Noise 握手转发和加密 Relay、Web 登录与设备状态页；提供 Dockerfile/Compose；单进程、Relay-only，不提供 Remote Web 会话界面或 WebRTC/TURN | Docker 实际构建与启动验证、真实 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
+| 开源自部署 Server | `apps/server` 已实现单账号授权、设备凭据持久化与刷新、Control/Noise 握手转发、WebRTC signaling 与短期 TURN credential 协调、加密 Relay、Web 登录与设备状态页；提供 Dockerfile/Compose；单进程，不提供 Remote Web 会话界面、独立 Relay attach/resume 或 Admin | Docker 实际构建与启动验证、真实 coturn/WebRTC 与 Desktop/Android/VS Code 跨机 E2E、反向代理长期连接回归 |
 | 完整 Server/Remote Web/Admin | 独立 Server 仓库已有实现，REST、Control WebSocket、Relay、Signaling 与 conformance fixture 跨仓库联调已完成 | 完整站点 runtime 变更在独立 Server 仓库完成，并同步跨仓库契约 |
 
 完整任务和优先级以 `docs/TODO.md` 为准。不得把 TODO 中的目标能力描述成已经完成。
 
 ## Development
 
-环境：Node.js 22、pnpm 9.15.4。Android 原生开发还需要 Android Studio、Android SDK 和 JDK。
+环境：Node.js 24.9、pnpm 9.15.4。Android 原生开发还需要 Android Studio、Android SDK 和 JDK。
 
 ```bash
 pnpm install
@@ -204,7 +447,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。当前待发布版本为 `0.6.0`，Android `versionCode` / Expo iOS `buildNumber` 为 `69`；发版准备已将安装说明同步到 `ds-harness-remote@0.6.0`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
+凭据或迁移旧 service。当前待发布版本为 `0.6.3`，Android `versionCode` / Expo iOS `buildNumber` 为 `71`；发版准备已将安装说明同步到 `ds-harness-remote@0.6.3`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
 
 ## Validation Baseline
 
@@ -526,7 +769,7 @@ Cursor/Claude 使用共享 session model state 读取现代 configOptions 或 le
 因此与 Pi 共用隔离 wrapper，每个会话独立进程（最多 30 个活动会话）。Claude 保持其
 每会话状态及重复 load 去重；恢复 Prompt 前加载 catalog 确认的 cwd，准备期间取消与
 重试按任务身份隔离。Desktop/Android 增加 Claude 工作区/历史/文字会话及模型入口，
-显示名为 Claude，后端 ID 为 claude；不开通图片及 Files/Terminal，不扩展 Harness/Codex RPC。
+显示名为 Claude，后端 ID 为 claude；不开通 Claude 图片；Claude/Hermes Files/Terminal 复用共享工作区桥接，不扩展 Harness/Codex RPC。
 
 本轮真实 `claude-agent-acp@0.93.0` 模型烟测读取 5 个选项并确认切换（未发送 Prompt）。
 Cursor `2026.10.16-e3cb207` 在本机初始化超时，真实 CLI 模型切换未验收；不将模拟
@@ -844,3 +1087,30 @@ Remote 窗口先通过 loopback `client.authorization.status` 只读检查本地
 保留已知列表，不将失败解释为退出登录；明确授权错误码才回登录。空主机文案仅用于
 成功的空列表，不用于请求失败。Plugin check、client-runtime 17 个核心测试、build、
 DSH bundle 与 diff check 通过；未新增 Windows 首次安装或跨设备验收。
+
+## DSH-Go pairing v1 (2026-11-08)
+
+The local Remote settings support Host QR → phone confirmation → one local code
+submission. No phone code retrieval, CLI confirmation, model tool or tunnel route
+is added. The exact final request is encrypted with AES-GCM and retained for safe
+result recovery; retries cannot change its code or submission ID. New paired
+Hosts retain an inbound-only policy through refresh/logout/restart and cannot
+create a Client role. Existing credentials preserve their behavior. Strict legacy
+storage ownership validation now recognizes and validates the pairing records and
+Host-only policy rather than rejecting them as unknown files.
+
+Validation: 75 plugin test files / 559 tests, source/test typecheck, production
+bundle build and verify-dsh-plugin passed. The actual C# API/Gateway integration
+(script scripts/check-device-pairing.ts) verified pairing, independent credentials,
+restart recovery, Host hello, encrypted Noise/Relay RPC and scoped revocation.
+The phone is simulated in Node: this is not Dart/Android acceptance. The actual
+React pairing component was checked in an isolated desktop/narrow preview; not a
+full Harness UI acceptance. Loopback/isTrusted cannot prove human presence against
+OS automation; a trusted native user-presence primitive would be required.
+Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
+docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
+pairing approval was performed.
+
+## Pairing sign-in placement (2026-11-08)
+
+DSH-Go pairing lives in the local settings Sign in tab list, alongside existing OAuth/password methods, rather than above general settings. Authorized Hosts retain a pairing shortcut. Provider-loading failures do not reset a manually selected pairing tab; switching/closing the panel does not cancel the Server session or reopen its single attempt.

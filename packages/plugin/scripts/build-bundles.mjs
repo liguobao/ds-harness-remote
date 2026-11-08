@@ -5,10 +5,11 @@ import { build } from 'esbuild'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-// tsc does not remove outputs for deleted sources. Keep retired rc.2 modules
-// out of npm's dist directory when rebuilding an existing checkout.
+// tsc does not remove outputs for deleted sources. Keep retired rc.2 and
+// retired dsh-TUI modules out of npm's dist directory when rebuilding an
+// existing checkout.
 await Promise.all(
-  ['api-proxy-switch', 'harness-api-bridge', 'harness-api-history', 'remote-api-proxy']
+  ['api-proxy-switch', 'harness-api-bridge', 'harness-api-history', 'remote-api-proxy', 'tui-command']
     .flatMap(name => ['.js', '.js.map', '.d.ts', '.d.ts.map'].map(extension =>
       rm(join(root, 'dist', `${name}${extension}`), { force: true }),
     )),
@@ -25,6 +26,11 @@ async function buildBundle(options) {
       ? file.text
         .replace(/^([ \t]*\/\/ )(?:.*\/)?node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(.+)$/gm, '$1node_modules/$2')
         .replace(/^([ \t]*")(?:[^"\r\n]*\/)?node_modules\/(?:\.pnpm\/[^/"\r\n]+\/node_modules\/)?([^"\r\n]+)("\([^\r\n)]*\) \{)$/gm, '$1node_modules/$2$3')
+        // esbuild derives source module comments from the process cwd. Keep
+        // the committed GitHub bundle stable when CI builds from the repo
+        // root while local package builds run from packages/plugin.
+        .replace(/^([ \t]*\/\/ )src\//gm, '$1packages/plugin/src/')
+        .replace(/^([ \t]*\/\/ )\.\.\/(protocol|client-core|crypto|webrtc)\//gm, '$1packages/$2/')
       : file.contents
     await mkdir(dirname(file.path), { recursive: true })
     await writeFile(file.path, content)
@@ -40,7 +46,15 @@ await buildBundle({
   outfile: join(root, 'dist/index.js'),
   // Inline werift so Desktop's generation validator never walks its `buffer`
   // dependency (Node resolves that name to a builtin id rather than a path).
-  external: ['@deepseek-ai/*', '@roamhq/wrtc', 'qrcode', 'ws'],
+  // Inline every runtime dependency: the Host entry must be importable from an
+  // installation that carries only the bundle files (local-path, unpacked
+  // GitHub and generation installs may omit the package's runtime
+  // dependencies). A missing `ws` used to abort plugin load with
+  // ERR_MODULE_NOT_FOUND, and a missing config schema library failed right
+  // after it. The official Connection package stays external because the Host
+  // composition must supply that one shared peer instance; `@roamhq/wrtc` stays
+  // an optional native load.
+  external: ['@deepseek-ai/dsh-client-connection', '@roamhq/wrtc'],
   // Inlined CommonJS dependencies require Node builtins lazily. A lexical
   // require keeps esbuild's __require working in pure ESM without a global shim.
   banner: {

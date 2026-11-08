@@ -32,6 +32,9 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     private readonly client: RemoteClientCore,
     private readonly compatibility?: SessionFormatCompatibility,
     private readonly harnessVersion?: string,
+    // Native snapshot consumers treat wire errors as terminal. Their local
+    // carrier is reset by subscribeRemoteRecovery only after reauthentication.
+    private readonly deferStreamDisconnect = false,
   ) {}
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
@@ -99,18 +102,15 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
   }
 
   async open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    if (this.frameTransfers === undefined) {
-      const description = await this.client.rpc<unknown>('harness.transport.describe', {}, signal)
-      this.frameTransfers = isRecord(description) && Array.isArray(description.capabilities)
-        && description.capabilities.includes('harness.remote.stream.transfer.v1')
-    }
     signal.throwIfAborted()
     const streamId = uuidV7()
     const queue = new AsyncValueQueue()
     const lifetime = new AbortController()
     const transferSignal = AbortSignal.any([signal, lifetime.signal])
+    let disconnected = false
     const unsubscribe = this.client.onEvent(event => routeStreamEvent(event, streamId, queue))
     const unsubscribeClose = this.client.onClose(() => {
+      disconnected = true
       lifetime.abort()
       queue.fail(new RemoteClientError('TRANSPORT_CLOSED', 'The remote Harness stream transport closed.'))
     })
@@ -123,6 +123,12 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     }
     signal.addEventListener('abort', onAbort, { once: true })
     try {
+      if (this.frameTransfers === undefined) {
+        const description = await this.client.rpc<unknown>('harness.transport.describe', {}, signal)
+        this.frameTransfers = isRecord(description) && Array.isArray(description.capabilities)
+          && description.capabilities.includes('harness.remote.stream.transfer.v1')
+      }
+      signal.throwIfAborted()
       await this.client.rpc('harness.remote.stream.open', {
         streamId, endpoint, payload, ...(this.frameTransfers ? { transferFrames: true } : {}),
       }, signal)
@@ -132,9 +138,10 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       unsubscribeClose()
       lifetime.abort()
       void this.client.rpc('harness.remote.stream.close', { streamId }).catch(() => undefined)
+      await this.deferDisconnect(error, disconnected, signal)
       throw error
     }
-    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal)
+    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal, () => disconnected)
   }
 
   private async *iterate(
@@ -147,6 +154,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     onAbort: () => void,
     lifetime: AbortController,
     transferSignal: AbortSignal,
+    disconnected: () => boolean,
   ): AsyncGenerator<unknown> {
     try {
       for await (const item of queue) {
@@ -172,6 +180,9 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
           ? normalizeLegacySessionGatewayValue(endpoint, value)
           : normalizeAssistantMessageStreamValue(endpoint, value)
       }
+    } catch (error) {
+      await this.deferDisconnect(error, disconnected(), signal)
+      throw error
     } finally {
       lifetime.abort()
       signal.removeEventListener('abort', onAbort)
@@ -180,6 +191,17 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       queue.close()
       await this.client.rpc('harness.remote.stream.close', { streamId }).catch(() => undefined)
     }
+  }
+
+  private async deferDisconnect(error: unknown, disconnected: boolean, signal: AbortSignal): Promise<void> {
+    if (!this.deferStreamDisconnect || !disconnected || signal.aborted) return
+    // Host business/permission failures remain terminal, even if a transport
+    // close races them. Only the actual onClose path may defer a failure;
+    // queue overflow uses TRANSPORT_CLOSED too but must not hang forever.
+    if (isRecord(error) && error.isDSHRemoteError === true) return
+    // Keep the native consumer alive until its carrier is replaced (or the
+    // page/selection is disposed). Do not reopen streams or replay RPCs here.
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
   }
 
   private async callTransferred(encoded: Uint8Array, signal: AbortSignal): Promise<unknown> {

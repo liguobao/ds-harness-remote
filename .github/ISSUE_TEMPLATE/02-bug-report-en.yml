@@ -1,0 +1,148 @@
+name: 🐛 Bug report
+description: Report reproducible incorrect behavior in ds-harness-remote
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve ds-harness-remote! Please provide a concise and reproducible bug report.
+
+        **Security & Privacy Notice (Important)**:
+        - **Do not post security vulnerabilities or sensitive data here.**
+        - Please redact credentials, auth tokens, pairing QR codes, session keys, agent prompts/conversations, and private local paths from logs and screenshots.
+        - This issue tracker covers the Android app, Web client, self-hosted relay/signaling server, desktop plugin, core connection protocols, and integration compatibility with companion plugins (such as dsh-go, ds-bot, deepseek-harness-intelligent-ui).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part or component is affected?
+      options:
+        - "Android App (apps/android)"
+        - "Web Client / Browser (apps/browser)"
+        - "Server / Relay / Signaling (apps/server)"
+        - "VS Code Extension (apps/vscode)"
+        - "DSH Desktop Plugin (packages/plugin)"
+        - "Companion plugins & integrations (dsh-go / ds-bot / intelligent ui)"
+        - "Connection & Core Protocols (client-core / webrtc / protocol)"
+        - "Documentation & Examples (docs / examples)"
+        - "Other / Unknown"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client-type
+    attributes:
+      label: Installation / Client method
+      options:
+        - "Android APK (GitHub Release / Pre-release)"
+        - "DSH Desktop Plugin (Marketplace)"
+        - "Hosted Web Client (dsh.r2049.cn/app)"
+        - "Self-hosted Docker Server"
+        - "npm / CLI package (ds-harness-remote)"
+        - "Built from source"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit SHA
+      description: Client version, plugin version, or source commit hash.
+      placeholder: "Example: 0.6.3 or 0123456"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system & environment
+      description: OS version and CPU architecture (include phone model and Android version if applicable).
+      placeholder: "Example: Android 14 (Pixel 8), Windows 11 x64, macOS 15.0 arm64, Ubuntu 24.04 x64"
+    validations:
+      required: true
+
+  - type: input
+    id: backend-runtime
+    attributes:
+      label: Agent / Host runtime
+      description: Which agent/harness and version is running on your work host?
+      placeholder: "Example: DeepSeek Harness Desktop 0.6.x, Codex CLI, Cursor, Antigravity"
+
+  - type: input
+    id: companion-plugins
+    attributes:
+      label: Companion plugins & integrations
+      description: If the issue involves companion plugins (such as dsh-go, ds-bot, deepseek-harness-intelligent-ui), please specify their names and versions (leave blank if not applicable).
+      placeholder: "Example: dsh-go v0.3.1, ds-bot v0.2.0, intelligent-ui v0.4.0"
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and the problem encountered.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect?
+      description: Describe the expected behavior instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: Provide the minimal reproducible sequence.
+      placeholder: |
+        1. Open ...
+        2. Connect to Host / Agent ...
+        3. Perform ...
+        4. See error ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      options:
+        - "Every time"
+        - "Sometimes / Intermittent"
+        - "Only once"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste sanitized log output (credentials, tokens, and personal paths removed).
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Screenshots, network environment (LAN / P2P / WebRTC relay), or other details. Mask QR codes and personal paths.
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This report concerns open-source components or supported companion integrations in this project.
+          required: true
+        - label: This is not a security vulnerability; vulnerabilities should be reported privately.
+          required: true
+        - label: I removed credentials, pairing QR codes, tokens, session keys, prompts, and sensitive paths.
+          required: true

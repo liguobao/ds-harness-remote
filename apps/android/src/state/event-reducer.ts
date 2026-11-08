@@ -339,7 +339,7 @@ function applyToolCall(
     : toolResultDetail(view, data)
   const images = state === 'finished' ? messageImages(data, sessionId) : []
   const failed = state === 'finished' && toolResultFailed(data)
-  const uiMeta = state === 'finished' && !failed && ['ui_render', 'ui_patch', 'ui_render_widget'].includes(stringValue(data.name) ?? stringValue(data.toolName) ?? (current.find(item => item.id === id && item.kind === 'tool') as ToolActivity | undefined)?.toolKey ?? '')
+  const uiMeta = state === 'finished' && !failed && ['ui_render', 'ui_patch', 'ui_render_widget', 'ui_compose'].includes(stringValue(data.name) ?? stringValue(data.toolName) ?? (current.find(item => item.id === id && item.kind === 'tool') as ToolActivity | undefined)?.toolKey ?? '')
     ? data.meta : undefined
   const next: ToolActivity = {
     kind: 'tool',
@@ -653,23 +653,45 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
   const blocks = content.flatMap(block => isRecord(block) && block.type === 'tool-result' && Array.isArray(block.content) ? block.content : [block])
   return blocks.flatMap(block => {
     if (!isRecord(block) || block.type !== 'image') return []
-    const attachment = isRecord(block.attachment) ? block.attachment : {}
+    const attachment: Record<string, unknown> = isRecord(block.attachment) ? block.attachment : {}
     const attachmentId = stringValue(block.attachmentId) ?? stringValue(attachment.attachmentId)
     const uri = imageDataUri(block)
     if (uri === undefined && attachmentId === undefined) return []
-    const name = stringValue(block.name) ?? stringValue(attachment.name)
-    const mediaType = stringValue(block.mediaType) ?? stringValue(attachment.mediaType)
-    const width = typeof block.width === 'number' ? block.width : typeof attachment.width === 'number' ? attachment.width : undefined
-    const height = typeof block.height === 'number' ? block.height : typeof attachment.height === 'number' ? attachment.height : undefined
+    // Image attachments have been recorded under several field names across
+    // Harness releases; accept whichever variant the Host persisted.
+    const name = firstString(block, ['name']) ?? firstString(attachment, ['name', 'fileName'])
+    const mediaType = firstString(block, ['mediaType'])
+      ?? firstString(attachment, ['mediaType', 'mimeType', 'contentType'])
+    const bytes = firstNumber(block, ['bytes'])
+      ?? firstNumber(attachment, ['bytes', 'byteLength', 'size'])
+    const width = firstNumber(block, ['width']) ?? firstNumber(attachment, ['width', 'imageWidth'])
+    const height = firstNumber(block, ['height']) ?? firstNumber(attachment, ['height', 'imageHeight'])
     return [{
       ...(attachmentId === undefined ? {} : { attachmentId, sessionId }),
       ...(uri === undefined ? {} : { uri }),
       ...(name === undefined ? {} : { name }),
       ...(mediaType === undefined ? {} : { mediaType }),
+      ...(bytes === undefined ? {} : { bytes }),
       ...(width === undefined ? {} : { width }),
       ...(height === undefined ? {} : { height }),
     }]
   })
+}
+
+/** Return the first string/number value found under any of the candidate keys. */
+function firstString(source: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = stringValue(source[key])
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+function firstNumber(source: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return undefined
 }
 
 function imageDataUri(block: UnknownRecord): string | undefined {

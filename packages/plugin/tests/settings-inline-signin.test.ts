@@ -44,7 +44,7 @@ function createTestHarness() {
       return [stateSlots[slot], setState]
     },
     useSyncExternalStore(subscribe: any, getSnapshot: any) {
-      return getSnapshot()
+      return typeof getSnapshot === 'function' ? getSnapshot() : undefined
     },
   }
 
@@ -108,7 +108,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const t = (k: string) => k
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
@@ -184,7 +184,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -211,7 +211,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
 
     tree = render()
     const activeInline = findElement(tree, (n: any) => n.props?.id === 'dsh-remote-inline-signin')
-    const submitBtn = findElement(activeInline, (n: any) => n.type === 'button' && n.props?.onClick)
+    const submitBtn = findElement(activeInline, (n: any) => n.type === 'button' && n.children?.[0] === 'startSignIn')
 
     submitBtn.props.onClick()
     await new Promise(r => setTimeout(r, 10))
@@ -261,7 +261,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -332,7 +332,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -403,7 +403,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -474,7 +474,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -568,7 +568,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -616,7 +616,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     unmount()
   })
 
-  it('handles provider discovery failure and recovers on retry', async () => {
+  it('handles provider discovery failure and recovers when reopened', async () => {
     const { React, resetRender, unmount } = createTestHarness()
     let providerCalls = 0
 
@@ -644,7 +644,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
       return {}
     })
 
-    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn() } as any
+    const statusFeed = { subscribe: vi.fn(() => () => {}), close: vi.fn(), getSnapshot: () => undefined } as any
     const Component = createRemotePluginOptions(React) as any
     const render = () => {
       resetRender()
@@ -664,18 +664,33 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     const toggleBtn = findElement(tree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin')
     toggleBtn.props.onClick()
 
-    const { el: retryBtn } = await waitForElement(
-      render,
-      (n: any) => n.props?.className?.includes('dshRemoteReconnect') && n.children?.[0] === 'retryLoginProviders'
-    )
+    await new Promise(r => setTimeout(r, 10))
+    const failedTree = render()
     expect(providerCalls).toBe(1)
-    expect(retryBtn).not.toBeNull()
+    expect(findElement(failedTree, (n: any) => n.props?.type === 'password')).not.toBeNull()
 
-    // Clicking retry button restarts provider discovery
-    retryBtn.props.onClick()
+    // Discovery retries when the login panel is reopened; no separate retry control.
+    findElement(failedTree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin').props.onClick()
+    tree = render()
+    findElement(tree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin').props.onClick()
 
-    const { el: qrImg } = await waitForElement(render, (n: any) => n.type === 'img')
+    const { tree: qrTree, el: qrImg } = await waitForElement(render, (n: any) => n.type === 'img')
     expect(qrImg).not.toBeNull()
+    expect(findElement(qrTree, (n: any) => n.props?.type === 'password')).toBeNull()
+
+    // Flat password tab switches to password form and can return to QR tab
+    const passwordTab = findElement(qrTree, (n: any) => n.props?.id === 'dsh-remote-settings-password-tab')
+    expect(passwordTab).not.toBeNull()
+    passwordTab.props.onClick()
+    tree = render()
+    expect(findElement(tree, (n: any) => n.props?.type === 'password')).not.toBeNull()
+    expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePasswordHint')?.children?.[0]).toBe('passwordHint')
+
+    const qrTab = findElement(tree, (n: any) => n.props?.id === 'dsh-remote-settings-oauth:zhihu-tab')
+    expect(qrTab).not.toBeNull()
+    qrTab.props.onClick()
+    const { el: qrImgAgain } = await waitForElement(render, (n: any) => n.type === 'img')
+    expect(qrImgAgain).not.toBeNull()
 
     expect(providerCalls).toBe(2)
 

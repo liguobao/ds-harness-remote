@@ -1,0 +1,34 @@
+{
+  "description": "Public deterministic test material only. Generated with Python cryptography; verified independently with NSec. Never use these keys in real devices.",
+  "sessionId": "019a0000-0000-7000-8000-000000000001",
+  "devicePrivateKey": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+  "devicePublicKey": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw",
+  "serverPrivateKey": "ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0A",
+  "serverPublicKey": "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns",
+  "vectors": [
+    {
+      "side": "host",
+      "path": "/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/host/status",
+      "body": "{}",
+      "proofKey": "agYkw6R_tCbGdoMvyfLpezYAYzBr7JM2pKse6XfOmR0",
+      "message": "POST\n/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/host/status\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "proof": "91fmfY_gpU9ToA2cU13yoyRb9IdFqoqChvDUu11Befg"
+    },
+    {
+      "side": "mobile",
+      "path": "/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/mobile/status",
+      "body": "{}",
+      "proofKey": "ODTTY63GYngXCFPEeyAxH0CBCHSisdMUYwzkVSlv_HI",
+      "message": "POST\n/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/mobile/status\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "proof": "3izg2tEapIkukkVFqJc7cPhHHtGLUEgHzs8f_O0r-Ag"
+    },
+    {
+      "side": "host",
+      "path": "/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/host/confirm",
+      "body": "{\"submissionId\":\"fixed-submission-0001\",\"verificationCode\":\"00123456\"}",
+      "proofKey": "agYkw6R_tCbGdoMvyfLpezYAYzBr7JM2pKse6XfOmR0",
+      "message": "POST\n/api/v1/device-pairing/sessions/019a0000-0000-7000-8000-000000000001/host/confirm\n6afb352cc3d384d4459c5f8162ab3053507cd474ba9262fc2c96ca5dbc4f3a2f",
+      "proof": "G3Ujz3E507BAwAtWVyPZCN8KJNb4-sGy84ff4nLGi18"
+    }
+  ]
+}

@@ -75,6 +75,7 @@ it('rechecks membership and pinned keys with a fresh Noise channel after relay l
     const local = vi.fn(async () => undefined)
     const gateway = { invoke: local, dispatchRpc: async () => ({ ok: true }),
       wireStream: { open: async () => (async function* () {})(), failure: () => ({ code: 'internal', message: '', details: {} }) } }
+    vi.spyOn(Math, 'random').mockReturnValue(0.999999)
     const runtime = new ClientModeRuntime(resolveConfig({ forceRelay: true, reconnect: { initialDelayMs: 100, maxDelayMs: 30000, jitter: 0 } }),
       identities, server as unknown as ClientServerApi, gateway,
       { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } as unknown as SafeLogger)
@@ -98,7 +99,11 @@ it('rechecks membership and pinned keys with a fresh Noise channel after relay l
         await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
         expect(runtime.status()).toMatchObject({ mode: 'remote', connected: false, recoveryGeneration: 0 })
         expect(attempts.length).toBeGreaterThan(50)
-        expect(attempts.at(-1)! - attempts.at(-2)!).toBe(30000)
+        // Full-jitter backoff reaches the cap: with Math.random() pinned to the
+        // top of each window, late attempts wait the full maxDelayMs.
+        // Floating-point draw: assert the cap without off-by-one brittleness.
+        expect(attempts.at(-1)! - attempts.at(-2)!).toBeGreaterThan(29_000)
+        expect(attempts.at(-1)! - attempts.at(-2)!).toBeLessThanOrEqual(30_000)
         expect(sockets).toHaveLength(1)
         server.listDevices.mockResolvedValue([host])
       }

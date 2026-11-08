@@ -9,22 +9,20 @@
   <strong>中文</strong>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">文档</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.zh.md">自部署</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue?logo=googledocs&amp;logoColor=white" alt="文档"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.zh.md"><img src="https://img.shields.io/badge/%E8%87%AA%E9%83%A8%E7%BD%B2-Docker-2496ED?logo=docker&amp;logoColor=white" alt="自部署"></a>
+  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量"></a>
 </p>
 
 
@@ -36,7 +34,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.6.0`
+`ds-harness-remote@0.6.4`
 
 ## 主要特性
 
@@ -51,39 +49,18 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
-## 目录
-
-- [一次连接，随时可用](#一次连接随时可用)
-- [主要特性](#主要特性)
-- [支持的客户端](#支持的客户端)
-- [安装](#安装)
-- [快速开始](#快速开始)
-- [界面截图](#界面截图)
-- [工作方式](#工作方式)
-- [实验性 ACP 工作区](#实验性-acp-工作区)
-- [端到端加密](#端到端加密)
-- [网络与传输](#网络与传输)
-- [安全边界](#安全边界)
-- [常见问题](#常见问题)
-- [文档](#文档)
-- [友情链接](#友情链接)
-- [Star History](#star-history)
-- [项目声明与商标](#项目声明与商标)
-- [License](#license)
-
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.0`；Host 也可以就是这台电脑 |
+| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.4`；Host 也可以就是这台电脑 |
 | Web | 浏览器页面 | 已支持 | 打开 [https://dsh.r2049.cn](https://dsh.r2049.cn)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
 | DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: DeepSeek Harness 的 Android 客户端。手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
 | 浏览器扩展 | Chrome | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
-| dsh-TUI | 纯终端 CLI  | 已支持 | 可作 Host，见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)；安装脚本不会为它自动创建 Web 服务 |
-| Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后可一条命令全程无操作安装，无需任何配置。
-| Harmony&nbsp;7.* | 鸿蒙原生 App | 已支持 | 源码见 [apps/harmony](apps/harmony)，构建与发布流程见 [HarmonyOS 客户端文档](docs/harmony-client.md)；支持账号授权登录、在线主机与设备改名、端到端加密、多会话、横屏双栏与深浅色主题 |
+| dsh-TUI | 纯终端 CLI | 计划中 | 本版本不包含该集成，将在后续版本单独提供；安装脚本不会为它自动创建 Web 服务 |
+| Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后一键安装。
 
 多个客户端可以同时连接同一个 Host，RPC 与数据流按连接隔离。
 
@@ -93,19 +70,16 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.6.0`
+`ds-harness-remote@0.6.4`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.6.0`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.6.4`。
+
+DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
 
 ### Linux 一键安装
 
 见官网首页[https://dsh.r2049.cn](https://dsh.r2049.cn/)，登陆后获取一键安装授权码安装即可。
-
-### dsh-TUI Host
-
-将 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) 作为终端 Host 的配置，请参阅
-[dsh-TUI Remote 使用指南](docs/dsh-tui.md)。
 
 ### 原生Android 客户端
 
@@ -132,7 +106,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 默认使用本项目提供的[https://dsh.r2049.cn](https://dsh.r2049.cn)托管 Remote Server。
 
-自建托管Server可使用仓库内的[最小 Server](apps/server/README.zh.md)，当前版本已包含P2P协调、Relay Server 等功能，暂不支持托管Remote Web的完整功能。
+自建托管Server可使用仓库内的[最小 Server](apps/server/README.zh.md)，当前版本已包含 WebRTC LAN/P2P/TURN 连接协调（TURN 需自行部署 coturn）与加密 Relay Server 等功能，暂不支持托管Remote Web的完整功能。
 
 ## 界面截图
 
@@ -151,8 +125,6 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 ### Android
 
 支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。
-
-界面默认跟随系统，支持英文、简体中文、日语、繁体中文、西语、德语、法语；语言设置点击「More ...」可展开全部语言。详细使用见 [Android 说明](apps/android/README.md)。
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
@@ -178,7 +150,7 @@ Harness 主机无需开放公网监听端口。只要能够访问互联网，就
 
 它将客户端切换到所选 Host 的 Harness 原生 API，因此原有 Workspace、工具和权限流程都保留在该电脑上。
 
-Host 当前注册的全部设置分区也可以通过 Harness 官方设置 API 在远端配置，大部分插件配置均已得到完整支持。
+你也可以远程修改主机上的 Harness 和插件设置；可编辑的选项取决于 Harness 和各插件通过官方设置接口开放的配置项。
 
 ## 实验性 ACP 工作区
 
@@ -186,13 +158,15 @@ Host 启动本机支持ACP 的Agent，通过ds-harness-remote 通道传递 Promp
 
 当前已支持：
 
-- **Codex**：通过独立的 App Server 接口接入，使用同一工作区入口。
+- **Codex**：通过 App Server 接入，使用统一工作区入口。
 - **Cursor**：通过 CLI 的 ACP 接口接入。
-- **Antigravity（AGY）**：将 CLI 的 stream-json 接口适配到 ACP gateway。
-- **Pi Agent（实验性）**：在 Host 安装 `@earendil-works/pi-coding-agent` 与 `pi-acp`，配置 Pi 本机模型服务后，Remote 默认自动检测并初始化，ACP 初始化成功才开放工作区；可在 Remote 设置中明确关闭，使用独立 ACP 数据面。工具按 Host 用户权限执行，逐工具确认需要 Pi 扩展，默认不会自动启用。
-- **OpenCode** — 通过 `opencode acp` 接入，支持工作区发现和历史恢复。Host 启动时检查 CLI 支持的参数，兼容带原生监听器与纯 stdio 的 ACP 构建。Desktop/Android 原生会话归档要求认证 loopback API；不提供该接口的版本会明确报告归档不可用。归档状态由 OpenCode 保存，历史保留；暂不提供恢复归档入口。
-- **Claude** — 使用 Host 本机已授权的 `claude-agent-acp`，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、文字消息及审批，暂不开放图片输入与直接 Files/Terminal 访问。
-- **Hermes** — 通过 Hermes Agent 自带的 ACP 服务端（`hermes acp`）接入，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、流式思考与工具输出、文字消息、审批及模型选择，暂不开放图片输入与直接 Files/Terminal 访问。
+- **Antigravity（AGY）**：通过 CLI 的 stream-json 接口适配接入。
+- **Pi Agent（实验性）**：安装并配置 Pi 与 `pi-acp` 后自动检测，可在设置中关闭；工具按主机用户权限执行，默认无逐工具确认。
+- **OpenCode**：通过 `opencode acp` 接入，支持工作区与历史；会话归档需版本提供认证 API，暂不支持恢复归档。
+- **Claude**：通过本机已授权的 `claude-agent-acp` 接入，需在设置中开启；支持文字与审批，暂不支持图片。
+- **Hermes**：通过 `hermes acp` 接入，需在设置中开启；支持文字、图片、流式输出、审批与模型选择。
+
+Claude 和 Hermes 均支持直接 Files/Terminal 访问，复用 Host 的工作区路径隔离与终端权限设置。
 
 配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-integration.md)。
 
@@ -226,7 +200,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 - LAN 、P2P网络下，除了网络协调相关指令，所有的数据不经过服务器；TURN服务使用开源coturn服务器部署，Relay 模式使用WebSocket转发。
 - 所有的会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
-- Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
+- 同账号设备连接无需额外确认，详见[设备信任与权限边界](docs/end-to-end-encryption.md#2-设备身份与信任)。
 - [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认开启，可在详细 Remote 设置中开启。
 - 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
 - 不开放通用工具 RPC 或远程桌面。
@@ -255,7 +229,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 **支持哪些 Harness 版本？**
 
-当前基线为 `dsh-v0.2.1-rc.5`，兼容 `0.2.0` rc.2 / rc.1，详见[兼容性说明](docs/compatibility.zh.md)。
+当前基线为 `dsh-v0.2.2-rc.1`；`dsh-v0.2.1-rc.5` 与 `0.2.0` rc.2 / rc.1 在同一官方 carrier 上继续兼容，详见[兼容性说明](docs/compatibility.zh.md)。
 
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；
 
@@ -298,7 +272,6 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 
 - [插件说明](packages/plugin/README.md)
 - [安装指南](docs/installation.zh.md)
-- [dsh-TUI Remote 使用指南](docs/dsh-tui.md)
 - [Codex Remote 技术说明](docs/codex-remote.md)
 - [ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)
 - [文档索引](docs/README.md)
@@ -309,12 +282,12 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 - [更新记录](docs/CHANGELOG.md)
 - [隐私说明](docs/PRIVACY.md)
 - [Android 说明](apps/android/README.md)
-- 当前开发适配基线为 `dsh-v0.2.1-rc.5`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
+- 当前开发适配基线为 `dsh-v0.2.2-rc.1`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 
 - 友情链接：[DSH Go](https://github.com/ccch1mneyyy/dsh-go) — 把 DeepSeek Harness 装进口袋：手机本机运行，也能遥控你的电脑。「已适配 Remote。」
-- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（已适配 Remote，参见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)）
+- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（终端优先的 Harness 客户端，Remote 集成计划在后续版本提供）
 - 友情链接：[LINUX DO 社区](https://linux.do/)
 - 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
 
@@ -332,6 +305,16 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 
 本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
 
+## 连接问题排查
+
+Android：复现问题后打开 **设置 → 诊断 → 导出连接日志**，选择文件夹保存 `.txt`。日志保留本次 App 进程启动以来最近 500 条连接诊断；重启 App 后清空，不包含凭据和会话内容。
+
+Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效并持久保存；排查完成后关闭（恢复 `info` 级别）。日志带 `[ds-harness-remote]` 前缀，Desktop 可在 `desktop.log` 查找。手动配置可设置 `logLevel: debug`。
+
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### 与 DSH-Go 配对
+
+在电脑本机 Remote 设置的「登录账号 → DSH-Go 扫码」中生成二维码，使用支持此协议的 DSH-Go 扫码确认，再将手机验证码输入电脑。仅允许校验一次，错误后整个配对作废。新 Host 默认仅被控，新建 Device-only 账号无 Web/Admin 权限。需要完整 Server 配对 v1 API 及按[接入文档](docs/dsh-go-pairing-integration.md)改造的 DSH-Go；随仓库提供的最小 Server 暂不支持此流程。

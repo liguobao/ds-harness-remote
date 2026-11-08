@@ -6,9 +6,12 @@ import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { MentionPopover, splitDraftSegments } from '../../ui/mention-popover'
+import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
+import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ReplyStatusDots } from './messages'
+import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
 import { createStyles } from './styles'
 import type { useChatMentions } from './use-chat-mentions'
 
@@ -35,6 +38,8 @@ const LONG_DRAFT_HINT = 12_000
 type Props = {
   backend: RemoteSession['backend']
   draft: string
+  quotes?: string[]
+  onRemoveQuote?: (index: number) => void
   input: ReturnType<typeof useChatMentions>
   replyActive: boolean
   stopping: boolean
@@ -48,15 +53,16 @@ type Props = {
   model: { available: boolean; label: string | undefined; selecting: boolean; onOpen: () => void }
   promptsPickerOpen: boolean
   onExpand: () => void
+  onOpenExpand?: () => void
   onOpenActions: () => void
   onOpenPrompts: () => void
   onSubmit: () => void
   onStop: () => void
 }
 
-export function ChatComposer({ backend, draft, input, replyActive, stopping, compactRunning,
+export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning,
   hasComposerContent, connected, composerDisabled, sendDisabled, compactComposer,
-  composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
+  composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { composerInputRef, mentionType, mentionGroups, selection, closeMention, onChangeText, onSelectionChange } = input
@@ -95,14 +101,44 @@ export function ChatComposer({ backend, draft, input, replyActive, stopping, com
           {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
         </Pressable>
       </View> : <View style={styles.composerCard}>
+        {draft.length > 0 && !compactRunning && onOpenExpand !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.expandComposer}
+            onPress={onOpenExpand}
+            hitSlop={8}
+            style={({ pressed }) => [styles.composerExpandButton, pressed && styles.plusPressed]}
+          >
+            <ExpandCornerIcon size={17} color={colors.muted} />
+          </Pressable>
+        )}
         <View style={styles.composerInputWrap}>
+          {quotes?.map((quoteText, index) => (
+            <Pressable
+              key={`inline-quote-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
+              onPress={() => onRemoveQuote?.(index)}
+              style={styles.composerInlineQuoteBadge}
+            >
+              <QuoteMarkIcon size={14} color={colors.primary} />
+              <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 180 }]}>
+                “{formatQuoteDraftSnippet(quoteText, 14)}”
+              </Text>
+            </Pressable>
+          ))}
           {/* Native attributed text keeps references blue without an opaque Android value layer. */}
           <TextInput
             ref={composerInputRef}
             accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
-            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
+            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }, draft.length > 0 && !compactRunning && onOpenExpand !== undefined && { paddingRight: 32 }]}
             onChangeText={onChangeText}
             onSelectionChange={onSelectionChange}
+            onKeyPress={({ nativeEvent }) => {
+              if (nativeEvent.key === 'Backspace' && draft.length === 0 && quotes && quotes.length > 0) {
+                onRemoveQuote?.(quotes.length - 1)
+              }
+            }}
 
             selection={selection}
             placeholder={strings.chat[backendTextKeys.placeholder]}

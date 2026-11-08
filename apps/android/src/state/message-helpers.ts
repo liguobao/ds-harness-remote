@@ -54,7 +54,12 @@ export interface InboxQueuedItem {
  * Queued prompts from the Host `inbox` projection. Only `next-turn` entries are
  * user-visible queue items; `next-step` is the agent's internal continuation
  * input (mirrors the official QueueDock, which renders `next-turn` only).
+ * In DS-Bot 0.3.0 (#663), only user-authored kinds (`user`, `schedule`,
+ * `user-question-reply`) belong in the QueueDock; team Bot-to-Bot relays
+ * (`source.kind === 'bot'`) are filtered out.
  */
+const OWN_QUEUE_KINDS = new Set(['user', 'schedule', 'user-question-reply'])
+
 export function inboxQueuedItems(inbox: unknown): InboxQueuedItem[] {
   const record = typeof inbox === 'object' && inbox !== null ? inbox as Record<string, unknown> : {}
   const rows = Array.isArray(record['next-turn']) ? record['next-turn'] : []
@@ -62,6 +67,8 @@ export function inboxQueuedItems(inbox: unknown): InboxQueuedItem[] {
   for (const row of rows) {
     if (typeof row !== 'object' || row === null) { items.push({ preview: '' }); continue }
     const source = (row as Record<string, unknown>).source
+    const sourceKind = typeof source === 'object' && source !== null ? (source as Record<string, unknown>).kind : undefined
+    if (typeof sourceKind === 'string' && !OWN_QUEUE_KINDS.has(sourceKind)) continue
     const rpcId = typeof source === 'object' && source !== null ? (source as Record<string, unknown>).rpcId : undefined
     const id = (row as Record<string, unknown>).id
     const content = (row as Record<string, unknown>).content

@@ -45,6 +45,7 @@ export class ClientSecureTransport implements RemoteTransport {
     this.noise = noise
     try {
       await waitForResponder(this.inner, noise, lifetime.signal)
+      this.inner.markSecureReady?.()
     } catch (error) {
       noise.destroy()
       if (this.lifetime === lifetime) {

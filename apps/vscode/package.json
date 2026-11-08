@@ -16,25 +16,73 @@
   "bugs": {
     "url": "https://github.com/liguobao/ds-harness-remote/issues"
   },
-  "keywords": ["deepseek", "harness", "remote", "agent", "webrtc"],
+  "keywords": [
+    "deepseek",
+    "harness",
+    "remote",
+    "agent",
+    "webrtc"
+  ],
   "engines": {
     "vscode": "^1.96.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onView:dshRemote.login", "onView:dshRemote.hosts"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:dshRemote.login",
+    "onView:dshRemote.hosts"
+  ],
   "main": "./dist/extension.cjs",
   "contributes": {
     "commands": [
-      { "command": "dshRemote.signIn", "title": "%command.signIn%" },
-      { "command": "dshRemote.signOut", "title": "%command.signOut%" },
-      { "command": "dshRemote.settings", "title": "%command.settings%", "icon": "$(gear)" },
-      { "command": "dshRemote.openSettings", "title": "%command.openSettings%" },
-      { "command": "dshRemote.refresh", "title": "%command.refresh%", "icon": "$(refresh)" },
-      { "command": "dshRemote.connect", "title": "%command.connect%", "icon": "$(plug)" },
-      { "command": "dshRemote.disconnect", "title": "%command.disconnect%", "icon": "$(debug-disconnect)" },
-      { "command": "dshRemote.addWorkspace", "title": "%command.addWorkspace%", "icon": "$(new-folder)" },
-      { "command": "dshRemote.newSession", "title": "%command.newSession%", "icon": "$(add)" },
-      { "command": "dshRemote.openSession", "title": "%command.openSession%", "icon": "$(open-preview)" }
+      {
+        "command": "dshRemote.signIn",
+        "title": "%command.signIn%"
+      },
+      {
+        "command": "dshRemote.signOut",
+        "title": "%command.signOut%"
+      },
+      {
+        "command": "dshRemote.settings",
+        "title": "%command.settings%",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "dshRemote.openSettings",
+        "title": "%command.openSettings%"
+      },
+      {
+        "command": "dshRemote.refresh",
+        "title": "%command.refresh%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dshRemote.connect",
+        "title": "%command.connect%",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "dshRemote.disconnect",
+        "title": "%command.disconnect%",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "dshRemote.addWorkspace",
+        "title": "%command.addWorkspace%",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "dshRemote.newSession",
+        "title": "%command.newSession%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dshRemote.openSession",
+        "title": "%command.openSession%",
+        "icon": "$(open-preview)"
+      }
     ],
     "configuration": {
       "title": "%extension.displayName%",
@@ -52,28 +100,63 @@
       }
     },
     "viewsContainers": {
-      "activitybar": [{
-        "id": "dshRemote",
-        "title": "%extension.displayName%",
-        "icon": "media/whale.svg"
-      }]
+      "activitybar": [
+        {
+          "id": "dshRemote",
+          "title": "%extension.displayName%",
+          "icon": "media/whale.svg"
+        }
+      ]
     },
     "views": {
       "dshRemote": [
-        { "id": "dshRemote.login", "name": "%view.signIn%", "type": "webview", "when": "!dshRemote.signedIn" },
-        { "id": "dshRemote.hosts", "name": "", "when": "dshRemote.signedIn" }
+        {
+          "id": "dshRemote.login",
+          "name": "%view.signIn%",
+          "type": "webview",
+          "when": "!dshRemote.signedIn"
+        },
+        {
+          "id": "dshRemote.hosts",
+          "name": "",
+          "when": "dshRemote.signedIn"
+        }
       ]
     },
     "menus": {
       "view/title": [
-        { "command": "dshRemote.refresh", "when": "view == dshRemote.hosts", "group": "navigation@1" },
-        { "command": "dshRemote.settings", "when": "view == dshRemote.hosts", "group": "navigation@2" }
+        {
+          "command": "dshRemote.refresh",
+          "when": "view == dshRemote.hosts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dshRemote.settings",
+          "when": "view == dshRemote.hosts",
+          "group": "navigation@2"
+        }
       ],
       "view/item/context": [
-        { "command": "dshRemote.connect", "when": "view == dshRemote.hosts && viewItem == dshRemote.host", "group": "inline" },
-        { "command": "dshRemote.addWorkspace", "when": "view == dshRemote.hosts && viewItem == dshRemote.host", "group": "inline@2" },
-        { "command": "dshRemote.newSession", "when": "view == dshRemote.hosts && viewItem == dshRemote.workspace", "group": "inline" },
-        { "command": "dshRemote.openSession", "when": "view == dshRemote.hosts && viewItem == dshRemote.session", "group": "inline" }
+        {
+          "command": "dshRemote.connect",
+          "when": "view == dshRemote.hosts && viewItem == dshRemote.host",
+          "group": "inline"
+        },
+        {
+          "command": "dshRemote.addWorkspace",
+          "when": "view == dshRemote.hosts && viewItem == dshRemote.host",
+          "group": "inline@2"
+        },
+        {
+          "command": "dshRemote.newSession",
+          "when": "view == dshRemote.hosts && viewItem == dshRemote.workspace",
+          "group": "inline"
+        },
+        {
+          "command": "dshRemote.openSession",
+          "when": "view == dshRemote.hosts && viewItem == dshRemote.session",
+          "group": "inline"
+        }
       ]
     }
   },
@@ -90,7 +173,7 @@
     "@dsh-remote/webrtc": "workspace:*",
     "markdown-it": "^14.3.3",
     "qrcode": "^1.5.4",
-    "werift": "0.24.4",
+    "werift": "0.26.0",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {

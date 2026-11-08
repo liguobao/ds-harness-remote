@@ -130,7 +130,7 @@ Web token 不进入二维码、手机回调 URL 或日志，并且只能由发�
 
 插件 Remote 登录页在进入授权页面和 Server 切换时重新获取列表，按语言偏好优先选择
 已启用的知乎或 GitHub，其余条目保留服务端顺序，未启用的偏好不会阻挡其他提供商。
-命令行使用 `ds-harness-remote login list`，dsh-TUI 使用 `/remote login list` 查看可用条目，
+命令行使用 `ds-harness-remote login list` 查看可用条目，
 随后通过 `login <id>` 登录。未指定 ID 时优先选择可用的知乎，否则选择首个扫码提供商。
 
 新增 OAuth 需要在 Server 实现授权、回调与账号绑定，并在 `app/api/auth.py` 的
@@ -313,7 +313,7 @@ Content-Type: application/json
 }
 ```
 
-Server 每次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值；旧 token 重用会撤销整个 token family。不要并发刷新，同一设备应使用 single-flight/互斥锁。
+Server 每次首次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值。按 [协议 §8.2](protocol.md#82-refresh)，刷新响应丢失可恢复尚未再次轮换、撤销或过期的直接后继；若恢复 pair 的 access 已过期，保存后用其 refresh token 继续正常轮换。过时 token 被拒绝但不会撤销当前有效凭据；旧版 Server 可能仍采用重用即撤销策略。不要并发刷新，同一设备应使用 single-flight/互斥锁。
 
 Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁，在获得锁后重新
 读取凭据，串行执行读取、刷新与原子落盘。等待 15 秒仍未获得锁时返回
@@ -361,7 +361,7 @@ wss://dsh.r2049.cn/ws/v1/connect
 ```
 
 Host 在启动时从当前运行入口定位 `@deepseek-ai/dsh`
-运行包读取版本：CLI/dsh-TUI 入口位于该包根目录之下，沿入口祖先链查找；0.2.0 Desktop 由
+运行包读取版本：CLI 入口位于该包根目录之下，沿入口祖先链查找；0.2.0 Desktop 由
 `app.asar` 内的 `@deepseek-ai/dsh-desktop-host` 入口拉起、Harness 包是其兄弟目录，则按入口的
 模块作用域解析 `@deepseek-ai/dsh/package.json`。读取成功时，Host 在设备注册
 descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。读取都失败时省略字段，不能
@@ -491,4 +491,8 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 
 ## 最小自部署 Server
 
-本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情和 Control/Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情、Control、WebRTC signaling/TURN credential 与 Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`；WebRTC 的 STUN/TURN 由 `DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` 配置，留空时保持 Relay-only。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+
+## Device pairing v1
+
+The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.

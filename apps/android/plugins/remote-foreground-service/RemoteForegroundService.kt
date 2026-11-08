@@ -10,6 +10,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -20,6 +22,9 @@ import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.text.format.DateUtils
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.ReactApplication
@@ -30,6 +35,18 @@ import com.facebook.react.jstasks.HeadlessJsTaskConfig
 import com.facebook.react.jstasks.HeadlessJsTaskContext
 import java.util.UUID
 
+/** Snapshot of the remote task displayed as a live activity card on lock screen. */
+data class LiveTaskData(
+  val hostId: String,
+  val sessionId: String,
+  val badge: String,
+  val title: String,
+  val statusText: String,
+  val isWaitingInput: Boolean,
+  val updatedAtMs: Long,
+  val summary: String = "",
+)
+
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
 class RemoteForegroundService : Service() {
   private var wakeLock: PowerManager.WakeLock? = null
@@ -39,6 +56,7 @@ class RemoteForegroundService : Service() {
   private var lifetimeId: String? = null
   private val stopWaiters = mutableListOf<Promise>()
   private var connectionStatus = "connecting"
+  private var liveTask: LiveTaskData? = null
 
   @Suppress("DEPRECATION")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -49,6 +67,7 @@ class RemoteForegroundService : Service() {
     }
     try {
       createChannel()
+      liveTask = currentLiveTask
       if (Build.VERSION.SDK_INT >= 34) {
         startForeground(NOTIFICATION_ID, notification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
       } else {
@@ -145,27 +164,132 @@ class RemoteForegroundService : Service() {
     super.onDestroy()
   }
 
-  private fun notification(): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-    .setSmallIcon(applicationInfo.icon)
-    .setContentTitle(getString(R.string.app_name))
-    .setContentText(when (connectionStatus) {
-      "connected" -> "Remote connected"
-      "reconnecting" -> "Remote disconnected · reconnecting"
-      else -> "Connecting to remote Host"
-    })
-    .setCategory(NotificationCompat.CATEGORY_SERVICE)
-    .setOngoing(true)
-    .setOnlyAlertOnce(true)
-    .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-    .apply {
-      packageManager.getLaunchIntentForPackage(packageName)?.let { intent ->
-        setContentIntent(PendingIntent.getActivity(
-          this@RemoteForegroundService, 0, intent,
-          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        ))
+  private fun formatRelativeTime(updatedAtMs: Long): String {
+    if (updatedAtMs <= 0L) return ""
+    val diffSec = maxOf(0L, (System.currentTimeMillis() - updatedAtMs) / 1000)
+    return try {
+      when {
+        diffSec < 60 -> getString(R.string.live_task_time_just_now)
+        diffSec < 3600 -> getString(R.string.live_task_time_minutes_ago, (diffSec / 60).toInt())
+        diffSec < 86400 -> getString(R.string.live_task_time_hours_ago, (diffSec / 3600).toInt())
+        else -> getString(R.string.live_task_time_days_ago, (diffSec / 86400).toInt())
+      }
+    } catch (_: Exception) {
+      DateUtils.getRelativeTimeSpanString(
+        updatedAtMs,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS
+      ).toString()
+    }
+  }
+
+  private fun notification(): Notification {
+    val task = liveTask
+    if (connectionStatus == "connected" && task != null) {
+      val uri = Uri.Builder().scheme("dshremote").authority("conversation")
+        .appendQueryParameter("host", task.hostId)
+        .appendQueryParameter("session", task.sessionId)
+        .build()
+      val intent = Intent(this, MainActivity::class.java).apply {
+        action = Intent.ACTION_VIEW
+        data = uri
+        addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      val reqId = (task.hostId + task.sessionId).hashCode() and 0x3fffffff
+      val pendingIntent = PendingIntent.getActivity(
+        this, reqId, intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+
+      val status = if (task.statusText.isNotBlank()) task.statusText else {
+        try {
+          if (task.isWaitingInput) getString(R.string.live_task_status_waiting) else getString(R.string.live_task_status_running)
+        } catch (_: Exception) {
+          if (task.isWaitingInput) "Waiting" else "Running"
+        }
+      }
+      val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
+      val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+      val titleColor = if (night) Color.WHITE else Color.parseColor("#1F1F1F")
+      val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
+
+      try {
+        val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
+          setImageViewResource(R.id.live_task_status_dot, dotRes)
+          setTextViewText(R.id.live_task_status_text, status)
+          setTextColor(R.id.live_task_status_text, statusColor)
+          setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
+          setTextColor(R.id.live_task_time, timeColor)
+          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
+          setTextViewText(R.id.live_task_summary, task.summary)
+          setTextColor(R.id.live_task_summary, timeColor)
+          setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
+          setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
+        }
+
+        val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
+          setImageViewResource(R.id.live_task_status_dot, dotRes)
+          setTextViewText(R.id.live_task_status_text, status)
+          setTextColor(R.id.live_task_status_text, statusColor)
+          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_title, titleColor)
+          setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
+        }
+
+        val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
+          .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+          .setSmallIcon(R.mipmap.ic_launcher_foreground)
+          .setContentTitle(status)
+          .setContentText(task.title.ifBlank { getString(R.string.app_name) })
+          .setCustomContentView(collapsedViews)
+          .setCustomBigContentView(expandedViews)
+          .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+          .setContentIntent(pendingIntent)
+          .setCategory(NotificationCompat.CATEGORY_SERVICE)
+          .setOngoing(true)
+          .setOnlyAlertOnce(true)
+          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          .setGroup(LIVE_GROUP)
+          .setGroupSummary(false)
+          .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+
+        if (task.updatedAtMs > 0) {
+          builder.setWhen(task.updatedAtMs).setShowWhen(true)
+        }
+
+        return builder.build()
+      } catch (e: Exception) {
+        Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
       }
     }
-    .build()
+
+    return NotificationCompat.Builder(this, CHANNEL_ID)
+      .setSmallIcon(R.mipmap.ic_launcher_foreground)
+      .setContentTitle(getString(R.string.app_name))
+      .setContentText(when (connectionStatus) {
+        "connected" -> "Remote connected"
+        "reconnecting" -> "Remote disconnected · reconnecting"
+        else -> "Connecting to remote Host"
+      })
+      .setCategory(NotificationCompat.CATEGORY_SERVICE)
+      .setOngoing(true)
+      .setOnlyAlertOnce(true)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+      .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+      .apply {
+        packageManager.getLaunchIntentForPackage(packageName)?.let { intent ->
+          setContentIntent(PendingIntent.getActivity(
+            this@RemoteForegroundService, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+          ))
+        }
+      }
+      .build()
+  }
 
   private fun createChannel() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -175,14 +299,51 @@ class RemoteForegroundService : Service() {
       "Remote connection",
       NotificationManager.IMPORTANCE_LOW,
     ))
+    manager.createNotificationChannel(NotificationChannel(
+      LIVE_CHANNEL_ID,
+      "Live tasks",
+      NotificationManager.IMPORTANCE_DEFAULT,
+    ).apply {
+      lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+    })
   }
 
   companion object {
     private const val ACTION_START = "io.github.liguobao.dshremote.action.START"
     private const val EXTRA_RESULT = "result"
     private const val CHANNEL_ID = "remote_connection"
+    private const val LIVE_CHANNEL_ID = "live_tasks"
+    private const val LIVE_GROUP = "dsh_remote_live_task"
+    private const val TASK_GROUP = "dsh_remote_task_alerts"
     private const val NOTIFICATION_ID = 7401
     private var running: RemoteForegroundService? = null
+    private var currentLiveTask: LiveTaskData? = null
+
+    fun updateLiveTask(
+      hostId: String,
+      sessionId: String,
+      badge: String,
+      title: String,
+      statusText: String,
+      isWaitingInput: Boolean,
+      updatedAtMs: Long,
+      summary: String = "",
+    ) {
+      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
+      currentLiveTask = data
+      val service = running ?: return
+      service.liveTask = data
+      service.getSystemService(NotificationManager::class.java)
+        .notify(NOTIFICATION_ID, service.notification())
+    }
+
+    fun clearLiveTask() {
+      currentLiveTask = null
+      val service = running ?: return
+      service.liveTask = null
+      service.getSystemService(NotificationManager::class.java)
+        .notify(NOTIFICATION_ID, service.notification())
+    }
 
     fun notifyTask(context: Context, hostId: String, sessionId: String, title: String, body: String) {
       if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
@@ -193,8 +354,9 @@ class RemoteForegroundService : Service() {
       val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       val id = (hostId + sessionId).hashCode() and 0x3fffffff
       val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(context.applicationInfo.icon)
+      val notification = NotificationCompat.Builder(context, channel).setSmallIcon(R.mipmap.ic_launcher_foreground)
         .setContentTitle(title).setContentText(body).setContentIntent(pending).setAutoCancel(true)
+        .setGroup(TASK_GROUP).setGroupSummary(false)
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
       try {manager.notify("remote_task", id, notification)} catch (_: SecurityException) { }
     }
@@ -236,4 +398,3 @@ class RemoteForegroundService : Service() {
     }
   }
 }
-

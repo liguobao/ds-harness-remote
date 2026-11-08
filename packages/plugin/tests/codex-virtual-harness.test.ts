@@ -66,11 +66,13 @@ describe('CodexVirtualHarness', () => {
       method: 'execute',
       args: { agentId: 'codex:thr_1', line: '/permission danger-full-access', images: [] },
     })).resolves.toMatchObject({ result: { kind: 'success' } })
-    await expect(iterator.next()).resolves.toMatchObject({ value: {
+    const projectionFrame = await iterator.next()
+    expect(projectionFrame).toMatchObject({ value: {
       type: 'projection',
       sessionId: 'codex:thr_1',
       key: 'permissions',
       value: { currentValue: 'danger-full-access' },
+      changes: [{ key: 'permissions', val: { currentValue: 'danger-full-access' } }],
     } })
 
     const prompted = await target.dispatch('session/prompt', { args: { request: {
@@ -468,6 +470,13 @@ describe('CodexVirtualHarness', () => {
         attachment: { attachmentId, mediaType: 'image/png', name: 'screen.png' },
         data: imageData,
       },
+    })
+    // 0.2.2 clients send the full image reference instead of the bare id.
+    await expect(target.dispatch('session/attachment', {
+      args: { request: { sessionId: 'codex:thr_image' as never, attachment: message.content[1]!.attachment } },
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: { attachment: { attachmentId, mediaType: 'image/png', name: 'screen.png' }, data: imageData },
     })
     const toolAttachmentId = assistant.message.content[1]!.attachment!.attachmentId!
     await expect(target.dispatch('session/attachment', { args: { request: { sessionId: 'codex:thr_image' as never, attachmentId: toolAttachmentId as never } } }, new AbortController().signal)).resolves.toMatchObject({

@@ -10,7 +10,7 @@ describe('plugin config', () => {
       terminal: { enabled: true },
       remoteTools: { enabled: true },
       forceRelay: false,
-      reconnect: { enabled: true, initialDelayMs: 1_000, maxDelayMs: 30_000, jitter: 0.2 },
+      reconnect: { enabled: true, initialDelayMs: 4_000, maxDelayMs: 30_000, jitter: 0.2 },
       codex: { enabled: true, binary: 'codex' },
       cursor: { enabled: false, binary: 'agent' },
     })
@@ -78,6 +78,9 @@ describe('plugin config', () => {
     expect(resolveConfig({ serverUrl: 'http://localhost:8080' }).serverUrl).toBe('http://localhost:8080')
     expect(resolveConfig({ serverUrl: 'http://192.168.1.20:8080' }).serverUrl).toBe('http://192.168.1.20:8080')
     expect(resolveConfig({ serverUrl: 'http://100.79.68.68:8080' }).serverUrl).toBe('http://100.79.68.68:8080')
+    expect(resolveConfig({ serverUrl: 'http://[fd00:1234::1]:8080' }).serverUrl).toBe('http://[fd00:1234::1]:8080')
+    expect(resolveConfig({ serverUrl: 'http://[fe80::1]:8080' }).serverUrl).toBe('http://[fe80::1]:8080')
+    expect(() => resolveConfig({ serverUrl: 'http://[2001:4860:4860::8888]:8080' })).toThrow(/HTTPS/)
     expect(normalizeServerUrl('https://REMOTE.example.com/')).toBe('https://remote.example.com')
   })
 

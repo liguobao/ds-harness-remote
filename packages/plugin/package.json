@@ -1,6 +1,6 @@
 {
   "name": "ds-harness-remote",
-  "version": "0.6.0",
+  "version": "0.6.4",
   "description": "P2P-based, end-to-end encrypted remote access to DeepSeek Harness, CodeX, Claude Code, Pi, and other workspaces from web and mobile clients.",
   "keywords": [
     "deepseek",
@@ -42,7 +42,8 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": "./dist/client.js",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./icon": "./icon.png"
   },
   "files": [
     "bin",
@@ -53,7 +54,8 @@
     "locale",
     "public.d.ts",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "icon.png"
   ],
   "dsh": {
     "bundle": {
@@ -159,7 +161,7 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8",
-    "werift": "0.24.4",
+    "werift": "0.26.0",
     "@types/ws": "^8.18.1",
     "@deepseek-ai/dsh-client-ui-settings-general": "0.2.1-rc.1",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.1",

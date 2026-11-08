@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import { connectionLogEntries, connectionLogText, subscribeConnectionLog } from '../services/connection-log'
+import { exportConnectionLog } from '../services/export-connection-log'
 import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
+import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
+import { useBotTeamStore } from '../state/bot-store'
+import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { foregroundService } from '../services/foreground-service'
@@ -121,7 +126,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
         qrRun.current += 1
         setProvidersPhase('failed')
         setLoginMethod('password')
-        setShowPassword(true)
+        setShowPassword(false)
         setShowQr(false)
         setQrLogin(undefined)
         setQrPhase('idle')
@@ -139,7 +144,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       qrRun.current += 1
       setProvidersPhase('failed')
       setLoginMethod('password')
-      setShowPassword(true)
+      setShowPassword(false)
       setShowQr(false)
       setQrLogin(undefined)
       setQrPhase('idle')
@@ -328,6 +333,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       setQrPhase('idle')
     }
     setLoginMethod(method)
+    setShowPassword(false)
     if (method === 'oauth') void signInWithZhihu()
     else if (method === 'github-oauth') void signInWithGithub()
     else if (method === 'google-oauth') void signInWithGoogle()
@@ -344,6 +350,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     const method = qrMethods.includes(loginMethod) ? loginMethod : qrMethods[0]
     if (method === undefined) return
     setLoginMethod(method)
+    setShowPassword(false)
     setShowQr(true)
     void refreshQr(method)
   }
@@ -351,7 +358,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   // Third-party sign-in is the primary path; email is a collapsed fallback
   // (the Server has no email sign-up). QR is offered on large screens only.
   const qrVisible = largeScreen && showQr
-  const emailVisible = showPassword || oauthMethods.length === 0
+  const emailVisible = showPassword || (providersPhase === 'ready' && oauthMethods.length === 0)
   const controlsDisabled = busy || oauthBusy || serverDirty
 
   const providerIcon = (method: SetupLoginMethod, size = 22) => method === 'oauth'
@@ -449,7 +456,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
           ? <ActivityIndicator color={colors.white} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
       </Pressable>
-      <Text style={styles.oauthHint}>{zhCN.setup.passwordHint}</Text>
+      <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text>
     </View>
   )
 
@@ -505,7 +512,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                     {providersPhase === 'failed' && (
                       <View style={styles.retryRow}><Button label={zhCN.common.retry} variant="secondary" onPress={() => setProviderReload(value => value + 1)} /></View>
                     )}
-                    {oauthMethods.length > 0 && (
+                    {(providersPhase === 'failed' || oauthMethods.length > 0) && (
                       <View style={styles.orDivider}>
                         <View style={styles.orLine} />
                         <Text style={styles.orText}>{zhCN.setup.or}</Text>
@@ -513,7 +520,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                       </View>
                     )}
                     {emailVisible && emailContent}
-                    {(!emailVisible || (largeScreen && qrMethods.length > 0)) && (
+                    {((largeScreen && qrMethods.length > 0) || providersPhase === 'failed' || oauthMethods.length > 0) && (
                       <View style={styles.altRow}>
                         {largeScreen && qrMethods.length > 0 && (
                           <Pressable
@@ -528,19 +535,25 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                             <Text style={styles.altButtonText}>{zhCN.setup.qr}</Text>
                           </Pressable>
                         )}
-                        {!emailVisible && (
+                        {(providersPhase === 'failed' || oauthMethods.length > 0) && (
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={zhCN.setup.emailSignIn}
+                            accessibilityLabel={emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
                             disabled={busy}
                             onPress={() => {
-                              setShowPassword(true)
-                              setLoginMethod('password')
+                              if (emailVisible) {
+                                setShowPassword(false)
+                              } else {
+                                setShowPassword(true)
+                                setLoginMethod('password')
+                              }
                             }}
                             style={({ pressed }) => [styles.altButton, pressed && styles.providerButtonPressed]}
                           >
                             <Mail size={18} color={colors.ink} />
-                            <Text style={styles.altButtonText}>{zhCN.setup.emailSignIn}</Text>
+                            <Text style={styles.altButtonText}>
+                              {emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
+                            </Text>
                           </Pressable>
                         )}
                       </View>
@@ -590,7 +603,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onReset: () => void }) {
+export function SettingsScreen({ onBack, onReset, onOpenDiagnostics }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void }) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -605,6 +618,24 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const typographyDensity = useAppStore(state => state.typographyDensity)
   const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
+  const showIdentity = (label: string, value?: string) => {
+    if (!value) return
+    Alert.alert(label, value, [
+      { text: zhCN.common.close, style: 'cancel' },
+      { text: zhCN.settings.copyIdentity, onPress: () => {
+        void Clipboard.setStringAsync(value).then(
+          () => Alert.alert(zhCN.diagram.copied),
+          () => Alert.alert(zhCN.settings.identityCopyFailed),
+        )
+      } },
+    ])
+  }
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
+  useEffect(() => {
+    setLogCount(connectionLogEntries().length)
+    return subscribeConnectionLog(() => setLogCount(connectionLogEntries().length))
+  }, [])
   const [densitySaving, setDensitySaving] = useState(false)
   const [densityPickerOpen, setDensityPickerOpen] = useState(false)
   const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
@@ -617,6 +648,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const defaultPermission = useAppStore(state => state.defaultPermissionPreset)
   const setDefaultPermission = useAppStore(state => state.setDefaultPermissionPreset)
   const [permissionSaving, setPermissionSaving] = useState(false)
+  const [dsBotSettingsOpen, setDsBotSettingsOpen] = useState(false)
+  const botTeamState = useBotTeamStore(state => state.state)
+  const mainBotName = botTeamState?.bots.find(b => b.main)?.name ?? botTeamState?.bots[0]?.name ?? 'Chief'
   const reset = useAppStore(state => state.resetLocalData)
   const signOut = useAppStore(state => state.signOut)
   const { colors } = useTheme()
@@ -705,16 +739,15 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
 
+  if (diagnosticsOpen && !onOpenDiagnostics) {
+    return <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
+  }
+
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
-            <View style={styles.accountPill}>
-              <Text style={styles.accountPillTitle} numberOfLines={1}>{account ?? zhCN.settings.notSignedIn}</Text>
-              <Text style={styles.accountPillMeta} numberOfLines={1}>{[loginMethodLabel(config?.loginMethod), config?.baseUrl?.replace(/^https?:\/\//, '')].filter(Boolean).join(' · ')}</Text>
-            </View>
-
             <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
             <GroupCard style={styles.themeCard}>
               <View style={styles.themeTiles} accessibilityRole="radiogroup">
@@ -807,6 +840,21 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
 
+            <SectionTitle>{zhCN.bots.dsBotSettings}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Bot}
+                label={zhCN.bots.dsBotSettings}
+                detail={
+                  botTeamState
+                    ? zhCN.bots.dsBotSettingsSummary(mainBotName, botTeamState.bots.length)
+                    : zhCN.bots.dsBotSettingsDisconnected
+                }
+                onPress={() => setDsBotSettingsOpen(true)}
+              />
+            </GroupCard>
+
             <SectionTitle>{zhCN.settings.defaultPermission}</SectionTitle>
             <GroupCard>
               <View accessibilityRole="radiogroup">
@@ -835,7 +883,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
 
-            <SectionTitle>{zhCN.settings.connection}</SectionTitle>
+            <SectionTitle>{zhCN.settings.accountAndServer}</SectionTitle>
             <GroupCard>
               <GroupRow first icon={Globe} label={zhCN.settings.server} value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured} />
               <GroupRow icon={UserRound} label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
@@ -851,8 +899,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   <GroupRow
                     key={option.value}
                     first={index === 0}
-                    icon={index === 0 ? Route : undefined}
-                    iconSpace
+                    icon={option.value === 'auto' ? Route : option.value === 'turn' ? Network : Server}
                     label={option.name}
                     detail={option.description}
                     selected={chosen}
@@ -865,12 +912,29 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
 
+            <SectionTitle>{zhCN.settings.diagnostics}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Terminal}
+                label={zhCN.settings.connectionLog}
+                detail={zhCN.settings.diagnosticsLead}
+                value={zhCN.settings.logLineCount(logCount)}
+                chevron
+                onPress={() => {
+                  if (onOpenDiagnostics) onOpenDiagnostics()
+                  else setDiagnosticsOpen(true)
+                }}
+              />
+            </GroupCard>
+
             <SectionTitle>{zhCN.settings.identity}</SectionTitle>
             <GroupCard>
-              <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} />
-              <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} />
-              <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} />
+              <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
+              <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
+              <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
             </GroupCard>
+            <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
             <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
 
             <GroupCard style={styles.signOutCard}>
@@ -912,6 +976,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
           </View>
         </View>
       </Modal>
+      <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
       <Modal visible={densityPickerOpen} transparent animationType="fade" onRequestClose={() => setDensityPickerOpen(false)} statusBarTranslucent>
         <View style={styles.languageBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setDensityPickerOpen(false)} />
@@ -988,12 +1053,13 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onSwitchServer }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
   onAbout: () => void
   onDevices?: () => void
+  onRemoteHosts?: () => void
   onSwitchServer?: () => void
 }) {
   const insets = useSafeAreaInsets()
@@ -1023,6 +1089,9 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
+          )}
+          {onRemoteHosts !== undefined && (
+            <HomeMenuRow icon={SlidersHorizontal} label={zhCN.remoteHosts.title} onPress={onRemoteHosts} />
           )}
           {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
           <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
@@ -1185,6 +1254,209 @@ function isNewerVersion(latest: string, current: string): boolean {
   return false
 }
 
+const TERMINAL_PALETTE = {
+  surface: '#0D1117',
+  header: '#161B22',
+  border: 'rgba(255, 255, 255, 0.08)',
+  ink: '#E6EDF3',
+  muted: '#8B949E',
+  accent: '#58A6FF',
+  success: '#3FB950',
+  danger: '#F85149',
+} as const
+
+function classifyLogLineColor(line: string): string {
+  if (/ (disconnect|fallback|stream-failed|health-failed|secure-send-failed|secure-receive-failed) /.test(line)
+    || /"keyMismatch":[1-9]|"lookupFailed":[1-9]|"status":[45]\d\d/.test(line)) {
+    return TERMINAL_PALETTE.danger
+  }
+  if (/ selected-path |"(?:phase|connectionState)":"(?:ready|secure|connected)"/.test(line)) {
+    return TERMINAL_PALETTE.success
+  }
+  return TERMINAL_PALETTE.ink
+}
+
+export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
+  useAppStore(state => state.language)
+  const config = useAppStore(state => state.config)
+  const account = useAppStore(state => state.account)
+  const devices = useAppStore(state => state.devices)
+  const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connection = useAppStore(state => state.connection)
+  const error = useAppStore(state => state.error)
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
+  const appVersion = Application.nativeApplicationVersion ?? '0.6.3'
+
+  const [lines, setLines] = useState<readonly string[]>(() => connectionLogEntries())
+  const [exportingLog, setExportingLog] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const logScrollRef = useRef<ScrollView>(null)
+  const stickToEndRef = useRef(true)
+
+  useEffect(() => {
+    setLines(connectionLogEntries())
+    return subscribeConnectionLog(() => setLines(connectionLogEntries()))
+  }, [])
+
+  const copyLog = async () => {
+    try {
+      await Clipboard.setStringAsync(connectionLogText(appVersion))
+      setCopied(true)
+      Alert.alert(zhCN.settings.logCopied)
+    } catch {
+      Alert.alert(zhCN.settings.identityCopyFailed)
+    }
+  }
+
+  const exportLog = async () => {
+    if (exportingLog) return
+    setExportingLog(true)
+    try {
+      if (await exportConnectionLog()) Alert.alert(zhCN.settings.logExported)
+    } catch {
+      Alert.alert(zhCN.settings.logExportFailed, zhCN.settings.logExportRetry)
+    } finally {
+      setExportingLog(false)
+    }
+  }
+
+  const onlineCount = devices.filter(item => item.online).length
+  const deviceSummary = selectedDevice !== undefined
+    ? `${selectedDevice.name} · ${connection.phase === 'connected' ? zhCN.status.online : connection.phase === 'connecting' || connection.phase === 'reconnecting' ? zhCN.status.waiting : zhCN.status.offline}`
+    : zhCN.devices.summary(devices.length, onlineCount)
+
+  return (
+    <View style={styles.flex}>
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.diagnostics} onBack={onBack} />}>
+        <Screen>
+          <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Globe}
+                label={zhCN.settings.server}
+                value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured}
+              />
+              <GroupRow
+                icon={UserRound}
+                label={zhCN.settings.account}
+                value={account ?? zhCN.settings.notSignedIn}
+              />
+              <GroupRow
+                icon={Laptop}
+                label={zhCN.devices.title}
+                value={deviceSummary}
+              />
+              <GroupRow
+                icon={Route}
+                label={zhCN.settings.transport}
+                value={connection.stats.mode}
+              />
+              {error !== undefined && (
+                <GroupRow
+                  icon={AlertTriangle}
+                  label={zhCN.devices.connectionInterrupted}
+                  detail={error}
+                  danger
+                  chevron={false}
+                />
+              )}
+            </GroupCard>
+
+            <SectionTitle>{zhCN.settings.connectionLog}</SectionTitle>
+            <View style={styles.terminalCard}>
+              <View style={styles.terminalHeader}>
+                <Terminal size={15} color={TERMINAL_PALETTE.accent} strokeWidth={2} />
+                <Text style={styles.terminalTitle}>{zhCN.settings.connectionLog}</Text>
+                <Text style={styles.terminalCount}>{zhCN.settings.logLineCount(lines.length)}</Text>
+                <View style={styles.flex} />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.settings.copyLog}
+                  onPress={() => void copyLog()}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
+                >
+                  {copied
+                    ? <Check size={16} color={TERMINAL_PALETTE.success} strokeWidth={2.2} />
+                    : <Copy size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />}
+                </Pressable>
+                {Platform.OS === 'android' && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={zhCN.settings.exportLog}
+                    disabled={exportingLog}
+                    onPress={() => void exportLog()}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
+                  >
+                    <Download size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />
+                  </Pressable>
+                )}
+              </View>
+              {lines.length === 0 ? (
+                <View style={styles.terminalEmpty}>
+                  <Text style={styles.terminalEmptyText}>{zhCN.settings.logEmpty}</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  ref={logScrollRef}
+                  style={styles.terminalScroll}
+                  contentContainerStyle={styles.terminalScrollContent}
+                  nestedScrollEnabled
+                  scrollEventThrottle={16}
+                  onScroll={event => {
+                    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+                    stickToEndRef.current = contentSize.height - layoutMeasurement.height - contentOffset.y <= 32
+                  }}
+                  onContentSizeChange={() => {
+                    if (stickToEndRef.current) logScrollRef.current?.scrollToEnd({ animated: false })
+                  }}
+                >
+                  {lines.map((line, index) => (
+                    <Text
+                      key={`${index}-${line.slice(0, 24)}`}
+                      selectable
+                      style={[styles.terminalLine, { color: classifyLogLineColor(line) }]}
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+
+            <GroupCard style={styles.settingsGap}>
+              <GroupRow
+                first
+                icon={Copy}
+                label={zhCN.settings.copyLog}
+                detail={zhCN.settings.copyLogNote}
+                chevron
+                onPress={() => void copyLog()}
+              />
+              {Platform.OS === 'android' && (
+                <GroupRow
+                  icon={Download}
+                  label={exportingLog ? zhCN.settings.logExporting : zhCN.settings.exportLog}
+                  detail={zhCN.settings.exportLogNote}
+                  disabled={exportingLog}
+                  accessory={exportingLog ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                  chevron={!exportingLog}
+                  onPress={() => void exportLog()}
+                />
+              )}
+            </GroupCard>
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
+    </View>
+  )
+}
+
 export function AboutScreen({ onBack }: { onBack: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1241,16 +1513,6 @@ function SettingsLink({ label, url, value }: { label: string; url: string; value
   )
 }
 
-function shorten(value?: string): string {
-  if (value === undefined) return zhCN.common.unavailable
-  return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-7)}` : value
-}
-
-function fingerprint(value?: string): string {
-  if (value === undefined || value.length === 0) return zhCN.common.unavailable
-  return value.slice(0, 24).toUpperCase().match(/.{1,4}/g)?.join(' ') ?? value
-}
-
 function languageOptions(): Array<{ value: LanguagePreference; name: string }> {
   return [
     { value: 'system', name: zhCN.settings.languageSystem },
@@ -1291,6 +1553,7 @@ function createStyles(colors: ThemeColors) {
   providerButtonPressed: { opacity: 0.7 },
   providerButtonDisabled: { opacity: 0.5 },
   oauthHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xxs },
+  passwordHint: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
   retryRow: { alignSelf: 'stretch' },
   orDivider: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.sm },
   orLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
@@ -1358,9 +1621,6 @@ function createStyles(colors: ThemeColors) {
   segmentButtonText: { ...type.small, fontSize: 15, color: colors.muted, textAlign: 'center' },
   segmentButtonTextActive: { color: colors.ink, fontWeight: '600' },
   keyNote: { flexDirection: 'row', gap: spacing.xs, paddingVertical: spacing.md },
-  accountPill: { marginTop: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, gap: 3 },
-  accountPillTitle: { ...type.bodyStrong, fontSize: 17, color: colors.ink },
-  accountPillMeta: { ...type.small, fontSize: 13, color: colors.muted },
   settingsGap: { marginTop: spacing.sm },
   themeCard: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   themeTiles: { flexDirection: 'row', gap: spacing.sm },
@@ -1420,5 +1680,32 @@ function createStyles(colors: ThemeColors) {
   languageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: spacing.xs },
   languageTitle: { ...type.heading, fontSize: 18, color: colors.ink, fontWeight: '700' },
   languageList: { paddingBottom: spacing.md },
+  terminalCard: {
+    borderRadius: radius.xl,
+    backgroundColor: TERMINAL_PALETTE.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: TERMINAL_PALETTE.border,
+    overflow: 'hidden',
+  },
+  terminalHeader: {
+    minHeight: 44,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: TERMINAL_PALETTE.header,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: TERMINAL_PALETTE.border,
+  },
+  terminalTitle: { ...type.smallStrong, color: TERMINAL_PALETTE.ink },
+  terminalCount: { ...type.caption, color: TERMINAL_PALETTE.muted, fontVariant: ['tabular-nums'] },
+  terminalIconBtn: { width: 34, height: 34, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  terminalIconBtnPressed: { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+  terminalScroll: { maxHeight: 320 },
+  terminalScrollContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
+  terminalLine: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  terminalEmpty: { height: 160, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
+  terminalEmptyText: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
   })
 }

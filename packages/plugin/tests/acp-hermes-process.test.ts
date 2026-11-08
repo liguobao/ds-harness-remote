@@ -88,6 +88,36 @@ describe('HermesAcpClient', () => {
     } finally { await client.close() }
   })
 
+  it('forwards image prompts to the Hermes ACP process without modification', async () => {
+    const { client, children } = setup((message, child) => {
+      if (message.method === 'session/new') {
+        child.reply(message, { sessionId: 'native-img-1' })
+        return true
+      }
+      if (message.method === 'session/prompt') {
+        child.reply(message, { stopReason: 'end_turn' })
+        return true
+      }
+      return false
+    })
+    try {
+      await client.start()
+      await client.call('session/new', { cwd: '/work/repo', mcpServers: [] })
+      const promptBlocks = [
+        { type: 'text', text: 'what is in this image?' },
+        { type: 'image', mimeType: 'image/png', data: 'AQIDBA==' },
+      ]
+      await client.call('session/prompt', { sessionId: 'native-img-1', prompt: promptBlocks })
+      const promptCall = children[0]!.sent.find(message => message.method === 'session/prompt')
+      expect(promptCall).toMatchObject({
+        params: {
+          sessionId: 'native-img-1',
+          prompt: promptBlocks,
+        },
+      })
+    } finally { await client.close() }
+  })
+
   it('labels replayed history with the hermes provider and keeps it out of live streams', async () => {
     const { client, children } = setup((message, child) => {
       if (message.method === 'session/list') {

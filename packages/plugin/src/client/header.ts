@@ -1,3 +1,4 @@
+import { createServerNotice } from './server-notice.js'
 import { renderBodyPortal } from './portal.js'
 import type { Translate } from '../client-locale.js'
 import type { StatusFeed } from '../status-stream.js'
@@ -5,9 +6,11 @@ import { formatBitrate, formatByteSize, formatLocalTime, shortDeviceId, transpor
 import type { ClientReact, PortalRenderer, RemoteStatus } from './types.js'
 
 export function createRemoteSessionHeaderAction(React: ClientReact, portal?: PortalRenderer) {
+  const ServerNotice = createServerNotice(React)
   function RemoteSessionHeaderAction(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
+    onSignIn: () => void
     t: Translate
   }): unknown {
     const { t } = props
@@ -148,19 +151,24 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
         strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
       }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }), React.createElement('path', { d: 'M8 21h8M12 17v4' })),
       React.createElement('span', { className: 'dshRemoteSessionTarget' }, t('remoteModeLabel', { name: status.target?.name ?? t('host') })),
-      React.createElement('button', {
+      status.clientAuthRequired ? React.createElement('button', {
+        type: 'button', className: 'dshRemoteNetwork isOffline', onClick: props.onSignIn,
+      }, t('clientSignInAgain')) : React.createElement('button', {
         type: 'button',
         className: `dshRemoteNetwork${networkOnline ? ' isOnline' : ' isOffline'}`,
         title: networkLabel,
-        disabled: !networkOnline,
         'aria-haspopup': 'dialog',
         'aria-expanded': routeOpen,
         onClick: () => setRouteOpen(value => !value),
       }, React.createElement('i', { 'aria-hidden': true }), networkLabel),
-      networkOnline ? React.createElement('span', { className: 'dshRemoteEncrypted' }, t('remoteLinkEncrypted')) : null,
+      React.createElement(ServerNotice, {
+        compact: true,
+        offline: network !== undefined && network.controlChannelState !== 'open',
+        linked: networkOnline, expiresAt: network?.recoveryExpiresAt, t,
+      }),
       renderHostReference(),
       React.createElement('button', { type: 'button', className: 'dshRemoteHeaderExitLink', disabled: busy, onClick: () => void exit() }, t('exitRemote')),
-      !routeOpen ? null : renderBodyPortal(portal, React.createElement('div', {
+      !routeOpen || !networkOnline ? null : renderBodyPortal(portal, React.createElement('div', {
         className: 'dshRemoteRouteBackdrop',
         role: 'presentation',
         onMouseDown: (event: MouseEvent) => { if (event.target === event.currentTarget) setRouteOpen(false) },
@@ -171,6 +179,11 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
       }, React.createElement('header', null,
         React.createElement('strong', null, t('connectionRouteTitle')),
         React.createElement('button', { type: 'button', 'aria-label': t('close'), onClick: () => setRouteOpen(false) }, '×')),
+        React.createElement(ServerNotice, {
+          offline: network !== undefined && network.controlChannelState !== 'open',
+          linked: networkOnline, expiresAt: network?.recoveryExpiresAt, t,
+          onReconnect: () => { void props.control('mode.set', { mode: 'remote', targetDeviceId: status.target?.deviceId }).catch(() => undefined) },
+        }),
         React.createElement('ol', null,
           React.createElement('li', null,
             React.createElement('small', null, t('connectionRouteFrom')),

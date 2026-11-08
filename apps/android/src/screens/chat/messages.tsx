@@ -1,3 +1,4 @@
+import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
 import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -5,17 +6,23 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
+  Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
+import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
+import { IconChecklistOutline, IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -29,7 +36,7 @@ import type {
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
-import { parseMessageQuotes, QuotePreview } from '../../ui/quote-preview'
+import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
 import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -81,7 +88,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     return result
   }), [items])
   const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
-    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
+    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
     && !availableUiIds.has(item.id)
     && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
       || (item.uiResultMeta as { ok?: unknown }).ok !== false))
@@ -122,17 +129,25 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     }
     return files
   }, [items])
+  const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
     </View>}
     {segments.map((segment, index) => segment.kind === 'response'
-      ? <MessageBubble key={segment.key} item={segment.item} compact />
+      ? <MessageBubble
+          key={segment.key}
+          item={segment.item}
+          compact
+          artifacts={index === lastResponseIndex ? artifacts : undefined}
+          editedFiles={index === lastResponseIndex ? editedFiles : undefined}
+          onFilePress={onFilePress}
+        />
       : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
-    <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />
-    {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
+    {lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
+    {lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
@@ -176,6 +191,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
   const expanded = pending || open
   const tools = items.filter((item): item is ToolActivity => item.kind === 'tool')
+  const latestTool = tools.at(-1)
   const activeTool = closed ? undefined : tools.findLast(item => item.state === 'running')
   const runningReasoning = closed ? undefined : items.findLast(item => item.kind === 'message' && item.streamingPhase === 'reasoning')
   const running = activeTool !== undefined || runningReasoning !== undefined
@@ -193,7 +209,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     : primary === 'read' || primary === 'search' || primary === 'readImage' ? FileSearch
       : primary === 'edit' || primary === 'write' ? FilePenLine
         : primary === 'plan' ? ListTree : tools.length > 0 ? Wrench : Sparkles
-  const detail = activeTool !== undefined ? processDetail(activeTool)
+  const detail = latestTool !== undefined ? processDetail(latestTool)
     : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
   return <View style={styles.activityGroup}>
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
@@ -205,9 +221,11 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
       {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
     </Pressable>
-    {running && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
-      <ReplyStatusDots />
-      <Text style={styles.processCurrentText} numberOfLines={2}>{activeTool ? toolDisplayName(activeTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
+    {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
+      {latestTool === undefined || (!closed && latestTool.state === 'running')
+        ? <ReplyStatusDots />
+        : latestTool.state === 'failed' ? <X size={14} color={colors.muted} /> : <CircleCheck size={14} color={colors.muted} />}
+      <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
     {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
@@ -220,20 +238,24 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
+  artifacts?: UiArtifact[]
+  onSendPrompt?: (text: string) => Promise<boolean>
 }) {
   if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
   if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
+  const hasArtifacts = artifacts !== undefined && artifacts.length > 0
   if (!compact && item.role === 'assistant'
+    && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} />
+  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -272,8 +294,46 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
+function HeartbeatMessage({ text, body }: { text: string; body: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return <View>
+    <NativeMarkdown text={body} />
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
+      onPress={() => setExpanded(value => !value)} style={styles.reasoningHeader}>
+      <Code2 size={16} color={colors.muted} />
+      <Text style={styles.reasoningLabel}>{expanded ? zhCN.chat.heartbeatCollapse : zhCN.chat.heartbeatExpand}</Text>
+      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+    </Pressable>
+    {expanded && <Text selectable style={styles.toolDetailCode}>{text}</Text>}
+  </View>
+}
 
-function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
+/**
+ * In-place free text selection on assistant prose (Figure 2 / IMG_1488).
+ * Allows the user to freely select any snippet using native handles.
+ * When text is selected, floating callout menu [询问智能体] [拷贝] appears
+ * right above the selection.
+ */
+function AssistantMessageCallout({ item }: { item: ChatMessage }) {
+  const styles = useThemedStyles(createStyles)
+  const body = heartbeatMessageBody(item.text, 'assistant')
+  return (
+    <View style={styles.assistantProseWrap}>
+      {body === undefined ? <NativeMarkdown text={item.text} /> : <HeartbeatMessage text={item.text} body={body} />}
+    </View>
+  )
+}
+
+function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt }: {
+  item: ChatMessage
+  compact: boolean
+  artifacts?: UiArtifact[]
+  editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
+  onFilePress?: (path: string) => void
+  onSendPrompt?: (text: string) => Promise<boolean>
+}) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
@@ -282,6 +342,7 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
   const showText = hasVisibleMessageText(item.text)
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
+  const hasArtifacts = artifacts !== undefined && artifacts.length > 0
 
   // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
@@ -290,16 +351,18 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
         {showReasoning && <ReasoningDisclosure item={item} />}
         {showImages && <ChatImages images={item.images!} />}
         {showText && (
-          <View style={styles.assistantText}>
-            <NativeMarkdown text={item.text} />
-          </View>
+          <AssistantMessageCallout item={item} />
         )}
         {showStreaming && (
           <View style={styles.assistantText}>
             <StreamingCursor />
           </View>
         )}
-        {!item.streaming && showText && <MessageActions item={item} />}
+        {artifacts?.map(ui => (
+          <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} onSendPrompt={onSendPrompt} />
+        ))}
+        {editedFiles?.length && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
+        {!item.streaming && (showText || hasArtifacts) && <MessageActions item={item} />}
       </View>
     )
   }
@@ -307,14 +370,28 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
   if (user) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
+    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
     return <View style={styles.userBlock}>
-      <View style={styles.userBubble}>
+      <View style={styles.userContent}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
-        {quotes.map((quoteText, index) => (
-          <QuotePreview key={`quote:${index}`} text={quoteText} style={styles.messageQuotePreview} />
-        ))}
-        {hasVisibleMessageText(body) && <NativeMarkdown text={body} />}
+        {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
+          <View style={styles.userMessageInlineWrap}>
+            {quotes.map((quoteText, index) => (
+              <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
+                <QuoteMarkIcon size={14} color={colors.primary} />
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 200 }]}>
+                  “{formatQuoteDraftSnippet(quoteText, 16)}”
+                </Text>
+              </View>
+            ))}
+            {hasVisibleMessageText(body) && (
+              <Text selectable style={styles.userMessageInlineText}>{body}</Text>
+            )}
+          </View>
+        ) : (
+          hasVisibleMessageText(body) && <NativeMarkdown text={body} />
+        )}
       </View>
       {item.sendState === 'canceled'
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
@@ -412,8 +489,15 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
         onPress={() => {if (!expanded) void loadDetail(); setExpanded(value => !value)}}
         style={({ pressed }) => [styles.toolRow, pressed && hasDetail && styles.toolRowPressed]}
       >
-        <View style={styles.toolIcon}>{/command|bash|shell|命令|终端/i.test(item.toolName)
-          ? <Terminal size={16} color={colors.muted} /> : <Code2 size={16} color={colors.muted} />}</View>
+        <View style={styles.toolIcon}>
+          {item.toolName === 'todo_write' || (item.toolKey ?? '').endsWith('todo_write') ? (
+            <IconChecklistOutline size={16} color={colors.primary} />
+          ) : /command|bash|shell|命令|终端/i.test(item.toolName) ? (
+            <Terminal size={16} color={colors.muted} />
+          ) : (
+            <Code2 size={16} color={colors.muted} />
+          )}
+        </View>
         <View style={styles.toolCopy}>
           <Text style={styles.toolName} numberOfLines={1}>{name}</Text>
           {detail !== undefined && <Text style={styles.activitySeparator}>·</Text>}
@@ -573,7 +657,12 @@ function QuestionCard({ item, busy, onRespond }: {
                 style={[styles.optionRow, chosen && styles.optionChosen]}
               >
                 <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <Check size={12} color={colors.white} />}</View>
-                <Text style={styles.optionLabel}>{option.label}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.optionLabel}>{option.label}</Text>
+                  {option.description !== undefined && (
+                    <Text style={styles.optionDescription}>{option.description}</Text>
+                  )}
+                </View>
               </Pressable>
             )
           })}

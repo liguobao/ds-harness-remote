@@ -1,6 +1,6 @@
 {
   "name": "@dsh-remote/android",
-  "version": "0.6.0",
+  "version": "0.6.4",
   "type": "module",
   "main": "index.ts",
   "dependencies": {
@@ -31,6 +31,7 @@
     "lucide-react-native": "^1.31.0",
     "markdown-it": "^14.3.3",
     "mathjax-full": "3.2.2",
+    "mermaid": "12.2.0",
     "pdfjs-dist": "6.3.289",
     "qrcode-generator": "2.0.4",
     "react": "19.2.3",
@@ -50,7 +51,7 @@
   },
   "scripts": {
     "prepare:workspace": "pnpm --filter '@dsh-remote/android^...' -r build && pnpm run verify:workspace && pnpm run build:renderers",
-    "build:renderers": "node scripts/build-terminal.mjs && node scripts/build-pdf.mjs && node scripts/build-intelligent-ui.mjs",
+    "build:renderers": "node scripts/build-terminal.mjs && node scripts/build-pdf.mjs && node scripts/build-mermaid.mjs && node scripts/build-intelligent-ui.mjs",
     "verify:workspace": "node scripts/verify-workspace-data-planes.mjs",
     "prestart": "pnpm run prepare:workspace",
     "start": "expo start",

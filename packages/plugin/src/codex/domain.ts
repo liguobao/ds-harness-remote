@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
@@ -1233,8 +1233,22 @@ export function codexBinaryCandidates(
   hostPlatform: NodeJS.Platform = process.platform,
   userHome: string = homedir(),
 ): string[] {
-  if (configured !== 'codex' || hostPlatform !== 'darwin') return [configured]
+  if (configured !== 'codex') return [configured]
 
+  if (hostPlatform === 'darwin') return macOSCodexBinaryCandidates(userHome)
+
+  // The Codex desktop app on Windows ships its own codex CLI under
+  // %LOCALAPPDATA%\OpenAI\Codex\bin\<build-hash>\codex.exe. Prefer the newest
+  // build so the app's current version is used; fall back to the configured
+  // `codex` when the app is absent or unreadable.
+  if (hostPlatform === 'win32') {
+    return [...new Set([...windowsBundledCodexCandidates(userHome), configured])]
+  }
+
+  return [configured]
+}
+
+function macOSCodexBinaryCandidates(userHome: string): string[] {
   const bundledCandidates = [
     '/Applications/ChatGPT.app',
     join(userHome, 'Applications', 'ChatGPT.app'),
@@ -1258,8 +1272,32 @@ export function codexBinaryCandidates(
     ...bundledCandidates,
     '/Applications/ChatGPT.app/Contents/Resources/codex',
     join(userHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
-    configured,
+    'codex',
   ])]
+}
+
+/**
+ * Codex desktop (ChatGPT/Codex for Windows) bundled CLI candidates, newest
+ * build first. Reads `%LOCALAPPDATA%\OpenAI\Codex\bin`; returns an empty list
+ * when the app is not installed. Never throws.
+ */
+function windowsBundledCodexCandidates(userHome: string): string[] {
+  const localAppData = process.env.LOCALAPPDATA ?? join(userHome, 'AppData', 'Local')
+  const binRoot = join(localAppData, 'OpenAI', 'Codex', 'bin')
+  try {
+    return readdirSync(binRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(binRoot, entry.name, 'codex.exe'))
+      .filter(candidate => existsSync(candidate))
+      .map(candidate => {
+        try { return { candidate, mtime: statSync(candidate).mtimeMs } }
+        catch { return { candidate, mtime: 0 } }
+      })
+      .sort((left, right) => right.mtime - left.mtime)
+      .map(entry => entry.candidate)
+  } catch {
+    return []
+  }
 }
 
 function parseCallEnvelope(input: unknown): { method: string; params: unknown } {

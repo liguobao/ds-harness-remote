@@ -104,7 +104,7 @@ export type ConfigInput = Config | VolatileSnapshot<Config>
  * `cordis.patch.yml` under this entry id. On older hosts the helper above keeps
  * the plain schema required by the namespace-registration API.
  */
-const entryConfigSchema = s.object({
+export const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
@@ -199,7 +199,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
-  const initialDelayMs = reconnect.initialDelayMs ?? 1_000
+  const initialDelayMs = reconnect.initialDelayMs ?? 4_000
   const maxDelayMs = reconnect.maxDelayMs ?? 30_000
   if (maxDelayMs < initialDelayMs) {
     throw new TypeError('reconnect.maxDelayMs must be greater than or equal to reconnect.initialDelayMs')
@@ -260,9 +260,17 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
-/** IPv4 hosts that are only reachable on loopback, a LAN, link-local, or CGNAT/VPN networks. */
+function isPrivateIpv6(hostname: string): boolean {
+  const host = (hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname).toLowerCase()
+  if (!host.includes(':') || !/^[0-9a-f:]+$/.test(host)) return false
+  if (host === '::1') return true
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)
+}
+
+/** IPv4/IPv6 hosts that are only reachable on loopback, a LAN, link-local, or CGNAT/VPN networks. */
 function isPrivateNetworkHostname(hostname: string): boolean {
   if (LOCAL_HOSTS.has(hostname)) return true
+  if (isPrivateIpv6(hostname)) return true
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
   if (match === null) return false
   const octets = match.slice(1).map(Number)

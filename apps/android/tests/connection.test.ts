@@ -108,6 +108,24 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+  it('gives TURN-only attempts an allocation budget without slowing automatic routing', async () => {
+    await runScenarios([
+      { name: 'automatic', preferred: ['lan', 'p2p', 'turn', 'relay'] as const, timeout: 6000 },
+      { name: 'TURN', preferred: ['turn', 'relay'] as const, timeout: 12000 },
+      { name: 'forced Relay', preferred: ['turn', 'relay'] as const, forceRelay: true, timeout: 6000 },
+      { name: 'default automatic', preferred: undefined, timeout: 6000 },
+    ].map(row => ({ name: row.name, run: async () => {
+      prepareScenario1()
+      const connection = new AndroidRemoteConnection()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, {
+        preferredTransports: row.preferred === undefined ? undefined : [...row.preferred],
+        forceRelay: 'forceRelay' in row ? row.forceRelay : false,
+      })
+      expect(testState.transportOptions[0]?.negotiateTimeoutMs).toBe(row.timeout)
+      await connection.close()
+    } })))
+  })
+
   it('uses the native Typert attachment contract and rejects late images from retired connections', async () => {
     await runScenarios(['direct', 'business-result', 'denied', 'disconnected', 'cancelled'].map(mode => ({ name: mode, run: async () => {
       prepareScenario1()
@@ -116,21 +134,44 @@ afterEach(async () => {
       await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
       const core = testState.cores[0]!
       const controller = new AbortController()
-      const value = { attachment: { attachmentId: 'a1', mediaType: 'image/png' }, data: 'synthetic' }
+      const attachment = { attachmentId: 'a1', mediaType: 'image/png', bytes: 8, width: 4, height: 2, name: 'a.png' }
+      const value = { attachment, data: 'synthetic' }
       const rpc = core.rpc.bind(core)
       vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
         if (method !== 'harness.remote.call') return rpc(method, params)
-        expect(params).toEqual({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+        expect(params).toEqual({
+          endpoint: 'session/attachment',
+          payload: { args: { request: { sessionId: 's1', attachmentId: 'a1', attachment } } },
+        })
         if (mode === 'disconnected') await connection.close()
         if (mode === 'cancelled') controller.abort()
         return { ok: true, value: mode === 'business-result' ? { ok: true, value }
           : mode === 'denied' ? { ok: false, error: { code: 'not-found' } } : value }
       })
       try {
-        const result = connection.readSessionImageAttachment('s1', 'a1', controller.signal)
+        const result = connection.readSessionImageAttachment('s1', attachment, controller.signal)
         if (mode === 'direct' || mode === 'business-result') await expect(result).resolves.toEqual(value)
         else await expect(result).rejects.toThrow()
       } finally { await connection.close() }
+      // Messages recorded before 0.2.2 kept only the durable id; keep that fallback for older Hosts.
+      prepareScenario1()
+      testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+      const legacyConnection = new AndroidRemoteConnection()
+      await legacyConnection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      const legacyCore = testState.cores[0]!
+      const legacyRpc = legacyCore.rpc.bind(legacyCore)
+      vi.spyOn(legacyCore, 'rpc').mockImplementation(async (method, params) => {
+        if (method !== 'harness.remote.call') return legacyRpc(method, params)
+        expect(params).toEqual({
+          endpoint: 'session/attachment',
+          payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } },
+        })
+        return { ok: true, value }
+      })
+      try {
+        await expect(legacyConnection.readSessionImageAttachment('s1', { attachmentId: 'a1' }, new AbortController().signal))
+          .resolves.toEqual(value)
+      } finally { await legacyConnection.close() }
     } })))
   })
 
@@ -171,7 +212,7 @@ afterEach(async () => {
       const core = testState.cores[0]!
       const rpc = vi.spyOn(core, 'rpc')
       let finish!: (value: unknown) => void
-      if (outcome === 'silent') rpc.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      if (outcome === 'silent') rpc.mockImplementation(() => new Promise((_resolve, reject) => {
         setTimeout(() => reject(new Error('RPC_TIMEOUT')), 5_000)
       }))
       if (outcome === 'shared-probe' || outcome === 'replaced') {
@@ -180,8 +221,12 @@ afterEach(async () => {
       if (outcome === 'disconnected') await connection.close()
       await vi.advanceTimersByTimeAsync(25_000)
       if (outcome === 'silent') {
+        // A single slow probe must not retire the carrier; one fast
+        // confirmation probe follows before the connection is closed.
         expect(closed).not.toHaveBeenCalled()
         await vi.advanceTimersByTimeAsync(5_000)
+        expect(closed).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(10_000)
         expect(closed).toHaveBeenCalledOnce()
         expect(() => connection.requireProxy()).toThrow()
       } else if (outcome === 'shared-probe') {
@@ -213,6 +258,32 @@ afterEach(async () => {
     })
   })
 
+  it('starts a replacement carrier with a clean health-probe history', async () => {
+    vi.useFakeTimers()
+    try {
+      const connection = new AndroidRemoteConnection()
+      const closed = vi.fn()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+      // One failed probe on the first carrier: the confirmation probe is still
+      // pending when the carrier is replaced.
+      vi.spyOn(testState.cores[0]!, 'rpc').mockRejectedValue(new Error('probe failed'))
+      await vi.advanceTimersByTimeAsync(25_000)
+      expect(closed).not.toHaveBeenCalled()
+
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+      vi.spyOn(testState.cores[1]!, 'rpc').mockRejectedValue(new Error('probe failed'))
+      await vi.advanceTimersByTimeAsync(25_000)
+      // The first probe on the replacement is not yet a confirmation: the
+      // previous carrier's failure must not count against the new one.
+      expect(closed).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(closed).toHaveBeenCalledOnce()
+      await connection.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('preserves transient versus refused carrier failures through the close callback', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
@@ -220,6 +291,10 @@ afterEach(async () => {
         { reason: 'webrtc-closed' as const, retryable: true },
         { reason: 'control-error' as const, retryable: true },
         { reason: 'control-closed' as const, closeCode: 1006, retryable: true },
+        { reason: 'control-closed' as const, closeCode: 4001, closeReason: 'CONNECTION_FAILED', retryable: true },
+        { reason: 'control-closed' as const, closeCode: 4001, closeReason: 'RATE_LIMITED', retryable: false },
+        { reason: 'control-closed' as const, closeCode: 4009, closeReason: 'heartbeat timeout', retryable: true },
+        { reason: 'control-closed' as const, closeCode: 4009, closeReason: 'server shutdown', retryable: true },
         { reason: 'control-closed' as const, closeCode: 4003, retryable: false },
         { reason: 'control-closed' as const, closeCode: 1008, retryable: false },
         { reason: 'invalid-control-frame' as const, retryable: false },

@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { ControlResult } from './control-result.js'
 import { resolveConfig, type Config, type ConfigInput, type ResolvedConfig } from './config.js'
@@ -8,13 +9,22 @@ import {
   type HostConnectionHandle,
   type HostAuthorizationControl,
 } from './client-runtime.js'
-import { IdentityStore, serverStorageDirectory } from './identity-store.js'
+import {
+  IdentityInvalidError,
+  IdentityStore,
+  resetDefaultIdentityRoles,
+  serverStorageDirectory,
+  type RemoteDeviceRole,
+} from './identity-store.js'
+import { safeStartupError } from './safe-error.js'
 import { ClientServerApi, HostServerApi } from './server-api.js'
-import { ServerCredentialStore } from './server-credentials.js'
+import { ServerCredentialStore, ServerCredentialsInvalidError } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
+import type { PluginUpdateSnapshot } from './update-check.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
+import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -24,10 +34,19 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpInstallResult?: {
+    backend: string
+    action: 'configured' | 'installed' | 'download_required'
+    downloadUrl?: string
+  }
+  startupError?: {
+    code: string
+    message: string
+  }
 }
 
 export interface PluginAssociation {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
 }
 
@@ -51,10 +70,31 @@ export interface PluginSettingsBinding {
 export class PluginControlRuntime {
   private logoutFlight?: Promise<PluginSettingsView>
   private serverSwitchFlight?: Promise<PluginSettingsView>
+  private startupFailure?: unknown
+  private storageAvailable = true
+
+  setStartupFailure(error: unknown, options?: { storageAvailable?: boolean }): void {
+    this.startupFailure = error
+    if (options?.storageAvailable !== undefined) {
+      this.storageAvailable = options.storageAvailable
+    }
+    this.client = undefined
+    this.host = undefined
+  }
+
+  clearStartupFailure(): void {
+    this.startupFailure = undefined
+    this.storageAvailable = true
+  }
+
+  setIdentityDirectory(directory: string): void {
+    this.identityDirectory = directory
+    this.storageAvailable = true
+  }
 
   constructor(
     private config: ResolvedConfig,
-    private readonly identityDirectory: string,
+    private identityDirectory: string,
     private readonly settings: PluginSettingsBinding | undefined,
     private client: ClientModeRuntime | undefined,
     private host: HostAuthorizationControl | undefined,
@@ -62,6 +102,9 @@ export class PluginControlRuntime {
       client: ClientModeRuntime | undefined
       host: HostAuthorizationControl
     }>,
+    /** Update-check snapshots merged into every `status` result; absent when the plugin is disabled. */
+    private readonly updates?: { snapshot(): PluginUpdateSnapshot | undefined },
+    private readonly useDefaultStorage = false,
   ) {}
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -88,7 +131,20 @@ export class PluginControlRuntime {
   private async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<ControlResult<unknown>> {
     try {
       // A request arriving during replacement must use the new Server runtime.
-      if (endpoint !== 'settings.server.set') await this.serverSwitchFlight
+      if (endpoint !== 'settings.server.set' && endpoint !== 'settings.identity.reset') await this.serverSwitchFlight
+      if (endpoint.startsWith('host.pairing.')) {
+        if (this.host?.pairingControl === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'Host device pairing is unavailable.')
+        const action = endpoint.slice('host.pairing.'.length)
+        if (action !== 'start' && action !== 'status' && action !== 'confirm' && action !== 'cancel') throw new ClientModeError('METHOD_NOT_ALLOWED', 'Unknown pairing action.')
+        const input = record(payload)
+        if (Object.keys(input).some(key => key !== 'sessionId' && key !== 'verificationCode')
+          || input.sessionId !== undefined && typeof input.sessionId !== 'string'
+          || input.verificationCode !== undefined && typeof input.verificationCode !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'Invalid pairing request.')
+        if (action === 'start') await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        const view = await this.host.pairingControl(action, input as { sessionId?: string; verificationCode?: string })
+        if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        return ok(view)
+      }
       if (endpoint === 'settings.development.set') return ok(await this.setDevelopment(payload))
       if (endpoint === 'settings.appearance.set') return ok(await this.setAppearance(payload))
       if (endpoint === 'settings.get') return ok(await this.settingsView())
@@ -100,7 +156,9 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.acp.set') return ok(await this.setAcp(payload))
       if (endpoint === 'settings.acp.add') return ok(await this.addAcp(payload))
       if (endpoint === 'settings.acp.remove') return ok(await this.removeAcp(payload))
+      if (endpoint === 'settings.acp.installOrConfigure') return ok(await this.installOrConfigureAcp(payload))
       if (endpoint === 'settings.logout') return ok(await this.logout())
+      if (endpoint === 'settings.identity.reset') return ok(await this.resetIdentity(payload))
       if (endpoint === 'host.authorization.set' && this.client !== undefined) {
         const value = record(payload)
         if (typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
@@ -114,11 +172,31 @@ export class PluginControlRuntime {
       if (endpoint === 'host.reconnect') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         this.host.reconnectHost()
-        return ok(this.hostOnlyStatus())
+        return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
+      }
+      if (endpoint === 'status') {
+        if (this.startupFailure !== undefined) {
+          const startupError = safeStartupError(this.startupFailure)
+          const failureStatus: Record<string, unknown> = {
+            mode: 'local',
+            available: false,
+            controlUnavailable: false,
+            connected: false,
+            transport: 'Disconnected',
+            startupError,
+            hostAuthorizationAvailable: false,
+          }
+          return withUpdate(ok(failureStatus), this.updates?.snapshot())
+        }
+        // Both mode paths merge the update snapshot here, so the SSE stream,
+        // polling, and the unary call always observe the same payload shape.
+        const base = this.client !== undefined
+          ? await this.client.handleControl(endpoint, payload, signal)
+          : ok(this.hostOnlyStatus())
+        return withUpdate(base, this.updates?.snapshot())
       }
       if (this.client !== undefined) return this.client.handleControl(endpoint, payload, signal)
 
-      if (endpoint === 'status') return ok(this.hostOnlyStatus())
       if (endpoint === 'devices') return ok([])
       if (endpoint === 'host.account.login') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
@@ -136,7 +214,12 @@ export class PluginControlRuntime {
         }
         return ok(await this.host.authorizeHostWithCode(value.code))
       }
-      if (endpoint === 'mode.set' && record(payload).mode === 'local') return ok(this.hostOnlyStatus())
+      if (endpoint === 'mode.set' && record(payload).mode === 'local') {
+        return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
+      }
+      if (this.startupFailure instanceof Error) {
+        throw this.startupFailure
+      }
       throw new ClientModeError('METHOD_NOT_ALLOWED', 'Remote Client mode is disabled by the plugin role.')
     } catch (error) {
       return fail(error)
@@ -155,10 +238,15 @@ export class PluginControlRuntime {
       throw new ClientModeError('INVALID_MESSAGE', 'Server URL is required.')
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
+    if (value.role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming connections.')
     const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl })
 
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure
+    }
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, next.serverUrl!, value.role),
+      role: value.role,
     })
     let identity = await identities.loadOrCreate(hostname())
     const api = value.role === 'host'
@@ -214,15 +302,68 @@ export class PluginControlRuntime {
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl })
     await this.settings.replace(editableConfig(next))
     if (this.switchServer !== undefined) {
-      if (next.serverUrl !== this.config.serverUrl) {
-        const runtimes = await this.switchServer(next)
-        this.client = runtimes.client
-        this.host = runtimes.host
+      if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== undefined) {
+        try {
+          const runtimes = await this.switchServer(next)
+          this.client = runtimes.client
+          this.host = runtimes.host
+          this.clearStartupFailure()
+        } catch (error) {
+          this.config = next
+          this.setStartupFailure(error)
+          throw error
+        }
       }
       this.config = next
       return { ...await this.settingsView(), applies: 'live' }
     }
     return this.settingsView()
+  }
+
+  private async resetIdentity(payload: unknown): Promise<PluginSettingsView> {
+    if (this.serverSwitchFlight !== undefined) {
+      throw new ClientModeError('SERVER_SWITCH_BUSY', 'A Server switch is already in progress.')
+    }
+    const flight = this.applyResetIdentity(payload)
+    this.serverSwitchFlight = flight
+    try {
+      return await flight
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = undefined
+    }
+  }
+
+  private async applyResetIdentity(payload: unknown): Promise<PluginSettingsView> {
+    await this.logoutFlight
+    const value = payload === undefined ? {} : record(payload)
+    const roleArg = value.role === undefined ? 'all' : value.role
+    if (roleArg !== 'host' && roleArg !== 'client' && roleArg !== 'all') {
+      throw new ClientModeError('INVALID_MESSAGE', 'Role must be host, client, or all.')
+    }
+    const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
+    const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
+    const nextDirectory = await resetDefaultIdentityRoles(
+      roles,
+      config.serverUrl,
+      hostname(),
+      this.useDefaultStorage ? {} : { directory: this.identityDirectory },
+    )
+    this.setIdentityDirectory(nextDirectory)
+    if (this.switchServer !== undefined) {
+      try {
+        const runtimes = await this.switchServer(config)
+        this.client = runtimes.client
+        this.host = runtimes.host
+        this.config = config
+        this.clearStartupFailure()
+      } catch (error) {
+        this.setStartupFailure(error)
+        throw error
+      }
+      return { ...await this.settingsView(), applies: 'live' }
+    }
+    this.clearStartupFailure()
+    return { ...await this.settingsView(), applies: 'live' }
   }
 
   private async setRole(payload: unknown): Promise<PluginSettingsView> {
@@ -235,6 +376,7 @@ export class PluginControlRuntime {
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
     const currentRole = current.role === 'client' ? 'client' : 'host'
+    if (role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (role !== currentRole && current.serverUrl !== undefined
       && await this.association(current.serverUrl, role) === undefined) {
       await this.authorizeOwnedRole(current.serverUrl, currentRole, role)
@@ -246,12 +388,14 @@ export class PluginControlRuntime {
   private async setDevelopment(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const value = record(payload)
+    if (value.debugLogging !== undefined && typeof value.debugLogging !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The debug logging switch must be a boolean.')
     if (value.remoteToolsEnabled !== undefined && typeof value.remoteToolsEnabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The Remote Tools switch must be a boolean.')
     if (value.terminalEnabled !== undefined && typeof value.terminalEnabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'The terminal switch must be a boolean.')
     if (value.ports !== undefined && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError('INVALID_MESSAGE', 'Loopback ports must be integers.')
-    if (value.terminalEnabled === undefined && value.remoteToolsEnabled === undefined && value.ports === undefined) throw new ClientModeError('INVALID_MESSAGE', 'A development setting is required.')
+    if (value.terminalEnabled === undefined && value.remoteToolsEnabled === undefined && value.ports === undefined && value.debugLogging === undefined) throw new ClientModeError('INVALID_MESSAGE', 'A development setting is required.')
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({ ...current,
+      logLevel: value.debugLogging === undefined ? current.logLevel : value.debugLogging ? 'debug' : 'info',
       terminal: { enabled: value.terminalEnabled === undefined ? (current.terminal?.enabled ?? true) : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === undefined ? (current.remoteTools?.enabled ?? true) : value.remoteToolsEnabled },
       loopback: { ports: value.ports === undefined ? (current.loopback?.ports ?? []) : value.ports },
@@ -349,22 +493,87 @@ export class PluginControlRuntime {
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
     return { ...await this.settingsView(), applies: 'live' }
   }
+
+  private async installOrConfigureAcp(payload: unknown): Promise<PluginSettingsView> {
+    if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    const value = record(payload)
+    const backend = value.backend
+    if (typeof backend !== 'string' || !isBuiltinAcpBackend(backend)) {
+      throw new ClientModeError('INVALID_MESSAGE', 'A valid built-in ACP backend is required.')
+    }
+    const outcome = await installOrConfigureBackend(backend)
+    if (outcome.action === 'download_required') {
+      const view = await this.settingsView()
+      return {
+        ...view,
+        acpInstallResult: {
+          backend,
+          action: 'download_required',
+          downloadUrl: outcome.downloadUrl,
+        },
+      }
+    }
+    const detected = outcome.detectedCommand
+    if (!detected) {
+      throw new ClientModeError('ACP_UNAVAILABLE', `Backend ${backend} could not be configured.`)
+    }
+    const defaultArgsMap: Record<string, string[]> = {
+      codex: ['app-server'],
+      cursor: ['acp'],
+      antigravity: ['--input-format', 'stream-json', '--output-format', 'stream-json'],
+      hermes: ['acp'],
+      opencode: ['acp'],
+      pi: [],
+      claude: [],
+    }
+    const defaultArgs = defaultArgsMap[backend] ?? ['acp']
+
+    const current = resolveConfig(this.settings.get())
+    const existing = current.acp?.backends.some(item => item.id === backend)
+    const backends = existing
+      ? (current.acp?.backends ?? []).map(item => item.id === backend ? { ...item, command: detected, enabled: true } : item)
+      : [...(current.acp?.backends ?? []), { id: backend, command: detected, enabled: true, args: defaultArgs }]
+
+    await this.settings.replace({
+      ...editableConfig(current),
+      ...(backend === 'cursor' ? { cursor: { ...current.cursor, binary: detected, enabled: true } } : {}),
+      ...(backend === 'codex' ? { codex: { ...current.codex, binary: detected, enabled: true } } : {}),
+      acp: { enabled: true, backends },
+    })
+    await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
+    const view = await this.settingsView()
+    return {
+      ...view,
+      applies: 'live',
+      acpInstallResult: {
+        backend,
+        action: outcome.action,
+        downloadUrl: outcome.downloadUrl,
+      },
+    }
+  }
   private async authorizeOwnedRole(
     serverUrl: string,
     sourceRole: 'host' | 'client',
     targetRole: 'host' | 'client',
   ): Promise<void> {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure
+    }
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole)
-    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname())
+    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory, role: sourceRole }).loadOrCreate(hostname())
     const sourceStore = new ServerCredentialStore(sourceDirectory)
     if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === undefined) return
     const sourceApi = sourceRole === 'host'
       ? new HostServerApi(serverUrl, sourceStore)
       : new ClientServerApi(serverUrl, sourceStore)
+    sourceApi.bindIdentity(sourceIdentity)
+    await sourceApi.loadStoredPolicy()
+    if (sourceApi.pairingHostOnly()) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'Paired Host cannot create a Client identity.')
     const sourceCredentials = await sourceApi.authenticate(sourceIdentity)
 
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole)
-    const targetIdentity = await new IdentityStore({ directory: targetDirectory }).loadOrCreate(hostname())
+    const targetIdentity = await new IdentityStore({ directory: targetDirectory, role: targetRole }).loadOrCreate(hostname())
     const targetApi = targetRole === 'host'
       ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
       : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
@@ -382,6 +591,9 @@ export class PluginControlRuntime {
   }
 
   private async clearAuthorization(): Promise<PluginSettingsView> {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure
+    }
     const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
     if (config.serverUrl !== undefined) {
       const runtimes = await Promise.allSettled([
@@ -413,11 +625,14 @@ export class PluginControlRuntime {
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, backendCommandAvailable(item.id, item.command ?? '')])),
       ...(association === undefined ? {} : { association }),
+      ...(this.startupFailure === undefined ? {} : {
+        startupError: safeStartupError(this.startupFailure),
+      }),
     }
   }
 
   private async associations(config: Config): Promise<PluginSettingsView['associations']> {
-    if (config.serverUrl === undefined) return {}
+    if (config.serverUrl === undefined || !this.storageAvailable) return {}
     const [host, client] = await Promise.all([
       this.association(config.serverUrl, 'host'),
       this.association(config.serverUrl, 'client'),
@@ -429,15 +644,25 @@ export class PluginControlRuntime {
   }
 
   private async association(serverUrl: string, role: 'host' | 'client'): Promise<PluginAssociation | undefined> {
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
-    })
-    const identity = await identities.loadOrCreate(hostname())
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
-    if (credentials === undefined) return undefined
-    return {
-      method: credentials.authorizationMethod,
-      ...(credentials.account === undefined ? {} : { account: credentials.account }),
+    if (role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) return undefined
+    try {
+      const identities = new IdentityStore({
+        directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
+        role,
+      })
+      const identity = await identities.loadExisting()
+      if (identity === undefined) return undefined
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId)
+      if (credentials === undefined) return undefined
+      return {
+        method: credentials.authorizationMethod,
+        ...(credentials.account === undefined ? {} : { account: credentials.account }),
+      }
+    } catch (error) {
+      if (error instanceof IdentityInvalidError || error instanceof ServerCredentialsInvalidError) {
+        return undefined
+      }
+      throw error
     }
   }
 
@@ -453,13 +678,24 @@ export class PluginControlRuntime {
 }
 
 function backendCommandAvailable(backend: string, command: string): boolean {
-  const candidates = backend === 'codex' ? codexBinaryCandidates(command)
-    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(command) : [command]
-  return candidates.some(commandAvailable)
+  if (!command || typeof command !== 'string' || command.trim().length === 0) return false
+  const trimmed = command.trim()
+  if (defaultCheckExecutable(trimmed)) return true
+  const candidates = backend === 'codex' ? codexBinaryCandidates(trimmed)
+    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(trimmed) : [trimmed]
+  return candidates.some(candidate => defaultCheckExecutable(candidate) || commandAvailable(candidate))
 }
 
 function commandAvailable(command: string): boolean {
-  try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], {
+      stdio: 'ignore',
+      timeout: 5000,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function editableConfig(config: ResolvedConfig): Config {
@@ -503,6 +739,12 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function ok(value: unknown): ControlResult<unknown> { return { ok: true, value } }
+
+/** Attach the update-check snapshot to a successful status-shaped result. */
+function withUpdate(result: ControlResult<unknown>, update: PluginUpdateSnapshot | undefined): ControlResult<unknown> {
+  if (update === undefined || !result.ok || !isRecord(result.value)) return result
+  return ok({ ...result.value, update })
+}
 
 function fail(error: unknown): ControlResult<unknown> {
   const source = error instanceof Error ? error : undefined

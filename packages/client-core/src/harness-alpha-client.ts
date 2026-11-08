@@ -118,6 +118,46 @@ export interface ScheduleDeleteResult {
   code?: string
 }
 
+export interface ScheduleCreateRequest {
+  title: string
+  prompt: string
+  after_seconds?: number
+  at?: string | { date: string; time: string; time_zone: string }
+  every_seconds?: number
+  daily?: { time: string; time_zone: string }
+  weekly?: { time: string; time_zone: string; weekdays: number[] }
+  cron?: { expression: string; time_zone: string }
+}
+
+export type ScheduleTimingChange =
+  | { kind: 'at'; at: string | { date: string; time: string; time_zone: string } }
+  | { kind: 'every'; every_seconds: number }
+  | { kind: 'daily'; daily: { time: string; time_zone: string } }
+  | { kind: 'weekly'; weekly: { time: string; time_zone: string; weekdays: number[] } }
+  | { kind: 'cron'; cron: { expression: string; time_zone: string } }
+
+export type ScheduleRecord =
+  | { id: string; kind: 'after'; title: string; prompt: string; afterSeconds: number; scheduledAt: string }
+  | { id: string; kind: 'at'; title: string; prompt: string; scheduledAt: string }
+  | { id: string; kind: 'every'; title: string; prompt: string; everySeconds: number; scheduledAt: string }
+  | { id: string; kind: 'daily'; title: string; prompt: string; time: string; timeZone: string; scheduledAt: string }
+  | { id: string; kind: 'weekly'; title: string; prompt: string; time: string; timeZone: string; weekdays: number[]; scheduledAt: string }
+  | { id: string; kind: 'cron'; title: string; prompt: string; expression: string; timeZone: string; scheduledAt: string }
+
+export interface ScheduleUpdateRequest {
+  sessionId: string
+  id: string
+  expected: ScheduleRecord
+  change?: ScheduleTimingChange
+  title?: string
+  prompt?: string
+}
+
+export type ScheduleUpdateResult =
+  | { id: string; updated: boolean; record: ScheduleRecord }
+  | { id: string; updated: false; code: 'schedule_not_found' | 'schedule_ended' | 'schedule_conflict' }
+  | { code: string; message: string }
+
 export interface ScheduleDeliveryHistoryResult {
   id: string
   records?: ScheduleDeliveryRecord[]
@@ -523,12 +563,23 @@ export class HarnessAlphaClient {
     if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the stop request.')
   }
 
-  async sessionAttachment(sessionId: string, attachmentId: string): Promise<{ attachment: unknown; data: string }> {
+  async sessionAttachment(
+    sessionId: string,
+    attachment: string | Record<string, unknown>,
+  ): Promise<{ attachment: unknown; data: string }> {
+    const reference = typeof attachment === 'string' ? undefined : attachment
+    const attachmentId = typeof attachment === 'string'
+      ? attachment
+      : typeof attachment.attachmentId === 'string' ? attachment.attachmentId : undefined
     const result = await this.callValue<{ attachment?: unknown; data?: string; mediaType?: string }>('session/attachment', {
-      request: { sessionId, attachmentId },
+      request: {
+        sessionId,
+        ...(attachmentId === undefined ? {} : { attachmentId }),
+        ...(reference === undefined ? {} : { attachment: reference }),
+      },
     })
     return {
-      attachment: result.attachment ?? { mediaType: result.mediaType },
+      attachment: result.attachment ?? reference ?? { mediaType: result.mediaType },
       data: result.data ?? '',
     }
   }
@@ -632,11 +683,37 @@ export class HarnessAlphaClient {
 
   async scheduleCatalog(): Promise<ScheduleCatalogEntry[]> {
     const result = await this.callValue<ScheduleCatalogEntry[] | { items: ScheduleCatalogEntry[] }>('schedule/catalog', {})
-    if (Array.isArray(result)) return result
-    if (result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)) {
-      return (result as { items: ScheduleCatalogEntry[] }).items
+    const list = Array.isArray(result)
+      ? result
+      : result && Array.isArray((result as { items?: ScheduleCatalogEntry[] }).items)
+        ? (result as { items: ScheduleCatalogEntry[] }).items
+        : null
+    if (list === null) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
     }
-    throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid schedule catalog payload.')
+    return list.map(entry => {
+      if (typeof entry.sessionId === 'string' && entry.sessionId.length > 0) return entry
+      const target = (entry as unknown as Record<string, unknown>).target
+      if (target && typeof target === 'object' && !Array.isArray(target)) {
+        const targetObj = target as Record<string, unknown>
+        if (targetObj.kind === 'session' && typeof targetObj.sessionId === 'string' && targetObj.sessionId.length > 0) {
+          return { ...entry, sessionId: targetObj.sessionId }
+        }
+      }
+      return entry
+    })
+  }
+
+  async scheduleCreate(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord> {
+    return this.callValue<ScheduleRecord>('schedule/create', {
+      request: { sessionId, ...request },
+    })
+  }
+
+  async scheduleUpdate(request: ScheduleUpdateRequest): Promise<ScheduleUpdateResult> {
+    return this.callValue<ScheduleUpdateResult>('schedule/update', {
+      request,
+    })
   }
 
   async scheduleDelete(sessionId: string, id: string): Promise<ScheduleDeleteResult> {

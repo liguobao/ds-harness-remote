@@ -202,13 +202,30 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
     }
   }
   const mentionGroups = buildMentionGroups()
+  /** Insert a reference token at the current cursor/selection, adding a leading space if needed. */
+  const insertAtSelection = (text: string) => {
+    const start = Math.max(0, Math.min(draftRef.current.length, selectionRef.current.start))
+    const end = Math.max(start, Math.min(draftRef.current.length, selectionRef.current.end))
+    const before = draftRef.current.slice(0, start)
+    const after = draftRef.current.slice(end)
+    const prefix = before.length > 0 && !/\s$/u.test(before) ? ' ' : ''
+    const inserted = `${prefix}${text}`
+    const next = `${before}${inserted}${after}`
+    const cursor = before.length + inserted.length
+    applyDraft(next)
+    selectionRef.current = { start: cursor, end: cursor }
+    setSelection({ start: cursor, end: cursor })
+    setMentionType(null)
+    composerInputRef.current?.focus()
+  }
+
   const resetSelection = () => {
     selectionRef.current = { start: 0, end: 0 }
     setSelection({ start: 0, end: 0 })
   }
   return {
     composerInputRef, draftRef, mentionType, setMentionType, selection, mentionGroups,
-    applyDraft, closeMention, onChangeText, onSelectionChange, resetSelection
+    applyDraft, closeMention, onChangeText, onSelectionChange, resetSelection, insertAtSelection
   }
 }
 

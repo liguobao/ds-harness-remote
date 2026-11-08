@@ -8,7 +8,7 @@
 
 本文保留完整 Server 的设计与互操作契约。用户于 2026-09-19 授权在当前仓库实现最小自部署版本，其运行方式与支持的 API 见 [最小 Server 说明](../apps/server/README.zh.md)。
 
-最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量单账号和 JSON 文件持久化，支持 Control/Noise handshake forwarding/opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
+最小版本参考独立仓库的账号/设备 API、WebSocket Gateway 与 Hub 逻辑，使用环境变量单账号和 JSON 文件持久化，支持 Control/Noise handshake forwarding、WebRTC signaling 转发、短期 TURN credential 与 opaque Relay。Web 提供登录与设备状态页。后文记录独立 Server 项目的完整设计。
 
 ## 1. 定位
 
@@ -131,7 +131,7 @@ Host 与 Client 的首次账号归属必须携带站点账号 token 注册随机
 Host 还可用账号网页生成的一次性主机匹配码接入。注册行为按 IP/账号限速；重复
 deviceId 不允许覆盖已有 public key、role 或 owner。
 
-Server credential 使用短 access token + 可旋转 refresh token。数据库仅保存 refresh token hash；检测旧 token 重用时撤销整个 token family。
+Server credential 使用短 access token + 可旋转 refresh token，凭据以摘要保存。刷新响应丢失时允许恢复尚未再次轮换、撤销或过期的直接后继；过时 token 被拒绝，但不撤销当前有效凭据。恢复边界与自部署 Server 持久化方式见 [协议 §8.2](protocol.md#82-refresh)。
 
 Host/Client private key 始终留在设备本地。
 
@@ -460,3 +460,12 @@ caddy/nginx（可选）
 7. rate limit、revoke、backpressure 和日志脱敏。
 8. TURN credential 和 Docker Compose。
 9. 根据 [protocol.md](protocol.md) 完成互操作验收。
+
+
+## WebRTC control recovery
+
+Optional `transport.webrtc.resume.v1` preserves authenticated LAN/P2P/TURN
+DataChannels across a temporary control outage using a two-sided, five-minute
+authorization lease. See [the contract and rollout limits](design/webrtc-control-recovery.md).
+This is separate from WebSocket Relay and TURN credential TTL; the relay-only
+self-hosted Server does not enable it. Production/native acceptance is not implied.

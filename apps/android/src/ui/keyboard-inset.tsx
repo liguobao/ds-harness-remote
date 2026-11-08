@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AppState, Keyboard, useWindowDimensions, View } from 'react-native'
+import { AppState, Keyboard, LayoutAnimation, Platform, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 /**
@@ -33,6 +33,40 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (Platform.OS === 'ios') {
+      const willShow = Keyboard.addListener('keyboardWillShow', (event: { duration?: number; easing?: string; endCoordinates: { screenY: number } }) => {
+        const duration = event.duration ?? 250
+        if (duration > 0) {
+          const animationType = ((event.easing ? (LayoutAnimation.Types as Record<string, any>)[event.easing] : undefined) ?? LayoutAnimation.Types.keyboard)
+          LayoutAnimation.configureNext(
+            LayoutAnimation.create(
+              duration,
+              animationType,
+              LayoutAnimation.Properties.opacity,
+            ),
+          )
+        }
+        setKeyboardScreenY(event.endCoordinates.screenY)
+      })
+      const willHide = Keyboard.addListener('keyboardWillHide', (event: { duration?: number; easing?: string }) => {
+        const duration = event.duration ?? 250
+        if (duration > 0) {
+          const animationType = ((event.easing ? (LayoutAnimation.Types as Record<string, any>)[event.easing] : undefined) ?? LayoutAnimation.Types.keyboard)
+          LayoutAnimation.configureNext(
+            LayoutAnimation.create(
+              duration,
+              animationType,
+              LayoutAnimation.Properties.opacity,
+            ),
+          )
+        }
+        setKeyboardScreenY(null)
+      })
+      return () => {
+        willShow.remove()
+        willHide.remove()
+      }
+    }
     const show = Keyboard.addListener('keyboardDidShow', event => measure(event.endCoordinates.screenY))
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardScreenY(null))
     return () => {

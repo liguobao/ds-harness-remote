@@ -58,7 +58,12 @@ export class ClientModeRuntime {
     const lifetime = this.remoteLifetime.signal
     const connectionSignal = signal === undefined ? lifetime : AbortSignal.any([lifetime, signal])
     connectionSignal.throwIfAborted()
-    const remote = await this.connection.connect(targetDeviceId, connectionSignal)
+    const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch(error => {
+      if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
+        this.noteClientAuthFailure(error)
+      }
+      throw error
+    })
     if (connectionSignal.aborted || this.closed) {
       await remote.client.close().catch(() => undefined)
       throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
@@ -99,6 +104,14 @@ export class ClientModeRuntime {
   private readonly featureProbePromises = new WeakMap<object, Promise<RemoteHostFeatures>>()
   private recoverable?: ConnectedRemote
   private recoveryGeneration = 0
+  private clientAuthRequired = false
+
+  private noteClientAuthFailure(error: unknown): void {
+    if (error instanceof Error && 'code' in error && typeof error.code === 'string'
+      && (error.code === 'AUTH_REQUIRED' || HOST_AUTHORIZATION_ERRORS.has(error.code))) {
+      this.clientAuthRequired = true
+    }
+  }
   private readonly sessionTools = new RemoteSessionTools((hostId, signal, query) => this.withToolRemote(hostId, signal, query))
 
   runSessionTool(operation: SessionToolOperation, args: unknown, signal: AbortSignal): Promise<unknown> {
@@ -173,6 +186,7 @@ export class ClientModeRuntime {
 
   async start(): Promise<void> {
     if (this.closed) throw new Error('client remote-mode runtime is closed')
+    if (this.host?.hostStatus().pairingHostOnly) { this.gatewaySwitch.install(); return }
     this.identity = await this.identities.loadOrCreate(this.config.deviceName)
     this.server.bindIdentity(this.identity)
     this.gatewaySwitch.install()
@@ -236,6 +250,7 @@ export class ClientModeRuntime {
       ...targetStatus,
       connected: this.connected !== undefined,
       recoveryGeneration: this.recoveryGeneration,
+      ...(this.clientAuthRequired && !this.connected && targetStatus.mode === 'remote' ? { clientAuthRequired: true } : {}),
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -294,22 +309,38 @@ export class ClientModeRuntime {
     if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
     this.assertHostAuthorizationForDeviceDiscovery()
     this.requireIdentity()
-    const serverDevices = await this.server.listDevices(signal)
-    signal?.throwIfAborted()
-    const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
-    const results = await Promise.allSettled(remoteDevices.map(async device => {
-      signal?.throwIfAborted()
-      await this.connection.authorizeHostPeer(device, signal)
-      const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }))
-      signal?.throwIfAborted()
+    const devices: RemoteDeviceView[] = []
+    for await (const page of this.server.devicePages(signal)) {
+      const remoteDevices = page.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
+      const resolved: RemoteDeviceView[] = new Array(remoteDevices.length)
+      let next = 0
+      let failed = false
+      // Bound authorization/presence fan-out even when an older Server ignores
+      // pagination. Finish this page before fetching the next one.
+      const workers = await Promise.allSettled(Array.from({ length: Math.min(8, remoteDevices.length) }, async () => {
+        try {
+          while (!failed && next < remoteDevices.length) {
+            signal.throwIfAborted()
+            this.assertHostAuthorizationForDeviceDiscovery()
+            const index = next++
+            const device = remoteDevices[index]!
+            await this.connection.authorizeHostPeer(device, signal)
+            const presence = await this.server.presenceFor(device.deviceId, signal).catch(() => ({ online: false }))
+            signal.throwIfAborted()
+            this.assertHostAuthorizationForDeviceDiscovery()
+            resolved[index] = { ...device, ...presence }
+          }
+        } catch (error) { failed = true; throw error }
+      }))
+      signal.throwIfAborted()
       this.assertHostAuthorizationForDeviceDiscovery()
-      return { ...device, ...presence }
-    }))
+      const failure = workers.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+      devices.push(...resolved)
+    }
     signal.throwIfAborted()
     this.assertHostAuthorizationForDeviceDiscovery()
-    const failure = results.find(result => result.status === 'rejected')
-    if (failure?.status === 'rejected') throw failure.reason
-    return results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    return devices
   }
 
   /**
@@ -322,6 +353,7 @@ export class ClientModeRuntime {
    */
   private assertHostAuthorizationForDeviceDiscovery(): void {
     const status = this.host?.hostStatus()
+    if (status?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (status === undefined || status.error === undefined || !HOST_AUTHORIZATION_ERRORS.has(status.error)) return
     const message = status.error === 'DEVICE_REVOKED'
       ? 'The local Host was revoked on the Server. Sign out and authorize this Host again.'
@@ -340,6 +372,7 @@ export class ClientModeRuntime {
       authorization = await this.server.authorizeWithAccount(this.identity, email, password)
     }
     await this.authorizeHostByDefault()
+    this.clientAuthRequired = false
     this.logger.info('Client account authorized')
     return authorization
   }
@@ -356,17 +389,21 @@ export class ClientModeRuntime {
       return this.identity
     })
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
-    if (result.status === 'complete') await this.authorizeHostByDefault()
+    if (result.status === 'complete') {
+      this.clientAuthRequired = false
+      await this.authorizeHostByDefault()
+    }
     return result
   }
 
   async clearClientAuthorization(): Promise<void> {
     const cleanup = this.leaveRemote()
     this.codexOpenedSessions.clear()
+    if (this.identity === undefined) { await Promise.all([cleanup, this.server.clearAuthorization()]); return }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()])
-    // Local identity rotation also completes when Server revocation fails.
-    this.identity = await this.identities.reset(this.config.deviceName)
-    this.server.bindIdentity(this.identity)
+    // A Host-only installation never creates a Client identity on logout.
+    if (this.host?.hostStatus().pairingHostOnly) this.identity = undefined
+    else { this.identity = await this.identities.reset(this.config.deviceName); this.server.bindIdentity(this.identity) }
     const failure = results.find(result => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
   }
@@ -754,6 +791,7 @@ export class ClientModeRuntime {
   }
 
   private async leaveRemote(): Promise<void> {
+    this.clientAuthRequired = false
     this.beginSelection()
     this.sessionTools.invalidate()
     this.remoteLifetime.abort(new ClientModeError('CANCELLED', 'The Remote connection was closed.'))
@@ -808,6 +846,7 @@ export class ClientModeRuntime {
 
   private selectRemoteTarget(remote: ConnectedRemote): void {
     this.assertRemoteCompatible(remote)
+    this.clientAuthRequired = false
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
     this.recoverable = remote
@@ -819,6 +858,7 @@ export class ClientModeRuntime {
       remote.client,
       localSessionGeneration === 'v3' && remote.features.sessionFormat !== 3 ? 'legacy-to-v3' : undefined,
       remote.harnessVersion,
+      true,
     )
   }
 
@@ -941,6 +981,7 @@ export class ClientModeRuntime {
   }
 
   private requireIdentity(): HostIdentity {
+    if (this.host?.hostStatus().pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (this.identity === undefined) throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
     return this.identity
   }
@@ -968,6 +1009,7 @@ export class ClientModeRuntime {
     this.logger.warn('remote Harness transport closed', { targetDeviceId: shortId(remote.target.deviceId) })
     // CodeX/ACP have separate virtual workspace lifetimes; never replace them
     // with Harness authority after a disconnect.
+    if (!this.closed && this.gatewaySwitch.status().mode === 'remote') this.noteClientAuthFailure(error)
     if (!recover || this.closed) return
     this.reconnect.start(async signal => {
       await cleanup

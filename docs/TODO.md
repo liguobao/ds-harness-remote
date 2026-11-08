@@ -1,17 +1,37 @@
 # TODO
 
-更新日期：2026-10-29。当前源码版本为 `0.6.0`，Android `versionCode 69`，Expo iOS `buildNumber 69`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
+更新日期：2026-11-05。当前源码版本为 `0.6.3`，Android `versionCode 71`，Expo iOS `buildNumber 71`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
 
 最近一次构建验证见 [AGENTS.md 的 0.5.20 合并后重建记录](../AGENTS.md#post-merge-0520-rebuild-2026-10-27)：全仓 check、847 tests、串行生产 build（含 Android Hermes）、DSH bundle 与打包检查通过。这是既有验证记录，本轮文档清理未重新运行；未新增 APK、原生真机或跨设备验收。Metro noble/hashes exports fallback 警告仍保留。
 
-Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
-peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
+Harness `0.2.2-rc.1` 为开发基线（Node.js `>=24.9`）。保留 `0.2.1-rc.5`、`0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
+peer range 接纳 `0.2.1` 与 `0.2.2` 预发布版。0.2.2 的 runtime 适配范围与验证边界见兼容性说明。
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。
 完整 Server、Remote Web 和 Admin 在独立 Server 仓库实现。
 本仓库 `apps/server` 提供最小单账号 Relay Server。
 
 状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
 RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真机验收。
+
+## 2026-11-05 Harness 0.2.2-rc.1 适配
+
+- [x] 开发基线、Cordis 4.1 / Loader 1.1 / Include 1.1、Node.js 24.9 与 CI/install.sh/文档同步。
+- [x] `session/attachment` 完整引用（Android 发送；Host 按版本降级给旧 Host）。
+- [x] CodeX/ACP 虚拟投影帧 `changes`、虚拟附件引用、`session/page` cursor 与 `session/events` 别名。
+- [x] Remote allowlist 新端点（toolResults / schedule / pluginManager）与插件更新自我保护。
+- [x] 本地 carrier 始终携带 owner Peer：官方 `Peer`/`OperatorPeer` 优先，缺失时回退官方 Connection `createPeer`；peerless open 报明确错误而非官方 Gateway TypeError。
+- [ ] 真实 Desktop 0.2.2 人工烟测：侧栏入口与更新徽标几何、插件页富文本详情/更新按钮、设置页导航图标、Remote Header 与文件预览。
+- [ ] 官方新增 ja/es/fr/de/ru/pt 界面语言的 Remote 文案与 `locale/*.json` 元信息。
+- [ ] 真实账号加密跨设备 E2E：Host 0.2.2 + Android/Desktop 客户端，覆盖图片附件、CodeX/ACP 投影、Trajectory 原始 JSON 与自动化任务编辑。
+- [ ] 缺少 `@deepseek-ai/dsh-api-remotes` 的 Host 组合（headless/TUI/自定义 profile）上 `$events` 不可用，Desktop 客户端会重连循环；评估插件侧启动告警与客户端降级（空闲事件流 + UI 提示）。
+- [ ] `pluginManager/updateBundle` 远程更新在真实 npm 安装与失败回滚场景的人工验证。
+
+## 2026-11-02 Android Mermaid 渲染（Issue #255）
+
+- [x] 第一阶段：内置固定版本 mermaid 12.2.0，聊天中的 ```mermaid 离线渲染为原生 SVG；HTML 标签图（journey）走全屏图片查看；失败/超限回退源码。
+- [ ] 真实会话验收：真实 Host 回复中的 mermaid（含流式输出过程）、长会话滚动与单元格回收、真机（非模拟器）性能与内存、大字体/TalkBack、横屏/平板。
+- [ ] 抓包确认渲染全程无网络请求（目前由 CSP 与导航拦截保证，未实测抓包）。
+- [ ] 中期：可移植渲染产物通道；长期：并入 #186 Remote Plugin 渲染契约。Remote Web 由独立 Server 仓库评估。
 
 ## 2026-10-24 DS Bot 0.2.1 适配
 
@@ -117,7 +137,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 同账号 membership、受保护 peer descriptor 与本地 pinned trust 双重授权
 - [x] Relay control、标准 Noise IK、counter/replay 拒绝与 opaque ciphertext
 - [x] Desktop Plugin Host runtime、Settings 配置和 GitHub/npm Bundle 入口
-- [x] dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI
+- [x] 历史：dsh-TUI profile 在无 Desktop `connection` 服务时默认启动 Host，并通过原生 `/remote` 的 `login [github|zhihu]`、`status`、`logout` 完成终端授权和状态管理；`ds-harness-remote` 保留为启动前 CLI（0.6.3 起移除该集成，后续版本恢复）
 - [x] 历史 Host ApiProxy bridge 与 switch（2026-10-25 已移除）
 - [x] Harness v0.1.2 alpha.1–rc.1 Typert Remote unary/stream/event carrier、固定 endpoint allowlist、加密 capability 探测；rc.2 ApiProxy 激活分支已移除
 - [x] Harness v0.1.5 rc.1 / v0.2.0 rc.1 Session V3 capability、严格 surface replacement、Assistant stream 与 v0.1.2/V3 mutation 前混连拒绝
@@ -134,10 +154,13 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P0：Plugin 可用链路
 
+- [ ] 在后续版本单独恢复 dsh-TUI 集成：终端专用 Host entry、`/remote login|status|logout` 与补全/场景，并重新完成 dsh-TUI 基线验收；本版本只发布浏览器/Desktop Host。
+- [ ] install.sh helper 直接 import 插件 entry，仍要求 profile 内可解析官方 peer（pnpm profile 缺少 `@deepseek-ai/dsh-client-connection` 时会失败，既有问题，与本次内联无关）；评估自带 installer 入口或在 preflight 前注入 profile 模块解析，并重做 Linux 干净机 Token 注册验收。
+
 - [ ] 单一安装入口实机回归：Linux root 干净 x64/arm64 上的 Node.js/DSH 引导、真实一次性 Token 注册、systemd 系统服务立即启动/重启自启及客户端在线确认；macOS 已有 CLI/Desktop launcher、desktop/web profile 选择和注册回归。模拟下载/systemctl 与回环 API 烟测不等于目标机验收；Windows 使用官方插件管理或命令，不维护专用脚本。
 
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
-- [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval
+- [x] 历史：在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval（0.6.3 起该集成暂时移除）
 - [x] 分别用 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 跑通双机 Workspace/Session/Prompt/approval E2E，并验证混合代际在 mutation 前拒绝
 - [ ] 核定旧版 Harness 的维护范围。逐项决定以下历史验收是否仍需执行。
 - [ ] 历史待验收 `dsh-v0.1.2-rc.1`：Desktop/dsh-TUI 跨机会话与长期稳定性。
@@ -329,6 +352,9 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 ## 最小自部署 Server
 
 - [x] 环境变量单账号、登录/状态页、持久化设备凭据、Control/加密 Relay 转发
+- [x] WebRTC signaling 转发、`transport.selected`（LAN/P2P/TURN/Relay）与 ICE 上限
+- [x] `GET /api/v1/turn/credentials` 短期 STUN/TURN credential（coturn REST API，可配置 TTL）
+- [ ] 真实 coturn 部署与 LAN/P2P/TURN 跨机验收（含严格 NAT、UDP 受限网络与 relay fallback）
 - [ ] 完成 Docker 镜像构建与容器启动验收。记录健康检查和凭据持久化结果。
 - [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
 
@@ -361,3 +387,7 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 
 - [x] AGY 工作区/会话 catalog、空白新会话、历史/图片、流式、标题刷新与重连恢复
 - [ ] Android AGY APK 与真机/加密跨设备回归；每目录超过 100 个会话的分页体验
+
+## DSH-Go pairing acceptance
+
+Implement Dart mobile proof vectors, scanner/credential integration and Android end-to-end acceptance using docs/dsh-go-pairing-integration.md. C# Server/Remote integration uses a simulated Node phone, not an Android build. Local UI and `isTrusted` cannot establish genuine human presence against OS automation; use a trusted native primitive if Harness makes one available. No deployment/release is included.

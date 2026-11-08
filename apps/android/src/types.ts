@@ -341,6 +341,8 @@ export interface ChatImage {
   uri?: string
   name?: string
   mediaType?: string
+  /** Encoded byte length of a durable Host attachment, required by the 0.2.2 read contract. */
+  bytes?: number
   width?: number
   height?: number
 }
@@ -469,6 +471,7 @@ export interface ConnectionSnapshot {
   phase: ConnectionPhase
   stats: TransportStats
   error?: string
+  errorCode?: string
   /** False for protocol/security refusals or a replaced connection. */
   retryable?: boolean
 }
@@ -499,9 +502,14 @@ export function transportPreferenceOptions(): TransportPreferenceOption[] {
 
 export type {
   ScheduleCatalogEntry,
+  ScheduleCreateRequest,
   ScheduleDeleteResult,
   ScheduleDeliveryHistoryResult,
   ScheduleDeliveryReceipt,
   ScheduleDeliveryRecord,
   ScheduleKind,
+  ScheduleRecord,
+  ScheduleTimingChange,
+  ScheduleUpdateRequest,
+  ScheduleUpdateResult,
 } from '@dsh-remote/client-core'

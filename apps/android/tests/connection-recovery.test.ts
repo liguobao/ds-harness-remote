@@ -36,21 +36,25 @@ describe('foreground carrier recovery', () => {
       state.transportPreference = preference as RecoveryState['transportPreference']
       offline()
       recovery.update()
-      await vi.advanceTimersByTimeAsync(999)
-      expect(reconnect).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(1)
+      // First retry is immediate (0ms) so a dropped P2P path heals over the
+      // relay without a fixed startup delay.
+      await vi.advanceTimersByTimeAsync(0)
       expect(reconnect).toHaveBeenCalledTimes(1)
-      await vi.advanceTimersByTimeAsync(3_000)
+      await vi.advanceTimersByTimeAsync(1_000)
       expect(reconnect).toHaveBeenCalledTimes(2)
-      await vi.advanceTimersByTimeAsync(8_000)
+      await vi.advanceTimersByTimeAsync(3_000)
       expect(reconnect).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(8_000)
+      expect(reconnect).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(15_000 + 30_000 + 30_000 + 60_000)
+      expect(reconnect).toHaveBeenCalledTimes(8)
       expect(exhausted).toHaveBeenCalledOnce()
       recovery.update()
       expect(exhausted).toHaveBeenCalledOnce()
       await vi.advanceTimersByTimeAsync(60_000)
-      expect(reconnect).toHaveBeenCalledTimes(3)
+      expect(reconnect).toHaveBeenCalledTimes(8)
       expect(reconnect.mock.calls.map(([options]) => options)).toEqual(
-        Array.from({ length: 3 }, () => preference === 'auto' ? { forceRelay: true } : {}),
+        Array.from({ length: 8 }, () => preference === 'auto' ? { forceRelay: true } : {}),
       )
     } })), prepare)
   })
@@ -70,9 +74,22 @@ describe('foreground carrier recovery', () => {
         if (action === 'refused') state.connection.retryable = false
         if (action === 'manual-connect') state.connection.phase = 'connecting'
         recovery.update()
+        if (action === 'never-connected') {
+          // A first attempt that never established retries twice immediately
+          // over Relay and then gives up instead of hanging.
+          await vi.advanceTimersByTimeAsync(0)
+          expect(reconnect).toHaveBeenCalledTimes(1)
+          expect(reconnect).toHaveBeenLastCalledWith({ forceRelay: true })
+          await vi.advanceTimersByTimeAsync(1_000)
+          expect(reconnect).toHaveBeenCalledTimes(2)
+          await vi.advanceTimersByTimeAsync(300_000)
+          expect(reconnect).toHaveBeenCalledTimes(2)
+          expect(exhausted).toHaveBeenCalledOnce()
+          return
+        }
         await vi.advanceTimersByTimeAsync(30_000)
         expect(reconnect).not.toHaveBeenCalled()
-        if (action === 'never-connected' || action === 'refused') expect(exhausted).toHaveBeenCalledOnce()
+        if (action === 'refused') expect(exhausted).toHaveBeenCalledOnce()
       } })), prepare)
   })
 
@@ -80,7 +97,7 @@ describe('foreground carrier recovery', () => {
     let finish!: (value: boolean) => void
     reconnect.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     offline()
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(0)
     recovery.update()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(reconnect).toHaveBeenCalledOnce()
@@ -90,15 +107,73 @@ describe('foreground carrier recovery', () => {
     await vi.advanceTimersByTimeAsync(0)
     offline()
     reconnect.mockImplementationOnce(async () => { throw new Error('unavailable') })
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(0)
     expect(reconnect).toHaveBeenLastCalledWith({})
-    await vi.advanceTimersByTimeAsync(3_000)
+    await vi.advanceTimersByTimeAsync(1_000)
     expect(reconnect).toHaveBeenLastCalledWith({ forceRelay: true })
     recovery.setActive(false)
     await vi.advanceTimersByTimeAsync(30_000)
     expect(reconnect).toHaveBeenCalledTimes(3)
+    // Returning to the foreground re-arms immediately, even after the
+    // previous cycle was on its way through the backoff ladder.
     recovery.setActive(true)
-    await vi.advanceTimersByTimeAsync(8_000)
+    await vi.advanceTimersByTimeAsync(0)
     expect(reconnect).toHaveBeenCalledTimes(4)
+  })
+
+  it('skips the 0ms fast-retry and uses jittered exponential backoff when the Host or device is offline', async () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    try {
+      for (const errorCode of ['HOST_OFFLINE', 'DEVICE_OFFLINE'] as const) {
+        prepare()
+        state = {
+          ...state,
+          connection: { phase: 'offline', stats: { mode: 'Disconnected' }, errorCode },
+        }
+        recovery.update()
+        // 0.5 -> 0.5 + 0.25 = 0.75 * [3000, 6000, 12000, 24000, 30000, 60000, 60000, 60000]
+        const expectedDelays = [2_250, 4_500, 9_000, 18_000, 22_500, 45_000, 45_000, 45_000]
+        for (let i = 0; i < expectedDelays.length; i++) {
+          const delay = expectedDelays[i]!
+          await vi.advanceTimersByTimeAsync(delay - 1)
+          expect(reconnect).toHaveBeenCalledTimes(i)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(reconnect).toHaveBeenCalledTimes(i + 1)
+        }
+        expect(exhausted).toHaveBeenCalledOnce()
+
+        // After the 8-attempt ladder exhausts, a low-frequency 60s jittered probe (0.75 * 60_000 = 45_000ms)
+        // continues while the Host remains offline, even if a probe transitions to another retryable
+        // error (CONNECTION_FAILED -> 120_000ms probe), and automatically recovers once the Host returns.
+        reconnect.mockImplementationOnce(async () => {
+          state = {
+            ...state,
+            connection: { phase: 'offline', stats: { mode: 'Disconnected' }, errorCode: 'CONNECTION_FAILED' },
+          }
+          recovery.update()
+          return false
+        })
+        await vi.advanceTimersByTimeAsync(44_999)
+        expect(reconnect).toHaveBeenCalledTimes(8)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(reconnect).toHaveBeenCalledTimes(9)
+
+        reconnect.mockImplementationOnce(async () => {
+          state = {
+            ...state,
+            connection: { phase: 'connected', stats: { mode: 'Relay' } },
+          }
+          recovery.update()
+          return true
+        })
+        await vi.advanceTimersByTimeAsync(119_999)
+        expect(reconnect).toHaveBeenCalledTimes(9)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(reconnect).toHaveBeenCalledTimes(10)
+        expect(state.connection.phase).toBe('connected')
+      }
+    } finally {
+      random.mockRestore()
+    }
   })
 })

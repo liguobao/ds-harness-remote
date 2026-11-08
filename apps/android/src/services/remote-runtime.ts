@@ -57,10 +57,13 @@ export class AndroidRemoteRuntime {
   }
 
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }
+  rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
+    return this.client.rpc<T>(method, params, signal)
+  }
   configureHistory(compact: boolean) { return this.client.configureHistory(compact) }
   requireProxy() { return this.client.requireProxy() }
-  readSessionImageAttachment(sessionId: string, attachmentId: string, signal: AbortSignal) {
-    return this.client.readSessionImageAttachment(sessionId, attachmentId, signal)
+  readSessionImageAttachment(sessionId: string, attachment: Record<string, unknown>, signal: AbortSignal) {
+    return this.client.readSessionImageAttachment(sessionId, attachment, signal)
   }
   requireBotClient() { return this.client.requireBotClient() }
   requireCodex() { return this.client.requireCodex() }

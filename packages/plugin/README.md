@@ -32,7 +32,7 @@ Session tools require explicit `hostId`, `backend` and `workspaceId`; existing-s
 
 For example, ask: “On the Linux Host, create a Harness session in my project, run its tests, and report the result here.” The Agent discovers the target, creates and messages a session, then waits and reads its history. An `idle` status does not prove the task objective succeeded. Pending approval/question detection is limited to retained history; use the native UI to handle those requests. Waiting never approves or interrupts work automatically.
 
-CodeX/ACP currently support workspace discovery only through these tools. This entry does not register an external MCP server. Terminal-only dsh-TUI profiles currently lack the local Remote Client runtime needed by these tools; they can still be discovered as target Hosts.
+CodeX/ACP currently support workspace discovery only through these tools. This entry does not register an external MCP server. Terminal-only profiles are not a supported Host surface in this release; dsh-TUI integration is planned for a later version.
 
 ## Install
 
@@ -42,13 +42,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.6.0
+ds-harness-remote@0.6.4
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.6.0
+dsh plugin --profile desktop add -w ds-harness-remote@0.6.4
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -58,18 +58,8 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.0
+dsh plugin --profile web add -w ds-harness-remote@0.6.4
 ```
-
-### dsh-TUI Host
-
-Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
-
-```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.6.0
-```
-
-After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
 
 ## Highlights
 
@@ -84,7 +74,7 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 
 ## Compatibility
 
-The development baseline is DeepSeek Harness `dsh-v0.2.1-rc.1`, retaining the official Typert Remote / Session V3 carrier from `0.2.0` RC. Earlier Typert carrier support remains capability-based.
+The development baseline is DeepSeek Harness `dsh-v0.2.2-rc.1`, retaining the official Typert Remote / Session V3 carrier from `0.2.1-rc.5` and `0.2.0` RC. Earlier Typert carrier support remains capability-based.
 
 `0.5.19` removes Harness `0.1.1-rc.2` ApiProxy support from the Host and bundled Remote client. ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP Desktop projection also uses Typert only.
 
@@ -105,7 +95,6 @@ This repository includes a minimal, single-account self-hosted Relay Server in [
 ## Documentation
 
 - [Complete guide](https://github.com/liguobao/ds-harness-remote#readme)
-- [dsh-TUI Remote guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/dsh-tui.md)
 - [Codex Remote technical notes](https://github.com/liguobao/ds-harness-remote/blob/main/docs/codex-remote.md)
 - [Agent workspace integration guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-integration.md)
 - [End-to-end encryption](https://github.com/liguobao/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)

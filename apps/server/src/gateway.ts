@@ -17,9 +17,10 @@ import {
 } from '@dsh-remote/protocol'
 import { ApiError, Store } from './store.js'
 import { Logger, type LogLevel } from './logger.js'
-import { normalizeGatewayOptions, type GatewayTimingOptions } from './config.js'
+import { normalizeGatewayOptions, normalizeMaxFramesPerSec, type GatewayTimingOptions } from './config.js'
 
 export interface GatewayOptions extends GatewayTimingOptions {
+  maxFramesPerSec?: number
   logLevel?: LogLevel
   logger?: Logger
   /** Advertise `transport.turn` (and accept TURN credential requests). */
@@ -34,8 +35,14 @@ export interface GatewayOptions extends GatewayTimingOptions {
  */
 type ConnectionState = 'awaiting_hello' | 'authenticated' | 'closing' | 'closed'
 
-type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string }
+type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string; evictedTombstoneUntil?: number }
 type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: TransportName[]; iceCandidates: number }
+type DroppedLink = { host: string; client: string; expiresAt: number; droppedFrames: number }
+
+/** Keep tombstones long enough for late in-flight frames to drain without CONNECTION_NOT_FOUND storms. */
+const DROPPED_LINK_TTL_MS = 300_000
+const MAX_DROPPED_LINKS_PER_HOST = 64
+const MAX_DROPPED_LINKS = 16_384
 
 /** Protocol v1 default: at most 256 ICE candidates per logical connection. */
 export const MAX_ICE_CANDIDATES_PER_CONNECTION = 256
@@ -101,6 +108,7 @@ function errorCode(error: unknown): string | undefined {
 export class Gateway {
   readonly peers = new Map<string, Peer>()
   private links = new Map<string, Link>()
+  private droppedLinks = new Map<string, DroppedLink>()
   private wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false })
   private heartbeat: ReturnType<typeof setInterval>
   private closed = false
@@ -109,13 +117,10 @@ export class Gateway {
   readonly heartbeatIntervalMs: number
   readonly heartbeatDisconnectMs: number
   readonly forceTerminateGraceMs: number
+  readonly maxFramesPerSec: number
   readonly logger: Logger
 
   constructor(server: Server, private store: Store, origin: string, options: GatewayOptions = {}) {
-    // 自建服务部署在内网，手机 App 发来的 Origin 未必等于 PUBLIC_URL 的 origin
-    // （HarmonyOS 原生 WebSocket 客户端常见），握手阶段本来还要校验设备 token，
-    // 所以默认只记录不拦截；需要严格 CSWSH 防护时设 DSH_SERVER_STRICT_ORIGIN=1。
-    const strictOrigin = process.env.DSH_SERVER_STRICT_ORIGIN === '1'
     // One normalization path for CLI and programmatic callers: NaN, Infinity,
     // negatives and out-of-range values degrade to documented defaults instead
     // of becoming 1ms timers.
@@ -124,6 +129,7 @@ export class Gateway {
     this.heartbeatIntervalMs = timing.heartbeatIntervalMs
     this.heartbeatDisconnectMs = timing.heartbeatDisconnectMs
     this.forceTerminateGraceMs = timing.forceTerminateGraceMs
+    this.maxFramesPerSec = normalizeMaxFramesPerSec(options.maxFramesPerSec)
     this.logger = options.logger ?? new Logger('gateway', options.logLevel ?? 'info')
     this.turnEnabled = options.turnEnabled === true
 
@@ -133,11 +139,18 @@ export class Gateway {
       // The route still requires an exact match: a query string is rejected
       // (exactly as before) but only its parsed pathname is ever logged.
       const pathRejected = req.url !== '/ws/v1/connect'
-      const requestOrigin = typeof req.headers.origin === 'string' ? req.headers.origin.slice(0, 96) : ''
-      const originMismatch = requestOrigin !== '' && requestOrigin !== origin
+      // 自建服务部署在内网时，手机 App（HarmonyOS 原生 WebSocket 客户端）发来的 Origin
+      // 未必等于 PUBLIC_URL 的 origin；握手阶段本来还要校验设备 token，
+      // 所以默认只记录不拦截。需要严格 CSWSH 防护时设 DSH_SERVER_STRICT_ORIGIN=1。
+      const strictOrigin = process.env.DSH_SERVER_STRICT_ORIGIN === '1'
+      const originMismatch = Boolean(req.headers.origin) && req.headers.origin !== origin
       const originRejected = originMismatch && strictOrigin
-      if (originMismatch && !strictOrigin) {
-        this.logger.warn('ws_origin_allowed', { origin: requestOrigin, expected: origin, remoteAddress: socketAddress(socket) })
+      if (originMismatch && !originRejected) {
+        this.logger.warn('ws_origin_allowed', {
+          origin: req.headers.origin,
+          expected: origin,
+          remoteAddress: socketAddress(socket),
+        })
       }
       if (pathRejected || originRejected || this.wss.clients.size >= 256) {
         this.logger.warn('ws_upgrade_rejected', {
@@ -148,7 +161,6 @@ export class Gateway {
             : originRejected
               ? 'origin_mismatch'
               : 'connection_limit_reached',
-          origin: requestOrigin,
           clientCount: this.wss.clients.size,
           hasOrigin: Boolean(req.headers.origin),
           remoteAddress: socketAddress(socket),
@@ -178,8 +190,82 @@ export class Gateway {
       for (const link of this.links.values()) {
         if (link.stage !== 'ready' && Date.now() - link.created > 30_000) this.drop(link, 'CONNECTION_FAILED')
       }
+      this.pruneDroppedLinks(Date.now())
     }, this.heartbeatIntervalMs)
     this.heartbeat.unref()
+  }
+
+  private pruneDroppedLinks(now: number): void {
+    for (const [id, entry] of this.droppedLinks) {
+      if (entry.expiresAt <= now) this.droppedLinks.delete(id)
+    }
+  }
+
+  private evictDroppedLink(id: string, entry: DroppedLink, now: number): void {
+    this.droppedLinks.delete(id)
+    if (entry.expiresAt <= now) return
+    for (const peerId of [entry.host, entry.client]) {
+      const p = this.peers.get(peerId)
+      if (p) p.evictedTombstoneUntil = Math.max(p.evictedTombstoneUntil ?? 0, entry.expiresAt)
+    }
+  }
+
+  private recordDroppedLink(link: Link): void {
+    const now = Date.now()
+    this.pruneDroppedLinks(now)
+    this.droppedLinks.delete(link.id)
+    let hostCount = 0
+    let oldestForHost: [string, DroppedLink] | undefined
+    for (const [id, entry] of this.droppedLinks) {
+      if (entry.host === link.host) {
+        if (oldestForHost === undefined) oldestForHost = [id, entry]
+        hostCount += 1
+      }
+    }
+    if (hostCount >= MAX_DROPPED_LINKS_PER_HOST && oldestForHost !== undefined) {
+      this.evictDroppedLink(oldestForHost[0], oldestForHost[1], now)
+    }
+    while (this.droppedLinks.size >= MAX_DROPPED_LINKS) {
+      const oldest = this.droppedLinks.entries().next().value as [string, DroppedLink] | undefined
+      if (oldest === undefined) break
+      this.evictDroppedLink(oldest[0], oldest[1], now)
+    }
+    this.droppedLinks.set(link.id, {
+      host: link.host,
+      client: link.client,
+      expiresAt: now + DROPPED_LINK_TTL_MS,
+      droppedFrames: 0,
+    })
+  }
+
+  private isDroppedLinkFrame(peer: Peer, frame: ControlFrame): boolean {
+    if (frame.type === 'ping' || frame.type === 'pong' || frame.type === 'connect.request') return false
+    const p = frame.payload as Record<string, unknown>
+    const id = p.connectionId
+    if (typeof id !== 'string' || this.links.has(id)) return false
+    const now = Date.now()
+    const dropped = this.droppedLinks.get(id)
+    if (!dropped) {
+      return peer.evictedTombstoneUntil !== undefined && now < peer.evictedTombstoneUntil
+    }
+    if (dropped.expiresAt <= now) {
+      this.droppedLinks.delete(id)
+      return false
+    }
+    if (peer.id !== dropped.host && peer.id !== dropped.client) return false
+    dropped.droppedFrames += 1
+    if (dropped.droppedFrames === 1) {
+      this.logger.debug('ws_stale_link_frames_dropped', {
+        peerId: peer.id,
+        role: peer.role,
+        connectionId: safeText(id),
+      })
+    }
+    return true
+  }
+
+  droppedLinkFrameCount(connectionId: string): number {
+    return this.droppedLinks.get(connectionId)?.droppedFrames ?? 0
   }
 
   private send(peer: Peer, frame: ControlFrame): void {
@@ -189,6 +275,7 @@ export class Gateway {
   }
   private drop(link: Link, code: string): void {
     this.links.delete(link.id)
+    this.recordDroppedLink(link)
     for (const id of [link.host, link.client]) {
       const p = this.peers.get(id)
       if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, retryable: true }))
@@ -287,7 +374,7 @@ export class Gateway {
     }, this.helloTimeoutMs)
     deadline.unref()
 
-    let windowStart = Date.now(), frames = 0, bytes = 0
+    let windowStart = Date.now(), frames = 0, bytes = 0, droppedFrames = 0, droppedBytes = 0
     ws.on('error', (error) => {
       // Error messages can embed payload fragments: log the class and errno only.
       this.logger.warn('ws_socket_error', {
@@ -300,8 +387,8 @@ export class Gateway {
       state = 'closed'
       clearDeadline()
       clearGrace()
-      this.logger.debug('ws_connection_closed', {
-        peerId: peer?.id,
+      this.logger.info('ws_connection_closed', {
+        ...(peer ? { peerId: peer.id, role: peer.role } : {}),
         code,
         // The close reason is arbitrary client text: report only its presence.
         hasReason: Buffer.isBuffer(reason) ? reason.length > 0 : false,
@@ -317,8 +404,23 @@ export class Gateway {
       try {
         if (binary) throw new ApiError('INVALID_MESSAGE')
         const text = raw.toString()
-        if (Date.now() - windowStart >= 1000) { windowStart = Date.now(); frames = 0; bytes = 0 }
-        if (++frames > 512 || (bytes += Buffer.byteLength(text)) > 16 * MAX_RELAY_FRAME_BYTES) throw new ApiError('RATE_LIMITED')
+        const frameBytes = Buffer.byteLength(text)
+        if (Date.now() - windowStart >= 1000) {
+          windowStart = Date.now()
+          frames = 0
+          bytes = 0
+          droppedFrames = 0
+          droppedBytes = 0
+        }
+        const maxDroppedFrames = Math.max(this.maxFramesPerSec * 2, 1024)
+        const maxDroppedBytes = 8 * MAX_RELAY_FRAME_BYTES
+        if (frames + droppedFrames + 1 > this.maxFramesPerSec + maxDroppedFrames
+          || bytes + droppedBytes + frameBytes > 16 * MAX_RELAY_FRAME_BYTES + maxDroppedBytes) {
+          throw new ApiError('RATE_LIMITED')
+        }
+        if (state === 'awaiting_hello' && (++frames > this.maxFramesPerSec || (bytes += frameBytes) > 16 * MAX_RELAY_FRAME_BYTES)) {
+          throw new ApiError('RATE_LIMITED')
+        }
         const envelope = JSON.parse(text) as { v?: unknown }
         if (envelope && envelope.v !== 1) throw new ApiError('UNSUPPORTED_VERSION')
         frame = decodeControlFrame(text)
@@ -362,6 +464,15 @@ export class Gateway {
         if (frame.type === 'hello') throw new ApiError('INVALID_MESSAGE')
         if (!peer || this.peers.get(peer.id) !== peer) throw new ApiError('AUTH_INVALID')
         this.store.get(peer.id)
+        if (this.isDroppedLinkFrame(peer, frame)) {
+          if (++droppedFrames > maxDroppedFrames || (droppedBytes += frameBytes) > maxDroppedBytes) {
+            throw new ApiError('RATE_LIMITED')
+          }
+          return
+        }
+        if (++frames > this.maxFramesPerSec || (bytes += frameBytes) > 16 * MAX_RELAY_FRAME_BYTES) {
+          throw new ApiError('RATE_LIMITED')
+        }
         this.handle(peer, frame)
       } catch (error) {
         const code = error instanceof ApiError ? error.code : 'INVALID_MESSAGE'
@@ -402,6 +513,17 @@ export class Gateway {
     if (frame.type === 'connect.request') {
       const request = frame.payload as ConnectRequestPayload
       if (peer.role !== 'client') throw new ApiError('MEMBERSHIP_REQUIRED')
+      const candidateHost = this.peers.get(request.hostDeviceId)
+      if (candidateHost && Date.now() - candidateHost.lastPong > this.heartbeatDisconnectMs) {
+        this.logger.warn('ws_heartbeat_timeout', {
+          peerId: candidateHost.id,
+          role: candidateHost.role,
+          lastPong: candidateHost.lastPong,
+          elapsedMs: Date.now() - candidateHost.lastPong,
+          thresholdMs: this.heartbeatDisconnectMs,
+        })
+        this.disconnect(candidateHost.id, 'CONNECTION_FAILED')
+      }
       const host = this.peers.get(request.hostDeviceId)
       if (!host || host.role !== 'host') { this.send(peer, createControlFrame('error', { code: 'HOST_OFFLINE', message: 'Host is offline.', retryable: true })); return }
       this.store.get(host.id)
@@ -443,7 +565,10 @@ export class Gateway {
     if (!other) throw new ApiError('CONNECTION_FAILED')
     if (frame.type === 'connect.accepted' || frame.type === 'connect.rejected') {
       if (peer.id !== link.host || link.stage !== 'pending') throw new ApiError('INVALID_MESSAGE')
-      if (frame.type === 'connect.rejected') this.links.delete(link.id)
+      if (frame.type === 'connect.rejected') {
+        this.links.delete(link.id)
+        this.recordDroppedLink(link)
+      }
       else link.stage = 'accepted'
       this.send(other, frame)
       return

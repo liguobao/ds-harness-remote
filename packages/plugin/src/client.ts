@@ -99,6 +99,25 @@ window.__ModuleLoader__.load({
       }
     })()
     const RemotePluginOptions = createRemotePluginOptions(React)
+    // Detail-page action beside the official Uninstall/Enable controls. The
+    // 0.2.2 bundle page renders the official README before the configuration
+    // section, so this jumps straight to the Remote card instead of requiring a
+    // scroll through the whole document.
+    function RemotePluginSettingsAction(props: { t: Translate; subject?: unknown }): unknown {
+      if (pluginSubjectPackageName(props.subject) !== 'ds-harness-remote') return null
+      const label = props.t('openPluginSettings')
+      return React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteDetailSettingsAction',
+        'aria-label': label,
+        onClick: (event: Event) => {
+          const button = event.currentTarget as Element | null
+          const page = button?.closest('[data-plugin-detail],[data-plugin-row-detail]') ?? document
+          const target = page.querySelector('[data-dsh-remote-settings]')
+          target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        },
+      }, label)
+    }
     const RemoteWorkspaceAction = createRemoteWorkspaceAction(React, portal)
     const RemoteProgressView = createRemoteProgressView(React)
     const RemoteSessionHeaderAction = createRemoteSessionHeaderAction(React, portal)
@@ -145,7 +164,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         void refresh().catch(reason => {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
           setSupported(false)
         })
       }, [])
@@ -179,7 +198,7 @@ window.__ModuleLoader__.load({
           }
           window.location.reload()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
           setBusy(false)
         }
       }
@@ -192,7 +211,7 @@ window.__ModuleLoader__.load({
           await props.control('host.account.login', { email: email.trim(), password })
           await refreshStatus()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         } finally {
           setPassword('')
           setBusy(false)
@@ -208,7 +227,7 @@ window.__ModuleLoader__.load({
           setHostRegistrationCode('')
           await refreshStatus()
         } catch (reason) {
-          setError(messageOf(reason))
+          setError(messageOf(reason, t))
         } finally {
           setBusy(false)
         }
@@ -587,7 +606,7 @@ window.__ModuleLoader__.load({
         id: 'ds-harness-remote-global-context',
         order: 20,
         locale: localeNamespace,
-        inject: () => ({ control, statusFeed }),
+        inject: () => ({ control, statusFeed, onSignIn: openRemote }),
       }, RemoteSessionHeaderAction))
       ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
         name: 'sidebar.footer.action',
@@ -637,6 +656,23 @@ window.__ModuleLoader__.load({
           sidebarEntry,
         }),
       }, RemotePluginOptions))
+      // Top-of-page shortcut to the configuration card. Reused on a bundle's
+      // and a single row's page (the bundle's README moved the card far down).
+      ctx.slots.inject('plugins.detail.actions', () => ctx.slots.register({
+        name: 'plugins.detail.actions',
+        id: 'ds-harness-remote-settings-link',
+        order: 30,
+        locale: localeNamespace,
+        inject: () => ({}),
+      }, RemotePluginSettingsAction))
+    }
+
+    function pluginSubjectPackageName(subject: unknown): string | undefined {
+      if (typeof subject !== 'object' || subject === null) return undefined
+      const pkg = (subject as { pkg?: unknown }).pkg
+      if (typeof pkg !== 'object' || pkg === null) return undefined
+      const name = (pkg as { name?: unknown }).name
+      return typeof name === 'string' ? name : undefined
     }
 
     function isMissingControlRoute(reason: unknown): boolean {

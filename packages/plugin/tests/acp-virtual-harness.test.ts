@@ -310,8 +310,34 @@ describe('AcpVirtualHarness', () => {
       const image = history.value.records.find((entry: any) => entry.event.type === 'user/message').event.data.content[0]
       expect(image).toMatchObject({ type: 'image', attachment: { mediaType: 'image/png', width: 1, height: 1 } })
       expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'acp:acp_1', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: true, value: { data } })
+      // 0.2.2 clients send the full image reference instead of the bare id.
+      expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'acp:acp_1', attachment: image.attachment } } }, signal)).toMatchObject({ ok: true, value: { data } })
       expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'acp:old', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: false })
       onFrame!({ frame: { method: 'session/update', params: { sessionId: 'acp_1', update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
+    } finally { await target.close() }
+  })
+
+  it('passes images and exposes attachments in Hermes sessions', async () => {
+    const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
+    let onFrame: ((frame: AgentAcpFrameData) => void) | undefined
+    const client = {
+      ...fakeAcp(),
+      call: vi.fn(async (method: string) => method === 'session/new' ? { sessionId: 'hermes_1' } : {}),
+      prompt: vi.fn(async () => ({})),
+      openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'hermes')
+    const signal = new AbortController().signal
+    try {
+      const workspace = await target.selectOrCreateWorkspace('/test')
+      await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
+      expect(await target.dispatch('session/prompt', { args: { request: { sessionId: 'hermes:hermes_1', content: [{ type: 'image', mediaType: 'image/png', data }] } } }, signal)).toMatchObject({ ok: true })
+      expect(client.prompt).toHaveBeenCalledWith('hermes_1', '', signal, [{ type: 'image', mimeType: 'image/png', data }], 'hermes')
+      const history = await target.dispatch('session/history', { args: { request: { sessionId: 'hermes:hermes_1' } } }, signal) as any
+      const image = history.value.records.find((entry: any) => entry.event.type === 'user/message').event.data.content[0]
+      expect(image).toMatchObject({ type: 'image', attachment: { mediaType: 'image/png', width: 1, height: 1 } })
+      expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'hermes:hermes_1', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: true, value: { data } })
+      onFrame!({ frame: { method: 'session/update', params: { sessionId: 'hermes_1', update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
     } finally { await target.close() }
   })
 
@@ -1122,4 +1148,19 @@ describe('AcpVirtualHarness', () => {
       await target.close()
     }
   })
+})
+
+it.each(['claude', 'hermes'] as const)('%s routes direct files and terminal streams through ACP tools', async backend => {
+  const client = { ...fakeAcp(), workspaceToolCall: vi.fn(async () => ({ entries: [] })) }
+  const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
+  const signal = new AbortController().signal
+  const scope = `${backend}:saved`
+  try {
+    const args = { workspaceFileScopeId: scope, path: '.' }
+    expect(await target.dispatch('workspaceFiles/list', { args }, signal)).toMatchObject({ ok: true })
+    expect(client.workspaceToolCall).toHaveBeenCalledWith('saved', backend, 'workspaceFiles/list', args, signal)
+    await target.open('terminal/follow', { args: { agentId: scope, id: 'term', attachmentId: 'attachment' } }, signal)
+    expect(client.openStream).toHaveBeenLastCalledWith('saved', expect.any(Function), expect.any(Function), signal,
+      { backend, endpoint: 'terminal/follow', args: { agentId: scope, id: 'term', attachmentId: 'attachment' } })
+  } finally { await target.close() }
 })

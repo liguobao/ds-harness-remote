@@ -43,6 +43,47 @@ class RemoteForegroundServiceModule(
   }
 
   @ReactMethod
+  fun updateLiveTask(
+    hostId: String,
+    sessionId: String,
+    badge: String,
+    title: String,
+    statusText: String,
+    isWaitingInput: Boolean,
+    updatedAtMs: Double,
+    summary: String,
+    promise: Promise,
+  ) {
+    context.runOnUiQueueThread {
+      try {
+        val boundedTitle = title.take(150)
+        val boundedBadge = badge.take(10)
+        val boundedStatus = statusText.take(50)
+        val safeTime = if (updatedAtMs.isFinite() && updatedAtMs > 0) updatedAtMs.toLong() else 0L
+        val boundedSummary = summary.take(400)
+        RemoteForegroundService.updateLiveTask(
+          hostId, sessionId, boundedBadge, boundedTitle, boundedStatus, isWaitingInput, safeTime, boundedSummary
+        )
+        promise.resolve(null)
+      } catch (e: Exception) {
+        promise.reject("UPDATE_LIVE_TASK_FAILED", e.message, e)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun clearLiveTask(promise: Promise) {
+    context.runOnUiQueueThread {
+      try {
+        RemoteForegroundService.clearLiveTask()
+        promise.resolve(null)
+      } catch (e: Exception) {
+        promise.reject("CLEAR_LIVE_TASK_FAILED", e.message, e)
+      }
+    }
+  }
+
+  @ReactMethod
   fun waitUntilStopped(lifetimeId: String, promise: Promise) {
     context.runOnUiQueueThread { RemoteForegroundService.waitUntilStopped(lifetimeId, promise) }
   }

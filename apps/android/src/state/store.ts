@@ -1,4 +1,4 @@
-import { createChatImageLoader } from '../services/chat-image-loader'
+import { chatImageAttachmentReference, createChatImageLoader } from '../services/chat-image-loader'
 import { loadWorkspacePreview } from '../services/workspace-file-preview'
 import type { RemoteSession } from '../types'
 import { create } from 'zustand'
@@ -24,6 +24,8 @@ const runtime: SessionRuntime = new SessionRuntime({
 export const requireProxy = () => runtime.connection.requireProxy()
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
 export const requireBotClient = () => runtime.connection.requireBotClient()
+export const requireConnectionRpc = () => (method: string, params: unknown, signal?: AbortSignal) => runtime.connection.rpc(method, params, signal)
+export const getConnectionGeneration = () => runtime.connectionGeneration
 
 export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
 
@@ -33,7 +35,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createPromptActions({ set, get, runtime }),
   ...createSessionEventActions({ set, get, runtime }),
   ...createAccountActions({ set, get }),
-  ...createPreferenceActions({ set, get }),
+  ...createPreferenceActions({ set, get, runtime }),
   ...createScheduleActions({
     set,
     get,
@@ -116,14 +118,15 @@ export function sessionChatImageLoader(session: RemoteSession) {
         || runtime.connection.requireProxy() !== proxy
         || state.selectedSession?.sessionId !== session.sessionId) throw new Error('Image connection expired')
     },
-    attachment: (sessionId, attachmentId, signal) => {
+    attachment: (sessionId, image, signal) => {
       if (session.backend === 'codex') {
+        if (image.attachmentId === undefined) throw new Error('Image attachment unavailable')
         return runtime.connection.requireCodex().request('dsh/sessionAttachment', {
-          threadId: sessionId.replace(/^codex:/u, ''), attachmentId,
+          threadId: sessionId.replace(/^codex:/u, ''), attachmentId: image.attachmentId,
         }, signal)
       }
       if (session.backend !== undefined && session.backend !== 'harness') throw new Error('Image attachment unavailable')
-      return runtime.connection.readSessionImageAttachment(sessionId, attachmentId, signal)
+      return runtime.connection.readSessionImageAttachment(sessionId, chatImageAttachmentReference(image), signal)
     },
     workspace: (path, signal) => {
       if (session.backend === 'codex' || session.backend === 'claude' || session.backend === 'hermes') throw new Error('Image preview unavailable')

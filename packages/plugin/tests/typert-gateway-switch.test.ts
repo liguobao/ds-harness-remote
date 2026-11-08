@@ -316,7 +316,7 @@ describe('TypertGatewaySwitch', () => {
     expect(remote.dispatch).not.toHaveBeenCalled()
     expect(remote.open).not.toHaveBeenCalled()
   })
-  it('carries the signal to the rc.1 fifth slot and never as the third argument (P0-2)', async () => {
+  it('supplies the fallback owner Peer for local rc.1 opens and rejects a peerless one', async () => {
     const calls: unknown[][] = []
     // A real six-parameter function keeps `.length === 6` so the switch detects the rc.1 arity.
     function rc1Open(
@@ -344,19 +344,38 @@ describe('TypertGatewaySwitch', () => {
       dispatch: vi.fn(async () => ({ ok: true as const, value: 'remote-dispatch' })),
       open: vi.fn(async () => (async function* () { yield 'remote-open' })()),
     }
-    const target = new TypertGatewaySwitch(gateway)
+    // Harness 0.2.2 dereferences peer.signal for forwarded events; a local
+    // carrier without a per-connection peer must use the shared owner fallback.
+    const fallbackPeer = { signal: new AbortController().signal, principal: { kind: 'owner' } }
+    const target = new TypertGatewaySwitch(gateway, () => fallbackPeer)
     const alwaysLocal = target.local()
     target.install()
     target.selectRemote(remote)
 
     const signal = new AbortController().signal
+    const explicitPeer = { signal: new AbortController().signal }
+    await expect(values(await target.local(explicitPeer).open('$events', { args: {} }, signal))).resolves.toEqual(['rc1-open'])
+    expect(calls).toHaveLength(1)
+    expect(calls[0]![3]).toBe(explicitPeer)
+    calls.length = 0
     await expect(values(await alwaysLocal.open('$events', { args: {} }, signal))).resolves.toEqual(['rc1-open'])
     expect(calls).toHaveLength(1)
     const args = calls[0]!
     expect(typeof (args[2] as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator]).toBe('function')
-    expect(args[3]).toBeUndefined()
+    expect(args[3]).toBe(fallbackPeer)
     expect(args[4]).toBe(signal)
     expect(args[5]).toBeInstanceOf(AbortController)
+
+    // Without any owner Peer the open fails with an actionable error, not a
+    // TypeError from the official Gateway dereferencing `peer.signal`.
+    const peerlessGateway = {
+      invoke: vi.fn(async () => 'local-invoke'),
+      dispatchRpc: vi.fn(async () => ({ ok: true as const, value: 'local-dispatch' })),
+      openWireStream: rc1Open,
+      wireStream: gateway.wireStream,
+    }
+    const peerless = new TypertGatewaySwitch(peerlessGateway).local()
+    await expect(peerless.open('$events', { args: {} }, signal)).rejects.toThrow(/requires an owner Peer/)
 
     // The public carrier wrapper receives the same rc.1 argument order from the mux.
     calls.length = 0

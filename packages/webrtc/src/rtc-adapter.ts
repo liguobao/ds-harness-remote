@@ -39,6 +39,7 @@ export type RtcPeerConnectionDiagnosticEvent =
 
 export interface RtcPeerConnectionConfiguration {
   iceServers?: RtcIceServer[]
+  iceTransportPolicy?: 'all' | 'relay'
   onDiagnostic?: (event: RtcPeerConnectionDiagnosticEvent) => void
 }
 
@@ -111,7 +112,10 @@ export function browserRtcFactory(): RtcPeerConnectionFactory {
     create(configuration) {
       // `any` keeps the DOM handler `this`/event typing out of the adapter.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers }) as any
+      const raw = new RTCPeerConnection({
+        iceServers: configuration.iceServers,
+        iceTransportPolicy: configuration.iceTransportPolicy,
+      }) as any
       return {
         get connectionState(): string { return raw.connectionState as string },
         get iceConnectionState(): string { return raw.iceConnectionState as string },
