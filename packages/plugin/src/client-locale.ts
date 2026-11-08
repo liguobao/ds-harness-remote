@@ -2,6 +2,7 @@
 export const localeNamespace = 'ds-harness-remote'
 
 export const en = {
+  pairingLoginTab: 'DSH-Go pairing',
   pairingTitle: "Pair with DSH-Go",
   pairingHint: "Scan in DSH-Go, confirm on your phone, then enter the phone code on this computer.",
   pairingHostOnly: "New Hosts accept connections only. Pairing does not enable control of other devices.",
@@ -337,6 +338,7 @@ export const en = {
 } as const
 
 export const zh: Record<keyof typeof en, string> = {
+  pairingLoginTab: 'DSH-Go 扫码',
   pairingTitle: "与 DSH-Go 配对",
   pairingHint: "使用 DSH-Go 扫码并在手机确认，再将手机验证码输入本机。",
   pairingHostOnly: "新 Host 默认仅被控；配对不会授予主控其他设备的权限。",

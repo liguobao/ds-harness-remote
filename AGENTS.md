@@ -1093,3 +1093,7 @@ OS automation; a trusted native user-presence primitive would be required.
 Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
 docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
 pairing approval was performed.
+
+## Pairing sign-in placement (2026-11-08)
+
+DSH-Go pairing lives in the local settings Sign in tab list, alongside existing OAuth/password methods, rather than above general settings. Authorized Hosts retain a pairing shortcut. Provider-loading failures do not reset a manually selected pairing tab; switching/closing the panel does not cancel the Server session or reopen its single attempt.

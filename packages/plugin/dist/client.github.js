@@ -1633,6 +1633,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // packages/plugin/src/client-locale.ts
   var localeNamespace = "ds-harness-remote", en = {
+    pairingLoginTab: "DSH-Go pairing",
     pairingTitle: "Pair with DSH-Go",
     pairingHint: "Scan in DSH-Go, confirm on your phone, then enter the phone code on this computer.",
     pairingHostOnly: "New Hosts accept connections only. Pairing does not enable control of other devices.",
@@ -1964,6 +1965,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     hermesVirtualWorkspace: "Hermes virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
+    pairingLoginTab: "DSH-Go \u626B\u7801",
     pairingTitle: "\u4E0E DSH-Go \u914D\u5BF9",
     pairingHint: "\u4F7F\u7528 DSH-Go \u626B\u7801\u5E76\u5728\u624B\u673A\u786E\u8BA4\uFF0C\u518D\u5C06\u624B\u673A\u9A8C\u8BC1\u7801\u8F93\u5165\u672C\u673A\u3002",
     pairingHostOnly: "\u65B0 Host \u9ED8\u8BA4\u4EC5\u88AB\u63A7\uFF1B\u914D\u5BF9\u4E0D\u4F1A\u6388\u4E88\u4E3B\u63A7\u5176\u4ED6\u8BBE\u5907\u7684\u6743\u9650\u3002",
@@ -2891,7 +2893,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), selectedLoginMethod = React.useRef(loginMethod);
+      selectedLoginMethod.current = loginMethod;
+      let associationReadRun = React.useRef(0), association = associations.client ?? associations.host, applyAssociations = (view) => {
         setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association }));
       }, applyView = (view, updateAssociations = !0) => {
         setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setDebugLogging(view.config.logLevel === "debug"), setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? !0), setSidebarEntry(view.config.sidebar?.entry ?? "standard"), props.sidebarEntry?.publish(view.config.sidebar?.entry ?? "standard"), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
@@ -2933,19 +2937,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
           if (!active || run !== providerRequestRun.current) return;
           let available = items.filter((item) => item.qrStartUrl != null);
           setOAuthProviders(available), setLoginMethod((current) => {
-            if (loginMethodManuallySelected.current && (current === "password" || available.some((item) => `oauth:${item.id}` === current))) return current;
+            if (loginMethodManuallySelected.current && (current === "password" || current === "device_pairing" || available.some((item) => `oauth:${item.id}` === current))) return current;
             let preferred = available.find((item) => item.id === props.preferredQrProvider) ?? available[0];
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch((reason) => {
-          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason, t)));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod((current) => current === "device_pairing" ? current : "password"), selectedLoginMethod.current !== "device_pairing" && setError(messageOf(reason, t)));
         }).finally(() => {
           active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
           active = !1;
         };
       }, [signInOpen, props.preferredQrProvider, providerReload]), React.useEffect(() => {
-        if (!signInOpen || providersLoading || loginMethod === "password" || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || qrFailed || qrCompleted) return;
+        if (!signInOpen || providersLoading || !loginMethod.startsWith("oauth:") || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || qrFailed || qrCompleted) return;
         let active = !0, run = ++qrFlowRun.current;
         return setQrBusy(!0), setQrFailed(!1), setError(void 0), setQrExpired(!1), props.control("client.account.qr.start", { provider: loginMethod.slice(6) }).then(async (session) => {
           if (!active || run !== qrFlowRun.current) return;
@@ -2963,7 +2967,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           active = !1;
         };
       }, [signInOpen, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload]), React.useEffect(() => {
-        if (!signInOpen || loginMethod === "password" || qrSession === void 0) return;
+        if (!signInOpen || !loginMethod.startsWith("oauth:") || qrSession === void 0) return;
         let active = !0, polling = !1, settled = !1, run = qrFlowRun.current, timer, poll = () => {
           polling || settled || !active || run !== qrFlowRun.current || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then((result) => {
             !active || settled || run !== qrFlowRun.current || (result.status === "complete" ? (settled = !0, timer !== void 0 && clearInterval(timer), setError(void 0), setQrExpired(!1), setQrCompleted(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)) : result.status === "expired" && (settled = !0, timer !== void 0 && clearInterval(timer), setQrExpired(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)));
@@ -3281,9 +3285,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
           id: "dsh-remote-inline-signin",
           className: "dshRemoteInlineSignIn"
         },
-        oauthProviders.length === 0 && !providersLoading && !providersFailed ? null : React.createElement(
+        React.createElement(
           "div",
-          { className: "dshRemoteLoginTabs", role: "tablist" },
+          { className: "dshRemoteLoginTabs", role: "tablist", "aria-label": t("signInAccount") },
+          React.createElement("button", {
+            type: "button",
+            role: "tab",
+            id: "dsh-remote-settings-device-pairing-tab",
+            "aria-selected": loginMethod === "device_pairing",
+            "aria-controls": "dsh-remote-settings-device-pairing-panel",
+            className: loginMethod === "device_pairing" ? "isActive" : "",
+            disabled: busy,
+            onClick: () => selectLoginMethod("device_pairing")
+          }, t("pairingLoginTab")),
           ...orderedQrProviders.map(qrLoginTab),
           React.createElement("button", {
             type: "button",
@@ -3296,8 +3310,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
             onClick: () => selectLoginMethod("password")
           }, t("accountPasswordLogin"))
         ),
-        providersLoading ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("loadingLoginProviders")) : null,
-        providersFailed ? React.createElement("button", {
+        providersLoading && loginMethod !== "device_pairing" ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("loadingLoginProviders")) : null,
+        providersFailed && loginMethod !== "device_pairing" ? React.createElement("button", {
           type: "button",
           className: "dshRemoteReconnect",
           disabled: busy,
@@ -3305,7 +3319,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
             setError(void 0), setProviderReload((v) => v + 1);
           }
         }, t("retryLoginProviders")) : null,
-        passwordVisible ? React.createElement(
+        loginMethod === "device_pairing" ? React.createElement(
+          "div",
+          { role: "tabpanel", id: "dsh-remote-settings-device-pairing-panel", "aria-labelledby": "dsh-remote-settings-device-pairing-tab" },
+          React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverUrl !== settingsView?.config.serverUrl, t, onComplete: () => void props.control("settings.get").then((view) => applyView(view)).catch(() => {
+          }) })
+        ) : passwordVisible ? React.createElement(
           "div",
           {
             className: "dshRemoteClientLogin",
@@ -3444,8 +3463,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
         open ? React.createElement(
           "div",
           { className: "dshRemotePluginCardBody" },
-          loaded ? React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverUrl !== settingsView?.config.serverUrl, t, onComplete: () => void props.control("settings.get").then((view) => applyView(view)).catch(() => {
-          }) }) : null,
           loaded ? association !== void 0 ? React.createElement(
             "div",
             { className: "dshRemoteSettings" },
@@ -3539,11 +3556,22 @@ Minimum version required to store current data is: ` + bestVersion + `.
               }, error ?? (notice === void 0 ? "" : t(notice.key, notice.params))),
               React.createElement("button", {
                 type: "button",
+                className: "dshRemoteSave",
+                disabled: busy || !loaded,
+                "aria-expanded": signInOpen,
+                "aria-controls": "dsh-remote-inline-signin",
+                onClick: () => {
+                  selectLoginMethod("device_pairing"), setSignInOpen((current) => !current);
+                }
+              }, t(signInOpen ? "close" : "pairingLoginTab")),
+              React.createElement("button", {
+                type: "button",
                 className: "dshRemoteDiscard",
                 disabled: busy || !writable,
                 onClick: () => void logout()
               }, t(busy ? "signingOut" : "signOut"))
-            )
+            ),
+            inlineSignIn
           ) : React.createElement(
             "div",
             { className: "dshRemoteSettings" },
