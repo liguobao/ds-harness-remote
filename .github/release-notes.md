@@ -1,8 +1,12 @@
 ## 中文
 
-**v0.6.3 · Android build 71**
+**v0.6.4 · Android build 71**
 
-- 适配 DeepSeek Harness `0.2.2-rc.1`：远程会话图片按新的附件引用契约重新可用，CodeX/ACP 会话的实时状态更新适配新的投影帧，新增的轨迹原始结果、自动化任务编辑与第三方插件更新界面可通过 Remote 使用。同时保留并已验证 Harness `0.2.1-rc.5` 兼容。
+- 新增 DS Bot 0.3.0 多会话、群聊、Agent 标识、设置子页、日程联动和电脑端安装指引。
+- 新增离线会话秒开、缓存阅读、工作区快捷创建、主机切换和连接诊断。
+- 改进 DSH-Go 配对、二维码、登录布局、服务地址编辑和账号标签。
+- 修复超大会话目录、损坏身份恢复、重连与自部署 Server 刷新恢复问题。
+- 新增 Windows Codex CLI 发现，统一发布 bundle 路径并补充 Issue 模板与许可证。
 - 明确 Remote 自身的 DSH 0.2.2 插件页在线更新入口：npm 安装可检查版本并更新，热更新失败时由 DSH 尝试恢复旧版；GitHub / 本地 link 安装需先切换至 npm。
 - 要求 Node.js `>=24.9`（与 Harness 0.2.2 一致）；Linux 安装器改为安装 Node.js 24.9.0。
 - 修复 Harness 0.2.2 上转发事件流因缺少调用 owner Peer 而触发 Desktop 客户端重连循环的问题。
@@ -24,9 +28,13 @@
 
 ## English
 
-**v0.6.3 · Android build 71**
+**v0.6.4 · Android build 71**
 
-- Support DeepSeek Harness `0.2.2-rc.1`: remote session images load again with the new attachment reference contract, CodeX/ACP sessions keep live state updates with the new projection frames, and the newly added Trajectory raw results, automation editing and third-party plugin update surfaces work over Remote. Harness `0.2.1-rc.5` remains supported and validated.
+- Add DS Bot 0.3.0 conversations, groups, agent badges, settings subpages, schedules and desktop installation guidance.
+- Add offline session instant-open, cached reading, direct workspace creation, host switching and connection diagnostics.
+- Improve DSH-Go pairing, QR sign-in, login layouts, editable server addresses and account labels.
+- Fix oversized session catalogues, corrupt identity recovery, reconnect handling and self-hosted refresh recovery.
+- Add Windows Codex CLI discovery, normalize release bundle paths, and add issue templates and the repository license.
 - Document online updates for Remote itself in DSH 0.2.2 Plugin management: npm installations can check versions and update, with DSH attempting to restore the previous version after a failed hot update; GitHub and local link installations must switch to npm first.
 - Require Node.js `>=24.9`, matching Harness 0.2.2. The Linux installer now provisions Node.js 24.9.0.
 - Fix a Harness 0.2.2 reconnect loop caused by opening the forwarded Remote event stream without a calling owner Peer.
