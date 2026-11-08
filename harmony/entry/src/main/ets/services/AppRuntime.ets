@@ -910,8 +910,14 @@ export class AppRuntime {
       }
       if (autoRetry) {
         // 自动重连期间的单次失败不打断退避序列，继续按下一档重试。
+        // 例外：失败原因是「主机不在线」——说明服务器已经回来了，只是主机插件还没重新注册，
+        // 这种通常几秒内就好，按 30 秒退避去等纯属浪费（实测恢复被拖到 34.8 秒）。
         const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
-        const delay: number = AppRuntime.RECONNECT_DELAYS_MS[index];
+        const offline: boolean = errorMessage(error).toLowerCase().indexOf('host is offline') >= 0
+          || errorMessage(error).indexOf('设备不在线') >= 0;
+        const delay: number = offline
+          ? Math.min(5000, AppRuntime.RECONNECT_DELAYS_MS[index])
+          : AppRuntime.RECONNECT_DELAYS_MS[index];
         this.reconnectAttempt += 1;
         this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '
           + this.reconnectAttempt + ' / ' + AppRuntime.MAX_RECONNECT_ATTEMPTS + ' 次）';

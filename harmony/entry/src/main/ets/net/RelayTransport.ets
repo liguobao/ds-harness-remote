@@ -207,6 +207,14 @@ export function describeControlClose(code: number, reason: string): CloseVerdict
     verdict.message = '服务器正在重启，稍后自动重连';
     return verdict;
   }
+  // 4009 = 服务器主动下线（server shutdown）：典型场景是运维重启 relay，
+  // 属于「等一会儿就好」的瞬时状态，必须自动重连，不能交回用户手动点。
+  // 实测：停服 12 秒后，此前被判成「不重连」，客户端一直停在设备列表，
+  // 直到 App 回前台才恢复（23 秒）。
+  if (code === 4009) {
+    verdict.message = '服务器正在重启（4009 server shutdown），稍后自动重连';
+    return verdict;
+  }
   if (code === 1006) {
     verdict.message = '网络中断，连接被异常关闭';
     return verdict;
