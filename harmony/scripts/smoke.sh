@@ -33,6 +33,10 @@ if [ -z "$DEV" ]; then
   echo "· 未指定设备，使用 $DEV"
 fi
 
+echo "· [0/4] 一致性自检（版本号两处 / i18n 覆盖）"
+node "$ROOT/scripts/bump-version.mjs" --check >/tmp/smoke-version.log 2>&1 || { cat /tmp/smoke-version.log; fail "版本号两处不一致（用 bump-version 同步）"; }
+node "$ROOT/scripts/check-i18n.mjs" >/tmp/smoke-i18n.log 2>&1 || { cat /tmp/smoke-i18n.log; fail "i18n 校验未通过"; }
+
 echo "· [1/4] 构建（本机签名，签名材料不入库）"
 "$ROOT/scripts/build-local.sh" >/tmp/smoke-build.log 2>&1 || { tail -20 /tmp/smoke-build.log; fail "构建失败"; }
 [ -f "$HAP" ] || fail "没有产出 signed hap：$HAP"
