@@ -1,3 +1,4 @@
+import { savedPairingSchema } from './pairing-contract.js'
 import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -293,7 +294,7 @@ export async function prepareDefaultIdentityDirectory(
  */
 export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   const rejected = () => new IdentityInvalidError('Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.')
-  const identityFiles = new Set(['device.json', 'device.key', 'trusted-peers.json', 'server-credentials.json'])
+  const identityFiles = new Set(['device.json', 'device.key', 'trusted-peers.json', 'server-credentials.json', 'host-pairing.json', 'pairing-host-only.json'])
   let identities = 0
   const checkIdentity = async (directory: string, scope?: string): Promise<void> => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
@@ -325,6 +326,17 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
       const origin = new URL(credentials.serverUrl)
       if (!['http:', 'https:'].includes(origin.protocol)) throw rejected()
       if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) throw rejected()
+    }
+    if (names.has('pairing-host-only.json')) {
+      await assertPrivateMode(join(directory, 'pairing-host-only.json'))
+      z.object({ hostOnly: z.literal(true) }).strict().parse(JSON.parse(await readFile(join(directory, 'pairing-host-only.json'), 'utf8')))
+    }
+    if (names.has('host-pairing.json')) {
+      await assertPrivateMode(join(directory, 'host-pairing.json'))
+      const pairing = savedPairingSchema.parse(JSON.parse(await readFile(join(directory, 'host-pairing.json'), 'utf8')))
+      if (pairing.deviceId !== record.deviceId || pairing.session.host.deviceId !== record.deviceId || pairing.session.host.identityKey !== record.publicKey || pairing.session.host.role !== 'host') throw rejected()
+      const origin = new URL(pairing.serverUrl)
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== pairing.serverUrl || scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) throw rejected()
     }
     identities++
   }

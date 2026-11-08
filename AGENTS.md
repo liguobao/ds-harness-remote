@@ -1070,3 +1070,26 @@ Remote 窗口先通过 loopback `client.authorization.status` 只读检查本地
 保留已知列表，不将失败解释为退出登录；明确授权错误码才回登录。空主机文案仅用于
 成功的空列表，不用于请求失败。Plugin check、client-runtime 17 个核心测试、build、
 DSH bundle 与 diff check 通过；未新增 Windows 首次安装或跨设备验收。
+
+## DSH-Go pairing v1 (2026-11-08)
+
+The local Remote settings support Host QR → phone confirmation → one local code
+submission. No phone code retrieval, CLI confirmation, model tool or tunnel route
+is added. The exact final request is encrypted with AES-GCM and retained for safe
+result recovery; retries cannot change its code or submission ID. New paired
+Hosts retain an inbound-only policy through refresh/logout/restart and cannot
+create a Client role. Existing credentials preserve their behavior. Strict legacy
+storage ownership validation now recognizes and validates the pairing records and
+Host-only policy rather than rejecting them as unknown files.
+
+Validation: 75 plugin test files / 559 tests, source/test typecheck, production
+bundle build and verify-dsh-plugin passed. The actual C# API/Gateway integration
+(script scripts/check-device-pairing.ts) verified pairing, independent credentials,
+restart recovery, Host hello, encrypted Noise/Relay RPC and scoped revocation.
+The phone is simulated in Node: this is not Dart/Android acceptance. The actual
+React pairing component was checked in an isolated desktop/narrow preview; not a
+full Harness UI acceptance. Loopback/isTrusted cannot prove human presence against
+OS automation; a trusted native user-presence primitive would be required.
+Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
+docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
+pairing approval was performed.

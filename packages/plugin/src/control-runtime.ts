@@ -35,7 +35,7 @@ export interface PluginSettingsView {
 }
 
 export interface PluginAssociation {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
 }
 
@@ -99,6 +99,19 @@ export class PluginControlRuntime {
     try {
       // A request arriving during replacement must use the new Server runtime.
       if (endpoint !== 'settings.server.set') await this.serverSwitchFlight
+      if (endpoint.startsWith('host.pairing.')) {
+        if (this.host?.pairingControl === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'Host device pairing is unavailable.')
+        const action = endpoint.slice('host.pairing.'.length)
+        if (action !== 'start' && action !== 'status' && action !== 'confirm' && action !== 'cancel') throw new ClientModeError('METHOD_NOT_ALLOWED', 'Unknown pairing action.')
+        const input = record(payload)
+        if (Object.keys(input).some(key => key !== 'sessionId' && key !== 'verificationCode')
+          || input.sessionId !== undefined && typeof input.sessionId !== 'string'
+          || input.verificationCode !== undefined && typeof input.verificationCode !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'Invalid pairing request.')
+        if (action === 'start') await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        const view = await this.host.pairingControl(action, input as { sessionId?: string; verificationCode?: string })
+        if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        return ok(view)
+      }
       if (endpoint === 'settings.development.set') return ok(await this.setDevelopment(payload))
       if (endpoint === 'settings.appearance.set') return ok(await this.setAppearance(payload))
       if (endpoint === 'settings.get') return ok(await this.settingsView())
@@ -175,6 +188,7 @@ export class PluginControlRuntime {
       throw new ClientModeError('INVALID_MESSAGE', 'Server URL is required.')
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
+    if (value.role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming connections.')
     const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl })
 
     const identities = new IdentityStore({
@@ -255,6 +269,7 @@ export class PluginControlRuntime {
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
     const currentRole = current.role === 'client' ? 'client' : 'host'
+    if (role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (role !== currentRole && current.serverUrl !== undefined
       && await this.association(current.serverUrl, role) === undefined) {
       await this.authorizeOwnedRole(current.serverUrl, currentRole, role)
@@ -442,6 +457,9 @@ export class PluginControlRuntime {
     const sourceApi = sourceRole === 'host'
       ? new HostServerApi(serverUrl, sourceStore)
       : new ClientServerApi(serverUrl, sourceStore)
+    sourceApi.bindIdentity(sourceIdentity)
+    await sourceApi.loadStoredPolicy()
+    if (sourceApi.pairingHostOnly()) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'Paired Host cannot create a Client identity.')
     const sourceCredentials = await sourceApi.authenticate(sourceIdentity)
 
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole)
@@ -510,6 +528,7 @@ export class PluginControlRuntime {
   }
 
   private async association(serverUrl: string, role: 'host' | 'client'): Promise<PluginAssociation | undefined> {
+    if (role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) return undefined
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, serverUrl, role),
     })

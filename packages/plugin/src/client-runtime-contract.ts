@@ -120,6 +120,7 @@ export interface HostAuthorizationControl {
   setAgentBackends?(config: ResolvedConfig): Promise<void>
   setTerminalEnabled?(enabled: boolean): void
   setLoopbackPorts?(ports: readonly number[]): void
+  pairingControl?(action: 'start' | 'status' | 'confirm' | 'cancel', input: { sessionId?: string; verificationCode?: string }): Promise<import('./pairing-contract.js').HostPairingView | undefined>
   hostStatus(): {
     deviceId?: string
     configured: boolean
@@ -131,6 +132,7 @@ export interface HostAuthorizationControl {
     account?: string
     authorized: boolean
     accountRequired: boolean
+    pairingHostOnly?: boolean
     connectedClients?: Array<{
       deviceId: string
       name: string

@@ -1582,7 +1582,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // node_modules/qrcode/lib/browser.js
   var require_browser = __commonJS({
     "node_modules/qrcode/lib/browser.js"(exports) {
-      var canPromise = require_can_promise(), QRCode3 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
+      var canPromise = require_can_promise(), QRCode4 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
       function renderCanvas(renderFunc, canvas, text, opts, cb) {
         let args = [].slice.call(arguments, 1), argsNum = args.length, isLastArgCb = typeof args[argsNum - 1] == "function";
         if (!isLastArgCb && !canPromise())
@@ -1596,7 +1596,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             throw new Error("Too few arguments provided");
           return argsNum === 1 ? (text = canvas, canvas = opts = void 0) : argsNum === 2 && !canvas.getContext && (opts = text, text = canvas, canvas = void 0), new Promise(function(resolve, reject) {
             try {
-              let data = QRCode3.create(text, opts);
+              let data = QRCode4.create(text, opts);
               resolve(renderFunc(data, canvas, opts));
             } catch (e) {
               reject(e);
@@ -1604,13 +1604,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
           });
         }
         try {
-          let data = QRCode3.create(text, opts);
+          let data = QRCode4.create(text, opts);
           cb(null, renderFunc(data, canvas, opts));
         } catch (e) {
           cb(e);
         }
       }
-      exports.create = QRCode3.create;
+      exports.create = QRCode4.create;
       exports.toCanvas = renderCanvas.bind(null, CanvasRenderer.render);
       exports.toDataURL = renderCanvas.bind(null, CanvasRenderer.renderToDataURL);
       exports.toString = renderCanvas.bind(null, function(data, _, opts) {
@@ -1619,7 +1619,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   });
 
-  // src/client/portal.ts
+  // packages/plugin/src/client/portal.ts
   function renderBodyPortal(portal, children) {
     if (typeof portal != "function" || typeof document > "u" || document === null) return children;
     let body = document.body;
@@ -1631,8 +1631,28 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   }
 
-  // src/client-locale.ts
+  // packages/plugin/src/client-locale.ts
   var localeNamespace = "ds-harness-remote", en = {
+    pairingTitle: "Pair with DSH-Go",
+    pairingHint: "Scan in DSH-Go, confirm on your phone, then enter the phone code on this computer.",
+    pairingHostOnly: "New Hosts accept connections only. Pairing does not enable control of other devices.",
+    pairingSaveServer: "Save the Server address before pairing.",
+    pairingScan: "Scan this QR code in DSH-Go and confirm on your phone.",
+    pairingEnter: "Check the requesting phone, then enter its code.",
+    pairingComplete: "Paired. DSH-Go can now connect to this Host.",
+    pairingPending: "Recover the original submission without changing the code.",
+    pairingClosed: "Pairing ended. Generate a new QR code to start again.",
+    pairingQr: "One-time DSH-Go pairing QR code",
+    pairingExpires: "Expires at {time}",
+    pairingCode: "8-digit code shown on your phone",
+    pairingWarning: "Only one submission is allowed. A wrong code invalidates this QR code; scan a new one.",
+    pairingConfirm: "Confirm binding",
+    pairingRetry: "Recover original submission",
+    pairingCancel: "Cancel pairing",
+    pairingStart: "Generate pairing QR code",
+    pairingBusy: "Please wait\u2026",
+    pairingUnsupported: "This Server does not support device pairing.",
+    pairingError: "Could not finish pairing. Check the connection; recover the original submission if a code was sent.",
     remoteTools: "Inject Remote Tools",
     remoteToolsHint: "Expose remote_* tools in sessions. On by default; turn it off when you do not need them. Changes apply after restarting the Host.",
     remoteToolsSaved: "Remote Tools setting saved.",
@@ -1944,6 +1964,26 @@ Minimum version required to store current data is: ` + bestVersion + `.
     hermesVirtualWorkspace: "Hermes virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
+    pairingTitle: "\u4E0E DSH-Go \u914D\u5BF9",
+    pairingHint: "\u4F7F\u7528 DSH-Go \u626B\u7801\u5E76\u5728\u624B\u673A\u786E\u8BA4\uFF0C\u518D\u5C06\u624B\u673A\u9A8C\u8BC1\u7801\u8F93\u5165\u672C\u673A\u3002",
+    pairingHostOnly: "\u65B0 Host \u9ED8\u8BA4\u4EC5\u88AB\u63A7\uFF1B\u914D\u5BF9\u4E0D\u4F1A\u6388\u4E88\u4E3B\u63A7\u5176\u4ED6\u8BBE\u5907\u7684\u6743\u9650\u3002",
+    pairingSaveServer: "\u8BF7\u5148\u4FDD\u5B58\u670D\u52A1\u5668\u5730\u5740\uFF0C\u518D\u5F00\u59CB\u914D\u5BF9\u3002",
+    pairingScan: "\u8BF7\u4F7F\u7528 DSH-Go \u626B\u7801\u5E76\u5728\u624B\u673A\u4E0A\u786E\u8BA4\u3002",
+    pairingEnter: "\u8BF7\u6838\u5BF9\u7533\u8BF7\u624B\u673A\uFF0C\u518D\u8F93\u5165\u8BE5\u624B\u673A\u663E\u793A\u7684\u9A8C\u8BC1\u7801\u3002",
+    pairingComplete: "\u914D\u5BF9\u5B8C\u6210\uFF0CDSH-Go \u73B0\u5728\u53EF\u4EE5\u8FDE\u63A5\u6B64 Host\u3002",
+    pairingPending: "\u8BF7\u6062\u590D\u539F\u63D0\u4EA4\u7ED3\u679C\uFF0C\u4E0D\u8981\u66F4\u6362\u9A8C\u8BC1\u7801\u3002",
+    pairingClosed: "\u914D\u5BF9\u5DF2\u7ED3\u675F\uFF0C\u8BF7\u91CD\u65B0\u751F\u6210\u4E8C\u7EF4\u7801\u3002",
+    pairingQr: "DSH-Go \u4E00\u6B21\u6027\u914D\u5BF9\u4E8C\u7EF4\u7801",
+    pairingExpires: "\u6709\u6548\u671F\u81F3 {time}",
+    pairingCode: "\u624B\u673A\u663E\u793A\u7684 8 \u4F4D\u9A8C\u8BC1\u7801",
+    pairingWarning: "\u4EC5\u5141\u8BB8\u63D0\u4EA4\u4E00\u6B21\u3002\u9A8C\u8BC1\u7801\u9519\u8BEF\u540E\uFF0C\u672C\u4E8C\u7EF4\u7801\u7ACB\u5373\u5931\u6548\uFF0C\u5FC5\u987B\u91CD\u65B0\u626B\u7801\u3002",
+    pairingConfirm: "\u786E\u8BA4\u7ED1\u5B9A",
+    pairingRetry: "\u6062\u590D\u539F\u63D0\u4EA4\u7ED3\u679C",
+    pairingCancel: "\u53D6\u6D88\u914D\u5BF9",
+    pairingStart: "\u751F\u6210\u914D\u5BF9\u4E8C\u7EF4\u7801",
+    pairingBusy: "\u8BF7\u7A0D\u5019\u2026",
+    pairingUnsupported: "\u5F53\u524D\u670D\u52A1\u5668\u4E0D\u652F\u6301\u8BBE\u5907\u626B\u7801\u914D\u5BF9\u3002",
+    pairingError: "\u6682\u65F6\u65E0\u6CD5\u5B8C\u6210\u914D\u5BF9\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u3002\u82E5\u5DF2\u63D0\u4EA4\u9A8C\u8BC1\u7801\uFF0C\u8BF7\u6062\u590D\u539F\u63D0\u4EA4\uFF0C\u4E0D\u8981\u66F4\u6362\u9A8C\u8BC1\u7801\u3002",
     remoteTools: "\u6CE8\u5165 Remote Tools",
     remoteToolsHint: "\u5728\u4F1A\u8BDD\u4E2D\u6CE8\u5165 remote_* \u5DE5\u5177\u3002\u9ED8\u8BA4\u5F00\u542F\uFF1B\u4E0D\u9700\u8981\u65F6\u53EF\u5173\u95ED\uFF0C\u91CD\u542F Host \u540E\u751F\u6548\u3002",
     remoteToolsSaved: "Remote Tools \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\u3002",
@@ -2256,7 +2296,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     codexVirtualSessions: "Sessions"
   };
 
-  // src/client/server-notice.ts
+  // packages/plugin/src/client/server-notice.ts
   function createServerNotice(React) {
     return function(props) {
       let { offline, linked, expiresAt, t } = props, wasOffline = React.useRef(!1), hadLink = React.useRef(linked), [restored, setRestored] = React.useState(!1), [now, setNow] = React.useState(Date.now());
@@ -2283,7 +2323,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
 
-  // src/client/presentation.ts
+  // packages/plugin/src/client/presentation.ts
   var defaultPreferredTransports = ["lan", "p2p", "turn", "relay"];
   function normalizedPreferredTransports(value) {
     return value === void 0 || value.length === 0 ? [...defaultPreferredTransports] : [...value];
@@ -2393,7 +2433,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return t(mode === "LAN" ? "remoteNetworkLan" : mode === "P2P" ? "remoteNetworkP2p" : mode === "TURN" ? "remoteNetworkTurn" : mode === "Relay" ? "remoteNetworkRelay" : "connected");
   }
 
-  // src/client/header.ts
+  // packages/plugin/src/client/header.ts
   function createRemoteSessionHeaderAction(React, portal) {
     let ServerNotice = createServerNotice(React);
     function RemoteSessionHeaderAction(props) {
@@ -2628,7 +2668,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
 
-  // src/client/control-result.ts
+  // packages/plugin/src/client/control-result.ts
   function unwrapControlResult(result, fallbackMessage) {
     if (!result.ok) {
       let remoteCode = result.error?.details?.remoteCode;
@@ -2640,7 +2680,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return result.value;
   }
 
-  // src/client/navigation.ts
+  // packages/plugin/src/client/navigation.ts
   var pendingWorkspaceSelectionKey = "dsh-remote:pending-workspace-selection";
   function storedWorkspaceSelection() {
     let raw = window.sessionStorage.getItem(pendingWorkspaceSelectionKey);
@@ -2660,7 +2700,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return snapshot.baselinesReady === !0 || snapshot.phase === "ready";
   }
 
-  // src/client/progress.ts
+  // packages/plugin/src/client/progress.ts
   function createRemoteProgressView(React) {
     function RemoteProgressView(props) {
       let progress = props.progress;
@@ -2734,14 +2774,116 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   }
 
-  // src/client/settings.ts
+  // packages/plugin/src/client/pairing.ts
   var import_qrcode = __toESM(require_browser(), 1);
+  function createHostPairingPanel(React) {
+    return function(props) {
+      let { t } = props, [view, setView] = React.useState(void 0), [image, setImage] = React.useState(void 0), [code, setCode] = React.useState(""), [busy, setBusy] = React.useState(!1), [locked, setLocked] = React.useState(!1), [error, setError] = React.useState(void 0), mounted = React.useRef(!1), flight = React.useRef(!1), attempts = React.useRef(/* @__PURE__ */ new Set()), completed = React.useRef(void 0), completion = React.useRef(props.onComplete);
+      completion.current = props.onComplete;
+      let apply = (next) => {
+        mounted.current && (next && !["created", "claimed", "approved"].includes(next.state) && attempts.current.delete(next.sessionId), setView(next), setLocked(next?.canRetry === !0 || next !== void 0 && attempts.current.has(next.sessionId)), next?.localSaved && completed.current !== next.sessionId && (completed.current = next.sessionId, completion.current()));
+      };
+      React.useEffect(() => {
+        mounted.current = !0;
+        let timer, poll = async () => {
+          if (!flight.current && !props.disabled && props.serverUrl)
+            try {
+              apply(await props.control("host.pairing.status"));
+            } catch {
+            }
+          mounted.current && (timer = setTimeout(() => void poll(), 2500));
+        };
+        return poll(), () => {
+          mounted.current = !1, timer && clearTimeout(timer);
+        };
+      }, [props.serverUrl, props.disabled]), React.useEffect(() => {
+        let current = !0;
+        return setImage(void 0), view?.qrPayload && import_qrcode.default.toDataURL(view.qrPayload, { width: 320, margin: 4, errorCorrectionLevel: "M" }).then((value) => {
+          current && setImage(value);
+        }).catch(() => {
+          current && setError(t("pairingError"));
+        }), () => {
+          current = !1;
+        };
+      }, [view?.qrPayload]);
+      let run = async (action, retry2 = !1) => {
+        if (!flight.current) {
+          flight.current = !0, setBusy(!0), setError(void 0), action === "confirm" && (view && attempts.current.add(view.sessionId), setLocked(!0), setCode(""));
+          try {
+            apply(await props.control("host.pairing." + action, action === "start" ? {} : {
+              sessionId: view?.sessionId,
+              ...action === "confirm" && !retry2 ? { verificationCode: code } : {}
+            }));
+          } catch (reason) {
+            if (mounted.current) {
+              let e = reason;
+              setError(t(e.code === "PAIRING_UNSUPPORTED" || e.details?.remoteCode === "PAIRING_UNSUPPORTED" ? "pairingUnsupported" : "pairingError"));
+            }
+          } finally {
+            flight.current = !1, mounted.current && setBusy(!1);
+          }
+        }
+      }, active = view !== void 0 && ["created", "claimed", "approved"].includes(view.state), retry = locked || view?.canRetry || view?.state === "approved", status = view === void 0 ? "pairingHint" : view.state === "created" ? "pairingScan" : view.state === "claimed" ? "pairingEnter" : view.state === "completed" ? "pairingComplete" : view.state === "approved" ? "pairingPending" : "pairingClosed";
+      return React.createElement(
+        "section",
+        { className: "dshRemotePairing", "aria-label": t("pairingTitle") },
+        React.createElement("h3", null, t("pairingTitle")),
+        React.createElement("p", { role: "status", "aria-live": "polite" }, t(status)),
+        React.createElement("p", null, t("pairingHostOnly")),
+        props.disabled ? React.createElement("p", null, t("pairingSaveServer")) : null,
+        view === void 0 ? null : React.createElement("p", { className: "dshRemotePairingIdentity" }, view.serverUrl, React.createElement("br"), React.createElement("code", null, view.hostFingerprint)),
+        image === void 0 ? null : React.createElement("img", { src: image, width: 320, height: 320, alt: t("pairingQr"), className: "dshRemotePairingQr" }),
+        view?.mobile === void 0 ? null : React.createElement("p", { className: "dshRemotePairingIdentity" }, React.createElement("strong", null, view.mobile.name), React.createElement("br"), React.createElement("code", null, view.mobile.fingerprint)),
+        active ? React.createElement("p", null, t("pairingExpires", { time: new Date(view.expiresAt).toLocaleTimeString() })) : null,
+        view?.state !== "claimed" || retry ? null : React.createElement(
+          "form",
+          { onSubmit: (event) => {
+            event.preventDefault(), event.nativeEvent?.isTrusted && /^[0-9]{8}$/.test(code) && run("confirm");
+          } },
+          React.createElement("label", null, t("pairingCode"), React.createElement("input", {
+            type: "text",
+            inputMode: "numeric",
+            autoComplete: "off",
+            pattern: "[0-9]{8}",
+            maxLength: 8,
+            value: code,
+            disabled: busy,
+            onChange: (event) => setCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 8))
+          })),
+          React.createElement("p", null, React.createElement("strong", null, t("pairingWarning"))),
+          React.createElement("button", { type: "submit", className: "dshRemoteSave", disabled: busy || props.disabled || !/^[0-9]{8}$/.test(code) }, t("pairingConfirm"))
+        ),
+        error === void 0 ? null : React.createElement("p", { role: "alert", className: "dshRemoteError" }, error),
+        React.createElement(
+          "div",
+          { className: "dshRemotePairingActions" },
+          active && retry ? React.createElement("button", {
+            type: "button",
+            disabled: busy || props.disabled,
+            className: "dshRemoteSave",
+            onClick: (event) => {
+              event.nativeEvent?.isTrusted && run("confirm", !0);
+            }
+          }, t("pairingRetry")) : null,
+          React.createElement("button", {
+            type: "button",
+            className: active ? "dshRemoteDiscard" : "dshRemoteSave",
+            disabled: busy || props.disabled || !props.serverUrl,
+            onClick: () => void run(active ? "cancel" : "start")
+          }, t(busy ? "pairingBusy" : active ? "pairingCancel" : "pairingStart"))
+        )
+      );
+    };
+  }
+
+  // packages/plugin/src/client/settings.ts
+  var import_qrcode2 = __toESM(require_browser(), 1);
   var sidebarEntryChoices = [
     { value: "standard", label: "sidebarEntryStandard" },
     { value: "compact", label: "sidebarEntryCompact" }
   ];
   function createRemotePluginOptions(React) {
-    let ServerNotice = createServerNotice(React);
+    let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React);
     function RemotePluginOptions(props) {
       let { t } = props, subscribeStatus = typeof props.statusFeed?.subscribe == "function" ? props.statusFeed.subscribe : () => () => {
       }, getStatusSnapshot = typeof props.statusFeed?.getSnapshot == "function" ? props.statusFeed.getSnapshot : () => {
@@ -2807,7 +2949,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         let active = !0, run = ++qrFlowRun.current;
         return setQrBusy(!0), setQrFailed(!1), setError(void 0), setQrExpired(!1), props.control("client.account.qr.start", { provider: loginMethod.slice(6) }).then(async (session) => {
           if (!active || run !== qrFlowRun.current) return;
-          let image = await import_qrcode.default.toDataURL(session.scanUrl, {
+          let image = await import_qrcode2.default.toDataURL(session.scanUrl, {
             width: 184,
             margin: 1,
             errorCorrectionLevel: "L"
@@ -3302,6 +3444,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
         open ? React.createElement(
           "div",
           { className: "dshRemotePluginCardBody" },
+          loaded ? React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverUrl !== settingsView?.config.serverUrl, t, onComplete: () => void props.control("settings.get").then((view) => applyView(view)).catch(() => {
+          }) }) : null,
           loaded ? association !== void 0 ? React.createElement(
             "div",
             { className: "dshRemoteSettings" },
@@ -3454,7 +3598,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return RemotePluginOptions;
   }
 
-  // src/client/shell.ts
+  // packages/plugin/src/client/shell.ts
   function installStyle(clientModuleId2) {
     let style = document.createElement("style");
     return style.dataset.plugin = clientModuleId2, style.dataset.pluginCss = "dsh-remote", style.textContent = [
@@ -3569,6 +3713,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       ".dshRemoteInlineSignIn{box-sizing:border-box;width:100%;margin-top:4px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteInlineSignIn .dshRemoteClientLogin,.dshRemoteInlineSignIn .dshRemoteQrLogin{height:auto;min-height:0;padding-bottom:8px}",
       ".dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}",
       ".dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteFieldValue{min-width:0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5;overflow-wrap:anywhere}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
+      ".dshRemotePairing{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary)}.dshRemotePairing h3{font-size:14px;margin:0 0 8px}.dshRemotePairing p{font-size:13px;line-height:1.5;margin:8px 0}.dshRemotePairingQr{display:block;width:min(320px,100%);height:auto;margin:16px 0;background:#fff}.dshRemotePairingIdentity code{overflow-wrap:anywhere;font-size:12px}.dshRemotePairing label{display:grid;gap:8px}.dshRemotePairing input{width:100%;max-width:240px;box-sizing:border-box;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:20px;letter-spacing:.15em}.dshRemotePairing input:focus-visible,.dshRemotePairing button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemotePairingActions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}",
       '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
       ".dshRemoteAssociation{min-width:0;flex:1;display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);align-items:baseline;column-gap:12px;row-gap:4px}.dshRemoteAssociation>span{grid-column:1/-1;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{grid-column:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5;overflow-wrap:anywhere}.dshRemoteAssociation p{grid-column:2;color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
       ".dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect{appearance:none;flex:0 0 auto;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:34px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteReconnect:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}",
@@ -3592,10 +3737,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
 
-  // src/client/workspaces.ts
-  var import_qrcode2 = __toESM(require_browser(), 1);
+  // packages/plugin/src/client/workspaces.ts
+  var import_qrcode3 = __toESM(require_browser(), 1);
 
-  // src/version-compare.ts
+  // packages/plugin/src/version-compare.ts
   var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
   function parseVersion(value) {
     let match = VERSION_PATTERN.exec(value.trim().replace(/^v/, ""));
@@ -3628,10 +3773,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return comparePrerelease(parsedLeft.prerelease, parsedRight.prerelease);
   }
 
-  // src/client/icons.ts
+  // packages/plugin/src/client/icons.ts
   var deepSeekWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAACVBMVEUAAADy8vXx8fUsA3vyAAAAAXRSTlMAQObYZgAAAOxJREFUWMPtlsEOwyAMQxP+/6OnTZMGxHGcot3wDYgfhkJbs6urprzveGtu9d1NgEdto8w93GuA7zPS2RFg7ynsCOAokbtAmLr2YaeKgJ6fxpT8jCAC0qSqPyNoO5DXdvyouj4ClFAdYaDxK09uiBDCIYBf6CxLesnR0uF2pG+JmhCqrUb0AOvjjoQaYDTCEAAgMg5grhAeAQIB+/M15IcKlnUIp4CkTCd0AKb4zVsRSJVGYEVzT0agK107IMGMEurvromEpaX4wzk/IKw378kq4LafED6Oowxfk7AP2q8W16EdM3p29Eyvrv6vF0WIBfBziKyCAAAAAElFTkSuQmCC", gptWorkspaceIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAAclBMVEX////v7+++wMf////s7O3k5OTExcrX2Ny6vMTv8PPW19yXmqRqboJmaHd3eoaqrLPs7fGMjpfb3eKlpq1eYXOxs7pWWWd+gY5HSVdRVGVub3k+QU74+Pg4OkcvMT1ISlUoKjUiIy4fICueoKkaGyUSFB21Bp+qAAAAAXRSTlMAQObYZgAABChJREFUWMPtl916qjoQhlsdEwIECEgMYCBxx/u/xT1DrFUL1LO1DtY8LSLJvPnmB4gfH//sr7TPDfvdebf/xXZbkE/4zZ0MVhGHd9zJDsv+7F3//Z69tT5wljAu3tXw+TIlzXKJlhflYmJ+5uF5WpWhb54X+C/zZCmT2wJA4dJZwus0UYjIGqWyMhVbEp4yKNRRqlv0opW5PJLJ4rFJXvP4JKDRMqturBZjkMVJFYjR6iHQDQDI4+k2k51wZbWrqwp4mR/1CVYATyko9TFGxBUqL5IvMbXSWt0T8bkGgFLqgqZBI/Uxbx5UAxLaNcCNLBpttM7wbCc1pmJOpWAsDtey68UaQMyrFgb9uxLPjqg3+nGluyKN0XUdWw0BJ0NvTFFqgzpr9J+Dh4w0Ga1qkqBNswagxdRgFPAbgHRQG5jumGWyMxrTIaRRa4AzFs0YrNMXgI4MJWnsKYFhGNMnIh/mBOPsV8CZBFjN9w8ArowxnZzDr5IcvxTaKpxJCVsoI3SWysz1UM4AqQdzlCgho1IKrK+x1mKFzisANtgEU8E7GwHDgOqxe4w9tnM166wbaA2xBMBLrTWcAGYGdCiYVUJUrMCF+7l6gklrW1RwPi8ByjuActANqhKzVWoYrFGcCFzbDgNaBrTWpncFQMcI2DfWoAiDqRCiHcYM/ZdCEKkZqfR8spj4F0CiJjv2gHL6URNoCQDaYacL6O1oFDO2eQDUFP7AKdCRdC4CRDZaNifbjA41l/uYb/SZMAFNTBGzY7sG4J2jTsJgToOzIzXF3HZqBpSOAGduXbkGEKV1OqVGqRJpRxtvwbSw5IqAiUJItwBCOT9R32FCGo3nCkAN3t0UTBRC6zDONcBeOee9pr4T+ASbnDOdc5OmtREwEEB5w8Wqgt4bOV5c7Lt9iiK8zdP/IsBbutUGX4gNwEVCqd3FUt/xYnRWt7BvPBYQjwjAGXa3ASguHVAZ/WXKlA3eZDX1wRegFsr7E2wAlB9xFbx/7MV70kFT8aqNgLL3F8nFBmA3hrn/IJHjKJOK2oj1WI4Z4FzwN/81AOhgYD6v2xbIvaZIurLC9AfvB1WLTYAoXejF1xeBL5cpBIyEbmxkZymIXwDQh1BAfOrhI1lfwtgz8tozF5T4ttf3+32AyxC6klwAgw/YVTHpoK82xYt3wLP/Bw4AAI4D7/01TLKXBj9NEz2wEuGiKpoy68S/FwCLMQAZ3gXhihaCa25vQo6RyToOz9PE6wYjJgGi1YnqZX8qMIK+TDlnargGzSv4NvFjlwXf/nfLLMrAB4O/Xl3BH0d+RIASFgDA8IYMIXgr2+cBsbDdPSwAAHjSZFmb3txETCKIxc0uWwI8rxsLJcTiVndNwyMgKljbbNN2/zcEAja2+4RgIDYN2Bu/WtAOaEodnu2dnzz/7I/Y/w/LaEcX/MdfAAAAAElFTkSuQmCC";
 
-  // src/client/workspaces.ts
+  // packages/plugin/src/client/workspaces.ts
   function createRemoteWorkspaceAction(React, portal) {
     let ServerNotice = createServerNotice(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
@@ -3714,7 +3859,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         let run = ++qrFlowRun.current;
         setBusy(!0), setError(void 0), setQrExpired(!1);
         try {
-          let session = await props.control("client.account.qr.start", { provider }), image = await import_qrcode2.default.toDataURL(session.scanUrl, {
+          let session = await props.control("client.account.qr.start", { provider }), image = await import_qrcode3.default.toDataURL(session.scanUrl, {
             width: 184,
             margin: 1,
             errorCorrectionLevel: "L"
@@ -5012,10 +5157,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return RemoteWorkspaceAction;
   }
 
-  // src/control-route.ts
+  // packages/plugin/src/control-route.ts
   var CONTROL_RPC_PREFIX = "/ds-harness-remote", STATUS_STREAM_ENDPOINT = "status.events", STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 
-  // src/plugin-route-client.ts
+  // packages/plugin/src/plugin-route-client.ts
   var PluginRouteFailure = class extends Error {
     constructor(code, message) {
       super(message);
@@ -5175,7 +5320,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return typeof value == "object" && value !== null && !Array.isArray(value);
   }
 
-  // src/remote-file-content-provider.ts
+  // packages/plugin/src/remote-file-content-provider.ts
   function shouldUseRemoteFileViewer(status) {
     return status.mode === "remote" && status.remoteFeatures?.fileViewer === !0;
   }
@@ -5246,7 +5391,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     return bytes;
   }
 
-  // src/status-stream.ts
+  // packages/plugin/src/status-stream.ts
   function parseStatus(data) {
     if (typeof data == "string")
       try {
@@ -5300,7 +5445,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
 
-  // src/client-recovery.ts
+  // packages/plugin/src/client-recovery.ts
   function subscribeRemoteRecovery(feed, reconnect) {
     let previous;
     return feed.subscribe((status) => {
@@ -5309,7 +5454,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     });
   }
 
-  // src/client.ts
+  // packages/plugin/src/client.ts
   var clientModuleId = "ds-harness-remote", controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
     constructor(message) {
       super(message), this.name = "ControlRouteUnavailableError";

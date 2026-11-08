@@ -313,3 +313,7 @@ On the Host, enable **Debug logging** in **Plugins → Remote settings**. The se
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### Pair with DSH-Go
+
+Generate a QR code in the local Remote settings, scan and confirm on a compatible DSH-Go build, then enter the phone code on this computer. A wrong code invalidates the whole pairing. New Hosts accept incoming connections only; Device-only accounts have no Web/Admin access. Requires the full Server pairing v1 API and a DSH-Go build implementing [this integration](docs/dsh-go-pairing-integration.md). The bundled minimal Server does not support this workflow.

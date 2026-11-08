@@ -2128,3 +2128,7 @@ This adds no new wire format or capability and requires an updated Host plugin.
 The additive `transport.webrtc.resume.v1` contract is specified in
 [WebRTC control recovery](design/webrtc-control-recovery.md). Protocol v1 and
 legacy control lifetimes remain unchanged unless all three parties negotiate it.
+
+## Device pairing v1
+
+The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.

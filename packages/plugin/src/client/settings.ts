@@ -1,3 +1,4 @@
+import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import QRCode from 'qrcode'
 import type { LocalizedMessage, Translate } from '../client-locale.js'
@@ -31,6 +32,7 @@ const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sid
 
 export function createRemotePluginOptions(React: ClientReact) {
   const ServerNotice = createServerNotice(React)
+  const HostPairingPanel = createHostPairingPanel(React)
   function RemotePluginOptions(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
@@ -719,6 +721,7 @@ export function createRemotePluginOptions(React: ClientReact) {
               : t('local')),
           React.createElement('span', { className: 'dshRemotePluginCardChevron', 'aria-hidden': true }, '⌄'))),
       !open ? null : React.createElement('div', { className: 'dshRemotePluginCardBody' },
+        !loaded ? null : React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverUrl !== settingsView?.config.serverUrl, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => applyView(view)).catch(() => undefined) }),
         !loaded
           ? React.createElement('p', { className: 'dshRemoteSettingsState' }, error ?? t('loadingSettings'))
           : association !== undefined
