@@ -858,12 +858,12 @@ export function HostSessionsDrawer({
       >
         <View style={styles.hostFooterNameRow}>
           <Text numberOfLines={1} style={styles.hostFooterName}>{deviceName ?? strings.devices.title}</Text>
-          {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />}
         </View>
         <View style={styles.hostFooterStatusRow}>
           <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
-          <Text style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
+          <Text numberOfLines={1} style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
         </View>
+        {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />}
       </Pressable>
     </>
   )
@@ -1989,10 +1989,10 @@ const createStyles = (colors: ThemeColors) =>
       borderRadius: radius.lg,
     },
     hostFooterIcon: { width: 48, minHeight: 48, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
-    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 48, justifyContent: 'center', gap: 2, paddingHorizontal: spacing.xs, borderRadius: radius.lg },
-    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
+    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xs, borderRadius: radius.lg },
+    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0, flexShrink: 1 },
     hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
-    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
     hostFooterStatusText: { ...type.caption, color: colors.muted },
     sectionList: { flex: 1 },

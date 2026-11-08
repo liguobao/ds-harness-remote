@@ -35,7 +35,7 @@ type Route =
   | { name: 'server' }
   | { name: 'remote-hosts' }
   | { name: 'device'; deviceId: string }
-  | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
+  | { name: 'connecting'; deviceId: string; sheet?: boolean; focusWorkspaceKey?: string; sessionId?: string }
   | { name: 'chat'; botConversationId?: string }
   | { name: 'settings' }
   | { name: 'diagnostics' }
@@ -238,6 +238,7 @@ function AppNavigator() {
       push({
         name: 'connecting',
         deviceId: target.device.deviceId,
+        sheet: true,
         ...(target.sessionId === undefined ? {} : { sessionId: target.sessionId }),
       })
     } else if (useAppStore.getState().selectedDevice === undefined) {
@@ -411,6 +412,7 @@ function AppNavigator() {
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
     ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
     : undefined
+  const startupConnection = route.name === 'connecting' && route.sheet === true
   const homeMenuVisible = homeMenuOpen && route.name === 'server'
 
   return (
@@ -437,7 +439,7 @@ function AppNavigator() {
           onToggleAutoConnectHost={value => browsePreference({ autoConnectHost: value })}
         />
       )}
-      {route.name === 'connecting' && deviceForRoute !== undefined && (
+      {route.name === 'connecting' && !startupConnection && deviceForRoute !== undefined && (
         <ConnectionScreen
           device={deviceForRoute}
           onBack={() => {
@@ -461,10 +463,10 @@ function AppNavigator() {
         />
       )}
       {route.name === 'device' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'chat' })} />}
-      {route.name === 'chat' && (
+      {(route.name === 'chat' || startupConnection) && (
         <ChatScreen
           botMode={botMode}
-          botConversationId={route.botConversationId}
+          botConversationId={route.name === 'chat' ? route.botConversationId : undefined}
           onBotModeChange={next => {
             saveHostMode(hostScope, next ? 'bot' : 'agent')
             setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'chat' ? { ...entry, botConversationId: undefined } : entry))
@@ -496,11 +498,16 @@ function AppNavigator() {
         </View>
       )}
       <HostSwitcherSheet
-        visible={hostSwitcherOpen}
-        onClose={() => setHostSwitcherOpen(false)}
+        visible={hostSwitcherOpen || (startupConnection && deviceForRoute !== undefined)}
+        initialConnectingDevice={startupConnection ? deviceForRoute : undefined}
+        onClose={() => {
+          setHostSwitcherOpen(false)
+          if (startupConnection) pop()
+        }}
         onConnected={() => {
           setHostSwitcherOpen(false)
-          goHomeChat()
+          if (route.name === 'connecting' && route.sessionId !== undefined) void openKnownSession(route.sessionId)
+          else goHomeChat()
         }}
         onSelectDevice={device => {
           setHostSwitcherOpen(false)

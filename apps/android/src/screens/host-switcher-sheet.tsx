@@ -16,6 +16,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 
 export interface HostSwitcherSheetProps {
   visible: boolean
+  initialConnectingDevice?: RemoteDevice | undefined
   onClose: () => void
   onSelectDevice: (device: RemoteDevice) => void
   onManageHosts: () => void
@@ -29,7 +30,7 @@ export interface HostSwitcherSheetProps {
  * the label start, the inset separators and the right edge match the cards
  * used elsewhere, and the trailing status text lands on one baseline.
  */
-export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts, onConnected }: HostSwitcherSheetProps) {
+export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts, onConnected, initialConnectingDevice }: HostSwitcherSheetProps) {
   useAppStore(state => state.language)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
@@ -38,14 +39,15 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   const refreshDevices = useAppStore(state => state.refreshDevices)
   const error = useAppStore(state => state.error)
   const clearError = useAppStore(state => state.clearError)
-  const [connectingDevice, setConnectingDevice] = useState<RemoteDevice>()
+  const [chosenDevice, setChosenDevice] = useState<RemoteDevice>()
+  const connectingDevice = chosenDevice ?? initialConnectingDevice
   const busy = connectingDevice !== undefined
   const dismiss = () => {
-    setConnectingDevice(undefined)
+    setChosenDevice(undefined)
     onClose()
   }
   useEffect(() => {
-    if (!visible) setConnectingDevice(undefined)
+    if (!visible) setChosenDevice(undefined)
   }, [visible])
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -95,9 +97,12 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
               <ConnectionScreen
                 embedded
                 device={connectingDevice}
-                onBack={() => setConnectingDevice(undefined)}
+                onBack={() => {
+                  setChosenDevice(undefined)
+                  if (initialConnectingDevice !== undefined) onClose()
+                }}
                 onConnected={() => {
-                  setConnectingDevice(undefined)
+                  setChosenDevice(undefined)
                   onConnected()
                 }}
               />
@@ -131,7 +136,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                         disabled={busy}
                         onPress={() => {
                           if (isConnected) onClose()
-                          else if (device.trusted && device.online) setConnectingDevice(device)
+                          else if (device.trusted && device.online) setChosenDevice(device)
                           else onSelectDevice(device)
                         }}
                         accessory={
