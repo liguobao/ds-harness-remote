@@ -440,7 +440,7 @@ export const zh: Record<keyof typeof en, string> = {
   registrationCodeHint: '登录 Server 网页后生成，用一次即可连接这台设备。',
   accountHint: '账号必须属于所选 Server。',
   password: '密码',
-  passwordHint: '仅限DSH Remote Web账号或自托管服务账号，非 DeepSeek Harness官方或其他平台。',
+  passwordHint: '仅限DSH Remote Web账号或自托管服务账号，非 DeepSeek Harness官方。',
   modeSavedNeedsAuthorization: '模式已保存。连接前请先授权 {role}；已有注册信息已保留。',
   modeSavedReused: '模式已保存并复用已有注册信息。重启 Harness 后生效。',
   modeSavedOwnedRole: '模式已保存，并已自动授权此自有设备。重启 Harness 后生效。',
