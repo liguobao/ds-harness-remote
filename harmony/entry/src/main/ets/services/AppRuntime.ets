@@ -178,6 +178,8 @@ export class AppRuntime {
   private reconnectTimer: number = -1;
   /** 退避耗尽后仍允许「网络恢复/回前台」再试一轮，否则用户只能手点或杀进程。 */
   private reconnectExhausted: boolean = false;
+  /** 「等主机重新上线」的起始时刻（0 = 不在等）；此状态下不消耗重连次数，最多等 90 秒。 */
+  private offlineWaitSince: number = 0;
   /**
    * 这次的失败是「恢复尝试」触发的：即使 reconnectAttempt 被清零，
    * connectDevice 的 catch 也必须继续按退避排下一次，否则网络刚回来那一下没连上就彻底停了。
@@ -875,6 +877,7 @@ export class AppRuntime {
       this.reconnectAttempt = 0;
       this.reconnectExhausted = false;
       this.autoRecovering = false;
+      this.offlineWaitSince = 0;
       this.reconnectStatus = '';
       this.clearReconnectTimer();
       this.connectStage = '';
@@ -895,6 +898,22 @@ export class AppRuntime {
       logError('connect failed: ' + errorMessage(error));
       LinkLog.write('conn', '连接失败 device=' + deviceId + '：' + errorMessage(error)
         + '（attempt=' + this.reconnectAttempt + '）');
+      // 「主机不在线」= 服务器已经回来了、只是主机插件还没重新注册：这不是连接失败，
+      // 属于「等主机回来」的状态，不该消耗重连次数（否则 6 次很快烧完就彻底停了）。
+      const failureText: string = errorMessage(error);
+      const hostOffline: boolean = failureText.toLowerCase().indexOf('host is offline') >= 0
+        || failureText.indexOf('设备不在线') >= 0;
+      if (hostOffline && !this.connectCancelled) {
+        if (this.offlineWaitSince === 0) {
+          this.offlineWaitSince = Date.now();
+        }
+        // 等主机回来的窗口最多 90 秒；超时后按普通失败处理（正常烧完退避并交回用户）
+        if (Date.now() - this.offlineWaitSince < 90000) {
+          this.reconnectAttempt = Math.min(this.reconnectAttempt, 1);
+        } else {
+          this.offlineWaitSince = 0;
+        }
+      }
       const autoRetry: boolean = !this.connectCancelled && deviceId === this.lastDeviceId
         && (this.reconnectAttempt > 0 || this.autoRecovering)
         && this.reconnectAttempt < AppRuntime.MAX_RECONNECT_ATTEMPTS;
@@ -913,10 +932,8 @@ export class AppRuntime {
         // 例外：失败原因是「主机不在线」——说明服务器已经回来了，只是主机插件还没重新注册，
         // 这种通常几秒内就好，按 30 秒退避去等纯属浪费（实测恢复被拖到 34.8 秒）。
         const index: number = Math.min(this.reconnectAttempt, AppRuntime.RECONNECT_DELAYS_MS.length - 1);
-        const offline: boolean = errorMessage(error).toLowerCase().indexOf('host is offline') >= 0
-          || errorMessage(error).indexOf('设备不在线') >= 0;
-        const delay: number = offline
-          ? Math.min(5000, AppRuntime.RECONNECT_DELAYS_MS[index])
+        const delay: number = hostOffline
+          ? Math.min(2000, AppRuntime.RECONNECT_DELAYS_MS[index])
           : AppRuntime.RECONNECT_DELAYS_MS[index];
         this.reconnectAttempt += 1;
         this.reconnectStatus = '重连失败，' + Math.round(delay / 1000) + ' 秒后重试（第 '

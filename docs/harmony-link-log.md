@@ -241,3 +241,30 @@ dshserver stop        # 连看护一起停
 日志出现 `watchdog: 端口无响应，重启`。
 
 > 注意：看护进程也是普通用户态进程，机器重启后仍需靠「打开终端自动执行 dshserver start」恢复。
+
+## 复测数据与剩余瓶颈（0.17.92–0.17.96）
+
+三次「停 relay 12 秒再起」的实测（客户端全程不碰）：
+
+| 版本 | 关键改动 | 恢复耗时 |
+|---|---|---|
+| 0.17.87 | 4009 改为自动重连 | 34.8s |
+| 0.17.88 | 主机未上线时退避封顶 5 秒 | 27.1s |
+| 0.17.92 | 等主机上线期间**不消耗重连次数** + 2 秒重试（窗口 90 秒） | 32.1s（瓶颈已转移） |
+
+0.17.92 的日志显示：客户端在 `Host is offline.` 阶段只用了 2 次尝试就等到主机回来
+（此前 6 次很快烧完，之后彻底停住）。**剩下的时间主要花在主机插件自己的重注册退避**
+（插件配置 `reconnect.initialDelayMs` 默认 4000ms，重注册本身要十几秒），不是客户端能压的。
+下一步若继续压：把插件配置的 `reconnect.initialDelayMs` 调到 1000（改 `cordis.patch.yml`，需重启 DSH 生效）。
+
+## ArkWeb 的 getStats 实测结论（连接详情里的「路径」）
+
+| 调用方式 | 结果 |
+|---|---|
+| `pc.getStats(callback)` | ❌ `TypeError: Failed to execute 'getStats' ...`（回调被当成非法 selector） |
+| `pc.getStats()` | ✅ 返回 Promise，能拿到 stats 报告 |
+| 报告里的 `candidate-pair` | ⚠️ 字段名/`selected`/`nominated` 给得不稳定，匹配放宽后仍可能为空 |
+
+因此桥里做了三层兜底：`getStats()` 无参调用 → 候选对匹配放宽（succeeded/selected/nominated 任一命中）→
+全程拿不到就上报「ICE 状态 + 本机/远端候选数量」。连接详情即使拿不到候选对，
+仍会显示传输类型、握手分段耗时、测延迟与回落原因。

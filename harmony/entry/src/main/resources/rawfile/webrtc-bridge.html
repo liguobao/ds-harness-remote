@@ -241,6 +241,7 @@
       if (c.sdpMid !== null && c.sdpMid !== undefined) { out.sdpMid = c.sdpMid; }
       if (c.sdpMLineIndex !== null && c.sdpMLineIndex !== undefined) { out.sdpMLineIndex = c.sdpMLineIndex; }
       if (c.usernameFragment) { out.usernameFragment = c.usernameFragment; }
+      localCandidateCount += 1;
       log('local candidate ' + String(c.type || '?') + ' ' + String(c.candidate).slice(0, 96));
       call('onIce', JSON.stringify(out));
     };
@@ -264,23 +265,34 @@
 
   // 报告一次「真正选中的候选对」：手机↔主机的地址、协议，排障时不用再猜走的哪条路。
   var pathAttempts = 0;
+  // 报告一次「真正选中的候选对」：手机↔主机的地址、协议。
+  // ArkWeb 的 getStats 可能只支持回调式（返回 undefined），也可能给 Promise，两种都兼容；
+  // 都拿不到时退化成「ICE 状态 + 候选数量」，让连接详情至少能看到规模。
   function reportSelectedPath() {
-    if (!pc || !pc.getStats) { log('path: getStats 不可用'); return; }
+    if (!pc || !pc.getStats) { log('path: 当前 ArkWeb 不提供 getStats'); return; }
     pathAttempts += 1;
     if (pathAttempts > 6) { return; }
-    try {
-      pc.getStats(null).then(function (stats) {
-        var pairs = [];
+    function handle(stats) {
+      try {
         var locals = {};
+        var pairs = [];
         stats.forEach(function (r) { if (r.type === 'local-candidate') { locals[r.id] = r; } });
         stats.forEach(function (r) {
-          if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded') && r.nominated !== false) {
-            pairs.push(r);
-          }
+          // 宽松匹配：不同实现里 selected / nominated / state 字段给得不一致，
+          // 先全收，再按「succeeded 优先」挑一个。
+          if (r.type === 'candidate-pair' || r.type === 'CandidatePair') { pairs.push(r); }
         });
+        if (pairs.length > 1) {
+          var ok = pairs.filter(function (r) {
+            return r.state === 'succeeded' || r.selected === true || r.nominated === true;
+          });
+          if (ok.length > 0) { pairs = ok; }
+        }
         if (pairs.length === 0) {
           log('path: 第 ' + pathAttempts + ' 次没拿到候选对（ice=' + String(pc.iceConnectionState) + '）');
-          if (pathAttempts <= 5) { setTimeout(reportSelectedPath, 600); }
+          if (pathAttempts <= 5) { setTimeout(reportSelectedPath, 600); return; }
+          call('onPath', 'ICE ' + String(pc.iceConnectionState || '?')
+            + ' · 候选 本机 ' + localCandidateCount + ' / 远端 ' + remoteCandidateCount);
           return;
         }
         var best = pairs[pairs.length - 1];
@@ -297,9 +309,26 @@
           text += ' · ' + Math.round(best.currentRoundTripTime * 1000) + 'ms';
         }
         call('onPath', text);
-      }).catch(function () {});
-    } catch (e) {}
+      } catch (e) {
+        log('path: 解析 stats 失败 ' + e);
+      }
+    }
+    try {
+      // 先按「无参 Promise 式」调用：ArkWeb 的 getStats 不接受 callback 作为 selector，
+      // 传函数会被当成非法 selector 直接 reject（实测 TypeError）。
+      var maybe = pc.getStats();
+      if (maybe && typeof maybe.then === 'function') {
+        maybe.then(handle).catch(function (err) { log('path: getStats 失败 ' + err); });
+      } else if (maybe !== undefined && maybe !== null) {
+        handle(maybe);
+      } else {
+        log('path: getStats 无返回值，跳过候选对');
+      }
+    } catch (e) {
+      log('path: getStats 抛错 ' + e);
+    }
   }
+
 
   function flushCandidates() {
     if (!pc || pendingCandidates.length === 0) { return; }
@@ -337,7 +366,11 @@
       .catch(function (err) { log('applyAnswer failed ' + err); call('onError', 'applyAnswer failed'); });
   }
 
+  var localCandidateCount = 0;
+  var remoteCandidateCount = 0;
+
   function addRemoteIce(candidateJson) {
+    remoteCandidateCount += 1;
     if (!pc) { log('addRemoteIce before startOffer'); return; }
     var candidate = null;
     try { candidate = JSON.parse(candidateJson); } catch (e) { log('candidate parse failed ' + e); return; }
