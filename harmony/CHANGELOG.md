@@ -1,6 +1,58 @@
 # HarmonyOS 客户端更新记录
 
+> 完整文件：本记录按版本倒序。历史版本（0.03 及更早）保留在文末，细节见 `docs/harmony-*.md`。
+
+## 0.17.86 — 2026-11-09
+
+对应 `AppScope/app.json5`：`versionName 0.17.86-lan` / `versionCode 1000208`。
+
+- 版本号统一：`AppScope/app.json5` 与 `ServerApi.CLIENT_VERSION_FALLBACK` 一致（此前兜底值还是模板遗留的 `0.02`）
+- 签名材料出库：`build-profile.json5` 的 `signingConfigs` 置空，本机签名放被忽略的 `build-profile.local.json5`，
+  构建改用 `harmony/scripts/build-local.sh`（临时顶替 → 构建 → 无条件还原）
+- 文档：四语 README 恢复/补齐「鸿蒙移植版」说明与脱敏界面截图；发行说明 `docs/release-0.17.86.md`
+
+## 0.17.84–0.17.85 — 2026-11-08/09
+
+- 对齐 dsh-Go A 组：连接详情（传输/握手分段/回落原因）+ 测延迟、精简历史开关（`remote.history.configure`）、
+  敏感内容打码（`sk-*`/`ghp_*`/`Bearer`/长 hex，点气泡看原文）、轮次导航 + 每轮用量（`3/9 · 12 步 · 1m20s`）、
+  主题色（深海/森林/暖沙/玫紫）、桌宠（干活/等确认/刚做完/待命）、分享卡（ShareKit，回退剪贴板）、横屏输入坞收敛
+- 明确不做：对话回放链接（需服务端存储；改为共享卡 + 整段 Markdown 导出）
+
+## 0.17.79 — 2026-11-08
+
+- 会话列表落盘：启动/重连先用上次列表铺开侧栏（主机 `session/list` 实测 3~9 秒），拉到新列表静默覆盖
+- 恢复场景改用缓存的主机信息建连：省掉一次设备查询；缓存公钥仍与本地 pin 比对，不一致自动回退
+- 修复回归：恢复路径跳过设备查询时一并跳过了 accessToken 刷新（会报 `4002 invalid access token`），
+  改为建连前先判断过期并刷新
+
+## 0.17.69–0.17.78 — 2026-11-08（局域网直连与保活）
+
+- **直连真正生效**：`startRtcAttempt()` 原被写在「服务器下发 relayEndpoint」分支里，而本机服务器从不下发该字段，
+  导致直连代码一次都没执行；改为与中继端点无关后实测 `transport=lan`
+- **长时任务保活**（`dataTransfer`）：熄屏/后台不再被冻结（实测熄屏 8 分钟零断线；此前有 35 分钟零收帧的记录）
+- **静默探测**：空闲 ≥35 秒主动发便宜 RPC 探活，失败即判死重连；直连入站数据也计入「链路活着」
+- **快速失败**：WebRTC 桥在 `failed/closed`/DC 关闭时立刻上报；DataChannel 超时 25s→12s；直连连续失败 2 次冷却 10 分钟
+- `session/follow` 首帧偶发丢失 → 自动重开一次（600ms）；启动自动连上次主机；会话列表/链路日志诊断增强
+
+## 0.17.63–0.17.68 — 2026-11-08（可观测与恢复链）
+
+- 新增 `services/LinkLog.ets`：链路决策落盘到应用沙箱 `link.log`（256KB 轮转，同时镜像 hilog），
+  诊断面板可看最近行、可一键复制
+- 修复「断线事件从不上报」：`RelayTransport.onClosed` 此前无任何订阅者 → `SecureConnection` 转发后
+  重连/退避/回原会话整条链才真正生效
+- `retryNow` 放宽三处把恢复卡死的限制（会话页重连中也能立刻重连、退避耗尽允许再试、计数归零）；
+  网络恢复/承载切换触发即时重试；回前台静默 ≥45 秒判死；连接 30 秒看门狗
+- 诊断面板：打点（每步耗时）、最慢样本、抖动自愈计数、保活状态、稳定统计（连接/断线/在线时长/恢复耗时）
+
+## 0.17.61–0.17.62 — 2026-11-07/08
+
+- 「重新打开会话」点不动（`openSession` 同会话早退）→ 新增 `reopenCurrentSession()`；
+  传输类失败走 `reconnectAndReopen()`，一次点击回到同一会话
+- `relay connection has not been authorized` 抖动窗口内自动等 250ms 重发（最多 4 次，requestId 不变）
+- 会话流打开预算 45s→20s；会话列表传输类失败先体检链路、3 秒后自动重拉；重连中发送键变灰
+
 ## 0.03 — 2026-11-04
+
 
 对应 `AppScope/app.json5`：`versionName 0.03` / `versionCode 1000008`。
 
