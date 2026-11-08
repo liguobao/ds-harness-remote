@@ -6047,7 +6047,7 @@ struct Index {
         // —— 连接 ——
         Row({ space: 10 }) {
           Column({ space: 3 }) {
-            Text(this.tr('连接'))
+            Text(this.tr('连接状态'))
               .fontSize(this.fs(11))
               .fontColor(this.pal().text3)
             Text(this.connectionSummary())

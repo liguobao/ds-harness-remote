@@ -230,7 +230,7 @@ function buildEnglish(): Map<string, string> {
   map.set('更换', 'Change');
   map.set('推理等级', 'Reasoning');
   map.set('正在读取模型目录…', 'Loading model catalog…');
-  map.set('连接', 'Connected to');
+  map.set('连接状态', 'Connection');
   map.set('断开连接', 'Disconnect');
   map.set('新会话', 'New session');
 
