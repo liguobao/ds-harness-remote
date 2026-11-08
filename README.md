@@ -54,6 +54,36 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - Clients are available across Android, iOS, Web, and native DSH.
 - Multiple clients can connect to the same Harness Host simultaneously, with RPC calls and streams isolated per connection.
 
+## What is this repository (HarmonyOS port)
+
+This repository is a **HarmonyOS 7.0 port** of [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote).
+The upstream plugin, server, protocol and tooling are kept in sync (currently aligned with upstream `v0.6.4`),
+and a **native HarmonyOS client** is added on top (pure ArkTS + WebRTC inside ArkWeb).
+
+- **Client source**: [`harmony/`](harmony/) · HarmonyOS 7.0 (API 26) or newer, built with DevEco Studio
+- **Capabilities**: account sign-in, multi-host list with aliases, end-to-end encryption (Noise IK), multi-session,
+  session search / archive / pin, image and voice input, slash commands, steer & interrupt, model and reasoning effort,
+  permission presets, scheduled tasks, workspace grouping, breakpoint-driven two/three-pane layout (tablet & 2-in-1),
+  Chinese/English UI, light/dark plus accent themes, desk pet
+- **Stability work**: link log persisted to disk (`link.log`, survives restarts), auto reconnect with session-stream reopen,
+  silence probing, long-running task keepalive (survives screen-off), LAN/P2P direct path first with relay/TURN fallback
+- **Build & install**:
+  ```sh
+  harmony/scripts/build-local.sh                    # signed locally; signing material never enters the repo
+  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  ```
+- **Docs**: [client guide](docs/harmony-client.md) · [LAN & link log](docs/harmony-link-log.md) ·
+  [2026-11-09 milestone](docs/harmony-milestone-2026-11-09.md) · [release notes](docs/release-0.17.86.md)
+- **Upstream sync**: `git fetch upstream && git merge upstream/main`
+
+### Interface preview (real device, redacted)
+
+| Sessions drawer | New session · LAN | Composer dock |
+| --- | --- | --- |
+| ![sessions drawer](docs/images/harmony/sessions-drawer.jpg) | ![new session](docs/images/harmony/chat-empty.jpg) | ![composer](docs/images/harmony/composer.jpg) |
+
+> The `LAN` badge means the direct local-network path is in use. Session titles, workspace names and quick prompts are blurred.
+
 ## Supported clients
 
 | Client | Form | Status | Notes |

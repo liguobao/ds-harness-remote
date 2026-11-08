@@ -48,6 +48,36 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 - Android、iOS、Web、ネイティブ DSH 向けのクライアントを提供しています。
 - 複数のクライアントから同じ Harness Host に同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
 
+## このリポジトリについて（HarmonyOS 移植版）
+
+本リポジトリは [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) の **HarmonyOS 7.0 移植版**です。
+上流のプラグイン・サーバー・プロトコル・ツールチェーンは追随し（現在は上流 `v0.6.4` に整列）、
+その上に**ネイティブな HarmonyOS クライアント**を追加しています（純 ArkTS + ArkWeb 内の WebRTC）。
+
+- **クライアントのソース**: [`harmony/`](harmony/) · HarmonyOS 7.0（API 26）以降、DevEco Studio でビルド
+- **機能**: アカウント認可ログイン、複数ホストと別名、エンドツーエンド暗号化（Noise IK）、複数セッション、
+  セッション検索・アーカイブ・ピン留め、画像と音声入力、スラッシュコマンド、割り込みと中断、
+  モデルと推論レベル、権限プリセット、スケジュールタスク、ワークスペース分類、ブレークポイント駆動の 2/3 ペイン
+  （タブレット・2-in-1）、中国語/英語 UI、ライト/ダークとテーマ色、デスクペット
+- **安定性**: リンクログの永続化（`link.log`、再起動後も保持）、自動再接続とセッションストリーム再開、
+  無音検知、長時間タスクによるキープアライブ（画面オフでも切断しない）、LAN/P2P 直結を優先しリレー/TURN にフォールバック
+- **ビルドとインストール**:
+  ```sh
+  harmony/scripts/build-local.sh                    # ローカル署名でビルド（署名素材はリポジトリに入れない）
+  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  ```
+- **ドキュメント**: [クライアントガイド](docs/harmony-client.md) · [LAN とリンクログ](docs/harmony-link-log.md) ·
+  [2026-11-09 マイルストーン](docs/harmony-milestone-2026-11-09.md) · [リリースノート](docs/release-0.17.86.md)
+- **上流への追随**: `git fetch upstream && git merge upstream/main`
+
+### 画面プレビュー（実機・マスキング済み）
+
+| セッション一覧 | 新規セッション · LAN | 入力ドック |
+| --- | --- | --- |
+| ![sessions drawer](docs/images/harmony/sessions-drawer.jpg) | ![new session](docs/images/harmony/chat-empty.jpg) | ![composer](docs/images/harmony/composer.jpg) |
+
+> `LAN` バッジはローカルネットワーク直結を意味します。セッション名・ワークスペース名・定型プロンプトはぼかし処理済みです。
+
 ## 対応クライアント
 
 | クライアント | 形式 | 状態 | 備考 |

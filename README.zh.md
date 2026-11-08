@@ -71,6 +71,14 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 > 上游与本仓库的关系：上游是通用方案（Android/iOS/Web/桌面插件），本仓库只是多提供了一个鸿蒙原生客户端实现，不改上游协议。
 
+### 界面预览（手机实机，已脱敏）
+
+| 会话抽屉 | 新会话 · 局域网直连 | 输入坞 |
+| --- | --- | --- |
+| ![会话抽屉](docs/images/harmony/sessions-drawer.jpg) | ![新会话](docs/images/harmony/chat-empty.jpg) | ![输入坞](docs/images/harmony/composer.jpg) |
+
+> 顶栏 `LAN` 徽标表示当前走局域网直连；截图里的会话标题、工作区名、快捷提示词均已模糊处理。
+
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
