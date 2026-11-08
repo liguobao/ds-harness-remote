@@ -1,7 +1,7 @@
 import type { ConnectionPhase, TransportPreference } from '../types'
 
 interface RecoveryState {
-  connection: { phase: ConnectionPhase; stats: { mode: string }; retryable?: boolean }
+  connection: { phase: ConnectionPhase; stats: { mode: string }; retryable?: boolean; errorCode?: string }
   selectedDevice?: { deviceId: string }
   reauthRequired: boolean
   transportPreference: TransportPreference
@@ -10,6 +10,9 @@ interface RecoveryState {
 // First retry is immediate: a dropped P2P path should recover in ~1s over
 // the relay, not after a fixed 1s timer plus the whole connect pipeline.
 const RETRY_DELAYS_MS = [0, 1_000, 3_000, 8_000, 15_000, 30_000, 30_000, 60_000]
+// When the Server explicitly reports HOST_OFFLINE / DEVICE_OFFLINE, skip the
+// 0ms P2P->Relay fast-retry and use jittered exponential backoff.
+const HOST_OFFLINE_RETRY_DELAYS_MS = [3_000, 6_000, 12_000, 24_000, 30_000, 60_000, 60_000, 60_000]
 /**
  * A connection that never established gets fewer, faster retries: the first
  * attempt already waited out its WebRTC budget, and every retry runs the
@@ -86,14 +89,25 @@ export class ForegroundConnectionRecovery {
     if (this.timer !== undefined || this.inFlight) return
     // Late-connected hosts use the full ladder; a first attempt that never
     // established retries immediately over Relay before giving up.
+    const hostOffline = state.connection.errorCode === 'HOST_OFFLINE' || state.connection.errorCode === 'DEVICE_OFFLINE'
     const maxAttempts = this.armed ? RETRY_DELAYS_MS.length : FIRST_CONNECT_RETRY_COUNT
     if (this.attempts >= maxAttempts) {
       if (!this.exhausted) {
         this.exhausted = true
         this.onExhausted()
       }
-      return
+      // If a previously connected Host remains in any retryable offline state,
+      // keep a low-frequency probe (60s jittered for HOST_OFFLINE/DEVICE_OFFLINE,
+      // 120s for other retryable transport failures) so prolonged Host/Server
+      // outages recover automatically without manual intervention.
+      if (!this.armed) {
+        return
+      }
     }
+    const baseDelay = this.attempts >= maxAttempts
+      ? (hostOffline ? 60_000 : 120_000)
+      : ((hostOffline ? HOST_OFFLINE_RETRY_DELAYS_MS : RETRY_DELAYS_MS)[this.attempts] ?? 60_000)
+    const delayMs = hostOffline ? Math.round(baseDelay * (0.5 + Math.random() * 0.5)) : baseDelay
     this.timer = setTimeout(() => {
       this.timer = undefined
       // Recheck after the delay: logout, manual connection or a Host change
@@ -111,7 +125,7 @@ export class ForegroundConnectionRecovery {
           this.inFlight = false
           this.update()
         })
-    }, RETRY_DELAYS_MS[this.attempts])
+    }, delayMs)
   }
 
   private cancelTimer(): void {

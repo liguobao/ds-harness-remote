@@ -18,11 +18,13 @@ import { ServerCredentialStore } from '../../../packages/plugin/src/server-crede
 import {
   createRemoteServer,
   normalizeGatewayOptions,
+  normalizeMaxFramesPerSec,
   normalizeIp,
   normalizeTrustedProxyIps,
   parseHelloTimeout,
   parseHeartbeatInterval,
   parseHeartbeatDisconnect,
+  parseMaxFramesPerSec,
   type Config,
 } from '../src/server.js'
 import {
@@ -923,6 +925,13 @@ describe('structured logger and sensitive data redaction', () => {
     expect(parseLogLevel('WARN')).toBe('warn')
     expect(parseLogLevel('silent')).toBe('silent')
     expect(parseLogLevel('invalid_level')).toBe('info')
+
+    // Max frames per second
+    expect(parseMaxFramesPerSec(undefined)).toBe(512)
+    expect(parseMaxFramesPerSec('4096')).toBe(4096)
+    expect(parseMaxFramesPerSec('32')).toBe(512)
+    expect(parseMaxFramesPerSec('100000')).toBe(512)
+    expect(normalizeMaxFramesPerSec(Number.NaN)).toBe(512)
   })
 })
 
@@ -1195,5 +1204,151 @@ describe('gateway diagnostics redaction', () => {
     expect(log).toContain('ws_connection_closed')
     expect(log).toContain('"hasReason":true')
     expect(log).not.toContain('CANARY-REASON')
+  })
+})
+
+describe('stale link frame dropping and configurable rate limit', () => {
+  it('silently drops late frames for a closed link even after the active frame quota is full, while bounding sustained stale byte floods', async () => {
+    await app.close()
+    await start(password, [], { maxFramesPerSec: 64 })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+
+    const ctx = await connection()
+    await handshake(ctx)
+    const closedClient = once(ctx.client.ws, 'close')
+    ctx.client.ws.close(1000, 'client closed')
+    await closedClient
+    expect(await ctx.host.next('error')).toMatchObject({
+      code: 'CONNECTION_FAILED',
+      connectionId: ctx.connectionId,
+      retryable: true,
+    })
+
+    // Churn 1,100 dropped links on an unrelated Host: per-Host tombstone isolation must prevent
+    // unrelated churn from evicting ctx.connectionId's tombstone.
+    const churnHost = await device('host')
+    const churnClient = await device('client')
+    const churnHostWire = await socket(churnHost)
+    const churnClientWire = await socket(churnClient)
+    await churnHostWire.next('hello.ack')
+    await churnClientWire.next('hello.ack')
+    const gatewayInternals = app.gateway as unknown as {
+      recordDroppedLink(link: { id: string; host: string; client: string }): void
+    }
+    for (let i = 0; i < 1100; i++) {
+      gatewayInternals.recordDroppedLink({
+        id: `churn-link-${i}`,
+        host: churnHost.deviceId,
+        client: churnClient.deviceId,
+      })
+    }
+
+    // Fill the normal 64-frame quota first with active traffic in the current window.
+    for (let i = 0; i < 60; i++) {
+      ctx.host.send('ping', { nonce: `fill-${i}` })
+      expect(await ctx.host.next('pong')).toEqual({ nonce: `fill-${i}` })
+    }
+
+    // Now burst 200 late relay frames (exceeding the 64 frames/sec active cap) on the dropped link:
+    // they are absorbed by the dedicated dropped-link drain budget without touching the active quota.
+    const lateCiphertext = 'A'.repeat(16 * 1024)
+    for (let i = 0; i < 200; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: i,
+        ciphertext: lateCiphertext,
+      })
+    }
+
+    // Wait for the 1s rate window to roll over and confirm the Host control connection
+    // was not closed with RATE_LIMITED and received zero error frames.
+    await new Promise(resolve => setTimeout(resolve, 1050))
+    ctx.host.send('ping', { nonce: 'host-survives-stale-burst' })
+    expect(await ctx.host.next('pong')).toEqual({ nonce: 'host-survives-stale-burst' })
+    expect(ctx.host.messages.filter(m => m.type === 'error')).toHaveLength(0)
+    expect(app.gateway.droppedLinkFrameCount(ctx.connectionId)).toBe(200)
+
+    // Even if the same Host subsequently drops >64 links (evicting ctx.connectionId's tombstone),
+    // evictedTombstoneUntil on the Peer still protects late frames for ctx.connectionId.
+    for (let i = 0; i < 70; i++) {
+      gatewayInternals.recordDroppedLink({
+        id: `same-host-churn-${i}`,
+        host: ctx.h.deviceId,
+        client: ctx.c.deviceId,
+      })
+    }
+    expect(app.gateway.droppedLinkFrameCount(ctx.connectionId)).toBe(0)
+    for (let i = 0; i < 100; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: 500 + i,
+        ciphertext: lateCiphertext,
+      })
+    }
+    await new Promise(resolve => setTimeout(resolve, 1050))
+    ctx.host.send('ping', { nonce: 'host-survives-post-eviction-burst' })
+    expect(await ctx.host.next('pong')).toEqual({ nonce: 'host-survives-post-eviction-burst' })
+    expect(ctx.host.messages.filter(m => m.type === 'error')).toHaveLength(0)
+
+    // Sustained stale traffic exceeding the 8 MiB/sec dropped-link byte ceiling is still bounded.
+    const hostClosed = once(ctx.host.ws, 'close')
+    const hugeCiphertext = 'B'.repeat(128 * 1024)
+    for (let i = 0; i < 70; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: 1000 + i,
+        ciphertext: hugeCiphertext,
+      })
+    }
+    expect(await ctx.host.next('error')).toMatchObject({
+      code: 'RATE_LIMITED',
+      retryable: false,
+    })
+    const [hostCloseCode] = await hostClosed
+    expect(hostCloseCode).toBe(4001)
+  })
+
+  it('enforces configured maxFramesPerSec on active frames and immediately reaps a heartbeat-expired host on connect.request', async () => {
+    await app.close()
+    await start(password, [], { maxFramesPerSec: 64 })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+    expect(app.gateway.maxFramesPerSec).toBe(64)
+
+    const h = await device('host')
+    const c = await device('client')
+    const rateLimitedClient = await device('client')
+    const hostWire = await socket(h)
+    const clientWire = await socket(c)
+    const noisyWire = await socket(rateLimitedClient)
+    await hostWire.next('hello.ack')
+    await clientWire.next('hello.ack')
+    await noisyWire.next('hello.ack')
+
+    // Simulate a Host whose last pong is older than heartbeatDisconnectMs before
+    // the next periodic interval tick runs.
+    const hostPeer = app.gateway.peers.get(h.deviceId)!
+    hostPeer.lastPong = Date.now() - (app.gateway.heartbeatDisconnectMs + 1000)
+
+    clientWire.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'] })
+    expect(await clientWire.next('error')).toMatchObject({
+      code: 'HOST_OFFLINE',
+      retryable: true,
+    })
+    expect(app.gateway.peers.has(h.deviceId)).toBe(false)
+
+    // Active frames exceeding the configured 64 frames/sec threshold trigger RATE_LIMITED (4001).
+    const noisyClosed = once(noisyWire.ws, 'close')
+    for (let i = 0; i < 70; i++) {
+      noisyWire.send('ping', { nonce: `active-${i}` })
+    }
+    expect(await noisyWire.next('error')).toMatchObject({
+      code: 'RATE_LIMITED',
+      retryable: false,
+    })
+    const [closeCode] = await noisyClosed
+    expect(closeCode).toBe(4001)
   })
 })

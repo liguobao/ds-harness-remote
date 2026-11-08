@@ -1,4 +1,5 @@
 import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
+import { classifyControlClose } from '@dsh-remote/protocol'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { connectionFailure, connectionLog } from './connection-log'
@@ -90,8 +91,10 @@ export class AndroidRemoteConnection {
       onDisconnect: event => {
         // Refused/replaced credentials, protocol errors and malformed frames
         // need manual recovery; do not automatically compete for ownership.
+        const retryableControlClose = event.closeCode !== undefined
+          && classifyControlClose(event.closeCode, event.closeReason).retryable
         retryableClose = event.reason !== 'invalid-control-frame'
-          && !(event.closeCode !== undefined && (event.closeCode >= 4000
+          && !(event.closeCode !== undefined && !retryableControlClose && (event.closeCode >= 4000
             || [1002, 1003, 1007, 1008, 1009].includes(event.closeCode)))
         if (event.transport !== undefined) lastTransport = event.transport
         connectionLog('disconnect', { reason: event.reason, closeCode: event.closeCode, transport: event.transport })

@@ -344,7 +344,13 @@ export class AdaptiveTransport extends BaseTransport {
       if (frame.type === 'connect.rejected' || frame.type === 'error') {
         const payload = frame.payload as { message?: unknown; code?: unknown; retryable?: unknown }
         const message = typeof payload.message === 'string' ? payload.message : 'Server rejected the connection'
-        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable })
+        const failure = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable })
+        const code = errorCodeSchema.safeParse(payload.code)
+        this.failConnection(failure, {
+          reason: payload.retryable === true ? 'control-error' : 'invalid-control-frame',
+          ...(code.success ? { errorCode: code.data } : {}),
+        })
+        return
       }
       if (frame.type === 'relay') {
         if (this.dataSocket !== undefined) return
