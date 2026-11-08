@@ -69,11 +69,15 @@ try {
     const descriptor = { deviceId: host.deviceId, name: host.name, role: 'host', platform: 'desktop', identityKey: host.publicKey };
     const pairing = new HostPairing(apiUrl, identities.directory, host, descriptor, result => api.adoptPairing(result));
     const created = await pairing.start();
-    const qr = JSON.parse(created.qrPayload!) as {
-        sessionId: string;
-        scanSecret: string;
-        serverPublicKey: string;
-    };
+    const shortQr = new URL(created.qrPayload!);
+    assert.equal(shortQr.origin, apiUrl);
+    assert.equal(shortQr.pathname, '/pair');
+    assert.match(shortQr.hash, /^#v1\.[A-Za-z0-9_-]{43}$/);
+    const resolution = await fetch(apiUrl + '/api/v1/device-pairing/resolve', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: shortQr.hash.slice(4) }) });
+    assert.equal(resolution.status, 200);
+    const qr = await resolution.json() as { sessionId: string; scanSecret: string; serverPublicKey: string; host: { identityKey: string } };
+    assert.equal(qr.host.identityKey, host.publicKey);
     async function mobile(action: string, body: unknown): Promise<unknown> {
         const path = `/api/v1/device-pairing/sessions/${qr.sessionId}/${action}`, raw = JSON.stringify(body);
         const response = await fetch(apiUrl + path, { method: 'POST', body: raw, headers: { 'Content-Type': 'application/json', 'X-DSH-Pairing-Proof': pairingProof(phone.privateKey, qr.serverPublicKey, qr.sessionId, path, raw, 'mobile') } });

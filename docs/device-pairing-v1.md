@@ -1,8 +1,6 @@
 # Remote × DSH-Go 配对协议 v1
 
-状态：完整 Server 与本仓库 Remote 插件已实现；DSH-Go 尚需按本文接入，未进行 Android 真机验收或生产部署。
-
-本文以独立 Server 协议为准；C# 代码、迁移和 tests 路径相对于 Server 仓库。本仓库固定向量为 `fixtures/pairing/v1/proof.json`，最小自部署 `apps/server` 尚不支持此 API。
+状态：服务端已实现；Remote / DSH-Go 需按本文实现，尚未进行双端真机联调或生产部署。
 
 ## 用户流程与信任边界
 
@@ -109,7 +107,7 @@ Node / Dart 可直接使用既有 X25519 实现，加 RFC 5869 HKDF-SHA256 和 H
 
 会话有效期固定 180 秒。创建本身不登记设备、不创建用户、不签发 Token；后续 Host 操作需证明持有该公钥的私钥。创建响应丢失时可创建新会话，旧会话自行过期。
 
-Remote 将以下 JSON 编成二维码（不创建网页登录链接）：
+兼容旧格式如下。新 Remote 优先使用下面说明的短凭据格式，旧 JSON 二维码仍有效：
 
 ```json
 {
@@ -294,6 +292,46 @@ dotnet run --project tests/dotnet-pairing/Checks.csproj -c Release
 
 建议 Remote 和 DSH-Go 先跑 proof 固定向量，再对隔离服务完成二维码、手机确认、单次错误、重试恢复和自动连接联调。旧 Server 对新路径返回 404 时显示“不支持扫码设备配对”，不能自动降级到缺少人工确认的方式。
 
-## Remote 本地状态
+### Login discovery
 
-插件将冻结的最终提交以 AES-256-GCM 加密保存在设备私有目录，AAD 绑定会话，重试沿用原字节和 submissionId。仅被控策略独立持久化，刷新/退出不隐式解除。凭证目录归属校验严格验证新增配对文件及身份/Server scope，不放宽未知文件、符号链接或私钥权限检查。
+`GET /api/v1/auth/oauth/providers` preserves its OAuth `items` array and adds
+`capabilities: { "devicePairing": "dsh-pairing-v1" }`. Clients show the DSH-Go
+pairing method only after a successful response with this exact capability.
+Missing/unknown capability, legacy fallback and discovery failure must not enable
+pairing. Discovery uses `Cache-Control: no-store`; refetch after changing Server.
+This advertises Host pairing, not Client/controller authorization.
+
+## 短凭据二维码（fragment-ticket-v1）
+
+登录方式发现接口仍为 `GET /api/v1/auth/oauth/providers`，新增独立字段：
+
+```json
+{"capabilities":{"devicePairing":"dsh-pairing-v1","devicePairingQr":"fragment-ticket-v1"},"items":[]}
+```
+
+新 Remote 仅在服务端明确声明 `devicePairingQr` 时生成短二维码，否则保留旧 JSON 格式；旧 Remote 的创建响应和配对 API 不变。既有未完成的 JSON 二维码继续有效，重启后保留会话原格式。能力发现的网络/非法响应错误不能静默当成不支持；旧发现接口 404 可以保留 JSON 格式。
+
+```text
+https://dsh.r2049.cn/pair#v1.<ticket>
+```
+
+`ticket` 是现有 `scanSecret`：32 随机字节的 canonical base64url，无 padding，43 个字符（256 位熵），不是可猜测数字短码。二维码不再包含 sessionId、Host 信息或公钥。服务端只存其 SHA-256 摘要，无新增数据库字段或迁移。
+
+手机必须直接解析扫码文本，不先打开网页、不经过第三方短链服务、不跟随重定向。严格校验 scheme/origin、路径恰为 `/pair`、无 userinfo/query、fragment 匹配 `^v1\.[A-Za-z0-9_-]{43}$`，并验证解码长度与 canonical 编码。限制扫码文本长度（建议最多 2048 UTF-8 字节）。默认要求 HTTPS；HTTP 仅沿用明确允许的本地开发/自托管策略，不能因扫码任意绕过安全策略。先让用户确认服务 origin，再向该 origin 发送无账号凭据的请求；不可携带 Web Cookie、旧 Token、手机私钥或 DeepSeek 凭据。
+
+```http
+POST /api/v1/device-pairing/resolve
+Content-Type: application/json
+
+{"ticket":"<fragment中v1.之后的43字符>"}
+```
+
+响应为现有创建响应，格式完全相同：`v, sessionId, expiresAt, serverPublicKey, scanSecret, host`。手机必须校验 `v === 1`、`scanSecret === ticket`、有效期、Host role/ID、canonical 公钥等原有字段，结合已确认的扫码 origin 建立本次配对上下文；响应不另提供可切换的 serverUrl。只允许 `created` 且未过期的会话解析。未知、错误、已领取、取消、失败、完成或过期的 ticket 均返回 `404 PAIRING_NOT_FOUND`；字段长度或额外字段错误返回 422。响应 `Cache-Control: no-store`。按来源 IP 限流，默认 30/min，超限 429；沿用 8192 字节请求上限。
+
+解析是只读操作，**不消耗领取机会**，网络丢包可安全重发相同 ticket。真正的一次性消费仍在带手机密钥证明的原子 `claim` 中完成；并发手机只允许一个成功。解析不创建用户、不绑定设备、不返回验证码或设备凭据。解析后，先展示服务器和 Host 身份给用户，手机主动确认后再提交 claim。claim 及后续 proof、8 位验证码单次尝试、Host 最终人工确认、权限和凭证恢复协议均不变。claim 响应丢失应重发原 claim，不重新 resolve。
+
+手机须固定首次 resolve 的 Host ID/公钥和服务端会话公钥，后续状态/完成响应必须一致。与旧完整 JSON 的离线携带公钥不同，短格式的首次信息来源是用户确认 origin 的 HTTPS 服务；不能声称它额外提供了独立的 Host 公钥验证。若服务端被攻破，短格式没有独立于该服务的身份保证。
+
+fragment 不进入 HTTP 请求 URL；但 ticket 依旧是秘密，不得进入日志、分析、崩溃上报、剪贴板或外部浏览器历史。POST 请求体也必须在代理和客户端日志中脱敏。GET `/pair` 仅返回无脚本/外部资源的引导文案，不解析、不 claim；设置 no-store、no-referrer 和严格 CSP，通用相机打开页面不会绑定设备。
+
+DSH Go 实现顺序：识别短格式并确认 origin → resolve → 校验并固定会话/Host 信息 → 展示 Host 并由手机用户确认 → 复用原 claim/验证码/轮询/安全存储/自动连接流程。同时保留下面的旧 JSON 扫码解析，用于旧服务和已显示二维码；未知格式明确拒绝，不猜测协议。Dart/Android 实现和真机扫码尚未完成。

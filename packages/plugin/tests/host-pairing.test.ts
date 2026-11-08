@@ -10,7 +10,7 @@ import { ServerCredentialStore } from '../src/server-credentials.js';
 import vectors from '../../../fixtures/pairing/v1/proof.json' with { type: 'json' };
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
-async function setup() {
+async function setup(compactQr = false) {
     const directory = await mkdtemp(join(tmpdir(), 'remote-pairing-'));
     directories.push(directory);
     const identity = await new IdentityStore({ directory }).loadOrCreate('Host');
@@ -23,6 +23,7 @@ async function setup() {
     const adopt = vi.fn(async () => { });
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
         const path = new URL(String(url)).pathname;
+        if (path.endsWith('/oauth/providers')) return Response.json({ capabilities: compactQr ? { devicePairingQr: 'fragment-ticket-v1' } : {} });
         if (path.endsWith('/sessions'))
             return Response.json(session);
         if (path.endsWith('/confirm')) {
@@ -115,4 +116,22 @@ it('fails closed on old servers and expires vanished sessions without allowing a
     await existing.start();
     f.fetcher.mockResolvedValueOnce(Response.json({ error: { code: 'PAIRING_NOT_FOUND' } }, { status: 404 }));
     expect(await existing.status()).toMatchObject({ state: 'expired', canRetry: false });
+});
+
+it('uses a short fragment ticket only when advertised and retains it across restart', async () => {
+    const f = await setup(true);
+    const pairing = f.create();
+    const view = await pairing.start();
+    expect(view.qrPayload).toBe(`http://127.0.0.1:8081/pair#v1.${f.session.scanSecret}`);
+    expect(view.qrPayload).not.toContain(f.session.serverPublicKey);
+    expect(view.qrPayload).not.toContain(f.session.sessionId);
+    await assertOwnedRemoteStorage(f.directory);
+    expect(JSON.parse(await readFile(join(f.directory, 'host-pairing.json'), 'utf8')).qrFormat).toBe('fragment-ticket-v1');
+    pairing.close();
+});
+it('preserves full JSON QR compatibility when compact discovery is absent', async () => {
+    const f = await setup();
+    const pairing = f.create();
+    expect(JSON.parse((await pairing.start()).qrPayload!)).toMatchObject({ type: 'dsh.remote.pairing', ...f.session });
+    pairing.close();
 });

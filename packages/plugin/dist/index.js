@@ -84175,7 +84175,7 @@ var HostServerApi = class {
     const value = requireRecord(body, "OAuth providers");
     if (!Array.isArray(value.items)) throw invalidOAuthProviders();
     const ids = /* @__PURE__ */ new Set();
-    return value.items.map((item) => {
+    const providers = value.items.map((item) => {
       const provider = requireRecord(item, "OAuth provider");
       if (typeof provider.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id) || ids.has(provider.id) || typeof provider.displayName !== "string" || !provider.displayName.trim() || provider.displayName.length > 128 || TERMINAL_CONTROL_CHARACTERS.test(provider.displayName) || !isOAuthEntryPath(provider.startUrl) || provider.qrStartUrl != null && !isOAuthEntryPath(provider.qrStartUrl)) throw invalidOAuthProviders();
       ids.add(provider.id);
@@ -84186,6 +84186,11 @@ var HostServerApi = class {
         ...typeof provider.qrStartUrl === "string" ? { qrStartUrl: provider.qrStartUrl } : {}
       };
     });
+    const capabilities = value.capabilities;
+    if (typeof capabilities === "object" && capabilities !== null && capabilities.devicePairing === "dsh-pairing-v1") {
+      providers.push({ id: "dsh-go-pairing-v1", displayName: "DSH-Go", startUrl: "/api/v1/device-pairing", devicePairing: true });
+    }
+    return providers;
   }
   async startOAuthQrLogin(provider = "zhihu") {
     const entry = (await this.oauthProviders()).find((item) => item.id === provider);
@@ -87123,6 +87128,7 @@ var savedPairingSchema = external_exports.object({
   serverUrl: external_exports.string().url(),
   deviceId: external_exports.string(),
   session: pairingCreatedSchema,
+  qrFormat: external_exports.literal("fragment-ticket-v1").optional(),
   state: pairingStatusSchema.shape.state,
   mobile: pairingDeviceSchema.optional(),
   submission: external_exports.string().optional(),
@@ -96293,11 +96299,13 @@ var HostPairing = class {
         if (active.has(status2.state))
           await this.send(old, "host/cancel", "{}");
       }
+      const discovery = await this.request("/api/v1/auth/oauth/providers", void 0, void 0, "GET");
+      const compactQr = discovery.capabilities?.devicePairingQr === "fragment-ticket-v1";
       const session2 = pairingCreatedSchema.parse(await this.request(root, JSON.stringify({ v: 1, device: this.descriptor })));
       this.assertHost(session2.host);
       if (session2.expiresAt <= Date.now() || session2.expiresAt > Date.now() + 24e4)
         throw new ServerApiError("INVALID_MESSAGE", "Invalid pairing expiry.", false);
-      const saved = { serverUrl: this.serverUrl, deviceId: this.identity.deviceId, session: session2, state: "created", localSaved: false };
+      const saved = { serverUrl: this.serverUrl, deviceId: this.identity.deviceId, session: session2, state: "created", localSaved: false, ...compactQr ? { qrFormat: "fragment-ticket-v1" } : {} };
       await this.save(saved);
       return this.view(saved);
     });
@@ -96405,7 +96413,7 @@ var HostPairing = class {
       expiresAt: s.session.expiresAt,
       serverUrl: this.serverUrl,
       hostFingerprint: fullFingerprint(this.identity.publicKey),
-      ...s.state === "created" ? { qrPayload: JSON.stringify({ type: "dsh.remote.pairing", ...s.session, serverUrl: this.serverUrl }) } : {},
+      ...s.state === "created" ? { qrPayload: s.qrFormat === "fragment-ticket-v1" ? `${this.serverUrl}/pair#v1.${s.session.scanSecret}` : JSON.stringify({ type: "dsh.remote.pairing", ...s.session, serverUrl: this.serverUrl }) } : {},
       ...s.mobile ? { mobile: { deviceId: s.mobile.deviceId, name: s.mobile.name, fingerprint: fullFingerprint(s.mobile.identityKey) } } : {},
       ...reason ? { failureReason: reason } : {},
       canRetry: s.submission !== void 0 && active.has(s.state),
@@ -96416,9 +96424,10 @@ var HostPairing = class {
     const path = `${root}/${s.session.sessionId}/${action}`;
     return this.request(path, raw, pairingProof(this.identity.privateKey, s.session.serverPublicKey, s.session.sessionId, path, raw));
   }
-  async request(path, body, proof) {
+  async request(path, body, proof, method = "POST") {
     try {
-      const response = await this.fetcher(this.serverUrl + path, { method: "POST", redirect: "error", headers: { "Content-Type": "application/json", ...proof ? { "X-DSH-Pairing-Proof": proof } : {} }, body, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(1e4)]) });
+      const response = await this.fetcher(this.serverUrl + path, { method, redirect: "error", headers: { "Content-Type": "application/json", ...proof ? { "X-DSH-Pairing-Proof": proof } : {} }, body, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(1e4)]) });
+      if (response.status === 404 && method === "GET" && path === "/api/v1/auth/oauth/providers") return {};
       if (response.status === 404 && path === root)
         throw new ServerApiError("PAIRING_UNSUPPORTED", "This Server does not support pairing.", false);
       const text = await response.text();

@@ -52,11 +52,13 @@ export class HostPairing {
                 if (active.has(status.state))
                     await this.send(old, 'host/cancel', '{}');
             }
+            const discovery = await this.request('/api/v1/auth/oauth/providers', undefined, undefined, 'GET') as { capabilities?: { devicePairingQr?: unknown } };
+            const compactQr = discovery.capabilities?.devicePairingQr === 'fragment-ticket-v1';
             const session = pairingCreatedSchema.parse(await this.request(root, JSON.stringify({ v: 1, device: this.descriptor })));
             this.assertHost(session.host);
             if (session.expiresAt <= Date.now() || session.expiresAt > Date.now() + 240000)
                 throw new ServerApiError('INVALID_MESSAGE', 'Invalid pairing expiry.', false);
-            const saved: Saved = { serverUrl: this.serverUrl, deviceId: this.identity.deviceId, session, state: 'created', localSaved: false };
+            const saved: Saved = { serverUrl: this.serverUrl, deviceId: this.identity.deviceId, session, state: 'created', localSaved: false, ...(compactQr ? { qrFormat: 'fragment-ticket-v1' as const } : {}) };
             await this.save(saved);
             return this.view(saved);
         });
@@ -154,7 +156,7 @@ export class HostPairing {
     }
     private view(s: Saved, reason?: string | null): HostPairingView {
         return { sessionId: s.session.sessionId, state: s.state, expiresAt: s.session.expiresAt, serverUrl: this.serverUrl, hostFingerprint: fullFingerprint(this.identity.publicKey),
-            ...(s.state === 'created' ? { qrPayload: JSON.stringify({ type: 'dsh.remote.pairing', ...s.session, serverUrl: this.serverUrl }) } : {}),
+            ...(s.state === 'created' ? { qrPayload: s.qrFormat === 'fragment-ticket-v1' ? `${this.serverUrl}/pair#v1.${s.session.scanSecret}` : JSON.stringify({ type: 'dsh.remote.pairing', ...s.session, serverUrl: this.serverUrl }) } : {}),
             ...(s.mobile ? { mobile: { deviceId: s.mobile.deviceId, name: s.mobile.name, fingerprint: fullFingerprint(s.mobile.identityKey) } } : {}),
             ...(reason ? { failureReason: reason } : {}), canRetry: s.submission !== undefined && active.has(s.state), localSaved: s.localSaved };
     }
@@ -162,9 +164,10 @@ export class HostPairing {
         const path = `${root}/${s.session.sessionId}/${action}`;
         return this.request(path, raw, pairingProof(this.identity.privateKey, s.session.serverPublicKey, s.session.sessionId, path, raw));
     }
-    private async request(path: string, body: string, proof?: string): Promise<unknown> {
+    private async request(path: string, body: string | undefined, proof?: string, method = 'POST'): Promise<unknown> {
         try {
-            const response = await this.fetcher(this.serverUrl + path, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', ...(proof ? { 'X-DSH-Pairing-Proof': proof } : {}) }, body, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(10000)]) });
+            const response = await this.fetcher(this.serverUrl + path, { method, redirect: 'error', headers: { 'Content-Type': 'application/json', ...(proof ? { 'X-DSH-Pairing-Proof': proof } : {}) }, body, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(10000)]) });
+            if (response.status === 404 && method === 'GET' && path === '/api/v1/auth/oauth/providers') return {};
             if (response.status === 404 && path === root)
                 throw new ServerApiError('PAIRING_UNSUPPORTED', 'This Server does not support pairing.', false);
             const text = await response.text();

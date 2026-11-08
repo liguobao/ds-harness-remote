@@ -11,6 +11,7 @@ export function createHostPairingPanel(React: ClientReact) {
     const { t } = props
     const [view, setView] = React.useState<HostPairingView | undefined>(undefined)
     const [image, setImage] = React.useState<string | undefined>(undefined)
+    const [now, setNow] = React.useState(Date.now())
     const [code, setCode] = React.useState('')
     const [busy, setBusy] = React.useState(false)
     const [locked, setLocked] = React.useState(false)
@@ -41,7 +42,7 @@ export function createHostPairingPanel(React: ClientReact) {
     }, [props.serverUrl, props.disabled])
     React.useEffect(() => {
       let current = true; setImage(undefined)
-      if (view?.qrPayload) void QRCode.toDataURL(view.qrPayload, { width: 320, margin: 4, errorCorrectionLevel: 'M' })
+      if (view?.qrPayload) void QRCode.toDataURL(view.qrPayload, { width: 184, margin: 1, errorCorrectionLevel: 'L' })
         .then(value => { if (current) setImage(value) }).catch(() => { if (current) setError(t('pairingError')) })
       return () => { current = false }
     }, [view?.qrPayload])
@@ -57,19 +58,27 @@ export function createHostPairingPanel(React: ClientReact) {
       } finally { flight.current = false; if (mounted.current) setBusy(false) }
     }
     const active = view !== undefined && ['created', 'claimed', 'approved'].includes(view.state)
+    React.useEffect(() => {
+      if (!active) return
+      setNow(Date.now())
+      const timer = setInterval(() => setNow(Date.now()), 1000)
+      return () => clearInterval(timer)
+    }, [active, view?.expiresAt])
+    const remaining = view === undefined ? 0 : Math.max(0, Math.ceil((new Date(view.expiresAt).getTime() - now) / 1000))
+    const remainingText = `${Math.floor(remaining / 60).toString().padStart(2, '0')}:${(remaining % 60).toString().padStart(2, '0')}`
     const retry = locked || view?.canRetry || view?.state === 'approved'
     const status = view === undefined ? 'pairingHint' : view.state === 'created' ? 'pairingScan'
       : view.state === 'claimed' ? 'pairingEnter' : view.state === 'completed' ? 'pairingComplete'
         : view.state === 'approved' ? 'pairingPending' : 'pairingClosed'
     return React.createElement('section', { className: 'dshRemotePairing', 'aria-label': t('pairingTitle') },
-      React.createElement('h3', null, t('pairingTitle')),
-      React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, t(status)),
-      React.createElement('p', { className: 'dshRemotePairingPolicy' }, t('pairingHostOnly')),
+      React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, ...t(status).split('DSH Go').flatMap((part, index) => index === 0 ? [part] : [React.createElement('a', { key: index, href: 'https://github.com/ccch1mneyyy/dsh-go', target: '_blank', rel: 'noopener noreferrer' }, 'DSH Go'), part])),
       props.disabled ? React.createElement('p', null, t('pairingSaveServer')) : null,
-      view === undefined ? null : React.createElement('p', { className: 'dshRemotePairingIdentity' }, view.serverUrl, React.createElement('br'), React.createElement('code', null, view.hostFingerprint)),
-      image === undefined ? null : React.createElement('img', { src: image, width: 320, height: 320, alt: t('pairingQr'), className: 'dshRemotePairingQr' }),
+      image === undefined ? null : React.createElement('img', { src: image, width: 200, height: 200, alt: t('pairingQr'), className: 'dshRemotePairingQr' }),
+      !active ? null : React.createElement('div', { className: 'dshRemotePairingQrActions' },
+        React.createElement('span', { className: 'dshRemotePairingCountdown', role: 'timer' }, remaining > 0 ? t('pairingExpires', { time: remainingText }) : t('pairingExpired')),
+        React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || props.disabled,
+          onClick: () => void run('cancel') }, t(busy ? 'pairingBusy' : 'pairingCancel'))),
       view?.mobile === undefined ? null : React.createElement('p', { className: 'dshRemotePairingIdentity' }, React.createElement('strong', null, view.mobile.name), React.createElement('br'), React.createElement('code', null, view.mobile.fingerprint)),
-      !active ? null : React.createElement('p', null, t('pairingExpires', { time: new Date(view!.expiresAt).toLocaleTimeString() })),
       view?.state !== 'claimed' || retry ? null : React.createElement('form', { onSubmit: (event: { preventDefault(): void; nativeEvent?: Event }) => {
         event.preventDefault()
         // Reject synthetic dispatch; this is not a claim of protection from OS automation.
@@ -83,7 +92,7 @@ export function createHostPairingPanel(React: ClientReact) {
       React.createElement('div', { className: 'dshRemotePairingActions' },
         active && retry ? React.createElement('button', { type: 'button', disabled: busy || props.disabled, className: 'dshRemoteSave',
           onClick: (event: { nativeEvent?: Event }) => { if (event.nativeEvent?.isTrusted) void run('confirm', true) } }, t('pairingRetry')) : null,
-        React.createElement('button', { type: 'button', className: active ? 'dshRemoteDiscard' : 'dshRemoteSave', disabled: busy || props.disabled || !props.serverUrl,
+        active ? null : React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || props.disabled || !props.serverUrl,
           onClick: () => void run(active ? 'cancel' : 'start') }, t(busy ? 'pairingBusy' : active ? 'pairingCancel' : 'pairingStart'))))
   }
 }

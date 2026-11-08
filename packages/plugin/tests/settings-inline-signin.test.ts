@@ -211,7 +211,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
 
     tree = render()
     const activeInline = findElement(tree, (n: any) => n.props?.id === 'dsh-remote-inline-signin')
-    const submitBtn = findElement(activeInline, (n: any) => n.type === 'button' && n.props?.onClick)
+    const submitBtn = findElement(activeInline, (n: any) => n.type === 'button' && n.children?.[0] === 'startSignIn')
 
     submitBtn.props.onClick()
     await new Promise(r => setTimeout(r, 10))
@@ -616,7 +616,7 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     unmount()
   })
 
-  it('handles provider discovery failure and recovers on retry', async () => {
+  it('handles provider discovery failure and recovers when reopened', async () => {
     const { React, resetRender, unmount } = createTestHarness()
     let providerCalls = 0
 
@@ -664,16 +664,15 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     const toggleBtn = findElement(tree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin')
     toggleBtn.props.onClick()
 
-    const { tree: failedTree, el: retryBtn } = await waitForElement(
-      render,
-      (n: any) => n.props?.className?.includes('dshRemoteReconnect') && n.children?.[0] === 'retryLoginProviders'
-    )
+    await new Promise(r => setTimeout(r, 10))
+    const failedTree = render()
     expect(providerCalls).toBe(1)
-    expect(retryBtn).not.toBeNull()
-    expect(findElement(failedTree, (n: any) => n.props?.type === 'password')).toBeNull()
+    expect(findElement(failedTree, (n: any) => n.props?.type === 'password')).not.toBeNull()
 
-    // Clicking retry button restarts provider discovery
-    retryBtn.props.onClick()
+    // Discovery retries when the login panel is reopened; no separate retry control.
+    findElement(failedTree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin').props.onClick()
+    tree = render()
+    findElement(tree, (n: any) => n.props?.['aria-controls'] === 'dsh-remote-inline-signin').props.onClick()
 
     const { tree: qrTree, el: qrImg } = await waitForElement(render, (n: any) => n.type === 'img')
     expect(qrImg).not.toBeNull()

@@ -34,6 +34,7 @@ export interface OAuthProviderInfo {
   displayName: string
   startUrl: string
   qrStartUrl?: string | null
+  devicePairing?: true
 }
 
 export type OAuthQrPollResult =
@@ -220,7 +221,7 @@ export class HostServerApi {
     const value = requireRecord(body, 'OAuth providers')
     if (!Array.isArray(value.items)) throw invalidOAuthProviders()
     const ids = new Set<string>()
-    return value.items.map(item => {
+    const providers: OAuthProviderInfo[] = value.items.map(item => {
       const provider = requireRecord(item, 'OAuth provider')
       if (typeof provider.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id)
         || ids.has(provider.id)
@@ -232,6 +233,12 @@ export class HostServerApi {
       return { id: provider.id, displayName: provider.displayName, startUrl: provider.startUrl,
         ...(typeof provider.qrStartUrl === 'string' ? { qrStartUrl: provider.qrStartUrl } : {}) }
     })
+    const capabilities = value.capabilities
+    if (typeof capabilities === 'object' && capabilities !== null
+      && (capabilities as Record<string, unknown>).devicePairing === 'dsh-pairing-v1') {
+      providers.push({ id: 'dsh-go-pairing-v1', displayName: 'DSH-Go', startUrl: '/api/v1/device-pairing', devicePairing: true })
+    }
+    return providers
   }
 
   async startOAuthQrLogin(provider: OAuthProvider = 'zhihu'): Promise<OAuthQrSession> {
