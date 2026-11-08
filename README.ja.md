@@ -61,10 +61,11 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
   （タブレット・2-in-1）、中国語/英語 UI、ライト/ダークとテーマ色、デスクペット
 - **安定性**: リンクログの永続化（`link.log`、再起動後も保持）、自動再接続とセッションストリーム再開、
   無音検知、長時間タスクによるキープアライブ（画面オフでも切断しない）、LAN/P2P 直結を優先しリレー/TURN にフォールバック
-- **ビルドとインストール**:
+- **ビルドとテスト**:
   ```sh
-  harmony/scripts/build-local.sh                    # ローカル署名でビルド（署名素材はリポジトリに入れない）
-  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  harmony/scripts/build-local.sh                     # ローカル署名でビルド（署名素材はリポジトリに入れない）
+  harmony/scripts/smoke.sh 192.168.3.145:34521       # ビルド → インストール → 起動 → 接続待ち → クラッシュ検査
+  node harmony/scripts/check-i18n.mjs                # UI 文言に英語があるか検証
   ```
 - **ドキュメント**: [クライアントガイド](docs/harmony-client.md) · [LAN とリンクログ](docs/harmony-link-log.md) ·
   [2026-11-09 マイルストーン](docs/harmony-milestone-2026-11-09.md) · [リリースノート](docs/release-0.17.86.md)

@@ -61,10 +61,11 @@ and a **native HarmonyOS client** is added on top (pure ArkTS + WebRTC inside Ar
   Chinese/English UI, light/dark plus accent themes, desk pet
 - **Stability work**: link log persisted to disk (`link.log`, survives restarts), auto reconnect with session-stream reopen,
   silence probing, long-running task keepalive (survives screen-off), LAN/P2P direct path first with relay/TURN fallback
-- **Build & install**:
+- **Build & test**:
   ```sh
-  harmony/scripts/build-local.sh                    # signed locally; signing material never enters the repo
-  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  harmony/scripts/build-local.sh                     # signed locally; signing material never enters the repo
+  harmony/scripts/smoke.sh 192.168.3.145:34521       # build → install → launch → wait for "connected · lan" → crash check
+  node harmony/scripts/check-i18n.mjs                # UI strings must all have English
   ```
 - **Docs**: [client guide](docs/harmony-client.md) · [LAN & link log](docs/harmony-link-log.md) ·
   [2026-11-09 milestone](docs/harmony-milestone-2026-11-09.md) · [release notes](docs/release-0.17.86.md)

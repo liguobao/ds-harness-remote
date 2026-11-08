@@ -60,10 +60,11 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
   断点驱动的双栏/三栏（平板与 PC 2in1）、中英双语、深浅色与主题色、桌宠
 - **稳定性工程**：链路日志落盘（`link.log`，重启保留）、掉线自动重连与会话流重开（含服务器 4009 重启场景）、
   静默探测、长时任务保活（熄屏不断）、主机未上线时 5 秒快重试、局域网直连（LAN/P2P）优先，中继/TURN 兜底
-- **构建与装机**：
+- **构建与自测**：
   ```sh
-  harmony/scripts/build-local.sh                    # 用本机签名构建（签名材料不入库）
-  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  harmony/scripts/build-local.sh                     # 用本机签名构建（签名材料不入库）
+  harmony/scripts/smoke.sh 192.168.3.145:34521       # 构建→装机→拉起→等「已连接 · lan」→崩溃检查
+  node harmony/scripts/check-i18n.mjs                # 校验每个 UI 文案都有英文
   ```
 - **文档**：[客户端说明](docs/harmony-client.md) · [局域网直连与链路日志](docs/harmony-link-log.md) ·
   [2026-11-09 里程碑](docs/harmony-milestone-2026-11-09.md) · [发行说明](docs/release-0.17.86.md)
