@@ -55,7 +55,7 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 | DSH Desktop プラグイン | Remote サイドバー | 対応 | `ds-harness-remote@0.6.4` をインストールします。このパソコンを Host としても利用できます |
 | Web | ブラウザーページ | 対応 | [https://dsh.r2049.cn](https://dsh.r2049.cn) を開きます。ネイティブの Harness UI を再利用します |
 | Android | ネイティブアプリ | 対応 | [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から APK をダウンロードできます。[Android ガイド](apps/android/README.md)を参照してください |
-| Harmony&nbsp;7.* | ネイティブアプリ | 対応 | ソースは [apps/harmony](apps/harmony) です。HarmonyOS 7.0（API 26）以降と DevEco Studio でビルドします。詳細は [HarmonyOS ガイド](docs/harmony-client.md) を参照してください |
+| Harmony&nbsp;7.* | ネイティブアプリ | 対応 | ソースは [harmony/](harmony/) です。HarmonyOS 7.0（API 26）以降と DevEco Studio でビルドします。詳細は [HarmonyOS ガイド](docs/harmony-client.md) を参照してください |
 | DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: DeepSeek Harness の Android クライアント。スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
 | ブラウザー拡張機能 | Chrome | アクセス入口のみ | ログイン済み Web の認可を独立したデバイス認証情報に交換し、オンラインの Host を一覧表示して同一オリジンの Remote Web を開きます。拡張機能自体に会話 UI はありません |
