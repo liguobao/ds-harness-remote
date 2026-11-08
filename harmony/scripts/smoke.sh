@@ -56,6 +56,10 @@ BEFORE=$(hdc -t "$DEV" shell "wc -l < $LOG_PATH 2>/dev/null" 2>/dev/null | tr -d
 echo "  启动前日志行数：$BEFORE"
 
 hdc -t "$DEV" shell "hilog -r" >/dev/null 2>&1
+# 先 force-stop 再拉起：否则 App 已在运行时 `aa start` 只是切前台，不会产生新日志
+# （第一版就因此误判成「没连上」）
+hdc -t "$DEV" shell "aa force-stop $BUNDLE" >/dev/null 2>&1
+sleep 2
 hdc -t "$DEV" shell "aa start -b $BUNDLE -a $ABILITY" >/dev/null 2>&1
 
 i=0
@@ -70,7 +74,9 @@ done
 if [ -z "$CONNECTED" ]; then
   echo "  最近链路日志："
   hdc -t "$DEV" shell "tail -6 $LOG_PATH 2>/dev/null" 2>/dev/null | sed 's/^/    /'
-  fail "${WAIT}s 内没有连上主机（若 App 停在设备列表，需要手动点一次「连接」）"
+  fail "${WAIT}s 内没有连上主机。常见原因：
+      1) 设备锁屏：锁屏状态下 aa start 不会加载页面，App 不会 bootstrap（先解锁再跑）
+      2) App 停在主机列表：需要手动点一次「连接」（之后会记住）
 fi
 
 echo "  已连接：$CONNECTED"
