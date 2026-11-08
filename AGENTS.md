@@ -1,5 +1,22 @@
 # Repository Guide for Agents
 
+## Oversized session catalogues (2026-11-07)
+
+Remote 的会话目录来自官方 `session/list`，覆盖整个账号，而客户端在
+`RemoteSessionTools.catalog()` 里用 `z.array(rowSchema).max(MAX_REMOTE_SESSIONS)` 校验这份共享列表。
+实测一台累计 5 431 行、其中 4 701 行是 subagent 会话的 Host 会让每个客户端在校验阶段抛 ZodError，
+异常被 Remote tool 包装器吞成 `REMOTE_SESSION_FAILED`，表现为手机「已连接」但会话列表永远空白，
+Desktop 面板的 Agent 工具同样失败。
+
+- Client：先按 workspace 归属与 subagent 过滤，再对结果施加行上限；超限时截断，不再整包失败。
+- Host：`session/list` 仅在超过 2 048 行预算时降级——只保留可列出的根会话（无 `parentSessionId` 且
+  `origin !== 'subagent'`），仍超预算时按 `updatedAt` 保留最新 2 048 行；正常规模账号行为不变。
+- 兼容：Harness 0.2.2 的 `SessionSummary` 去掉了顶层 `title`，标题只保留在
+  `projections.values.title`；Host 在 `session/list` 响应里把它提升回行字段，否则 Remote 列表全是空标题。
+- 实测：该账号由 5 431 行 / 5.13 MB 降到 717 行 / 643 KB，Android 与 Desktop 恢复正常；测试覆盖
+  子会话超预算、根会话超预算、正常规模与 `session/search` 不受影响四种场景。
+
+
 ## Self-hosted refresh response recovery (2026-11-06)
 
 `apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间

@@ -57,6 +57,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
   let accountGeneration = 0
   let refreshGeneration = 0
   let accountChanges = 0
+  let lastDirectoryError: string | undefined
   let effects: Promise<unknown> = Promise.resolve()
 
   // Credential refresh and directory cleanup can write SecureStore. Account
@@ -380,6 +381,16 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           }
         })
         if (!current()) return
+        const failedIds = new Set(result.lookupFailedDeviceIds ?? [])
+        const mismatchCount = result.keyMismatchDeviceIds?.length ?? 0
+        const allLookupsFailed = failedIds.size > 0 && result.devices.every(device => failedIds.has(device.deviceId))
+        const directoryError = mismatchCount > 0
+          ? zhCN.devices.identityChangedError
+          : allLookupsFailed
+            ? friendlyError(result.lookupError ?? new Error(zhCN.devices.loadFailed))
+            : undefined
+        const previousDirectoryError = lastDirectoryError
+        lastDirectoryError = directoryError
         set(state => ({
           devices: result.devices,
           selectedDevice: state.selectedDevice === undefined ? undefined : {
@@ -387,6 +398,11 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
             name: result.devices.find(device => device.deviceId === state.selectedDevice?.deviceId)?.name ?? state.selectedDevice.name,
           },
           refreshing: false,
+          ...(directoryError !== undefined
+            ? { error: directoryError }
+            : state.error !== undefined && state.error === previousDirectoryError
+              ? { error: undefined }
+              : {}),
         }))
       } catch (error) {
         if (!current()) return
@@ -394,7 +410,9 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           await get().requireReauth(friendlyError(error))
           return
         }
-        set({ refreshing: false, error: friendlyError(error) })
+        const message = friendlyError(error)
+        lastDirectoryError = message
+        set({ refreshing: false, error: message })
       }
     },
 

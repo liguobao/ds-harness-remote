@@ -1325,16 +1325,58 @@ function filterSessionProjections(session: unknown): unknown {
   }
 }
 
+/**
+ * A session catalogue above the client row bound cannot be listed at all: every
+ * client validates the shared list against a fixed maximum (2 048 rows today)
+ * before it filters by workspace, so one large account blanks the whole Remote
+ * surface (measured 5 431 rows, 4 701 of them subagent Sessions). Degrade only
+ * when the bound is actually exceeded, and degrade by dropping the rows that no
+ * client lists as roots instead of failing the listing.
+ */
+const SESSION_LIST_ROW_BUDGET = 2_048
+
+function trimSessionCatalogRows(endpoint: string | undefined, items: unknown[]): unknown[] {
+  if (endpoint !== 'session/list' || items.length <= SESSION_LIST_ROW_BUDGET) return items
+  const roots = items.filter(isListableRemoteSession)
+  const kept = roots.length > 0 ? roots : items
+  return kept.length <= SESSION_LIST_ROW_BUDGET
+    ? kept
+    : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET)
+}
+
+function isListableRemoteSession(session: unknown): boolean {
+  return isRecord(session) && session.parentSessionId === undefined && session.origin !== 'subagent'
+}
+
+function updatedAtOf(session: unknown): number {
+  return isRecord(session) && typeof session.updatedAt === 'number' ? session.updatedAt : 0
+}
+
+/**
+ * Harness 0.2.2 dropped the top-level `title` from SessionSummary rows; the
+ * durable title stays in the projection block, so Remote lists render blank
+ * names unless the Host lifts it back onto the row.
+ */
+function withSessionRowTitle(session: unknown): unknown {
+  if (!isRecord(session) || (typeof session.title === 'string' && session.title !== '')) return session
+  const values = isRecord(session.projections) ? session.projections.values : undefined
+  const title = isRecord(values) ? values.title : undefined
+  return typeof title === 'string' && title !== '' ? { ...session, title } : session
+}
+
 export function filterSessionListProjections(result: TypertRpcResult): TypertRpcResult
 export function filterSessionListProjections(endpoint: string, result: TypertRpcResult): TypertRpcResult
 export function filterSessionListProjections(
   resultOrEndpoint: TypertRpcResult | string,
   maybeResult?: TypertRpcResult,
 ): TypertRpcResult {
-  const result = typeof resultOrEndpoint === 'string' ? maybeResult! : resultOrEndpoint
-  if (typeof resultOrEndpoint === 'string' && resultOrEndpoint !== 'session/list' && resultOrEndpoint !== 'session/search') return result
+  const endpoint = typeof resultOrEndpoint === 'string' ? resultOrEndpoint : undefined
+  const result = endpoint === undefined ? resultOrEndpoint as TypertRpcResult : maybeResult!
+  if (endpoint !== undefined && endpoint !== 'session/list' && endpoint !== 'session/search') return result
   if (!result || !result.ok) return result
-  const filterList = (items: unknown[]): unknown[] => items.map(filterSessionProjections)
+  const filterList = (items: unknown[]): unknown[] => trimSessionCatalogRows(endpoint, items)
+    .map(filterSessionProjections)
+    .map(withSessionRowTitle)
   if (isRecord(result.value)) {
     let changed = false
     const updated = { ...result.value }

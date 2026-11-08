@@ -19,6 +19,10 @@ describe('server URL handling', () => {
     expect(normalizeServerUrl('http://172.20.0.2:8090')).toBe('http://172.20.0.2:8090')
     expect(normalizeServerUrl('http://100.64.0.3:8090')).toBe('http://100.64.0.3:8090')
     expect(normalizeServerUrl('http://169.254.1.1:8090')).toBe('http://169.254.1.1:8090')
+    expect(normalizeServerUrl('http://[::1]:8080')).toBe('http://[::1]:8080')
+    expect(normalizeServerUrl('http://[fd00:1234::1]:8080')).toBe('http://[fd00:1234::1]:8080')
+    expect(normalizeServerUrl('http://[fe80::1]:8080')).toBe('http://[fe80::1]:8080')
+    expect(() => normalizeServerUrl('http://[2001:4860:4860::8888]:8080')).toThrow(/HTTPS/)
   })
 
   it('parses server deep links without pairing codes', () => {

@@ -11,7 +11,7 @@ import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
-import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
+import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import { resolveStartupAutoConnect } from './src/lib/auto-connect'
@@ -38,6 +38,7 @@ type Route =
   | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
   | { name: 'chat'; botConversationId?: string }
   | { name: 'settings' }
+  | { name: 'diagnostics' }
   | { name: 'about' }
 
 export default function App() {
@@ -469,9 +470,16 @@ function AppNavigator() {
           }}
         />
       )}
-      {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
+      {route.name === 'settings' && (
+        <SettingsScreen
+          onBack={pop}
+          onReset={() => reset({ name: 'server' })}
+          onOpenDiagnostics={() => push({ name: 'diagnostics' })}
+        />
+      )}
+      {route.name === 'diagnostics' && <DiagnosticsScreen onBack={pop} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
-      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
+      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && route.name !== 'diagnostics' && (
         <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
           <ErrorBanner message={error} onDismiss={clearError} />
         </View>
