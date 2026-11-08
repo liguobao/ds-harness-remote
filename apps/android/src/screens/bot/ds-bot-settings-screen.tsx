@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -27,12 +28,14 @@ import {
   SlidersHorizontal,
   Sparkles,
   Terminal,
+  Trash2,
   Users,
   X,
   type LucideIcon,
 } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import {
+  canDeleteBot,
   object,
   objects,
   parseBotState,
@@ -927,45 +930,76 @@ export function DsBotSettingsModal({
 
                   <GroupCard>
                     {effectiveState.bots.map((bot, idx) => (
-                      <Pressable
+                      <View
                         key={bot.id}
-                        disabled={!isLiveState}
-                        onPress={() => setEditorTarget({ kind: 'bot', bot })}
-                        style={({ pressed }) => [
+                        style={[
                           styles.botListRow,
                           idx > 0 && styles.topHairline,
-                          pressed && { opacity: 0.75 },
                         ]}
                       >
-                        <BotAvatarWithBadge
-                          bot={bot}
-                          size={42}
-                          showMainStar
-                          badgeBorderColor={isDark ? colors.cardOpaque : '#FFFFFF'}
-                        />
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text style={styles.rowTitle} numberOfLines={1}>{bot.name}</Text>
-                            {Boolean(bot.role) && (
-                              <Text style={styles.rowSub} numberOfLines={1}>{bot.role}</Text>
-                            )}
-                            {(bot.main || bot.id === effectiveState.mainBotId) && (
-                              <View style={[styles.statusBadge, styles.statusBadgeReady]}>
-                                <Text style={[styles.statusBadgeText, { color: colors.primary }]}>主 Bot</Text>
-                              </View>
-                            )}
-                            {bot.private && (
-                              <View style={styles.statusBadge}>
-                                <Text style={styles.statusBadgeText}>{s.bots.privateBot}</Text>
-                              </View>
-                            )}
+                        <Pressable
+                          disabled={!isLiveState}
+                          onPress={() => setEditorTarget({ kind: 'bot', bot })}
+                          style={({ pressed }) => [
+                            { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 },
+                            pressed && { opacity: 0.75 },
+                          ]}
+                        >
+                          <BotAvatarWithBadge
+                            bot={bot}
+                            size={42}
+                            showMainStar
+                            badgeBorderColor={isDark ? colors.cardOpaque : '#FFFFFF'}
+                          />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text style={styles.rowTitle} numberOfLines={1}>{bot.name}</Text>
+                              {Boolean(bot.role) && (
+                                <Text style={styles.rowSub} numberOfLines={1}>{bot.role}</Text>
+                              )}
+                              {(bot.main || bot.id === effectiveState.mainBotId) && (
+                                <View style={[styles.statusBadge, styles.statusBadgeReady]}>
+                                  <Text style={[styles.statusBadgeText, { color: colors.primary }]}>主 Bot</Text>
+                                </View>
+                              )}
+                              {bot.private && (
+                                <View style={styles.statusBadge}>
+                                  <Text style={styles.statusBadgeText}>{s.bots.privateBot}</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.rowSub} numberOfLines={1}>
+                              {bot.instructions || (bot.model || effectiveState.defaultModel) || '点击管理模型、指令与文件夹'}
+                            </Text>
                           </View>
-                          <Text style={styles.rowSub} numberOfLines={1}>
-                            {bot.instructions || (bot.model || effectiveState.defaultModel) || '点击管理模型、指令与文件夹'}
-                          </Text>
-                        </View>
-                        <ChevronRight size={18} color={colors.subtle} />
-                      </Pressable>
+                          <ChevronRight size={18} color={colors.subtle} />
+                        </Pressable>
+                        {isLiveState && canDeleteBot(effectiveState, bot) && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`${s.bots.delete} ${bot.name}`}
+                            disabled={busy}
+                            hitSlop={8}
+                            onPress={() => {
+                              Alert.alert(s.bots.delete, s.bots.deleteHint, [
+                                { text: s.bots.cancel, style: 'cancel' },
+                                {
+                                  text: s.bots.delete,
+                                  style: 'destructive',
+                                  onPress: () => void perform('delete-bot', { id: bot.id }),
+                                },
+                              ])
+                            }}
+                            style={({ pressed }) => [
+                              { padding: 6 },
+                              pressed && { opacity: 0.65 },
+                              busy && { opacity: 0.4 },
+                            ]}
+                          >
+                            <Trash2 size={17} color={colors.danger} />
+                          </Pressable>
+                        )}
+                      </View>
                     ))}
                   </GroupCard>
                 </>
@@ -1006,16 +1040,57 @@ export function DsBotSettingsModal({
                           .map(id => effectiveState.bots.find(b => b.id === id)?.name ?? id)
                           .join('、')
                         return (
-                          <GroupRow
+                          <View
                             key={room.id}
-                            first={idx === 0}
-                            icon={Users}
-                            label={room.name}
-                            detail={memberNames || `${room.members.length} ${s.bots.members}`}
-                            value={`${room.members.length} 成员`}
-                            chevron
-                            onPress={() => setEditorTarget({ kind: 'room', room })}
-                          />
+                            style={[
+                              styles.botListRow,
+                              idx > 0 && styles.topHairline,
+                            ]}
+                          >
+                            <Pressable
+                              disabled={!isLiveState}
+                              onPress={() => setEditorTarget({ kind: 'room', room })}
+                              style={({ pressed }) => [
+                                { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 },
+                                pressed && { opacity: 0.75 },
+                              ]}
+                            >
+                              <Users size={20} color={colors.ink} />
+                              <View style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={styles.rowTitle} numberOfLines={1}>{room.name}</Text>
+                                <Text style={styles.rowSub} numberOfLines={1}>
+                                  {memberNames || `${room.members.length} ${s.bots.members}`}
+                                </Text>
+                              </View>
+                              <Text style={styles.rowSub}>{`${room.members.length} 成员`}</Text>
+                              <ChevronRight size={18} color={colors.subtle} />
+                            </Pressable>
+                            {isLiveState && !effectiveState.readOnly && (
+                              <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`${s.bots.delete} ${room.name}`}
+                                disabled={busy}
+                                hitSlop={8}
+                                onPress={() => {
+                                  Alert.alert(s.bots.delete, s.bots.deleteHint, [
+                                    { text: s.bots.cancel, style: 'cancel' },
+                                    {
+                                      text: s.bots.delete,
+                                      style: 'destructive',
+                                      onPress: () => void perform('delete-room', { id: room.id }),
+                                    },
+                                  ])
+                                }}
+                                style={({ pressed }) => [
+                                  { padding: 6 },
+                                  pressed && { opacity: 0.65 },
+                                  busy && { opacity: 0.4 },
+                                ]}
+                              >
+                                <Trash2 size={17} color={colors.danger} />
+                              </Pressable>
+                            )}
+                          </View>
                         )
                       })
                     )}

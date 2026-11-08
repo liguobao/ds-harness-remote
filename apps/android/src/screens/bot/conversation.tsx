@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
-import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject } from '../../services/bot-catalog'
+import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
-import { detectMention, MentionPopover, splitDraftSegments, type MentionGroup } from '../../ui/mention-popover'
+import { detectMention, MentionPopover, type MentionGroup } from '../../ui/mention-popover'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatActivityGroup, ChatItemView, QueueDock } from '../chat/messages'
@@ -55,7 +55,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const [draft, setDraft] = useState('')
   const draftRef = useRef(draft)
   draftRef.current = draft
-  const [selection, setSelection] = useState({ start: 0, end: 0 })
   const selectionRef = useRef({ start: 0, end: 0 })
   const inputRef = useRef<TextInput>(null)
   const [atQuery, setAtQuery] = useState<string | null>(null)
@@ -116,9 +115,17 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const path = markdownFilePath(href)
     if (path !== undefined) setFileLinkPath(path)
   }, [state.bots, bot?.id, onSelectBot, ready, connected, sessions, openSession])
-  useEffect(() => { setFileLinkPath(undefined); setAtQuery(null); setPlusMenuOpen(false); setReferenceChatOpen(false); setStagedReferences([]) }, [session.sessionId])
+  useEffect(() => {
+    draftRef.current = ''
+    selectionRef.current = { start: 0, end: 0 }
+    setDraft('')
+    setFileLinkPath(undefined)
+    setAtQuery(null)
+    setPlusMenuOpen(false)
+    setReferenceChatOpen(false)
+    setStagedReferences([])
+  }, [session.sessionId])
 
-  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const updateAtMention = (nextText: string, cursor: number) => {
     const detected = detectMention(nextText, cursor)
     if (detected === undefined || detected.type !== 'context') {
@@ -135,26 +142,23 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     setDraft(nextText)
     const cursor = Math.max(0, Math.min(nextText.length, selectionRef.current.end + delta))
     selectionRef.current = { start: cursor, end: cursor }
-    setSelection({ start: cursor, end: cursor })
     updateAtMention(nextText, cursor)
   }
   const handleSelectionChange = (event: { nativeEvent: { selection: { start: number; end: number } } }) => {
     const nextSel = event.nativeEvent.selection
     if (nextSel.start === selectionRef.current.start && nextSel.end === selectionRef.current.end) return
     selectionRef.current = nextSel
-    setSelection(nextSel)
     if (nextSel.start === nextSel.end) updateAtMention(draftRef.current, nextSel.end)
   }
   const insertAtMention = (mentionText: string) => {
-    const start = atSpanStartRef.current
-    const end = selectionRef.current.end
+    const start = Math.max(0, Math.min(draftRef.current.length, atSpanStartRef.current))
+    const end = Math.max(start, Math.min(draftRef.current.length, selectionRef.current.end))
     const current = draftRef.current
     const nextText = current.slice(0, start) + mentionText + current.slice(end)
     const nextCursor = start + mentionText.length
     draftRef.current = nextText
     setDraft(nextText)
     selectionRef.current = { start: nextCursor, end: nextCursor }
-    setSelection({ start: nextCursor, end: nextCursor })
     setAtQuery(null)
     inputRef.current?.focus()
   }
@@ -190,10 +194,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       })),
     }]
   }, [atQuery, state, bot?.id, room])
-  const disabled = busy || !active || !ready
+  const inputDisabled = !active || !ready
     || (bot !== undefined && bot.sessionId !== session.sessionId)
     || (room !== undefined && (room.sessionId || room.id) !== session.sessionId)
     || state.readOnly !== undefined
+  const disabled = busy || inputDisabled
   useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
   useEffect(() => { mounted.current = true; request.current = new AbortController(); return () => { mounted.current = false; request.current.abort() } }, [session.sessionId])
   useEffect(() => {
@@ -211,22 +216,55 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     return () => { control.abort(); clearTimeout(timer) }
   }, [client, room?.id, active])
   const send = async () => {
-    const rawDraft = draft.trim()
-    const prefix = stagedReferences.map(item => item.mentionText.trim()).join(' ')
+    const rawDraft = draftRef.current.trim()
+    const submittedRefs = stagedReferences
+    const prefix = submittedRefs.map(item => item.mentionText.trim()).join(' ')
     const submitted = [prefix, rawDraft].filter(Boolean).join(' ')
     if (!submitted || disabled) return
     atEnd.current = true
     followEnd()
     setError(undefined)
+    let message: { endpoint: BotOperation; payload: BotObject }
     try {
-      const message = botMessageRequest(state, bot?.id ?? room?.id ?? '', submitted)
-      const result = await perform(message.endpoint, message.payload)
-      if (mounted.current && result.ok) {
-        draftRef.current = ''
-        setDraft(current => current.trim() === rawDraft ? '' : current)
-        setStagedReferences([])
+      message = botMessageRequest(state, bot?.id ?? room?.id ?? session.sessionId, submitted)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : s.bots.unavailable)
+      return
+    }
+    const sendSessionId = session.sessionId
+    const activeRequest = request.current
+    draftRef.current = ''
+    selectionRef.current = { start: 0, end: 0 }
+    setDraft('')
+    setAtQuery(null)
+    setStagedReferences([])
+    const restoreFailedDraft = () => {
+      if (!mounted.current || activeRequest.signal.aborted || session.sessionId !== sendSessionId) return
+      const typedWhileInFlight = draftRef.current.trim()
+      const restoredDraft = typedWhileInFlight
+        ? (rawDraft ? `${rawDraft}\n${typedWhileInFlight}` : typedWhileInFlight)
+        : rawDraft
+      draftRef.current = restoredDraft
+      selectionRef.current = { start: restoredDraft.length, end: restoredDraft.length }
+      setDraft(restoredDraft)
+      if (submittedRefs.length > 0) {
+        setStagedReferences(current => {
+          const existing = new Set(current.map(item => item.sessionId))
+          return [...submittedRefs.filter(item => !existing.has(item.sessionId)), ...current]
+        })
       }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : s.bots.unavailable) }
+    }
+    try {
+      const result = await perform(message.endpoint, message.payload)
+      if (!result.ok) {
+        restoreFailedDraft()
+      }
+    } catch (reason) {
+      if (mounted.current && !activeRequest.signal.aborted && session.sessionId === sendSessionId) {
+        restoreFailedDraft()
+        setError(reason instanceof Error ? reason.message : s.bots.unavailable)
+      }
+    }
   }
   const earlierPage = async () => {
     if (olderBusy || bot === undefined || cursor === null) return
@@ -322,13 +360,13 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const trimmed = promptText.trim()
     if (!trimmed || disabled) return false
     try {
-      const message = botMessageRequest(state, bot?.id ?? room?.id ?? '', trimmed)
+      const message = botMessageRequest(state, bot?.id ?? room?.id ?? session.sessionId, trimmed)
       const result = await perform(message.endpoint, message.payload)
       return result.ok
     } catch {
       return false
     }
-  }, [disabled, state, bot?.id, room?.id, perform])
+  }, [disabled, state, bot?.id, room?.id, session.sessionId, perform])
 
   const isDisplayTool = (item: ChatItem): boolean => {
     if (item.kind !== 'tool') return false
@@ -554,19 +592,13 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             placeholderTextColor={colors.muted}
             style={styles.composerInput}
             multiline
-            editable={!disabled}
-            selection={selection}
+            editable={!inputDisabled}
+            value={draft}
             onChangeText={handleDraftChange}
             onSelectionChange={handleSelectionChange}
-          >
-            <Text>
-              {draftSegments.map((segment, index) => (
-                <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
-                  {segment.text}
-                </Text>
-              ))}
-            </Text>
-          </TextInput>
+            selectionColor={colors.accent}
+            cursorColor={colors.accent}
+          />
           {selected?.running && (
             <Pressable
               accessibilityRole="button"

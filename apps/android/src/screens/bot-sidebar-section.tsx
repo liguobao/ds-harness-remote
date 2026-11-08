@@ -38,6 +38,7 @@ import {
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
 import {
+  canDeleteBot,
   object,
   objects,
   text,
@@ -775,7 +776,7 @@ export function BotModalsHost() {
       onPress: () => void perform('agent-session', { agentId: menuAgent.id }),
     })
   }
-  if ((menuBot && !menuBot.main) || menuRoom || menuAgent) {
+  if (canDeleteBot(state, menuBot) || menuRoom || menuAgent) {
     contextActions.push({
       key: 'delete',
       icon: Trash2,

@@ -4,6 +4,7 @@ import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
   BotRemoteClient,
   botMessageRequest,
+  canDeleteBot,
   isScopedKnownBotSessionId,
   parseBotState,
   trackScopedBotStateSessions,
@@ -49,10 +50,18 @@ describe('Android Bot client authority', () => {
       { name: 'older Bot', draft: '/btw progress?', target: 'bot', supported: false },
       { name: 'ordinary message on older Bot', draft: 'hello', target: 'bot', supported: false, endpoint: 'send', text: 'hello' },
       { name: 'not the command', draft: '/btwquestion', target: 'bot', supported: true, endpoint: 'send', text: '/btwquestion' },
+      { name: 'bot sessionId target', draft: 'hello', target: 'part-2', supported: true, endpoint: 'send', expectedSessionId: 'bot', text: 'hello' },
+      { name: 'agent session target', draft: 'hello agent', target: 'agent-s1', supported: true, endpoint: 'send', expectedSessionId: 'agent-s1', text: 'hello agent' },
+      { name: 'aside on agent session rejected', draft: '/btw progress?', target: 'agent-s1', supported: true },
       { name: 'read only', draft: '/btw progress?', target: 'bot', supported: true, readOnly: 'locked' },
       { name: 'unknown session', draft: '/btw progress?', target: 'unlisted', supported: true },
     ].map(row => ({ name: row.name, run: async () => {
-      const state = parseBotState({ ...botState(), ...(row.supported ? { btwCards: {} } : {}), readOnly: row.readOnly })
+      const state = parseBotState({
+        ...botState(),
+        agents: [{ id: 'agent-1', sessions: ['agent-s1'] }],
+        ...(row.supported ? { btwCards: {} } : {}),
+        readOnly: row.readOnly,
+      })
       const dispatch = vi.fn(async () => envelope({ id: 'aside' }))
       const client = new BotRemoteClient(dispatch, async () => [], () => {})
       const send = async () => {
@@ -62,7 +71,10 @@ describe('Android Bot client authority', () => {
       if (row.endpoint) {
         await send()
         expect(dispatch).toHaveBeenCalledTimes(1)
-        expect(dispatch).toHaveBeenCalledWith({ endpoint: row.endpoint, payload: { sessionId: row.target, text: row.text } }, undefined)
+        expect(dispatch).toHaveBeenCalledWith(
+          { endpoint: row.endpoint, payload: { sessionId: row.expectedSessionId ?? row.target, text: row.text } },
+          undefined,
+        )
       } else { await expect(send()).rejects.toThrow(); expect(dispatch).not.toHaveBeenCalled() }
     } })))
     // Unknown outcome is never retried as either a side question or a prompt.
@@ -152,6 +164,19 @@ describe('Android Bot client authority', () => {
     expect(refGroups.conversations.map(item => item.sessionId)).toEqual(['dsh-1'])
     const inserted = insertReferenceAtSelection('请参考', { start: 3, end: 3 }, refGroups.conversations[0]!.mentionText)
     expect(inserted.text).toBe(`请参考 ${refGroups.conversations[0]!.mentionText}`)
+
+    expect(canDeleteBot(team, team.bots[1])).toBe(true)
+    expect(canDeleteBot(team, team.bots[0])).toBe(true)
+    const soleMainTeam = parseBotState({
+      bots: [
+        { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', main: true },
+        { id: 'priv', sessionId: 'priv-part-1', name: 'Private', main: false, private: true },
+      ],
+      rooms: [],
+      mainBotId: 'chief',
+    })
+    expect(canDeleteBot(soleMainTeam, soleMainTeam.bots[0])).toBe(false)
+    expect(canDeleteBot(soleMainTeam, soleMainTeam.bots[1])).toBe(true)
   })
 
   it('keeps roster previews scoped to current Harness sessions and rejects stale catalog responses', async () => {

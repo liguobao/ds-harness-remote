@@ -86,7 +86,7 @@ export function BotFloatingPopover({
                 disabled={action.disabled}
                 onPress={() => {
                   onClose()
-                  action.onPress()
+                  setTimeout(() => action.onPress(), 32)
                 }}
                 style={({ pressed }) => [
                   styles.row,

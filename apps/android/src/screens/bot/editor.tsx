@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { strings as s } from '../../locales/i18n'
-import { object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
-import { ChevronDown, ChevronUp, RotateCcw, X } from 'lucide-react-native'
+import { canDeleteBot, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
+import { ChevronDown, ChevronUp, RotateCcw, Trash2, X } from 'lucide-react-native'
 import { Button, IconButton } from '../../ui/components'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -197,6 +197,25 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
     [bot, state.rooms],
   )
   const canBePrivate = Boolean(bot && !bot.main && inRooms.length === 0 && workDir.trim() !== '')
+  const canDelete = Boolean(
+    editing && !state.readOnly && (room !== undefined || canDeleteBot(state, bot)),
+  )
+  const confirmDelete = () => {
+    const targetId = bot?.id ?? room?.id
+    if (!targetId || !canDelete) return
+    Alert.alert(s.bots.delete, s.bots.deleteHint, [
+      { text: s.bots.cancel, style: 'cancel' },
+      {
+        text: s.bots.delete,
+        style: 'destructive',
+        onPress: () => {
+          void perform(bot ? 'delete-bot' : 'delete-room', { id: targetId }).then(res => {
+            if (res.ok) onClose()
+          })
+        },
+      },
+    ])
+  }
   const save = async () => {
     const operation = kind === 'bot' ? bot ? 'update-bot' : 'create-bot' : room ? 'update-room' : 'create-room'
     const payload = kind === 'bot'
@@ -296,7 +315,20 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         </>}
 
       </ScrollView>
-      <View style={styles.actions}><Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} /><Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} /></View>
+      <View style={styles.actions}>
+        {canDelete && (
+          <Button
+            variant="danger"
+            icon={Trash2}
+            label={s.bots.delete}
+            disabled={busy}
+            onPress={confirmDelete}
+          />
+        )}
+        <View style={styles.grow} />
+        <Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} />
+        <Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} />
+      </View>
       <BotFolderPickerModal visible={folderPickerOpen} value={workDir} client={client} onClose={() => setFolderPickerOpen(false)} onPick={setWorkDir} />
     </ModalSurface>
   </Modal>

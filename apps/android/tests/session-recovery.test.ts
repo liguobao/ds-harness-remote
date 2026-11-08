@@ -1374,6 +1374,82 @@ describe('authoritative permission projection', () => {
           expect(useAppStore.getState().selectedSession?.title).toBe('Host B Chief')
         },
       },
+      {
+        name: 'deletes an active or main Bot cleanly without bouncing back to the deleted selection',
+        run: async () => {
+          let bots = [
+            { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', role: 'Lead', main: true },
+            { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs', main: true },
+            { id: 'helper', sessionId: ' chief-part-1', name: 'Helper', role: 'Ops', main: false },
+          ]
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [chiefPart1, chiefPart2, writerPart1],
+          })
+          useBotTeamStore.getState().ensureScope('reset-delete-bot-test')
+          proxy.sessionList.mockResolvedValue([chiefPart1, chiefPart2, writerPart1])
+          const calls: Array<{ endpoint: string; payload?: Record<string, unknown> }> = []
+          botDispatch.mockImplementation(async ({ endpoint, payload }: { endpoint: string; payload?: Record<string, unknown> }) => {
+            calls.push({ endpoint, payload })
+            if (endpoint === 'set-main') {
+              const id = String(payload?.id ?? '')
+              const main = Boolean(payload?.main)
+              const replace = typeof payload?.replace === 'string' ? payload.replace : undefined
+              bots = bots.map(entry => {
+                if (entry.id === id) return { ...entry, main }
+                if (replace && entry.id === replace) return { ...entry, main: false }
+                return entry
+              })
+              return { status: 200, json: { ok: true, value: { mainBotId: bots.find(b => b.main)?.id, mainBotIds: bots.filter(b => b.main).map(b => b.id), bots, rooms: [] } } }
+            }
+            if (endpoint === 'delete-bot') {
+              const id = String(payload?.id ?? '')
+              const target = bots.find(b => b.id === id)
+              if (target?.main) {
+                return { status: 200, json: { ok: false, error: { message: 'A Main Bot cannot be deleted' } } }
+              }
+              bots = bots.filter(entry => entry.id !== id)
+              return { status: 200, json: { ok: true, value: { mainBotId: bots.find(b => b.main)?.id, mainBotIds: bots.filter(b => b.main).map(b => b.id), bots, rooms: [] } } }
+            }
+            return {
+              status: 200,
+              json: {
+                ok: true,
+                value: {
+                  mainBotId: bots.find(b => b.main)?.id,
+                  mainBotIds: bots.filter(b => b.main).map(b => b.id),
+                  bots,
+                  rooms: [],
+                },
+              },
+            }
+          })
+
+          await useBotTeamStore.getState().refresh()
+          useBotTeamStore.getState().setSelectedId('writer')
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().selectedId).toBe('writer')
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('writer-part-1')
+
+          // Deleting 'writer' (which is one of two main bots) demotes it first, deletes it, and leaves selectedId undefined.
+          const delWriter = await useBotTeamStore.getState().perform('delete-bot', { id: 'writer' })
+          expect(delWriter.ok).toBe(true)
+          expect(calls.some(c => c.endpoint === 'set-main' && c.payload?.id === 'writer' && c.payload?.main === false)).toBe(true)
+          expect(calls.some(c => c.endpoint === 'delete-bot' && c.payload?.id === 'writer')).toBe(true)
+          expect(useBotTeamStore.getState().selectedId).toBeUndefined()
+          expect(useBotTeamStore.getState().session).toBeUndefined()
+          expect(useBotTeamStore.getState().state?.bots.map(b => b.id)).toEqual(['chief', 'helper'])
+
+          // Deleting 'chief' (now the sole main bot, with non-private 'helper' available) hands over main role to 'helper' first.
+          const delChief = await useBotTeamStore.getState().perform('delete-bot', { id: 'chief' })
+          expect(delChief.ok).toBe(true)
+          expect(calls.some(c => c.endpoint === 'set-main' && c.payload?.id === 'helper' && c.payload?.replace === 'chief')).toBe(true)
+          expect(calls.some(c => c.endpoint === 'delete-bot' && c.payload?.id === 'chief')).toBe(true)
+          expect(useBotTeamStore.getState().state?.bots.map(b => b.id)).toEqual(['helper'])
+        },
+      },
     ], async () => {
       await prepareScenario1()
     })
