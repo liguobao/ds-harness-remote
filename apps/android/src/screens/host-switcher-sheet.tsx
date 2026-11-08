@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Check, RefreshCw, SlidersHorizontal, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -6,6 +6,7 @@ import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
+import { ConnectionScreen } from './device-screens'
 import { platformIcon, switcherDeviceSubtitle } from '../lib/device-display'
 import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -18,6 +19,7 @@ export interface HostSwitcherSheetProps {
   onClose: () => void
   onSelectDevice: (device: RemoteDevice) => void
   onManageHosts: () => void
+  onConnected: () => void
 }
 
 /**
@@ -27,7 +29,7 @@ export interface HostSwitcherSheetProps {
  * the label start, the inset separators and the right edge match the cards
  * used elsewhere, and the trailing status text lands on one baseline.
  */
-export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts }: HostSwitcherSheetProps) {
+export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts, onConnected }: HostSwitcherSheetProps) {
   useAppStore(state => state.language)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
@@ -36,6 +38,15 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   const refreshDevices = useAppStore(state => state.refreshDevices)
   const error = useAppStore(state => state.error)
   const clearError = useAppStore(state => state.clearError)
+  const [connectingDevice, setConnectingDevice] = useState<RemoteDevice>()
+  const busy = connectingDevice !== undefined
+  const dismiss = () => {
+    setConnectingDevice(undefined)
+    onClose()
+  }
+  useEffect(() => {
+    if (!visible) setConnectingDevice(undefined)
+  }, [visible])
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
@@ -49,14 +60,14 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   }, [visible, refreshDevices])
 
   return (
-    <Modal visible={visible} transparent animationType='fade' onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType='fade' onRequestClose={dismiss} statusBarTranslucent>
       <View style={styles.backdrop} pointerEvents='box-none'>
         <Pressable
           accessibilityRole='button'
           accessibilityLabel={strings.common.close}
           pointerEvents='box-only'
           style={StyleSheet.absoluteFill}
-          onPress={onClose}
+          onPress={dismiss}
         />
         <View
           style={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
@@ -68,18 +79,30 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
             <View style={styles.headerActions}>
               {refreshing
                 ? <ActivityIndicator size='small' color={colors.primary} style={{ marginHorizontal: 8 }} />
-                : <IconButton label={strings.common.refresh} icon={RefreshCw} onPress={() => void refreshDevices()} />}
-              <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+                : <IconButton label={strings.common.refresh} icon={RefreshCw} disabled={busy} onPress={() => void refreshDevices()} />}
+              <IconButton label={strings.common.close} icon={X} onPress={dismiss} />
             </View>
           </View>
-          {error !== undefined && (
+          {error !== undefined && connectingDevice === undefined && (
             <ErrorBanner
               message={error}
               onRetry={() => void refreshDevices()}
               onDismiss={clearError}
             />
           )}
-          <ScrollView
+          {connectingDevice !== undefined ? (
+            <View style={{ height: Math.min(560, sheetMaxHeight - 110 - insets.bottom) }}>
+              <ConnectionScreen
+                embedded
+                device={connectingDevice}
+                onBack={() => setConnectingDevice(undefined)}
+                onConnected={() => {
+                  setConnectingDevice(undefined)
+                  onConnected()
+                }}
+              />
+            </View>
+          ) : <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
@@ -105,8 +128,10 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                         selected={isConnected}
                         chevron={false}
                         accessibilityLabel={device.name}
+                        disabled={busy}
                         onPress={() => {
                           if (isConnected) onClose()
+                          else if (device.trusted && device.online) setConnectingDevice(device)
                           else onSelectDevice(device)
                         }}
                         accessory={
@@ -127,17 +152,18 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                   })}
             </GroupCard>
             <Text style={styles.hint}>{strings.remoteHosts.singleHostHint}</Text>
-          </ScrollView>
-          <View style={styles.bottomCard}>
+          </ScrollView>}
+          {connectingDevice === undefined && <View style={styles.bottomCard}>
             <GroupCard>
               <GroupRow
                 first
                 icon={SlidersHorizontal}
                 label={strings.remoteHosts.manageAction}
                 onPress={onManageHosts}
+                disabled={busy}
               />
             </GroupCard>
-          </View>
+          </View>}
         </View>
       </View>
     </Modal>

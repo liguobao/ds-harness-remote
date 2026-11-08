@@ -9,6 +9,7 @@ import {
   Platform,
   TextInput,
   SectionList,
+  RefreshControl,
   ScrollView,
   Modal,
   Pressable,
@@ -37,7 +38,7 @@ import {
   Monitor,
   MoreHorizontal,
   Plus,
-  RefreshCw,
+  MoreVertical,
   Search,
   Server,
   Settings,
@@ -67,7 +68,8 @@ import {
 } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
-import { BotModalsHost, BotSidebarSection, useBotTeamPolling } from './bot-sidebar-section'
+import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
+import { HomeActionsMenu } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
@@ -147,6 +149,7 @@ export function HostSessionsDrawer({
   onOpenPlugins,
   onOpenHostSwitcher,
   onOpenSettings,
+  onOpenAbout,
   botMode,
   onBotModeChange,
   onSelectBot,
@@ -164,6 +167,7 @@ export function HostSessionsDrawer({
   onOpenPlugins?: () => void
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
+  onOpenAbout?: () => void
   botMode?: boolean
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (botId: string) => void
@@ -228,7 +232,7 @@ export function HostSessionsDrawer({
     setDrawerMode(activeBotMode ? 'bot' : 'agent')
   }, [activeBotMode, hostScope])
 
-  useBotTeamPolling(drawerMode === 'bot')
+  useBotTeamLoad(drawerMode === 'bot')
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
@@ -345,6 +349,7 @@ export function HostSessionsDrawer({
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showConfigModal, setShowConfigModal] = useState(false)
+  const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<'workspace' | 'workspace-tree' | 'list'>('workspace')
   const [orderBy, setOrderBy] = useState<'manual' | 'updated'>('updated')
   const [manualOrders, setManualOrders] = useState<Record<string, string[]>>({})
@@ -831,19 +836,35 @@ export function HostSessionsDrawer({
   const FooterHostIcon = platform === 'win32' ? Monitor : platform === 'linux' ? Server : Laptop
   const hostFooterDeviceInfo = (
     <>
-      <View style={styles.hostFooterIcon}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
+        disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
+        onPress={() => {
+          Keyboard.dismiss()
+          if (!inline) closeDrawer()
+          onOpenDeviceInfo?.()
+        }}
+        style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedFade]}
+      >
         <FooterHostIcon size={20} color={colors.ink} strokeWidth={1.8} />
-      </View>
-      <View style={styles.hostFooterInfo}>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
+        disabled={onOpenHostSwitcher === undefined}
+        onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher?.() }}
+        style={({ pressed }) => [styles.hostFooterInfo, pressed && styles.pressedBg]}
+      >
         <View style={styles.hostFooterNameRow}>
           <Text numberOfLines={1} style={styles.hostFooterName}>{deviceName ?? strings.devices.title}</Text>
-          <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />
+          {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />}
         </View>
         <View style={styles.hostFooterStatusRow}>
           <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
           <Text style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
         </View>
-      </View>
+      </Pressable>
     </>
   )
 
@@ -853,12 +874,12 @@ export function HostSessionsDrawer({
       <View style={styles.brandHeader}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
+          accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
+          disabled={onOpenAbout === undefined}
           onPress={() => {
             Keyboard.dismiss()
-            if (onOpenDeviceInfo) onOpenDeviceInfo()
-            else if (onOpenHostSwitcher) onOpenHostSwitcher()
-            else if (onOpenWorkspaces) onOpenWorkspaces()
+            if (!inline) closeDrawer()
+            onOpenAbout?.()
           }}
           hitSlop={8}
           style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
@@ -871,21 +892,20 @@ export function HostSessionsDrawer({
           >
             <Path d={FISH_LOGO_PATH} fill={colors.ink} />
           </Svg>
-          <Text style={styles.brandTitle} numberOfLines={1}>deepseek</Text>
-          <View style={styles.brandBadge}>
-            <Text style={styles.brandBadgeText}>HARNESS</Text>
-          </View>
+          <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
         </Pressable>
         <View style={styles.brandRight}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.common.refresh}
-            onPress={() => void handleRefresh()}
-            hitSlop={8}
-            style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
-          >
-            <RefreshCw size={17} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
+          {onOpenSettings !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.settings.more}
+              onPress={() => { Keyboard.dismiss(); setAppMenuOpen(true) }}
+              hitSlop={8}
+              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+            >
+              <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
+            </Pressable>
+          )}
           {Boolean(onBack) && (inline || dismissible) && (
             <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={handleBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
               <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
@@ -940,6 +960,8 @@ export function HostSessionsDrawer({
 
       {drawerMode === 'bot' ? (
         <BotSidebarSection
+          refreshing={connected ? refreshing : devicesRefreshing}
+          onRefresh={() => void handleRefresh()}
           searchQuery={botSearchQuery}
           onSearchChange={setBotSearchQuery}
           showSearch={showBotSearch}
@@ -1042,6 +1064,15 @@ export function HostSessionsDrawer({
           {groupStorageError && <Text accessibilityRole="alert" style={{ color: colors.muted, paddingHorizontal: spacing.md }}>{groupStorageError}</Text>}
           {/* 会话树状列表 */}
           <SectionList<RemoteSession, DrawerSection>
+            refreshControl={
+              <RefreshControl
+                refreshing={connected ? refreshing : devicesRefreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            alwaysBounceVertical
             scrollEnabled={dragState === null}
             sections={groupsReady ? sections : []}
             ListHeaderComponent={
@@ -1347,18 +1378,7 @@ export function HostSessionsDrawer({
 
       {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧唯一设置按钮 */}
       <View style={styles.hostFooterBar}>
-        {onOpenHostSwitcher !== undefined ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
-            onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
-            style={({ pressed }) => [styles.hostFooterLeft, pressed && styles.pressedBg]}
-          >
-            {hostFooterDeviceInfo}
-          </Pressable>
-        ) : (
-          <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        )}
+        <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
         {onOpenSettings !== undefined && (
           <Pressable
             accessibilityRole="button"
@@ -1778,6 +1798,31 @@ export function HostSessionsDrawer({
         }}
       />
 
+      <Modal
+        visible={appMenuOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setAppMenuOpen(false)}
+      >
+        <View style={{ flex: 1 }}>
+          <HomeActionsMenu
+            visible={appMenuOpen}
+            onClose={() => setAppMenuOpen(false)}
+            onSettings={() => {
+              setAppMenuOpen(false)
+              if (!inline) closeDrawer()
+              onOpenSettings?.()
+            }}
+            onAbout={() => {
+              setAppMenuOpen(false)
+              if (!inline) closeDrawer()
+              onOpenAbout?.()
+            }}
+          />
+        </View>
+      </Modal>
+
       {/* DS-Bot 弹窗宿主 (创建/编辑 Bot & 群聊、上下文菜单、用量/日程报表) */}
       <BotModalsHost />
     </View>
@@ -1823,7 +1868,7 @@ const createStyles = (colors: ThemeColors) =>
       paddingBottom: spacing.md,
     },
     brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 6 },
-    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
+    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, flexShrink: 1 },
     brandBadge: {
       backgroundColor: colors.ink,
       paddingHorizontal: 5,
@@ -1936,15 +1981,15 @@ const createStyles = (colors: ThemeColors) =>
     hostFooterLeft: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
+      gap: 4,
       flex: 1,
       minWidth: 0,
       paddingHorizontal: spacing.sm,
       paddingVertical: 6,
       borderRadius: radius.lg,
     },
-    hostFooterIcon: { width: 20, alignItems: 'center', justifyContent: 'center' },
-    hostFooterInfo: { flex: 1, minWidth: 0, gap: 2 },
+    hostFooterIcon: { width: 48, minHeight: 48, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
+    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 48, justifyContent: 'center', gap: 2, paddingHorizontal: spacing.xs, borderRadius: radius.lg },
     hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
     hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
     hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

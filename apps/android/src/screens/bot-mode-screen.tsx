@@ -32,7 +32,7 @@ import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
-import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamPolling } from './bot-sidebar-section'
+import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
 
 export function BotModeScreen({
   selectedId: propSelectedId,
@@ -62,7 +62,7 @@ export function BotModeScreen({
   const hostScope = useAppStore(browseScope)
   const connectionGen = getConnectionGeneration()
 
-  useBotTeamPolling(true)
+  useBotTeamLoad(!drawerOpen)
 
   const state = useBotTeamStore(store => store.state)
   const session = useBotTeamStore(store => store.session)
@@ -215,7 +215,7 @@ export function BotModeScreen({
   const room = state?.rooms.find(entry => entry.id === selectedId)
   const targetSessionId = resolveBotTargetSessionId(state, selectedId)
 
-  // Only resolve and open when session identity, Host/connection epoch, or explicit retry changes — never on 3s roster array reference refreshes.
+  // Only resolve and open when session identity, Host/connection epoch, or explicit retry changes — never on roster array reference changes.
   useEffect(() => {
     if (connectionPhase !== 'connected') return
     void syncSelectedSession({ selectedId })
@@ -225,7 +225,9 @@ export function BotModeScreen({
   const visibleError = actionError ?? openError ?? error ?? clientInitError
 
   const retry = () => {
-    void retryOpenSession()
+    if (loading) return
+    if (state === undefined) void useBotTeamStore.getState().refresh(true)
+    else void retryOpenSession()
   }
 
   const insets = useSafeAreaInsets()
@@ -417,13 +419,13 @@ export function BotModeScreen({
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
                 />
-              ) : loading || (targetSessionId && !openError) ? (
+              ) : (loading && visibleError === undefined) || (targetSessionId && !openError && state !== undefined) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>
               ) : state === undefined ? (
                 <ScrollView contentContainerStyle={{ padding: 16 }}>
-                  <DsBotInstallCard error={visibleError} onRetry={retry} />
+                  <DsBotInstallCard error={visibleError} loading={loading} onRetry={retry} />
                 </ScrollView>
               ) : state.bots.length === 0 ? (
                 <EmptyState

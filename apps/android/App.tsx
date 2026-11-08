@@ -83,6 +83,7 @@ function ThemedStatusBar() {
 function AppNavigator() {
   const bootPhase = useAppStore(state => state.bootPhase)
   const browseReady = useBrowseMemory(state => state.ready)
+  const [bootstrapComplete, setBootstrapComplete] = useState(false)
   const [pendingConversation, setPendingConversation] = useState<{deviceId: string; sessionId: string}>()
   const [linksReady, setLinksReady] = useState(false)
   const autoRestored = useRef(false)
@@ -173,7 +174,14 @@ function AppNavigator() {
     reset({ name: 'chat' })
   }
 
-  useEffect(() => {void hydrateBrowseMemory(); void bootstrap()}, [bootstrap])
+  useEffect(() => {
+    let active = true
+    void hydrateBrowseMemory()
+    // bootPhase becomes ready before bootstrap's account wrapper finishes
+    // refreshing the device directory. Restore only after that refresh settles.
+    void bootstrap().then(() => { if (active) setBootstrapComplete(true) })
+    return () => { active = false }
+  }, [bootstrap])
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
   const openKnownSession = async (id: string) => {
@@ -202,7 +210,7 @@ function AppNavigator() {
     return () => subscription.remove()
   }, [])
   useEffect(() => {
-    if (bootPhase !== 'ready' || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
+    if (bootPhase !== 'ready' || !bootstrapComplete || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
     if (pendingConversation !== undefined && devices.length > 0) {
       autoRestored.current = true
       const target = pendingConversation
@@ -244,7 +252,7 @@ function AppNavigator() {
         setHostSwitcherOpen(true)
       }
     }
-  }, [bootPhase, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
+  }, [bootPhase, bootstrapComplete, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
 
   // Zhihu OAuth deep link: dshremote://oauth?token=... completes the
   // account authorization started from the server setup screen.
@@ -465,6 +473,7 @@ function AppNavigator() {
           onBack={pop}
           onOpenHostSwitcher={() => setHostSwitcherOpen(true)}
           onOpenSettings={() => push({ name: 'settings' })}
+          onOpenAbout={() => push({ name: 'about' })}
           onOpenDeviceInfo={() => {
             if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId })
             else setHostSwitcherOpen(true)
@@ -489,6 +498,10 @@ function AppNavigator() {
       <HostSwitcherSheet
         visible={hostSwitcherOpen}
         onClose={() => setHostSwitcherOpen(false)}
+        onConnected={() => {
+          setHostSwitcherOpen(false)
+          goHomeChat()
+        }}
         onSelectDevice={device => {
           setHostSwitcherOpen(false)
           openDevice(device)
