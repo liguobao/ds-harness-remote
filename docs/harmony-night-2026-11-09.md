@@ -103,3 +103,19 @@
 ```
 
 一次冷启动把今晚的所有改动串起来验证了：**记得上次主机 → 2.9 秒 LAN 直连 → 快照秒开侧栏 → 保活重新持有**。
+## 交付物清单（早上可以直接用）
+
+| 项 | 位置 / 值 |
+|---|---|
+| 客户端版本 | `0.17.100-lan / 1000222`（Edge 与手机均已装） |
+| HAP | `~/WorkBuddy/incoming/dshremote-v0.17.100-lan.hap`（2.6 MB，调试签名） |
+| 自建 relay | `dshserver status` → 进程/端口/登录接口 三项通过；地址 `http://192.168.3.57:8080/app/login` |
+| 仓库 | `main@0d30b5f`（0 behind 上游），标签 `client-v0.17.86…100-lan` |
+| 脚本 | `build-local.sh` / `smoke.sh`（含版本号+i18n 前置自检）/ `check-i18n.mjs` / `bump-version.mjs` |
+| 文档 | 本文件、`harmony-milestone-2026-11-09.md`、`release-0.17.96.md`、`harmony-link-log.md`（4009 与 getStats 结论） |
+
+## 早上建议先做的三件事
+
+1. 手机解锁后打开 App：应 3 秒内自动连上（`已连接 · lan`），侧栏立刻有 183 个会话
+2. 点顶栏传输徽标 → 连接详情 → 「测延迟」，确认数字（LAN 下通常 < 50ms）
+3. 若要看英文界面：设置 › 语言 › English（本轮已补齐 317 条文案，静态校验通过，视觉未目视）
