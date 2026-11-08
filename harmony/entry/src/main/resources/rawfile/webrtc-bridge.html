@@ -245,6 +245,7 @@
     pc.onconnectionstatechange = function () {
       var st = String(pc.connectionState);
       call('onState', st);
+      if (st === 'connected') { reportSelectedPath(); }
       // failed/closed 基本等于「这条路走不通了」：立刻报错，让客户端马上回落中继。
       // 不报的话客户端只能在 DataChannel 超时（25 秒）之后才回落，用户白等。
       if (st === 'failed' || st === 'closed') { call('onError', 'connection ' + st); }
@@ -256,6 +257,39 @@
     };
     pc.ondatachannel = function (event) { attachChannel(event.channel); };
     return pc;
+  }
+
+
+  // 报告一次「真正选中的候选对」：手机↔主机的地址、协议，排障时不用再猜走的哪条路。
+  function reportSelectedPath() {
+    if (!pc || !pc.getStats) { return; }
+    try {
+      pc.getStats(null).then(function (stats) {
+        var pairs = [];
+        var locals = {};
+        stats.forEach(function (r) { if (r.type === 'local-candidate') { locals[r.id] = r; } });
+        stats.forEach(function (r) {
+          if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded') && r.nominated !== false) {
+            pairs.push(r);
+          }
+        });
+        if (pairs.length === 0) { return; }
+        var best = pairs[pairs.length - 1];
+        var local = locals[best.localCandidateId] || {};
+        var remote = locals[best.remoteCandidateId] || {};
+        function addr(c) {
+          if (!c.address) { return '?'; }
+          return c.address + ':' + String(c.port || '?');
+        }
+        var proto = String(local.protocol || remote.protocol || '?');
+        var kind = String(local.candidateType || '?');
+        var text = addr(local) + ' → ' + addr(remote) + ' · ' + proto + ' · ' + kind;
+        if (typeof best.currentRoundTripTime === 'number') {
+          text += ' · ' + Math.round(best.currentRoundTripTime * 1000) + 'ms';
+        }
+        call('onPath', text);
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   function flushCandidates() {

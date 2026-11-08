@@ -266,6 +266,8 @@ export class RelayTransport {
   private suspectLogged: boolean = false;
   /** 这次为什么没走直连（诊断面板与徽标提示用）；走成了就留空。 */
   private lanSkipReasonValue: string = '';
+  /** 直连真正选中的 ICE 候选对摘要（页面 getStats 汇总）。 */
+  private rtcPathValue: string = '';
   /** connect.accepted 里的中继端点/票据：直连失败回落时要用，也可能压根没给。 */
   private relayEndpointValue: string = '';
   private relayTicketValue: string = '';
@@ -387,6 +389,11 @@ export class RelayTransport {
   /** 本次连接没走直连的原因（空串 = 直连成功或未判定）。 */
   lanSkipReason(): string {
     return this.lanSkipReasonValue;
+  }
+
+  /** 直连选中的路径描述（ICE 候选对/协议），中继时为空串。 */
+  rtcPathText(): string {
+    return this.rtcPathValue;
   }
 
   /** 中继是否已拿到 connectionId（connect.accepted 之后才算授权）。 */
@@ -750,6 +757,12 @@ export class RelayTransport {
         }
       } catch (e) {
         logWarn('webrtc: signal.ice 发送失败');
+      }
+    };
+    rtc.onPath = (text: string) => {
+      if (text.length > 0) {
+        this.rtcPathValue = text;
+        logInfo('webrtc: 选中路径 ' + text);
       }
     };
     rtc.onTransport = (kind: string) => {

@@ -5,7 +5,7 @@ import { common, Want } from '@kit.AbilityKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
-  getAppRuntime, errorMessage } from '../services/AppRuntime';
+  getAppRuntime, errorMessage, maskSecrets } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
@@ -49,6 +49,10 @@ struct Index {
   @State reconnecting: boolean = false;
   /** 连接诊断面板。 */
   @State diagnosticsOpen: boolean = false;
+  /** 连接详情（点顶栏传输徽标打开）：传输路径 / 握手耗时 / 延迟 / 回落原因。 */
+  @State linkDetailOpen: boolean = false;
+  /** 已手动「看原文」的气泡（打码的敏感内容点一下就能展开）。 */
+  @State revealedSecrets: string[] = [];
   /** 定时任务面板。 */
   @State schedulesOpen: boolean = false;
   @State devices: RemoteHostDevice[] = [];
@@ -933,6 +937,22 @@ struct Index {
   }
 
   /** 折叠到前 18 行，行尾加省略提示。 */
+  /** 气泡里实际显示的文本：开了打码且没点「看原文」就把 Key/Token 遮掉。 */
+  private bubbleText(item: ChatItem): string {
+    if (!this.runtime.secretMask || this.revealedSecrets.indexOf(item.id) >= 0) {
+      return item.text;
+    }
+    return maskSecrets(item.text);
+  }
+
+  /** 这条气泡是否「被遮挡过，可以展开看原文」。 */
+  private showsMaskedHint(item: ChatItem): boolean {
+    if (!this.runtime.secretMask || this.revealedSecrets.indexOf(item.id) >= 0) {
+      return false;
+    }
+    return maskSecrets(item.text) !== item.text;
+  }
+
   private collapseText(text: string): string {
     const lines: string[] = text.split('\n');
     if (lines.length <= 18) {
@@ -1963,6 +1983,9 @@ struct Index {
       if (this.composerExpanded) {
         this.ExpandedComposerOverlay()
       }
+      if (this.linkDetailOpen) {
+        this.LinkDetailOverlay()
+      }
       if (this.diagnosticsOpen) {
         this.DiagnosticsOverlay()
       }
@@ -2375,6 +2398,19 @@ struct Index {
                   }
                 });
               })
+              this.SettingsRow(this.tr('精简历史'),
+                this.runtime.compactHistory ? this.tr('开 · 历史工具输出转摘要') : this.tr('关 · 传完整历史'),
+                false, () => {
+                  this.runtime.setCompactHistory(!this.runtime.compactHistory).then(() => {
+                    promptAction.showToast({ message: this.runtime.compactHistory
+                      ? this.tr('已开启：下次打开会话生效') : this.tr('已关闭：下次打开会话生效') });
+                  }).catch(() => undefined);
+                })
+              this.SettingsRow(this.tr('敏感内容打码'),
+                this.runtime.secretMask ? this.tr('开 · 点气泡看原文') : this.tr('关 · 原文显示'),
+                false, () => {
+                  this.runtime.setSecretMask(!this.runtime.secretMask);
+                })
               this.SettingsRow(this.tr('连接诊断'),
                 this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
                   const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
@@ -3907,6 +3943,10 @@ struct Index {
                   .backgroundColor(this.transportBadgeBg())
                   .borderRadius(5)
                   .margin({ left: 4 })
+                  // 点徽标看「走的是哪条路、多快、为什么没直连」，排障不用再翻日志
+                  .onClick(() => {
+                    this.linkDetailOpen = true;
+                  })
               }
               if (sessionBackendBadge(this.currentSessionId).length > 0) {
                 Text(sessionBackendBadge(this.currentSessionId))
@@ -6790,9 +6830,19 @@ struct Index {
                 this.toggleHeartbeat(item);
               })
           } else if (item.text.length > 0) {
+            // 敏感内容（Key/Token）默认打码，点一下看原文
+            if (this.showsMaskedHint(item)) {
+              Text(this.tr('已遮挡敏感内容 · 点此看原文'))
+                .fontSize(this.fs(10))
+                .fontColor('#22D3EE')
+                .padding({ top: 2, bottom: 2 })
+                .onClick(() => {
+                  this.revealedSecrets = this.revealedSecrets.concat([item.id]);
+                })
+            }
             // 长回复先折叠到 18 行，避免一条消息把整屏占满
             if (this.isLongCollapsed(item)) {
-              this.MarkdownText(this.collapseText(item.text), item.streaming)
+              this.MarkdownText(this.collapseText(this.bubbleText(item)), item.streaming)
               Text(this.tr('展开全文') + ' · ' + this.textLineCount(item.text) + this.tr(' 行'))
                 .fontSize(this.fs(11))
                 .fontColor('#22D3EE')
@@ -6801,7 +6851,7 @@ struct Index {
                   this.expandedMessages = this.expandedMessages.concat([item.id]);
                 })
             } else {
-              this.MarkdownText(item.text, item.streaming)
+              this.MarkdownText(this.bubbleText(item), item.streaming)
             }
           }
           if (item.timestamp > 0) {
@@ -7333,6 +7383,73 @@ struct Index {
       parts.push(this.tr('上次 ') + formatSessionTime(schedule.lastDeliveredAt));
     }
     return parts.join(' · ');
+  }
+
+  /** 连接详情：传输路径 / 握手耗时 / 测延迟 / 回落原因（点顶栏传输徽标打开）。 */
+  @Builder
+  LinkDetailOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('rgba(8,12,24,0.45)')
+        .onClick(() => {
+          this.linkDetailOpen = false;
+        })
+      Column({ space: 10 }) {
+        Row({ space: 10 }) {
+          Text(this.tr('连接详情'))
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Blank()
+          Text(this.runtime.latencyTesting ? this.tr('测量中…') : this.tr('测延迟'))
+            .fontSize(this.fs(12))
+            .fontColor(this.runtime.latencyTesting ? this.pal().text3 : '#22D3EE')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              if (!this.runtime.latencyTesting) {
+                this.runtime.measureLatency();
+              }
+            })
+          Text(this.tr('收起'))
+            .fontSize(this.fs(13))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 2, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.linkDetailOpen = false;
+            })
+        }
+        .width('100%')
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.runtime.connectionDetailLines(), (line: string) => {
+              Text(line)
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text2)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            }, (line: string) => line)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: '56%' })
+      .padding({ left: 16, right: 16, top: 14, bottom: 18 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .border({ width: { top: 0.5 }, color: this.pal().borderStrong })
+      .transition(TransitionEffect.translate({ y: 320 })
+        .combine(TransitionEffect.opacity(0))
+        .animation({ duration: 200, curve: Curve.Friction }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 连接诊断：现场排障不用连电脑抓 hilog。 */

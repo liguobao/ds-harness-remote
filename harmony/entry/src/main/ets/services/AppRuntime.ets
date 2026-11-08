@@ -18,7 +18,7 @@ import { logInfo, logWarn, logError } from '../util/Log';
 import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
-import { NetTrace } from '../util/NetTrace';
+import { NetTrace, TraceSample } from '../util/NetTrace';
 import { LinkLog } from './LinkLog';
 import { KeepAlive } from './KeepAlive';
 
@@ -203,6 +203,15 @@ export class AppRuntime {
   /** 应用层心跳探测：空闲一段时间就主动要一个回包，把「静默判死」从 45~90 秒压到 20 秒级。 */
   private probeTimer: number = -1;
   private probeInFlight: boolean = false;
+  /** 最近一次「测延迟」结果（毫秒）；-1 表示没测过。 */
+  latencyMs: number = -1;
+  latencyAt: number = 0;
+  /** 是否正在测延迟（按钮转圈用）。 */
+  latencyTesting: boolean = false;
+  /** 精简历史：主机把历史里的工具参数/输出转摘要，省流量、首屏更快。 */
+  compactHistory: boolean = false;
+  /** 已发送文本里的 Key/Token 默认打码（点气泡可看原文）。 */
+  secretMask: boolean = true;
   /** 稳定性统计（诊断面板 + 落盘日志用）。 */
   private connectCount: number = 0;
   private disconnectCount: number = 0;
@@ -477,6 +486,8 @@ export class AppRuntime {
       this.splitWidth = this.store.loadSplitWidth();
       this.layoutDensity = this.store.loadLayoutDensity();
       this.showInspector = this.store.loadShowInspector();
+      this.compactHistory = this.store.loadCompactHistory();
+      this.secretMask = this.store.loadSecretMask();
       this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
@@ -657,6 +668,17 @@ export class AppRuntime {
       if (config === undefined || identity === undefined || credentials === undefined) {
         throw new Error('尚未登录');
       }
+      // 建连前先把 accessToken 弄新鲜：中继握手只用这个 token，
+      // 过期了服务器会回 4002 invalid access token。
+      // 恢复场景跳过了设备查询（省一次往返），也就顺带跳过了那次刷新，所以这里必须补上。
+      if (!this.hasFreshAccessToken(credentials)) {
+        try {
+          await this.ensureApi();
+          LinkLog.write('conn', 'accessToken 即将过期，已先刷新再建连');
+        } catch (error) {
+          logWarn('refresh before connect failed: ' + errorMessage(error));
+        }
+      }
       // 先把中继/控制通道的建连预热起来，和下面的 REST 查询并行跑：
       // 二者互不依赖（RelayTransport 只需要 deviceId，身份公钥是给 Noise 用的）。
       const relayOptions: RelayTransportOptions = new RelayTransportOptions();
@@ -794,6 +816,8 @@ export class AppRuntime {
       this.autoConnectSuppressed = false;
       // 连着主机时申请长时任务：熄屏/后台不再被系统冻结，心跳与直连都活着
       KeepAlive.start().catch(() => undefined);
+      // 精简历史：主机侧把历史工具参数/输出转摘要（remote.history.configure）
+      this.applyCompactHistory().catch(() => undefined);
       this.connectCount += 1;
       this.connectedAt = Date.now();
       if (this.lastDisconnectAt > 0) {
@@ -3878,6 +3902,110 @@ export class AppRuntime {
     LinkLog.write('event', text);
   }
 
+  /** 把「精简历史」设置同步给主机；失败不打扰用户，只记日志。 */
+  async applyCompactHistory(): Promise<void> {
+    const core: RemoteClientCore | undefined = this.core;
+    if (core === undefined) {
+      return;
+    }
+    try {
+      await core.rpc('remote.history.configure', { 'compact': this.compactHistory }, 6000,
+        'remote.history.configure');
+      LinkLog.write('conn', '精简历史=' + (this.compactHistory ? '开' : '关') + ' 已同步给主机');
+    } catch (error) {
+      LinkLog.write('conn', '精简历史设置失败：' + errorMessage(error));
+    }
+  }
+
+  /** 开关「敏感内容打码」。 */
+  setSecretMask(enabled: boolean): void {
+    this.secretMask = enabled;
+    this.store.saveSecretMask(enabled);
+    this.notify();
+  }
+
+  /** 切换精简历史（下次打开会话生效，和主机约定一致）。 */
+  async setCompactHistory(enabled: boolean): Promise<void> {
+    this.compactHistory = enabled;
+    this.store.saveCompactHistory(enabled);
+    this.notify();
+    await this.applyCompactHistory();
+  }
+
+  /**
+   * 测延迟：连发 3 个便宜 RPC，取最小/平均往返。
+   * 只用于「这条链路现在到底多快」，失败就当链路有问题直接报出来。
+   */
+  async measureLatency(): Promise<void> {
+    const core: RemoteClientCore | undefined = this.core;
+    if (core === undefined || this.latencyTesting) {
+      return;
+    }
+    this.latencyTesting = true;
+    this.notify();
+    const samples: number[] = [];
+    try {
+      for (let i = 0; i < 3; i++) {
+        const started: number = Date.now();
+        await core.rpc('harness.transport.describe', {}, 6000, 'latency');
+        samples.push(Date.now() - started);
+      }
+      let total: number = 0;
+      for (const value of samples) {
+        total += value;
+      }
+      this.latencyMs = Math.round(total / samples.length);
+      this.latencyAt = Date.now();
+      LinkLog.write('probe', '测延迟：' + samples.join('/') + 'ms → 平均 ' + this.latencyMs + 'ms'
+        + ' transport=' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
+    } catch (error) {
+      this.latencyMs = -1;
+      this.latencyAt = Date.now();
+      LinkLog.write('probe', '测延迟失败：' + errorMessage(error));
+      this.errorMsg = '测延迟失败：' + errorMessage(error);
+      this.nudgeLink();
+    }
+    this.latencyTesting = false;
+    this.notify();
+  }
+
+  /** 「连接详情」的行内容：传输、路径、耗时、延迟、回落原因。 */
+  connectionDetailLines(): string[] {
+    const relay: RelayTransport | undefined = this.activeRelay;
+    const rows: string[] = [];
+    rows.push('传输：' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
+    if (relay !== undefined) {
+      const path: string = relay.rtcPathText();
+      if (path.length > 0) {
+        rows.push('路径：' + path);
+      }
+      const skip: string = relay.lanSkipReason();
+      if (skip.length > 0 && this.transportLabel !== 'lan') {
+        rows.push('没直连：' + skip);
+      }
+    }
+    const staged: TraceSample | undefined = NetTrace.latest('connect 分段');
+    if (staged !== undefined) {
+      rows.push('握手：' + NetTrace.msText(staged.totalMs) + '（' + staged.detail + '）');
+    }
+    if (this.latencyMs >= 0) {
+      rows.push('延迟：' + this.latencyMs + 'ms（测于 ' + this.clockText(this.latencyAt) + '）');
+    } else {
+      rows.push('延迟：未测');
+    }
+    const silence: number = relay !== undefined ? relay.silenceMs() : -1;
+    rows.push('链路：' + (silence < 0 ? '未知'
+      : (Math.round(silence / 100) / 10) + ' 秒前收到过数据'));
+    rows.push('精简历史：' + (this.compactHistory ? '开（历史工具输出转摘要）' : '关'));
+    return rows;
+  }
+
+  private clockText(at: number): string {
+    const d: Date = new Date(at);
+    const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+
   /** 诊断面板展示的链路日志尾行（落盘日志的内存镜像）。 */
   linkLogTail(): string[] {
     return LinkLog.tail(12);
@@ -4217,6 +4345,32 @@ function builtinSlashCommands(): SlashCommand[] {
 }
 
 export /** 真实承载（用于区分「换网」和「网络刚恢复」）。 */
+/** 形如 sk-xxx / ghp_xxx / Bearer xxx / 长 hex 的片段，展示时打码。 */
+const SECRET_PATTERNS: RegExp[] = [
+  /sk-[A-Za-z0-9_-]{12,}/g,
+  /ghp_[A-Za-z0-9]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
+  /(Bearer\s+)[A-Za-z0-9._-]{16,}/g,
+  /\b[A-Fa-f0-9]{32,}\b/g
+];
+
+/** 把文本里像密钥的片段打码，返回新文本（原文不动，供「看原文」用）。 */
+export function maskSecrets(text: string): string {
+  if (text.length === 0) {
+    return text;
+  }
+  let out: string = text;
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, (match: string, prefix: string | undefined): string => {
+      const head: string = typeof prefix === 'string' && prefix.length > 0 ? prefix : '';
+      const body: string = match.slice(head.length);
+      const tail: string = body.length > 4 ? body.slice(body.length - 4) : '';
+      return head + '•••• ' + tail;
+    });
+  }
+  return out;
+}
+
 function isRealBearer(label: string): boolean {
   return label === 'Wi-Fi' || label === '移动数据' || label === '有线网络';
 }

@@ -28,6 +28,10 @@ const KEY_LAST_HOST = 'dshremote.lastHost.v1';
 const KEY_HOST_INFO = 'dshremote.hostInfo.v1';
 /** 上次成功拉到的会话列表（只存侧栏要用的字段），启动/重连时先把列表画出来。 */
 const KEY_SESSION_SNAPSHOT = 'dshremote.sessionSnapshot.v1';
+/** 精简历史：主机把历史里的工具参数/输出转摘要，省流量。 */
+const KEY_COMPACT_HISTORY = 'dshremote.compactHistory.v1';
+/** 已发送文本里的 Key/Token 默认打码。 */
+const KEY_SECRET_MASK = 'dshremote.secretMask.v1';
 /** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
 const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
 
@@ -797,6 +801,31 @@ export class SecureStore {
       this.putSync(KEY_SESSION_SNAPSHOT, json);
     } catch (error) {
       logWarn('session snapshot save failed');
+    }
+  }
+
+  loadCompactHistory(): boolean {
+    return this.getSync(KEY_COMPACT_HISTORY, '0') === '1';
+  }
+
+  saveCompactHistory(enabled: boolean): void {
+    try {
+      this.putSync(KEY_COMPACT_HISTORY, enabled ? '1' : '0');
+    } catch (error) {
+      logWarn('compact history save failed');
+    }
+  }
+
+  loadSecretMask(): boolean {
+    // 默认开：宁可多遮，用户点一下就能看
+    return this.getSync(KEY_SECRET_MASK, '1') === '1';
+  }
+
+  saveSecretMask(enabled: boolean): void {
+    try {
+      this.putSync(KEY_SECRET_MASK, enabled ? '1' : '0');
+    } catch (error) {
+      logWarn('secret mask save failed');
     }
   }
 

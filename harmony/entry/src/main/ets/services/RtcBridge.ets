@@ -56,6 +56,14 @@ class RtcBridgeSink {
     }
   }
 
+  onPath(text: string): void {
+    logInfo('[webrtc] path ' + text);
+    const handler: ((value: string) => void) | undefined = RtcBridge.active!.onPath;
+    if (handler !== undefined) {
+      handler(text);
+    }
+  }
+
   onTransport(kind: string): void {
     logInfo('[webrtc] transport=' + kind);
     const handler: ((value: string) => void) | undefined = RtcBridge.active!.onTransport;
@@ -98,6 +106,8 @@ export class RtcBridge {
   onDataOpen: (() => void) | undefined = undefined;
   onDataBinary: ((base64: string) => void) | undefined = undefined;
   onDataClosed: (() => void) | undefined = undefined;
+  /** 直连选中的 ICE 候选对摘要（例如 "192.168.3.145:51000 → 192.168.3.57:42813 · udp · lan"）。 */
+  onPath: ((text: string) => void) | undefined = undefined;
   onError: ((message: string) => void) | undefined = undefined;
   /** 实际选中的路径：'lan' | 'p2p' | 'turn'。 */
   onTransport: ((kind: string) => void) | undefined = undefined;
