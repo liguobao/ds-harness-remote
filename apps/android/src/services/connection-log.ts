@@ -3,7 +3,8 @@ const entries: string[] = []
 const limit = 500
 const allowed = new Set(['attempt', 'forceRelay', 'phase', 'reason', 'closeCode', 'transport',
   'connectionState', 'iceConnectionState', 'localCandidates', 'remoteCandidates',
-  'protocol', 'localCandidateType', 'remoteCandidateType', 'status', 'durationMs', 'method', 'request', 'stage', 'errorName'])
+  'protocol', 'localCandidateType', 'remoteCandidateType', 'status', 'durationMs', 'method', 'request', 'stage', 'errorName',
+  'listed', 'resolved', 'unpinned', 'keyMismatch', 'lookupFailed', 'missingTrusted'])
 const safeWords = new Set(['auto', 'lan', 'p2p', 'turn', 'relay', 'starting', 'secure', 'ready', 'failed',
   'closed', 'new', 'connecting', 'connected', 'disconnected', 'checking', 'completed',
   'gathering', 'complete', 'host', 'srflx', 'prflx', 'GET', 'POST', 'PATCH', 'DELETE',
@@ -22,12 +23,33 @@ function safeValue(value: unknown, depth = 0): unknown {
   return '[redacted]'
 }
 
-export function connectionLog(event: 'connect' | 'handshake' | 'disconnect' | 'fallback' | 'selected-path' | 'stream-failed' | 'health-failed' | 'secure-send-failed' | 'secure-receive-failed' | 'http', fields: Record<string, unknown> = {}): void {
+type ConnectionLogListener = (line: string) => void
+const listeners = new Set<ConnectionLogListener>()
+
+/** Copy of the bounded in-process diagnostics buffer. */
+export function connectionLogEntries(): readonly string[] {
+  return [...entries]
+}
+
+/** Subscribe to new diagnostic lines; returns an unsubscribe function. */
+export function subscribeConnectionLog(listener: ConnectionLogListener): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+export function connectionLog(
+  event: 'connect' | 'handshake' | 'disconnect' | 'fallback' | 'selected-path' | 'stream-failed'
+    | 'health-failed' | 'secure-send-failed' | 'secure-receive-failed' | 'http' | 'devices',
+  fields: Record<string, unknown> = {},
+): void {
   const safe = Object.fromEntries(Object.entries(fields).filter(([key]) => allowed.has(key)).map(([key, value]) => [key, safeValue(value)]))
   const line = `${new Date().toISOString()} ${event} ${JSON.stringify(safe)}`
   entries.push(line)
   if (entries.length > limit) entries.splice(0, entries.length - limit)
   try { console.info(`[ds-harness-remote] ${line}`) } catch { /* Diagnostics must not break connections. */ }
+  for (const listener of [...listeners]) {
+    try { listener(line) } catch { /* Diagnostics must not break connections. */ }
+  }
 }
 
 export function connectionLogText(version: string): string {

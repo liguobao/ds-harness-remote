@@ -50,7 +50,7 @@ import { useAppStore } from '../state/store'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
-import { GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
+import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -204,6 +204,10 @@ export function HostSessionsDrawer({
   const deleteWorkspace = useAppStore(state => state.workspaceDelete)
   const busy = useAppStore(state => state.busyAction)
   const connected = useAppStore(state => state.connection.phase === 'connected')
+  const error = useAppStore(state => state.error)
+  const clearError = useAppStore(state => state.clearError)
+  const devicesRefreshing = useAppStore(state => state.refreshing)
+  const refreshDevices = useAppStore(state => state.refreshDevices)
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const createSession = useAppStore(state => state.createSession)
   const pinSession = useAppStore(state => state.pinSession)
@@ -436,7 +440,11 @@ export function HostSessionsDrawer({
   }, [showConfigModal])
 
   const handleRefresh = async () => {
-    if (refreshing || busy !== undefined || !connected) return
+    if (refreshing || busy !== undefined) return
+    if (!connected) {
+      if (!devicesRefreshing) await refreshDevices()
+      return
+    }
     setRefreshing(true)
     try {
       if (drawerMode === 'bot') {
@@ -872,6 +880,14 @@ export function HostSessionsDrawer({
           )}
         </View>
       </View>
+
+      {!connected && error !== undefined && (
+        <ErrorBanner
+          message={error}
+          onRetry={() => void refreshDevices()}
+          onDismiss={clearError}
+        />
+      )}
 
       {/* 顶部模式切换分段胶囊：智能体 / DS-Bot */}
       <View style={styles.modeSwitcherWrap}>

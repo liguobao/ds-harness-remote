@@ -83986,8 +83986,15 @@ function resolveConfig(input4 = {}, env = process.env) {
   };
 }
 var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+function isPrivateIpv6(hostname6) {
+  const host = (hostname6.startsWith("[") && hostname6.endsWith("]") ? hostname6.slice(1, -1) : hostname6).toLowerCase();
+  if (!host.includes(":") || !/^[0-9a-f:]+$/.test(host)) return false;
+  if (host === "::1") return true;
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
+}
 function isPrivateNetworkHostname(hostname6) {
   if (LOCAL_HOSTS.has(hostname6)) return true;
+  if (isPrivateIpv6(hostname6)) return true;
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname6);
   if (match === null) return false;
   const octets = match.slice(1).map(Number);
