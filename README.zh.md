@@ -49,6 +49,28 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
+## 这个仓库是什么（鸿蒙移植版）
+
+本仓库是 [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的 **HarmonyOS 7.0 移植分支**：
+上游的插件、服务端、协议与工具链保持跟进（当前已对齐上游 `v0.6.4`），另加一个**原生鸿蒙客户端**（纯 ArkTS + ArkWeb 内 WebRTC 数据面）。
+
+- **客户端源码**：仓库根 [`harmony/`](harmony/)，HarmonyOS 7.0（API 26）及以上，DevEco Studio 构建
+- **能力**：账号授权登录、多主机列表与别名、端到端加密（Noise IK）、多会话、会话搜索/归档/置顶、
+  图片与语音输入、斜杠命令、插话与中断、模型与推理等级、权限预设、定时任务、工作区分组、
+  断点驱动的双栏/三栏（平板与 PC 2in1）、中英双语、深浅色与主题色、桌宠
+- **稳定性工程**：链路日志落盘（`link.log`，重启保留）、掉线自动重连与会话流重开、静默探测、
+  长时任务保活（熄屏不断）、局域网直连（LAN/P2P）优先，中继/TURN 兜底
+- **构建与装机**：
+  ```sh
+  harmony/scripts/build-local.sh                    # 用本机签名构建（签名材料不入库）
+  hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+  ```
+- **文档**：[客户端说明](docs/harmony-client.md) · [局域网直连与链路日志](docs/harmony-link-log.md) ·
+  [2026-11-09 里程碑](docs/harmony-milestone-2026-11-09.md) · [发行说明](docs/release-0.17.86.md)
+- **上游同步**：`git remote add upstream https://github.com/liguobao/ds-harness-remote.git` 后 `git fetch upstream && git merge upstream/main`
+
+> 上游与本仓库的关系：上游是通用方案（Android/iOS/Web/桌面插件），本仓库只是多提供了一个鸿蒙原生客户端实现，不改上游协议。
+
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |

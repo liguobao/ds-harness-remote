@@ -12,6 +12,12 @@
 </p>
 
 <p align="center">
+  <strong>本仓库是 HarmonyOS 7.0 移植版</strong>：在上游基础上新增原生鸿蒙客户端（源码在 <a href="harmony/">harmony/</a>）<br>
+  中文说明与移植细节见 <a href="README.zh.md#这个仓库是什么鸿蒙移植版">README.zh.md</a> ·
+  客户端文档 <a href="docs/harmony-client.md">docs/harmony-client.md</a>
+</p>
+
+<p align="center">
   <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation-blue?logo=googledocs&amp;logoColor=white" alt="Documentation"></a>
   <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
