@@ -74,15 +74,15 @@ done
 if [ -z "$CONNECTED" ]; then
   echo "  最近链路日志："
   hdc -t "$DEV" shell "tail -6 $LOG_PATH 2>/dev/null" 2>/dev/null | sed 's/^/    /'
-  fail "${WAIT}s 内没有连上主机。常见原因：
-      1) 设备锁屏：锁屏状态下 aa start 不会加载页面，App 不会 bootstrap（先解锁再跑）
-      2) App 停在主机列表：需要手动点一次「连接」（之后会记住）
+  echo "  ${WAIT}s 内没有连上主机。常见原因："
+  echo "    1) 设备锁屏：锁屏状态下 aa start 不会加载页面，App 不会 bootstrap（先解锁再跑）"
+  echo "    2) App 停在主机列表：需要手动点一次「连接」（之后会记住）"
+  exit 1
 fi
 
 echo "  已连接：$CONNECTED"
 
 echo "· [4/4] 崩溃检查"
-# 只认真正的崩溃：ArkWeb 启动时会打一堆 crashpad / crash reporting 噪声，必须排掉
 # 只认真正的崩溃：ArkWeb/chromium 会打大量 crashpad、ERR_ABORTED 噪声，必须排掉
 CRASH=$(hdc -t "$DEV" shell "hilog -x 2>/dev/null | grep -E 'FaultLogger|jscrash|Unhandled exception|Abort message' | grep -i '${BUNDLE}'" 2>/dev/null | head -3)
 if [ -n "$CRASH" ]; then
