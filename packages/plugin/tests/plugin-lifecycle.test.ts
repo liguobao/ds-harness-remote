@@ -234,6 +234,78 @@ describe('Cordis plugin lifecycle', () => {
     await ctx.fiber.dispose()
   })
 
+  it('keeps loopback control alive when legacy storage has a credentialed corrupt client and recovers live on reset', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-corrupt-recovery-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(
+      { error: { code: 'AUTHORIZATION_REQUIRED', message: 'Sign in required' } },
+      { status: 401 },
+    )))
+
+    const serverUrl = 'https://dsh.r2049.cn'
+    const legacyRoot = join(dshHome, 'remote')
+    const hostDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'host')
+    const clientDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'client')
+    const hostIdentity = await new remotePlugin.IdentityStore({ directory: hostDir, role: 'host' }).loadOrCreate('Host')
+    const clientIdentity = await new remotePlugin.IdentityStore({ directory: clientDir, role: 'client' }).loadOrCreate('Client')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(join(clientDir, 'device.key'), 'corrupted-key\n')
+    await new remotePlugin.ServerCredentialStore(clientDir).save({
+      serverUrl,
+      deviceId: clientIdentity.deviceId,
+      authorizationMethod: 'owned_device',
+      accessToken: 'c'.repeat(24),
+      accessTokenExpiresAt: Date.now() + 60_000,
+      refreshToken: 'r'.repeat(24),
+      refreshTokenExpiresAt: Date.now() + 600_000,
+    })
+
+    let config: Config = { ...disabledAgentDomains, serverUrl }
+    let handler!: ControlRouteHandler
+    const ctx = new Context()
+    ctx.provide('settings', { register: () => ({
+      get: () => config,
+      replace: async (value: Config) => { config = value },
+    }) } as never)
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', { rpc: { handle: (_channel: string, value: ControlRouteHandler) => {
+      handler = value
+      return async () => undefined
+    } } } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, config)
+    const call = (endpoint: string, payload: unknown = {}) => handler(endpoint, payload, new AbortController().signal)
+    try {
+      await vi.waitFor(() => expect(handler).toBeDefined())
+      await expect(call('status')).resolves.toMatchObject({
+        ok: true,
+        value: {
+          available: false,
+          controlUnavailable: false,
+          startupError: { code: 'IDENTITY_INVALID' },
+        },
+      })
+      await expect(call('settings.identity.reset', { role: 'client' })).resolves.toMatchObject({
+        ok: true,
+        value: { applies: 'live' },
+      })
+      expect(ctx.dshRemote.currentIdentity().deviceId).toBe(hostIdentity.deviceId)
+      const statusAfter = await call('status')
+      expect(statusAfter).toMatchObject({
+        ok: true,
+        value: {
+          available: true,
+          identityReady: true,
+        },
+      })
+      expect((statusAfter as { value?: { startupError?: unknown } }).value?.startupError).toBeUndefined()
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('registers loopback control, remote tools, and live Server switching when another plugin already provides dshRemote services', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-service-conflict-'))
     directories.push(dshHome)

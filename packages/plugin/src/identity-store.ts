@@ -1,5 +1,6 @@
 import { savedPairingSchema } from './pairing-contract.js'
 import { createHash } from 'node:crypto'
+import type { BigIntStats } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -54,12 +55,23 @@ export interface IdentityStoreOptions {
   directory?: string
   env?: NodeJS.ProcessEnv
   homeDirectory?: string
+  role?: RemoteDeviceRole
+}
+
+export interface ResetIdentityOptions extends IdentityStoreOptions {
+  createIdentityStore?: (options: IdentityStoreOptions) => IdentityStore
 }
 
 export type RemoteDeviceRole = 'host' | 'client'
+export type IdentityErrorCode = 'IDENTITY_INVALID' | 'IDENTITY_LOCKED' | 'STORAGE_CONFLICT'
 
 export class IdentityInvalidError extends Error {
-  readonly code = 'IDENTITY_INVALID'
+  constructor(
+    message: string,
+    readonly code: IdentityErrorCode = 'IDENTITY_INVALID',
+  ) {
+    super(message)
+  }
 }
 
 export class IdentityStore {
@@ -67,13 +79,16 @@ export class IdentityStore {
   get directory(): string { return this.storageDirectory }
   private identity?: HostIdentity
   private peers = new Map<string, TrustedPeer>()
+  private peerSaveChain: Promise<void> = Promise.resolve()
   private readonly defaultOptions?: IdentityStoreOptions
+  readonly role?: RemoteDeviceRole
 
   constructor(options: IdentityStoreOptions = {}) {
     const env = options.env ?? process.env
     const dshHome = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
     this.storageDirectory = options.directory ?? join(dshHome, 'ds-harness-remote')
     this.defaultOptions = options.directory === undefined ? options : undefined
+    this.role = options.role
   }
 
   async loadOrCreate(deviceName: string): Promise<HostIdentity> {
@@ -88,28 +103,81 @@ export class IdentityStore {
     return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName))
   }
 
+  /**
+   * Read and verify an existing identity without creating files, mutating
+   * device metadata, or triggering client self-heal. Returns `undefined` when
+   * neither identity file exists yet.
+   */
+  async loadExisting(): Promise<HostIdentity | undefined> {
+    if (this.defaultOptions !== undefined) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions)
+    const devicePath = join(this.directory, 'device.json')
+    const keyPath = join(this.directory, 'device.key')
+    const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
+    if (!hasDevice && !hasKey) return undefined
+    if (hasDevice !== hasKey) {
+      throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
+    }
+    await assertPrivateMode(keyPath)
+    try {
+      const record = identitySchema.parse(JSON.parse(await readFile(devicePath, 'utf8')))
+      const privateKey = (await readFile(keyPath, 'utf8')).trim()
+      const regenerated = generateKeyPair(fromBase64Url(privateKey))
+      if (regenerated.publicKey !== record.publicKey) {
+        throw new IdentityInvalidError('device public and private keys do not match')
+      }
+      return { ...record, privateKey, fingerprint: fingerprint(record.publicKey) }
+    } catch (error: unknown) {
+      if (error instanceof IdentityInvalidError) throw error
+      throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error)}`)
+    }
+  }
+
   private async loadOrCreateLocked(deviceName: string): Promise<HostIdentity> {
     const devicePath = join(this.directory, 'device.json')
     const keyPath = join(this.directory, 'device.key')
     const [hasDevice, hasKey] = await Promise.all([exists(devicePath), exists(keyPath)])
+    const isClientRole = this.role === 'client' || (this.role === undefined && isScopedClientDirectory(this.directory))
     if (hasDevice !== hasKey) {
+      if (isClientRole && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory)
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName)
+      }
       throw new IdentityInvalidError('device identity is incomplete; repair it explicitly before reconnecting')
     }
 
     if (!hasDevice) {
-      const keys = generateKeyPair()
-      const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
-      // Write the key first: a crash between the two leaves device.key alone,
-      // which the incomplete-pair guard above reports explicitly, instead of
-      // leaving a device.json whose published public key has no private half.
-      await atomicTextWrite(keyPath, `${keys.privateKey}\n`, 0o600)
-      await atomicJsonWrite(devicePath, record, 0o600)
+      return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName)
     }
 
-    const identity = await this.readIdentity(devicePath, keyPath, deviceName)
+    let identity: HostIdentity
+    try {
+      identity = await this.readIdentity(devicePath, keyPath, deviceName)
+    } catch (error) {
+      if (error instanceof IdentityInvalidError
+        && isClientRole
+        && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory)
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName)
+      }
+      throw error
+    }
     // Only a verified pair makes the leftovers dead weight. In the #276 residue
     // the surviving device.key.*.tmp is the only private key that still matches
     // device.json, so a failed verification keeps it for manual recovery.
+    await removeStaleTemporaries(this.directory)
+    return identity
+  }
+
+  private async createAndReadIdentityLocked(devicePath: string, keyPath: string, deviceName: string): Promise<HostIdentity> {
+    const keys = generateKeyPair()
+    const record = { schemaVersion: 1 as const, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey }
+    // Write the key first: a crash between the two leaves device.key alone,
+    // which the incomplete-pair guard above reports explicitly, instead of
+    // leaving a device.json whose published public key has no private half.
+    await atomicTextWrite(keyPath, `${keys.privateKey}
+`, 0o600)
+    await atomicJsonWrite(devicePath, record, 0o600)
+    const identity = await this.readIdentity(devicePath, keyPath, deviceName)
     await removeStaleTemporaries(this.directory)
     return identity
   }
@@ -151,6 +219,7 @@ export class IdentityStore {
     if (this.defaultOptions !== undefined) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions)
     await ensureDirectory(this.directory)
     return withIdentityLock(this.directory, async () => {
+      await this.peerSaveChain.catch(() => undefined)
       this.identity = undefined
       this.peers.clear()
       await removeIdentityRecords(this.directory)
@@ -206,19 +275,32 @@ export class IdentityStore {
     this.peers = peers
   }
 
-  private async savePeers(): Promise<void> {
-    await atomicJsonWrite(join(this.directory, 'trusted-peers.json'), {
-      schemaVersion: 1,
-      peers: [...this.peers.values()],
-    }, 0o600)
+  private savePeers(): Promise<void> {
+    const next = this.peerSaveChain.catch(() => undefined).then(() =>
+      atomicJsonWrite(join(this.directory, 'trusted-peers.json'), {
+        schemaVersion: 1,
+        peers: [...this.peers.values()],
+      }, 0o600),
+    )
+    this.peerSaveChain = next
+    return next
   }
 }
 
+const statIdSchema = z.union([
+  z.number().int().nonnegative().transform(value => BigInt(value)),
+  z.string().regex(/^(?:0|[1-9]\d{0,19})$/).transform(value => BigInt(value)),
+])
+
 const legacyRootPinSchema = z.object({
   schemaVersion: z.literal(1),
-  dev: z.number().int().nonnegative(),
-  ino: z.number().int().nonnegative(),
+  dev: statIdSchema,
+  ino: statIdSchema,
 }).strict()
+
+function serializeStatId(value: bigint): number | string {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString()
+}
 
 /** Resolve storage and migrate legacy data before startup or installation uses it.
  * Upgrade/restart must stop old instances: idle old processes do not hold file locks.
@@ -247,21 +329,27 @@ export async function prepareDefaultIdentityDirectory(
     let pin: z.infer<typeof legacyRootPinSchema> | undefined
     if (pinMetadata !== undefined) {
       if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
-        throw new IdentityInvalidError('Remote storage fallback record is invalid; no credentials were changed.')
+        throw new IdentityInvalidError('Remote storage fallback record is invalid; no credentials were changed.', 'STORAGE_CONFLICT')
       }
       await assertPrivateMode(pinPath)
-      pin = legacyRootPinSchema.parse(JSON.parse(await readFile(pinPath, 'utf8')))
+      try {
+        pin = legacyRootPinSchema.parse(JSON.parse(await readFile(pinPath, 'utf8')))
+      } catch {
+        throw new IdentityInvalidError('Remote storage fallback record is invalid; no credentials were changed.', 'STORAGE_CONFLICT')
+      }
     }
     if (old !== undefined) {
       if (current !== undefined) {
-        throw new IdentityInvalidError('Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.')
+        throw new IdentityInvalidError('Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.', 'STORAGE_CONFLICT')
       }
       await assertOwnedRemoteStorage(source)
       await assertStorageIdle(source)
       // Persist the choice across processes. A later installer/CLI must not move
       // storage out from under a Host that is already using the fallback.
       if (pin !== undefined) {
-        if (pin.dev !== old.dev || pin.ino !== old.ino) throw new IdentityInvalidError('Legacy Remote storage changed after fallback; inspect it before reconnecting.')
+        if (pin.dev !== old.dev || pin.ino !== old.ino) {
+          throw new IdentityInvalidError('Legacy Remote storage changed after fallback; inspect it before reconnecting.', 'STORAGE_CONFLICT')
+        }
         return source
       }
       try {
@@ -277,15 +365,74 @@ export async function prepareDefaultIdentityDirectory(
         await assertStorageIdle(source)
         // If the fallback choice cannot be recorded, stop rather than risk
         // another process moving a directory this process starts using.
-        await atomicJsonWrite(pinPath, { schemaVersion: 1, dev: old.dev, ino: old.ino }, 0o600)
+        await atomicJsonWrite(pinPath, {
+          schemaVersion: 1,
+          dev: serializeStatId(old.dev),
+          ino: serializeStatId(old.ino),
+        }, 0o600)
         return source
       }
     } else if (pin !== undefined) {
-      if (current === undefined) throw new IdentityInvalidError('Pinned Remote storage is missing; no replacement identity was created.')
+      if (current === undefined) throw new IdentityInvalidError('Pinned Remote storage is missing; no replacement identity was created.', 'STORAGE_CONFLICT')
       await assertOwnedRemoteStorage(target)
     }
     return target
   })
+}
+
+/**
+ * Reset the selected role identities and credentials in either an explicit
+ * storage root or the default `$DSH_HOME` root. When legacy `<DSH_HOME>/remote`
+ * could not be migrated only because one of its owned role identities was
+ * corrupt, resetting that role repairs the legacy tree first and then completes
+ * the standard migration without creating a conflicting second root.
+ */
+export async function resetDefaultIdentityRoles(
+  roles: readonly RemoteDeviceRole[],
+  serverUrl: string | undefined,
+  deviceName: string,
+  options: ResetIdentityOptions = {},
+): Promise<string> {
+  const createStore = options.createIdentityStore ?? (storeOptions => new IdentityStore(storeOptions))
+  const resetRolesInRoot = async (root: string): Promise<void> => {
+    if (serverUrl === undefined) {
+      if (!roles.includes('host')) return
+      const identities = createStore({ directory: root, env: options.env, homeDirectory: options.homeDirectory, role: 'host' })
+      await identities.reset(deviceName)
+      await new ServerCredentialStore(root).clear()
+      return
+    }
+    for (const role of roles) {
+      const directory = serverStorageDirectory(root, serverUrl, role)
+      const identities = createStore({ directory, env: options.env, homeDirectory: options.homeDirectory, role })
+      await identities.reset(deviceName)
+      await new ServerCredentialStore(directory).clear()
+    }
+  }
+
+  if (options.directory !== undefined) {
+    await resetRolesInRoot(options.directory)
+    return options.directory
+  }
+
+  try {
+    const root = await prepareDefaultIdentityDirectory(options)
+    await resetRolesInRoot(root)
+    return root
+  } catch (error) {
+    if (!(error instanceof IdentityInvalidError) || error.code !== 'IDENTITY_INVALID') {
+      throw error
+    }
+    const env = options.env ?? process.env
+    const home = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
+    const source = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target)])
+    if (old === undefined || current !== undefined) throw error
+    await assertStorageIdle(source)
+    await resetRolesInRoot(source)
+    return prepareDefaultIdentityDirectory(options)
+  }
 }
 
 /** Legacy storage has no owner marker. Require its complete known layout and
@@ -293,39 +440,69 @@ export async function prepareDefaultIdentityDirectory(
  * Read-only: never repair, create peers, rename devices or refresh tokens here.
  */
 export async function assertOwnedRemoteStorage(root: string): Promise<void> {
-  const rejected = () => new IdentityInvalidError('Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.')
-  const identityFiles = new Set(['device.json', 'device.key', 'trusted-peers.json', 'server-credentials.json', 'host-pairing.json', 'pairing-host-only.json'])
+  let failureCode: IdentityErrorCode = 'STORAGE_CONFLICT'
+  const rejected = (code: IdentityErrorCode = failureCode) => new IdentityInvalidError(
+    'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.',
+    code,
+  )
+  const identityFiles = new Set([
+    'device.json',
+    'device.key',
+    'trusted-peers.json',
+    'server-credentials.json',
+    'host-pairing.json',
+    'pairing-host-only.json',
+  ])
   let identities = 0
-  const checkIdentity = async (directory: string, scope?: string): Promise<void> => {
+  const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
     for (const entry of entries) {
-      if (!entry.isFile() || !identityFiles.has(entry.name)) throw rejected()
+      const allowedFile = identityFiles.has(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
+      if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
       const metadata = await lstat(join(directory, entry.name))
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) throw rejected()
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+        throw rejected('STORAGE_CONFLICT')
+      }
     }
     const names = new Set(entries.map(entry => entry.name))
-    if (!names.has('device.json') || !names.has('device.key')) throw rejected()
+    if (!names.has('device.json') && !names.has('device.key')) throw rejected('STORAGE_CONFLICT')
+    failureCode = 'IDENTITY_INVALID'
+    if (!names.has('device.json') || !names.has('device.key')) {
+      if (role === 'client' && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++
+        return
+      }
+      throw rejected('IDENTITY_INVALID')
+    }
     await assertPrivateMode(join(directory, 'device.key'))
     const record = identitySchema.parse(JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')))
     const key = (await readFile(join(directory, 'device.key'), 'utf8')).trim()
-    if (generateKeyPair(fromBase64Url(key)).publicKey !== record.publicKey) throw rejected()
+    if (generateKeyPair(fromBase64Url(key)).publicKey !== record.publicKey) {
+      if (role === 'client' && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++
+        return
+      }
+      throw rejected('IDENTITY_INVALID')
+    }
     if (names.has('trusted-peers.json')) {
       const peers = trustedPeersSchema.parse(JSON.parse(await readFile(join(directory, 'trusted-peers.json'), 'utf8'))).peers
       const ids = new Set<string>()
       for (const peer of peers) {
-        if (peer.fingerprint !== fingerprint(peer.publicKey) || ids.has(peer.deviceId)) throw rejected()
+        if (peer.fingerprint !== fingerprint(peer.publicKey) || ids.has(peer.deviceId)) throw rejected('IDENTITY_INVALID')
         ids.add(peer.deviceId)
       }
     }
     if (names.has('server-credentials.json')) {
       // Use the existing strict schema and permission checks without refreshing or writing.
       const raw = JSON.parse(await readFile(join(directory, 'server-credentials.json'), 'utf8')) as { serverUrl?: unknown }
-      if (typeof raw.serverUrl !== 'string') throw rejected()
+      if (typeof raw.serverUrl !== 'string') throw rejected('IDENTITY_INVALID')
       const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record.deviceId)
-      if (credentials === undefined) throw rejected()
+      if (credentials === undefined) throw rejected('IDENTITY_INVALID')
       const origin = new URL(credentials.serverUrl)
-      if (!['http:', 'https:'].includes(origin.protocol)) throw rejected()
-      if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) throw rejected()
+      if (!['http:', 'https:'].includes(origin.protocol)) throw rejected('IDENTITY_INVALID')
+      if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) {
+        throw rejected('STORAGE_CONFLICT')
+      }
     }
     if (names.has('pairing-host-only.json')) {
       await assertPrivateMode(join(directory, 'pairing-host-only.json'))
@@ -334,9 +511,12 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     if (names.has('host-pairing.json')) {
       await assertPrivateMode(join(directory, 'host-pairing.json'))
       const pairing = savedPairingSchema.parse(JSON.parse(await readFile(join(directory, 'host-pairing.json'), 'utf8')))
-      if (pairing.deviceId !== record.deviceId || pairing.session.host.deviceId !== record.deviceId || pairing.session.host.identityKey !== record.publicKey || pairing.session.host.role !== 'host') throw rejected()
+      if (pairing.deviceId !== record.deviceId || pairing.session.host.deviceId !== record.deviceId || pairing.session.host.identityKey !== record.publicKey || pairing.session.host.role !== 'host') throw rejected('IDENTITY_INVALID')
       const origin = new URL(pairing.serverUrl)
-      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== pairing.serverUrl || scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) throw rejected()
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected('IDENTITY_INVALID')
+      if (scope !== undefined && createHash('sha256').update(origin.origin).digest('hex').slice(0, 24) !== scope) {
+        throw rejected('STORAGE_CONFLICT')
+      }
     }
     identities++
   }
@@ -345,32 +525,53 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
-      if (flat.some(entry => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected()
+      if (flat.some(entry => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected('STORAGE_CONFLICT')
       await checkIdentity(root)
     }
     const servers = entries.find(entry => entry.name === 'servers')
     if (servers !== undefined) {
-      if (!servers.isDirectory()) throw rejected()
+      if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT')
       for (const scope of await readdir(join(root, 'servers'), { withFileTypes: true })) {
-        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected()
+        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT')
         for (const role of await readdir(join(root, 'servers', scope.name), { withFileTypes: true })) {
-          if (!role.isDirectory() || !['host', 'client'].includes(role.name)) throw rejected()
-          await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name)
+          if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT')
+          await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name, role.name)
         }
       }
     }
-    if (identities === 0) throw rejected()
-  } catch {
+    if (identities === 0) throw rejected(failureCode)
+  } catch (error) {
+    if (error instanceof IdentityInvalidError && error.message === 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.') {
+      throw error
+    }
     // Do not surface schema errors or file contents that might contain secrets.
-    throw rejected()
+    throw rejected(failureCode)
   }
 }
 
-async function storageDirectoryStat(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+async function isRepairableLegacyClientDirectory(directory: string, names: ReadonlySet<string>): Promise<boolean> {
+  if (names.has('server-credentials.json') || names.has('host-pairing.json') || names.has('pairing-host-only.json')) return false
+  if (names.has('trusted-peers.json')) {
+    const peers = trustedPeersSchema.parse(JSON.parse(await readFile(join(directory, 'trusted-peers.json'), 'utf8'))).peers
+    if (peers.length > 0) return false
+  }
+  if (names.has('device.json')) {
+    const record = identitySchema.parse(JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')))
+    if (fromBase64Url(record.publicKey).byteLength !== 32) return false
+  }
+  if (names.has('device.key')) {
+    await assertPrivateMode(join(directory, 'device.key'))
+    const key = (await readFile(join(directory, 'device.key'), 'utf8')).trim()
+    generateKeyPair(fromBase64Url(key))
+  }
+  return true
+}
+
+async function storageDirectoryStat(path: string): Promise<BigIntStats | undefined> {
   try {
-    const entry = await lstat(path)
+    const entry = await lstat(path, { bigint: true })
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new IdentityInvalidError('Remote storage must be a real directory; symbolic links are not migrated.')
+      throw new IdentityInvalidError('Remote storage must be a real directory; symbolic links are not migrated.', 'STORAGE_CONFLICT')
     }
     return entry
   } catch (error) {
@@ -382,7 +583,10 @@ async function storageDirectoryStat(path: string): Promise<Awaited<ReturnType<ty
 async function assertStorageIdle(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes('.refresh-lock') || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
-      throw new IdentityInvalidError('Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.')
+      throw new IdentityInvalidError(
+        'Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.',
+        entry.isSymbolicLink() ? 'STORAGE_CONFLICT' : 'IDENTITY_LOCKED',
+      )
     }
     if (entry.isDirectory()) await assertStorageIdle(join(directory, entry.name))
   }
@@ -408,7 +612,8 @@ async function assertPrivateMode(path: string): Promise<void> {
 }
 
 async function atomicJsonWrite(path: string, value: unknown, mode: number): Promise<void> {
-  await atomicTextWrite(path, `${JSON.stringify(value, null, 2)}\n`, mode)
+  await atomicTextWrite(path, `${JSON.stringify(value, null, 2)}
+`, mode)
 }
 
 async function atomicTextWrite(path: string, value: string, mode: number): Promise<void> {
@@ -440,26 +645,6 @@ function safeErrorMessage(error: unknown): string {
 
 /**
  * Serialize every read-create-verify cycle that touches `directory`.
- *
- * The lock is a `wx`-created `device.lock` holding the owner's pid. It is
- * removed by exactly two parties: its owner, once the operation finished, and a
- * contender that proved the recorded process no longer exists. Those are the
- * only two cases in which no live owner can be mid-operation, which is what
- * makes both removals safe:
- *
- * - Age is never evidence of abandonment. A holder suspended for minutes is
- *   still the holder, and letting a successor take over would hand the
- *   critical section to two processes at once — the failure this lock exists to
- *   prevent. A holder that resumes therefore still owns its lock and can only
- *   ever remove its own.
- * - A lock whose record cannot be read yet (the file is created before its
- *   pid lands) is treated as held, never reclaimed: deleting it would admit a
- *   second creator while the first is still running.
- * - Takeover is arbitrated through a claim file named after the dead record, so
- *   two contenders cannot both reclaim, and the claimant re-reads the lock
- *   under the claim to confirm it is still the record whose owner it proved
- *   gone. A lock acquired after a takeover has a different record, hence a
- *   different claim name, so it can never be the one a stale claim removes.
  */
 const LOCK_FILE_NAME = 'device.lock'
 const LOCK_TIMEOUT_MS = 15_000
@@ -472,16 +657,18 @@ async function withIdentityLock<T>(directory: string, operation: () => Promise<T
   let delay = LOCK_RETRY_INITIAL_MS
   for (;;) {
     try {
-      // One call, so the window in which a contender can read the path without
-      // its record is the only unprotected state — and that state is waited on.
-      await writeFile(lockPath, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      await writeFile(lockPath, `${process.pid}
+`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
       break
     } catch (error: unknown) {
       if (!(await isLockContention(error, lockPath))) throw error
       if (await takeOverLockOfExitedOwner(lockPath)) continue
     }
     if (Date.now() >= deadline) {
-      throw new IdentityInvalidError('device identity is locked by another process; stop other DSH instances and retry')
+      throw new IdentityInvalidError(
+        'device identity is locked by another process; stop other DSH instances and retry',
+        'IDENTITY_LOCKED',
+      )
     }
     await new Promise(resolve => setTimeout(resolve, delay))
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS)
@@ -489,8 +676,6 @@ async function withIdentityLock<T>(directory: string, operation: () => Promise<T
   try {
     return await operation()
   } finally {
-    // Safe by the invariant above: no contender reclaims a lock whose owner is
-    // still running, so this path still names our own lock.
     await rm(lockPath, { force: true })
   }
 }
@@ -514,7 +699,8 @@ async function takeOverLockOfExitedOwner(lockPath: string): Promise<boolean> {
   if (record === undefined || !ownerExited(record)) return false
   const claimPath = `${lockPath}.takeover-${createHash('sha256').update(record).digest('hex').slice(0, 16)}`
   try {
-    await writeFile(claimPath, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    await writeFile(claimPath, `${process.pid}
+`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
   } catch (error: unknown) {
     // Another contender is reclaiming this same record; it removes the lock.
     if (await isLockContention(error, claimPath)) return false
@@ -542,16 +728,46 @@ function ownerExited(record: string): boolean {
   if (!/^\d+\n$/.test(record)) return false
   const pid = Number(record.trim())
   if (pid === 0 || pid > 2147483647) return false
-  // Our own pid means re-entry from the same process (a second store, an HMR
-  // reload). Waiting is correct: the operation does finish and release.
   if (pid === process.pid) return false
   try {
     process.kill(pid, 0)
     return false
   } catch (error: unknown) {
-    // ESRCH proves the process is gone; EPERM means it exists under another
-    // user and must be treated as a live owner.
     return isNodeError(error) && error.code === 'ESRCH'
+  }
+}
+
+function isScopedClientDirectory(directory: string): boolean {
+  return /[\\/]servers[\\/][a-f0-9]{24}[\\/]client$/.test(directory)
+}
+
+/**
+ * Narrow client self-heal is allowed only when the directory contains nothing
+ * but uncredentialed, unpeered client identity files. Any credential record,
+ * refresh lock, non-empty or unreadable trusted-peers file, symlink, or unknown
+ * entry fails closed so existing authorization or recovery material is kept.
+ */
+async function canAutoHealClientIdentity(directory: string): Promise<boolean> {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true })
+    for (const entry of entries) {
+      if (isLockArtifact(entry.name)) continue
+      const entryPath = join(directory, entry.name)
+      const metadata = await lstat(entryPath)
+      if (!metadata.isFile() || metadata.isSymbolicLink()) return false
+      if (entry.name === 'device.json' || entry.name === 'device.key' || isIdentityTempArtifact(entry.name)) {
+        continue
+      }
+      if (entry.name === 'trusted-peers.json') {
+        const parsed = trustedPeersSchema.parse(JSON.parse(await readFile(entryPath, 'utf8')))
+        if (parsed.peers.length > 0) return false
+        continue
+      }
+      return false
+    }
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -560,7 +776,7 @@ async function ensureDirectory(directory: string): Promise<void> {
   await chmod(directory, 0o700)
 }
 
-/** Drop every identity record, leaving the lock files in place. */
+/** Drop owned identity records in `directory`, preserving locks and sibling trees. */
 async function removeIdentityRecords(directory: string): Promise<void> {
   let entries: string[]
   try {
@@ -569,12 +785,26 @@ async function removeIdentityRecords(directory: string): Promise<void> {
     return
   }
   await Promise.all(entries
-    .filter(name => !isLockArtifact(name))
-    .map(name => rm(join(directory, name), { recursive: true, force: true })))
+    .filter(name => isOwnedIdentityRecord(name))
+    .map(name => unlink(join(directory, name)).catch(() => undefined)))
 }
 
 function isLockArtifact(name: string): boolean {
   return name === LOCK_FILE_NAME || name.startsWith(`${LOCK_FILE_NAME}.takeover-`)
+}
+
+function isIdentityTempArtifact(name: string): boolean {
+  return (name.startsWith('device.json.') || name.startsWith('device.key.')) && name.endsWith('.tmp')
+}
+
+function isOwnedIdentityRecord(name: string): boolean {
+  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json' || name === 'host-pairing.json') return true
+  return (
+    name.startsWith('device.json.')
+    || name.startsWith('device.key.')
+    || name.startsWith('trusted-peers.json.')
+    || name.startsWith('host-pairing.json.')
+  ) && name.endsWith('.tmp')
 }
 
 /** Drop temp files a previous interrupted write left beside the identity pair. */
@@ -586,7 +816,6 @@ async function removeStaleTemporaries(directory: string): Promise<void> {
     return
   }
   await Promise.all(entries
-    .filter(name => name.startsWith('device.json.') || name.startsWith('device.key.'))
-    .filter(name => name.endsWith('.tmp'))
+    .filter(name => isIdentityTempArtifact(name))
     .map(name => unlink(join(directory, name)).catch(() => undefined)))
 }

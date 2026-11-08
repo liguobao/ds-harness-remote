@@ -20,6 +20,10 @@ export interface RemoteStatus {
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
   controlUnavailable?: boolean
+  startupError?: {
+    code: string
+    message: string
+  }
   deviceName?: string
   deviceId?: string
   serverUrl?: string
@@ -250,6 +254,10 @@ export interface PluginSettingsView {
     backend: string
     action: 'configured' | 'installed' | 'download_required'
     downloadUrl?: string
+  }
+  startupError?: {
+    code: string
+    message: string
   }
 }
 

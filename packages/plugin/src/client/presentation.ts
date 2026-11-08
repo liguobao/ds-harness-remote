@@ -177,9 +177,23 @@ export function connectionStatusClass(status: RemoteStatus['host'] | undefined):
   return status === undefined ? '' : ' isOffline'
 }
 
+export function startupErrorMessage(error: { code: string; message: string }, t: Translate): string {
+  if (error.code === 'IDENTITY_INVALID') return t('identityCorrupted')
+  if (error.code === 'SERVER_CREDENTIALS_INVALID') return t('credentialsCorrupted')
+  if (error.code === 'IDENTITY_LOCKED') return t('identityLocked')
+  if (error.code === 'STORAGE_CONFLICT') return t('storageConflict')
+  if (error.code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
+  return error.message || t('remoteStartupFailed')
+}
+
 export function messageOf(reason: unknown, t: Translate): string {
-  if (typeof reason === 'object' && reason !== null && 'code' in reason && reason.code === 'CONNECTION_FAILED') {
-    return t('serverUnavailableError')
+  if (typeof reason === 'object' && reason !== null && 'code' in reason && typeof reason.code === 'string') {
+    if (reason.code === 'CONNECTION_FAILED') return t('serverUnavailableError')
+    if (reason.code === 'IDENTITY_INVALID') return t('identityCorrupted')
+    if (reason.code === 'SERVER_CREDENTIALS_INVALID') return t('credentialsCorrupted')
+    if (reason.code === 'IDENTITY_LOCKED') return t('identityLocked')
+    if (reason.code === 'STORAGE_CONFLICT') return t('storageConflict')
+    if (reason.code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
   }
   return reason instanceof Error ? reason.message : String(reason)
 }

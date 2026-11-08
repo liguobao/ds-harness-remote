@@ -11,6 +11,7 @@ import {
   formatLocalTime,
   displayRemoteAccount,
   messageOf,
+  startupErrorMessage,
 } from './presentation.js'
 import type {
   ClientReact,
@@ -69,6 +70,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [debugBusy, setDebugBusy] = React.useState(false)
     const [debugLogging, setDebugLogging] = React.useState(false)
+    const [resetBusy, setResetBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
@@ -160,7 +162,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         // Refresh the read-only settings snapshot on that change without
         // fetching settings for ordinary connection/statistics updates.
         const key = JSON.stringify([status.serverUrl, status.deviceId, status.host?.deviceId,
-          status.host?.authorized, status.host?.account])
+          status.host?.authorized, status.host?.account, status.startupError?.code])
         if (key === authorizationKey) return
         authorizationKey = key
         const run = ++associationReadRun.current
@@ -579,6 +581,50 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     // The entry style is presentation only, so it lives beside the development
+    const resetIdentity = async (): Promise<void> => {
+      if (!window.confirm(t('resetIdentityConfirm'))) return
+      const run = ++associationReadRun.current
+      setResetBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.identity.reset', {})
+        const status = await props.control<RemoteStatus>('status').catch(() => undefined)
+        applyView(view, run === associationReadRun.current)
+        if (status !== undefined) {
+          setHostStatus(status.host)
+          setHostName(status.deviceName ?? '')
+          setHostDeviceId(status.host?.deviceId ?? '')
+        }
+        setSignInOpen(false)
+        setNotice({ key: 'resetIdentitySuccess' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+      } finally {
+        setResetBusy(false)
+      }
+    }
+
+    const resetDisabledByStartupState = settingsView?.startupError?.code === 'STORAGE_CONFLICT'
+      || settingsView?.startupError?.code === 'IDENTITY_LOCKED'
+
+    const resetIdentitySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+      React.createElement('div', null,
+        React.createElement('strong', null, t('resetIdentity')),
+        React.createElement('p', null, t('resetIdentityHint'))),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteDiscard',
+        disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+        onClick: () => void resetIdentity(),
+      }, t(resetBusy ? 'resettingAction' : 'resetIdentity')),
+    )
+
+    const startupErrorBanner = settingsView?.startupError !== undefined
+      ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' },
+          startupErrorMessage(settingsView.startupError, t))
+      : null
+
     // switches instead of inside the Host-facing settings block.
     const sidebarEntrySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
       React.createElement('div', null,
@@ -840,8 +886,10 @@ export function createRemotePluginOptions(React: ClientReact) {
                 React.createElement('div', null,
                   React.createElement('span', null, t('deviceId')),
                   React.createElement('code', null, hostDeviceId || '—'))),
+              startupErrorBanner,
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
                 React.createElement('div', null,
@@ -895,6 +943,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                 }, t(busy ? 'signingOut' : 'signOut'))),
               inlineSignIn)
             : React.createElement('div', { className: 'dshRemoteSettings' },
+              startupErrorBanner,
               React.createElement('div', { className: 'dshRemoteHostIdentity' },
                 React.createElement('div', null,
                   React.createElement('span', null, t('hostName')),
@@ -904,13 +953,14 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteSettingsSignIn' },
                 React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
                 React.createElement('button', {
                   type: 'button',
                   className: signInOpen ? 'dshRemoteDiscard' : 'dshRemoteSave',
-                  disabled: busy || !loaded,
+                  disabled: busy || resetBusy || !loaded || settingsView?.startupError !== undefined,
                   'aria-expanded': signInOpen,
                   'aria-controls': 'dsh-remote-inline-signin',
                   onClick: () => {

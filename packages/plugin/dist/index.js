@@ -77929,6 +77929,54 @@ function safeErrorCode(error62) {
   if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
   return "INTERNAL_ERROR";
 }
+var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
+  "IDENTITY_INVALID",
+  "IDENTITY_LOCKED",
+  "STORAGE_CONFLICT",
+  "SERVER_CREDENTIALS_INVALID",
+  "SERVER_CREDENTIALS_BUSY"
+]);
+var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
+  "device identity is incomplete; repair it explicitly before reconnecting",
+  "device public and private keys do not match",
+  "device identity is locked by another process; stop other DSH instances and retry",
+  "Remote storage fallback record is invalid; no credentials were changed.",
+  "Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.",
+  "Legacy Remote storage changed after fallback; inspect it before reconnecting.",
+  "Pinned Remote storage is missing; no replacement identity was created.",
+  "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+  "Remote storage must be a real directory; symbolic links are not migrated.",
+  "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration."
+]);
+function safeStartupError(error62) {
+  const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && SAFE_STARTUP_CODES.has(error62.code) ? error62.code : safeErrorCode(error62);
+  if (code === "SERVER_CREDENTIALS_INVALID") {
+    return { code, message: "Local Remote server credentials are invalid." };
+  }
+  if (code === "SERVER_CREDENTIALS_BUSY") {
+    return {
+      code,
+      message: "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again."
+    };
+  }
+  if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
+    const rawMessage = error62 instanceof Error ? error62.message : "";
+    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
+      return { code, message: rawMessage };
+    }
+    if (rawMessage.startsWith("device identity is invalid")) {
+      return { code, message: "device identity is invalid" };
+    }
+    if (rawMessage.startsWith("trusted peer ")) {
+      return { code, message: "trusted peer record is invalid" };
+    }
+    return {
+      code,
+      message: code === "IDENTITY_LOCKED" ? "device identity is locked by another process; stop other DSH instances and retry" : code === "STORAGE_CONFLICT" ? "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." : "device identity is invalid"
+    };
+  }
+  return { code, message: "Remote plugin failed to start." };
+}
 
 // packages/plugin/src/loopback-host.ts
 var HOP_HEADERS = /* @__PURE__ */ new Set([
@@ -87169,7 +87217,10 @@ var trustedPeersSchema = external_exports.object({
   peers: external_exports.array(trustedPeerSchema)
 }).strict();
 var IdentityInvalidError = class extends Error {
-  code = "IDENTITY_INVALID";
+  constructor(message, code = "IDENTITY_INVALID") {
+    super(message);
+    this.code = code;
+  }
 };
 var IdentityStore = class {
   storageDirectory;
@@ -87178,32 +87229,83 @@ var IdentityStore = class {
   }
   identity;
   peers = /* @__PURE__ */ new Map();
+  peerSaveChain = Promise.resolve();
   defaultOptions;
+  role;
   constructor(options = {}) {
     const env = options.env ?? process.env;
     const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
     this.storageDirectory = options.directory ?? join5(dshHome, "ds-harness-remote");
     this.defaultOptions = options.directory === void 0 ? options : void 0;
+    this.role = options.role;
   }
   async loadOrCreate(deviceName) {
     if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
   }
+  /**
+   * Read and verify an existing identity without creating files, mutating
+   * device metadata, or triggering client self-heal. Returns `undefined` when
+   * neither identity file exists yet.
+   */
+  async loadExisting() {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
+    const devicePath = join5(this.directory, "device.json");
+    const keyPath = join5(this.directory, "device.key");
+    const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    if (!hasDevice && !hasKey) return void 0;
+    if (hasDevice !== hasKey) {
+      throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
+    }
+    await assertPrivateMode2(keyPath);
+    try {
+      const record11 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
+      const privateKey = (await readFile3(keyPath, "utf8")).trim();
+      const regenerated = generateKeyPair(fromBase64Url2(privateKey));
+      if (regenerated.publicKey !== record11.publicKey) {
+        throw new IdentityInvalidError("device public and private keys do not match");
+      }
+      return { ...record11, privateKey, fingerprint: fingerprint2(record11.publicKey) };
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError) throw error62;
+      throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error62)}`);
+    }
+  }
   async loadOrCreateLocked(deviceName) {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    const isClientRole = this.role === "client" || this.role === void 0 && isScopedClientDirectory(this.directory);
     if (hasDevice !== hasKey) {
+      if (isClientRole && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
+      }
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
     }
     if (!hasDevice) {
-      const keys = generateKeyPair();
-      const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-      await atomicTextWrite(keyPath, `${keys.privateKey}
-`, 384);
-      await atomicJsonWrite(devicePath, record11, 384);
+      return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
     }
+    let identity3;
+    try {
+      identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError && isClientRole && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
+      }
+      throw error62;
+    }
+    await removeStaleTemporaries(this.directory);
+    return identity3;
+  }
+  async createAndReadIdentityLocked(devicePath, keyPath, deviceName) {
+    const keys = generateKeyPair();
+    const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+    await atomicTextWrite(keyPath, `${keys.privateKey}
+`, 384);
+    await atomicJsonWrite(devicePath, record11, 384);
     const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
     await removeStaleTemporaries(this.directory);
     return identity3;
@@ -87243,6 +87345,7 @@ var IdentityStore = class {
     if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, async () => {
+      await this.peerSaveChain.catch(() => void 0);
       this.identity = void 0;
       this.peers.clear();
       await removeIdentityRecords(this.directory);
@@ -87291,18 +87394,29 @@ var IdentityStore = class {
     }
     this.peers = peers;
   }
-  async savePeers() {
-    await atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
-      schemaVersion: 1,
-      peers: [...this.peers.values()]
-    }, 384);
+  savePeers() {
+    const next = this.peerSaveChain.catch(() => void 0).then(
+      () => atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
+        schemaVersion: 1,
+        peers: [...this.peers.values()]
+      }, 384)
+    );
+    this.peerSaveChain = next;
+    return next;
   }
 };
+var statIdSchema = external_exports.union([
+  external_exports.number().int().nonnegative().transform((value) => BigInt(value)),
+  external_exports.string().regex(/^(?:0|[1-9]\d{0,19})$/).transform((value) => BigInt(value))
+]);
 var legacyRootPinSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
-  dev: external_exports.number().int().nonnegative(),
-  ino: external_exports.number().int().nonnegative()
+  dev: statIdSchema,
+  ino: statIdSchema
 }).strict();
+function serializeStatId(value) {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
+}
 async function prepareDefaultIdentityDirectory(options = {}) {
   if (options.directory !== void 0) return options.directory;
   const env = options.env ?? process.env;
@@ -87324,19 +87438,25 @@ async function prepareDefaultIdentityDirectory(options = {}) {
     let pin;
     if (pinMetadata !== void 0) {
       if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
-        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.");
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
       }
       await assertPrivateMode2(pinPath);
-      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+      try {
+        pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+      } catch {
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
+      }
     }
     if (old !== void 0) {
       if (current !== void 0) {
-        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.");
+        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
       }
       await assertOwnedRemoteStorage(source);
       await assertStorageIdle(source);
       if (pin !== void 0) {
-        if (pin.dev !== old.dev || pin.ino !== old.ino) throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.");
+        if (pin.dev !== old.dev || pin.ino !== old.ino) {
+          throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
+        }
         return source;
       }
       try {
@@ -87347,49 +87467,123 @@ async function prepareDefaultIdentityDirectory(options = {}) {
         if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
         await assertOwnedRemoteStorage(source);
         await assertStorageIdle(source);
-        await atomicJsonWrite(pinPath, { schemaVersion: 1, dev: old.dev, ino: old.ino }, 384);
+        await atomicJsonWrite(pinPath, {
+          schemaVersion: 1,
+          dev: serializeStatId(old.dev),
+          ino: serializeStatId(old.ino)
+        }, 384);
         return source;
       }
     } else if (pin !== void 0) {
-      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.");
+      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
       await assertOwnedRemoteStorage(target3);
     }
     return target3;
   });
 }
+async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options = {}) {
+  const createStore = options.createIdentityStore ?? ((storeOptions) => new IdentityStore(storeOptions));
+  const resetRolesInRoot = async (root2) => {
+    if (serverUrl === void 0) {
+      if (!roles.includes("host")) return;
+      const identities = createStore({ directory: root2, env: options.env, homeDirectory: options.homeDirectory, role: "host" });
+      await identities.reset(deviceName);
+      await new ServerCredentialStore(root2).clear();
+      return;
+    }
+    for (const role2 of roles) {
+      const directory = serverStorageDirectory(root2, serverUrl, role2);
+      const identities = createStore({ directory, env: options.env, homeDirectory: options.homeDirectory, role: role2 });
+      await identities.reset(deviceName);
+      await new ServerCredentialStore(directory).clear();
+    }
+  };
+  if (options.directory !== void 0) {
+    await resetRolesInRoot(options.directory);
+    return options.directory;
+  }
+  try {
+    const root2 = await prepareDefaultIdentityDirectory(options);
+    await resetRolesInRoot(root2);
+    return root2;
+  } catch (error62) {
+    if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") {
+      throw error62;
+    }
+    const env = options.env ?? process.env;
+    const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+    const source = join5(home, "remote");
+    const target3 = join5(home, "ds-harness-remote");
+    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target3)]);
+    if (old === void 0 || current !== void 0) throw error62;
+    await assertStorageIdle(source);
+    await resetRolesInRoot(source);
+    return prepareDefaultIdentityDirectory(options);
+  }
+}
 async function assertOwnedRemoteStorage(root2) {
-  const rejected = () => new IdentityInvalidError("Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.");
-  const identityFiles = /* @__PURE__ */ new Set(["device.json", "device.key", "trusted-peers.json", "server-credentials.json", "host-pairing.json", "pairing-host-only.json"]);
+  let failureCode = "STORAGE_CONFLICT";
+  const rejected = (code = failureCode) => new IdentityInvalidError(
+    "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+    code
+  );
+  const identityFiles = /* @__PURE__ */ new Set([
+    "device.json",
+    "device.key",
+    "trusted-peers.json",
+    "server-credentials.json",
+    "host-pairing.json",
+    "pairing-host-only.json"
+  ]);
   let identities = 0;
-  const checkIdentity = async (directory, scope2) => {
+  const checkIdentity = async (directory, scope2, role2) => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
-      if (!entry.isFile() || !identityFiles.has(entry.name)) throw rejected();
+      const allowedFile = identityFiles.has(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
+      if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) throw rejected();
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+        throw rejected("STORAGE_CONFLICT");
+      }
     }
     const names = new Set(entries.map((entry) => entry.name));
-    if (!names.has("device.json") || !names.has("device.key")) throw rejected();
+    if (!names.has("device.json") && !names.has("device.key")) throw rejected("STORAGE_CONFLICT");
+    failureCode = "IDENTITY_INVALID";
+    if (!names.has("device.json") || !names.has("device.key")) {
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
+      throw rejected("IDENTITY_INVALID");
+    }
     await assertPrivateMode2(join5(directory, "device.key"));
     const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
     const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
-    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) throw rejected();
+    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
+      throw rejected("IDENTITY_INVALID");
+    }
     if (names.has("trusted-peers.json")) {
       const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
       const ids = /* @__PURE__ */ new Set();
       for (const peer of peers) {
-        if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected();
+        if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected("IDENTITY_INVALID");
         ids.add(peer.deviceId);
       }
     }
     if (names.has("server-credentials.json")) {
       const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
-      if (typeof raw.serverUrl !== "string") throw rejected();
+      if (typeof raw.serverUrl !== "string") throw rejected("IDENTITY_INVALID");
       const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record11.deviceId);
-      if (credentials === void 0) throw rejected();
+      if (credentials === void 0) throw rejected("IDENTITY_INVALID");
       const origin = new URL(credentials.serverUrl);
-      if (!["http:", "https:"].includes(origin.protocol)) throw rejected();
-      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) throw rejected();
+      if (!["http:", "https:"].includes(origin.protocol)) throw rejected("IDENTITY_INVALID");
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+        throw rejected("STORAGE_CONFLICT");
+      }
     }
     if (names.has("pairing-host-only.json")) {
       await assertPrivateMode2(join5(directory, "pairing-host-only.json"));
@@ -87398,9 +87592,12 @@ async function assertOwnedRemoteStorage(root2) {
     if (names.has("host-pairing.json")) {
       await assertPrivateMode2(join5(directory, "host-pairing.json"));
       const pairing = savedPairingSchema.parse(JSON.parse(await readFile3(join5(directory, "host-pairing.json"), "utf8")));
-      if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected();
+      if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
       const origin = new URL(pairing.serverUrl);
-      if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl || scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) throw rejected();
+      if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected("IDENTITY_INVALID");
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+        throw rejected("STORAGE_CONFLICT");
+      }
     }
     identities++;
   };
@@ -87408,30 +87605,50 @@ async function assertOwnedRemoteStorage(root2) {
     const entries = await readdir(root2, { withFileTypes: true });
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
-      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected();
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected("STORAGE_CONFLICT");
       await checkIdentity(root2);
     }
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
-      if (!servers.isDirectory()) throw rejected();
+      if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
       for (const scope2 of await readdir(join5(root2, "servers"), { withFileTypes: true })) {
-        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected();
+        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
         for (const role2 of await readdir(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
-          if (!role2.isDirectory() || !["host", "client"].includes(role2.name)) throw rejected();
-          await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name);
+          if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
+          await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
         }
       }
     }
-    if (identities === 0) throw rejected();
-  } catch {
-    throw rejected();
+    if (identities === 0) throw rejected(failureCode);
+  } catch (error62) {
+    if (error62 instanceof IdentityInvalidError && error62.message === "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.") {
+      throw error62;
+    }
+    throw rejected(failureCode);
   }
+}
+async function isRepairableLegacyClientDirectory(directory, names) {
+  if (names.has("server-credentials.json") || names.has("host-pairing.json") || names.has("pairing-host-only.json")) return false;
+  if (names.has("trusted-peers.json")) {
+    const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+    if (peers.length > 0) return false;
+  }
+  if (names.has("device.json")) {
+    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+    if (fromBase64Url2(record11.publicKey).byteLength !== 32) return false;
+  }
+  if (names.has("device.key")) {
+    await assertPrivateMode2(join5(directory, "device.key"));
+    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+    generateKeyPair(fromBase64Url2(key));
+  }
+  return true;
 }
 async function storageDirectoryStat(path) {
   try {
-    const entry = await lstat(path);
+    const entry = await lstat(path, { bigint: true });
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.");
+      throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.", "STORAGE_CONFLICT");
     }
     return entry;
   } catch (error62) {
@@ -87442,7 +87659,10 @@ async function storageDirectoryStat(path) {
 async function assertStorageIdle(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
-      throw new IdentityInvalidError("Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.");
+      throw new IdentityInvalidError(
+        "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+        entry.isSymbolicLink() ? "STORAGE_CONFLICT" : "IDENTITY_LOCKED"
+      );
     }
     if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
   }
@@ -87508,7 +87728,10 @@ async function withIdentityLock(directory, operation) {
       if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
     if (Date.now() >= deadline) {
-      throw new IdentityInvalidError("device identity is locked by another process; stop other DSH instances and retry");
+      throw new IdentityInvalidError(
+        "device identity is locked by another process; stop other DSH instances and retry",
+        "IDENTITY_LOCKED"
+      );
     }
     await new Promise((resolve9) => setTimeout(resolve9, delay));
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
@@ -87563,6 +87786,32 @@ function ownerExited(record11) {
     return isNodeError(error62) && error62.code === "ESRCH";
   }
 }
+function isScopedClientDirectory(directory) {
+  return /[\\/]servers[\\/][a-f0-9]{24}[\\/]client$/.test(directory);
+}
+async function canAutoHealClientIdentity(directory) {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (isLockArtifact(entry.name)) continue;
+      const entryPath = join5(directory, entry.name);
+      const metadata = await lstat(entryPath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
+      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name)) {
+        continue;
+      }
+      if (entry.name === "trusted-peers.json") {
+        const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(entryPath, "utf8")));
+        if (parsed.peers.length > 0) return false;
+        continue;
+      }
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function ensureDirectory(directory) {
   await mkdir3(directory, { recursive: true, mode: 448 });
   await chmod2(directory, 448);
@@ -87574,10 +87823,17 @@ async function removeIdentityRecords(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => !isLockArtifact(name2)).map((name2) => rm3(join5(directory, name2), { recursive: true, force: true })));
+  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 function isLockArtifact(name2) {
   return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
+}
+function isIdentityTempArtifact(name2) {
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
+}
+function isOwnedIdentityRecord(name2) {
+  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json") return true;
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.")) && name2.endsWith(".tmp");
 }
 async function removeStaleTemporaries(directory) {
   let entries;
@@ -87586,7 +87842,7 @@ async function removeStaleTemporaries(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => name2.startsWith("device.json.") || name2.startsWith("device.key.")).filter((name2) => name2.endsWith(".tmp")).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  await Promise.all(entries.filter((name2) => isIdentityTempArtifact(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 
 // packages/plugin/src/control-stream.ts
@@ -95697,7 +95953,7 @@ async function installOrConfigureBackend(backendId, options = {}) {
 
 // packages/plugin/src/control-runtime.ts
 var PluginControlRuntime = class {
-  constructor(config2, identityDirectory, settings, client, host, switchServer, updates) {
+  constructor(config2, identityDirectory, settings, client, host, switchServer, updates, useDefaultStorage = false) {
     this.config = config2;
     this.identityDirectory = identityDirectory;
     this.settings = settings;
@@ -95705,9 +95961,28 @@ var PluginControlRuntime = class {
     this.host = host;
     this.switchServer = switchServer;
     this.updates = updates;
+    this.useDefaultStorage = useDefaultStorage;
   }
   logoutFlight;
   serverSwitchFlight;
+  startupFailure;
+  storageAvailable = true;
+  setStartupFailure(error62, options) {
+    this.startupFailure = error62;
+    if (options?.storageAvailable !== void 0) {
+      this.storageAvailable = options.storageAvailable;
+    }
+    this.client = void 0;
+    this.host = void 0;
+  }
+  clearStartupFailure() {
+    this.startupFailure = void 0;
+    this.storageAvailable = true;
+  }
+  setIdentityDirectory(directory) {
+    this.identityDirectory = directory;
+    this.storageAvailable = true;
+  }
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -95729,7 +96004,7 @@ var PluginControlRuntime = class {
   }
   async handle(endpoint, payload, signal) {
     try {
-      if (endpoint !== "settings.server.set") await this.serverSwitchFlight;
+      if (endpoint !== "settings.server.set" && endpoint !== "settings.identity.reset") await this.serverSwitchFlight;
       if (endpoint.startsWith("host.pairing.")) {
         if (this.host?.pairingControl === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "Host device pairing is unavailable.");
         const action = endpoint.slice("host.pairing.".length);
@@ -95754,6 +96029,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
       if (endpoint === "settings.acp.installOrConfigure") return ok3(await this.installOrConfigureAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
+      if (endpoint === "settings.identity.reset") return ok3(await this.resetIdentity(payload));
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
         const value = record9(payload);
         if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
@@ -95770,6 +96046,19 @@ var PluginControlRuntime = class {
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
       if (endpoint === "status") {
+        if (this.startupFailure !== void 0) {
+          const startupError = safeStartupError(this.startupFailure);
+          const failureStatus = {
+            mode: "local",
+            available: false,
+            controlUnavailable: false,
+            connected: false,
+            transport: "Disconnected",
+            startupError,
+            hostAuthorizationAvailable: false
+          };
+          return withUpdate(ok3(failureStatus), this.updates?.snapshot());
+        }
         const base = this.client !== void 0 ? await this.client.handleControl(endpoint, payload, signal) : ok3(this.hostOnlyStatus());
         return withUpdate(base, this.updates?.snapshot());
       }
@@ -95794,6 +96083,9 @@ var PluginControlRuntime = class {
       if (endpoint === "mode.set" && record9(payload).mode === "local") {
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
+      if (this.startupFailure instanceof Error) {
+        throw this.startupFailure;
+      }
       throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is disabled by the plugin role.");
     } catch (error62) {
       return fail5(error62);
@@ -95813,8 +96105,12 @@ var PluginControlRuntime = class {
     const current = editableConfig(resolveConfig(this.settings.get()));
     if (value.role === "client" && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming connections.");
     const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl });
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role)
+      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role),
+      role: value.role
     });
     let identity3 = await identities.loadOrCreate(hostname4());
     const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
@@ -95866,15 +96162,66 @@ var PluginControlRuntime = class {
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
     if (this.switchServer !== void 0) {
-      if (next.serverUrl !== this.config.serverUrl) {
-        const runtimes = await this.switchServer(next);
-        this.client = runtimes.client;
-        this.host = runtimes.host;
+      if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== void 0) {
+        try {
+          const runtimes = await this.switchServer(next);
+          this.client = runtimes.client;
+          this.host = runtimes.host;
+          this.clearStartupFailure();
+        } catch (error62) {
+          this.config = next;
+          this.setStartupFailure(error62);
+          throw error62;
+        }
       }
       this.config = next;
       return { ...await this.settingsView(), applies: "live" };
     }
     return this.settingsView();
+  }
+  async resetIdentity(payload) {
+    if (this.serverSwitchFlight !== void 0) {
+      throw new ClientModeError("SERVER_SWITCH_BUSY", "A Server switch is already in progress.");
+    }
+    const flight = this.applyResetIdentity(payload);
+    this.serverSwitchFlight = flight;
+    try {
+      return await flight;
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = void 0;
+    }
+  }
+  async applyResetIdentity(payload) {
+    await this.logoutFlight;
+    const value = payload === void 0 ? {} : record9(payload);
+    const roleArg = value.role === void 0 ? "all" : value.role;
+    if (roleArg !== "host" && roleArg !== "client" && roleArg !== "all") {
+      throw new ClientModeError("INVALID_MESSAGE", "Role must be host, client, or all.");
+    }
+    const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+    const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
+    const nextDirectory = await resetDefaultIdentityRoles(
+      roles,
+      config2.serverUrl,
+      hostname4(),
+      this.useDefaultStorage ? {} : { directory: this.identityDirectory }
+    );
+    this.setIdentityDirectory(nextDirectory);
+    if (this.switchServer !== void 0) {
+      try {
+        const runtimes = await this.switchServer(config2);
+        this.client = runtimes.client;
+        this.host = runtimes.host;
+        this.config = config2;
+        this.clearStartupFailure();
+      } catch (error62) {
+        this.setStartupFailure(error62);
+        throw error62;
+      }
+      return { ...await this.settingsView(), applies: "live" };
+    }
+    this.clearStartupFailure();
+    return { ...await this.settingsView(), applies: "live" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {
@@ -96051,8 +96398,11 @@ var PluginControlRuntime = class {
     };
   }
   async authorizeOwnedRole(serverUrl, sourceRole, targetRole) {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
-    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname4());
+    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory, role: sourceRole }).loadOrCreate(hostname4());
     const sourceStore = new ServerCredentialStore(sourceDirectory);
     if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === void 0) return;
     const sourceApi = sourceRole === "host" ? new HostServerApi(serverUrl, sourceStore) : new ClientServerApi(serverUrl, sourceStore);
@@ -96061,7 +96411,7 @@ var PluginControlRuntime = class {
     if (sourceApi.pairingHostOnly()) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "Paired Host cannot create a Client identity.");
     const sourceCredentials = await sourceApi.authenticate(sourceIdentity);
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole);
-    const targetIdentity = await new IdentityStore({ directory: targetDirectory }).loadOrCreate(hostname4());
+    const targetIdentity = await new IdentityStore({ directory: targetDirectory, role: targetRole }).loadOrCreate(hostname4());
     const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory)) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory));
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account);
   }
@@ -96075,6 +96425,9 @@ var PluginControlRuntime = class {
     return task;
   }
   async clearAuthorization() {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     if (config2.serverUrl !== void 0) {
       const runtimes = await Promise.allSettled([
@@ -96102,11 +96455,14 @@ var PluginControlRuntime = class {
       applies: "restart",
       associations,
       acpAvailability: Object.fromEntries((config2.acp?.backends ?? []).map((item) => [item.id, backendCommandAvailable(item.id, item.command ?? "")])),
-      ...association === void 0 ? {} : { association }
+      ...association === void 0 ? {} : { association },
+      ...this.startupFailure === void 0 ? {} : {
+        startupError: safeStartupError(this.startupFailure)
+      }
     };
   }
   async associations(config2) {
-    if (config2.serverUrl === void 0) return {};
+    if (config2.serverUrl === void 0 || !this.storageAvailable) return {};
     const [host, client] = await Promise.all([
       this.association(config2.serverUrl, "host"),
       this.association(config2.serverUrl, "client")
@@ -96118,16 +96474,25 @@ var PluginControlRuntime = class {
   }
   async association(serverUrl, role2) {
     if (role2 === "client" && this.host?.hostStatus?.()?.pairingHostOnly) return void 0;
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2)
-    });
-    const identity3 = await identities.loadOrCreate(hostname4());
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
-    if (credentials === void 0) return void 0;
-    return {
-      method: credentials.authorizationMethod,
-      ...credentials.account === void 0 ? {} : { account: credentials.account }
-    };
+    try {
+      const identities = new IdentityStore({
+        directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2),
+        role: role2
+      });
+      const identity3 = await identities.loadExisting();
+      if (identity3 === void 0) return void 0;
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
+      if (credentials === void 0) return void 0;
+      return {
+        method: credentials.authorizationMethod,
+        ...credentials.account === void 0 ? {} : { account: credentials.account }
+      };
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError || error62 instanceof ServerCredentialsInvalidError) {
+        return void 0;
+      }
+      throw error62;
+    }
   }
   hostOnlyStatus() {
     return {
@@ -100622,6 +100987,7 @@ async function runCli(args = process.argv.slice(2), dependencies = {}) {
     if (command === "register") return await register(rest, runtime);
     if (command === "status") return await status(rest, runtime);
     if (command === "logout") return await logout(rest, runtime);
+    if (command === "reset-identity") return await resetIdentity(rest, runtime);
     if (command === "help" || command === "--help" || command === "-h" || command === void 0) {
       write2(runtime.stdout, helpText());
       return 0;
@@ -100710,7 +101076,7 @@ Run "ds-harness-remote login" to authorize this Host.
 `);
     return 0;
   }
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
   const identity3 = await identities.loadOrCreate(deviceName);
   const store = new ServerCredentialStore(directory);
@@ -100745,29 +101111,70 @@ Run "ds-harness-remote login" to authorize this Host.
 async function logout(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote logout");
   const serverUrl = selectedServer();
-  const root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
+  let root2;
+  try {
+    root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  } catch (error62) {
+    if (error62 instanceof IdentityInvalidError && error62.code === "IDENTITY_INVALID") {
+      await resetDefaultIdentityRoles(["host"], serverUrl, deviceName, {
+        env: runtime.env,
+        createIdentityStore: runtime.createIdentityStore
+      });
+      write2(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n");
+      return 0;
+    }
+    throw error62;
+  }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
-  if (!await exists3(join17(directory, "device.json"))) {
+  const [hasDevice, hasKey, hasCredentials] = await Promise.all([
+    exists3(join17(directory, "device.json")),
+    exists3(join17(directory, "device.key")),
+    exists3(join17(directory, "server-credentials.json"))
+  ]);
+  if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
     write2(runtime.stdout, "This Host is already logged out.\n");
     return 0;
   }
-  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity3 = await identities.loadOrCreate(deviceName);
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  api.bindIdentity(identity3);
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   let revokeFailure;
   try {
+    const identity3 = await identities.loadOrCreate(deviceName);
+    const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
+    api.bindIdentity(identity3);
     await api.revokeCurrentDevice();
   } catch (error62) {
     revokeFailure = error62;
   }
   await identities.reset(deviceName);
-  if (revokeFailure !== void 0) {
+  await new ServerCredentialStore(directory).clear();
+  if (revokeFailure !== void 0 && !(revokeFailure instanceof IdentityInvalidError) && !(revokeFailure instanceof ServerCredentialsInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`);
   }
   write2(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n");
+  return 0;
+}
+async function resetIdentity(args, runtime) {
+  if (args.length > 1) {
+    throw new CliUsageError("Usage: ds-harness-remote reset-identity [host|client|all]");
+  }
+  const roleArg = args[0];
+  if (roleArg !== void 0 && roleArg !== "host" && roleArg !== "client" && roleArg !== "all") {
+    throw new CliUsageError("Usage: ds-harness-remote reset-identity [host|client|all]");
+  }
+  const serverUrl = selectedServer();
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
+  const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+  await resetDefaultIdentityRoles(roles, serverUrl, deviceName, {
+    env: runtime.env,
+    createIdentityStore: runtime.createIdentityStore
+  });
+  for (const role2 of roles) {
+    write2(runtime.stdout, `Remote ${role2} identity was reset and a new key pair was created.
+`);
+  }
+  write2(runtime.stdout, "Restart the Harness instance to use the fresh identity.\n");
   return 0;
 }
 async function hostContext(runtime) {
@@ -100775,7 +101182,7 @@ async function hostContext(runtime) {
   const root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   const identity3 = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
   return { api, identities, identity: identity3, deviceName };
@@ -100835,6 +101242,7 @@ function helpText() {
     "  ds-harness-remote register <server-token>",
     "  ds-harness-remote status",
     "  ds-harness-remote logout",
+    "  ds-harness-remote reset-identity [host|client|all]",
     "",
     "login uses an available QR provider (preferring Zhihu). Use login list to see available providers.",
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
@@ -100918,21 +101326,33 @@ function apply(ctx, entry = void 0) {
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
   const activateWhenCarrierReady = async (runtimeContext) => {
-    const identityDirectory = await prepareDefaultIdentityDirectory();
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
     const webServer = runtimeContext.get("webServer");
     let disposePendingControl;
-    const installPendingControl = () => {
+    const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
+      let identityDirectory = new IdentityStore().directory;
+      let storageError;
+      try {
+        identityDirectory = await prepareDefaultIdentityDirectory();
+      } catch (error62) {
+        storageError = error62;
+      }
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
           identityDirectory,
           void 0,
           void 0,
-          void 0
+          void 0,
+          void 0,
+          void 0,
+          true
         );
+        if (storageError !== void 0) {
+          control.setStartupFailure(storageError, { storageAvailable: false });
+        }
         return control.register(connection, webServer);
       }, "ds-harness-remote pending control");
     };
@@ -100944,7 +101364,7 @@ function apply(ctx, entry = void 0) {
     if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext);
     }
-    installPendingControl();
+    await installPendingControl();
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
 }
@@ -100954,10 +101374,28 @@ async function activate(ctx, readConfig, entryId) {
   const connection = ctx.get("connection");
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+  let defaultIdentityDirectory = new IdentityStore().directory;
+  let initialStorageError;
+  try {
+    defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+  } catch (error62) {
+    initialStorageError = error62;
+  }
   if (!config2.enabled) {
     if (connection !== void 0) {
-      const controlRuntime2 = new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, void 0, void 0);
+      const controlRuntime2 = new PluginControlRuntime(
+        config2,
+        defaultIdentityDirectory,
+        settingsBinding,
+        void 0,
+        void 0,
+        void 0,
+        void 0,
+        true
+      );
+      if (initialStorageError !== void 0) {
+        controlRuntime2.setStartupFailure(initialStorageError, { storageAvailable: false });
+      }
       ctx.effect(() => controlRuntime2.register(connection, webServer), "ds-harness-remote disabled control");
     }
     return;
@@ -101012,7 +101450,8 @@ async function activate(ctx, readConfig, entryId) {
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
     const hostIdentities = new IdentityStore({
-      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host")
+      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
+      role: "host"
     });
     const runtime2 = new HostPluginRuntime(
       config3,
@@ -101031,7 +101470,8 @@ async function activate(ctx, readConfig, entryId) {
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {
       const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client")
+        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client"),
+        role: "client"
       });
       clientRuntime2 = new ClientModeRuntime(
         config3,
@@ -101044,10 +101484,16 @@ async function activate(ctx, readConfig, entryId) {
     }
     return { runtime: runtime2, clientRuntime: clientRuntime2 };
   };
-  let { runtime, clientRuntime } = createRuntimes(config2);
-  let closed = false;
+  let runtime;
+  let clientRuntime;
   let hostServiceProvided = false;
   let clientServiceProvided = false;
+  let clientActive = false;
+  if (initialStorageError === void 0) {
+    ;
+    ({ runtime, clientRuntime } = createRuntimes(config2));
+  }
+  let closed = false;
   let startup;
   let replacement;
   const syncOptionalService = (serviceName, value, owned) => {
@@ -101070,13 +101516,18 @@ async function activate(ctx, readConfig, entryId) {
     }
   };
   const replaceServer = (next) => {
+    const previousReplacement = replacement;
     const operation = async () => {
-      await startup;
+      await startup?.catch(() => void 0);
+      await previousReplacement?.catch(() => void 0);
       if (closed) throw new Error("Remote plugin is closed");
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()]);
+      clientActive = false;
+      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
       const failure5 = shutdown.find((result) => result.status === "rejected");
       if (failure5?.status === "rejected") throw failure5.reason;
       if (closed) throw new Error("Remote plugin is closed");
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+      controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
       const fresh = createRuntimes(next);
       try {
         await fresh.runtime.start();
@@ -101088,54 +101539,77 @@ async function activate(ctx, readConfig, entryId) {
       }
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
+      clientActive = clientRuntime !== void 0;
+      controlRuntime?.clearStartupFailure();
       hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
       if (clientRuntime !== void 0) {
         clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
       }
+      if (connection !== void 0) updateChecker.start();
       return { client: clientRuntime, host: runtime };
     };
     replacement = operation();
     return replacement;
   };
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
-  hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
+    config2,
+    defaultIdentityDirectory,
+    settingsBinding,
+    clientRuntime,
+    runtime,
+    replaceServer,
+    updateChecker,
+    true
+  );
+  if (initialStorageError !== void 0) {
+    controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+  }
+  if (runtime !== void 0) {
+    hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  }
   if (clientRuntime !== void 0) {
     clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
   }
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection, webServer);
-    try {
-      startup = (async () => {
-        await runtime.start();
-        if (clientRuntime !== void 0) {
-          await clientRuntime.start();
-        } else {
-          logger2.warn("client remote mode is unavailable", {
-            serverConfigured: config2.serverUrl !== void 0,
-            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-            connectionAvailable: connection !== void 0
-          });
-        }
-      })();
-      await startup;
-      if (connection !== void 0) updateChecker.start();
-    } catch (error62) {
-      await disposeControl?.();
-      await clientRuntime?.close();
-      await runtime.close();
-      throw error62;
+    if (initialStorageError !== void 0) {
+      logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
+    } else {
+      try {
+        startup = (async () => {
+          await runtime.start();
+          if (clientRuntime !== void 0) {
+            await clientRuntime.start();
+            clientActive = true;
+          } else {
+            logger2.warn("client remote mode is unavailable", {
+              serverConfigured: config2.serverUrl !== void 0,
+              remoteGatewayAvailable: localTypertGateway.supportsCarrier,
+              connectionAvailable: connection !== void 0
+            });
+          }
+        })();
+        await startup;
+        if (connection !== void 0) updateChecker.start();
+      } catch (error62) {
+        clientActive = false;
+        logger2.error("Remote plugin startup failed", safeStartupError(error62));
+        controlRuntime?.setStartupFailure(error62);
+        await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
+      }
     }
     return async () => {
       closed = true;
+      clientActive = false;
       updateChecker.stop();
       await replacement?.catch(() => void 0);
       await disposeControl?.();
       await clientRuntime?.close();
-      await runtime.close();
+      await runtime?.close();
     };
   }, "ds-harness-remote lifecycle");
-  if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? void 0 : clientRuntime);
+  if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
 }
 function readEntryConfig(entry) {
   if (entry === void 0) return {};
@@ -101247,6 +101721,7 @@ export {
   fingerprint2 as fingerprint,
   name,
   prepareDefaultIdentityDirectory,
+  resetDefaultIdentityRoles,
   resolveConfig,
   runCli,
   serverStorageDirectory
