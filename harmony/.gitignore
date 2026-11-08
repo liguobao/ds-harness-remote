@@ -17,3 +17,4 @@
 .DS_Store
 .crypto-bundle.mjs
 .crypto-entry.ts
+.build-profile.tracked.json5

@@ -48,7 +48,15 @@ hvigorw --no-daemon assembleHap -p product=default -p buildMode=release
 
 ## 签名与发布流程
 
-**签名凭据永不入库。** 仓库里的 `build-profile.json5` 中 `signingConfigs` 为空数组，本地开发时用被忽略的 `build-profile.local.json5`（`.gitignore` 已含 `*.local.json5`）由 DevEco Studio 生成本机签名配置。
+**签名凭据永不入库。** 仓库里的 `build-profile.json5` 中 `signingConfigs` 为空数组；本机签名配置放在被忽略的 `build-profile.local.json5`（`.gitignore` 含 `*.local.json5`）。
+
+本机构建（要安装到设备时必须签名）：
+
+```sh
+harmony/scripts/build-local.sh      # 临时顶替签名配置 → 构建 → 还原，签名材料不落仓库
+```
+
+hvigor **只读** `build-profile.json5`（不自动合并 `.local.json5`），所以脚本做的事是：备份 → 用 local 覆盖 → `devecocli build` → 通过 `trap` 无条件还原；产物在 `entry/build/default/outputs/default/entry-default-signed.hap`。
 
 CI 打包使用 `.github/workflows/harmony-hap.yml`，签名材料只通过仓库 Secrets 注入：
 
