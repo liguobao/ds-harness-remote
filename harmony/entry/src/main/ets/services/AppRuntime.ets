@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { notificationManager } from '@kit.NotificationKit';
 import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
@@ -109,6 +110,8 @@ function commandReplyText(result: Record<string, Object> | undefined): string {
 
 export class AppRuntime {
   private store: SecureStore = new SecureStore();
+  /** 应用沙箱目录（导出诊断文件用）。 */
+  private filesDir: string = '';
   private config: StoredServerConfig | undefined = undefined;
   private identity: DeviceIdentity | undefined = undefined;
   private credentials: TokenPair | undefined = undefined;
@@ -513,6 +516,11 @@ export class AppRuntime {
   async bootstrap(context: common.Context): Promise<void> {
     if (this.phase !== PHASE_BOOT) {
       return;
+    }
+    try {
+      this.filesDir = context.filesDir;
+    } catch (error) {
+      this.filesDir = '';
     }
     LinkLog.init(context);
     this.startNetworkMonitor();
@@ -4225,6 +4233,51 @@ export class AppRuntime {
     rows.push('日志：' + (LinkLog.pathText().length > 0 ? 'link.log（已落盘，重启也保留）' : '未启用'));
     rows.push('会话：' + (this.currentSessionId.length > 0 ? this.currentSessionId : '—'));
     return rows;
+  }
+
+  /**
+   * 把诊断信息与链路日志写成文件，返回路径（现场排障时可以直接 hdc file recv 拉走，
+   * 不用手抄屏幕，也不依赖 App 里复制粘贴）。
+   */
+  exportDiagnosticsToFile(): string {
+    if (this.filesDir.length === 0) {
+      return '';
+    }
+    const stamp: Date = new Date();
+    const pad = (value: number): string => (value < 10 ? '0' + value : '' + value);
+    const name: string = 'diagnostics-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate())
+      + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + '.txt';
+    const path: string = this.filesDir + '/' + name;
+    const lines: string[] = [];
+    lines.push('# DSH 远程 诊断导出（' + stamp.toLocaleString() + '）');
+    lines.push('');
+    for (const row of this.diagnosticsLines()) {
+      lines.push(row);
+    }
+    lines.push('');
+    lines.push('## 最近事件');
+    for (const row of this.linkEvents) {
+      lines.push(row);
+    }
+    lines.push('');
+    lines.push('## link.log（最近 200 行）');
+    for (const row of LinkLog.tail(200)) {
+      lines.push(row);
+    }
+    try {
+      const file = fileIo.openSync(path,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(file.fd, lines.join('\n'));
+      } finally {
+        fileIo.closeSync(file);
+      }
+      LinkLog.write('life', '诊断已导出：' + path);
+      return path;
+    } catch (error) {
+      logWarn('export diagnostics failed: ' + errorMessage(error));
+      return '';
+    }
   }
 
   /** 拉当前会话的定时任务列表。 */

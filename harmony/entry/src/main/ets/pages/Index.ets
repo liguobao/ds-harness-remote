@@ -7767,6 +7767,16 @@ struct Index {
             .fontWeight(FontWeight.Medium)
             .fontColor(this.pal().text)
           Blank()
+          Text(this.tr('存文件'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              const path: string = this.runtime.exportDiagnosticsToFile();
+              promptAction.showToast({ message: path.length > 0
+                ? this.tr('已保存，可用 hdc file recv 拉走\n') + path
+                : this.tr('导出失败（存储不可用）') });
+            })
           Text(this.tr('复制'))
             .fontSize(this.fs(12))
             .fontColor('#22D3EE')

@@ -46,6 +46,11 @@ VERSION=$(hdc -t "$DEV" shell "bm dump -n $BUNDLE | grep versionName | tail -1" 
 echo "  已安装版本：${VERSION:-未知}"
 
 echo "· [3/4] 拉起并等待连接（最多 ${WAIT}s）"
+# 只认这次拉起之后新增的日志行：否则会命中上一次运行留下的「已连接」
+BEFORE=$(hdc -t "$DEV" shell "wc -l < $LOG_PATH 2>/dev/null" 2>/dev/null | tr -d ' \r')
+[ -z "$BEFORE" ] && BEFORE=0
+echo "  启动前日志行数：$BEFORE"
+
 hdc -t "$DEV" shell "hilog -r" >/dev/null 2>&1
 hdc -t "$DEV" shell "aa start -b $BUNDLE -a $ABILITY" >/dev/null 2>&1
 
@@ -54,7 +59,7 @@ CONNECTED=""
 while [ "$i" -lt "$WAIT" ]; do
   sleep 3
   i=$((i + 3))
-  CONNECTED=$(hdc -t "$DEV" shell "cat $LOG_PATH 2>/dev/null" 2>/dev/null | grep "已连接 ·" | tail -1)
+  CONNECTED=$(hdc -t "$DEV" shell "tail -n +$((BEFORE + 1)) $LOG_PATH 2>/dev/null" 2>/dev/null | grep "已连接 ·" | tail -1)
   [ -n "$CONNECTED" ] && break
 done
 
