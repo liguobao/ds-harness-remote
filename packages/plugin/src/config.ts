@@ -104,7 +104,7 @@ export type ConfigInput = Config | VolatileSnapshot<Config>
  * `cordis.patch.yml` under this entry id. On older hosts the helper above keeps
  * the plain schema required by the namespace-registration API.
  */
-const entryConfigSchema = s.object({
+export const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),

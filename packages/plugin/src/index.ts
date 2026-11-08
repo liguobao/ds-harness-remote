@@ -5,6 +5,7 @@ import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import { ClientModeRuntime, type HostConnectionHandle } from './client-runtime.js'
 import {
   Config,
+  entryConfigSchema,
   resolveConfig,
   type Config as ConfigShape,
   type ConfigInput,
@@ -507,8 +508,24 @@ async function createSettingsBinding(
       replace: section => runHmrSafe<void>(async () => { await settings.replace(entryId, section) }, hmr),
     }
   }
-  const scope = settings.register(pluginSettingsNamespace, Config, {
-    base: readConfig(),
+  // `Config` is the volatile variant of the entry schema (the DSH 0.1.7-rc.1+
+  // live entry reference). A registry that still exposes `register()` calls the
+  // schema directly — `schema(mergeLayers(base, user))` — and a volatile schema
+  // resolves to a `{ get }` accessor instead of a plain Config, so the `validate`
+  // step below rejects activation on every host that has this registry
+  // (observed on DSH 0.2.1-rc.3 with `unrecognized key: "get"`).
+  //
+  // That registry also returns `mergeLayers(base, user)` unchanged while no
+  // section is stored (`user === undefined`), so the entry Config never reaches
+  // the schema on a fresh install: `serverUrl`, `loopback.ports` and `acp` all
+  // disappear. Resolve it inside the registered schema instead of merging on
+  // every read, so a stored section — including an explicit reset — keeps the
+  // registry's own precedence.
+  const base = readConfig()
+  const resolveRegistration = (input?: unknown) =>
+    entryConfigSchema((input === undefined ? base : input) as Parameters<typeof entryConfigSchema>[0])
+  const scope = settings.register(pluginSettingsNamespace, resolveRegistration, {
+    base,
     applies: 'restart',
     validate: value => { resolveConfig(value) },
   })
