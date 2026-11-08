@@ -9,6 +9,7 @@ import {
   connectionStatusClass,
   connectionStatusLabel,
   formatLocalTime,
+  displayRemoteAccount,
   messageOf,
 } from './presentation.js'
 import type {
@@ -109,6 +110,7 @@ export function createRemotePluginOptions(React: ClientReact) {
 
     const associationReadRun = React.useRef(0)
     const association = associations.client ?? associations.host
+    React.useEffect(() => { if (association !== undefined) setSignInOpen(false) }, [association])
     const savedServerUrl = settingsView?.config.serverUrl
     const serverDirty = savedServerUrl === undefined || serverUrl.trim() !== savedServerUrl
 
@@ -644,7 +646,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       onClick: () => selectLoginMethod(`oauth:${provider.id}`),
     }, provider.displayName)
 
-    const inlineSignIn = !signInOpen ? null : React.createElement('div', {
+    const inlineSignIn = !signInOpen || association !== undefined ? null : React.createElement('div', {
       id: 'dsh-remote-inline-signin',
       className: 'dshRemoteInlineSignIn',
     },
@@ -667,7 +669,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       providersLoading && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
       loginMethod === 'device_pairing' && pairingAvailable
         ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-settings-device-pairing-panel', 'aria-labelledby': 'dsh-remote-settings-device-pairing-tab' },
-          React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => applyView(view)).catch(() => undefined) }))
+          React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => { applyView(view); setSignInOpen(false); props.onSignIn?.() }).catch(() => undefined) }))
         : passwordVisible
         ? React.createElement('div', {
           className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-settings-password-panel',
@@ -827,8 +829,7 @@ export function createRemotePluginOptions(React: ClientReact) {
               React.createElement('div', { className: 'dshRemoteSettingsTop' },
                 React.createElement('div', { className: 'dshRemoteAssociation' },
                   React.createElement('span', null, t(association.account === undefined ? 'authorization' : 'account')),
-                  React.createElement('strong', null, association.account
-                    ?? t('authorizationComplete')),
+                  React.createElement('strong', null, association.account === undefined ? t('authorizationComplete') : displayRemoteAccount(association.account)),
                   React.createElement('p', null, association.account === undefined
                     ? serverUrl
                     : t('authorizedOn', { role: 'Remote', serverUrl })))),
@@ -886,11 +887,6 @@ export function createRemotePluginOptions(React: ClientReact) {
                   className: error !== undefined ? 'dshRemoteError' : 'dshRemoteNotice',
                   role: error !== undefined ? 'alert' : 'status',
                 }, error ?? (notice === undefined ? '' : t(notice.key, notice.params))),
-                React.createElement('button', {
-                  type: 'button', className: 'dshRemoteSave', disabled: busy || !loaded,
-                  'aria-expanded': signInOpen, 'aria-controls': 'dsh-remote-inline-signin',
-                  onClick: () => { selectLoginMethod('device_pairing'); setSignInOpen(current => !current) },
-                }, t(signInOpen ? 'close' : 'pairingLoginTab')),
                 React.createElement('button', {
                   type: 'button',
                   className: 'dshRemoteDiscard',

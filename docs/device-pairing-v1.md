@@ -12,7 +12,7 @@ Host 是 DS Harness 插件，不要求 CLI。验证码不向 Host API、通知�
 
 ## 数据与兼容性
 
-- 新 Host、新手机共同配对：创建随机 `device:<UUID>` 内部账号，`account_kind=device_only`，无密码。
+- 新 Host、新手机共同配对：创建随机 `dsh-device:<UUID>` 内部账号，`account_kind=device_only`，无密码。
 - 一端已经登记：沿用该端所有者；另一端新设备归入同一内部账号，但只创建本次 Host—手机关系。
 - 双端已有相同所有者：只明确授权本次关系。若这对关系此前撤销，本次重新扫码和验证码确认才允许恢复这一对；其他撤销关系不恢复。
 - 双端属于不同内部账号：终态失败 `PAIRING_ACCOUNT_CONFLICT`，不合并账号、不转移设备。手机端不得静默覆盖自己已有的其他账号凭证。
@@ -184,7 +184,7 @@ POST /api/v1/device-pairing/sessions/{id}/mobile/status
 
 ```json
 {
-  "account":"device:<UUID>",
+  "account":"dsh-device:<UUID>",
   "accountKind":"device_only",
   "device":{"deviceId":"...","name":"...","role":"client","platform":"android","identityKey":"...","clientVersion":null,"harnessVersion":null},
   "inboundOnly":false,

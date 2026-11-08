@@ -8,7 +8,7 @@ import type { StatusFeed } from '../status-stream.js'
 import { compareVersions } from '../version-compare.js'
 import { deepSeekWorkspaceIcon, gptWorkspaceIcon } from './icons.js'
 import { pendingWorkspaceSelectionKey } from './navigation.js'
-import { connectedClientModeLabel, connectedProgress, connectionErrorMessage, formatPlatform, messageOf } from './presentation.js'
+import { connectedClientModeLabel, connectedProgress, displayRemoteAccount, connectionErrorMessage, formatPlatform, messageOf } from './presentation.js'
 import { createRemoteProgressView, runConnectHostProgress } from './progress.js'
 import type {
   ClientReact,
@@ -585,6 +585,15 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setError(t('remoteControlUnavailable'))
           return
         }
+        if (nextStatus.host?.pairingHostOnly) {
+          // Host credentials establish an inbound-only signed-in view. Never
+          // query/derive a Client identity or discover controllable Hosts here.
+          setNeedsAuthorization(!nextStatus.host.authorized || nextStatus.host.accountRequired)
+          setDevices([])
+          setDiscoveryUnavailable(false)
+          chooseAnotherHost()
+          return
+        }
         if (!nextStatus.available) {
           setDevices([])
           setNeedsAuthorization(false)
@@ -756,6 +765,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       // waiting for the modal to be opened.
       return props.statusFeed.subscribe(next => {
         setStatus(next)
+        if (next.host?.pairingHostOnly) {
+          setNeedsAuthorization(!next.host.authorized || next.host.accountRequired)
+          setDevices([])
+          setSelectedHost(undefined)
+          setConnectingHost(undefined)
+        }
         if (next.host?.online) {
           setDiscoveryUnavailable(false)
         }
@@ -1119,7 +1134,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     // panel below the list is visible without scrolling past every device.
     const serverUnavailable = discoveryUnavailable || (status?.host?.online === false
       && status.host.reconnecting && (status.host.lastActiveAt !== undefined || status.host.error === 'CONNECTION_FAILED'))
-    const listedHosts = connectingHost === undefined ? devices : [connectingHost]
+    const listedHosts = status?.host?.pairingHostOnly ? [] : connectingHost === undefined ? devices : [connectingHost]
 
     const computerIcon = React.createElement('svg', {
       className: 'dshRemoteComputerIcon',
@@ -1204,7 +1219,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 target: '_blank',
                 rel: 'noreferrer',
               }, t('starProject')) : null),
-            React.createElement('p', null, selectedHostDetails ?? t('remoteDescription'))),
+            React.createElement('p', null, selectedHostDetails ?? t(status?.host?.pairingHostOnly ? 'pairingHostOnly' : 'remoteDescription'))),
           React.createElement('div', { className: 'dshRemotePageActions' },
             selectedHost === undefined ? null : React.createElement('button', {
               type: 'button',
@@ -1262,7 +1277,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-pairing-panel', 'aria-labelledby': 'dsh-remote-pairing-tab', className: 'dshRemotePanelPairing' },
                   React.createElement(HostPairingPanel, { key: status.serverUrl ?? '', control: props.control,
                     serverUrl: status.serverUrl ?? '', disabled: busy || savingServer || serverDirty, t,
-                    onComplete: () => { void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined) } }))
+                    onComplete: () => { void refreshRemote() } }))
                 : passwordVisible
                 ? React.createElement('div', {
                   className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
@@ -1364,7 +1379,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   : null,
                 React.createElement('div', { className: 'dshRemoteSectionHeading' },
                   React.createElement('div', { className: 'dshRemoteSectionTitle' },
-                    React.createElement('strong', null, t('chooseHost')),
+                    React.createElement('strong', null, t(status?.host?.pairingHostOnly ? 'thisMachineHost' : 'chooseHost')),
                     status?.hostAuthorizationAvailable ? React.createElement('div', { className: 'dshRemoteHostControlToggle' },
                       React.createElement('span', null, t('allowControlDevice')),
                       React.createElement('input', {
@@ -1378,7 +1393,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
                   'aria-busy': connectingHost === undefined ? undefined : true,
                 }, listedHosts.length === 0
-                  ? (error !== undefined ? null : React.createElement('p', null, busy ? t('checkingConnection') : t('noRemoteHosts')))
+                  ? (error !== undefined ? null : React.createElement('p', null, busy ? t('checkingConnection') : t(status?.host?.pairingHostOnly ? 'pairingHostOnly' : 'noRemoteHosts')))
                   : listedHosts.map(device => React.createElement('button', {
                     type: 'button',
                     key: device.deviceId,
@@ -1397,10 +1412,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               React.createElement(RemoteProgressView, { progress, t }),
               selectedHost === undefined
                 ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
-                  React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
+                  status?.host?.pairingHostOnly ? null : React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
                   React.createElement('footer', { className: 'dshRemoteAccountFooter' },
                     React.createElement('span', { className: 'dshRemoteHostNameLine' },
-                      React.createElement('span', null, status?.target?.name ?? status?.deviceName ?? status?.host?.account ?? t('account')),
+                      React.createElement('span', null, status?.target?.name ?? status?.deviceName ?? (status?.host?.account === undefined ? t('account') : displayRemoteAccount(status.host.account))),
                       React.createElement(ServerNotice, {
                         offline: discoveryUnavailable || (status?.host?.online === false && status.host.reconnecting),
                         linked: connectedCount > 0 || status?.connected === true,

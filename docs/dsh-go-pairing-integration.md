@@ -168,7 +168,7 @@ completed 响应的 credentials：
 
 ```json
 {
-  "account":"device:<UUID>",
+  "account":"dsh-device:<UUID>",
   "accountKind":"device_only",
   "device":{"deviceId":"<phone-id>","name":"My phone","role":"client","platform":"android","identityKey":"<phone-public-key>"},
   "inboundOnly":false,

@@ -203,3 +203,8 @@ export function connectedClientModeLabel(
   if (mode === 'Relay') return t('remoteNetworkRelay')
   return t('connected')
 }
+
+/** Normalize legacy internal account labels without changing credential identity. */
+export function displayRemoteAccount(account: string): string {
+  return account.replace(/^device:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i, 'dsh-device:$1')
+}
