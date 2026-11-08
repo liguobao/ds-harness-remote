@@ -82645,9 +82645,10 @@ var RemoteSessionTools = class {
   async catalog(gateway, args, signal) {
     const found = await this.requireWorkspace(gateway, args, signal);
     const response = record7(await gateway.invoke({ namespace: "session", method: "list", args: { _request: {} }, signal }));
-    const rows = external_exports.array(rowSchema).max(MAX_REMOTE_SESSIONS).parse(response.items);
+    const rows = external_exports.array(rowSchema).parse(response.items);
     const allowed = new Set(found.sessionIds);
-    return rows.filter((row) => allowed.has(row.sessionId) && row.parentSessionId === void 0 && row.origin !== "subagent");
+    const owned = rows.filter((row) => allowed.has(row.sessionId) && row.parentSessionId === void 0 && row.origin !== "subagent");
+    return owned.length > MAX_REMOTE_SESSIONS ? owned.slice(0, MAX_REMOTE_SESSIONS) : owned;
   }
   async requireSession(gateway, args, signal) {
     const row = (await this.catalog(gateway, args, signal)).find((row2) => row2.sessionId === args.sessionId);
@@ -99174,11 +99175,31 @@ function filterSessionProjections(session2) {
     }
   };
 }
+var SESSION_LIST_ROW_BUDGET = 2048;
+function trimSessionCatalogRows(endpoint, items) {
+  if (endpoint !== "session/list" || items.length <= SESSION_LIST_ROW_BUDGET) return items;
+  const roots = items.filter(isListableRemoteSession);
+  const kept = roots.length > 0 ? roots : items;
+  return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
+}
+function isListableRemoteSession(session2) {
+  return isRecord21(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+}
+function updatedAtOf(session2) {
+  return isRecord21(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+}
+function withSessionRowTitle(session2) {
+  if (!isRecord21(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord21(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord21(values) ? values.title : void 0;
+  return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
+}
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
-  const result = typeof resultOrEndpoint === "string" ? maybeResult : resultOrEndpoint;
-  if (typeof resultOrEndpoint === "string" && resultOrEndpoint !== "session/list" && resultOrEndpoint !== "session/search") return result;
+  const endpoint = typeof resultOrEndpoint === "string" ? resultOrEndpoint : void 0;
+  const result = endpoint === void 0 ? resultOrEndpoint : maybeResult;
+  if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
-  const filterList = (items) => items.map(filterSessionProjections);
+  const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
   if (isRecord21(result.value)) {
     let changed = false;
     const updated = { ...result.value };
