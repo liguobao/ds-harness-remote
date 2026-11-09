@@ -1,0 +1,58 @@
+{
+  "version": "0.6.4",
+  "author": "liguobao <lgb835485368@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/liguobao/ds-harness-remote#readme",
+  "bugs": {
+    "url": "https://github.com/liguobao/ds-harness-remote/issues"
+  },
+  "name": "ds-harness-remote-tui",
+  "description": "Remote Host integration for DeepSeek Harness TUI.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liguobao/ds-harness-remote.git",
+    "directory": "packages/tui"
+  },
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "ds-harness-remote": "workspace:0.6.4",
+    "@deepseek-ai/dsh-session-reference": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-stats": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-turn-outline": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-log-export": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-job-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-terminal-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-account-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-settings-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-workspace-changes": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-remotes": "0.2.2-rc.1"
+  }
+}

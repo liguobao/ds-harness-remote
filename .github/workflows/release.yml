@@ -47,9 +47,13 @@ jobs:
           const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'))
           const root = await readJson('package.json')
           const plugin = await readJson('packages/plugin/package.json')
+          const tui = await readJson('packages/tui/package.json')
           const androidPackage = await readJson('apps/android/package.json')
           const androidApp = await readJson('apps/android/app.json')
-          const versions = new Set([root.version, plugin.version, androidPackage.version, androidApp.expo?.version])
+          const versions = new Set([root.version, plugin.version, tui.version, androidPackage.version, androidApp.expo?.version])
+          if (tui.dependencies['ds-harness-remote'] !== `workspace:${plugin.version}`) {
+            throw new Error('TUI must depend on the matching Remote workspace version.')
+          }
           const expectedTag = `v${plugin.version}`
 
           if (versions.size !== 1) {
@@ -91,6 +95,9 @@ jobs:
           mkdir -p release-assets
           pnpm --dir packages/plugin pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
 
+      - name: Pack npm TUI
+        run: pnpm --dir packages/tui pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
+
       - name: Stage release assets
         run: |
           cd release-assets
@@ -125,6 +132,20 @@ jobs:
       - name: Report npm publish failure
         if: steps.npm-publish.outcome == 'failure'
         run: echo '::warning::npm publish failed; GitHub Packages, GitHub Release, and Android APK publication will continue. Retry this tag after refreshing npm registry credentials.'
+
+      - name: Publish npm TUI
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "ds-harness-remote@$VERSION" >/dev/null 2>&1; then
+            if npm view "ds-harness-remote-tui@$VERSION" >/dev/null 2>&1; then
+              echo "TUI version already exists on npm, skip publish."
+            else
+              npm publish "release-assets/ds-harness-remote-tui-$VERSION.tgz" --access public --provenance
+            fi
+          else
+            echo '::error::Publish ds-harness-remote before its matching TUI package.'
+            exit 1
+          fi
 
       - name: Publish GitHub Packages plugin
         env:
