@@ -15,3 +15,13 @@ assert.match(patch, /name: 'ds-harness-remote-tui'/)
 assert.match(patch, /name: '@deepseek-ai\/dsh-api-remotes'/)
 assert.match(bundle, /dsh-TUI Remote needs @deepseek-ai\/dsh-api-remotes/)
 assert.doesNotMatch(bundle, /(?:from\s+|require\()['"]@dsh-remote\//)
+
+const { apply } = await import('../dist/index.js')
+const names = [...patch.matchAll(/name: '([^']+)'/g)].map(match => match[1])
+const loader = {
+  entries: () => names.map(name => ({ options: { name }, disabled: name === '@deepseek-ai/dsh-api-remotes' })),
+}
+assert.throws(
+  () => apply({ get: () => loader }),
+  /Host API packages are missing or disabled: @deepseek-ai\/dsh-api-remotes/,
+)
