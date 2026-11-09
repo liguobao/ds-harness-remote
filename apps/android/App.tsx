@@ -36,7 +36,7 @@ type Route =
   | { name: 'remote-hosts' }
   | { name: 'device'; deviceId: string }
   | { name: 'connecting'; deviceId: string; sheet?: boolean; focusWorkspaceKey?: string; sessionId?: string }
-  | { name: 'chat'; botConversationId?: string }
+  | { name: 'chat'; botConversationId?: string; externalOpenRevision?: number }
   | { name: 'settings' }
   | { name: 'diagnostics' }
   | { name: 'about' }
@@ -184,17 +184,27 @@ function AppNavigator() {
   }, [bootstrap])
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
+  const externalOpenRevision = useRef(0)
   const openKnownSession = async (id: string) => {
+    const revision = ++externalOpenRevision.current
     const backend = sessionBackendFromId(id)
     const expectedScope = browseScope(useAppStore.getState())
+    const isCurrent = () => revision === externalOpenRevision.current
+      && browseScope(useAppStore.getState()) === expectedScope
+      && useAppStore.getState().connection.phase === 'connected'
     await useAppStore.getState().refreshWorkspaces(backend)
-    if (browseScope(useAppStore.getState()) !== expectedScope || useAppStore.getState().connection.phase !== 'connected') return
+    if (!isCurrent()) return
     const state = useAppStore.getState(), target = state.sessions.find(item => item.sessionId === id)
     if (target === undefined) {goHomeChat(); useAppStore.setState({error: zhCN.comfort.conversationMissing}); return}
-    const pending = openSession(target)
-    if (useAppStore.getState().selectedSession?.sessionId === id) reset({ name: 'chat' })
-    const ok = await pending
-    if (ok && routeRef.current.name === 'connecting') reset({ name: 'chat' })
+    const ok = await openSession(target)
+    if (!isCurrent()) return
+    if (ok && useAppStore.getState().selectedSession?.sessionId === id) {
+      saveHostMode(expectedScope, 'agent')
+      setHostSwitcherOpen(false)
+      reset({ name: 'chat', externalOpenRevision: revision })
+    } else if (routeRef.current.name === 'connecting') {
+      goHomeChat()
+    }
   }
   useEffect(() => {
     const receive = (url: string) => {
@@ -211,7 +221,7 @@ function AppNavigator() {
   }, [])
   useEffect(() => {
     if (bootPhase !== 'ready' || !bootstrapComplete || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
-    if (pendingConversation !== undefined && devices.length > 0) {
+    if (pendingConversation !== undefined) {
       autoRestored.current = true
       const target = pendingConversation
       const device = devices.find(item => item.deviceId === target.deviceId && item.trusted)
@@ -410,7 +420,8 @@ function AppNavigator() {
   if (bootPhase === 'loading' || !browseReady) return null
 
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
-    ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
+    ? devices.find(device => device.deviceId === route.deviceId)
+      ?? (selectedDevice?.deviceId === route.deviceId ? selectedDevice : undefined)
     : undefined
   const startupConnection = route.name === 'connecting' && route.sheet === true
   const homeMenuVisible = homeMenuOpen && route.name === 'server'
@@ -466,6 +477,7 @@ function AppNavigator() {
       {(route.name === 'chat' || startupConnection) && (
         <ChatScreen
           botMode={botMode}
+          externalOpenRevision={route.name === 'chat' ? route.externalOpenRevision : undefined}
           botConversationId={route.name === 'chat' ? route.botConversationId : undefined}
           onBotModeChange={next => {
             saveHostMode(hostScope, next ? 'bot' : 'agent')
@@ -492,7 +504,7 @@ function AppNavigator() {
       )}
       {route.name === 'diagnostics' && <DiagnosticsScreen onBack={pop} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
-      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && route.name !== 'diagnostics' && (
+      {error !== undefined && route.name !== 'connecting' && route.name !== 'diagnostics' && (
         <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
           <ErrorBanner message={error} onDismiss={clearError} />
         </View>

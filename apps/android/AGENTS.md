@@ -1,3 +1,17 @@
+## Notification conversation navigation (Issue #378, 2026-11-09)
+
+显式外部会话打开成功后，App 的 chat 路由携带独立 externalOpenRevision，ChatScreen
+据此解锁抽屉并关闭会话列表；重复打开当前会话也触发，普通自动选择会话仍保留启动侧栏。
+成功导航切回 Agent 模式并关闭 Host 切换层，支持从设置页等返回目标聊天。保留 bootstrapComplete
+等待；空设备目录也消费链接并显示未知 Host 错误，不回退连接另一设备。聊天路由允许全局
+错误横幅，避免未知 Host / Session 静默失败。并行 openKnownSession 使用代际隔离迟到提交；
+尚未覆盖用户离开页面或同 Host 断线重连期间的完整导航取消。
+
+验证：Android check、现有 61 文件 / 553 tests、production Hermes export（29 MB）与
+ git diff --check 通过；本机 Node 22.22.0 / pnpm 9.15.4，存在 TUI 要求 Node >=24.9
+的环境警告；保留 Metro noble/hashes exports fallback 警告。未新增展示类测试，
+未构建 APK 或验证 Android 真机通知点击；验收矩阵见关联 Issue / PR。
+
 # Expo HAS CHANGED
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.

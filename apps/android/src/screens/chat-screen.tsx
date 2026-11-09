@@ -120,6 +120,7 @@ export function ChatScreen({
   onOpenSettings,
   onOpenAbout,
   botMode = false,
+  externalOpenRevision,
   botConversationId,
   onBotModeChange,
   onSelectBot,
@@ -133,6 +134,7 @@ export function ChatScreen({
   onOpenSettings?: () => void
   onOpenAbout?: () => void
   botMode?: boolean
+  externalOpenRevision?: number
   botConversationId?: string
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (id?: string) => void
@@ -196,6 +198,13 @@ export function ChatScreen({
     setDrawerSwipeUnlocked(false)
     setSessionsOpen(true)
   }, [hostId])
+  // Explicit navigation must also reveal an already selected conversation.
+  // A revision (rather than session identity) handles repeated notification taps.
+  useEffect(() => {
+    if (externalOpenRevision === undefined) return
+    setDrawerSwipeUnlocked(true)
+    setSessionsOpen(false)
+  }, [externalOpenRevision])
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
