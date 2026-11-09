@@ -34,6 +34,7 @@ import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './p
 import { installRemoteDiscoveryTools } from './remote-tools.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
+import { assertRemoteEventSource } from './tui-event-source.js'
 import {
   createOwnerPeerFactory,
   ownerPeerConstructor,
@@ -122,10 +123,8 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (isLegacySettingsProvider(settings)) return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
-  // This release activates only the browser/Desktop Host surface: one official
-  // Harness `connection` service is required before the runtime starts. dsh-TUI
-  // support is deferred to a later release and no terminal-specific services
-  // are resolved here.
+  // The default entry uses the browser/Desktop Host connection service.
+  // The separate dsh-TUI entry starts through applyTuiHost.
   const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
@@ -171,10 +170,27 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
 }
 
+/** Start the shared Host runtime from the separate dsh-TUI package. */
+export function applyTuiHost(
+  ctx: Context,
+  entry: EntryConfig | ConfigShape | undefined,
+): void {
+  const readConfig = (): ConfigInput => readEntryConfig(entry)
+  const entryId = locateEntryId(ctx)
+  ctx.inject(['settings', 'typertGateway'], async runtimeContext => {
+    const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
+    if (!new TypertGatewaySwitch(gateway).supportsCarrier()) {
+      throw new Error('dsh-TUI Remote requires the official Typert Gateway carrier.')
+    }
+    await activate(runtimeContext, readConfig, entryId, true)
+  })
+}
+
 async function activate(
   ctx: Context,
   readConfig: () => ConfigInput,
   entryId: string,
+  requireRemoteEvents = false,
 ): Promise<void> {
   const settings = ctx.get('settings') as SettingsServiceLike | undefined
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
@@ -259,6 +275,7 @@ async function activate(
       },
     }
   }
+  if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway)
   // The Host `subprocess` service owns PTY allocation, containment, and process
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
