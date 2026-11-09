@@ -457,7 +457,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
     for (const entry of entries) {
-      const allowedFile = identityFiles.has(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
+      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
       if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
       const metadata = await lstat(join(directory, entry.name))
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
@@ -525,7 +525,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
-      if (flat.some(entry => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected('STORAGE_CONFLICT')
+      if (flat.some(entry => !entry.isFile() || (!identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name)))) throw rejected('STORAGE_CONFLICT')
       await checkIdentity(root)
     }
     const servers = entries.find(entry => entry.name === 'servers')
@@ -793,6 +793,11 @@ function isLockArtifact(name: string): boolean {
   return name === LOCK_FILE_NAME || name.startsWith(`${LOCK_FILE_NAME}.takeover-`)
 }
 
+// Only the exact atomic writer format for our trust record is accepted.
+function isPeerTempArtifact(name: string): boolean {
+  return /^trusted-peers\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name)
+}
+
 function isIdentityTempArtifact(name: string): boolean {
   return (name.startsWith('device.json.') || name.startsWith('device.key.')) && name.endsWith('.tmp')
 }
@@ -816,6 +821,6 @@ async function removeStaleTemporaries(directory: string): Promise<void> {
     return
   }
   await Promise.all(entries
-    .filter(name => isIdentityTempArtifact(name))
+    .filter(name => isIdentityTempArtifact(name) || isPeerTempArtifact(name))
     .map(name => unlink(join(directory, name)).catch(() => undefined)))
 }

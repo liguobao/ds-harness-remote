@@ -51,6 +51,39 @@ describe('IdentityStore', () => {
     expect(await prepareDefaultIdentityDirectory({ env })).toBe(target)
   })
 
+  it('migrates interrupted peer writes for flat, host and client storage and cleans only known temporaries', async () => {
+    for (const role of ['flat', 'host', 'client'] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const directory = role === 'flat' ? source : serverStorageDirectory(source, 'https://example.com', role)
+      const store = new IdentityStore({ directory })
+      const identity = await store.loadOrCreate('Host')
+      await store.trustPeer({ deviceId: identity.deviceId, name: 'Peer', platform: 'linux', publicKey: identity.publicKey })
+      const peers = await readFile(join(directory, 'trusted-peers.json'))
+      const temp = 'trusted-peers.json.33208.01a1b6d8-e8b5-7000-8000-000000000001.tmp'
+      await writeFile(join(directory, temp), '{partial')
+      const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      const moved = directory.replace(source, target)
+      expect(await readFile(join(moved, temp), 'utf8')).toBe('{partial')
+      const reopened = new IdentityStore({ directory: moved })
+      expect(await reopened.loadOrCreate('Host')).toEqual(identity)
+      expect(await readFile(join(moved, 'trusted-peers.json'))).toEqual(peers)
+      expect(await readdir(moved)).not.toContain(temp)
+    }
+  })
+
+  it('rejects unknown or malformed peer temporary names without deleting them', async () => {
+    for (const name of ['foreign.json.1.01a1b6d8-e8b5-7000-8000-000000000001.tmp', 'trusted-peers.json.other.tmp']) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      await new IdentityStore({ directory: source }).loadOrCreate('Host')
+      await writeFile(join(source, name), 'keep')
+      await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+      await new IdentityStore({ directory: source }).loadOrCreate('Host')
+      expect(await readFile(join(source, name), 'utf8')).toBe('keep')
+    }
+  })
+
   it('refuses conflicting roots, lock records and symlinks without modifying either storage tree', async () => {
     for (const scenario of ['conflict', 'destination-race', 'identity-lock', 'refresh-lock', 'symlink']) {
       const home = await temporaryDirectory()

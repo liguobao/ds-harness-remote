@@ -87546,7 +87546,7 @@ async function assertOwnedRemoteStorage(root2) {
   const checkIdentity = async (directory, scope2, role2) => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
-      const allowedFile = identityFiles.has(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
+      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
@@ -87612,7 +87612,7 @@ async function assertOwnedRemoteStorage(root2) {
     const entries = await readdir(root2, { withFileTypes: true });
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
-      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected("STORAGE_CONFLICT");
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
       await checkIdentity(root2);
     }
     const servers = entries.find((entry) => entry.name === "servers");
@@ -87835,6 +87835,9 @@ async function removeIdentityRecords(directory) {
 function isLockArtifact(name2) {
   return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
 }
+function isPeerTempArtifact(name2) {
+  return /^trusted-peers\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name2);
+}
 function isIdentityTempArtifact(name2) {
   return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
 }
@@ -87849,7 +87852,7 @@ async function removeStaleTemporaries(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => isIdentityTempArtifact(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  await Promise.all(entries.filter((name2) => isIdentityTempArtifact(name2) || isPeerTempArtifact(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 
 // packages/plugin/src/control-stream.ts

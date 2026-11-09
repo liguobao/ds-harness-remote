@@ -1,5 +1,11 @@
 # Repository Guide for Agents
 
+## Interrupted trust-file migration recovery (2026-11-09)
+
+迁移归属检查接受 atomic writer 生成的 `trusted-peers.json.<pid>.<UUIDv7>.tmp`，覆盖旧根目录及 Server Host/Client 目录；仍执行普通文件、链接数、大小与身份/凭据一致性校验。迁移只读保留残留，身份成功加载后清理，不用残留覆盖正式信任记录。未知或格式错误的临时文件仍拒绝迁移。
+
+验证：identity-store 与跨进程锁共 25 tests、生产 bundle 构建与 DSH bundle 校验通过。完整构建的依赖布局差异未纳入提交，发布 bundle 仅同步本次逻辑。Plugin 类型检查受既有 acp/virtual-harness.ts:302 的 Claude backend 类型不匹配阻断。未做 Windows 真机验收。
+
 ## Oversized session catalogues (2026-11-07)
 
 Remote 的会话目录来自官方 `session/list`，覆盖整个账号，而客户端在
