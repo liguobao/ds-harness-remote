@@ -87554,6 +87554,19 @@ async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options =
     return prepareDefaultIdentityDirectory(options);
   }
 }
+async function readStorageEntries(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const result = [];
+  for (const entry of entries) {
+    const metadataName = entry.name === ".DS_Store" || ["desktop.ini", "thumbs.db"].includes(entry.name.toLowerCase());
+    if (metadataName && entry.isFile()) {
+      const metadata = await lstat(join5(directory, entry.name));
+      if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue;
+    }
+    result.push(entry);
+  }
+  return result;
+}
 async function assertOwnedRemoteStorage(root2) {
   let failureCode = "STORAGE_CONFLICT";
   const rejected = (code = failureCode) => new IdentityInvalidError(
@@ -87570,7 +87583,7 @@ async function assertOwnedRemoteStorage(root2) {
   ]);
   let identities = 0;
   const checkIdentity = async (directory, scope2, role2) => {
-    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
+    const entries = (await readStorageEntries(directory)).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
       const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
@@ -87635,7 +87648,7 @@ async function assertOwnedRemoteStorage(root2) {
     identities++;
   };
   try {
-    const entries = await readdir(root2, { withFileTypes: true });
+    const entries = await readStorageEntries(root2);
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
       if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
@@ -87644,9 +87657,9 @@ async function assertOwnedRemoteStorage(root2) {
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
       if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
-      for (const scope2 of await readdir(join5(root2, "servers"), { withFileTypes: true })) {
+      for (const scope2 of await readStorageEntries(join5(root2, "servers"))) {
         if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
-        for (const role2 of await readdir(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
+        for (const role2 of await readStorageEntries(join5(root2, "servers", scope2.name))) {
           if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
           await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
         }
@@ -87824,7 +87837,7 @@ function isScopedClientDirectory(directory) {
 }
 async function canAutoHealClientIdentity(directory) {
   try {
-    const entries = await readdir(directory, { withFileTypes: true });
+    const entries = await readStorageEntries(directory);
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);

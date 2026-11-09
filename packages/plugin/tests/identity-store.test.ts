@@ -1,6 +1,6 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { link, truncate, chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from '../src/identity-store.js'
 
@@ -475,6 +475,79 @@ describe('IdentityStore', () => {
       }
     }
   })
+  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db', 'DESKTOP.INI', 'THUMBS.DB'])('保留各层普通元文件 %s 并原样迁移身份', async name => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const host = serverStorageDirectory(source, 'https://example.com', 'host')
+    const client = serverStorageDirectory(source, 'https://example.com', 'client')
+    const first = await new IdentityStore({ directory: host }).loadOrCreate('Host')
+    const second = await new IdentityStore({ directory: client, role: 'client' }).loadOrCreate('Client')
+    const levels = [source, join(source, 'servers'), dirname(host), host, client]
+    for (const level of levels) await writeFile(join(level, name), 'metadata')
+    const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+    expect(target).toBe(join(home, 'ds-harness-remote'))
+    for (const level of levels) expect(await readFile(join(level.replace(source, target), name), 'utf8')).toBe('metadata')
+    expect(await new IdentityStore({ directory: host.replace(source, target) }).loadOrCreate('Host')).toEqual(first)
+    expect(await new IdentityStore({ directory: client.replace(source, target), role: 'client' }).loadOrCreate('Client')).toEqual(second)
+  })
+
+  it('普通元文件兼容历史平铺身份及未配对客户端自愈', async () => {
+    for (const role of ['flat', 'client'] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const directory = role === 'flat' ? source : serverStorageDirectory(source, 'https://example.com', role)
+      await new IdentityStore({ directory, role: role === 'flat' ? 'host' : role }).loadOrCreate('Device')
+      await writeFile(join(directory, '.DS_Store'), 'metadata')
+      if (role === 'client') await rm(join(directory, 'device.key'))
+      const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      await expect(new IdentityStore({ directory: directory.replace(source, target), role: role === 'flat' ? 'host' : role }).loadOrCreate('Device')).resolves.toHaveProperty('deviceId')
+    }
+  })
+
+  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db'])('客户端自愈仅容忍普通元文件 %s，异常内容保留原身份', async name => {
+    for (const kind of ['file', 'directory', 'hardlink', 'oversized'] as const) {
+      const directory = await temporaryDirectory()
+      await new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+      const original = await readFile(join(directory, 'device.json'))
+      await rm(join(directory, 'device.key'))
+      const artifact = join(directory, name)
+      if (kind === 'directory') await mkdir(artifact)
+      else if (kind === 'hardlink') await link(join(directory, 'device.json'), artifact)
+      else {
+        await writeFile(artifact, 'metadata')
+        if (kind === 'oversized') await truncate(artifact, 16 * 1024 * 1024 + 1)
+      }
+      const loaded = new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+      if (kind === 'file') await expect(loaded).resolves.toHaveProperty('deviceId')
+      else {
+        await expect(loaded).rejects.toMatchObject({ code: 'IDENTITY_INVALID' })
+        expect(await readFile(join(directory, 'device.json'))).toEqual(original)
+      }
+    }
+  })
+
+  it('元文件名称仍拦截目录、符号链接、硬链接、超大文件及未知内容', async () => {
+    for (const level of ['root', 'servers', 'scope', 'role'] as const) {
+      for (const kind of ['directory', 'symlink', 'hardlink', 'oversized', 'unknown', 'appledouble'] as const) {
+        const home = await temporaryDirectory()
+        const source = join(home, 'remote')
+        const host = serverStorageDirectory(source, 'https://example.com', 'host')
+        await new IdentityStore({ directory: host }).loadOrCreate('Host')
+        const directory = { root: source, servers: join(source, 'servers'), scope: dirname(host), role: host }[level]
+        const artifact = join(directory, kind === 'unknown' ? 'foreign.txt' : kind === 'appledouble' ? '._foreign' : '.DS_Store')
+        if (kind === 'directory') await mkdir(artifact)
+        else if (kind === 'symlink') await symlink(home, artifact, process.platform === 'win32' ? 'junction' : 'dir')
+        else if (kind === 'hardlink') await link(join(host, 'device.json'), artifact)
+        else {
+          await writeFile(artifact, 'keep')
+          if (kind === 'oversized') await truncate(artifact, 16 * 1024 * 1024 + 1)
+        }
+        await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), `${level}:${kind}`).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+        await expect(stat(source)).resolves.toBeDefined()
+      }
+    }
+  })
+
 })
 
 async function temporaryDirectory(): Promise<string> {

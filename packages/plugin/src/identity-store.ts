@@ -435,6 +435,22 @@ export async function resetDefaultIdentityRoles(
   }
 }
 
+// 仅忽略已知系统元数据的普通文件；目录、链接和未知名称仍交给原校验处理。
+async function readStorageEntries(directory: string) {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const result: typeof entries = []
+  for (const entry of entries) {
+    const metadataName = entry.name === '.DS_Store'
+      || ['desktop.ini', 'thumbs.db'].includes(entry.name.toLowerCase())
+    if (metadataName && entry.isFile()) {
+      const metadata = await lstat(join(directory, entry.name))
+      if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue
+    }
+    result.push(entry)
+  }
+  return result
+}
+
 /** Legacy storage has no owner marker. Require its complete known layout and
  * cryptographically consistent identities, rather than trusting the directory name.
  * Read-only: never repair, create peers, rename devices or refresh tokens here.
@@ -455,7 +471,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   ])
   let identities = 0
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
-    const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
+    const entries = (await readStorageEntries(directory)).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
     for (const entry of entries) {
       const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
       if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
@@ -521,7 +537,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     identities++
   }
   try {
-    const entries = await readdir(root, { withFileTypes: true })
+    const entries = await readStorageEntries(root)
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
@@ -531,9 +547,9 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const servers = entries.find(entry => entry.name === 'servers')
     if (servers !== undefined) {
       if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT')
-      for (const scope of await readdir(join(root, 'servers'), { withFileTypes: true })) {
+      for (const scope of await readStorageEntries(join(root, 'servers'))) {
         if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT')
-        for (const role of await readdir(join(root, 'servers', scope.name), { withFileTypes: true })) {
+        for (const role of await readStorageEntries(join(root, 'servers', scope.name))) {
           if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT')
           await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name, role.name)
         }
@@ -749,7 +765,7 @@ function isScopedClientDirectory(directory: string): boolean {
  */
 async function canAutoHealClientIdentity(directory: string): Promise<boolean> {
   try {
-    const entries = await readdir(directory, { withFileTypes: true })
+    const entries = await readStorageEntries(directory)
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue
       const entryPath = join(directory, entry.name)
