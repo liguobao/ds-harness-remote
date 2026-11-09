@@ -53,6 +53,7 @@ export interface CodexLiveProjectionContext {
   readonly pendingApprovals: Map<string, PendingApproval>
   readonly emitApproval: (input: { eventId: string; agentId: string; request: JsonRecord; }) => void
   readonly imageAttachments: Map<string, CodexImageAttachmentEntry>
+  readonly invalidateThreadHistory?: (threadId: string) => void
 }
 
 export class CodexLiveProjection {
@@ -151,6 +152,7 @@ export class CodexLiveProjection {
       this.context.setPermissionSelection(follow.sessionId, preset)
       return
     }
+    this.context.invalidateThreadHistory?.(follow.threadId)
     if (frame.method === 'turn/started') {
       const turn = record(params.turn)
       const turnModel = projectCodexModel(turn)
