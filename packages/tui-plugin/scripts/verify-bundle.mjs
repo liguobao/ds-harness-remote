@@ -20,6 +20,11 @@ function uniqueSortedPackages(label, packages) {
   return [...packages].sort()
 }
 
+function patchPackageNames(content) {
+  return [...content.matchAll(/^\s*name:\s*(?:'([^']+)'|"([^"]+)"|([^\s#]+))\s*$/gm)]
+    .map(match => match[1] ?? match[2] ?? match[3])
+}
+
 assert.equal(manifest.name, 'ds-harness-remote-tui')
 assert.equal(component.facets.host.entry, 'dist/index.js')
 assert.match(patch, /name: 'ds-harness-remote-tui'/)
@@ -28,9 +33,10 @@ assert.match(bundle, /dsh-TUI Remote needs @deepseek-ai\/dsh-api-remotes/)
 assert.doesNotMatch(bundle, /(?:from\s+|require\()['"]@dsh-remote\//)
 
 const { apply } = await import('../dist/index.js')
-const names = [...patch.matchAll(/^\s*name:\s*(?:'([^']+)'|"([^"]+)"|([^\s#]+))\s*$/gm)]
-  .map(match => match[1] ?? match[2] ?? match[3])
+const names = patchPackageNames(patch)
 const developmentApiPackages = uniqueSortedPackages('Development patch', names.filter(name => name.startsWith('@deepseek-ai/')))
+const releasePatchApiPackages = uniqueSortedPackages('Published patch',
+  patchPackageNames(releasePatch).filter(name => name.startsWith('@deepseek-ai/')))
 const dependencyBlock = releaseManifestSource.match(/"dependencies"\s*:\s*\{([^}]*)\}/)?.[1]
 assert.ok(dependencyBlock, 'Published package has no dependencies block')
 const releaseApiDependencies = uniqueSortedPackages('Published dependencies',
@@ -43,6 +49,7 @@ const requiredHostApiPackages = uniqueSortedPackages('Published entry', required
   assert.ok(match, `Invalid requiredHostApiPackages item: ${line}`)
   return match[1]
 }))
+assert.deepEqual(releasePatchApiPackages, developmentApiPackages, 'Published patch differs from development patch')
 assert.deepEqual(releaseApiDependencies, developmentApiPackages, 'Published API dependencies differ from development patch')
 assert.deepEqual(requiredHostApiPackages, developmentApiPackages, 'Published entry differs from development patch')
 const loader = {
@@ -54,7 +61,6 @@ assert.throws(
 )
 
 for (const packageName of developmentApiPackages) {
-  assert.match(releasePatch, new RegExp(`name: ['"]${packageName}['"]`))
   assert.equal(releaseManifest.dependencies[packageName], '0.2.2-rc.1')
 }
 assert.match(releasePatch, /inject: \[settings, connection\]/)
