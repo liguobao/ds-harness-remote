@@ -1,6 +1,6 @@
 # dsh-TUI Remote Host API plan
 
-Status: Draft for [issue #290](https://github.com/liguobao/ds-harness-remote/issues/290).
+Status: WSL Host smoke test complete. Android acceptance remains open for [issue #290](https://github.com/liguobao/ds-harness-remote/issues/290).
 
 ## Problem
 
@@ -42,8 +42,29 @@ The 0.2.2 package graph may require a different list or load order.
 - The browser and Desktop Host still load one Remote entry.
 - The test report records Harness, Plugin, dsh-TUI, Android, Node.js, and transport versions.
 
-## Open design decisions
+## WSL Host validation (2026-11-09)
 
-- Choose the separate package name and publish path.
-- Choose the owner of the official Host API package list.
-- Decide how the package detects an absent Remote event source without private Gateway fields.
+The test used an isolated `DSH_HOME` and a local self-hosted Server.
+The Host ran Harness `0.2.2-rc.1`, dsh-TUI `0.19.0`, and Node.js `24.15.0`.
+The TUI package version was `0.1.0-alpha.0` from a local tarball.
+The Server version was `0.5.21` from this repository.
+The Server had no STUN or TURN configuration.
+
+- The clean profile loaded the official Host API entries from the TUI package patch.
+- The first patch left `session-controller` waiting for `fileUploads`.
+- The corrected patch loaded `connection` and `file-upload` before the Remote entry.
+- The corrected profile started without pending Host API entries.
+- The Host connected to the local Server after account authorization.
+- A separate Client identity listed one online Host.
+- The Host control connection recovered after the Server stopped and restarted.
+- A disabled `dsh-api-remotes` entry produced a clear startup error.
+- The disabled entry kept the Host offline.
+
+The test used `HostServerApi.authorizeWithAccount` for the local Server.
+The `ds-harness-remote` CLI selects the public default Server.
+This test did not use that CLI for local account authorization or status.
+The TUI profile also warned about two missing optional TUI tool entries.
+Those entries were `tool-ralph` and `tool-subagent-list-agents`.
+
+Android workspace, session, event, prompt, approval, and reconnect checks remain open.
+The separate TUI package also needs a release path.
