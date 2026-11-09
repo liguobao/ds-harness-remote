@@ -90,6 +90,12 @@ export class ChatItem {
   images: string[] = [];
   /** 历史图片的附件 id：拿到字节前先占位，下拉时逐张补。 */
   imageAttachmentIds: string[] = [];
+  /**
+   * 与 `imageAttachmentIds` 一一对应的完整 `ImageAttachmentRef`（JSON 字符串）。
+   * 0.2.2+ 的主机 `session/attachment` 必须收到 mediaType/bytes/width/height 并逐项校验，
+   * 只给 attachmentId 会被网关判参数不合法；历史记录里本来就存着完整引用，原样回传最稳。
+   */
+  imageRefs: string[] = [];
 }
 
 /**
@@ -2569,15 +2575,19 @@ export class AppRuntime {
     }
     for (let guard = 0; guard < 24; guard += 1) {
       let attachmentId: string = '';
+      let attachmentRef: Record<string, Object> | undefined = undefined;
       for (const item of this.messages) {
         if (item.kind !== 'user' || item.imageAttachmentIds.length === 0) {
           continue;
         }
-        for (const id of item.imageAttachmentIds) {
-          if (!this.fetchedAttachments.has(id)) {
-            attachmentId = id;
-            break;
+        for (let i = 0; i < item.imageAttachmentIds.length; i += 1) {
+          const id: string = item.imageAttachmentIds[i];
+          if (this.fetchedAttachments.has(id)) {
+            continue;
           }
+          attachmentId = id;
+          attachmentRef = parseAttachmentRef(i < item.imageRefs.length ? item.imageRefs[i] : '');
+          break;
         }
         if (attachmentId.length > 0) {
           break;
@@ -2593,11 +2603,12 @@ export class AppRuntime {
         body = cached;
       } else {
         try {
-          body = await harness.sessionAttachment(sessionId, attachmentId);
+          body = await harness.sessionAttachment(sessionId, attachmentId, attachmentRef);
           this.attachmentCache.set(attachmentId, body);
         } catch (error) {
           const text: string = errorMessage(error);
-          logWarn('history image ' + attachmentId + ' failed: ' + text);
+          logWarn('history image ' + attachmentId + ' failed (ref=' +
+            (attachmentRef === undefined ? 'no' : 'yes') + '): ' + text);
           // 0.2.2+ 的 Host 要完整 ImageAttachmentRef；只报日志的话用户只会看到图片空着
           if (text.toLowerCase().indexOf('attachment') >= 0) {
             this.pushLinkEvent('图片附件读取失败（可能是 Host 版本要求完整引用）');
@@ -2609,7 +2620,8 @@ export class AppRuntime {
         this.notify();
         continue;
       }
-      logInfo('history image ok ' + attachmentId.substring(0, 20) + ' base64=' + body.length);
+      logInfo('history image ok ' + attachmentId.substring(0, 20) + ' base64=' + body.length +
+        ' ref=' + (attachmentRef === undefined ? 'no' : 'yes'));
       this.notify();
       const next: ChatItem[] = this.messages.slice();
       let changed: boolean = false;
@@ -4766,6 +4778,7 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.actionCommand = item.actionCommand;
   copy.images = item.images.slice();
   copy.imageAttachmentIds = item.imageAttachmentIds.slice();
+  copy.imageRefs = item.imageRefs.slice();
   return copy;
 }
 
@@ -4978,7 +4991,9 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   }
   const id: string = messageIdOf(data);
   const text: string = messageTextOf(data);
-  const attachmentIds: string[] = imageAttachmentIdsOf(data);
+  const attachmentIds: string[] = [];
+  const attachmentRefs: string[] = [];
+  imageAttachmentsOf(data, attachmentIds, attachmentRefs);
   if (!hasVisibleText(text) && attachmentIds.length === 0) {
     return items;
   }
@@ -4994,6 +5009,7 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
         settled.requestRpcId = rpcId;
         if (attachmentIds.length > 0) {
           settled.imageAttachmentIds = attachmentIds;
+          settled.imageRefs = attachmentRefs;
         }
         if (time > 0) {
           settled.timestamp = time;
@@ -5016,6 +5032,7 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   message.text = text;
   message.requestRpcId = rpcId;
   message.imageAttachmentIds = attachmentIds;
+  message.imageRefs = attachmentRefs;
   message.timestamp = time > 0 ? time : Date.now();
   next.push(message);
   return next;
@@ -5359,13 +5376,31 @@ function collectTextBlocks(value: Object | undefined, blockType: string, parts: 
   }
 }
 
-/** 从 user/message 的 content 里挑出图片附件 id（历史回显用；本地刚发的没有 id）。 */
-function imageAttachmentIdsOf(data: Record<string, Object>): string[] {
+/**
+ * 把 `imageRefs` 里存的引用 JSON 还原成主机要的对象。
+ * 解析不出来（老记录、字段异常）就返回 undefined，退回只发 attachmentId 的老行为。
+ */
+function parseAttachmentRef(json: string): Record<string, Object> | undefined {
+  if (json.length === 0) {
+    return undefined;
+  }
+  try {
+    return asRecord(JSON.parse(json) as Object);
+  } catch (error) {
+    return undefined;
+  }
+}
+
+/**
+ * 从 user/message 的 content 里挑出图片附件（历史回显用；本地刚发的没有 id）。
+ * `idsOut` 与 `refsOut` 下标一一对应：refs 是完整 `ImageAttachmentRef` 的 JSON 字符串，
+ * 因为 0.2.2+ 的 `session/attachment` 必须收到 mediaType/bytes/width/height 才能校验通过。
+ */
+function imageAttachmentsOf(data: Record<string, Object>, idsOut: string[], refsOut: string[]): void {
   const message: Record<string, Object> = messageRecord(data);
   const blocks: Object[] | undefined = asArray(message['content']);
-  const out: string[] = [];
   if (blocks === undefined) {
-    return out;
+    return;
   }
   for (const block of blocks) {
     const record: Record<string, Object> | undefined = asRecord(block);
@@ -5377,11 +5412,11 @@ function imageAttachmentIdsOf(data: Record<string, Object>): string[] {
       continue;
     }
     const attachmentId: string = jsonStr(attachment, 'attachmentId', '');
-    if (attachmentId.length > 0 && !out.includes(attachmentId)) {
-      out.push(attachmentId);
+    if (attachmentId.length > 0 && !idsOut.includes(attachmentId)) {
+      idsOut.push(attachmentId);
+      refsOut.push(JSON.stringify(attachment));
     }
   }
-  return out;
 }
 
 function isHumanUserMessage(data: Record<string, Object>): boolean {

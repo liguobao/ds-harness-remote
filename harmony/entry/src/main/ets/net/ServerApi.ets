@@ -4,7 +4,7 @@ import { jsonStr, jsonNum, jsonBool, jsonArr, asArray, asRecord } from '../proto
 import { AccountLoginResult, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, DeviceIdentity } from '../model/Types';
 
 /** Fallback when the bundle info cannot be read; must match AppScope/app.json5. */
-const CLIENT_VERSION_FALLBACK: string = '0.17.100-lan';
+const CLIENT_VERSION_FALLBACK: string = '0.17.101-lan';
 
 let clientVersionValue: string = CLIENT_VERSION_FALLBACK;
 

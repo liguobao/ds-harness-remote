@@ -2,6 +2,16 @@
 
 > 完整文件：本记录按版本倒序。历史版本（0.03 及更早）保留在文末，细节见 `docs/harmony-*.md`。
 
+## 0.17.101 — 2026-11-09
+
+对应 `AppScope/app.json5`：`versionName 0.17.101-lan` / `versionCode 1000223`。
+
+- **历史图片不再空白**：Harness 0.2.2 起 `session/attachment` 要求完整 `ImageAttachmentRef`
+  （`mediaType`/`bytes`/`width`/`height` 逐项校验），客户端此前只发 `attachmentId`，被网关判参数
+  不合法 → 从电脑网页发的图片在鸿蒙端气泡里是空的（本机刚发的直接显示，所以只坏「历史回显」）。
+  现在把历史消息里原生的引用整条保留、读取时原样回传，老 Host 仍走只发 id 的兼容路径。
+- 链路日志新增 `history image ok … ref=yes|no` / `failed (ref=…)`，一眼看出走的是哪条路。
+
 ## 0.17.87–0.17.96 — 2026-11-09
 
 - **恢复链路**：`4009 server shutdown` 改为自动重连（此前被判「不重连」，要人切前台才恢复）；
