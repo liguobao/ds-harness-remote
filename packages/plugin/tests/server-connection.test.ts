@@ -513,7 +513,11 @@ describe('HostServerConnection', () => {
   it('recovers control authentication only within the authorized retry budget', async () => {
     const rows = [
       'recover',
+      'recover-error-frame',
+      'recover-4001-token-expired',
+      'recover-after-heartbeat-timeout',
       'reject-again',
+      'reject-again-error-frame',
       'refresh-rejected',
       'revoked',
       'revoked-frame',
@@ -529,14 +533,16 @@ describe('HostServerConnection', () => {
           run: async () => {
             const keys = generateKeyPair(new Uint8Array(32).fill(24))
             const sockets: FakeWebSocket[] = []
+            let refreshed = false
             const api = {
               baseUrl: 'https://dsh.r2049.cn',
               authenticate: vi.fn(async () => ({
-                accessToken: sockets.length === 0 ? 'old-access-value' : 'new-access-value',
+                accessToken: refreshed ? 'new-access-value' : 'old-access-value',
               })),
               refreshCredentials: vi.fn(async () => {
                 if (scenario === 'refresh-rejected')
                   throw new ServerApiError('AUTH_INVALID', 'refresh rejected', false, 401, 'credential_refresh')
+                refreshed = true
               }),
               clearAuthorization: vi.fn(async () => undefined),
             } as unknown as HostServerApi
@@ -573,22 +579,83 @@ describe('HostServerConnection', () => {
                     retryable: false,
                   }),
                 )
+              } else if (scenario === 'recover-error-frame' || scenario === 'reject-again-error-frame') {
+                sockets[0]!.receive(
+                  createControlFrame('error', {
+                    code: 'AUTH_INVALID',
+                    message: 'invalid access token',
+                    retryable: false,
+                  }),
+                )
+              } else if (scenario === 'recover-4001-token-expired') {
+                sockets[0]!.receive(
+                  createControlFrame('error', {
+                    code: 'TOKEN_EXPIRED',
+                    message: 'TOKEN_EXPIRED',
+                    retryable: false,
+                  }),
+                )
+                sockets[0]!.close(4001, 'TOKEN_EXPIRED')
+              } else if (scenario === 'recover-after-heartbeat-timeout') {
+                sockets[0]!.receive(createControlFrame('hello.ack', helloAck('control-initial')))
+                await flush()
+                sockets[0]!.close(4009, 'heartbeat timeout')
+                await new Promise((resolve) => setTimeout(resolve, 15))
+                expect(sockets).toHaveLength(2)
+                sockets[1]!.open()
+                sockets[1]!.receive(
+                  createControlFrame('error', {
+                    code: 'AUTH_INVALID',
+                    message: 'invalid access token',
+                    retryable: false,
+                  }),
+                )
               } else {
                 sockets[0]!.close(scenario.startsWith('replaced') ? 4003 : scenario === 'revoked' ? 4004 : 4002)
               }
               await flush()
-              if (scenario === 'recover' || scenario === 'reject-again') {
+              if (scenario === 'recover-after-heartbeat-timeout') {
+                expect(sockets).toHaveLength(3)
+                expect(api.refreshCredentials).toHaveBeenCalledWith('old-access-value')
+                sockets[2]!.open()
+                expect(JSON.parse(sockets[2]!.sent[0]!).payload.accessToken).toBe('new-access-value')
+                sockets[2]!.receive(createControlFrame('hello.ack', helloAck('control-recovered-after-4009')))
+                await flush()
+                expect(server.isOnline()).toBe(true)
+                expect(server.lastError()).toBeUndefined()
+                expect(api.refreshCredentials).toHaveBeenCalledTimes(1)
+              } else if (
+                scenario === 'recover'
+                || scenario === 'recover-error-frame'
+                || scenario === 'recover-4001-token-expired'
+                || scenario === 'reject-again'
+                || scenario === 'reject-again-error-frame'
+              ) {
                 expect(sockets).toHaveLength(2)
                 expect(api.refreshCredentials).toHaveBeenCalledWith('old-access-value')
                 sockets[1]!.open()
                 expect(JSON.parse(sockets[1]!.sent[0]!).payload.accessToken).toBe('new-access-value')
-                if (scenario === 'recover') {
+                if (
+                  scenario === 'recover'
+                  || scenario === 'recover-error-frame'
+                  || scenario === 'recover-4001-token-expired'
+                ) {
                   sockets[1]!.receive(createControlFrame('hello.ack', helloAck('control-recovered')))
                   await flush()
                   expect(server.isOnline()).toBe(true)
                   expect(server.lastError()).toBeUndefined()
                 } else {
-                  sockets[1]!.close(4002)
+                  if (scenario === 'reject-again-error-frame') {
+                    sockets[1]!.receive(
+                      createControlFrame('error', {
+                        code: 'AUTH_INVALID',
+                        message: 'invalid access token',
+                        retryable: false,
+                      }),
+                    )
+                  } else {
+                    sockets[1]!.close(4002)
+                  }
                   await new Promise((resolve) => setTimeout(resolve, 20))
                   expect(sockets).toHaveLength(2)
                   expect(server.lastError()).toBe('AUTH_INVALID')

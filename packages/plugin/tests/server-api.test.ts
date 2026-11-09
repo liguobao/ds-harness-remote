@@ -647,6 +647,97 @@ describe('HostServerApi', () => {
           },
         },
         {
+          name: 'rotates a recovered refresh response whose access token already expired before returning',
+          run: async () => {
+            const directory = await mkdtemp(join(tmpdir(), 'dsh-recovered-expired-refresh-'))
+            directories.push(directory)
+            const identity = hostIdentity()
+            const store = new ServerCredentialStore(directory)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'owned_device',
+              ...tokens({
+                accessToken: 'rotated-access-step-0',
+                accessTokenExpiresAt: Date.now() - 1_800_000,
+                refreshToken: 'rotated-refresh-step-0',
+              }),
+            })
+            const fetchMock = vi.fn<typeof fetch>()
+              .mockResolvedValueOnce(
+                json(
+                  tokens({
+                    accessToken: 'rotated-access-step-1',
+                    accessTokenExpiresAt: Date.now() - 60_000,
+                    refreshToken: 'rotated-refresh-step-1',
+                  }),
+                ),
+              )
+              .mockResolvedValueOnce(
+                json(
+                  tokens({
+                    accessToken: 'rotated-access-step-2',
+                    accessTokenExpiresAt: Date.now() + 3_600_000,
+                    refreshToken: 'rotated-refresh-step-2',
+                  }),
+                ),
+              )
+            const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            await expect(api.authenticate(identity)).resolves.toMatchObject({
+              accessToken: 'rotated-access-step-2',
+              refreshToken: 'rotated-refresh-step-2',
+            })
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+            expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+              deviceId: identity.deviceId,
+              refreshToken: 'rotated-refresh-step-0',
+            })
+            expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+              deviceId: identity.deviceId,
+              refreshToken: 'rotated-refresh-step-1',
+            })
+            fetchMock.mockClear()
+              .mockResolvedValueOnce(
+                json(
+                  tokens({
+                    accessToken: 'rotated-access-step-3',
+                    accessTokenExpiresAt: Date.now() - 60_000,
+                    refreshToken: 'rotated-refresh-step-3',
+                  }),
+                ),
+              )
+              .mockResolvedValueOnce(
+                json(
+                  tokens({
+                    accessToken: 'rotated-access-step-4',
+                    accessTokenExpiresAt: Date.now() - 30_000,
+                    refreshToken: 'rotated-refresh-step-4',
+                  }),
+                ),
+              )
+            const secondApi = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+            await store.save({
+              serverUrl: 'https://dsh.r2049.cn',
+              deviceId: identity.deviceId,
+              authorizationMethod: 'owned_device',
+              ...tokens({
+                accessToken: 'rotated-access-step-2',
+                accessTokenExpiresAt: Date.now() - 120_000,
+                refreshToken: 'rotated-refresh-step-2',
+              }),
+            })
+            await expect(secondApi.authenticate(identity)).rejects.toMatchObject({
+              code: 'CONNECTION_FAILED',
+              retryable: true,
+              phase: 'credential_refresh',
+            })
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+            await expect(store.load('https://dsh.r2049.cn', identity.deviceId)).resolves.toMatchObject({
+              refreshToken: 'rotated-refresh-step-4',
+            })
+          },
+        },
+        {
           name: 'preserves refresh rejection and releases the lock without retrying the token',
           run: async () => {
             const directory = await mkdtemp(join(tmpdir(), 'dsh-rejected-refresh-'))

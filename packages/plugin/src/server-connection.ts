@@ -135,6 +135,7 @@ export class HostServerConnection {
       this.start()
       return
     }
+    this.retryWake?.()
     if (this.resumeQueued) return
     this.resumeQueued = true
     void this.running.finally(() => {
@@ -257,6 +258,7 @@ export class HostServerConnection {
     let acknowledged = false
     let retainOnClose = false
     let invalidControl = false
+    let socketError: string | undefined
     let messageQueue = Promise.resolve()
     await new Promise<void>((resolve, reject) => {
       let settled = false
@@ -308,7 +310,7 @@ export class HostServerConnection {
         const cleanup = preserve
           ? Promise.all([...this.tunnels.values()].filter(tunnel => !tunnel.lease?.canDetach()).map(tunnel => this.dropTunnel(tunnel.connectionId)))
           : this.dropTunnels()
-        void cleanup.finally(() => error === undefined ? resolve() : reject(error))
+        void cleanup.catch(() => undefined).finally(() => error === undefined ? resolve() : reject(error))
       }
       let forceDrainWake: (() => void) | undefined
       const handleClose = (event: { code: number; reason: string }, forced = false): void => {
@@ -344,8 +346,16 @@ export class HostServerConnection {
           forceDrainWake = undefined
           if (settled) return
           if (this.stopped) { finish(); return }
-          if (event.code === 4003) {
+          if (event.code === 4003 || event.reason === 'CONNECTION_REPLACED' || socketError === 'CONNECTION_REPLACED') {
             finish(new ControlConnectionError('CONNECTION_REPLACED', 'Another instance connected with this Host identity.'))
+            return
+          }
+          if (event.code === 4004 || event.reason === 'DEVICE_REVOKED' || socketError === 'DEVICE_REVOKED' || this.terminalError === 'DEVICE_REVOKED') {
+            finish(new ControlConnectionError('DEVICE_REVOKED', 'The Server revoked this Host device.'))
+            return
+          }
+          if (event.code === 4011 || event.reason === 'UNSUPPORTED_VERSION' || socketError === 'UNSUPPORTED_VERSION' || this.terminalError === 'UNSUPPORTED_VERSION') {
+            finish(new ControlConnectionError('UNSUPPORTED_VERSION', 'The Server does not support the Remote protocol version.'))
             return
           }
           if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code)
@@ -359,11 +369,20 @@ export class HostServerConnection {
             finish(new ControlConnectionError('CREDENTIALS_REFRESHED', 'Retry control without recovery state.'))
             return
           }
-          if (event.code === 4002) {
+          // WHY: Hosted and self-hosted Servers report expired/invalid access
+          // tokens differently (close 4002, control `error` frame AUTH_INVALID /
+          // TOKEN_EXPIRED, or close 4001 with reason AUTH_INVALID / TOKEN_EXPIRED).
+          // All of them must enter the single-attempt refresh recovery path.
+          const isAuthRejection = event.code === 4002
+            || socketError === 'AUTH_INVALID'
+            || socketError === 'TOKEN_EXPIRED'
+            || (event.code === 4001 && (event.reason === 'AUTH_INVALID' || event.reason === 'TOKEN_EXPIRED'))
+          if (isAuthRejection) {
             if (this.authRecoveryAttempted) {
               finish(new ControlConnectionError('AUTH_INVALID', 'Server rejected refreshed credentials.'))
               return
             }
+            this.terminalError = undefined
             try {
               await Promise.race([
                 this.api.refreshCredentials(credentials.accessToken),
@@ -391,19 +410,13 @@ export class HostServerConnection {
             // Only a successfully refreshed credential consumes the hello retry.
             // Transient refresh errors must remain eligible for normal backoff.
             this.authRecoveryAttempted = true
+            this.terminalError = undefined
             finish(new ControlConnectionError('CREDENTIALS_REFRESHED', 'Retry hello with refreshed credentials.'))
             return
           }
-          if (event.code === 4004 || this.terminalError === 'DEVICE_REVOKED') {
-            finish(new ControlConnectionError('DEVICE_REVOKED', 'The Server revoked this Host device.'))
-            return
-          }
-          if (event.code === 4011 || this.terminalError === 'UNSUPPORTED_VERSION') {
-            finish(new ControlConnectionError('UNSUPPORTED_VERSION', 'The Server does not support the Remote protocol version.'))
-            return
-          }
-          if (acknowledged && this.terminalError === undefined) this.terminalError = closeCode(event.code)
-          finish(acknowledged ? undefined : new ControlConnectionError(closeCode(event.code), event.reason || 'Server control connection closed.'))
+          const finalCode = socketError ?? closeCode(event.code)
+          if (acknowledged && this.terminalError === undefined) this.terminalError = finalCode
+          finish(acknowledged ? undefined : new ControlConnectionError(finalCode, event.reason || 'Server control connection closed.'))
         }
         void close()
       }
@@ -466,7 +479,10 @@ export class HostServerConnection {
           if (preview.type === 'error') {
             const payload = requireControlError(preview.payload)
             if (payload.code === 'DEVICE_REVOKED' || payload.connectionId === undefined) {
-              this.terminalError = payload.code
+              socketError = payload.code
+              if (payload.code !== 'AUTH_INVALID' && payload.code !== 'TOKEN_EXPIRED') {
+                this.terminalError = payload.code
+              }
             }
           }
         } catch {
@@ -521,8 +537,14 @@ export class HostServerConnection {
             for (const tunnel of this.tunnels.values()) tunnel.lease?.tick(true)
             return
           }
-          if (!acknowledged) throw new ControlConnectionError('INVALID_MESSAGE', 'Server sent a frame before hello.ack.')
+          // WHY: Connection-level `error` frames legitimately arrive before
+          // `hello.ack` when the Server rejects `hello` (e.g. expired accessToken,
+          // revoked device, unsupported version, or handshake rate limit).
+          if (!acknowledged && (frame.type !== 'error' || requireControlError(frame.payload).connectionId !== undefined)) {
+            throw new ControlConnectionError('INVALID_MESSAGE', 'Server sent a frame before hello.ack.')
+          }
           await this.handleFrame(frame)
+          if (!acknowledged && !closing) closeSocket(4001, socketError ?? 'hello rejected')
         }).catch(error => {
           if (settled || this.socket !== socket) return
           invalidControl = true
@@ -614,6 +636,20 @@ export class HostServerConnection {
         // CONNECTION_FAILED fallback code with local channel failures.
         if (payload.retryable) this.logger.info('server closed a remote connection', fields)
         else this.logger.warn('server closed a remote connection', fields)
+      } else if (payload.code === 'AUTH_INVALID' || payload.code === 'TOKEN_EXPIRED') {
+        this.logger.warn('server returned a control error', { code: payload.code, retryable: payload.retryable })
+        if (this.forceCloseSocket) this.forceCloseSocket(4002, payload.code)
+        else this.socket?.close(4002, payload.code)
+      } else if (payload.code === 'UNSUPPORTED_VERSION') {
+        this.terminalError = payload.code
+        this.logger.warn('server returned a control error', { code: payload.code, retryable: payload.retryable })
+        if (this.forceCloseSocket) this.forceCloseSocket(4011, 'unsupported version')
+        else this.socket?.close(4011, 'unsupported version')
+      } else if (payload.code === 'CONNECTION_REPLACED') {
+        this.terminalError = payload.code
+        this.logger.warn('server returned a control error', { code: payload.code, retryable: payload.retryable })
+        if (this.forceCloseSocket) this.forceCloseSocket(4003, 'connection replaced')
+        else this.socket?.close(4003, 'connection replaced')
       } else {
         this.terminalError = payload.code
         this.logger.warn('server returned a control error', { code: payload.code, retryable: payload.retryable })

@@ -264,6 +264,7 @@ describe('account and device authorization', () => {
         const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
         try {
           if (delay === 0) await api.refreshCredentials()
+          else expect((await api.authenticate(identity)).accessTokenExpiresAt).toBeGreaterThan(now)
           await expect(api.listDevices()).resolves.toEqual([])
           const recovered = await credentials.load(base, identity.deviceId)
           expect(recovered?.refreshToken).not.toBe(before?.refreshToken)
