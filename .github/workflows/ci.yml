@@ -60,7 +60,7 @@ jobs:
           harmony=false
           while IFS= read -r file_path; do
             case "$file_path" in
-              .github/workflows/ci.yml|.github/workflows/harmony*.yml|apps/harmony/*|fixtures/crypto/*|packages/crypto/*|packages/protocol/*|pnpm-workspace.yaml)
+              .github/workflows/ci.yml|.github/workflows/harmony*.yml|harmony/*|fixtures/crypto/*|packages/crypto/*|packages/protocol/*|pnpm-workspace.yaml)
                 harmony=true
                 break
                 ;;
@@ -112,7 +112,7 @@ jobs:
       # against the repository's golden vectors here. See .github/workflows/harmony-hap.yml
       # for the signed HAP build that runs on a self-hosted runner.
       - name: Run HarmonyOS client crypto conformance
-        run: pnpm exec vitest run apps/harmony/tests/crypto.test.ts
+        run: pnpm exec vitest run harmony/tests
 
       # Android prebuild recompiles shared packages. Serialize workspace builds
       # so Plugin bundling cannot read dist files while tsc rewrites them.

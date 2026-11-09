@@ -8,7 +8,7 @@
  * in the HAP.
  */
 import { build } from 'esbuild'
-import { readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -16,7 +16,24 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const here = dirname(fileURLToPath(import.meta.url))
 const etsRoot = join(here, '..', 'entry', 'src', 'main', 'ets')
 const bundlePath = join(here, '.crypto-bundle.mjs')
-const fixturePath = join(here, '..', '..', '..', 'fixtures', 'crypto', 'v1', 'noise-ik.json')
+// The project lives at <repo>/harmony, so the repo root is two levels up. Resolve it by
+// looking for the fixtures directory instead of hard-coding a depth: the tree moved once
+// already (apps/harmony -> harmony) and a wrong depth only surfaces as ENOENT in CI.
+function findRepoRoot(start: string): string {
+  let dir = start
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(join(dir, 'fixtures', 'crypto', 'v1', 'noise-ik.json'))) {
+      return dir
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error(`fixtures/crypto/v1/noise-ik.json not found above ${start}`)
+}
+
+const repoRoot = findRepoRoot(here)
+const fixturePath = join(repoRoot, 'fixtures', 'crypto', 'v1', 'noise-ik.json')
 
 interface CryptoModule {
   NoiseIkInitiator: new (

@@ -37,5 +37,5 @@
 ```bash
 cd harmony   # 注：工程已从 apps/harmony 上移到仓库根 harmony/
 hvigorw --no-daemon assembleHap -p product=default -p buildMode=debug   # 编译通过
-pnpm exec vitest run apps/harmony/tests/crypto.test.ts                   # 6/6 通过
+pnpm exec vitest run harmony/tests                   # 6/6 通过
 ```

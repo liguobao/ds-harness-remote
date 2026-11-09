@@ -1,4 +1,4 @@
-# HarmonyOS 客户端（apps/harmony）
+# HarmonyOS 客户端（harmony/）
 
 HarmonyOS 7.0（API 26）原生客户端，纯 ArkTS 实现，不依赖任何 Native 模块。
 
@@ -11,7 +11,7 @@ HarmonyOS 7.0（API 26）原生客户端，纯 ArkTS 实现，不依赖任何 Na
 ## 目录结构
 
 ```
-apps/harmony/entry/src/main/ets/
+harmony/entry/src/main/ets/
 ├── crypto/        # X25519、ChaCha20-Poly1305、SHA-256、HKDF、Noise IK（纯 ArkTS）
 ├── net/           # RelayTransport、SecureTransport、ServerApi、HarnessClient、RemoteGateway
 ├── protocol/      # Protocol、SecureMessageCodec、Types
@@ -19,8 +19,8 @@ apps/harmony/entry/src/main/ets/
 ├── model/         # 数据模型
 ├── pages/         # ArkUI 主界面
 └── entryability/  # Ability 生命周期
-apps/harmony/tests/               # Node 侧一致性测试（见下）
-apps/harmony/scripts/             # CI 辅助脚本（签名注入）
+harmony/tests/               # Node 侧一致性测试（见下）
+harmony/scripts/             # CI 辅助脚本（签名注入）
 ```
 
 ## 与共享包的对应关系
@@ -38,11 +38,11 @@ apps/harmony/scripts/             # CI 辅助脚本（签名注入）
 要求 DevEco Studio（含 HarmonyOS 7.0 / API 26 SDK）或已安装 HarmonyOS SDK 的命令行环境。
 
 ```bash
-cd apps/harmony
+cd harmony
 hvigorw --no-daemon assembleHap -p product=default -p buildMode=release
 ```
 
-产物在 `entry/build/default/outputs/default/`。也可在 DevEco Studio 中直接打开 `apps/harmony` 目录构建运行。
+产物在 `entry/build/default/outputs/default/`。也可在 DevEco Studio 中直接打开仓库根的 `harmony` 目录构建运行。
 
 编译产物（`*.hap`、`/release/`）已在 `.gitignore` 中忽略，不允许提交入库；正式包通过 GitHub Releases 的 Assets 发布。
 
@@ -69,7 +69,7 @@ CI 打包使用 `.github/workflows/harmony-hap.yml`，签名材料只通过仓�
 | `HARMONY_SIGNING_CERT_B64` | `.cer` 证书（base64） |
 | `HARMONY_SIGNING_PROFILE_B64` | `.p7b` 授权文件（base64） |
 
-构建前由 `apps/harmony/scripts/inject-signing.mjs` 把材料写入临时目录并注入 `build-profile.json5`；缺少 Secrets 时脚本以退出码 2 跳过，产物为未签名包并给出告警。
+构建前由 `harmony/scripts/inject-signing.mjs` 把材料写入临时目录并注入 `build-profile.json5`；缺少 Secrets 时脚本以退出码 2 跳过，产物为未签名包并给出告警。
 
 > GitHub 托管的 Ubuntu runner 未预置鸿蒙 SDK，因此该工作流使用 `[self-hosted, harmonyos]` 标签的自建 runner，工作流第一步会校验 `hvigorw` 是否存在，缺失即失败并给出原因。
 
@@ -85,7 +85,7 @@ CI 打包使用 `.github/workflows/harmony-hap.yml`，签名材料只通过仓�
 
 | 层级 | 命令 | 覆盖 |
 |---|---|---|
-| 一致性（Node，CI 可跑） | `pnpm exec vitest run apps/harmony/tests/crypto.test.ts` | 用仓库 `fixtures/crypto/v1/noise-ik.json` 校验 X25519 公钥推导、handshake msg1 逐字节、msg2 payload、双向 transport 帧、篡改拒绝 |
+| 一致性（Node，CI 可跑） | `pnpm exec vitest run harmony/tests` | 用仓库 `fixtures/crypto/v1/noise-ik.json` 校验 X25519 公钥推导、handshake msg1 逐字节、msg2 payload、双向 transport 帧、篡改拒绝 |
 | 设备端（DevEco / ohosTest） | `entry/src/ohosTest/ets/test/` | Crypto（X25519 对称性、AEAD 往返、篡改/换钥拒绝）、SecureStore（Asset Store 可用性、token/身份往返、host pin 清除） |
 
 Node 侧测试通过 esbuild 把 `.ets` 当作 TypeScript 打包，并用确定性桩替换 `@kit.CryptoArchitectureKit`，其余代码与实际出包完全一致。

@@ -2,6 +2,18 @@
 
 > 完整文件：本记录按版本倒序。历史版本（0.03 及更早）保留在文末，细节见 `docs/harmony-*.md`。
 
+## 0.17.103 — 2026-11-09
+
+对应 `AppScope/app.json5`：`versionName 0.17.103-lan` / `versionCode 1000225`。评审整改。
+
+- **旧私钥迁移顺序修正**：只有安全存储写入并回读一致，才把带明文私钥的旧记录改写成「只剩公钥」；
+  写失败就保留原记录（此前会把最后一份私钥从磁盘上抹掉）
+- **不再降级明文**：`saveIdentity` / `saveCredentials` 在安全存储不可用时抛 `SecureStorageUnavailableError`，
+  不再把私钥 / token 写进 preferences；写新值失败时旧值会被写回
+- 构建与测试路径统一到仓库根 `harmony/`（ci.yml、harmony-hap.yml、测试 fixture 改为向上查找）
+- Server 侧 Origin 校验放宽已从本 PR 移出，恢复上游行为
+- 新增 `harmony/tests/secure-store.test.ts`（失败场景 5 例）与 `docs/harmony-pr-notes.md`
+
 ## 0.17.102 — 2026-11-09
 
 对应 `AppScope/app.json5`：`versionName 0.17.102-lan` / `versionCode 1000224`。

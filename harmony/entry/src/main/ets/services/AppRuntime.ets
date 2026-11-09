@@ -3168,7 +3168,15 @@ export class AppRuntime {
 
   private async adoptCredentials(tokens: TokenPair): Promise<void> {
     this.credentials = tokens;
-    await this.store.saveCredentials(tokens);
+    try {
+      await this.store.saveCredentials(tokens);
+    } catch (error) {
+      // 安全存储暂时不可用（多见于设备刚锁上）：新 token 只留在内存里，界面明确提示。
+      // 这里不能抛 —— 旧 refresh token 服务器已经消费掉，抛出去只会让本次重连直接失败。
+      logWarn('credentials not persisted: ' + errorMessage(error));
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
   }
 
   private async readStoredCredentials(): Promise<TokenPair | undefined> {

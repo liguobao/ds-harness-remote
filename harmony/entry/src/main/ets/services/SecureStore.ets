@@ -91,6 +91,17 @@ export class StoredServerConfig {
   email: string = '';
 }
 
+/**
+ * 系统安全存储（Asset Store）写不进去时抛这个：调用方必须显式提示并保留可恢复状态。
+ * 绝不能悄悄把私钥 / token 降级成明文写进 preferences —— 那等于把密钥留在应用沙箱里。
+ */
+export class SecureStorageUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SecureStorageUnavailableError';
+  }
+}
+
 /** Preferences-backed persistent storage for config, identity and tokens. */
 export class SecureStore {
   private prefs: preferences.Preferences | undefined = undefined;
@@ -164,8 +175,13 @@ export class SecureStore {
       // Legacy build stored the key inline; migrate it on the spot.
       privateKey = jsonStr(root, 'privateKey', '');
       if (privateKey.length > 0) {
-        await this.writeSecret(identitySecretAlias(identity.deviceId), privateKey);
-        this.putPublicIdentity(identity);
+        // 迁移顺序不能反：先确认安全存储里能读回同一份私钥，才允许把带明文的旧记录
+        // 改写成「只有公钥」。写失败就原样保留旧记录 —— 它可能是最后一份私钥。
+        if (await this.writeSecretVerified(identitySecretAlias(identity.deviceId), privateKey)) {
+          this.putPublicIdentity(identity);
+        } else {
+          logWarn('identity migration kept legacy record: secure storage write failed');
+        }
       }
     }
     if (privateKey === undefined || privateKey.length === 0) {
@@ -176,20 +192,13 @@ export class SecureStore {
   }
 
   async saveIdentity(identity: DeviceIdentity): Promise<void> {
-    const stored: boolean = await this.writeSecret(identitySecretAlias(identity.deviceId),
+    const stored: boolean = await this.writeSecretVerified(identitySecretAlias(identity.deviceId),
       identity.privateKey);
     if (!stored) {
-      // Last-resort compatibility path for devices without a usable asset store.
-      logWarn('identity private key stored in sandbox KV (asset store unavailable)');
-      const legacy: Record<string, Object> = {
-        'deviceId': identity.deviceId,
-        'name': identity.name,
-        'platform': identity.platform,
-        'privateKey': identity.privateKey,
-        'publicKey': identity.publicKey
-      };
-      await this.putSync(KEY_IDENTITY, JSON.stringify(legacy));
-      return;
+      // 不再提供「明文兜底」：私钥落进 preferences 等于绕开系统安全存储。
+      // 明确报错并保持旧记录不动，让调用方提示用户（通常是设备锁着）。
+      throw new SecureStorageUnavailableError(
+        '设备私钥无法写入系统安全存储，已中止保存（未写入明文）。请解锁设备后重试。');
     }
     this.putPublicIdentity(identity);
   }
@@ -244,12 +253,12 @@ export class SecureStore {
     // Await the flush: a rotated refresh token must reach disk before we continue, or a
     // crash right after the Server spent the old one would strand this device offline.
     const json: string = JSON.stringify(body);
-    if (await this.writeSecret(ASSET_ALIAS_CREDENTIALS, json)) {
-      this.deleteSyncKey(KEY_CREDENTIALS);
-      return;
+    if (!await this.writeSecretVerified(ASSET_ALIAS_CREDENTIALS, json)) {
+      // 同上：token 也不许落明文。旧凭据留在原处，调用方可重试。
+      throw new SecureStorageUnavailableError(
+        '登录凭据无法写入系统安全存储，已中止保存（未写入明文）。请解锁设备后重试。');
     }
-    logWarn('account tokens stored in sandbox KV (asset store unavailable)');
-    await this.putSync(KEY_CREDENTIALS, json);
+    this.deleteSyncKey(KEY_CREDENTIALS);
   }
 
   async clearCredentials(): Promise<void> {
@@ -539,7 +548,7 @@ export class SecureStore {
   private async migratePlaintextSecrets(): Promise<void> {
     const legacyCredentials: string = this.getSync(KEY_CREDENTIALS, '');
     if (legacyCredentials.length > 0) {
-      if (await this.writeSecret(ASSET_ALIAS_CREDENTIALS, legacyCredentials)) {
+      if (await this.writeSecretVerified(ASSET_ALIAS_CREDENTIALS, legacyCredentials)) {
         this.deleteSyncKey(KEY_CREDENTIALS);
       }
     }
@@ -556,7 +565,7 @@ export class SecureStore {
         const deviceId: string = jsonStr(root, 'deviceId', '');
         const privateKey: string = jsonStr(root, 'privateKey', '');
         if (deviceId.length > 0 && privateKey.length > 0) {
-          if (await this.writeSecret(identitySecretAlias(deviceId), privateKey)) {
+          if (await this.writeSecretVerified(identitySecretAlias(deviceId), privateKey)) {
             const identity: DeviceIdentity = new DeviceIdentity();
             identity.deviceId = deviceId;
             identity.name = jsonStr(root, 'name', '');
@@ -576,6 +585,9 @@ export class SecureStore {
   // which is the HarmonyOS equivalent of Android's WHEN_UNLOCKED_THIS_DEVICE_ONLY.
 
   private async writeSecret(alias: string, secret: string): Promise<boolean> {
+    // add 之前必须 delete 同别名；万一 add 失败，旧值已经被删掉了。
+    // 先把旧值读出来，失败时尽力写回去，避免「写新失败 = 旧凭据也没了」。
+    const previous: string | undefined = await this.readSecretQuiet(alias);
     try {
       await this.deleteSecret(alias);
       const attrs: asset.AssetMap = new Map<asset.Tag, asset.Value>();
@@ -589,7 +601,60 @@ export class SecureStore {
     } catch (error) {
       this.assetOk = false;
       logError('asset add failed for ' + alias + ': ' + JSON.stringify(error));
+      if (previous !== undefined && previous.length > 0) {
+        await this.restoreSecretQuiet(alias, previous);
+      }
       return false;
+    }
+  }
+
+  /**
+   * 写入后回读比对，只有读回来的内容完全一致才算成功。
+   * 迁移/覆盖信任记录这类「写完就要删旧数据」的场景必须用它。
+   */
+  private async writeSecretVerified(alias: string, secret: string): Promise<boolean> {
+    if (!await this.writeSecret(alias, secret)) {
+      return false;
+    }
+    const readBack: string | undefined = await this.readSecretQuiet(alias);
+    if (readBack === secret) {
+      return true;
+    }
+    logError('asset verify failed for ' + alias);
+    return false;
+  }
+
+  /** 尽力把旧值写回去；失败只记日志，别再往上抛。 */
+  private async restoreSecretQuiet(alias: string, secret: string): Promise<void> {
+    try {
+      const attrs: asset.AssetMap = new Map<asset.Tag, asset.Value>();
+      attrs.set(asset.Tag.ALIAS, encodeUtf8(alias));
+      attrs.set(asset.Tag.SECRET, encodeUtf8(secret));
+      attrs.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_UNLOCKED);
+      attrs.set(asset.Tag.SYNC_TYPE, asset.SyncType.NEVER);
+      await asset.add(attrs);
+    } catch (error) {
+      logError('asset restore failed for ' + alias + ': ' + JSON.stringify(error));
+    }
+  }
+
+  /** 只读一次，不改 assetOk / 错误码（写前预读、写完校验都用它）。 */
+  private async readSecretQuiet(alias: string): Promise<string | undefined> {
+    try {
+      const query: asset.AssetMap = new Map<asset.Tag, asset.Value>();
+      query.set(asset.Tag.ALIAS, encodeUtf8(alias));
+      query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ALL);
+      const rows: Array<asset.AssetMap> = await asset.query(query);
+      if (rows.length === 0) {
+        return undefined;
+      }
+      const secret: asset.Value | undefined = rows[0].get(asset.Tag.SECRET);
+      if (secret instanceof Uint8Array) {
+        return decodeUtf8(secret);
+      }
+      return undefined;
+    } catch (error) {
+      return undefined;
     }
   }
 

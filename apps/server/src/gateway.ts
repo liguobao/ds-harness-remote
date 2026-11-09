@@ -139,19 +139,7 @@ export class Gateway {
       // The route still requires an exact match: a query string is rejected
       // (exactly as before) but only its parsed pathname is ever logged.
       const pathRejected = req.url !== '/ws/v1/connect'
-      // 自建服务部署在内网时，手机 App（HarmonyOS 原生 WebSocket 客户端）发来的 Origin
-      // 未必等于 PUBLIC_URL 的 origin；握手阶段本来还要校验设备 token，
-      // 所以默认只记录不拦截。需要严格 CSWSH 防护时设 DSH_SERVER_STRICT_ORIGIN=1。
-      const strictOrigin = process.env.DSH_SERVER_STRICT_ORIGIN === '1'
-      const originMismatch = Boolean(req.headers.origin) && req.headers.origin !== origin
-      const originRejected = originMismatch && strictOrigin
-      if (originMismatch && !originRejected) {
-        this.logger.warn('ws_origin_allowed', {
-          origin: req.headers.origin,
-          expected: origin,
-          remoteAddress: socketAddress(socket),
-        })
-      }
+      const originRejected = Boolean(req.headers.origin) && req.headers.origin !== origin
       if (pathRejected || originRejected || this.wss.clients.size >= 256) {
         this.logger.warn('ws_upgrade_rejected', {
           // Parsed pathname only: the raw URL may carry credentials in its query.
