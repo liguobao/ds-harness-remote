@@ -40,6 +40,8 @@
   },
   "dependencies": {
     "ds-harness-remote": "workspace:0.6.4",
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-file-upload": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session-reference": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session-stats": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session-turn-outline": "0.2.2-rc.1",
