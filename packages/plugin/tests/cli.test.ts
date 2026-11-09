@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,11 @@ import { IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { HostServerApi } from '../src/server-api.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
+
 const directories: string[] = []
 
 afterEach(async () => {
@@ -14,6 +19,25 @@ afterEach(async () => {
 })
 
 describe('Remote CLI', () => {
+  it('automatically migrates storage before normal CLI commands without an extra migration step', async () => {
+    const dshHome = join(tmpdir(), `ds-harness-remote-cli-migration-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const legacy = join(dshHome, 'remote')
+    const original = await new IdentityStore({ directory: legacy }).loadOrCreate('Legacy Host')
+    const output = writer()
+    const errors = writer()
+    const createHostApi = vi.fn()
+    const dependencies = { env: { DSH_HOME: dshHome }, stdout: output, stderr: errors, createHostApi }
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect(errors.text).toBe('')
+    expect(createHostApi).not.toHaveBeenCalled()
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect(await runCli(['status'], dependencies)).toBe(0)
+    expect((await readFile(join(dshHome, 'ds-harness-remote', 'device.key'), 'utf8')).trim()).toBe(original.privateKey)
+    await expect(stat(legacy)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(output.text).not.toContain(original.privateKey)
+  })
+
   it('authorizes the Host through the selected OAuth QR provider', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-${crypto.randomUUID()}`)
     directories.push(dshHome)
@@ -63,7 +87,7 @@ describe('Remote CLI', () => {
     expect(output.text).not.toContain('access-token-value')
     expect(errors.text).toBe('')
 
-    const directory = serverStorageDirectory(join(dshHome, 'remote'), 'https://dsh.r2049.cn', 'host')
+    const directory = serverStorageDirectory(join(dshHome, 'ds-harness-remote'), 'https://dsh.r2049.cn', 'host')
     const device = JSON.parse(await readFile(join(directory, 'device.json'), 'utf8')) as { deviceId: string }
     await expect(new ServerCredentialStore(directory).load('https://dsh.r2049.cn', device.deviceId))
       .resolves.toMatchObject({ authorizationMethod: 'account', account: 'host@example.com' })
@@ -142,11 +166,11 @@ describe('Remote CLI', () => {
     expect(output.text).toContain('local device identity was rotated')
   })
 
-  it('reports Host authorization and credential readiness without exposing tokens', async () => {
+  it('keeps Host authorization ready on verified legacy storage when migration fails without exposing tokens', async () => {
     const dshHome = join(tmpdir(), `dsh-remote-cli-status-${crypto.randomUUID()}`)
     directories.push(dshHome)
     const env = { DSH_HOME: dshHome }
-    const root = new IdentityStore({ env }).directory
+    const root = join(dshHome, 'remote')
     const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
     const identity = await new IdentityStore({ directory, env }).loadOrCreate('CLI status Host')
     await new ServerCredentialStore(directory).save({
@@ -159,11 +183,17 @@ describe('Remote CLI', () => {
     const output = writer()
     const fetchMock = vi.fn(async () => { throw new Error('valid local credentials must not need a request') }) as unknown as typeof fetch
 
+    const credentialBytes = await readFile(join(directory, 'server-credentials.json'))
+    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('move unavailable'), { code: 'EACCES' }))
+
     await expect(runCli(['status'], {
       env,
       stdout: output,
       createHostApi: (serverUrl, store) => new HostServerApi(serverUrl, store, fetchMock),
     })).resolves.toBe(0)
+
+    expect(await readFile(join(directory, 'server-credentials.json'))).toEqual(credentialBytes)
+    await expect(stat(join(dshHome, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
 
     expect(output.text).toContain('Host control: enabled')
     expect(output.text).toContain('Authorization: logged in (account)')
@@ -173,6 +203,61 @@ describe('Remote CLI', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(output.text).not.toContain('access-token-value')
     expect(output.text).not.toContain('refresh-token-value')
+  })
+
+  it('resets local device identity via reset-identity command including legacy corrupt storage and rejects extra args', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-reset-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const env = { DSH_HOME: dshHome }
+    const legacyRoot = join(dshHome, 'remote')
+    const hostLegacyDir = serverStorageDirectory(legacyRoot, 'https://dsh.r2049.cn', 'host')
+    const clientLegacyDir = serverStorageDirectory(legacyRoot, 'https://dsh.r2049.cn', 'client')
+    const originalHost = await new IdentityStore({ directory: hostLegacyDir, env, role: 'host' }).loadOrCreate('Host')
+    const originalClient = await new IdentityStore({ directory: clientLegacyDir, env, role: 'client' }).loadOrCreate('Client')
+    await writeFile(join(clientLegacyDir, 'device.key'), 'corrupted-client-key\n')
+    await new ServerCredentialStore(clientLegacyDir).save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: originalClient.deviceId,
+      authorizationMethod: 'owned_device',
+      ...tokens(),
+    })
+    const output = writer()
+    const errors = writer()
+
+    await expect(runCli(['reset-identity', 'client', '--extra'], { env, stdout: output, stderr: errors })).resolves.toBe(2)
+    await expect(runCli(['reset-identity', 'client'], { env, stdout: output, stderr: errors })).resolves.toBe(0)
+    expect(output.text).toContain('Remote client identity was reset')
+
+    const canonicalRoot = join(dshHome, 'ds-harness-remote')
+    const hostCanonicalDir = serverStorageDirectory(canonicalRoot, 'https://dsh.r2049.cn', 'host')
+    const clientCanonicalDir = serverStorageDirectory(canonicalRoot, 'https://dsh.r2049.cn', 'client')
+    const preservedHost = JSON.parse(await readFile(join(hostCanonicalDir, 'device.json'), 'utf8')) as { deviceId: string }
+    const rotatedClient = JSON.parse(await readFile(join(clientCanonicalDir, 'device.json'), 'utf8')) as { deviceId: string }
+    expect(preservedHost.deviceId).toBe(originalHost.deviceId)
+    expect(rotatedClient.deviceId).not.toBe(originalClient.deviceId)
+  })
+
+  it('succeeds on logout even when local device identity is corrupt', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-corrupt-logout-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const env = { DSH_HOME: dshHome }
+    const root = new IdentityStore({ env }).directory
+    const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const identities = new IdentityStore({ directory, env, role: 'host' })
+    const original = await identities.loadOrCreate('CLI test Host')
+    // Corrupt the key file
+    await writeFile(join(directory, 'device.key'), 'corrupted-private-key\n')
+    await new ServerCredentialStore(directory).save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: original.deviceId,
+      authorizationMethod: 'account',
+      account: 'host@example.com',
+      ...tokens(),
+    })
+    const output = writer()
+
+    await expect(runCli(['logout'], { env, stdout: output })).resolves.toBe(0)
+    expect(output.text).toContain('Remote Host logged out and its local device identity was rotated')
   })
 })
 

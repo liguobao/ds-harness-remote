@@ -1,7 +1,18 @@
 import { AbortController as NativeAbortController } from 'abort-controller'
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { BotRemoteClient, botMessageRequest, parseBotState, type BotOperation } from '../src/services/bot-catalog'
+import {
+  BotRemoteClient,
+  botMessageRequest,
+  canDeleteBot,
+  isScopedKnownBotSessionId,
+  parseBotState,
+  trackScopedBotStateSessions,
+  type BotOperation,
+} from '../src/services/bot-catalog'
+import { inboxQueuedItems } from '../src/state/message-helpers'
+import { buildBotMentionRows, buildReferenceChatGroups, insertReferenceAtSelection } from '../src/screens/bot/at-menu'
+import { sessionMentionText } from '../src/ui/mention-helpers'
 import type { RemoteSession } from '../src/types'
 
 const botState = () => ({ bots: [{ id: 'bot', sessionId: 'part-2', name: 'Bot' }], rooms: [{ id: 'room', name: 'Team', members: ['bot', 'other'] }], mainBotIds: ['bot'] })
@@ -39,10 +50,18 @@ describe('Android Bot client authority', () => {
       { name: 'older Bot', draft: '/btw progress?', target: 'bot', supported: false },
       { name: 'ordinary message on older Bot', draft: 'hello', target: 'bot', supported: false, endpoint: 'send', text: 'hello' },
       { name: 'not the command', draft: '/btwquestion', target: 'bot', supported: true, endpoint: 'send', text: '/btwquestion' },
+      { name: 'bot sessionId target', draft: 'hello', target: 'part-2', supported: true, endpoint: 'send', expectedSessionId: 'bot', text: 'hello' },
+      { name: 'agent session target', draft: 'hello agent', target: 'agent-s1', supported: true, endpoint: 'send', expectedSessionId: 'agent-s1', text: 'hello agent' },
+      { name: 'aside on agent session rejected', draft: '/btw progress?', target: 'agent-s1', supported: true },
       { name: 'read only', draft: '/btw progress?', target: 'bot', supported: true, readOnly: 'locked' },
       { name: 'unknown session', draft: '/btw progress?', target: 'unlisted', supported: true },
     ].map(row => ({ name: row.name, run: async () => {
-      const state = parseBotState({ ...botState(), ...(row.supported ? { btwCards: {} } : {}), readOnly: row.readOnly })
+      const state = parseBotState({
+        ...botState(),
+        agents: [{ id: 'agent-1', sessions: ['agent-s1'] }],
+        ...(row.supported ? { btwCards: {} } : {}),
+        readOnly: row.readOnly,
+      })
       const dispatch = vi.fn(async () => envelope({ id: 'aside' }))
       const client = new BotRemoteClient(dispatch, async () => [], () => {})
       const send = async () => {
@@ -52,7 +71,10 @@ describe('Android Bot client authority', () => {
       if (row.endpoint) {
         await send()
         expect(dispatch).toHaveBeenCalledTimes(1)
-        expect(dispatch).toHaveBeenCalledWith({ endpoint: row.endpoint, payload: { sessionId: row.target, text: row.text } }, undefined)
+        expect(dispatch).toHaveBeenCalledWith(
+          { endpoint: row.endpoint, payload: { sessionId: row.expectedSessionId ?? row.target, text: row.text } },
+          undefined,
+        )
       } else { await expect(send()).rejects.toThrow(); expect(dispatch).not.toHaveBeenCalled() }
     } })))
     // Unknown outcome is never retried as either a side question or a prompt.
@@ -66,14 +88,95 @@ describe('Android Bot client authority', () => {
     await runScenarios([
       { name: 'current Bot part', id: 'bot', sessions: [session('part-2')], expected: 'part-2' },
       { name: 'group', id: 'room', sessions: [session('room')], expected: 'room' },
+      { name: 'group current part (v0.2.7)', id: 'room', state: { ...botState(), rooms: [{ id: 'room', sessionId: 'room-part-2', name: 'Team', members: ['bot', 'other'] }] }, sessions: [session('room-part-2')], expected: 'room-part-2' },
+      { name: 'DSH Agent session in Bot team', id: 'agent-s1', state: { ...botState(), agents: [{ id: 'agent-1', sessions: ['agent-s1'] }] }, sessions: [session('agent-s1')], expected: 'agent-s1' },
       { name: 'old part cannot replace current', id: 'bot', sessions: [session('bot'), session('part-1')] },
       { name: 'ACP identity collision', id: 'bot', sessions: [session('part-2', 'cursor')] },
       { name: 'unlisted session', id: 'other', sessions: [session('other')] },
     ].map(row => ({ name: row.name, run: async () => {
-      const client = new BotRemoteClient(vi.fn(async () => envelope(botState())), async () => row.sessions, () => {})
+      const client = new BotRemoteClient(vi.fn(async () => envelope(row.state ?? botState())), async () => row.sessions, () => {})
       if (row.expected) await expect(client.resolveSession(row.id)).resolves.toMatchObject({ session: { sessionId: row.expected } })
       else await expect(client.resolveSession(row.id)).rejects.toThrow()
     } })))
+
+    const team = parseBotState({
+      bots: [
+        { id: 'chief', sessionId: 'chief-part-2', parts: ['chief-part-1'], name: 'Chief', role: 'Lead', main: true, engine: 'claude-code', appliedModel: 'claude-code/default' },
+        { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs' },
+      ],
+      rooms: [{ id: 'room-1', sessionId: 'room-part-2', ownParts: ['room-part-1'], name: 'Core Team', members: ['chief', 'writer'] }],
+      mainBotId: 'chief',
+      defaultModel: 'deepseek/deepseek-reasoner',
+      closedCards: { 'chief-part-2': { 'call-1': 'replied', 'call-2': 'dismissed' } },
+      imVia: { 'chief-part-2': { '10': 'Telegram' } },
+      connectorRequests: { 'chief-part-2': { 'req-1': { id: 'github' } } },
+      mailRequests: {},
+      computer: { enabled: true },
+      computerLive: { asks: {}, holds: {} },
+    })
+    expect(team.bots[0]?.engine).toBe('claude-code')
+    expect(team.bots[0]?.appliedModel).toBe('claude-code/default')
+    expect(team.defaultModel).toBe('deepseek/deepseek-reasoner')
+    expect(team.closedCards).toEqual({ 'chief-part-2': { 'call-1': 'replied', 'call-2': 'dismissed' } })
+    expect(team.imVia).toEqual({ 'chief-part-2': { '10': 'Telegram' } })
+    expect(team.connectorRequests).toEqual({ 'chief-part-2': { 'req-1': { id: 'github' } } })
+    trackScopedBotStateSessions(team, 'test-scope-030')
+    expect(isScopedKnownBotSessionId('chief', 'test-scope-030')).toBe(true)
+    expect(isScopedKnownBotSessionId('chief-part-1', 'test-scope-030')).toBe(true)
+    expect(isScopedKnownBotSessionId('chief-part-2', 'test-scope-030')).toBe(true)
+    expect(isScopedKnownBotSessionId('room-part-1', 'test-scope-030')).toBe(true)
+    expect(isScopedKnownBotSessionId('dsh-1', 'test-scope-030')).toBe(false)
+
+    // DS-Bot 0.3.0 (#663): only user/schedule/user-question-reply inbox items belong in QueueDock; Bot relays are filtered.
+    expect(inboxQueuedItems({
+      'next-turn': [
+        { id: 'q-user', source: { kind: 'user', rpcId: 'r-user' }, content: [{ type: 'text', text: 'User queued' }] },
+        { id: 'q-bot', source: { kind: 'bot', rpcId: 'r-bot' }, content: [{ type: 'text', text: 'Internal bot relay' }] },
+        { id: 'q-sched', source: { kind: 'schedule', rpcId: 'r-sched' }, content: [{ type: 'text', text: 'Scheduled' }] },
+        { id: 'q-ans', source: { kind: 'user-question-reply', rpcId: 'r-ans' }, content: [{ type: 'text', text: 'Question reply' }] },
+      ],
+    })).toEqual([
+      { id: 'q-user', rpcId: 'r-user', preview: 'User queued' },
+      { id: 'q-sched', rpcId: 'r-sched', preview: 'Scheduled' },
+      { id: 'q-ans', rpcId: 'r-ans', preview: 'Question reply' },
+    ])
+    const directMentions = buildBotMentionRows({ state: team, currentBotId: 'chief' })
+    expect(directMentions.map(item => item.text)).toEqual(['@Writer '])
+    const roomMentions = buildBotMentionRows({ state: team, currentRoom: team.rooms[0] })
+    expect(roomMentions.map(item => item.text)).toEqual(['@Chief ', '@Writer ', '@所有人 '])
+
+    const refGroups = buildReferenceChatGroups({
+      state: team,
+      currentSessionId: 'chief-part-2',
+      currentBotId: 'chief',
+      sessions: [
+        { ...session('chief-part-2'), title: 'Chief' },
+        { ...session('writer-part-1'), title: 'Writer' },
+        { ...session('room-part-2'), title: 'Core Team' },
+        { ...session('room-part-1'), title: 'Core Team Part 1' },
+        { ...session('dsh-1'), title: '架构讨论', updatedAt: 200 },
+        { ...session('dsh-sub'), title: 'Subagent', origin: 'subagent', parentSessionId: 'dsh-1', updatedAt: 300 },
+      ],
+    })
+    expect(refGroups.bots).toHaveLength(1)
+    expect(refGroups.bots[0]?.mentionLabel).toBe('与 Writer 的对话')
+    expect(refGroups.bots[0]?.mentionText).toBe(sessionMentionText('writer-part-1', '与 Writer 的对话'))
+    expect(refGroups.conversations.map(item => item.sessionId)).toEqual(['dsh-1'])
+    const inserted = insertReferenceAtSelection('请参考', { start: 3, end: 3 }, refGroups.conversations[0]!.mentionText)
+    expect(inserted.text).toBe(`请参考 ${refGroups.conversations[0]!.mentionText}`)
+
+    expect(canDeleteBot(team, team.bots[1])).toBe(true)
+    expect(canDeleteBot(team, team.bots[0])).toBe(true)
+    const soleMainTeam = parseBotState({
+      bots: [
+        { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', main: true },
+        { id: 'priv', sessionId: 'priv-part-1', name: 'Private', main: false, private: true },
+      ],
+      rooms: [],
+      mainBotId: 'chief',
+    })
+    expect(canDeleteBot(soleMainTeam, soleMainTeam.bots[0])).toBe(false)
+    expect(canDeleteBot(soleMainTeam, soleMainTeam.bots[1])).toBe(true)
   })
 
   it('keeps roster previews scoped to current Harness sessions and rejects stale catalog responses', async () => {
@@ -97,13 +200,29 @@ describe('Android Bot client authority', () => {
     await runScenarios([
       { name: 'aside', endpoint: 'btw', payload: { sessionId: 'bot', text: 'progress?' }, allowed: true },
       { name: 'cancel aside', endpoint: 'btw-cancel', payload: { sessionId: 'bot', id: 'aside' }, allowed: true },
+      { name: 'delete aside', endpoint: 'btw-delete', payload: { sessionId: 'bot', cardId: 'aside' }, allowed: true },
       { name: 'continue group', endpoint: 'room-continue', payload: { roomId: 'room' }, allowed: true },
+      { name: 'stop room work', endpoint: 'stop-room-work', payload: { roomId: 'room' }, allowed: true },
+      { name: 'goal control', endpoint: 'goal-control', payload: { roomId: 'room', action: 'pause' }, allowed: true },
+      { name: 'run stats', endpoint: 'run-stats', payload: { botId: 'bot' }, allowed: true },
+      { name: 'new part (0.3.0)', endpoint: 'bot-new-part', payload: { botId: 'bot' }, allowed: true },
+      { name: 'open earlier part (0.3.0)', endpoint: 'bot-open-part', payload: { botId: 'bot', sessionId: 'part-1' }, allowed: true },
+      { name: 'create schedule (0.3.0)', endpoint: 'schedule-create', payload: { title: 'Daily', prompt: 'Brief', target: { botId: 'bot' }, schedule: { kind: 'daily', time: '09:00' } }, allowed: true },
+      { name: 'delete schedule (0.3.0)', endpoint: 'schedule-delete', payload: { sessionId: 'part-2', id: 'sched-1' }, allowed: true },
+      { name: 'memory view (0.3.0)', endpoint: 'memory-view', payload: { id: 'bot' }, allowed: true },
+      { name: 'set prefs (0.3.0)', endpoint: 'set-prefs', payload: { layout: 'bubble' }, allowed: true },
+      { name: 'browser takeover (0.3.0)', endpoint: 'browser-takeover', payload: { botId: 'bot' }, allowed: true },
       { name: 'send', endpoint: 'send', payload: { sessionId: 'bot', text: 'hello' }, allowed: true },
       { name: 'card', endpoint: 'view-reply', payload: { sessionId: 'part-2', viewId: 'view', action: 'form', values: { fields: { name: 'value' } } }, allowed: true },
       { name: 'one time', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'allow' }, allowed: true },
       { name: 'reject', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'reject' }, allowed: true },
       { name: 'broad approval', endpoint: 'approval-answer', payload: { choice: 'allow_session' }, allowed: false },
       { name: 'credential write', endpoint: 'secret-set', payload: {}, allowed: false },
+      { name: 'local agent registration (0.3.0)', endpoint: 'local-agent-add', payload: {}, allowed: false },
+      { name: 'im pairing (0.3.0)', endpoint: 'im-pair', payload: {}, allowed: false },
+      { name: 'connector command (0.3.0)', endpoint: 'connector-add', payload: {}, allowed: false },
+      { name: 'mail account (0.3.0)', endpoint: 'mail-account-add', payload: {}, allowed: false },
+      { name: 'computer control (0.3.0)', endpoint: 'computer-set-enabled', payload: {}, allowed: false },
       { name: 'unknown route operation', endpoint: 'future-operation', payload: {}, allowed: false },
     ].map(row => ({ name: row.name, run: async () => {
       const dispatch = vi.fn(async () => envelope(true))

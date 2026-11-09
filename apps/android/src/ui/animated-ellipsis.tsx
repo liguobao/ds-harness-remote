@@ -10,7 +10,10 @@ export function AnimatedEllipsis() {
   }, [])
   return (
     <Text accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      {'.'.repeat(visible)}{'\u2008'.repeat(3 - visible)}
+      {/* Keep the same glyphs in every frame so centered labels never shift. */}
+      <Text>.</Text>
+      <Text style={visible < 2 ? { color: 'transparent' } : undefined}>.</Text>
+      <Text style={visible < 3 ? { color: 'transparent' } : undefined}>.</Text>
     </Text>
   )
 }

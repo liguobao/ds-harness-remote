@@ -42,13 +42,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.6.3
+ds-harness-remote@0.6.4
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.6.3
+dsh plugin --profile desktop add -w ds-harness-remote@0.6.4
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -58,7 +58,7 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.3
+dsh plugin --profile web add -w ds-harness-remote@0.6.4
 ```
 
 ## Highlights

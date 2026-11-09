@@ -59,6 +59,16 @@ describe('HostServerApi', () => {
       }
     } })))
   })
+  it('enables device pairing only for an explicit supported server capability', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-pairing-discovery-'))
+    directories.push(directory)
+    for (const capability of [undefined, false, 'dsh-pairing-v2', 'dsh-pairing-v1']) {
+      const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory),
+        vi.fn(async () => json({ items: [], capabilities: { devicePairing: capability } })) as unknown as typeof fetch)
+      expect((await api.oauthProviders()).some(item => item.devicePairing === true)).toBe(capability === 'dsh-pairing-v1')
+    }
+  })
+
   it('discovers future providers and uses their advertised QR entry without account credentials', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-oauth-discovery-'))
     directories.push(directory)

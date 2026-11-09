@@ -160,7 +160,8 @@ export function startBrowseTracking(): () => void {
       previousSelected = selectedKey; previousMessages = messages; previousUpdated = selected.updatedAt
       const entry = memory.entries[browseKey(scope, selected.sessionId)]
       updateBrowseEntry(scope, selected.sessionId, {session: selected,
-        visitedAt: Date.now(), ...(entry?.position?.atBottom !== false && AppState.currentState === 'active' ? {seenAt: selected.updatedAt} : {})})
+        visitedAt: Date.now(), ...(entry?.position?.atBottom !== false && AppState.currentState === 'active' ? {seenAt: selected.updatedAt} : {}),
+        ...(messages && messages.length > 0 ? { messages } : {})})
       browsePreference({last: {scope, deviceId: device.deviceId, sessionId: selected.sessionId}})
     }
     for (const session of state.sessions) {

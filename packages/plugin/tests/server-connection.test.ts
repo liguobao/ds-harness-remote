@@ -36,6 +36,41 @@ class FakeWebSocket {
 }
 
 describe('HostServerConnection', () => {
+  it('starts the hello timeout after the WebSocket upgrade completes', async () => {
+    vi.useFakeTimers()
+    const socket = new FakeWebSocket()
+    const api = {
+      baseUrl: 'https://remote.test',
+      authenticate: async () => ({ accessToken: 'test-token' }),
+    } as unknown as HostServerApi
+    const server = new HostServerConnection(
+      config(),
+      { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST',
+        ...generateKeyPair(new Uint8Array(32).fill(51)) },
+      { trustedPeer: () => undefined } as unknown as IdentityStore,
+      api,
+      { close: async () => {} } as unknown as ConnectionController,
+      logger(),
+      () => socket,
+    )
+    try {
+      server.start()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(socket.readyState).toBe(0)
+
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', helloAck('control-1')))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(server.isOnline()).toBe(true)
+    } finally {
+      try {
+        await server.stop()
+        expect(vi.getTimerCount()).toBe(0)
+      } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+    }
+  })
+
   it('keeps the responder alive for the Server RTC budget and preserves legacy defaults', async () => {
     await runScenarios([
       { name: 'twenty-second Server', timeout: 20000, expected: 20000 },
@@ -948,6 +983,8 @@ describe('HostServerConnection', () => {
   })
 
   it('closes retained tunnels and stops retrying when the Server rejects the protocol version', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(1)
     const sockets: FakeWebSocket[] = []
     const rtc = { close: vi.fn(async () => undefined) }
     const channel = { close: vi.fn(async () => undefined) }
@@ -966,23 +1003,32 @@ describe('HostServerConnection', () => {
     lease.acknowledge({ ...requests[0]!, ticket: 'confirmed', leaseMs: 300_000 })
     try {
       server.start()
-      await flush()
+      await vi.advanceTimersByTimeAsync(0)
       sockets[0]!.open()
       sockets[0]!.receive(createControlFrame('hello.ack', { ...helloAck('control-rtc'), capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
-      await vi.waitFor(() => expect(server.isOnline()).toBe(true))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(server.isOnline()).toBe(true)
       const internals = server as unknown as { tunnels: Map<string, unknown> }
       internals.tunnels.set('connection-rtc', { connectionId: 'connection-rtc', transport: 'p2p', rtc, channel, lease })
       sockets[0]!.close(1012, 'Server restart')
-      await vi.waitFor(() => expect(sockets).toHaveLength(2))
+      // Exercise the maximum jitter delay without racing a wall-clock timeout.
+      await vi.advanceTimersByTimeAsync(cfg.reconnect.maxDelayMs - 1)
+      expect(sockets).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sockets).toHaveLength(2)
       sockets[1]!.open()
       sockets[1]!.close(4011, 'unsupported protocol version')
-      await vi.waitFor(() => expect(channel.close).toHaveBeenCalledOnce())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(channel.close).toHaveBeenCalledOnce()
       expect(rtc.close).toHaveBeenCalledOnce()
       expect(internals.tunnels.size).toBe(0)
       expect(server.lastError()).toBe('UNSUPPORTED_VERSION')
-      await new Promise(resolve => setTimeout(resolve, 250))
+      await vi.advanceTimersByTimeAsync(cfg.reconnect.maxDelayMs * 2)
       expect(sockets).toHaveLength(2)
-    } finally { await server.stop(); lease.stop() }
+    } finally {
+      try { await server.stop(); lease.stop() }
+      finally { vi.useRealTimers(); vi.restoreAllMocks() }
+    }
   })
 
   it('keeps an authenticated Relay fallback when the parallel WebRTC negotiation later fails', async () => {
@@ -1446,5 +1492,406 @@ it('keeps reconnecting through non-protocol gateway 401 responses and becomes on
   } finally {
     await server?.stop()
     await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('reconnects when the control WebSocket goes silent beyond 3x heartbeatIntervalMs, even on a half-open socket', async () => {
+  vi.useFakeTimers()
+  const sockets: FakeWebSocket[] = []
+  const logs = logger()
+  const api = {
+    baseUrl: 'https://dsh.r2049.cn',
+    authenticate: vi.fn(async () => ({ accessToken: 'access-token' })),
+  } as unknown as HostServerApi
+  const server = new HostServerConnection(
+    { ...config(), reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 100, jitter: 0 } },
+    { schemaVersion: 1, deviceId: 'host-watchdog', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+    { trustedPeer: () => undefined } as unknown as IdentityStore,
+    api,
+    { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+    logs,
+    () => {
+      const socket = new FakeWebSocket()
+      // Simulate a half-open TCP socket where close() does not fire onclose on its own.
+      socket.close = vi.fn(() => { socket.readyState = 2 })
+      sockets.push(socket)
+      return socket
+    },
+  )
+  try {
+    server.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets).toHaveLength(1)
+    sockets[0]!.open()
+    sockets[0]!.receive(createControlFrame('hello.ack', helloAck('watchdog-1')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+
+    // Pings arriving inside the 75s window reset the silence watchdog.
+    await vi.advanceTimersByTimeAsync(50_000)
+    sockets[0]!.receive(createControlFrame('ping', { nonce: 'n-1' }))
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(50_000)
+    expect(server.isOnline()).toBe(true)
+    expect(sockets).toHaveLength(1)
+
+    // Silence reaching 75_000ms after the last frame triggers close + reconnect.
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(logs.warn).toHaveBeenCalledWith(
+      'server control heartbeat timeout; reconnecting',
+      expect.objectContaining({ heartbeatIntervalMs: 25_000 }),
+    )
+    expect(server.isOnline()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sockets).toHaveLength(2)
+    sockets[1]!.open()
+    sockets[1]!.receive(createControlFrame('hello.ack', helloAck('watchdog-2')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+  } finally {
+    await server.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  }
+})
+
+it('completes watchdog reconnect and stop even when an async control frame handler is stalled, and ignores late completion', async () => {
+  vi.useFakeTimers()
+  const sockets: FakeWebSocket[] = []
+  let resolveDeviceLookup: ((value: unknown) => void) | undefined
+  const api = {
+    baseUrl: 'https://dsh.r2049.cn',
+    authenticate: vi.fn(async () => ({ accessToken: 'access-token' })),
+    deviceFor: vi.fn(() => new Promise(resolve => { resolveDeviceLookup = resolve })),
+  } as unknown as HostServerApi
+  const server = new HostServerConnection(
+    { ...config(), reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 100, jitter: 0 } },
+    { schemaVersion: 1, deviceId: 'host-stalled', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+    { trustedPeer: () => undefined } as unknown as IdentityStore,
+    api,
+    { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+    logger(),
+    () => {
+      const socket = new FakeWebSocket()
+      socket.close = vi.fn(() => { socket.readyState = 2 })
+      sockets.push(socket)
+      return socket
+    },
+  )
+  try {
+    server.start()
+    await vi.advanceTimersByTimeAsync(0)
+    sockets[0]!.open()
+    sockets[0]!.receive(createControlFrame('hello.ack', helloAck('stalled-1')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+
+    // Start an async connect.incoming handler whose deviceFor lookup never resolves yet.
+    const clientKeys = generateKeyPair()
+    sockets[0]!.receive(createControlFrame('connect.incoming', {
+      connectionId: 'conn-stalled-1',
+      clientDeviceId: 'client-stalled-1',
+      clientIdentityKey: clientKeys.publicKey,
+      authorization: 'account',
+      preferredTransports: ['relay'],
+    }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.deviceFor).toHaveBeenCalledTimes(1)
+
+    // Also simulate a lease callback setting readyState = 2 (CLOSING) without firing onclose.
+    sockets[0]!.readyState = 2
+
+    // Watchdog expiry still settles the half-open/CLOSING socket and reconnects despite the stalled handler.
+    await vi.advanceTimersByTimeAsync(75_000)
+    expect(server.isOnline()).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sockets).toHaveLength(2)
+    sockets[1]!.open()
+    sockets[1]!.receive(createControlFrame('hello.ack', helloAck('stalled-2')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+
+    // Late resolution of the old socket's stalled deviceFor lookup must not send frames on sockets[1].
+    const sentBefore = sockets[1]!.sent.length
+    resolveDeviceLookup?.({
+      deviceId: 'client-stalled-1',
+      role: 'client',
+      name: 'Client',
+      platform: 'android',
+      identityKey: clientKeys.publicKey,
+      membershipId: 'membership-1',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets[1]!.sent).toHaveLength(sentBefore)
+    expect(server.isOnline()).toBe(true)
+
+    // Wire a real ControlLease onto an active tunnel and verify its heartbeat-expiry
+    // callback path when socket.close() rejects non-WHATWG codes (like 1012) and
+    // sets readyState = 2 (CLOSING) without emitting onclose.
+    let closedCode: number | undefined
+    const terminated = vi.fn()
+    ;(sockets[1] as unknown as { terminate: () => void }).terminate = terminated
+    sockets[1]!.close = vi.fn((code?: number) => {
+      if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+        throw new Error('InvalidAccessError: close code out of range')
+      }
+      closedCode = code
+      sockets[1]!.readyState = 2
+    })
+    const hostKeys = (server as unknown as { identity: { privateKey: string; publicKey: string; deviceId: string } }).identity
+    const responder = new NoiseIkSession({
+      role: 'responder',
+      localPrivateKey: hostKeys.privateKey,
+      localPublicKey: hostKeys.publicKey,
+      remotePublicKey: clientKeys.publicKey,
+      prologue: createNoisePrologue('conn-lease-1', hostKeys.deviceId, 'client-stalled-1'),
+    })
+    const initiator = new NoiseIkSession({
+      role: 'initiator',
+      localPrivateKey: clientKeys.privateKey,
+      localPublicKey: clientKeys.publicKey,
+      remotePublicKey: hostKeys.publicKey,
+      prologue: createNoisePrologue('conn-lease-1', hostKeys.deviceId, 'client-stalled-1'),
+    })
+    const internals = server as unknown as {
+      lastActiveAt?: number
+      negotiatedCapabilities: string[]
+      tunnels: Map<string, unknown>
+      connections: { accept: ReturnType<typeof vi.fn> }
+      completeHandshake(tunnel: unknown, payload: unknown): Promise<void>
+    }
+    internals.connections.accept = vi.fn(async () => undefined)
+    internals.negotiatedCapabilities = ['transport.relay', 'transport.webrtc.resume']
+    const leaseTunnel = {
+      connectionId: 'conn-lease-1',
+      membershipId: 'membership-1',
+      peer: { deviceId: 'client-stalled-1', publicKey: clientKeys.publicKey },
+      noise: responder,
+      rtc: { send: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
+      transport: 'p2p',
+      recoveryTicket: 'lease-ticket-1',
+    }
+    internals.tunnels.set('conn-lease-1', leaseTunnel)
+    await internals.completeHandshake(leaseTunnel, {
+      connectionId: 'conn-lease-1',
+      targetDeviceId: hostKeys.deviceId,
+      step: 1,
+      data: toBase64Url(initiator.writeHandshake()),
+    })
+    expect(leaseTunnel).toHaveProperty('lease')
+    internals.lastActiveAt = Date.now() - 80_000
+    ;(leaseTunnel as unknown as { lease: { tick(force?: boolean): void } }).lease.tick(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(closedCode).toBe(4009)
+    expect(terminated).toHaveBeenCalledTimes(1)
+    expect(sockets[1]!.onopen).toBeNull()
+    expect(sockets[1]!.onmessage).toBeNull()
+    expect(sockets[1]!.onerror).toBeTypeOf('function')
+    expect(server.isOnline()).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sockets).toHaveLength(3)
+    sockets[2]!.open()
+    sockets[2]!.receive(createControlFrame('hello.ack', helloAck('stalled-3')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+    initiator.destroy()
+  } finally {
+    await server.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  }
+})
+
+it('automatically recovers from a stalled CONNECTING upgrade or stalled 4002 credential refresh, and disposes late-opening abandoned sockets', async () => {
+  vi.useFakeTimers()
+  const sockets: FakeWebSocket[] = []
+  let resolveRefresh: (() => void) | undefined
+  let resolveSlowLookup: ((value: unknown) => void) | undefined
+  const api = {
+    baseUrl: 'https://dsh.r2049.cn',
+    authenticate: vi.fn(async () => ({ accessToken: 'access-token' })),
+    refreshCredentials: vi.fn(() => new Promise<void>(resolve => { resolveRefresh = resolve })),
+    deviceFor: vi.fn(() => new Promise(resolve => { resolveSlowLookup = resolve })),
+  } as unknown as HostServerApi
+  const server = new HostServerConnection(
+    { ...config(), reconnect: { enabled: true, initialDelayMs: 10, maxDelayMs: 100, jitter: 0 } },
+    { schemaVersion: 1, deviceId: 'host-cancel', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+    {
+      trustedPeer: () => undefined,
+      trustPeer: vi.fn(async (input: Record<string, unknown>) => ({ ...input, fingerprint: 'CLIENT', trustedAt: 1 })),
+    } as unknown as IdentityStore,
+    api,
+    { close: vi.fn(async () => undefined) } as unknown as ConnectionController,
+    logger(),
+    () => {
+      const socket = new FakeWebSocket()
+      if (sockets.length === 0) {
+        // First socket remains stuck in CONNECTING (readyState 0) and throws on close() while CONNECTING,
+        // but succeeds once readyState transitions to OPEN (1).
+        const originalClose = socket.close.bind(socket)
+        socket.close = vi.fn((code?: number, reason?: string) => {
+          if (socket.readyState === 0) throw new Error('closing while CONNECTING')
+          originalClose(code, reason)
+        })
+      }
+      sockets.push(socket)
+      return socket
+    },
+  )
+  try {
+    server.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets).toHaveLength(1)
+
+    // Without any manual reconnect(), the 30_000ms upgrade deadline automatically
+    // abandons the stalled CONNECTING socket and opens a replacement socket.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(sockets[0]!.onopen).toBeTypeOf('function')
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sockets).toHaveLength(2)
+
+    // Establish the second socket, then let the abandoned first socket finish opening:
+    // the disposal onopen handler must immediately close sockets[0] (readyState -> 3)
+    // and produce no sends, timers, or state changes on sockets[1].
+    sockets[1]!.open()
+    sockets[1]!.receive(createControlFrame('hello.ack', helloAck('cancel-2')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+    const sentOnSecond = sockets[1]!.sent.length
+    sockets[0]!.open()
+    expect(sockets[0]!.readyState).toBe(3)
+    expect(sockets[0]!.onopen).toBeNull()
+    expect(sockets[1]!.sent).toHaveLength(sentOnSecond)
+
+    // Close sockets[1] with 4002 so handleClose enters pending refreshCredentials.
+    // Without calling reconnect(), the 15_000ms refresh timeout automatically settles
+    // and reconnects onto sockets[2].
+    sockets[1]!.close(4002, 'expired token')
+    await vi.advanceTimersByTimeAsync(60)
+    expect(api.refreshCredentials).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sockets).toHaveLength(3)
+    sockets[2]!.open()
+    sockets[2]!.receive(createControlFrame('hello.ack', helloAck('cancel-3')))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.isOnline()).toBe(true)
+
+    // Resolving the old refresh promise afterward must not mutate authRecoveryAttempted on the live connection.
+    resolveRefresh?.()
+    await vi.advanceTimersByTimeAsync(0)
+    expect((server as unknown as { authRecoveryAttempted: boolean }).authRecoveryAttempted).toBe(false)
+
+    // Verify that on a natural close, even if a preceding handler stays stalled beyond
+    // the 50ms drain window, a queued terminal error (UNSUPPORTED_VERSION) is still
+    // recorded and stops automatic retries.
+    const clientKeys = generateKeyPair()
+    sockets[2]!.receive(createControlFrame('connect.incoming', {
+      connectionId: 'conn-drain-1',
+      clientDeviceId: 'client-drain-1',
+      clientIdentityKey: clientKeys.publicKey,
+      authorization: 'account',
+      preferredTransports: ['relay'],
+    }))
+    sockets[2]!.receive(createControlFrame('error', {
+      code: 'UNSUPPORTED_VERSION',
+      message: 'unsupported version',
+      retryable: false,
+    }))
+    sockets[2]!.close(1000, 'closing after terminal error')
+    await vi.advanceTimersByTimeAsync(200)
+    expect(server.lastError()).toBe('UNSUPPORTED_VERSION')
+    expect(server.isReconnecting()).toBe(false)
+    expect(sockets).toHaveLength(3)
+    resolveSlowLookup?.({
+      deviceId: 'client-drain-1',
+      role: 'client',
+      name: 'Client',
+      platform: 'android',
+      identityKey: clientKeys.publicKey,
+      membershipId: 'membership-1',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+  } finally {
+    await server.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  }
+})
+
+it('stops sending remaining fragments when a relay tunnel is dropped mid-send', async () => {
+  const hostKeys = generateKeyPair(new Uint8Array(32).fill(71))
+  const clientKeys = generateKeyPair(new Uint8Array(32).fill(72))
+  const socket = new FakeWebSocket()
+  socket.open()
+  let accepted: AuthenticatedPeerChannel | undefined
+  const server = new HostServerConnection(
+    config(),
+    { schemaVersion: 1, deviceId: 'host-frag', name: 'Host', fingerprint: 'HOST', ...hostKeys },
+    { trustedPeer: () => undefined } as unknown as IdentityStore,
+    { baseUrl: 'https://dsh.r2049.cn' } as HostServerApi,
+    {
+      accept: vi.fn(async (ch: AuthenticatedPeerChannel) => { accepted = ch }),
+      closeConnection: vi.fn(async () => false),
+      close: vi.fn(async () => undefined),
+    } as unknown as ConnectionController,
+    logger(),
+    () => socket,
+  )
+  const noise = new NoiseIkSession({
+    role: 'responder',
+    localPrivateKey: hostKeys.privateKey,
+    localPublicKey: hostKeys.publicKey,
+    remotePublicKey: clientKeys.publicKey,
+    prologue: createNoisePrologue('connection-frag', 'host-frag', 'client-frag'),
+  })
+  const initiator = new NoiseIkSession({
+    role: 'initiator',
+    localPrivateKey: clientKeys.privateKey,
+    localPublicKey: clientKeys.publicKey,
+    remotePublicKey: hostKeys.publicKey,
+    prologue: createNoisePrologue('connection-frag', 'host-frag', 'client-frag'),
+  })
+  const tunnel = {
+    connectionId: 'connection-frag',
+    membershipId: 'membership-frag',
+    peer: { deviceId: 'client-frag', publicKey: clientKeys.publicKey },
+    noise,
+    transport: 'relay',
+  }
+  const internals = server as unknown as {
+    socket: FakeWebSocket
+    tunnels: Map<string, unknown>
+    completeHandshake(tunnel: unknown, payload: unknown): Promise<void>
+    dropTunnel(id: string, code?: string): Promise<void>
+  }
+  internals.socket = socket
+  internals.tunnels.set('connection-frag', tunnel)
+  let relaySent = 0
+  socket.onSend = frame => {
+    if ((frame as { type?: unknown }).type === 'relay') {
+      relaySent += 1
+      if (relaySent === 1) void internals.dropTunnel('connection-frag', 'CONNECTION_FAILED')
+    }
+  }
+  try {
+    await internals.completeHandshake(tunnel, {
+      connectionId: 'connection-frag',
+      targetDeviceId: 'host-frag',
+      step: 1,
+      data: toBase64Url(initiator.writeHandshake()),
+    })
+    const largePayload = 'x'.repeat(200_000)
+    await expect(
+      accepted!.send(createRpcRequest('harness.api.call', { method: 'host.describe', rpcId: 'big-1', payload: { text: largePayload } })),
+    ).rejects.toThrow(/Relay tunnel closed|Secure channel closed/)
+    expect(relaySent).toBe(1)
+  } finally {
+    initiator.destroy()
+    await server.stop()
   }
 })

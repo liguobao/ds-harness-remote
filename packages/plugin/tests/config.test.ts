@@ -78,6 +78,9 @@ describe('plugin config', () => {
     expect(resolveConfig({ serverUrl: 'http://localhost:8080' }).serverUrl).toBe('http://localhost:8080')
     expect(resolveConfig({ serverUrl: 'http://192.168.1.20:8080' }).serverUrl).toBe('http://192.168.1.20:8080')
     expect(resolveConfig({ serverUrl: 'http://100.79.68.68:8080' }).serverUrl).toBe('http://100.79.68.68:8080')
+    expect(resolveConfig({ serverUrl: 'http://[fd00:1234::1]:8080' }).serverUrl).toBe('http://[fd00:1234::1]:8080')
+    expect(resolveConfig({ serverUrl: 'http://[fe80::1]:8080' }).serverUrl).toBe('http://[fe80::1]:8080')
+    expect(() => resolveConfig({ serverUrl: 'http://[2001:4860:4860::8888]:8080' })).toThrow(/HTTPS/)
     expect(normalizeServerUrl('https://REMOTE.example.com/')).toBe('https://remote.example.com')
   })
 

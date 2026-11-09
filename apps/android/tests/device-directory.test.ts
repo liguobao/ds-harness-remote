@@ -110,6 +110,8 @@ describe('trusted device reconciliation', () => {
           const result = await reconcileTrustedDevices(api, trusted)
           expect(result.devices).toEqual([])
           expect(result.missingTrustedDeviceIds).toEqual([])
+          expect(result.keyMismatchDeviceIds).toEqual(['host-1'])
+          expect(result.lookupFailedDeviceIds).toEqual([])
         },
       },
       {
@@ -174,6 +176,8 @@ describe('trusted device reconciliation', () => {
           }
           const result = await reconcileTrustedDevices(api, [])
           expect(result.unpinnedDeviceIds).toEqual(['host-3'])
+          expect(result.lookupFailedDeviceIds).toEqual(['host-3'])
+          expect(result.lookupError).toBeInstanceOf(Error)
           expect(result.devices).toEqual([])
         },
       },

@@ -2278,7 +2278,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
-    var { randomBytes: randomBytes13, createHash: createHash7 } = __require("crypto");
+    var { randomBytes: randomBytes14, createHash: createHash8 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2816,7 +2816,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort2 = isSecure ? 443 : 80;
-      const key = randomBytes13(16).toString("base64");
+      const key = randomBytes14(16).toString("base64");
       const request = isSecure ? https.request : http.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -2946,7 +2946,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash7("sha1").update(key + GUID).digest("base64");
+        const digest = createHash8("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3315,7 +3315,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter3 = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash7 } = __require("crypto");
+    var { createHash: createHash8 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3622,7 +3622,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash7("sha1").update(key + GUID).digest("base64");
+        const digest = createHash8("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -32187,16 +32187,16 @@ var init_lib = __esm({
        * or moving a URI to a new ID, stays allowed.
        */
       assertStableHeaderExtensionIds(next) {
-        const active = /* @__PURE__ */ new Map();
+        const active2 = /* @__PURE__ */ new Map();
         for (const index of this.currentRemoteDescription?.media.keys() ?? []) {
           for (const extension2 of this.negotiatedHeaderExtensions(index)) {
-            active.set(extension2.id, extension2.uri);
+            active2.set(extension2.id, extension2.uri);
           }
         }
         for (const media of next.media) {
           if (media.port === 0) continue;
           for (const extension2 of media.rtp.headerExtensions) {
-            const uri = active.get(extension2.id);
+            const uri = active2.get(extension2.id);
             if (uri !== void 0 && uri !== extension2.uri) {
               throw createWebRtcDomException(
                 "InvalidModificationError",
@@ -44698,7 +44698,7 @@ var require_lib = __commonJS({
   }
 });
 
-// src/index.ts
+// packages/plugin/src/index.ts
 import * as DshConnection from "@deepseek-ai/dsh-client-connection";
 
 // node_modules/zod/v4/classic/external.js
@@ -60417,8 +60417,8 @@ function encodeJSONPointerSegment(segment) {
   return segment.replace(/~/g, "~0").replace(/\//g, "~1");
 }
 function extractDefs(ctx, schema) {
-  const root = ctx.seen.get(schema);
-  if (!root)
+  const root2 = ctx.seen.get(schema);
+  if (!root2)
     throw new Error("Unprocessed schema. This is a bug in Zod.");
   if (ctx.external && ctx.sharedDefsExtractedFor === ctx.external)
     return;
@@ -60447,7 +60447,7 @@ function extractDefs(ctx, schema) {
     }
     const uriPrefix = `#`;
     const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
-    if (entry[1] === root && !entry[1].schema.id) {
+    if (entry[1] === root2 && !entry[1].schema.id) {
       return { ref: uriPrefix };
     }
     const defId = entry[1].schema.id ?? `__schema${ctx.counter++}`;
@@ -60618,8 +60618,8 @@ function foldIntersection(json2) {
   assignProps(json2, folded);
 }
 function finalize(ctx, schema) {
-  const root = ctx.seen.get(schema);
-  if (!root)
+  const root2 = ctx.seen.get(schema);
+  if (!root2)
     throw new Error("Unprocessed schema. This is a bug in Zod.");
   const flattenRef = (zodSchema) => {
     const seen = ctx.seen.get(zodSchema);
@@ -60730,7 +60730,7 @@ function finalize(ctx, schema) {
       throw new Error("Schema is missing an `id` property");
     result.$id = ctx.external.uri(id6);
   }
-  assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
+  assignProps(result, root2.defId ? root2.schema : root2.def ?? root2.schema);
   const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
   if (rootMetaId !== void 0 && result.id === rootMetaId)
     delete result.id;
@@ -64418,7 +64418,7 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// ../protocol/dist/loopback.js
+// packages/protocol/dist/loopback.js
 var LOOPBACK_CHUNK_BYTES = 64 * 1024;
 var LOOPBACK_MAX_BODY_BYTES = 1024 * 1024;
 var LOOPBACK_MAX_WS_BYTES = 256 * 1024;
@@ -64440,7 +64440,7 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
-// ../protocol/dist/wire-json.js
+// packages/protocol/dist/wire-json.js
 function parseWireJson(input4) {
   try {
     const text = typeof input4 === "string" ? input4 : new TextDecoder("utf-8", { fatal: true }).decode(input4);
@@ -64480,7 +64480,7 @@ function parseWireJson(input4) {
   }
 }
 
-// ../protocol/dist/close-semantics.js
+// packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
 var HEARTBEAT_TIMEOUT_CLOSE_CODE = 4009;
@@ -64508,7 +64508,7 @@ function classifyControlClose(code, reason) {
   };
 }
 
-// ../protocol/dist/index.js
+// packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
@@ -64530,6 +64530,7 @@ var MAX_AUTH_TOKEN_LENGTH = 8 * 1024;
 var MAX_REMOTE_CAPABILITY_ENTRIES = 128;
 var MAX_REMOTE_WORKSPACE_TYPE_ENTRIES = 32;
 var HOST_REGISTRATION_CODE_TTL_MS = 10 * 6e4;
+var DEFAULT_HEARTBEAT_INTERVAL_MS = 25e3;
 var MAX_ACTIVE_TRANSFERS_PER_DIRECTION = 2;
 var TRANSFER_IDLE_MS = 2 * 6e4;
 var MAX_RPC_TEXT_INPUT_BYTES = 64 * 1024;
@@ -65170,7 +65171,7 @@ function cryptoRandomId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-// ../client-core/dist/remote-gateway.js
+// packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id6, capability) {
   if (!capabilities.includes(capability))
@@ -65197,7 +65198,7 @@ function createRemoteId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// ../client-core/dist/codex-client.js
+// packages/client-core/dist/codex-client.js
 var MAX_DISPLAY_ITEM_TEXT = 256 * 1024;
 var CODEX_IMAGE_MEDIA_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
@@ -65799,7 +65800,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// ../client-core/dist/acp-client.js
+// packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
@@ -66054,7 +66055,7 @@ function canonicalBase64ToBytes(value) {
   return bytes;
 }
 
-// ../client-core/dist/index.js
+// packages/client-core/dist/index.js
 var RemoteClientError = class extends Error {
   code;
   constructor(code, message, options) {
@@ -66229,7 +66230,7 @@ function transportSendError(error62) {
   return error62 instanceof Error ? error62 : new Error("remote transport send failed", { cause: error62 });
 }
 
-// src/acp/image-content.ts
+// packages/plugin/src/acp/image-content.ts
 var AGY_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 var AGY_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 var AGY_MAX_IMAGES = 4;
@@ -66289,7 +66290,7 @@ function acpImageLimits(backend) {
   return backend === "antigravity" || backend === "hermes" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
 }
 
-// src/acp/virtual-catalog.ts
+// packages/plugin/src/acp/virtual-catalog.ts
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
 var OPENCODE_WORKSPACE_PREFIX = "opencode:cwd:";
@@ -66402,7 +66403,7 @@ function modelCatalog(backend = "cursor") {
   };
 }
 
-// src/acp/virtual-contract.ts
+// packages/plugin/src/acp/virtual-contract.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
 var ACP_SESSION_PREFIX = "acp:";
 var OPENCODE_SESSION_PREFIX = "opencode:";
@@ -66612,7 +66613,7 @@ function acpPermissionsProjection(preset) {
   };
 }
 
-// src/acp/virtual-event-carrier.ts
+// packages/plugin/src/acp/virtual-event-carrier.ts
 var AcpEventCarrier = class {
   constructor(context) {
     this.context = context;
@@ -66697,7 +66698,7 @@ var AcpEventCarrier = class {
   }
 };
 
-// src/acp/pi-tool-result.ts
+// packages/plugin/src/acp/pi-tool-result.ts
 function piToolResult(update) {
   let content = Array.isArray(update.content) ? update.content.flatMap((item) => {
     if (item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string") return [{ type: "text", text: item.content.text }];
@@ -66716,7 +66717,7 @@ ${item.newText}` }];
   return { content, isError: update.status === "failed" || update.rawOutput?.isError === true };
 }
 
-// src/acp/virtual-live.ts
+// packages/plugin/src/acp/virtual-live.ts
 var AcpLiveProjection = class {
   constructor(context) {
     this.context = context;
@@ -67205,7 +67206,7 @@ var AcpLiveProjection = class {
   }
 };
 
-// src/acp/virtual-titles.ts
+// packages/plugin/src/acp/virtual-titles.ts
 var OPENCODE_DEFAULT_TITLE = /^(?:New|Child) session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 var AcpSessionTitles = class {
   constructor(backend, client, sessions, publish) {
@@ -67285,7 +67286,7 @@ function waitForTitle(delay, signal) {
   });
 }
 
-// src/acp/virtual-harness.ts
+// packages/plugin/src/acp/virtual-harness.ts
 var AcpVirtualHarness = class _AcpVirtualHarness {
   constructor(client, host, backend = "cursor", hostCarrier) {
     this.client = client;
@@ -68168,7 +68169,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
 };
 
-// ../webrtc/dist/websocket-backpressure.js
+// packages/webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
   const started = Date.now();
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
@@ -68180,7 +68181,7 @@ async function waitForRelayCapacity(socket) {
     throw new Error("Relay transport closed");
 }
 
-// ../webrtc/dist/transport.js
+// packages/webrtc/dist/transport.js
 var BaseTransport = class {
   handlers = /* @__PURE__ */ new Set();
   closeHandlers = /* @__PURE__ */ new Set();
@@ -68202,7 +68203,7 @@ var BaseTransport = class {
   }
 };
 
-// ../webrtc/dist/util.js
+// packages/webrtc/dist/util.js
 function toBase64Url(bytes) {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
@@ -68216,7 +68217,7 @@ function fromBase64Url(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-// ../webrtc/dist/rtc-adapter.js
+// packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
@@ -68446,7 +68447,7 @@ function adaptDataChannel(raw) {
   };
 }
 
-// ../webrtc/dist/rtc-chunking.js
+// packages/webrtc/dist/rtc-chunking.js
 var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
 var RTC_CHUNK_HEADER_BYTES = 12;
 var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
@@ -68555,7 +68556,7 @@ function isChunk(frame) {
   return true;
 }
 
-// ../webrtc/dist/rtc-data-channel.js
+// packages/webrtc/dist/rtc-data-channel.js
 var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
 var SELECTED_PATH_RETRY_COUNT = 5;
 var SELECTED_PATH_RETRY_DELAY_MS = 50;
@@ -69273,7 +69274,7 @@ function sleep(ms) {
   return new Promise((resolve9) => setTimeout(resolve9, ms));
 }
 
-// ../webrtc/dist/control-lease.js
+// packages/webrtc/dist/control-lease.js
 var WEBRTC_LEASE_MS2 = 3e5;
 var ControlLease = class {
   connectionId;
@@ -69355,7 +69356,7 @@ var ControlLease = class {
   }
 };
 
-// ../webrtc/dist/adaptive-transport.js
+// packages/webrtc/dist/adaptive-transport.js
 var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
@@ -70127,7 +70128,7 @@ function throwIfAborted(signal) {
     throw new Error("Adaptive connection was aborted");
 }
 
-// ../webrtc/dist/serial-send.js
+// packages/webrtc/dist/serial-send.js
 var SerialSend = class {
   tail = Promise.resolve();
   bytes = 0;
@@ -70148,7 +70149,7 @@ var SerialSend = class {
   }
 };
 
-// src/client-runtime-contract.ts
+// packages/plugin/src/client-runtime-contract.ts
 var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
 var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
@@ -70264,7 +70265,7 @@ function iceServersForAttempt(attempt, iceServers) {
   return attempt === "direct" ? stunOnlyIceServers(iceServers) : iceServers;
 }
 
-// src/client-capabilities.ts
+// packages/plugin/src/client-capabilities.ts
 function remoteHostFeatures(clientVersion) {
   return {
     commandList: false,
@@ -70331,7 +70332,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   };
 }
 
-// src/client-codex-streams.ts
+// packages/plugin/src/client-codex-streams.ts
 var ClientCodexStreams = class {
   constructor(context) {
     this.context = context;
@@ -71126,15 +71127,15 @@ function invert(number4, modulo) {
     throw new Error("invert: does not exist");
   return mod(x, modulo);
 }
-function assertIsSquare(Fp2, root, n) {
-  if (!Fp2.eql(Fp2.sqr(root), n))
+function assertIsSquare(Fp2, root2, n) {
+  if (!Fp2.eql(Fp2.sqr(root2), n))
     throw new Error("Cannot find square root");
 }
 function sqrt3mod4(Fp2, n) {
   const p1div4 = (Fp2.ORDER + _1n2) / _4n;
-  const root = Fp2.pow(n, p1div4);
-  assertIsSquare(Fp2, root, n);
-  return root;
+  const root2 = Fp2.pow(n, p1div4);
+  assertIsSquare(Fp2, root2, n);
+  return root2;
 }
 function sqrt5mod8(Fp2, n) {
   const p5div8 = (Fp2.ORDER - _5n) / _8n;
@@ -71142,9 +71143,9 @@ function sqrt5mod8(Fp2, n) {
   const v = Fp2.pow(n2, p5div8);
   const nv = Fp2.mul(n, v);
   const i = Fp2.mul(Fp2.mul(nv, _2n), v);
-  const root = Fp2.mul(nv, Fp2.sub(i, Fp2.ONE));
-  assertIsSquare(Fp2, root, n);
-  return root;
+  const root2 = Fp2.mul(nv, Fp2.sub(i, Fp2.ONE));
+  assertIsSquare(Fp2, root2, n);
+  return root2;
 }
 function sqrt9mod16(P) {
   const Fp_ = Field(P);
@@ -71163,9 +71164,9 @@ function sqrt9mod16(P) {
     tv1 = Fp2.cmov(tv1, tv2, e1);
     tv2 = Fp2.cmov(tv4, tv3, e2);
     const e3 = Fp2.eql(Fp2.sqr(tv2), n);
-    const root = Fp2.cmov(tv1, tv2, e3);
-    assertIsSquare(Fp2, root, n);
-    return root;
+    const root2 = Fp2.cmov(tv1, tv2, e3);
+    assertIsSquare(Fp2, root2, n);
+    return root2;
   };
 }
 function tonelliShanks(P) {
@@ -72039,7 +72040,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes13 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes14 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain2 = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -72121,7 +72122,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes13(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes14(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -74077,9 +74078,9 @@ function invert2(number4, modulo) {
     throw new Error("invert: does not exist");
   return mod2(x, modulo);
 }
-function assertIsSquare2(Fp2, root, n) {
+function assertIsSquare2(Fp2, root2, n) {
   const F = Fp2;
-  if (!F.eql(F.sqr(root), n))
+  if (!F.eql(F.sqr(root2), n))
     throw new Error("Cannot find square root");
 }
 function aoddModulus(order, fnName) {
@@ -74089,9 +74090,9 @@ function aoddModulus(order, fnName) {
 function sqrt3mod42(Fp2, n) {
   const F = Fp2;
   const p1div4 = (F.ORDER + _1n8) / _4n2;
-  const root = F.pow(n, p1div4);
-  assertIsSquare2(F, root, n);
-  return root;
+  const root2 = F.pow(n, p1div4);
+  assertIsSquare2(F, root2, n);
+  return root2;
 }
 function sqrt5mod82(Fp2, n) {
   const F = Fp2;
@@ -74100,9 +74101,9 @@ function sqrt5mod82(Fp2, n) {
   const v = F.pow(n2, p5div8);
   const nv = F.mul(n, v);
   const i = F.mul(F.mul(nv, _2n5), v);
-  const root = F.mul(nv, F.sub(i, F.ONE));
-  assertIsSquare2(F, root, n);
-  return root;
+  const root2 = F.mul(nv, F.sub(i, F.ONE));
+  assertIsSquare2(F, root2, n);
+  return root2;
 }
 function sqrt9mod162(P) {
   const Fp_ = Field2(P);
@@ -74122,9 +74123,9 @@ function sqrt9mod162(P) {
     tv1 = F.cmov(tv1, tv2, e1);
     tv2 = F.cmov(tv4, tv3, e2);
     const e3 = F.eql(F.sqr(tv2), n);
-    const root = F.cmov(tv1, tv2, e3);
-    assertIsSquare2(F, root, n);
-    return root;
+    const root2 = F.cmov(tv1, tv2, e3);
+    assertIsSquare2(F, root2, n);
+    return root2;
   });
 }
 function tonelliShanks2(P) {
@@ -74445,18 +74446,18 @@ function validateTableBytes(numPoints, fpBytes) {
   if (bytes > TABLE_BYTES_MAX)
     throw new Error("invalid window size: table would need ~" + Math.ceil(bytes / 2 ** 20) + " MiB, max " + TABLE_BYTES_MAX / 2 ** 20 + " MiB");
 }
-function probeRandomBytes(randomBytes13, length) {
-  if (randomBytes13 === void 0)
+function probeRandomBytes(randomBytes14, length) {
+  if (randomBytes14 === void 0)
     return void 0;
-  afunction(randomBytes13, "randomBytes");
+  afunction(randomBytes14, "randomBytes");
   try {
-    const probe = randomBytes13(length);
+    const probe = randomBytes14(length);
     if (!isBytes3(probe) || probe.length !== length)
       return void 0;
   } catch {
     return void 0;
   }
-  return randomBytes13;
+  return randomBytes14;
 }
 function validateMSMPoints2(points, c) {
   aarray(points, "points");
@@ -74549,9 +74550,9 @@ var ScalarMultiplier = class {
   baseCanBeBlinded;
   bits;
   // Parametrized with a given Point class (not individual point)
-  constructor(Point, randomBytes13) {
+  constructor(Point, randomBytes14) {
     validatePointCons(Point);
-    this.randomBytes = probeRandomBytes(randomBytes13, BLIND_BYTES);
+    this.randomBytes = probeRandomBytes(randomBytes14, BLIND_BYTES);
     this.Point = Point;
     this.BASE = Point.BASE;
     this.ZERO = Point.ZERO;
@@ -74822,7 +74823,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes13 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
+  const randomBytes14 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -75083,7 +75084,7 @@ function edwards2(params, extraOpts = {}) {
     }
   }
   const normalize = (points) => normalizeZ2(Point, points);
-  const wnaf = new ScalarMultiplier(Point, randomBytes13);
+  const wnaf = new ScalarMultiplier(Point, randomBytes14);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
   Object.freeze(Point.prototype);
@@ -77314,7 +77315,7 @@ function noiseIk() {
   ]]);
 }
 
-// ../crypto/dist/noise.js
+// packages/crypto/dist/noise.js
 var NOISE_IK_PROTOCOL = "Noise_IK_25519_ChaChaPoly_SHA256";
 var NoiseIkSession = class {
   handshake;
@@ -77449,7 +77450,7 @@ function constantTimeEqual(left, right) {
   return different === 0;
 }
 
-// ../crypto/dist/index.js
+// packages/crypto/dist/index.js
 function generateKeyPair(privateKeyBytes) {
   const privateKey = privateKeyBytes ?? x25519.utils.randomPrivateKey();
   if (privateKey.byteLength !== 32)
@@ -77474,7 +77475,7 @@ function fromBase64Url2(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-// src/client-secure-transport.ts
+// packages/plugin/src/client-secure-transport.ts
 var ClientSecureTransport = class {
   constructor(inner, identity3, host) {
     this.inner = inner;
@@ -77623,7 +77624,7 @@ async function waitForResponder(inner, noise, signal) {
   });
 }
 
-// src/client-connection.ts
+// packages/plugin/src/client-connection.ts
 var ClientConnection = class {
   constructor(context) {
     this.context = context;
@@ -77819,7 +77820,7 @@ var ClientConnection = class {
   }
 };
 
-// src/client-reconnect.ts
+// packages/plugin/src/client-reconnect.ts
 var ClientReconnect = class {
   constructor(config2) {
     this.config = config2;
@@ -77879,7 +77880,7 @@ function canReconnect(error62) {
   return failure5.retryable !== false;
 }
 
-// src/loopback-preview.ts
+// packages/plugin/src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
@@ -77893,10 +77894,10 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// src/loopback-host.ts
+// packages/plugin/src/loopback-host.ts
 import { request as httpRequest } from "node:http";
 
-// src/safe-error.ts
+// packages/plugin/src/safe-error.ts
 var RpcError = class extends Error {
   constructor(code, message, details2, retryable = false) {
     super(message);
@@ -77910,8 +77911,56 @@ function safeErrorCode(error62) {
   if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
   return "INTERNAL_ERROR";
 }
+var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
+  "IDENTITY_INVALID",
+  "IDENTITY_LOCKED",
+  "STORAGE_CONFLICT",
+  "SERVER_CREDENTIALS_INVALID",
+  "SERVER_CREDENTIALS_BUSY"
+]);
+var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
+  "device identity is incomplete; repair it explicitly before reconnecting",
+  "device public and private keys do not match",
+  "device identity is locked by another process; stop other DSH instances and retry",
+  "Remote storage fallback record is invalid; no credentials were changed.",
+  "Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.",
+  "Legacy Remote storage changed after fallback; inspect it before reconnecting.",
+  "Pinned Remote storage is missing; no replacement identity was created.",
+  "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+  "Remote storage must be a real directory; symbolic links are not migrated.",
+  "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration."
+]);
+function safeStartupError(error62) {
+  const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && SAFE_STARTUP_CODES.has(error62.code) ? error62.code : safeErrorCode(error62);
+  if (code === "SERVER_CREDENTIALS_INVALID") {
+    return { code, message: "Local Remote server credentials are invalid." };
+  }
+  if (code === "SERVER_CREDENTIALS_BUSY") {
+    return {
+      code,
+      message: "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again."
+    };
+  }
+  if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
+    const rawMessage = error62 instanceof Error ? error62.message : "";
+    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
+      return { code, message: rawMessage };
+    }
+    if (rawMessage.startsWith("device identity is invalid")) {
+      return { code, message: "device identity is invalid" };
+    }
+    if (rawMessage.startsWith("trusted peer ")) {
+      return { code, message: "trusted peer record is invalid" };
+    }
+    return {
+      code,
+      message: code === "IDENTITY_LOCKED" ? "device identity is locked by another process; stop other DSH instances and retry" : code === "STORAGE_CONFLICT" ? "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." : "device identity is invalid"
+    };
+  }
+  return { code, message: "Remote plugin failed to start." };
+}
 
-// src/loopback-host.ts
+// packages/plugin/src/loopback-host.ts
 var HOP_HEADERS = /* @__PURE__ */ new Set([
   "connection",
   "keep-alive",
@@ -78165,7 +78214,7 @@ var LoopbackHost = class {
   }
 };
 
-// src/loopback-preview.ts
+// packages/plugin/src/loopback-preview.ts
 var LoopbackPreview = class {
   constructor(client) {
     this.client = client;
@@ -78401,26 +78450,53 @@ var LoopbackPreview = class {
   }
 };
 
-// src/plugin-route-bridge.ts
+// packages/plugin/src/plugin-route-bridge.ts
 var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
 var BOT_REMOTE_OPERATIONS = [
   "state",
   "models",
   "efforts",
+  "providers",
+  "local-agents",
   "exchange",
+  "exchange-text",
+  "file-text",
   "earlier",
+  "chat",
+  "run-stats",
+  "thinking",
   "usage",
   "room-progress",
   "schedules",
+  "schedule-create",
+  "schedule-delete",
+  "memory-view",
+  "memory-history",
+  "memory-ask",
+  "memory-forget",
+  "memory-restore",
+  "folders",
+  "folder-list",
+  "team-workspace",
+  "set-prefs",
+  "browser-takeover",
+  "browser-give-back",
+  "browser-stop",
   "create-bot",
   "duplicate-bot",
   "update-bot",
   "delete-bot",
   "set-main",
   "set-flags",
+  "resume",
+  "bot-new-part",
+  "bot-open-part",
   "create-room",
   "update-room",
   "delete-room",
+  "stop-room-work",
+  "goal-draft",
+  "goal-control",
   "add-agent",
   "agent-session",
   "agent-adopt",
@@ -78430,9 +78506,15 @@ var BOT_REMOTE_OPERATIONS = [
   "send",
   "btw",
   "btw-cancel",
+  "btw-delete",
+  "side-new",
+  "side-ask",
+  "side-cancel",
+  "side-close",
   "room-continue",
   "answer-question",
   "dismiss-question",
+  "dismiss-view",
   "view-reply",
   "approval-answer",
   "stop-member-work"
@@ -78496,7 +78578,7 @@ function serializedBytes(value) {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
-// src/client-control.ts
+// packages/plugin/src/client-control.ts
 var ClientControl = class {
   constructor(context) {
     this.context = context;
@@ -78784,7 +78866,7 @@ var ClientControl = class {
   }
 };
 
-// src/client-workspace-queries.ts
+// packages/plugin/src/client-workspace-queries.ts
 async function readRemoteWorkspaceBaseline(gateway, signal) {
   const lifetime = new AbortController();
   const activeSignal = signal === void 0 ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]);
@@ -78817,10 +78899,10 @@ function remoteWorkspaceTitle(path) {
   return normalized.split(/[\\/]+/u).filter(Boolean).at(-1) ?? path;
 }
 
-// src/codex/permissions.ts
+// packages/plugin/src/codex/permissions.ts
 function codexPermissionPresetFromResponse(value) {
-  const root = record4(value);
-  for (const settings of [root, record4(root.threadSettings)]) {
+  const root2 = record4(value);
+  for (const settings of [root2, record4(root2.threadSettings)]) {
     const sandbox = settings.sandbox ?? settings.sandboxPolicy;
     const type = record4(sandbox).type;
     if (settings.approvalPolicy === "never" && (sandbox === "danger-full-access" || type === "dangerFullAccess")) {
@@ -78836,7 +78918,7 @@ function record4(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-// src/codex/virtual-values.ts
+// packages/plugin/src/codex/virtual-values.ts
 var CODEX_SESSION_PREFIX = "codex:";
 var CODEX_HISTORY_PAGE_MAX_MESSAGES = 200;
 function nativeThreadId(sessionId) {
@@ -78910,7 +78992,7 @@ function errorCode(error62) {
   return "code" in error62 && typeof error62.code === "string" ? error62.code : void 0;
 }
 
-// src/codex/virtual-catalog.ts
+// packages/plugin/src/codex/virtual-catalog.ts
 var CODEX_WORKSPACE_PREFIX = "codex-workspace:";
 var CODEX_PROVIDER = "codex";
 var CODEX_MODEL = "codex";
@@ -79077,11 +79159,11 @@ function nativeVisibleWorkspaces(catalog, selectedWorkspaceId) {
   return catalog.workspaces.filter((workspace2) => workspace2.sessionIds.length > 0 || workspace2.workspaceId === selectedWorkspaceId);
 }
 function projectWorkspace(project2) {
-  const root = project2.roots[0];
+  const root2 = project2.roots[0];
   return {
     workspaceId: codexProjectWorkspaceId(project2.id),
-    path: root.path,
-    title: project2.name.trim() || basename(root.path),
+    path: root2.path,
+    title: project2.name.trim() || basename(root2.path),
     sessionIds: [],
     sessionCount: 0,
     createdAt: isoTime(project2.createdAt),
@@ -79092,7 +79174,7 @@ function projectCodexProject(value, fallbackPosition) {
   const source = record5(value);
   const id6 = string5(source.id);
   if (id6 === void 0) return void 0;
-  const roots = array3(source.roots).map((root) => string5(record5(root).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
+  const roots = array3(source.roots).map((root2) => string5(record5(root2).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
   if (roots.length === 0) return void 0;
   return {
     id: id6,
@@ -79108,7 +79190,7 @@ function findProjectWorkspace(thread, session2, projects, workspaceByProjectId) 
   const explicitWorkspace = explicitProjectId === void 0 ? void 0 : workspaceByProjectId.get(explicitProjectId);
   if (explicitWorkspace !== void 0) return explicitWorkspace;
   if (session2.cwd === void 0) return void 0;
-  const match = projects.flatMap((project2) => project2.roots.map((root) => ({ project: project2, root }))).filter((value) => containsPath(value.root.path, session2.cwd)).sort((left, right) => {
+  const match = projects.flatMap((project2) => project2.roots.map((root2) => ({ project: project2, root: root2 }))).filter((value) => containsPath(value.root.path, session2.cwd)).sort((left, right) => {
     const length = right.root.path.length - left.root.path.length;
     if (length !== 0) return length;
     const position = left.project.position - right.project.position;
@@ -79127,8 +79209,8 @@ function addSessionToWorkspace(workspace2, session2) {
   if (createdAt < workspace2.createdAt) workspace2.createdAt = createdAt;
   if (updatedAt > workspace2.updatedAt) workspace2.updatedAt = updatedAt;
 }
-function containsPath(root, candidate) {
-  const normalizedRoot = normalizePathForCompare(root);
+function containsPath(root2, candidate) {
+  const normalizedRoot = normalizePathForCompare(root2);
   const normalizedCandidate = normalizePathForCompare(candidate);
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
 }
@@ -79186,7 +79268,7 @@ function isProjectListUnsupported(error62) {
   return code === "METHOD_NOT_ALLOWED" || code === "METHOD_NOT_FOUND" || code === "CODEX_UPSTREAM_ERROR" || error62.message.includes("The requested Codex method is not available over Remote.");
 }
 
-// src/codex/codex-image-codec.ts
+// packages/plugin/src/codex/codex-image-codec.ts
 var CODEX_IMAGE_MEDIA_TYPES2 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var CODEX_IMAGE_ATTACHMENT_PREFIX = "codex-image:";
 var MAX_CODEX_IMAGE_BASE64 = 288 * 1024 * 1024;
@@ -79412,7 +79494,7 @@ function hashString2(value) {
   return (hash3 >>> 0).toString(16).padStart(8, "0");
 }
 
-// src/codex/virtual-contract.ts
+// packages/plugin/src/codex/virtual-contract.ts
 var SESSION_SEARCH_RESULT_LIMIT = 20;
 var SESSION_SEARCH_SNIPPET_CODE_POINTS = 240;
 var CODEX_DEFAULT_PERMISSION = "workspace-write";
@@ -79588,7 +79670,7 @@ var AsyncValueQueue2 = class {
   }
 };
 
-// src/codex/virtual-event-carrier.ts
+// packages/plugin/src/codex/virtual-event-carrier.ts
 var CodexEventCarrier = class {
   constructor(context) {
     this.context = context;
@@ -79662,14 +79744,14 @@ var CodexEventCarrier = class {
   }
 };
 
-// src/codex/virtual-history.ts
+// packages/plugin/src/codex/virtual-history.ts
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
 var DEFAULT_HISTORY_MESSAGES = 50;
 function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
   const entries = [];
   let seq = 0;
   let turnNumber = 0;
-  const active = activeTurnId(thread.turns);
+  const active2 = activeTurnId(thread.turns);
   const threadModel = projectCodexModel(thread);
   const fallbackSelection = threadModel.model === void 0 ? modelSelection() : {
     provider: "codex",
@@ -79754,7 +79836,7 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
     entries,
     lastSeq: seq - 1,
     nextTurn: turnNumber,
-    ...active === void 0 ? {} : { activeTurnId: active }
+    ...active2 === void 0 ? {} : { activeTurnId: active2 }
   };
 }
 function turnEndReason(turn) {
@@ -80160,7 +80242,7 @@ function isCodexNativeHistoryPage(value, sessionId) {
   return header.id === sessionId && integer3(page.cursor) !== void 0 && integer3(page.nextTurn) !== void 0 && Array.isArray(page.records) && typeof page.hasMore === "boolean" && (page.activeTurnId === void 0 || typeof page.activeTurnId === "string");
 }
 
-// src/codex/virtual-live.ts
+// packages/plugin/src/codex/virtual-live.ts
 var CodexLiveProjection = class {
   constructor(context) {
     this.context = context;
@@ -80654,7 +80736,7 @@ function turnEndReason2(turn) {
   return { kind: "completed" };
 }
 
-// src/codex/virtual-harness.ts
+// packages/plugin/src/codex/virtual-harness.ts
 var CODEX_CATALOG_CACHE_MS = 2e3;
 var CodexVirtualHarness = class _CodexVirtualHarness {
   constructor(client, host, sessionGeneration = "legacy", hostCarrier) {
@@ -81295,9 +81377,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.pendingRequestIds.set(sessionId, string5(request.requestId) ?? "");
     const mode2 = request.mode === "steer" ? "turn/steer" : "turn/start";
     if (mode2 === "turn/steer") {
-      const active = this.activeTurnId(threadId);
-      if (active === void 0) return failure3("steer-unavailable", "The CodeX Thread has no active turn to steer.");
-      await this.client.request(mode2, { threadId, expectedTurnId: active, input: input4 }, signal);
+      const active2 = this.activeTurnId(threadId);
+      if (active2 === void 0) return failure3("steer-unavailable", "The CodeX Thread has no active turn to steer.");
+      await this.client.request(mode2, { threadId, expectedTurnId: active2, input: input4 }, signal);
     } else {
       await this.client.request(mode2, {
         threadId,
@@ -81498,7 +81580,7 @@ function awaitWithAbort(promise2, signal) {
   });
 }
 
-// src/control-route.ts
+// packages/plugin/src/control-route.ts
 var CONTROL_RPC_PREFIX = "/ds-harness-remote";
 var STATUS_STREAM_ENDPOINT = "status.events";
 var STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
@@ -81624,7 +81706,7 @@ function writeText(res, status2, body) {
   res.end(body);
 }
 
-// src/harness-version.ts
+// packages/plugin/src/harness-version.ts
 import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join } from "node:path";
@@ -81653,30 +81735,79 @@ async function readHarnessManifestVersion(manifestPath) {
     return void 0;
   }
 }
-async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
-  if (entrypoint === void 0 || !isAbsolute(entrypoint)) return void 0;
-  let resolvedEntrypoint = entrypoint;
-  try {
-    resolvedEntrypoint = await realpathEntrypoint(entrypoint);
-  } catch {
+function globalNpmRoots(context, execPath, cwd2) {
+  const roots = [];
+  const add3 = (value) => {
+    if (typeof value === "string" && value.length > 0) roots.push(value);
+  };
+  const env = context.env ?? process.env;
+  if (isAbsolute(execPath)) {
+    add3(dirname(execPath));
+    add3(join(dirname(execPath), "..", "lib"));
   }
-  if (!isAbsolute(resolvedEntrypoint)) return void 0;
-  let directory = dirname(resolvedEntrypoint);
-  for (let depth = 0; depth < 8; depth += 1) {
-    const version2 = await readHarnessManifestVersion(join(directory, "package.json"));
+  const prefix = env.npm_config_prefix;
+  if (prefix !== void 0 && prefix.length > 0) {
+    add3(prefix);
+    add3(join(prefix, "lib"));
+  }
+  const appData = env.APPDATA;
+  if (appData !== void 0 && appData.length > 0) add3(join(appData, "npm"));
+  for (const base of ["/usr/local/lib", "/usr/lib", "/opt/homebrew/lib"]) add3(base);
+  return roots;
+}
+async function readHarnessDistributionVersion(entrypoint = process.argv[1], context = {}) {
+  const cwd2 = context.cwd ?? process.cwd();
+  const execPath = context.execPath ?? (typeof process.execPath === "string" ? process.execPath : "");
+  const globalRoots = context.globalRoots ?? globalNpmRoots(context, execPath, cwd2);
+  const manifests = [];
+  const seen = /* @__PURE__ */ new Set();
+  const addManifest = (value) => {
+    if (typeof value !== "string" || value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    manifests.push(value);
+  };
+  const addAncestors = (start) => {
+    let directory = start;
+    for (let depth = 0; depth < 8; depth += 1) {
+      addManifest(join(directory, "package.json"));
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  };
+  const addResolved = (base) => {
+    try {
+      addManifest(createRequire(base).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+    } catch {
+    }
+  };
+  if (typeof entrypoint === "string" && entrypoint.length > 0 && isAbsolute(entrypoint)) {
+    let resolvedEntrypoint = entrypoint;
+    try {
+      resolvedEntrypoint = await realpathEntrypoint(entrypoint);
+    } catch {
+    }
+    if (isAbsolute(resolvedEntrypoint)) {
+      addAncestors(dirname(resolvedEntrypoint));
+      addResolved(resolvedEntrypoint);
+    }
+  }
+  if (isAbsolute(execPath)) {
+    addAncestors(dirname(execPath));
+    addResolved(execPath);
+  }
+  for (const root2 of globalRoots) addManifest(join(root2, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addManifest(join(cwd2, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+  addResolved(join(cwd2, "package.json"));
+  addResolved(cwd2);
+  for (const manifest of manifests) {
+    const version2 = await readHarnessManifestVersion(manifest);
     if (version2 !== void 0) return version2;
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
   }
-  try {
-    return await readHarnessManifestVersion(createRequire(resolvedEntrypoint).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
-  } catch {
-    return void 0;
-  }
+  return void 0;
 }
 
-// src/ids.ts
+// packages/plugin/src/ids.ts
 import { randomBytes as randomBytes7 } from "node:crypto";
 function uuidV7(now = Date.now()) {
   if (!Number.isSafeInteger(now) || now < 0 || now > 281474976710655) {
@@ -81694,7 +81825,7 @@ function uuidV7(now = Date.now()) {
   return `${hex3.slice(0, 8)}-${hex3.slice(8, 12)}-${hex3.slice(12, 16)}-${hex3.slice(16, 20)}-${hex3.slice(20)}`;
 }
 
-// src/session-format-compat.ts
+// packages/plugin/src/session-format-compat.ts
 function normalizeLegacySessionGatewayValue(endpoint, value) {
   if (endpoint === "session/page") return normalizePage(value);
   if (endpoint === "session/follow") return normalizeFollowFrame(value);
@@ -81862,7 +81993,7 @@ function isEventSeq(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);
 }
 
-// src/remote-typert-gateway.ts
+// packages/plugin/src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
 var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
@@ -82247,12 +82378,12 @@ function normalizeThemeNamespace(namespace) {
   };
 }
 
-// src/workspace-transfer-limits.ts
+// packages/plugin/src/workspace-transfer-limits.ts
 function workspaceUploadMaxBytes(mode2) {
   return mode2 === "LAN" || mode2 === "P2P" ? 1024 * 1024 * 1024 : 20 * 1024 * 1024;
 }
 
-// src/remote-file-upload.ts
+// packages/plugin/src/remote-file-upload.ts
 import { constants } from "node:fs";
 import { open as open2 } from "node:fs/promises";
 import { randomUUID as randomUUID2 } from "node:crypto";
@@ -82309,10 +82440,10 @@ async function uploadRemoteFile(client, sessionId, localPath, name2, signal, ass
   }
 }
 
-// src/remote-session-tools.ts
+// packages/plugin/src/remote-session-tools.ts
 import { basename as basename2, isAbsolute as isAbsolute2 } from "node:path";
 
-// src/remote-file-download.ts
+// packages/plugin/src/remote-file-download.ts
 import { mkdir, mkdtemp, open as open3, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as join2 } from "node:path";
@@ -82370,7 +82501,7 @@ async function downloadRemoteFile(gateway, sessionId, path, signal, assertCurren
   }
 }
 
-// src/remote-session-tools.ts
+// packages/plugin/src/remote-session-tools.ts
 import { createHash } from "node:crypto";
 var id2 = external_exports.string().min(1).max(256);
 var MAX_REMOTE_WORKSPACES = 512;
@@ -82446,14 +82577,14 @@ var RemoteSessionTools = class {
         const generation = this.generation;
         const receipt = { ...target2(args), sessionId: args.sessionId, operationId: args.operationId, status: "pending" };
         let uploaderEntered = false;
-        const pending = Promise.resolve().then(() => this.connect(args.hostId, signal, async (remote, active) => {
+        const pending = Promise.resolve().then(() => this.connect(args.hostId, signal, async (remote, active2) => {
           const gateway = new RemoteTypertGateway2(remote.client);
           if (!remote.features.remoteGateway) fail4("HARNESS_SESSIONS_UNAVAILABLE");
-          await this.requireSession(gateway, args, active);
+          await this.requireSession(gateway, args, active2);
           const name2 = args.name ?? basename2(args.localPath);
           sessionToolInputs.remote_upload_file.parse({ ...args, name: name2 });
           uploaderEntered = true;
-          return uploadRemoteFile(remote.client, args.sessionId, args.localPath, name2, active, () => {
+          return uploadRemoteFile(remote.client, args.sessionId, args.localPath, name2, active2, () => {
             if (generation !== this.generation) fail4("REMOTE_AUTHORITY_CHANGED");
           });
         })).then((result) => Object.assign(receipt, result), () => {
@@ -82466,9 +82597,9 @@ var RemoteSessionTools = class {
       case "remote_download_file": {
         const args = sessionToolInputs[operation].parse(input4);
         const generation = this.generation;
-        return this.onHost(args, signal, async (gateway, active) => {
-          await this.requireSession(gateway, args, active);
-          return downloadRemoteFile(gateway, args.sessionId, args.path, active, () => {
+        return this.onHost(args, signal, async (gateway, active2) => {
+          await this.requireSession(gateway, args, active2);
+          return downloadRemoteFile(gateway, args.sessionId, args.path, active2, () => {
             if (generation !== this.generation) fail4("REMOTE_AUTHORITY_CHANGED");
           });
         });
@@ -82483,8 +82614,8 @@ var RemoteSessionTools = class {
       }
       case "remote_list_sessions": {
         const args = sessionToolInputs[operation].parse(input4);
-        return this.onHost(args, signal, async (gateway, active) => {
-          const rows = await this.catalog(gateway, args, active);
+        return this.onHost(args, signal, async (gateway, active2) => {
+          const rows = await this.catalog(gateway, args, active2);
           const sorted = rows.sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId));
           const items = sorted.slice(args.offset, args.offset + args.limit).map(summary);
           return {
@@ -82496,13 +82627,13 @@ var RemoteSessionTools = class {
       }
       case "remote_read_session": {
         const args = sessionToolInputs[operation].parse(input4);
-        return this.onHost(args, signal, async (gateway, active) => {
-          const row = await this.requireSession(gateway, args, active);
-          const page = args.cursor === void 0 ? await first(gateway, "session/follow", { request: { address: address(args.sessionId), maxMessages: args.maxMessages } }, active) : record7(await gateway.invoke({ namespace: "session", method: "page", args: { request: {
+        return this.onHost(args, signal, async (gateway, active2) => {
+          const row = await this.requireSession(gateway, args, active2);
+          const page = args.cursor === void 0 ? await first(gateway, "session/follow", { request: { address: address(args.sessionId), maxMessages: args.maxMessages } }, active2) : record7(await gateway.invoke({ namespace: "session", method: "page", args: { request: {
             address: address(args.sessionId),
             ...args.cursor,
             maxMessages: args.maxMessages
-          } }, signal: active }));
+          } }, signal: active2 }));
           const throughSeq = args.cursor?.throughSeq ?? page.cursor;
           if (args.cursor === void 0 && page.type !== "snapshot") fail4("INVALID_SESSION_SNAPSHOT");
           const records = historyRecords(page);
@@ -82528,9 +82659,9 @@ var RemoteSessionTools = class {
     }
   }
   onHost(args, signal, query) {
-    return this.connect(args.hostId, signal, (remote, active) => {
+    return this.connect(args.hostId, signal, (remote, active2) => {
       if (!remote.features.remoteGateway) fail4("HARNESS_SESSIONS_UNAVAILABLE");
-      return query(new RemoteTypertGateway2(remote.client), active);
+      return query(new RemoteTypertGateway2(remote.client), active2);
     });
   }
   async requireWorkspace(gateway, args, signal) {
@@ -82544,9 +82675,10 @@ var RemoteSessionTools = class {
   async catalog(gateway, args, signal) {
     const found = await this.requireWorkspace(gateway, args, signal);
     const response = record7(await gateway.invoke({ namespace: "session", method: "list", args: { _request: {} }, signal }));
-    const rows = external_exports.array(rowSchema).max(MAX_REMOTE_SESSIONS).parse(response.items);
+    const rows = external_exports.array(rowSchema).parse(response.items);
     const allowed = new Set(found.sessionIds);
-    return rows.filter((row) => allowed.has(row.sessionId) && row.parentSessionId === void 0 && row.origin !== "subagent");
+    const owned = rows.filter((row) => allowed.has(row.sessionId) && row.parentSessionId === void 0 && row.origin !== "subagent");
+    return owned.length > MAX_REMOTE_SESSIONS ? owned.slice(0, MAX_REMOTE_SESSIONS) : owned;
   }
   async requireSession(gateway, args, signal) {
     const row = (await this.catalog(gateway, args, signal)).find((row2) => row2.sessionId === args.sessionId);
@@ -82579,10 +82711,10 @@ var RemoteSessionTools = class {
     const entry = { fingerprint: fingerprint3, receipt, pending: void 0 };
     entry.pending = Promise.resolve().then(async () => {
       try {
-        await this.onHost(args, signal, async (gateway, active) => {
-          if (operation === "remote_create_session") await this.requireWorkspace(gateway, args, active);
-          else await this.requireSession(gateway, args, active);
-          active.throwIfAborted();
+        await this.onHost(args, signal, async (gateway, active2) => {
+          if (operation === "remote_create_session") await this.requireWorkspace(gateway, args, active2);
+          else await this.requireSession(gateway, args, active2);
+          active2.throwIfAborted();
           const endpoint = operation === "remote_create_session" ? "session/create" : operation === "remote_send_message" ? "session/prompt" : "session/cancel";
           const request = operation === "remote_create_session" ? { workspaceId: args.workspaceId } : operation === "remote_send_message" ? {
             sessionId: args.sessionId,
@@ -82591,7 +82723,7 @@ var RemoteSessionTools = class {
             content: [{ type: "text", text: args.message }]
           } : { sessionId: args.sessionId };
           dispatched = true;
-          const result = await gateway.dispatch(endpoint, { args: { request } }, active);
+          const result = await gateway.dispatch(endpoint, { args: { request } }, active2);
           if (!result.ok) {
             entry.receipt = { ...receipt, status: "rejected" };
             return;
@@ -82620,7 +82752,7 @@ var RemoteSessionTools = class {
     const keys = args.targets.map((item) => JSON.stringify(item));
     if (new Set(keys).size !== keys.length) fail4("DUPLICATE_WAIT_TARGET");
     const stop = new AbortController();
-    const active = AbortSignal.any([signal, stop.signal]);
+    const active2 = AbortSignal.any([signal, stop.signal]);
     const states = args.targets.map((item) => ({ ...item, status: "unknown" }));
     let timedOut = false;
     let timer2;
@@ -82630,7 +82762,7 @@ var RemoteSessionTools = class {
     }, args.timeoutMs);
     const workers = args.targets.map(async (item, index) => {
       try {
-        await this.onHost(item, active, async (gateway, current) => {
+        await this.onHost(item, active2, async (gateway, current) => {
           const row = await this.requireSession(gateway, item, current);
           const source = await gateway.open("session/follow", { args: { request: { address: address(item.sessionId), maxMessages: 20 } } }, current);
           const iterator = source[Symbol.asyncIterator]();
@@ -82657,7 +82789,7 @@ var RemoteSessionTools = class {
           }
         });
       } catch {
-        if (!active.aborted) states[index].status = "unavailable";
+        if (!active2.aborted) states[index].status = "unavailable";
       }
     });
     try {
@@ -82781,17 +82913,20 @@ var ObservedState = class {
   }
 };
 
-// src/server-api.ts
+// packages/plugin/src/server-api.ts
 import { platform } from "node:os";
 
-// src/server-credentials.ts
+// packages/plugin/src/server-credentials.ts
 import { chmod, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
 import { dirname as dirname2, join as join3 } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
   deviceId: external_exports.string().min(1),
-  authorizationMethod: external_exports.enum(["account", "host_registration_code", "owned_device"]),
+  authorizationMethod: external_exports.enum(["account", "host_registration_code", "owned_device", "device_pairing"]),
+  accountKind: external_exports.enum(["standard", "device_only"]).optional(),
+  pairingRestricted: external_exports.boolean().optional(),
+  inboundOnly: external_exports.boolean().optional(),
   account: external_exports.string().min(1).max(254).optional(),
   accessToken: external_exports.string().min(16),
   accessTokenExpiresAt: external_exports.number().int().positive(),
@@ -82827,6 +82962,15 @@ var ServerCredentialStore = class {
       await rm2(lock, { recursive: true });
     }
   }
+  async pairingHostOnly() {
+    const policy = await readPrivateJson(join3(dirname2(this.path), "pairing-host-only.json"));
+    if (policy === void 0) return false;
+    external_exports.object({ hostOnly: external_exports.literal(true) }).strict().parse(policy);
+    return true;
+  }
+  async restrictPairingHostOnly() {
+    await atomicWritePrivate(join3(dirname2(this.path), "pairing-host-only.json"), '{"hostOnly":true}');
+  }
   async load(serverUrl, deviceId) {
     if (!await exists(this.path)) return void 0;
     await assertPrivateMode(this.path);
@@ -82840,7 +82984,7 @@ var ServerCredentialStore = class {
   }
   async save(credentials) {
     const record11 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
-    await atomicWrite(this.path, `${JSON.stringify(record11, null, 2)}
+    await atomicWritePrivate(this.path, `${JSON.stringify(record11, null, 2)}
 `);
     return record11;
   }
@@ -82857,7 +83001,7 @@ var ServerCredentialsBusyError = class extends Error {
     super("Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.");
   }
 };
-async function atomicWrite(path, contents) {
+async function atomicWritePrivate(path, contents) {
   await mkdir2(dirname2(path), { recursive: true, mode: 448 });
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
   await writeFile(temporary, contents, { encoding: "utf8", mode: 384, flag: "wx" });
@@ -82882,8 +83026,13 @@ async function exists(path) {
 function safeMessage(error62) {
   return error62 instanceof Error ? error62.message : "invalid credential data";
 }
+async function readPrivateJson(path) {
+  if (!await exists(path)) return void 0;
+  await assertPrivateMode(path);
+  return JSON.parse(await readFile2(path, "utf8"));
+}
 
-// src/config.ts
+// packages/plugin/src/config.ts
 import { hostname as hostname3 } from "node:os";
 
 // node_modules/@deepseek-ai/cosmokit/lib/index.js
@@ -83752,7 +83901,7 @@ defineMethod("transform", [
   "preserve"
 ], ({ inner }, isInner) => inner.toString(isInner));
 
-// src/config.ts
+// packages/plugin/src/config.ts
 var DEFAULT_REMOTE_SERVER_URL = "https://dsh.r2049.cn";
 var entryConfigSchema = Schema.object({
   enabled: Schema.boolean(),
@@ -83885,8 +84034,15 @@ function resolveConfig(input4 = {}, env = process.env) {
   };
 }
 var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+function isPrivateIpv6(hostname6) {
+  const host = (hostname6.startsWith("[") && hostname6.endsWith("]") ? hostname6.slice(1, -1) : hostname6).toLowerCase();
+  if (!host.includes(":") || !/^[0-9a-f:]+$/.test(host)) return false;
+  if (host === "::1") return true;
+  return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
+}
 function isPrivateNetworkHostname(hostname6) {
   if (LOCAL_HOSTS.has(hostname6)) return true;
+  if (isPrivateIpv6(hostname6)) return true;
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname6);
   if (match === null) return false;
   const octets = match.slice(1).map(Number);
@@ -83912,10 +84068,10 @@ function normalizeServerUrl(value) {
   return url2.origin;
 }
 
-// src/version.ts
-var PLUGIN_VERSION = "0.6.3";
+// packages/plugin/src/version.ts
+var PLUGIN_VERSION = "0.6.4";
 
-// src/server-api.ts
+// packages/plugin/src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 var HostServerApi = class {
   constructor(serverUrl, store, fetchImplementation = fetch, role2 = "host") {
@@ -83925,6 +84081,7 @@ var HostServerApi = class {
     this.baseUrl = normalizeServerUrl(serverUrl);
   }
   baseUrl;
+  hostOnly = false;
   identity;
   credentials;
   credentialsPromise;
@@ -83939,6 +84096,38 @@ var HostServerApi = class {
   /** End this runtime's HTTP requests, including authentication and response bodies. */
   close() {
     this.lifetime.abort(new ServerApiError("CONNECTION_CLOSED", "The Server API has been closed.", false));
+  }
+  pairingHostOnly() {
+    return this.hostOnly;
+  }
+  async loadStoredPolicy() {
+    this.hostOnly = this.role === "host" && (await this.store.pairingHostOnly() || (await this.store.load(this.baseUrl, this.requireIdentity().deviceId))?.pairingRestricted === true);
+  }
+  async adoptPairing(result) {
+    const identity3 = this.requireIdentity();
+    if (this.role !== "host" || result.device.role !== "host" || result.device.deviceId !== identity3.deviceId || result.device.identityKey !== identity3.publicKey)
+      throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Pairing identity mismatch.", false);
+    if (result.pairingRestricted) {
+      if (!result.inboundOnly) throw new ServerApiError("DEVICE_SCOPE_REQUIRED", "Paired Host must remain inbound only.", false);
+      this.hostOnly = true;
+      await this.store.restrictPairingHostOnly();
+    }
+    this.credentials = await this.withRefreshLock(async () => {
+      const existing = await this.store.load(this.baseUrl, identity3.deviceId);
+      if (existing?.account !== void 0 && existing.account !== result.account)
+        throw new ServerApiError("PAIRING_ACCOUNT_CONFLICT", "Pairing cannot replace the current account.", false);
+      if (existing !== void 0 && existing.refreshTokenExpiresAt > Date.now() + 3e4) return existing;
+      return this.store.save({
+        serverUrl: this.baseUrl,
+        deviceId: identity3.deviceId,
+        authorizationMethod: "device_pairing",
+        account: result.account,
+        accountKind: result.accountKind,
+        pairingRestricted: result.pairingRestricted,
+        inboundOnly: result.inboundOnly,
+        ...validateTokens(result.tokens)
+      });
+    });
   }
   currentAuthorization() {
     if (this.credentials === void 0) return void 0;
@@ -84024,7 +84213,7 @@ var HostServerApi = class {
     const value = requireRecord(body, "OAuth providers");
     if (!Array.isArray(value.items)) throw invalidOAuthProviders();
     const ids = /* @__PURE__ */ new Set();
-    return value.items.map((item) => {
+    const providers = value.items.map((item) => {
       const provider = requireRecord(item, "OAuth provider");
       if (typeof provider.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id) || ids.has(provider.id) || typeof provider.displayName !== "string" || !provider.displayName.trim() || provider.displayName.length > 128 || TERMINAL_CONTROL_CHARACTERS.test(provider.displayName) || !isOAuthEntryPath(provider.startUrl) || provider.qrStartUrl != null && !isOAuthEntryPath(provider.qrStartUrl)) throw invalidOAuthProviders();
       ids.add(provider.id);
@@ -84035,6 +84224,11 @@ var HostServerApi = class {
         ...typeof provider.qrStartUrl === "string" ? { qrStartUrl: provider.qrStartUrl } : {}
       };
     });
+    const capabilities = value.capabilities;
+    if (typeof capabilities === "object" && capabilities !== null && capabilities.devicePairing === "dsh-pairing-v1") {
+      providers.push({ id: "dsh-go-pairing-v1", displayName: "DSH-Go", startUrl: "/api/v1/device-pairing", devicePairing: true });
+    }
+    return providers;
   }
   async startOAuthQrLogin(provider = "zhihu") {
     const entry = (await this.oauthProviders()).find((item) => item.id === provider);
@@ -84176,10 +84370,7 @@ var HostServerApi = class {
       throw error62;
     }
     return this.store.save({
-      serverUrl: this.baseUrl,
-      deviceId: identity3.deviceId,
-      authorizationMethod: stored.authorizationMethod,
-      ...stored.account === void 0 ? {} : { account: stored.account },
+      ...stored,
       ...validateTokens(tokens)
     });
   }
@@ -84493,7 +84684,7 @@ function requireRecord(value, name2) {
   return value;
 }
 
-// src/terminal-carrier-compat.ts
+// packages/plugin/src/terminal-carrier-compat.ts
 var identity2 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
 var attachmentArgs = external_exports.object({ agentId: identity2, id: identity2, attachmentId: identity2 }).strict();
 var dimensions = { cols: external_exports.number().int().min(1).max(1e3), rows: external_exports.number().int().min(1).max(1e3) };
@@ -84717,7 +84908,7 @@ function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/typert-gateway-switch.ts
+// packages/plugin/src/typert-gateway-switch.ts
 var REMOTE_COMMAND_METHODS = ["execute", "list"];
 var LOCAL_ONLY_NAMESPACES = /* @__PURE__ */ new Set(["dynamicCordisRunner"]);
 var ALL_REMOTE_COMMANDS = { execute: true, list: true };
@@ -84955,11 +85146,11 @@ function normalizeTerminalEnvironment(endpoint, value) {
   return { ...value, maxBufferedBytes: 256 * 1024 };
 }
 
-// src/werift-rtc.ts
+// packages/plugin/src/werift-rtc.ts
 import { createSocket as createSocket4 } from "node:dgram";
 import { networkInterfaces as networkInterfaces2 } from "node:os";
 
-// src/native-rtc-helper.ts
+// packages/plugin/src/native-rtc-helper.ts
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { delimiter, dirname as dirname3, join as join4 } from "node:path";
@@ -85034,10 +85225,10 @@ function addCandidate(candidates, value) {
   candidates.push(value);
 }
 function nvmNodeCandidates() {
-  const root = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
-  if (root === "" || !existsSync(root)) return [];
+  const root2 = join4(process.env.HOME ?? "", ".nvm", "versions", "node");
+  if (root2 === "" || !existsSync(root2)) return [];
   try {
-    return readdirSync(root).map((version2) => join4(root, version2, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
+    return readdirSync(root2).map((version2) => join4(root2, version2, "bin", process.platform === "win32" ? "node.exe" : "node")).sort((left, right) => right.localeCompare(left, "en", { numeric: true }));
   } catch {
     return [];
   }
@@ -85485,7 +85676,7 @@ process.stdin.on('end', () => {
 })
 `;
 
-// src/werift-rtc.ts
+// packages/plugin/src/werift-rtc.ts
 var cachedFactory;
 var cachedWerift;
 var cachedNativeFactory;
@@ -86028,7 +86219,7 @@ function isPrivate(ip) {
   return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
 }
 
-// src/client-runtime.ts
+// packages/plugin/src/client-runtime.ts
 var ClientModeRuntime = class {
   constructor(config2, identities, server, typertGateway, logger2, host, rtcFactoryProvider = loadNodeRtcFactory) {
     this.config = config2;
@@ -86182,6 +86373,10 @@ var ClientModeRuntime = class {
   }
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
+    if (this.host?.hostStatus().pairingHostOnly) {
+      this.gatewaySwitch.install();
+      return;
+    }
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
     this.server.bindIdentity(this.identity);
     this.gatewaySwitch.install();
@@ -86323,6 +86518,7 @@ var ClientModeRuntime = class {
    */
   assertHostAuthorizationForDeviceDiscovery() {
     const status2 = this.host?.hostStatus();
+    if (status2?.pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
     if (status2 === void 0 || status2.error === void 0 || !HOST_AUTHORIZATION_ERRORS.has(status2.error)) return;
     const message = status2.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
     throw new ClientModeError(status2.error, message);
@@ -86362,9 +86558,16 @@ var ClientModeRuntime = class {
   async clearClientAuthorization() {
     const cleanup = this.leaveRemote();
     this.codexOpenedSessions.clear();
+    if (this.identity === void 0) {
+      await Promise.all([cleanup, this.server.clearAuthorization()]);
+      return;
+    }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()]);
-    this.identity = await this.identities.reset(this.config.deviceName);
-    this.server.bindIdentity(this.identity);
+    if (this.host?.hostStatus().pairingHostOnly) this.identity = void 0;
+    else {
+      this.identity = await this.identities.reset(this.config.deviceName);
+      this.server.bindIdentity(this.identity);
+    }
     const failure5 = results.find((result) => result.status === "rejected");
     if (failure5?.status === "rejected") throw failure5.reason;
   }
@@ -86869,6 +87072,7 @@ var ClientModeRuntime = class {
     }
   }
   requireIdentity() {
+    if (this.host?.hostStatus().pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
     return this.identity;
   }
@@ -86915,13 +87119,63 @@ var ClientModeRuntime = class {
   }
 };
 
-// src/control-runtime.ts
+// packages/plugin/src/control-runtime.ts
 import { hostname as hostname4 } from "node:os";
 import { execFileSync as execFileSync2 } from "node:child_process";
 
-// src/identity-store.ts
+// packages/plugin/src/pairing-contract.ts
+var pairingDeviceSchema = external_exports.object({
+  deviceId: external_exports.string().min(1).max(128),
+  name: external_exports.string().max(128),
+  role: external_exports.enum(["host", "client"]),
+  platform: external_exports.string().max(32),
+  identityKey: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  clientVersion: external_exports.string().nullable().optional(),
+  harnessVersion: external_exports.string().nullable().optional()
+}).strict();
+var pairingCreatedSchema = external_exports.object({
+  v: external_exports.literal(1),
+  sessionId: external_exports.string().uuid(),
+  expiresAt: external_exports.number().int().positive(),
+  serverPublicKey: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  scanSecret: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  host: pairingDeviceSchema
+}).strict();
+var pairingCredentialsSchema = external_exports.object({
+  account: external_exports.string().min(1).max(254),
+  accountKind: external_exports.enum(["standard", "device_only"]),
+  device: pairingDeviceSchema,
+  inboundOnly: external_exports.boolean(),
+  pairingRestricted: external_exports.boolean(),
+  tokens: deviceTokenPairSchema
+}).strict();
+var pairingStatusSchema = external_exports.object({
+  v: external_exports.literal(1),
+  sessionId: external_exports.string().uuid(),
+  state: external_exports.enum(["created", "claimed", "approved", "completed", "failed", "cancelled", "expired"]),
+  expiresAt: external_exports.number().int().positive(),
+  recoverUntil: external_exports.number().int().positive(),
+  failureReason: external_exports.string().nullable(),
+  attemptConsumed: external_exports.boolean(),
+  submissionId: external_exports.string().nullable(),
+  host: pairingDeviceSchema,
+  mobile: pairingDeviceSchema.nullable(),
+  credentials: pairingCredentialsSchema.nullable()
+}).strict();
+var savedPairingSchema = external_exports.object({
+  serverUrl: external_exports.string().url(),
+  deviceId: external_exports.string(),
+  session: pairingCreatedSchema,
+  qrFormat: external_exports.literal("fragment-ticket-v1").optional(),
+  state: pairingStatusSchema.shape.state,
+  mobile: pairingDeviceSchema.optional(),
+  submission: external_exports.string().optional(),
+  localSaved: external_exports.boolean()
+}).strict();
+
+// packages/plugin/src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -86945,35 +87199,95 @@ var trustedPeersSchema = external_exports.object({
   peers: external_exports.array(trustedPeerSchema)
 }).strict();
 var IdentityInvalidError = class extends Error {
-  code = "IDENTITY_INVALID";
+  constructor(message, code = "IDENTITY_INVALID") {
+    super(message);
+    this.code = code;
+  }
 };
 var IdentityStore = class {
-  directory;
+  storageDirectory;
+  get directory() {
+    return this.storageDirectory;
+  }
   identity;
   peers = /* @__PURE__ */ new Map();
+  peerSaveChain = Promise.resolve();
+  defaultOptions;
+  role;
   constructor(options = {}) {
     const env = options.env ?? process.env;
     const dshHome = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    this.directory = options.directory ?? join5(dshHome, "remote");
+    this.storageDirectory = options.directory ?? join5(dshHome, "ds-harness-remote");
+    this.defaultOptions = options.directory === void 0 ? options : void 0;
+    this.role = options.role;
   }
   async loadOrCreate(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, () => this.loadOrCreateLocked(deviceName));
+  }
+  /**
+   * Read and verify an existing identity without creating files, mutating
+   * device metadata, or triggering client self-heal. Returns `undefined` when
+   * neither identity file exists yet.
+   */
+  async loadExisting() {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
+    const devicePath = join5(this.directory, "device.json");
+    const keyPath = join5(this.directory, "device.key");
+    const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    if (!hasDevice && !hasKey) return void 0;
+    if (hasDevice !== hasKey) {
+      throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
+    }
+    await assertPrivateMode2(keyPath);
+    try {
+      const record11 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
+      const privateKey = (await readFile3(keyPath, "utf8")).trim();
+      const regenerated = generateKeyPair(fromBase64Url2(privateKey));
+      if (regenerated.publicKey !== record11.publicKey) {
+        throw new IdentityInvalidError("device public and private keys do not match");
+      }
+      return { ...record11, privateKey, fingerprint: fingerprint2(record11.publicKey) };
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError) throw error62;
+      throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error62)}`);
+    }
   }
   async loadOrCreateLocked(deviceName) {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
+    const isClientRole = this.role === "client" || this.role === void 0 && isScopedClientDirectory(this.directory);
     if (hasDevice !== hasKey) {
+      if (isClientRole && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
+      }
       throw new IdentityInvalidError("device identity is incomplete; repair it explicitly before reconnecting");
     }
     if (!hasDevice) {
-      const keys = generateKeyPair();
-      const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-      await atomicTextWrite(keyPath, `${keys.privateKey}
-`, 384);
-      await atomicJsonWrite(devicePath, record11, 384);
+      return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
     }
+    let identity3;
+    try {
+      identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError && isClientRole && await canAutoHealClientIdentity(this.directory)) {
+        await removeIdentityRecords(this.directory);
+        return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
+      }
+      throw error62;
+    }
+    await removeStaleTemporaries(this.directory);
+    return identity3;
+  }
+  async createAndReadIdentityLocked(devicePath, keyPath, deviceName) {
+    const keys = generateKeyPair();
+    const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+    await atomicTextWrite(keyPath, `${keys.privateKey}
+`, 384);
+    await atomicJsonWrite(devicePath, record11, 384);
     const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
     await removeStaleTemporaries(this.directory);
     return identity3;
@@ -87010,8 +87324,10 @@ var IdentityStore = class {
    * lock another process holds — and cannot leave itself unprotected either.
    */
   async reset(deviceName) {
+    if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, async () => {
+      await this.peerSaveChain.catch(() => void 0);
       this.identity = void 0;
       this.peers.clear();
       await removeIdentityRecords(this.directory);
@@ -87060,17 +87376,283 @@ var IdentityStore = class {
     }
     this.peers = peers;
   }
-  async savePeers() {
-    await atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
-      schemaVersion: 1,
-      peers: [...this.peers.values()]
-    }, 384);
+  savePeers() {
+    const next = this.peerSaveChain.catch(() => void 0).then(
+      () => atomicJsonWrite(join5(this.directory, "trusted-peers.json"), {
+        schemaVersion: 1,
+        peers: [...this.peers.values()]
+      }, 384)
+    );
+    this.peerSaveChain = next;
+    return next;
   }
 };
-function serverStorageDirectory(root, serverUrl, role2) {
+var statIdSchema = external_exports.union([
+  external_exports.number().int().nonnegative().transform((value) => BigInt(value)),
+  external_exports.string().regex(/^(?:0|[1-9]\d{0,19})$/).transform((value) => BigInt(value))
+]);
+var legacyRootPinSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  dev: statIdSchema,
+  ino: statIdSchema
+}).strict();
+function serializeStatId(value) {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
+}
+async function prepareDefaultIdentityDirectory(options = {}) {
+  if (options.directory !== void 0) return options.directory;
+  const env = options.env ?? process.env;
+  const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+  const source = join5(home, "remote");
+  const target3 = join5(home, "ds-harness-remote");
+  await mkdir3(home, { recursive: true, mode: 448 });
+  const lockDirectory = join5(home, ".ds-harness-remote-migration");
+  await storageDirectoryStat(lockDirectory);
+  await ensureDirectory(lockDirectory);
+  return withIdentityLock(lockDirectory, async () => {
+    const old = await storageDirectoryStat(source);
+    const current = await storageDirectoryStat(target3);
+    const pinPath = join5(lockDirectory, "legacy-root.json");
+    const pinMetadata = await lstat(pinPath).catch((error62) => {
+      if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+      throw error62;
+    });
+    let pin;
+    if (pinMetadata !== void 0) {
+      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
+      }
+      await assertPrivateMode2(pinPath);
+      try {
+        pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+      } catch {
+        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
+      }
+    }
+    if (old !== void 0) {
+      if (current !== void 0) {
+        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
+      }
+      await assertOwnedRemoteStorage(source);
+      await assertStorageIdle(source);
+      if (pin !== void 0) {
+        if (pin.dev !== old.dev || pin.ino !== old.ino) {
+          throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
+        }
+        return source;
+      }
+      try {
+        await rename2(source, target3);
+      } catch (error62) {
+        if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
+        const remaining = await storageDirectoryStat(source);
+        if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
+        await assertOwnedRemoteStorage(source);
+        await assertStorageIdle(source);
+        await atomicJsonWrite(pinPath, {
+          schemaVersion: 1,
+          dev: serializeStatId(old.dev),
+          ino: serializeStatId(old.ino)
+        }, 384);
+        return source;
+      }
+    } else if (pin !== void 0) {
+      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
+      await assertOwnedRemoteStorage(target3);
+    }
+    return target3;
+  });
+}
+async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options = {}) {
+  const createStore = options.createIdentityStore ?? ((storeOptions) => new IdentityStore(storeOptions));
+  const resetRolesInRoot = async (root2) => {
+    if (serverUrl === void 0) {
+      if (!roles.includes("host")) return;
+      const identities = createStore({ directory: root2, env: options.env, homeDirectory: options.homeDirectory, role: "host" });
+      await identities.reset(deviceName);
+      await new ServerCredentialStore(root2).clear();
+      return;
+    }
+    for (const role2 of roles) {
+      const directory = serverStorageDirectory(root2, serverUrl, role2);
+      const identities = createStore({ directory, env: options.env, homeDirectory: options.homeDirectory, role: role2 });
+      await identities.reset(deviceName);
+      await new ServerCredentialStore(directory).clear();
+    }
+  };
+  if (options.directory !== void 0) {
+    await resetRolesInRoot(options.directory);
+    return options.directory;
+  }
+  try {
+    const root2 = await prepareDefaultIdentityDirectory(options);
+    await resetRolesInRoot(root2);
+    return root2;
+  } catch (error62) {
+    if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") {
+      throw error62;
+    }
+    const env = options.env ?? process.env;
+    const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
+    const source = join5(home, "remote");
+    const target3 = join5(home, "ds-harness-remote");
+    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target3)]);
+    if (old === void 0 || current !== void 0) throw error62;
+    await assertStorageIdle(source);
+    await resetRolesInRoot(source);
+    return prepareDefaultIdentityDirectory(options);
+  }
+}
+async function assertOwnedRemoteStorage(root2) {
+  let failureCode = "STORAGE_CONFLICT";
+  const rejected = (code = failureCode) => new IdentityInvalidError(
+    "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+    code
+  );
+  const identityFiles = /* @__PURE__ */ new Set([
+    "device.json",
+    "device.key",
+    "trusted-peers.json",
+    "server-credentials.json",
+    "host-pairing.json",
+    "pairing-host-only.json"
+  ]);
+  let identities = 0;
+  const checkIdentity = async (directory, scope2, role2) => {
+    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
+    for (const entry of entries) {
+      const allowedFile = identityFiles.has(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
+      if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
+      const metadata = await lstat(join5(directory, entry.name));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+        throw rejected("STORAGE_CONFLICT");
+      }
+    }
+    const names = new Set(entries.map((entry) => entry.name));
+    if (!names.has("device.json") && !names.has("device.key")) throw rejected("STORAGE_CONFLICT");
+    failureCode = "IDENTITY_INVALID";
+    if (!names.has("device.json") || !names.has("device.key")) {
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
+      throw rejected("IDENTITY_INVALID");
+    }
+    await assertPrivateMode2(join5(directory, "device.key"));
+    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
+      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+        identities++;
+        return;
+      }
+      throw rejected("IDENTITY_INVALID");
+    }
+    if (names.has("trusted-peers.json")) {
+      const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+      const ids = /* @__PURE__ */ new Set();
+      for (const peer of peers) {
+        if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected("IDENTITY_INVALID");
+        ids.add(peer.deviceId);
+      }
+    }
+    if (names.has("server-credentials.json")) {
+      const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
+      if (typeof raw.serverUrl !== "string") throw rejected("IDENTITY_INVALID");
+      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record11.deviceId);
+      if (credentials === void 0) throw rejected("IDENTITY_INVALID");
+      const origin = new URL(credentials.serverUrl);
+      if (!["http:", "https:"].includes(origin.protocol)) throw rejected("IDENTITY_INVALID");
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+        throw rejected("STORAGE_CONFLICT");
+      }
+    }
+    if (names.has("pairing-host-only.json")) {
+      await assertPrivateMode2(join5(directory, "pairing-host-only.json"));
+      external_exports.object({ hostOnly: external_exports.literal(true) }).strict().parse(JSON.parse(await readFile3(join5(directory, "pairing-host-only.json"), "utf8")));
+    }
+    if (names.has("host-pairing.json")) {
+      await assertPrivateMode2(join5(directory, "host-pairing.json"));
+      const pairing = savedPairingSchema.parse(JSON.parse(await readFile3(join5(directory, "host-pairing.json"), "utf8")));
+      if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
+      const origin = new URL(pairing.serverUrl);
+      if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected("IDENTITY_INVALID");
+      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+        throw rejected("STORAGE_CONFLICT");
+      }
+    }
+    identities++;
+  };
+  try {
+    const entries = await readdir(root2, { withFileTypes: true });
+    const flat = entries.filter((entry) => entry.name !== "servers");
+    if (flat.length > 0) {
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name))) throw rejected("STORAGE_CONFLICT");
+      await checkIdentity(root2);
+    }
+    const servers = entries.find((entry) => entry.name === "servers");
+    if (servers !== void 0) {
+      if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
+      for (const scope2 of await readdir(join5(root2, "servers"), { withFileTypes: true })) {
+        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
+        for (const role2 of await readdir(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
+          if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
+          await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
+        }
+      }
+    }
+    if (identities === 0) throw rejected(failureCode);
+  } catch (error62) {
+    if (error62 instanceof IdentityInvalidError && error62.message === "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.") {
+      throw error62;
+    }
+    throw rejected(failureCode);
+  }
+}
+async function isRepairableLegacyClientDirectory(directory, names) {
+  if (names.has("server-credentials.json") || names.has("host-pairing.json") || names.has("pairing-host-only.json")) return false;
+  if (names.has("trusted-peers.json")) {
+    const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+    if (peers.length > 0) return false;
+  }
+  if (names.has("device.json")) {
+    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+    if (fromBase64Url2(record11.publicKey).byteLength !== 32) return false;
+  }
+  if (names.has("device.key")) {
+    await assertPrivateMode2(join5(directory, "device.key"));
+    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+    generateKeyPair(fromBase64Url2(key));
+  }
+  return true;
+}
+async function storageDirectoryStat(path) {
+  try {
+    const entry = await lstat(path, { bigint: true });
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.", "STORAGE_CONFLICT");
+    }
+    return entry;
+  } catch (error62) {
+    if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+    throw error62;
+  }
+}
+async function assertStorageIdle(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+      throw new IdentityInvalidError(
+        "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+        entry.isSymbolicLink() ? "STORAGE_CONFLICT" : "IDENTITY_LOCKED"
+      );
+    }
+    if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
+  }
+}
+function serverStorageDirectory(root2, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
   const scope2 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
-  return join5(root, "servers", scope2, role2);
+  return join5(root2, "servers", scope2, role2);
 }
 function fingerprint2(publicKey) {
   const compact = createHash5("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -87128,7 +87710,10 @@ async function withIdentityLock(directory, operation) {
       if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
     if (Date.now() >= deadline) {
-      throw new IdentityInvalidError("device identity is locked by another process; stop other DSH instances and retry");
+      throw new IdentityInvalidError(
+        "device identity is locked by another process; stop other DSH instances and retry",
+        "IDENTITY_LOCKED"
+      );
     }
     await new Promise((resolve9) => setTimeout(resolve9, delay));
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
@@ -87183,6 +87768,32 @@ function ownerExited(record11) {
     return isNodeError(error62) && error62.code === "ESRCH";
   }
 }
+function isScopedClientDirectory(directory) {
+  return /[\\/]servers[\\/][a-f0-9]{24}[\\/]client$/.test(directory);
+}
+async function canAutoHealClientIdentity(directory) {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (isLockArtifact(entry.name)) continue;
+      const entryPath = join5(directory, entry.name);
+      const metadata = await lstat(entryPath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
+      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name)) {
+        continue;
+      }
+      if (entry.name === "trusted-peers.json") {
+        const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(entryPath, "utf8")));
+        if (parsed.peers.length > 0) return false;
+        continue;
+      }
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function ensureDirectory(directory) {
   await mkdir3(directory, { recursive: true, mode: 448 });
   await chmod2(directory, 448);
@@ -87194,10 +87805,17 @@ async function removeIdentityRecords(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => !isLockArtifact(name2)).map((name2) => rm3(join5(directory, name2), { recursive: true, force: true })));
+  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 function isLockArtifact(name2) {
   return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
+}
+function isIdentityTempArtifact(name2) {
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
+}
+function isOwnedIdentityRecord(name2) {
+  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json") return true;
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.")) && name2.endsWith(".tmp");
 }
 async function removeStaleTemporaries(directory) {
   let entries;
@@ -87206,10 +87824,10 @@ async function removeStaleTemporaries(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => name2.startsWith("device.json.") || name2.startsWith("device.key.")).filter((name2) => name2.endsWith(".tmp")).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  await Promise.all(entries.filter((name2) => isIdentityTempArtifact(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
 
-// src/control-stream.ts
+// packages/plugin/src/control-stream.ts
 var STATUS_STREAM_SAMPLE_INTERVAL_MS = 1500;
 var STATUS_STREAM_HEARTBEAT_INTERVAL_MS = 15e3;
 var STATUS_STREAM_RETRY_MS = 3e3;
@@ -87352,14 +87970,14 @@ var ControlStatusStream = class {
   }
 };
 
-// src/codex/domain.ts
+// packages/plugin/src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readFileSync } from "node:fs";
+import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
-// src/codex/app-server.ts
+// packages/plugin/src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
 import { Buffer as Buffer2 } from "node:buffer";
 var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
@@ -87612,7 +88230,7 @@ function isRecord11(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/codex/method-policy.ts
+// packages/plugin/src/codex/method-policy.ts
 var id3 = external_exports.string().min(1).max(256);
 var cursor2 = external_exports.string().min(1).max(4096).nullable().optional();
 var textInput = external_exports.object({
@@ -87725,7 +88343,7 @@ function threadIdFromParams(params) {
   return typeof params.threadId === "string" ? params.threadId : void 0;
 }
 
-// src/compact-history.ts
+// packages/plugin/src/compact-history.ts
 var LIMIT = 512;
 var object2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var summary2 = (value) => {
@@ -87777,7 +88395,7 @@ function compactHistory(value) {
   return project(value);
 }
 
-// src/codex/history-preview.ts
+// packages/plugin/src/codex/history-preview.ts
 import { randomUUID as randomUUID12 } from "node:crypto";
 var object3 = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : {};
 var details = /* @__PURE__ */ new WeakMap();
@@ -87840,7 +88458,7 @@ async function previewCall(peer, input4, invoke) {
   return preview;
 }
 
-// src/codex/peer-bridge.ts
+// packages/plugin/src/codex/peer-bridge.ts
 import { Buffer as Buffer3 } from "node:buffer";
 var streamOpenSchema = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
@@ -88120,7 +88738,7 @@ function concatChunks(chunks, totalBytes) {
   return output2;
 }
 
-// src/codex/domain.ts
+// packages/plugin/src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
 var CODEX_PAGE_LIMIT2 = 100;
@@ -88952,7 +89570,7 @@ var CodexRemoteDomain = class {
           ...cursor3 === void 0 ? {} : { cursor: cursor3 }
         }));
         for (const project2 of result.data) {
-          const projectRoots = project2.roots.map((root) => root.path).filter((path) => isAbsolute3(path));
+          const projectRoots = project2.roots.map((root2) => root2.path).filter((path) => isAbsolute3(path));
           if (projectRoots.length === 0) continue;
           projectIds.add(project2.id);
           roots.push(...projectRoots);
@@ -89017,10 +89635,10 @@ var CodexRemoteDomain = class {
     } catch {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
-    for (const root of paths.values()) {
+    for (const root2 of paths.values()) {
       try {
-        if (!containsCodexPath(resolve2(root), lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
+        if (!containsCodexPath(resolve2(root2), lexicalCandidate)) continue;
+        const canonicalRoot = await realpath(root2);
         if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
       } catch {
       }
@@ -89088,11 +89706,11 @@ var CodexRemoteDomain = class {
     } catch {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
-    for (const root of authority.roots) {
+    for (const root2 of authority.roots) {
       try {
-        const lexicalRoot = resolve2(root);
+        const lexicalRoot = resolve2(root2);
         if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
-        const canonicalRoot = await realpath(root);
+        const canonicalRoot = await realpath(root2);
         if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
           return { path: lexicalCandidate, root: lexicalRoot, canonicalRoot };
         }
@@ -89104,7 +89722,7 @@ var CodexRemoteDomain = class {
   async listCodexWorkspacePaths() {
     const paths = /* @__PURE__ */ new Map();
     const authority = await this.readWorkspaceAuthority();
-    for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root);
+    for (const root2 of authority.roots) paths.set(normalizeCodexPathForCompare(root2), root2);
     return paths;
   }
 };
@@ -89134,7 +89752,14 @@ function findImageBlock(value, attachmentId) {
   return void 0;
 }
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir3()) {
-  if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
+  if (configured !== "codex") return [configured];
+  if (hostPlatform === "darwin") return macOSCodexBinaryCandidates(userHome);
+  if (hostPlatform === "win32") {
+    return [.../* @__PURE__ */ new Set([...windowsBundledCodexCandidates(userHome), configured])];
+  }
+  return [configured];
+}
+function macOSCodexBinaryCandidates(userHome) {
   const bundledCandidates = [
     "/Applications/ChatGPT.app",
     join6(userHome, "Applications", "ChatGPT.app")
@@ -89157,8 +89782,23 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     ...bundledCandidates,
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     join6(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    configured
+    "codex"
   ])];
+}
+function windowsBundledCodexCandidates(userHome) {
+  const localAppData = process.env.LOCALAPPDATA ?? join6(userHome, "AppData", "Local");
+  const binRoot = join6(localAppData, "OpenAI", "Codex", "bin");
+  try {
+    return readdirSync2(binRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(binRoot, entry.name, "codex.exe")).filter((candidate) => existsSync2(candidate)).map((candidate) => {
+      try {
+        return { candidate, mtime: statSync2(candidate).mtimeMs };
+      } catch {
+        return { candidate, mtime: 0 };
+      }
+    }).sort((left, right) => right.mtime - left.mtime).map((entry) => entry.candidate);
+  } catch {
+    return [];
+  }
 }
 function parseCallEnvelope(input4) {
   if (!isRecord13(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
@@ -89227,8 +89867,8 @@ function filterThreadListByWorkspaceAuthority(result, authority) {
 }
 function sanitizeProject(value) {
   if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
-  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+  const roots = Array.isArray(value.roots) ? value.roots.flatMap((root2) => {
+    const path = isRecord13(root2) && typeof root2.path === "string" && root2.path.length > 0 ? root2.path : void 0;
     return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -89262,21 +89902,21 @@ function isThreadAllowedByWorkspaceAuthority(thread, authority) {
   const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
   if (projectId !== void 0 && authority.projectIds.has(projectId)) return true;
   const cwd2 = typeof thread.cwd === "string" ? thread.cwd : void 0;
-  return cwd2 !== void 0 && authority.roots.some((root) => containsCodexPath(root, cwd2));
+  return cwd2 !== void 0 && authority.roots.some((root2) => containsCodexPath(root2, cwd2));
 }
-function containsCodexPath(root, candidate) {
-  const normalizedRoot = normalizeCodexPathForCompare(root);
+function containsCodexPath(root2, candidate) {
+  const normalizedRoot = normalizeCodexPathForCompare(root2);
   const normalizedCandidate = normalizeCodexPathForCompare(candidate);
   return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
 }
 function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
-function codexDirectoryCrumbs(root, path) {
-  const crumbs2 = [{ name: basename3(root) || root, path: root, hidden: false }];
-  const remainder = relative(root, path);
+function codexDirectoryCrumbs(root2, path) {
+  const crumbs2 = [{ name: basename3(root2) || root2, path: root2, hidden: false }];
+  const remainder = relative(root2, path);
   if (remainder === "") return crumbs2;
-  let current = root;
+  let current = root2;
   for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
     current = resolve2(current, segment);
     crumbs2.push({ name: segment, path: current, hidden: false });
@@ -89405,7 +90045,7 @@ function isUnmaterializedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === CODEX_THREAD_UNMATERIALIZED;
 }
 
-// src/acp/adapters/session-models.ts
+// packages/plugin/src/acp/adapters/session-models.ts
 var AcpSessionModelState = class {
   constructor(backend) {
     this.backend = backend;
@@ -89484,7 +90124,7 @@ function record8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/acp/adapters/cursor-process.ts
+// packages/plugin/src/acp/adapters/cursor-process.ts
 import { spawn as spawn3 } from "node:child_process";
 import { Buffer as Buffer4 } from "node:buffer";
 var ACP_REQUEST_TIMEOUT_MS = 6e4;
@@ -89804,7 +90444,7 @@ function isRecord14(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/acp/history-events.ts
+// packages/plugin/src/acp/history-events.ts
 function acpHistoryEvents(messages, sessionId, provider) {
   const events = [];
   const tools = /* @__PURE__ */ new Map();
@@ -89922,7 +90562,7 @@ function acpHistoryEvents(messages, sessionId, provider) {
   return events;
 }
 
-// src/acp/adapters/isolated-process.ts
+// packages/plugin/src/acp/adapters/isolated-process.ts
 var IsolatedAcpClient = class {
   constructor(binary, logger2, options = {}, factory = () => new CursorAcpClient(
     binary,
@@ -90201,15 +90841,15 @@ var IsolatedAcpClient = class {
   }
 };
 
-// src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
+// packages/plugin/src/workspace-bridge.ts
+import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
-// src/remote-terminal-controller.ts
+// packages/plugin/src/remote-terminal-controller.ts
 var import_headless = __toESM(require_xterm_headless(), 1);
 var import_addon_serialize = __toESM(require_addon_serialize(), 1);
 
-// src/remote-terminal-provider.ts
+// packages/plugin/src/remote-terminal-provider.ts
 import { spawn as spawn4 } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as constants3 } from "node:fs";
@@ -90354,7 +90994,7 @@ function subprocessTerminalSpawner(subprocess) {
   }, { shells: (signal) => discoverTerminalShells(subprocess, signal) });
 }
 
-// src/remote-terminal-controller.ts
+// packages/plugin/src/remote-terminal-controller.ts
 var MAX_INPUT_BYTES = 64 * 1024;
 var MAX_COLS = 240;
 var MAX_ROWS = 100;
@@ -90794,7 +91434,7 @@ function dimension(value, max) {
   return value;
 }
 
-// src/workspace-bridge.ts
+// packages/plugin/src/workspace-bridge.ts
 var MAX_READ_BYTES = 4 * 1024 * 1024;
 var WorkspaceBridgeState = class extends RemoteTerminalState {
 };
@@ -90875,17 +91515,17 @@ var WorkspaceBridge = class {
     this.ownedSubscribers.clear();
   }
   async fileCall(endpoint, sessionId, args, signal) {
-    const root = await this.rootFor(sessionId, signal);
+    const root2 = await this.rootFor(sessionId, signal);
     const path = typeof args.path === "string" ? args.path : ".";
     signal.throwIfAborted();
-    const target3 = await this.safePath(root, path, endpoint === "workspaceFiles/list");
+    const target3 = await this.safePath(root2, path, endpoint === "workspaceFiles/list");
     try {
       if (endpoint === "workspaceFiles/list") {
         const entries = await readdir3(target3, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
-          const info2 = await lstat(item);
+          const info2 = await lstat2(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
         }
@@ -90941,8 +91581,8 @@ var WorkspaceBridge = class {
     }
   }
   async watchChanges(sessionId, args, signal) {
-    const root = await this.rootFor(sessionId, signal);
-    const target3 = await this.safePath(root, typeof args.path === "string" ? args.path : ".", true);
+    const root2 = await this.rootFor(sessionId, signal);
+    const target3 = await this.safePath(root2, typeof args.path === "string" ? args.path : ".", true);
     const queue = new AsyncQueue();
     signal.throwIfAborted();
     const watcher = watch(target3, { recursive: false });
@@ -90971,23 +91611,23 @@ var WorkspaceBridge = class {
     const cwd2 = await this.resolveCwd(parsed.nativeId, signal);
     if (!cwd2) throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX thread has no available workspace.");
     try {
-      const root = await realpath2(cwd2);
-      const info = await stat4(root);
+      const root2 = await realpath2(cwd2);
+      const info = await stat4(root2);
       if (!info.isDirectory()) throw new Error();
-      return root;
+      return root2;
     } catch {
       throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX workspace is unavailable.");
     }
   }
-  async safePath(root, path, directory) {
-    const candidate = isAbsolute5(path) ? resolve3(path) : resolve3(root, path);
-    const rel = relative2(root, candidate);
+  async safePath(root2, path, directory) {
+    const candidate = isAbsolute5(path) ? resolve3(path) : resolve3(root2, path);
+    const rel = relative2(root2, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
-      const info = await lstat(candidate);
+      const info = await lstat2(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
-      const canonicalRel = relative2(root, canonical);
+      const canonicalRel = relative2(root2, canonical);
       if (canonicalRel.startsWith("..") || isAbsolute5(canonicalRel)) throw new Error();
       if (directory && !info.isDirectory()) throw new Error();
       return canonical;
@@ -91026,14 +91666,14 @@ function readLimit(args) {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES;
 }
 
-// src/codex/session-id.ts
+// packages/plugin/src/codex/session-id.ts
 function parseCodexSessionId(value) {
   if (typeof value !== "string") return void 0;
   const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
   return match === null ? void 0 : { sessionId: value, threadId: match[1] };
 }
 
-// src/terminal-policy.ts
+// packages/plugin/src/terminal-policy.ts
 var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/environment",
   "terminal/shells",
@@ -91110,7 +91750,7 @@ var TerminalPolicy = class _TerminalPolicy {
   }
 };
 
-// src/acp/workspace-tools.ts
+// packages/plugin/src/acp/workspace-tools.ts
 var AcpWorkspaceTools = class {
   constructor(bridge, terminal) {
     this.bridge = bridge;
@@ -91148,16 +91788,16 @@ var AcpWorkspaceTools = class {
   }
 };
 
-// src/acp/gateway.ts
+// packages/plugin/src/acp/gateway.ts
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
 import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
-// src/acp/adapters/claude-process.ts
+// packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
 
-// src/acp/adapters/claude-history.ts
+// packages/plugin/src/acp/adapters/claude-history.ts
 function claudeHistoryEvents(messages, sessionId, provider = "claude") {
   const events = [];
   const tools = /* @__PURE__ */ new Map();
@@ -91282,7 +91922,7 @@ function claudeHistoryEvents(messages, sessionId, provider = "claude") {
   return events;
 }
 
-// src/acp/adapters/claude-process.ts
+// packages/plugin/src/acp/adapters/claude-process.ts
 var ClaudeAcpClient = class extends CursorAcpClient {
   live = /* @__PURE__ */ new Map();
   loads = /* @__PURE__ */ new Map();
@@ -91405,7 +92045,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   }
 };
 
-// src/acp/adapters/hermes-process.ts
+// packages/plugin/src/acp/adapters/hermes-process.ts
 var HERMES_ACP_COMMAND = "hermes";
 var HERMES_ACP_ARGS = ["acp"];
 var HermesAcpClient = class extends ClaudeAcpClient {
@@ -91414,11 +92054,11 @@ var HermesAcpClient = class extends ClaudeAcpClient {
   }
 };
 
-// src/acp/adapters/pi-process.ts
+// packages/plugin/src/acp/adapters/pi-process.ts
 var PiAcpClient = class extends IsolatedAcpClient {
 };
 
-// src/acp/adapters/antigravity/models.ts
+// packages/plugin/src/acp/adapters/antigravity/models.ts
 import { execFile } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 var exec = promisify2(execFile);
@@ -91476,7 +92116,7 @@ function agySelectionArgs(catalog, modelId, effort) {
   };
 }
 
-// src/acp/adapters/antigravity/image-store.ts
+// packages/plugin/src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants4 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join9, basename as basename4 } from "node:path";
@@ -91492,21 +92132,21 @@ async function privateDirectory(path) {
   const info = await fs.lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink() || await fs.realpath(path) !== path || process.getuid && (info.uid !== process.getuid() || (info.mode & 63) !== 0)) throw new Error("Invalid AGY image cache directory.");
 }
-async function prepareAgyImageDirectory(root = AGY_IMAGE_ROOT) {
-  await privateDirectory(root);
-  return root;
+async function prepareAgyImageDirectory(root2 = AGY_IMAGE_ROOT) {
+  await privateDirectory(root2);
+  return root2;
 }
-function stageAgyImages(sessionId, images, root = AGY_IMAGE_ROOT) {
-  const result = stagingChain.then(() => stageImages(sessionId, images, root));
+function stageAgyImages(sessionId, images, root2 = AGY_IMAGE_ROOT) {
+  const result = stagingChain.then(() => stageImages(sessionId, images, root2));
   stagingChain = result.then(() => void 0, () => void 0);
   return result;
 }
-async function stageImages(sessionId, images, root) {
-  await prepareAgyImageDirectory(root);
+async function stageImages(sessionId, images, root2) {
+  await prepareAgyImageDirectory(root2);
   let total = 0;
-  for (const entry of await fs.readdir(root)) {
+  for (const entry of await fs.readdir(root2)) {
     if (!/^[0-9a-f]{64}$/.test(entry)) continue;
-    const dir = join9(root, entry);
+    const dir = join9(root2, entry);
     const info = await fs.lstat(dir);
     if (!info.isDirectory() || info.isSymbolicLink()) continue;
     for (const name2 of await fs.readdir(dir)) {
@@ -91520,7 +92160,7 @@ async function stageImages(sessionId, images, root) {
   }
   const parsed = images.map(parseAcpImage);
   if (total + parsed.reduce((sum, image) => sum + imageByteLength(image.data), 0) > 512 * 1024 * 1024) throw new Error("AGY temporary image cache is full.");
-  const directory = join9(root, sessionFolder(sessionId));
+  const directory = join9(root2, sessionFolder(sessionId));
   await privateDirectory(directory);
   const paths = [];
   try {
@@ -91555,12 +92195,12 @@ function agyImageReferences(text) {
     return [];
   }
 }
-async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
+async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
   const name2 = basename4(path);
-  if (!IMAGE_NAME.test(name2) || path !== join9(root, sessionFolder(sessionId), name2)) return void 0;
+  if (!IMAGE_NAME.test(name2) || path !== join9(root2, sessionFolder(sessionId), name2)) return void 0;
   try {
-    await privateDirectory(root);
-    await privateDirectory(join9(root, sessionFolder(sessionId)));
+    await privateDirectory(root2);
+    await privateDirectory(join9(root2, sessionFolder(sessionId)));
     const info = await fs.lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || info.size > 8 * 1024 * 1024 || Date.now() - info.mtimeMs > TTL) return void 0;
     const file2 = await fs.open(path, constants4.O_RDONLY | (constants4.O_NOFOLLOW ?? 0));
@@ -91578,12 +92218,12 @@ async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
   }
 }
 
-// src/acp/adapters/antigravity-process.ts
+// packages/plugin/src/acp/adapters/antigravity-process.ts
 import { spawn as spawn5 } from "node:child_process";
 import { Buffer as Buffer6 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
-// src/acp/adapters/antigravity/transcript-watcher.ts
+// packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
 import { promises as fs2 } from "node:fs";
 import { join as join10 } from "node:path";
 import { EventEmitter as EventEmitter2 } from "node:events";
@@ -91727,7 +92367,7 @@ var TranscriptWatcher = class extends EventEmitter2 {
   }
 };
 
-// src/acp/adapters/antigravity-process.ts
+// packages/plugin/src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS2 = 2e4;
 var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
@@ -92315,12 +92955,12 @@ function withoutSelectionArgs(args) {
   return filtered;
 }
 
-// src/acp/adapters/opencode-process.ts
+// packages/plugin/src/acp/adapters/opencode-process.ts
 import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
 import { realpath as realpath4 } from "node:fs/promises";
 
-// src/acp/adapters/opencode-native-api.ts
+// packages/plugin/src/acp/adapters/opencode-native-api.ts
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
@@ -92435,7 +93075,7 @@ function unavailable() {
   return new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "OpenCode did not confirm the archive operation. Check the Host OpenCode version and retry after refreshing its session list.");
 }
 
-// src/acp/adapters/opencode-process.ts
+// packages/plugin/src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
@@ -92879,7 +93519,7 @@ function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/acp/method-policy.ts
+// packages/plugin/src/acp/method-policy.ts
 var id5 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
 var mode = external_exports.enum(["agent", "plan", "ask"]);
@@ -92985,7 +93625,7 @@ function isSessionMutation(method) {
   return method === "session/prompt" || method === "session/cancel" || method === "dsh/selectModel" || method === "dsh/selectPermission" || method === "dsh/toolCall";
 }
 
-// src/acp/adapters/antigravity/transcript-loader.ts
+// packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
 import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -93285,15 +93925,15 @@ function workspaceMatches(rawUris, requestedWorkspace) {
 async function transcriptPath(baseDir, conversationId) {
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
   try {
-    const root = await fs3.realpath(baseDir);
-    const expected = join11(root, conversationId, ".system_generated", "logs", "transcript.jsonl");
+    const root2 = await fs3.realpath(baseDir);
+    const expected = join11(root2, conversationId, ".system_generated", "logs", "transcript.jsonl");
     return await fs3.realpath(expected) === expected ? expected : void 0;
   } catch {
     return void 0;
   }
 }
 
-// src/acp/peer-bridge.ts
+// packages/plugin/src/acp/peer-bridge.ts
 import { Buffer as Buffer8 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
@@ -93645,7 +94285,7 @@ function concatChunks2(chunks, totalBytes) {
   return output2;
 }
 
-// src/acp/gateway.ts
+// packages/plugin/src/acp/gateway.ts
 var APPROVAL_TTL_MS2 = 5 * 6e4;
 var BACKEND_STABLE_MS = 3e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
@@ -94955,9 +95595,9 @@ function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/acp/backend-installer.ts
+// packages/plugin/src/acp/backend-installer.ts
 import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
 import { promisify as promisify4 } from "node:util";
@@ -95016,7 +95656,7 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat10 = statSync2(candidate);
+    const stat10 = statSync3(candidate);
     if (!stat10.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
@@ -95293,9 +95933,9 @@ async function installOrConfigureBackend(backendId, options = {}) {
   throw new Error(`Installation of ${spec.name} completed but executable could not be verified.`);
 }
 
-// src/control-runtime.ts
+// packages/plugin/src/control-runtime.ts
 var PluginControlRuntime = class {
-  constructor(config2, identityDirectory, settings, client, host, switchServer, updates) {
+  constructor(config2, identityDirectory, settings, client, host, switchServer, updates, useDefaultStorage = false) {
     this.config = config2;
     this.identityDirectory = identityDirectory;
     this.settings = settings;
@@ -95303,9 +95943,28 @@ var PluginControlRuntime = class {
     this.host = host;
     this.switchServer = switchServer;
     this.updates = updates;
+    this.useDefaultStorage = useDefaultStorage;
   }
   logoutFlight;
   serverSwitchFlight;
+  startupFailure;
+  storageAvailable = true;
+  setStartupFailure(error62, options) {
+    this.startupFailure = error62;
+    if (options?.storageAvailable !== void 0) {
+      this.storageAvailable = options.storageAvailable;
+    }
+    this.client = void 0;
+    this.host = void 0;
+  }
+  clearStartupFailure() {
+    this.startupFailure = void 0;
+    this.storageAvailable = true;
+  }
+  setIdentityDirectory(directory) {
+    this.identityDirectory = directory;
+    this.storageAvailable = true;
+  }
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -95327,7 +95986,18 @@ var PluginControlRuntime = class {
   }
   async handle(endpoint, payload, signal) {
     try {
-      if (endpoint !== "settings.server.set") await this.serverSwitchFlight;
+      if (endpoint !== "settings.server.set" && endpoint !== "settings.identity.reset") await this.serverSwitchFlight;
+      if (endpoint.startsWith("host.pairing.")) {
+        if (this.host?.pairingControl === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "Host device pairing is unavailable.");
+        const action = endpoint.slice("host.pairing.".length);
+        if (action !== "start" && action !== "status" && action !== "confirm" && action !== "cancel") throw new ClientModeError("METHOD_NOT_ALLOWED", "Unknown pairing action.");
+        const input4 = record9(payload);
+        if (Object.keys(input4).some((key) => key !== "sessionId" && key !== "verificationCode") || input4.sessionId !== void 0 && typeof input4.sessionId !== "string" || input4.verificationCode !== void 0 && typeof input4.verificationCode !== "string") throw new ClientModeError("INVALID_MESSAGE", "Invalid pairing request.");
+        if (action === "start") await this.client?.handleControl("mode.set", { mode: "local" }, signal);
+        const view = await this.host.pairingControl(action, input4);
+        if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl("mode.set", { mode: "local" }, signal);
+        return ok3(view);
+      }
       if (endpoint === "settings.development.set") return ok3(await this.setDevelopment(payload));
       if (endpoint === "settings.appearance.set") return ok3(await this.setAppearance(payload));
       if (endpoint === "settings.get") return ok3(await this.settingsView());
@@ -95341,6 +96011,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
       if (endpoint === "settings.acp.installOrConfigure") return ok3(await this.installOrConfigureAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
+      if (endpoint === "settings.identity.reset") return ok3(await this.resetIdentity(payload));
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
         const value = record9(payload);
         if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
@@ -95357,6 +96028,19 @@ var PluginControlRuntime = class {
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
       if (endpoint === "status") {
+        if (this.startupFailure !== void 0) {
+          const startupError = safeStartupError(this.startupFailure);
+          const failureStatus = {
+            mode: "local",
+            available: false,
+            controlUnavailable: false,
+            connected: false,
+            transport: "Disconnected",
+            startupError,
+            hostAuthorizationAvailable: false
+          };
+          return withUpdate(ok3(failureStatus), this.updates?.snapshot());
+        }
         const base = this.client !== void 0 ? await this.client.handleControl(endpoint, payload, signal) : ok3(this.hostOnlyStatus());
         return withUpdate(base, this.updates?.snapshot());
       }
@@ -95381,6 +96065,9 @@ var PluginControlRuntime = class {
       if (endpoint === "mode.set" && record9(payload).mode === "local") {
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }
+      if (this.startupFailure instanceof Error) {
+        throw this.startupFailure;
+      }
       throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is disabled by the plugin role.");
     } catch (error62) {
       return fail5(error62);
@@ -95398,9 +96085,14 @@ var PluginControlRuntime = class {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
     const current = editableConfig(resolveConfig(this.settings.get()));
+    if (value.role === "client" && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming connections.");
     const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl });
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role)
+      directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role),
+      role: value.role
     });
     let identity3 = await identities.loadOrCreate(hostname4());
     const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
@@ -95452,15 +96144,66 @@ var PluginControlRuntime = class {
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
     if (this.switchServer !== void 0) {
-      if (next.serverUrl !== this.config.serverUrl) {
-        const runtimes = await this.switchServer(next);
-        this.client = runtimes.client;
-        this.host = runtimes.host;
+      if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== void 0) {
+        try {
+          const runtimes = await this.switchServer(next);
+          this.client = runtimes.client;
+          this.host = runtimes.host;
+          this.clearStartupFailure();
+        } catch (error62) {
+          this.config = next;
+          this.setStartupFailure(error62);
+          throw error62;
+        }
       }
       this.config = next;
       return { ...await this.settingsView(), applies: "live" };
     }
     return this.settingsView();
+  }
+  async resetIdentity(payload) {
+    if (this.serverSwitchFlight !== void 0) {
+      throw new ClientModeError("SERVER_SWITCH_BUSY", "A Server switch is already in progress.");
+    }
+    const flight = this.applyResetIdentity(payload);
+    this.serverSwitchFlight = flight;
+    try {
+      return await flight;
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = void 0;
+    }
+  }
+  async applyResetIdentity(payload) {
+    await this.logoutFlight;
+    const value = payload === void 0 ? {} : record9(payload);
+    const roleArg = value.role === void 0 ? "all" : value.role;
+    if (roleArg !== "host" && roleArg !== "client" && roleArg !== "all") {
+      throw new ClientModeError("INVALID_MESSAGE", "Role must be host, client, or all.");
+    }
+    const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+    const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
+    const nextDirectory = await resetDefaultIdentityRoles(
+      roles,
+      config2.serverUrl,
+      hostname4(),
+      this.useDefaultStorage ? {} : { directory: this.identityDirectory }
+    );
+    this.setIdentityDirectory(nextDirectory);
+    if (this.switchServer !== void 0) {
+      try {
+        const runtimes = await this.switchServer(config2);
+        this.client = runtimes.client;
+        this.host = runtimes.host;
+        this.config = config2;
+        this.clearStartupFailure();
+      } catch (error62) {
+        this.setStartupFailure(error62);
+        throw error62;
+      }
+      return { ...await this.settingsView(), applies: "live" };
+    }
+    this.clearStartupFailure();
+    return { ...await this.settingsView(), applies: "live" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {
@@ -95472,6 +96215,7 @@ var PluginControlRuntime = class {
     }
     const current = editableConfig(resolveConfig(this.settings.get()));
     const currentRole = current.role === "client" ? "client" : "host";
+    if (role2 === "client" && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
     if (role2 !== currentRole && current.serverUrl !== void 0 && await this.association(current.serverUrl, role2) === void 0) {
       await this.authorizeOwnedRole(current.serverUrl, currentRole, role2);
     }
@@ -95481,13 +96225,15 @@ var PluginControlRuntime = class {
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const value = record9(payload);
+    if (value.debugLogging !== void 0 && typeof value.debugLogging !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The debug logging switch must be a boolean.");
     if (value.remoteToolsEnabled !== void 0 && typeof value.remoteToolsEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The Remote Tools switch must be a boolean.");
     if (value.terminalEnabled !== void 0 && typeof value.terminalEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The terminal switch must be a boolean.");
     if (value.ports !== void 0 && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError("INVALID_MESSAGE", "Loopback ports must be integers.");
-    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
+    if (value.terminalEnabled === void 0 && value.remoteToolsEnabled === void 0 && value.ports === void 0 && value.debugLogging === void 0) throw new ClientModeError("INVALID_MESSAGE", "A development setting is required.");
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({
       ...current,
+      logLevel: value.debugLogging === void 0 ? current.logLevel : value.debugLogging ? "debug" : "info",
       terminal: { enabled: value.terminalEnabled === void 0 ? current.terminal?.enabled ?? true : value.terminalEnabled },
       remoteTools: { enabled: value.remoteToolsEnabled === void 0 ? current.remoteTools?.enabled ?? true : value.remoteToolsEnabled },
       loopback: { ports: value.ports === void 0 ? current.loopback?.ports ?? [] : value.ports }
@@ -95634,14 +96380,20 @@ var PluginControlRuntime = class {
     };
   }
   async authorizeOwnedRole(serverUrl, sourceRole, targetRole) {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
-    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory }).loadOrCreate(hostname4());
+    const sourceIdentity = await new IdentityStore({ directory: sourceDirectory, role: sourceRole }).loadOrCreate(hostname4());
     const sourceStore = new ServerCredentialStore(sourceDirectory);
     if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === void 0) return;
     const sourceApi = sourceRole === "host" ? new HostServerApi(serverUrl, sourceStore) : new ClientServerApi(serverUrl, sourceStore);
+    sourceApi.bindIdentity(sourceIdentity);
+    await sourceApi.loadStoredPolicy();
+    if (sourceApi.pairingHostOnly()) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "Paired Host cannot create a Client identity.");
     const sourceCredentials = await sourceApi.authenticate(sourceIdentity);
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole);
-    const targetIdentity = await new IdentityStore({ directory: targetDirectory }).loadOrCreate(hostname4());
+    const targetIdentity = await new IdentityStore({ directory: targetDirectory, role: targetRole }).loadOrCreate(hostname4());
     const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory)) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory));
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account);
   }
@@ -95655,6 +96407,9 @@ var PluginControlRuntime = class {
     return task;
   }
   async clearAuthorization() {
+    if (!this.storageAvailable && this.startupFailure instanceof Error) {
+      throw this.startupFailure;
+    }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     if (config2.serverUrl !== void 0) {
       const runtimes = await Promise.allSettled([
@@ -95682,11 +96437,14 @@ var PluginControlRuntime = class {
       applies: "restart",
       associations,
       acpAvailability: Object.fromEntries((config2.acp?.backends ?? []).map((item) => [item.id, backendCommandAvailable(item.id, item.command ?? "")])),
-      ...association === void 0 ? {} : { association }
+      ...association === void 0 ? {} : { association },
+      ...this.startupFailure === void 0 ? {} : {
+        startupError: safeStartupError(this.startupFailure)
+      }
     };
   }
   async associations(config2) {
-    if (config2.serverUrl === void 0) return {};
+    if (config2.serverUrl === void 0 || !this.storageAvailable) return {};
     const [host, client] = await Promise.all([
       this.association(config2.serverUrl, "host"),
       this.association(config2.serverUrl, "client")
@@ -95697,16 +96455,26 @@ var PluginControlRuntime = class {
     };
   }
   async association(serverUrl, role2) {
-    const identities = new IdentityStore({
-      directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2)
-    });
-    const identity3 = await identities.loadOrCreate(hostname4());
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
-    if (credentials === void 0) return void 0;
-    return {
-      method: credentials.authorizationMethod,
-      ...credentials.account === void 0 ? {} : { account: credentials.account }
-    };
+    if (role2 === "client" && this.host?.hostStatus?.()?.pairingHostOnly) return void 0;
+    try {
+      const identities = new IdentityStore({
+        directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2),
+        role: role2
+      });
+      const identity3 = await identities.loadExisting();
+      if (identity3 === void 0) return void 0;
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
+      if (credentials === void 0) return void 0;
+      return {
+        method: credentials.authorizationMethod,
+        ...credentials.account === void 0 ? {} : { account: credentials.account }
+      };
+    } catch (error62) {
+      if (error62 instanceof IdentityInvalidError || error62 instanceof ServerCredentialsInvalidError) {
+        return void 0;
+      }
+      throw error62;
+    }
   }
   hostOnlyStatus() {
     return {
@@ -95791,7 +96559,7 @@ function fail5(error62) {
   };
 }
 
-// src/logging.ts
+// packages/plugin/src/logging.ts
 var levels = ["debug", "info", "warn", "error"];
 var secretKey = /authorization|cookie|token|secret|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i;
 var SafeLogger = class {
@@ -95812,9 +96580,10 @@ var SafeLogger = class {
     this.write("error", message, fields);
   }
   write(level, message, fields) {
-    if (levels.indexOf(level) < levels.indexOf(this.threshold)) return;
+    const threshold = typeof this.threshold === "function" ? this.threshold() : this.threshold;
+    if (levels.indexOf(level) < levels.indexOf(threshold)) return;
     const safeFields = fields === void 0 ? "" : ` ${JSON.stringify(redact(fields))}`;
-    this.sink[level](`[dsh-remote] ${message}${safeFields}`);
+    this.sink[level](`[ds-harness-remote] ${message}${safeFields}`);
   }
 };
 function redact(value, key = "") {
@@ -95824,11 +96593,239 @@ function redact(value, key = "") {
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
 
-// src/workspace-upload.ts
+// packages/plugin/src/host-pairing.ts
+import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes13, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { join as join14 } from "node:path";
+import { rm as rm4 } from "node:fs/promises";
+var root = "/api/v1/device-pairing/sessions";
+var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
+function rawKey(text) {
+  const bytes = Buffer.from(text, "base64url");
+  if (bytes.length !== 32 || bytes.toString("base64url") !== text)
+    throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Invalid pairing key.", false);
+  return bytes;
+}
+function pairingProof(privateKey, serverKey, id6, path, raw, side = "host") {
+  const local = createPrivateKey4({ key: Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), rawKey(privateKey)]), format: "der", type: "pkcs8" });
+  const peer = createPublicKey2({ key: Buffer.concat([Buffer.from("302a300506032b656e032100", "hex"), rawKey(serverKey)]), format: "der", type: "spki" });
+  const shared = diffieHellman2({ privateKey: local, publicKey: peer });
+  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(id6), Buffer.from("dsh-pairing-v1/" + side), 32));
+  try {
+    return createHmac6("sha256", key).update(`POST
+${path}
+${createHash7("sha256").update(raw).digest("hex")}`).digest("base64url");
+  } finally {
+    shared.fill(0);
+    key.fill(0);
+  }
+}
+var fullFingerprint = (key) => createHash7("sha256").update(rawKey(key)).digest("hex");
+var HostPairing = class {
+  constructor(serverUrl, directory, identity3, descriptor, adopt, fetcher = fetch) {
+    this.identity = identity3;
+    this.descriptor = descriptor;
+    this.adopt = adopt;
+    this.fetcher = fetcher;
+    this.serverUrl = normalizeServerUrl(serverUrl);
+    this.path = join14(directory, "host-pairing.json");
+  }
+  path;
+  serverUrl;
+  lifetime = new AbortController();
+  queue = Promise.resolve();
+  close() {
+    this.lifetime.abort();
+  }
+  async discard() {
+    this.close();
+    await this.queue.catch(() => void 0);
+    await rm4(this.path, { force: true });
+  }
+  serial(fn) {
+    const task = this.queue.catch(() => void 0).then(fn);
+    this.queue = task;
+    return task;
+  }
+  start() {
+    return this.serial(async () => {
+      const old = await this.load();
+      if (old) {
+        const status2 = await this.poll(old);
+        if (active.has(status2.state))
+          await this.send(old, "host/cancel", "{}");
+      }
+      const discovery = await this.request("/api/v1/auth/oauth/providers", void 0, void 0, "GET");
+      const compactQr = discovery.capabilities?.devicePairingQr === "fragment-ticket-v1";
+      const session2 = pairingCreatedSchema.parse(await this.request(root, JSON.stringify({ v: 1, device: this.descriptor })));
+      this.assertHost(session2.host);
+      if (session2.expiresAt <= Date.now() || session2.expiresAt > Date.now() + 24e4)
+        throw new ServerApiError("INVALID_MESSAGE", "Invalid pairing expiry.", false);
+      const saved = { serverUrl: this.serverUrl, deviceId: this.identity.deviceId, session: session2, state: "created", localSaved: false, ...compactQr ? { qrFormat: "fragment-ticket-v1" } : {} };
+      await this.save(saved);
+      return this.view(saved);
+    });
+  }
+  status() {
+    return this.serial(async () => {
+      const saved = await this.load();
+      return saved ? this.poll(saved) : void 0;
+    });
+  }
+  confirm(id6, code) {
+    return this.serial(async () => {
+      const saved = await this.requireSession(id6);
+      let raw;
+      if (saved.submission !== void 0) {
+        if (code !== void 0)
+          throw new ServerApiError("PAIRING_ATTEMPT_USED", "Recover the original submission without changing the code.", false);
+        raw = this.crypt(saved.submission, id6, false);
+      } else {
+        if (saved.state !== "claimed" || typeof code !== "string" || !/^[0-9]{8}$/.test(code))
+          throw new ServerApiError("INVALID_MESSAGE", "Confirm on the phone and enter 8 digits.", false);
+        raw = JSON.stringify({ submissionId: uuidV7(), verificationCode: code });
+        saved.submission = this.crypt(raw, id6, true);
+        await this.save(saved);
+      }
+      return this.accept(saved, await this.send(saved, "host/confirm", raw));
+    });
+  }
+  cancel(id6) {
+    return this.serial(async () => {
+      const s = await this.requireSession(id6);
+      return this.accept(s, await this.send(s, "host/cancel", "{}"));
+    });
+  }
+  async load() {
+    const value = await readPrivateJson(this.path);
+    if (value === void 0)
+      return void 0;
+    const s = savedPairingSchema.parse(value);
+    if (s.serverUrl !== this.serverUrl || s.deviceId !== this.identity.deviceId)
+      throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Pairing belongs to another identity.", false);
+    if (s.session.expiresAt + 3e5 <= Date.now()) {
+      await rm4(this.path, { force: true });
+      return void 0;
+    }
+    return s;
+  }
+  async requireSession(id6) {
+    const s = await this.load();
+    if (!s || s.session.sessionId !== id6)
+      throw new ServerApiError("PAIRING_CLOSED", "This pairing was replaced or expired.", false);
+    return s;
+  }
+  save(s) {
+    return atomicWritePrivate(this.path, JSON.stringify(s));
+  }
+  async poll(s) {
+    try {
+      return await this.accept(s, await this.send(s, "host/status", "{}"));
+    } catch (e) {
+      if (!(e instanceof ServerApiError) || e.status !== 404)
+        throw e;
+      s.state = "expired";
+      delete s.submission;
+      await this.save(s);
+      return this.view(s);
+    }
+  }
+  assertHost(d) {
+    if (d.deviceId !== this.identity.deviceId || d.role !== "host" || d.identityKey !== this.identity.publicKey)
+      throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Host identity changed.", false);
+  }
+  async accept(s, value) {
+    this.lifetime.signal.throwIfAborted();
+    const r = pairingStatusSchema.parse(value);
+    if (r.sessionId !== s.session.sessionId || r.expiresAt !== s.session.expiresAt)
+      throw new ServerApiError("INVALID_MESSAGE", "Pairing session changed.", false);
+    this.assertHost(r.host);
+    if (r.mobile) {
+      if (r.mobile.role !== "client" || r.mobile.deviceId === this.identity.deviceId || r.mobile.identityKey === this.identity.publicKey || s.mobile && (s.mobile.deviceId !== r.mobile.deviceId || s.mobile.identityKey !== r.mobile.identityKey))
+        throw new ServerApiError("PAIRING_DEVICE_CONFLICT", "Phone identity changed.", false);
+      s.mobile = r.mobile;
+    }
+    if (r.state === "completed") {
+      if (!r.credentials)
+        throw new ServerApiError("INVALID_MESSAGE", "Missing Host credentials.", false);
+      this.assertHost(r.credentials.device);
+      if (r.credentials.pairingRestricted && !r.credentials.inboundOnly)
+        throw new ServerApiError("DEVICE_SCOPE_REQUIRED", "Paired Host must remain inbound only.", false);
+      if (!s.localSaved) {
+        await this.adopt(r.credentials);
+        s.localSaved = true;
+      }
+    }
+    s.state = r.state;
+    if (!active.has(s.state))
+      delete s.submission;
+    await this.save(s);
+    return this.view(s, r.failureReason);
+  }
+  view(s, reason) {
+    return {
+      sessionId: s.session.sessionId,
+      state: s.state,
+      expiresAt: s.session.expiresAt,
+      serverUrl: this.serverUrl,
+      hostFingerprint: fullFingerprint(this.identity.publicKey),
+      ...s.state === "created" ? { qrPayload: s.qrFormat === "fragment-ticket-v1" ? `${this.serverUrl}/pair#v1.${s.session.scanSecret}` : JSON.stringify({ type: "dsh.remote.pairing", ...s.session, serverUrl: this.serverUrl }) } : {},
+      ...s.mobile ? { mobile: { deviceId: s.mobile.deviceId, name: s.mobile.name, fingerprint: fullFingerprint(s.mobile.identityKey) } } : {},
+      ...reason ? { failureReason: reason } : {},
+      canRetry: s.submission !== void 0 && active.has(s.state),
+      localSaved: s.localSaved
+    };
+  }
+  send(s, action, raw) {
+    const path = `${root}/${s.session.sessionId}/${action}`;
+    return this.request(path, raw, pairingProof(this.identity.privateKey, s.session.serverPublicKey, s.session.sessionId, path, raw));
+  }
+  async request(path, body, proof, method = "POST") {
+    try {
+      const response = await this.fetcher(this.serverUrl + path, { method, redirect: "error", headers: { "Content-Type": "application/json", ...proof ? { "X-DSH-Pairing-Proof": proof } : {} }, body, signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(1e4)]) });
+      if (response.status === 404 && method === "GET" && path === "/api/v1/auth/oauth/providers") return {};
+      if (response.status === 404 && path === root)
+        throw new ServerApiError("PAIRING_UNSUPPORTED", "This Server does not support pairing.", false);
+      const text = await response.text();
+      if (text.length > 32768)
+        throw new Error("oversized response");
+      const value = JSON.parse(text);
+      if (!response.ok) {
+        const code = value.error?.code;
+        throw new ServerApiError(typeof code === "string" && /^[A-Z_]{1,80}$/.test(code) ? code : "PAIRING_REQUEST_FAILED", "Pairing failed; recover the original submission if sent.", response.status >= 500 || response.status === 429, response.status);
+      }
+      return value;
+    } catch (e) {
+      if (e instanceof ServerApiError)
+        throw e;
+      throw new ServerApiError("PAIRING_CONNECTION_FAILED", "Pairing result is unknown. Recover the original submission.", true);
+    }
+  }
+  crypt(value, id6, encrypt) {
+    const key = createHash7("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
+    try {
+      if (encrypt) {
+        const iv = randomBytes13(12);
+        const c2 = createCipheriv5("aes-256-gcm", key, iv);
+        c2.setAAD(Buffer.from(id6));
+        const data2 = Buffer.concat([c2.update(value, "utf8"), c2.final()]);
+        return Buffer.concat([iv, c2.getAuthTag(), data2]).toString("base64url");
+      }
+      const b = Buffer.from(value, "base64url");
+      const c = createDecipheriv4("aes-256-gcm", key, b.subarray(0, 12));
+      c.setAAD(Buffer.from(id6));
+      c.setAuthTag(b.subarray(12, 28));
+      return Buffer.concat([c.update(b.subarray(28)), c.final()]).toString("utf8");
+    } finally {
+      key.fill(0);
+    }
+  }
+};
+
+// packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat2, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join14 } from "node:path";
+import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
@@ -95904,12 +96901,12 @@ var WorkspaceUploadHost = class {
     const sourceRoot = await this.sessionRoot(p.sessionId);
     this.assertLive();
     if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const root = await realpath6(sourceRoot);
-    const directory = await stat6(root);
+    const root2 = await realpath6(sourceRoot);
+    const directory = await stat6(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join14(root, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join15(root2, `.dsh-upload-${randomUUID16()}.part`);
     const handle = await open5(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
-    const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
+    const upload = { ...p, received: 0, touched: Date.now(), root: root2, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
     return { uploadId: p.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK };
@@ -95943,7 +96940,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat2(upload.temp);
+    const temp = await lstat3(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -95951,7 +96948,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link(upload.temp, join14(upload.root, name2));
+        await link(upload.temp, join15(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -96002,9 +96999,9 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root = await lstat2(upload.root);
-      const temp = await lstat2(upload.temp);
-      if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
+      const root2 = await lstat3(upload.root);
+      const temp = await lstat3(upload.temp);
+      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
   }
@@ -96021,7 +97018,7 @@ function validName(name2) {
   return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
 }
 
-// src/workspace-upload-authority.ts
+// packages/plugin/src/workspace-upload-authority.ts
 function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, acp) {
   return async (sessionId, signal) => {
     signal.throwIfAborted();
@@ -96042,7 +97039,7 @@ function unavailable2() {
   return new RpcError("UPLOAD_WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.");
 }
 
-// src/connection-controller.ts
+// packages/plugin/src/connection-controller.ts
 var ConnectionController = class {
   constructor(identities, createRouter, logger2) {
     this.identities = identities;
@@ -96257,7 +97254,7 @@ function shortId2(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
 
-// src/rpc-router.ts
+// packages/plugin/src/rpc-router.ts
 var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
 var emptyParamsSchema = external_exports.object({}).strict();
 var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
@@ -96510,12 +97507,12 @@ function errorResponse2(requestId, error62) {
   );
 }
 
-// src/file-viewer-contract.ts
+// packages/plugin/src/file-viewer-contract.ts
 var REMOTE_FILE_CHUNK_BYTES = 512 * 1024;
 var MAX_REMOTE_FILE_LOCATOR_CHARS = 4096;
 var MAX_REMOTE_DIRECTORY_ENTRIES = 1e3;
 
-// src/file-viewer-bridge.ts
+// packages/plugin/src/file-viewer-bridge.ts
 var locatorSchema = external_exports.string().min(1).max(MAX_REMOTE_FILE_LOCATOR_CHARS);
 var callSchema2 = external_exports.discriminatedUnion("endpoint", [
   external_exports.object({
@@ -96630,7 +97627,7 @@ function isOversizedListing(value) {
   return typeof value === "object" && value !== null && "entries" in value && Array.isArray(value.entries) && value.entries.length > MAX_REMOTE_DIRECTORY_ENTRIES;
 }
 
-// src/server-connection.ts
+// packages/plugin/src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var HostServerConnection = class {
   constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => new WebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
@@ -96646,6 +97643,7 @@ var HostServerConnection = class {
     this.harnessVersion = harnessVersion;
   }
   socket;
+  forceCloseSocket;
   running;
   stopped = true;
   online = false;
@@ -96659,6 +97657,7 @@ var HostServerConnection = class {
   rtcFactory;
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
+  heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
   webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
   start() {
     if (this.running !== void 0) return;
@@ -96687,7 +97686,8 @@ var HostServerConnection = class {
     this.retryWake?.();
     this.retryWake = void 0;
     for (const tunnel of this.tunnels.values()) this.notifyTunnelClosed(tunnel);
-    this.socket?.close(1e3, "plugin stopped");
+    if (this.forceCloseSocket) this.forceCloseSocket(1e3, "plugin stopped");
+    else this.socket?.close(1e3, "plugin stopped");
     await this.running;
     await this.dropTunnels();
   }
@@ -96719,7 +97719,8 @@ var HostServerConnection = class {
     }
     this.reconnectRequested = true;
     this.retryWake?.();
-    this.socket?.close(4e3, "manual reconnect");
+    if (this.forceCloseSocket) this.forceCloseSocket(4e3, "manual reconnect");
+    else this.socket?.close(4e3, "manual reconnect");
     void this.running.finally(() => {
       if (!this.reconnectRequested || this.stopped) return;
       this.reconnectRequested = false;
@@ -96783,24 +97784,181 @@ var HostServerConnection = class {
     const socket = this.createWebSocket(websocketUrl2(this.api.baseUrl));
     this.socket = socket;
     this.controlFrameLimits = {};
+    this.heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
     let acknowledged = false;
     let retainOnClose = false;
     let invalidControl = false;
     let messageQueue = Promise.resolve();
     await new Promise((resolve9, reject) => {
       let settled = false;
-      const helloTimer = setTimeout(() => socket.close(4001, "hello timeout"), 1e4);
+      let closing = false;
+      let upgradeTimer;
+      let helloTimer;
+      let refreshTimer;
+      let livenessTimer;
+      const clearLiveness = () => {
+        if (livenessTimer === void 0) return;
+        clearTimeout(livenessTimer);
+        livenessTimer = void 0;
+      };
       const finish = (error62) => {
         if (settled) return;
         settled = true;
-        clearTimeout(helloTimer);
+        if (upgradeTimer !== void 0) clearTimeout(upgradeTimer);
+        if (helloTimer !== void 0) clearTimeout(helloTimer);
+        if (refreshTimer !== void 0) clearTimeout(refreshTimer);
+        clearLiveness();
         this.online = false;
-        if (this.socket === socket) this.socket = void 0;
+        socket.onopen = socket.readyState === 0 ? () => {
+          socket.onopen = null;
+          try {
+            socket.close(1e3, "connection abandoned");
+          } catch {
+          }
+          ;
+          socket.terminate?.();
+        } : null;
+        socket.onmessage = null;
+        socket.onerror = () => void 0;
+        socket.onclose = () => {
+          socket.onopen = null;
+          socket.onerror = null;
+          socket.onclose = null;
+        };
+        if (this.socket === socket) {
+          this.socket = void 0;
+          this.forceCloseSocket = void 0;
+        }
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
         const cleanup = preserve ? Promise.all([...this.tunnels.values()].filter((tunnel) => !tunnel.lease?.canDetach()).map((tunnel) => this.dropTunnel(tunnel.connectionId))) : this.dropTunnels();
         void cleanup.finally(() => error62 === void 0 ? resolve9() : reject(error62));
       };
+      let forceDrainWake;
+      const handleClose = (event, forced = false) => {
+        if (settled || this.socket !== socket) return;
+        if (closing) {
+          if (forced) {
+            forceDrainWake?.();
+            if (this.stopped || this.reconnectRequested) finish();
+          }
+          return;
+        }
+        closing = true;
+        clearLiveness();
+        const closeSemantics = classifyControlClose(event.code, event.reason);
+        retainOnClose = [1e3, 1001, 4007].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
+        const close = async () => {
+          if (!forced) {
+            let drainTimer;
+            await Promise.race([
+              messageQueue.catch(() => void 0),
+              new Promise((resolve10) => {
+                forceDrainWake = resolve10;
+                drainTimer = setTimeout(resolve10, 50);
+              })
+            ]);
+            if (drainTimer !== void 0) clearTimeout(drainTimer);
+          }
+          forceDrainWake = void 0;
+          if (settled) return;
+          if (this.stopped) {
+            finish();
+            return;
+          }
+          if (event.code === 4003) {
+            finish(new ControlConnectionError("CONNECTION_REPLACED", "Another instance connected with this Host identity."));
+            return;
+          }
+          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code) || event.code === 4002 && event.reason === "recovery authorization rejected")) {
+            await this.dropTunnels();
+            if (settled) return;
+            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry control without recovery state."));
+            return;
+          }
+          if (event.code === 4002) {
+            if (this.authRecoveryAttempted) {
+              finish(new ControlConnectionError("AUTH_INVALID", "Server rejected refreshed credentials."));
+              return;
+            }
+            try {
+              await Promise.race([
+                this.api.refreshCredentials(credentials.accessToken),
+                new Promise((_, rejectRefresh) => {
+                  refreshTimer = setTimeout(
+                    () => rejectRefresh(new ControlConnectionError("CONNECTION_FAILED", "Credential refresh timed out.")),
+                    15e3
+                  );
+                })
+              ]);
+            } catch (error62) {
+              if (refreshTimer !== void 0) {
+                clearTimeout(refreshTimer);
+                refreshTimer = void 0;
+              }
+              if (settled) return;
+              finish(asError2(error62));
+              return;
+            }
+            if (refreshTimer !== void 0) {
+              clearTimeout(refreshTimer);
+              refreshTimer = void 0;
+            }
+            if (settled) return;
+            this.authRecoveryAttempted = true;
+            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry hello with refreshed credentials."));
+            return;
+          }
+          if (event.code === 4004 || this.terminalError === "DEVICE_REVOKED") {
+            finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
+            return;
+          }
+          if (event.code === 4011 || this.terminalError === "UNSUPPORTED_VERSION") {
+            finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
+            return;
+          }
+          if (acknowledged && this.terminalError === void 0) this.terminalError = closeCode(event.code);
+          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code), event.reason || "Server control connection closed."));
+        };
+        void close();
+      };
+      const closeSocket = (code, reason) => {
+        try {
+          socket.close(code, reason);
+        } catch {
+          try {
+            socket.close(1e3, reason);
+          } catch {
+          }
+        }
+        ;
+        socket.terminate?.();
+        handleClose({ code, reason }, true);
+      };
+      this.forceCloseSocket = closeSocket;
+      const armLiveness = () => {
+        clearLiveness();
+        const timeoutMs = Math.max(15e3, this.heartbeatIntervalMs * 3);
+        livenessTimer = setTimeout(() => {
+          livenessTimer = void 0;
+          if (this.stopped || settled || closing || this.socket !== socket) return;
+          const silentMs = this.lastActiveAt === void 0 ? timeoutMs : Math.max(0, Date.now() - this.lastActiveAt);
+          this.logger.warn("server control heartbeat timeout; reconnecting", {
+            silentMs,
+            heartbeatIntervalMs: this.heartbeatIntervalMs
+          });
+          closeSocket(4009, "heartbeat timeout");
+        }, timeoutMs);
+        livenessTimer.unref?.();
+      };
+      upgradeTimer = setTimeout(() => closeSocket(4001, "upgrade timeout"), 3e4);
+      upgradeTimer.unref?.();
       socket.onopen = () => {
+        if (settled || closing || this.socket !== socket) return;
+        if (upgradeTimer !== void 0) {
+          clearTimeout(upgradeTimer);
+          upgradeTimer = void 0;
+        }
+        helloTimer = setTimeout(() => closeSocket(4001, "hello timeout"), 1e4);
         this.sendControl("hello", {
           role: "host",
           deviceId: this.identity.deviceId,
@@ -96813,13 +97971,25 @@ var HostServerConnection = class {
         });
       };
       socket.onmessage = (event) => {
-        if (this.socket !== socket) return;
+        if (settled || closing || this.socket !== socket) return;
+        try {
+          const preview = decodeControl(event.data, this.controlFrameLimits);
+          if (preview.type === "error") {
+            const payload = requireControlError(preview.payload);
+            if (payload.code === "DEVICE_REVOKED" || payload.connectionId === void 0) {
+              this.terminalError = payload.code;
+            }
+          }
+        } catch {
+        }
         messageQueue = messageQueue.then(async () => {
-          if (this.socket !== socket) return;
+          if (settled || this.socket !== socket) return;
           const frame = decodeControl(event.data, this.controlFrameLimits);
           this.lastActiveAt = Date.now();
+          if (acknowledged) armLiveness();
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
+            this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
             this.webRtcNegotiateTimeoutMs = Math.max(
               DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
               payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
@@ -96835,6 +98005,7 @@ var HostServerConnection = class {
             }
             acknowledged = true;
             clearTimeout(helloTimer);
+            armLiveness();
             if (this.rtcFactory === void 0 && this.rtcFactoryProvider !== void 0 && !this.config.forceRelay) {
               void this.rtcFactoryProvider().then((factory) => {
                 if (factory !== void 0) this.rtcFactory ??= factory;
@@ -96856,6 +98027,7 @@ var HostServerConnection = class {
           if (!acknowledged) throw new ControlConnectionError("INVALID_MESSAGE", "Server sent a frame before hello.ack.");
           await this.handleFrame(frame);
         }).catch((error62) => {
+          if (settled || this.socket !== socket) return;
           invalidControl = true;
           const code = errorCode4(error62);
           this.terminalError = code;
@@ -96863,58 +98035,14 @@ var HostServerConnection = class {
             code,
             reason: diagnosticReason3(error62)
           });
-          socket.close(4008, "invalid control frame");
+          closeSocket(4008, "invalid control frame");
         });
       };
       socket.onerror = () => {
         if (!acknowledged) finish(new ControlConnectionError("CONNECTION_FAILED", "Unable to open the Server WebSocket."));
       };
       socket.onclose = (event) => {
-        if (this.socket !== socket) return;
-        const closeSemantics = classifyControlClose(event.code, event.reason);
-        retainOnClose = [1e3, 1001, 4007].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
-        const close = async () => {
-          await messageQueue.catch(() => void 0);
-          if (this.stopped) {
-            finish();
-            return;
-          }
-          if (event.code === 4003) {
-            finish(new ControlConnectionError("CONNECTION_REPLACED", "Another instance connected with this Host identity."));
-            return;
-          }
-          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code) || event.code === 4002 && event.reason === "recovery authorization rejected")) {
-            await this.dropTunnels();
-            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry control without recovery state."));
-            return;
-          }
-          if (event.code === 4002) {
-            if (this.authRecoveryAttempted) {
-              finish(new ControlConnectionError("AUTH_INVALID", "Server rejected refreshed credentials."));
-              return;
-            }
-            try {
-              await this.api.refreshCredentials(credentials.accessToken);
-            } catch (error62) {
-              finish(asError2(error62));
-              return;
-            }
-            this.authRecoveryAttempted = true;
-            finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry hello with refreshed credentials."));
-            return;
-          }
-          if (event.code === 4004) {
-            finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
-            return;
-          }
-          if (event.code === 4011) {
-            finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
-            return;
-          }
-          if (acknowledged) this.terminalError = closeCode(event.code);
-          finish(acknowledged ? void 0 : new ControlConnectionError(closeCode(event.code), event.reason || "Server control connection closed."));
-        };
-        void close();
+        handleClose(event);
       };
     });
   }
@@ -96968,7 +98096,8 @@ var HostServerConnection = class {
       const payload = requireControlError(frame.payload);
       if (payload.code === "DEVICE_REVOKED") {
         this.terminalError = payload.code;
-        this.socket?.close(4004, "device revoked");
+        if (this.forceCloseSocket) this.forceCloseSocket(4004, "device revoked");
+        else this.socket?.close(4004, "device revoked");
       } else if (payload.connectionId !== void 0) {
         await this.dropTunnel(payload.connectionId, payload.code, {
           closedBy: "server",
@@ -96990,10 +98119,12 @@ var HostServerConnection = class {
     throw new ControlConnectionError("INVALID_MESSAGE", `Unexpected Server control frame: ${frame.type}`);
   }
   async handleConnectIncoming(payload) {
+    const sourceSocket = this.socket;
     let descriptor;
     try {
       descriptor = await this.api.deviceFor(payload.clientDeviceId);
     } catch (error62) {
+      if (this.socket !== sourceSocket) return;
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by account authorization", {
         clientDeviceId: shortId3(payload.clientDeviceId),
@@ -97001,6 +98132,7 @@ var HostServerConnection = class {
       });
       return;
     }
+    if (this.socket !== sourceSocket) return;
     if (descriptor.role !== "client" || descriptor.deviceId !== payload.clientDeviceId || descriptor.identityKey !== payload.clientIdentityKey) {
       this.sendControl("connect.rejected", { connectionId: payload.connectionId });
       this.logger.warn("connection rejected by peer identity validation", {
@@ -97030,6 +98162,7 @@ var HostServerConnection = class {
       publicKey: descriptor.identityKey,
       membershipId: descriptor.membershipId
     });
+    if (this.socket !== sourceSocket) return;
     const previous = this.tunnels.get(payload.connectionId);
     previous?.noise.destroy();
     const noise = new NoiseIkSession({
@@ -97111,8 +98244,10 @@ var HostServerConnection = class {
     const leaseTicket = viaWebRtc ? tunnel.recoveryTicket : tunnel.transport === "relay" && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : void 0;
     if (leaseTicket) {
       tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, (payload2) => {
-        if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= 75e3) {
-          this.socket?.close(1012, "control heartbeat timeout");
+        const heartbeatTimeoutMs = Math.max(15e3, this.heartbeatIntervalMs * 3);
+        if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
+          if (this.forceCloseSocket) this.forceCloseSocket(4009, "heartbeat timeout");
+          else this.socket?.close(4009, "heartbeat timeout");
           throw new Error("Control heartbeat timed out");
         }
         this.sendControl("connection.lease.request", payload2);
@@ -97397,11 +98532,17 @@ var HostServerConnection = class {
     });
   }
   async sendRelay(tunnel, ciphertext) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel === void 0) {
+      throw new Error("Relay tunnel closed");
+    }
     const counter = Number(tunnel.noise.sendingCounter() - 1n);
     if (!Number.isSafeInteger(counter) || counter < 0) throw new ControlConnectionError("FRAME_TOO_LARGE", "Noise transport counter overflowed.");
     const socket = tunnel.dataSocket ?? this.socket;
     if (socket === void 0) throw new Error("Relay transport closed");
     await waitForRelayCapacity(socket);
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel === void 0) {
+      throw new Error("Relay tunnel closed");
+    }
     if (tunnel.dataSocket !== void 0) {
       if (tunnel.dataSocket !== socket || tunnel.dataSocket.readyState !== 1 || !tunnel.dataReady) {
         throw new Error("Relay data transport is not ready");
@@ -97610,7 +98751,10 @@ var ServerNoiseChannel = class {
     try {
       await this.sends.run(encoded.byteLength, async () => {
         if (this.closed) throw new Error("Secure channel closed");
-        for (const plaintext of this.outgoing.encode(encoded)) await this.transmit(this.tunnel.noise.encrypt(plaintext));
+        for (const plaintext of this.outgoing.encode(encoded)) {
+          if (this.closed) throw new Error("Secure channel closed");
+          await this.transmit(this.tunnel.noise.encrypt(plaintext));
+        }
       });
     } catch (error62) {
       await this.close().catch(() => void 0);
@@ -97667,7 +98811,7 @@ function decodeControl(data2, limits) {
 }
 function requireHelloAck(value) {
   const payload = requireObject(value);
-  if (payload.protocol !== PROTOCOL_VERSION || typeof payload.serverVersion !== "string" || typeof payload.connectionSessionId !== "string" || !Number.isSafeInteger(payload.heartbeatIntervalMs) || !Number.isSafeInteger(payload.maxControlFrameBytes) || !Number.isSafeInteger(payload.maxRelayFrameBytes)) {
+  if (payload.protocol !== PROTOCOL_VERSION || typeof payload.serverVersion !== "string" || typeof payload.connectionSessionId !== "string" || !Number.isSafeInteger(payload.heartbeatIntervalMs) || payload.heartbeatIntervalMs <= 0 || !Number.isSafeInteger(payload.maxControlFrameBytes) || !Number.isSafeInteger(payload.maxRelayFrameBytes)) {
     throw new ControlConnectionError("INVALID_MESSAGE", "hello.ack payload is invalid.");
   }
   return payload;
@@ -97778,12 +98922,12 @@ function closeCode(code) {
   return "CONNECTION_FAILED";
 }
 
-// src/harness-remote-bridge.ts
+// packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { lstat as lstat3, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join15, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
+import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
-// src/remote-directory-browser.ts
+// packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
 import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
@@ -97819,11 +98963,11 @@ async function listRemoteDirectory(path, signal) {
   };
 }
 function crumbs(path) {
-  const root = parse3(path).root;
-  const result = [{ name: root, path: root, hidden: false }];
+  const root2 = parse3(path).root;
+  const result = [{ name: root2, path: root2, hidden: false }];
   const segments = [];
   let current = path;
-  while (current !== root) {
+  while (current !== root2) {
     segments.unshift(basename6(current));
     current = dirname6(current);
   }
@@ -97834,7 +98978,7 @@ function crumbs(path) {
   return result;
 }
 
-// src/harness-remote-bridge.ts
+// packages/plugin/src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema3 = external_exports.object({
@@ -98084,7 +99228,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      nativePayload = normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion);
+      nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
       if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
@@ -98299,12 +99443,12 @@ var HarnessRemoteBridge = class {
   }
   closeStream(input4) {
     const params = streamCloseSchema3.parse(input4);
-    const active = this.streams.get(params.streamId);
-    if (active !== void 0) {
+    const active2 = this.streams.get(params.streamId);
+    if (active2 !== void 0) {
       this.streams.delete(params.streamId);
-      active.controller.abort("client-closed");
+      active2.controller.abort("client-closed");
     }
-    return { closed: active !== void 0, streamId: params.streamId };
+    return { closed: active2 !== void 0, streamId: params.streamId };
   }
   async closeAll(reason = "peer-disconnected") {
     const streams = [...this.streams.entries()];
@@ -98524,61 +99668,61 @@ var HarnessRemoteBridge = class {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
     try {
-      const root = await realpath7(cwd2);
-      const info = await stat8(root);
+      const root2 = await realpath7(cwd2);
+      const info = await stat8(root2);
       if (!info.isDirectory()) throw new Error();
-      return { root, cwd: cwd2 };
+      return { root: root2, cwd: cwd2 };
     } catch {
       throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
     }
   }
-  async verifyWorkspacePathContainment(root, cwd2, path, endpoint) {
+  async verifyWorkspacePathContainment(root2, cwd2, path, endpoint) {
     const candidate = isAbsolute10(path) ? resolve8(path) : resolve8(cwd2, path);
     if (process.platform === "win32") {
-      const rootDrive = parse4(root).root.toLowerCase();
+      const rootDrive = parse4(root2).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
       if (rootDrive !== candDrive) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
     }
     const relCwd = relative5(cwd2, candidate);
-    const relRoot = relative5(root, candidate);
+    const relRoot = relative5(root2, candidate);
     if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
       throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
     }
     try {
-      const rootLstat = await lstat3(root);
+      const rootLstat = await lstat4(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
       }
-      const base = !isPathOutside(relCwd) ? cwd2 : root;
+      const base = !isPathOutside(relCwd) ? cwd2 : root2;
       const rel = relative5(base, candidate);
       const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
       let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join15(currentPath, parts[i]);
+        currentPath = join16(currentPath, parts[i]);
         const dirRel = relative5(base, currentPath);
         if (isPathOutside(dirRel)) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
         }
-        const dirLstat = await lstat3(currentPath);
+        const dirLstat = await lstat4(currentPath);
         if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.");
         }
       }
-      const targetLstat = await lstat3(candidate);
+      const targetLstat = await lstat4(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
       }
       const canonical = await realpath7(candidate);
       if (process.platform === "win32") {
-        const rootDrive = parse4(root).root.toLowerCase();
+        const rootDrive = parse4(root2).root.toLowerCase();
         const canonicalDrive = parse4(canonical).root.toLowerCase();
         if (rootDrive !== canonicalDrive) {
           throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
         }
       }
-      const canonicalRel = relative5(root, canonical);
+      const canonicalRel = relative5(root2, canonical);
       if (isPathOutside(canonicalRel)) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
@@ -98590,9 +99734,9 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       }
       const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
-      const dispatchedCandidate = resolve8(root, safeRel);
+      const dispatchedCandidate = resolve8(root2, safeRel);
       const dispatchedCanonical = await realpath7(dispatchedCandidate);
-      const dispatchedRel = relative5(root, dispatchedCanonical);
+      const dispatchedRel = relative5(root2, dispatchedCanonical);
       if (isPathOutside(dispatchedRel)) {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
@@ -98634,15 +99778,108 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   }
   return payload;
 }
-function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion) {
+async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
   if (endpoint !== "session/attachment" || !isRecord21(payload) || !isRecord21(payload.args)) return payload;
   const request = isRecord21(payload.args.request) ? payload.args.request : void 0;
-  if (request === void 0 || isDshV022OrNewer(harnessVersion)) return payload;
+  if (request === void 0) return payload;
   const attachment = isRecord21(request.attachment) ? request.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
-  const sessionId = request.sessionId;
-  return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  if (!isDshV022OrNewer(harnessVersion)) {
+    const sessionId = request.sessionId;
+    return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
+  }
+  if (attachment !== void 0 && isCompleteImageReference(attachment)) return payload;
+  const reference = await findSessionAttachmentReference(gateway, request.sessionId, attachmentId, signal);
+  if (reference === void 0) return payload;
+  const mergedAttachment = attachment !== void 0 ? { ...reference, ...attachment } : reference;
+  return { ...payload, args: { ...payload.args, request: { ...request, attachment: mergedAttachment } } };
+}
+async function findSessionAttachmentReference(gateway, sessionId, attachmentId, signal) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
+  try {
+    const result = await gateway.dispatch("session/events", { args: { request: { address: { kind: "session", sessionId } } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  let beforeSeq = void 0;
+  for (let page = 0; page < 10; page += 1) {
+    try {
+      const pageRequest = {
+        address: { kind: "session", sessionId },
+        maxMessages: 200,
+        ...beforeSeq !== void 0 ? { beforeSeq } : {}
+      };
+      const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
+      const reference = extractAttachmentReference(result, attachmentId);
+      if (reference !== void 0) return reference;
+      if (result.ok === true && isRecord21(result.value)) {
+        if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
+          beforeSeq = result.value.beforeSeq;
+          continue;
+        }
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+  try {
+    const result = await gateway.dispatch("session/history", { args: { request: { sessionId, maxMessages: 200 } } }, signal);
+    const reference = extractAttachmentReference(result, attachmentId);
+    if (reference !== void 0) return reference;
+  } catch {
+  }
+  return void 0;
+}
+function extractAttachmentReference(result, attachmentId) {
+  if (result.ok !== true) return void 0;
+  const value = result.value;
+  let records;
+  if (Array.isArray(value)) records = value;
+  else if (isRecord21(value)) {
+    if (Array.isArray(value.records)) records = value.records;
+    else if (Array.isArray(value.events)) records = value.events;
+  }
+  if (records === void 0) return void 0;
+  for (const record11 of records) {
+    const found = findImageReference(record11, attachmentId, 0);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function findImageReference(value, attachmentId, depth) {
+  if (depth > 12 || value === null || typeof value !== "object") return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findImageReference(item, attachmentId, depth + 1);
+      if (found !== void 0) return found;
+    }
+    return void 0;
+  }
+  const block = value;
+  const candidate = isRecord21(block.attachment) ? block.attachment : block;
+  const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
+  if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
+    return {
+      attachmentId,
+      mediaType: candidate.mediaType,
+      bytes: candidate.bytes,
+      width: candidate.width,
+      height: candidate.height,
+      ...typeof candidate.name === "string" ? { name: candidate.name } : {}
+    };
+  }
+  for (const nested of Object.values(block)) {
+    if (nested === null || typeof nested !== "object") continue;
+    const found = findImageReference(nested, attachmentId, depth + 1);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function isCompleteImageReference(value) {
+  return typeof value.mediaType === "string" && typeof value.bytes === "number" && typeof value.width === "number" && typeof value.height === "number";
 }
 function isDshV022OrNewer(version2) {
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2?.trim() ?? "");
@@ -98802,11 +100039,31 @@ function filterSessionProjections(session2) {
     }
   };
 }
+var SESSION_LIST_ROW_BUDGET = 2048;
+function trimSessionCatalogRows(endpoint, items) {
+  if (endpoint !== "session/list" || items.length <= SESSION_LIST_ROW_BUDGET) return items;
+  const roots = items.filter(isListableRemoteSession);
+  const kept = roots.length > 0 ? roots : items;
+  return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
+}
+function isListableRemoteSession(session2) {
+  return isRecord21(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+}
+function updatedAtOf(session2) {
+  return isRecord21(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+}
+function withSessionRowTitle(session2) {
+  if (!isRecord21(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord21(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord21(values) ? values.title : void 0;
+  return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
+}
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
-  const result = typeof resultOrEndpoint === "string" ? maybeResult : resultOrEndpoint;
-  if (typeof resultOrEndpoint === "string" && resultOrEndpoint !== "session/list" && resultOrEndpoint !== "session/search") return result;
+  const endpoint = typeof resultOrEndpoint === "string" ? resultOrEndpoint : void 0;
+  const result = endpoint === void 0 ? resultOrEndpoint : maybeResult;
+  if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
-  const filterList = (items) => items.map(filterSessionProjections);
+  const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
   if (isRecord21(result.value)) {
     let changed = false;
     const updated = { ...result.value };
@@ -98844,8 +100101,8 @@ function filterRemotePluginInventory(endpoint, result) {
   return result;
 }
 function requestArgs(payload) {
-  const root = record10(payload);
-  const args = isRecord21(root.args) ? root.args : root;
+  const root2 = record10(payload);
+  const args = isRecord21(root2.args) ? root2.args : root2;
   return record10(args.request ?? args._request ?? args);
 }
 function record10(value) {
@@ -98863,11 +100120,11 @@ function remoteOwnedBundleRow(row, plugin) {
   return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord21(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
-// src/service.ts
+// packages/plugin/src/service.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { existsSync as existsSync5 } from "node:fs";
 
-// src/codex-workspace-bridge.ts
+// packages/plugin/src/codex-workspace-bridge.ts
 var CodexWorkspaceBridge = class extends WorkspaceBridge {
   constructor(resolveCwd, terminalEnabled, state2 = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner()) {
     super(resolveCwd, terminalEnabled, state2, spawnTerminal, {
@@ -98884,7 +100141,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
   }
 };
 
-// src/service.ts
+// packages/plugin/src/service.ts
 var HostPluginRuntime = class {
   constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule) {
     this.config = config2;
@@ -98968,6 +100225,7 @@ var HostPluginRuntime = class {
   serverApi;
   serverConnection;
   harnessVersion;
+  pairing;
   closed = false;
   codex;
   acp;
@@ -99017,6 +100275,8 @@ var HostPluginRuntime = class {
       this.harnessVersion = await this.readHarnessVersion();
       this.serverApi.setHarnessVersion(this.harnessVersion);
       this.serverApi.bindIdentity(this.identity);
+      await this.serverApi.loadStoredPolicy();
+      this.initializePairing();
       this.serverConnection = this.createServerConnection(this.identity);
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start();
     }
@@ -99042,9 +100302,35 @@ var HostPluginRuntime = class {
       ...error62 === void 0 ? {} : { error: error62 },
       ...authorization?.account === void 0 ? {} : { account: authorization.account },
       authorized: authorization !== void 0,
+      pairingHostOnly: this.serverApi?.pairingHostOnly() ?? false,
       accountRequired: error62 === "ACCOUNT_AUTH_REQUIRED" || error62 === "AUTH_REQUIRED" || error62 === "AUTH_INVALID" || error62 === "TOKEN_EXPIRED" || error62 === "DEVICE_REVOKED" || error62 === "DEVICE_OWNERSHIP_REQUIRED",
       connectedClients: this.listConnectedClients()
     };
+  }
+  initializePairing() {
+    this.pairing?.close();
+    if (!this.serverApi || !this.identity || !this.config.serverUrl) {
+      this.pairing = void 0;
+      return;
+    }
+    this.pairing = new HostPairing(this.config.serverUrl, this.identities.directory, this.identity, {
+      deviceId: this.identity.deviceId,
+      name: this.identity.name,
+      role: "host",
+      platform: process.platform,
+      identityKey: this.identity.publicKey,
+      ...this.harnessVersion === void 0 ? {} : { harnessVersion: this.harnessVersion }
+    }, async (result) => {
+      await this.serverApi.adoptPairing(result);
+      if (!this.closed) this.serverConnection?.reconnect();
+    });
+  }
+  async pairingControl(action, input4) {
+    if (this.pairing === void 0 || this.closed) throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure and save the Server URL before pairing.", false);
+    if (action === "start") return this.pairing.start();
+    if (action === "status") return this.pairing.status();
+    if (typeof input4.sessionId !== "string") throw new ServerApiError("INVALID_MESSAGE", "A specific pairing session is required.", false);
+    return action === "confirm" ? this.pairing.confirm(input4.sessionId, input4.verificationCode) : this.pairing.cancel(input4.sessionId);
   }
   async hasStoredAuthorization() {
     return this.serverApi?.hasStoredAuthorization() ?? false;
@@ -99088,9 +100374,12 @@ var HostPluginRuntime = class {
     }
     const result = await this.serverApi.pollOAuthQrLogin(this.currentIdentity(), qrId, async () => {
       await this.serverConnection?.stop();
+      await this.pairing?.discard();
+      this.pairing = void 0;
       this.identity = await this.identities.reset(this.config.deviceName);
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
+      this.initializePairing();
       return this.identity;
     });
     if (result.status === "complete") {
@@ -99100,6 +100389,8 @@ var HostPluginRuntime = class {
     return result;
   }
   async clearHostAuthorization() {
+    await this.pairing?.discard();
+    this.pairing = void 0;
     await this.serverConnection?.stop();
     let revokeFailure;
     try {
@@ -99110,6 +100401,7 @@ var HostPluginRuntime = class {
     this.identity = await this.identities.reset(this.config.deviceName);
     this.serverApi?.bindIdentity(this.identity);
     if (this.serverApi !== void 0) this.serverConnection = this.createServerConnection(this.identity);
+    this.initializePairing();
     this.logger.info("Host authorization cleared");
     if (revokeFailure !== void 0) throw revokeFailure;
   }
@@ -99123,9 +100415,12 @@ var HostPluginRuntime = class {
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || error62.code !== "DEVICE_REVOKED") throw error62;
       await this.serverConnection?.stop();
+      await this.pairing?.discard();
+      this.pairing = void 0;
       this.identity = await this.identities.reset(this.config.deviceName);
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
+      this.initializePairing();
       result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account);
       this.logger.info("Rotated revoked Host identity before owned-device authorization");
     }
@@ -99139,9 +100434,12 @@ var HostPluginRuntime = class {
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email3, password, async () => {
       await this.serverConnection?.stop();
+      await this.pairing?.discard();
+      this.pairing = void 0;
       this.identity = await this.identities.reset(this.config.deviceName);
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
+      this.initializePairing();
       this.logger.info("Rotated revoked Host identity before account authorization");
       return this.identity;
     });
@@ -99206,6 +100504,7 @@ var HostPluginRuntime = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.pairing?.close();
     this.serverApi?.close();
     await this.serverConnection?.stop();
     await this.connections.close();
@@ -99354,7 +100653,7 @@ function isPlainRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// src/plugin-route-dispatcher.ts
+// packages/plugin/src/plugin-route-dispatcher.ts
 function createPluginRouteDispatcher(readConnection, readPort, peer) {
   let cookie;
   return async (route, body, signal) => {
@@ -99409,7 +100708,7 @@ function withSignal(pending, signal) {
   });
 }
 
-// src/remote-tools.ts
+// packages/plugin/src/remote-tools.ts
 var emptyInput = external_exports.object({}).strict();
 var workspaceInput = external_exports.object({ hostId: external_exports.string().min(1).max(256) }).strict();
 var string8 = { type: "string" };
@@ -99561,7 +100860,7 @@ function installRemoteDiscoveryTools(ctx, resolve9) {
   });
 }
 
-// src/hmr-safe-settings.ts
+// packages/plugin/src/hmr-safe-settings.ts
 var PUMP_KEY = Symbol.for("ds-harness-remote.hmr-safe-settings-pump");
 function createPump() {
   const queue = [];
@@ -99604,7 +100903,7 @@ function runHmrSafe(run, hmr) {
   });
 }
 
-// src/update-check.ts
+// packages/plugin/src/update-check.ts
 var DIST_TAG_URLS = [
   "https://registry.npmjs.org/-/package/ds-harness-remote/dist-tags",
   "https://registry.npmmirror.com/-/package/ds-harness-remote/dist-tags"
@@ -99706,7 +101005,7 @@ var PluginUpdateChecker = class {
   }
 };
 
-// src/tui-event-source.ts
+// packages/plugin/src/tui-event-source.ts
 async function assertRemoteEventSource(gateway) {
   const peerGateway = gateway.createPeer?.();
   if (peerGateway?.peer === void 0) {
@@ -99731,7 +101030,7 @@ async function assertRemoteEventSource(gateway) {
   }
 }
 
-// src/owner-peer.ts
+// packages/plugin/src/owner-peer.ts
 function ownerPeerConstructor(connectionExports) {
   const candidate = typeof connectionExports.Peer === "function" ? connectionExports.Peer : connectionExports.OperatorPeer;
   return typeof candidate === "function" ? candidate : void 0;
@@ -99754,7 +101053,7 @@ function createOwnerPeerFactory(ctx, constructor, connection) {
   };
 }
 
-// src/remote-file-content-provider.ts
+// packages/plugin/src/remote-file-content-provider.ts
 var REMOTE_FILE_SAVE_AS_MAX_BYTES = 100 * 1024 * 1024;
 var REMOTE_FILE_FAST_SAVE_AS_MAX_BYTES = 1024 * 1024 * 1024;
 function createRemoteFileContentProvider(call, options = {}) {
@@ -99827,10 +101126,10 @@ function decodeBase64(value) {
   return bytes;
 }
 
-// src/cli.ts
+// packages/plugin/src/cli.ts
 import { stat as stat9 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -99841,6 +101140,7 @@ async function runCli(args = process.argv.slice(2), dependencies = {}) {
     if (command === "register") return await register(rest, runtime);
     if (command === "status") return await status(rest, runtime);
     if (command === "logout") return await logout(rest, runtime);
+    if (command === "reset-identity") return await resetIdentity(rest, runtime);
     if (command === "help" || command === "--help" || command === "-h" || command === void 0) {
       write2(runtime.stdout, helpText());
       return 0;
@@ -99914,14 +101214,14 @@ Waiting for authorization...
 async function status(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote status");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
-  const directory = serverStorageDirectory(root, serverUrl, "host");
+  const root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  const directory = serverStorageDirectory(root2, serverUrl, "host");
   const lines = [
     "Remote Host status",
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join16(directory, "device.json"))) {
+  if (!await exists3(join17(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -99929,7 +101229,7 @@ Run "ds-harness-remote login" to authorize this Host.
 `);
     return 0;
   }
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
   const identity3 = await identities.loadOrCreate(deviceName);
   const store = new ServerCredentialStore(directory);
@@ -99964,37 +101264,78 @@ Run "ds-harness-remote login" to authorize this Host.
 async function logout(args, runtime) {
   if (args.length !== 0) throw new CliUsageError("Usage: ds-harness-remote logout");
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
-  const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join16(directory, "device.json"))) {
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
+  let root2;
+  try {
+    root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  } catch (error62) {
+    if (error62 instanceof IdentityInvalidError && error62.code === "IDENTITY_INVALID") {
+      await resetDefaultIdentityRoles(["host"], serverUrl, deviceName, {
+        env: runtime.env,
+        createIdentityStore: runtime.createIdentityStore
+      });
+      write2(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n");
+      return 0;
+    }
+    throw error62;
+  }
+  const directory = serverStorageDirectory(root2, serverUrl, "host");
+  const [hasDevice, hasKey, hasCredentials] = await Promise.all([
+    exists3(join17(directory, "device.json")),
+    exists3(join17(directory, "device.key")),
+    exists3(join17(directory, "server-credentials.json"))
+  ]);
+  if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
     write2(runtime.stdout, "This Host is already logged out.\n");
     return 0;
   }
-  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity3 = await identities.loadOrCreate(deviceName);
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  api.bindIdentity(identity3);
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   let revokeFailure;
   try {
+    const identity3 = await identities.loadOrCreate(deviceName);
+    const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
+    api.bindIdentity(identity3);
     await api.revokeCurrentDevice();
   } catch (error62) {
     revokeFailure = error62;
   }
   await identities.reset(deviceName);
-  if (revokeFailure !== void 0) {
+  await new ServerCredentialStore(directory).clear();
+  if (revokeFailure !== void 0 && !(revokeFailure instanceof IdentityInvalidError) && !(revokeFailure instanceof ServerCredentialsInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`);
   }
   write2(runtime.stdout, "Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n");
   return 0;
 }
+async function resetIdentity(args, runtime) {
+  if (args.length > 1) {
+    throw new CliUsageError("Usage: ds-harness-remote reset-identity [host|client|all]");
+  }
+  const roleArg = args[0];
+  if (roleArg !== void 0 && roleArg !== "host" && roleArg !== "client" && roleArg !== "all") {
+    throw new CliUsageError("Usage: ds-harness-remote reset-identity [host|client|all]");
+  }
+  const serverUrl = selectedServer();
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
+  const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+  await resetDefaultIdentityRoles(roles, serverUrl, deviceName, {
+    env: runtime.env,
+    createIdentityStore: runtime.createIdentityStore
+  });
+  for (const role2 of roles) {
+    write2(runtime.stdout, `Remote ${role2} identity was reset and a new key pair was created.
+`);
+  }
+  write2(runtime.stdout, "Restart the Harness instance to use the fresh identity.\n");
+  return 0;
+}
 async function hostContext(runtime) {
   const serverUrl = selectedServer();
-  const root = new IdentityStore({ env: runtime.env }).directory;
-  const directory = serverStorageDirectory(root, serverUrl, "host");
+  const root2 = await prepareDefaultIdentityDirectory({ env: runtime.env });
+  const directory = serverStorageDirectory(root2, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env });
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   const identity3 = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
   return { api, identities, identity: identity3, deviceName };
@@ -100054,6 +101395,7 @@ function helpText() {
     "  ds-harness-remote register <server-token>",
     "  ds-harness-remote status",
     "  ds-harness-remote logout",
+    "  ds-harness-remote reset-identity [host|client|all]",
     "",
     "login uses an available QR provider (preferring Zhihu). Use login list to see available providers.",
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
@@ -100080,7 +101422,7 @@ async function exists3(path) {
 var CliUsageError = class extends Error {
 };
 
-// src/acp.ts
+// packages/plugin/src/acp.ts
 var AcpGateway = class {
   constructor(adapters) {
     this.adapters = adapters;
@@ -100122,11 +101464,10 @@ var AcpGateway = class {
   }
 };
 
-// src/index.ts
+// packages/plugin/src/index.ts
 var name = "ds-harness-remote";
 var legacyLoaderModuleNames = /* @__PURE__ */ new Set(["@dsh-remote/plugin"]);
 var pluginSettingsNamespace = "ds-harness-remote";
-var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
 function apply(ctx, entry = void 0) {
@@ -100137,23 +101478,36 @@ function apply(ctx, entry = void 0) {
     if (isLegacySettingsProvider(settings)) return;
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
-  const activateWhenCarrierReady = (runtimeContext) => {
+  const activateWhenCarrierReady = async (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
     const webServer = runtimeContext.get("webServer");
     let disposePendingControl;
-    const installPendingControl = () => {
+    const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
+      let identityDirectory = new IdentityStore().directory;
+      let storageError;
+      try {
+        identityDirectory = await prepareDefaultIdentityDirectory();
+      } catch (error62) {
+        storageError = error62;
+      }
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
-          new IdentityStore().directory,
+          identityDirectory,
           void 0,
           void 0,
-          void 0
+          void 0,
+          void 0,
+          void 0,
+          true
         );
+        if (storageError !== void 0) {
+          control.setStartupFailure(storageError, { storageAvailable: false });
+        }
         return control.register(connection, webServer);
-      }, "dsh-remote pending control");
+      }, "ds-harness-remote pending control");
     };
     const startActiveRuntime = async (activeContext) => {
       await disposePendingControl?.();
@@ -100163,7 +101517,7 @@ function apply(ctx, entry = void 0) {
     if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext);
     }
-    installPendingControl();
+    await installPendingControl();
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
 }
@@ -100184,11 +101538,29 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const connection = ctx.get("connection");
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const defaultIdentityDirectory = new IdentityStore().directory;
+  let defaultIdentityDirectory = new IdentityStore().directory;
+  let initialStorageError;
+  try {
+    defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+  } catch (error62) {
+    initialStorageError = error62;
+  }
   if (!config2.enabled) {
     if (connection !== void 0) {
-      const controlRuntime2 = new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, void 0, void 0);
-      ctx.effect(() => controlRuntime2.register(connection, webServer), "dsh-remote disabled control");
+      const controlRuntime2 = new PluginControlRuntime(
+        config2,
+        defaultIdentityDirectory,
+        settingsBinding,
+        void 0,
+        void 0,
+        void 0,
+        void 0,
+        true
+      );
+      if (initialStorageError !== void 0) {
+        controlRuntime2.setStartupFailure(initialStorageError, { storageAvailable: false });
+      }
+      ctx.effect(() => controlRuntime2.register(connection, webServer), "ds-harness-remote disabled control");
     }
     return;
   }
@@ -100209,7 +101581,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       ctx.logger.error(message);
       console.error(message);
     }
-  }, config2.logLevel);
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const nativeTypertGateway = ctx.get("typertGateway");
   const connectionExports = DshConnection;
@@ -100225,7 +101597,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     const peer = fallbackPeer;
     fallbackPeer = void 0;
     return peer?.dispose?.();
-  }, "dsh-remote fallback owner peer");
+  }, "ds-harness-remote fallback owner peer");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
   const localTypertGateway = hostGateway.local();
   localTypertGateway.createPeer = () => {
@@ -100243,7 +101615,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
   const createRuntimes = (config3) => {
     const hostIdentities = new IdentityStore({
-      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host")
+      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
+      role: "host"
     });
     const runtime2 = new HostPluginRuntime(
       config3,
@@ -100262,7 +101635,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {
       const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client")
+        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client"),
+        role: "client"
       });
       clientRuntime2 = new ClientModeRuntime(
         config3,
@@ -100275,19 +101649,50 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     }
     return { runtime: runtime2, clientRuntime: clientRuntime2 };
   };
-  let { runtime, clientRuntime } = createRuntimes(config2);
+  let runtime;
+  let clientRuntime;
+  let hostServiceProvided = false;
+  let clientServiceProvided = false;
+  let clientActive = false;
+  if (initialStorageError === void 0) {
+    ;
+    ({ runtime, clientRuntime } = createRuntimes(config2));
+  }
   let closed = false;
-  let clientServiceProvided = clientRuntime !== void 0;
   let startup;
   let replacement;
+  const syncOptionalService = (serviceName, value, owned) => {
+    try {
+      if (serviceName === "dshRemote") {
+        if (owned) ctx.dshRemote = value;
+        else ctx.provide("dshRemote", value);
+      } else if (owned) {
+        ctx.dshRemoteClient = value;
+      } else {
+        ctx.provide("dshRemoteClient", value);
+      }
+      return true;
+    } catch {
+      logger2.warn("failed to provide remote service", {
+        service: serviceName,
+        code: "SERVICE_PROVIDE_CONFLICT"
+      });
+      return false;
+    }
+  };
   const replaceServer = (next) => {
+    const previousReplacement = replacement;
     const operation = async () => {
-      await startup;
+      await startup?.catch(() => void 0);
+      await previousReplacement?.catch(() => void 0);
       if (closed) throw new Error("Remote plugin is closed");
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()]);
+      clientActive = false;
+      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
       const failure5 = shutdown.find((result) => result.status === "rejected");
       if (failure5?.status === "rejected") throw failure5.reason;
       if (closed) throw new Error("Remote plugin is closed");
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+      controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
       const fresh = createRuntimes(next);
       try {
         await fresh.runtime.start();
@@ -100299,56 +101704,77 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       }
       runtime = fresh.runtime;
       clientRuntime = fresh.clientRuntime;
-      ctx.dshRemote = runtime;
+      clientActive = clientRuntime !== void 0;
+      controlRuntime?.clearStartupFailure();
+      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
       if (clientRuntime !== void 0) {
-        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
-        else {
-          ctx.provide("dshRemoteClient", clientRuntime);
-          clientServiceProvided = true;
-        }
+        clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
       }
+      if (connection !== void 0) updateChecker.start();
       return { client: clientRuntime, host: runtime };
     };
     replacement = operation();
     return replacement;
   };
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config2, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer, updateChecker);
-  ctx.provide("dshRemote", runtime);
-  if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
+  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
+    config2,
+    defaultIdentityDirectory,
+    settingsBinding,
+    clientRuntime,
+    runtime,
+    replaceServer,
+    updateChecker,
+    true
+  );
+  if (initialStorageError !== void 0) {
+    controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+  }
+  if (runtime !== void 0) {
+    hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  }
+  if (clientRuntime !== void 0) {
+    clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+  }
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection, webServer);
-    try {
-      startup = (async () => {
-        await runtime.start();
-        if (clientRuntime !== void 0) {
-          await clientRuntime.start();
-        } else {
-          logger2.warn("client remote mode is unavailable", {
-            serverConfigured: config2.serverUrl !== void 0,
-            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-            connectionAvailable: connection !== void 0
-          });
-        }
-      })();
-      await startup;
-      if (connection !== void 0) updateChecker.start();
-    } catch (error62) {
-      await disposeControl?.();
-      await clientRuntime?.close();
-      await runtime.close();
-      throw error62;
+    if (initialStorageError !== void 0) {
+      logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
+    } else {
+      try {
+        startup = (async () => {
+          await runtime.start();
+          if (clientRuntime !== void 0) {
+            await clientRuntime.start();
+            clientActive = true;
+          } else {
+            logger2.warn("client remote mode is unavailable", {
+              serverConfigured: config2.serverUrl !== void 0,
+              remoteGatewayAvailable: localTypertGateway.supportsCarrier,
+              connectionAvailable: connection !== void 0
+            });
+          }
+        })();
+        await startup;
+        if (connection !== void 0) updateChecker.start();
+      } catch (error62) {
+        clientActive = false;
+        logger2.error("Remote plugin startup failed", safeStartupError(error62));
+        controlRuntime?.setStartupFailure(error62);
+        await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
+      }
     }
     return async () => {
       closed = true;
+      clientActive = false;
       updateChecker.stop();
       await replacement?.catch(() => void 0);
       await disposeControl?.();
       await clientRuntime?.close();
-      await runtime.close();
+      await runtime?.close();
     };
-  }, "dsh-remote lifecycle");
-  if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed ? void 0 : clientRuntime);
+  }, "ds-harness-remote lifecycle");
+  if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
 }
 function readEntryConfig(entry) {
   if (entry === void 0) return {};
@@ -100379,14 +101805,15 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
       }, hmr)
     };
   }
-  const scope2 = settings.register(pluginSettingsNamespace, Config, {
-    base: readConfig(),
+  const base = readConfig();
+  const resolveRegistration = (input4) => entryConfigSchema(input4 === void 0 ? base : input4);
+  const scope2 = settings.register(pluginSettingsNamespace, resolveRegistration, {
+    base,
     applies: "restart",
     validate: (value) => {
       resolveConfig(value);
     }
   });
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope2, hmr));
   return {
     get: () => scope2.get(),
     replace: (section) => runHmrSafe(async () => {
@@ -100396,39 +101823,6 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
 }
 function isLegacySettingsProvider(value) {
   return typeof value === "object" && value !== null && typeof value.register === "function";
-}
-function reportSettingsMigration(ctx, migration) {
-  if (migration === "migrated") ctx.logger.info("migrated legacy Remote settings namespace");
-  if (migration === "failed") ctx.logger.warn("failed to migrate legacy Remote settings namespace");
-}
-async function migrateLegacySettings(settings, currentScope, hmr) {
-  if (typeof settings.describe !== "function") return "skipped";
-  try {
-    let descriptors = settings.describe();
-    const current = descriptors.find((descriptor) => descriptor.ns === pluginSettingsNamespace);
-    if (isPlainRecord2(current?.user)) return "skipped";
-    let legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    if (legacy === void 0) {
-      settings.register(legacySettingsNamespace, Config, {
-        applies: "restart",
-        validate: (value) => {
-          resolveConfig(value);
-        }
-      });
-      descriptors = settings.describe();
-      legacy = descriptors.find((descriptor) => descriptor.ns === legacySettingsNamespace);
-    }
-    if (!isPlainRecord2(legacy?.user) || Object.keys(legacy.user).length === 0) return "skipped";
-    await runHmrSafe(async () => {
-      await currentScope.replace(legacy.user);
-    }, hmr);
-    return "migrated";
-  } catch {
-    return "failed";
-  }
-}
-function isPlainRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 async function disableLegacyLoaderEntries(ctx, logger2) {
   const loader = ctx.get("loader");
@@ -100493,8 +101887,9 @@ export {
   applyTuiHost,
   createRemoteFileContentProvider,
   fingerprint2 as fingerprint,
-  migrateLegacySettings,
   name,
+  prepareDefaultIdentityDirectory,
+  resetDefaultIdentityRoles,
   resolveConfig,
   runCli,
   serverStorageDirectory

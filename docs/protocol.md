@@ -295,7 +295,9 @@ deviceId 或相同 role，并为新角色签发独立 token pair、同步同账�
 }
 ```
 
-Server 必须轮换 refresh token。完整多账号 Server 对未再次轮换、未撤销且未过期的后继 token 提供幂等恢复，不使用固定两分钟窗口；过时 token 被拒绝但不撤销当前有效凭据。恢复数据异常或数据库繁忙返回可重试 503。自部署 Server 的策略以其实现为准。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+Server 必须轮换 refresh token。完整多账号 Server 和开源自部署 Server 对未再次轮换、未撤销且未过期的直接后继 token 提供幂等恢复，不使用固定两分钟窗口；过时 token 被拒绝但不撤销当前有效凭据。恢复数据异常或数据库繁忙返回可重试 503。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+
+自部署 Server 用请求携带的旧 refresh bearer 作为 HMAC-SHA256 密钥，结合随机 nonce、deviceId 和用途域分离派生后继 pair；磁盘只保存 token 摘要、nonce 和原始过期时间，不保存明文 bearer。消耗旧 token、保存恢复元数据和后继记录必须一起提交，写入失败时旧 token 保持可用。重复请求返回原 pair，不延长 access 或 refresh 生命周期；若 access 已过期，Client 应保存恢复的 pair，再用其 refresh token 正常轮换。后继再次轮换后，不允许用更早的祖先 token 跨代恢复。升级前已消耗且没有恢复元数据的旧 token 无法恢复，返回 `AUTH_INVALID`，但不撤销现有有效凭据。部署旧版 Server 的行为可能仍是重用即撤销，升级 Plugin 不会改变 Server 策略。
 HTTP `401/403` 的空响应、非 JSON 响应或不符合协议的错误体应保留凭据并退避重试，不单凭状态码判定设备授权失效。完整 Server 握手时的授权快照竞争使用 WebSocket `1013`（稍后重试），Client 保留凭据重连，不消耗授权刷新恢复次数。
 成功响应必须使用 §8.1 的 token pair schema。请求和响应禁止包含未定义字段。
 
@@ -826,11 +828,11 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
 按 `endpoint` 执行以下编译期固定操作白名单，新增上游操作默认拒绝：
 
-- 查询：`state`、`models`、`efforts`、`exchange`、`earlier`、`usage`、`room-progress`、`schedules`。
-- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
-- 群聊管理：`create-room`、`update-room`、`delete-room`、`room-continue`。
+- 查询：`state`、`models`、`efforts`、`exchange`、`exchange-text`、`file-text`、`earlier`、`chat`、`run-stats`、`thinking`、`usage`、`room-progress`、`schedules`。
+- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`、`resume`、`bot-new-part`、`bot-open-part`。
+- 群聊管理：`create-room`、`update-room`、`delete-room`、`stop-room-work`、`goal-draft`、`goal-control`、`room-continue`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`btw`、`btw-cancel`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
+- 会话交互：`send`、`btw`、`btw-cancel`、`btw-delete`、`side-new`、`side-ask`、`side-cancel`、`side-close`、`answer-question`、`dismiss-question`、`dismiss-view`、`view-reply`、`approval-answer`、`stop-member-work`。
 
 `view-reply` 转发 DS Bot 0.2.0 / 0.2.1 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
 用于选择、确认、表单及 0.2.1 的 `submit` 提交；公式输入通过 `values.inputs` 传递。
@@ -846,8 +848,8 @@ DS Bot 0.2.1 旁问：`btw { sessionId, text }` 返回卡片 ID，`btw-cancel { 
 Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本地计算与 SVG 图表；
 HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
-`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
-安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断
+`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批（0.3.0 起同时覆盖群聊与 Bot 自有会话审批）。
+安装/升级、日程增删、凭据和 connector/mail 管理、IM 外部账号配对与登录、本机 CLI Agent 注册（`local-agent-*`）、电脑操控与截屏（`computer-*`）、能力脚本、memory 写入、浏览器控制、诊断
 文件及本机偏好设置等操作均不开放；不允许通过 `api/bot` 间接扩大 Harness Remote 权限。
 被拒绝的操作返回 `INVALID_MESSAGE`，浏览器兼容入口显示安全的
 `remote-plugin/operation-not-allowed` 原生错误封装。
@@ -2126,3 +2128,7 @@ This adds no new wire format or capability and requires an updated Host plugin.
 The additive `transport.webrtc.resume.v1` contract is specified in
 [WebRTC control recovery](design/webrtc-control-recovery.md). Protocol v1 and
 legacy control lifetimes remain unchanged unless all three parties negotiate it.
+
+## Device pairing v1
+
+The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.

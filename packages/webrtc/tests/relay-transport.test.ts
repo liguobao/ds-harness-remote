@@ -464,7 +464,7 @@ describe('AdaptiveTransport capability negotiation', () => {
   })
 
   it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
-    await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
+    await runScenarios(['control-closed', 'control-error', 'retryable-control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
       name: reason, run: async () => {
         vi.stubGlobal('WebSocket', FakeWebSocket)
         const diagnostic = vi.fn()
@@ -485,6 +485,9 @@ describe('AdaptiveTransport capability negotiation', () => {
         await connecting
         if (reason === 'control-closed') socket.onclose?.({ code: 4003, reason: 'private upstream detail' })
         if (reason === 'control-error') socket.onerror?.()
+        if (reason === 'retryable-control-error') {
+          socket.receive(createControlFrame('error', { code: 'CONNECTION_FAILED', message: 'CONNECTION_FAILED', connectionId: 'connection-1', retryable: true }))
+        }
         if (reason === 'invalid-control-frame') socket.receiveRaw('invalid private content')
         if (rtc !== undefined) (rtc.channel as unknown as { onclose: () => void }).onclose()
         if (reason === 'local-close') await transport.close()
@@ -493,9 +496,11 @@ describe('AdaptiveTransport capability negotiation', () => {
         expect(transport.getStats().connected).toBe(false)
         if (reason === 'local-close') expect(diagnostic).not.toHaveBeenCalled()
         else expect(diagnostic.mock.calls).toEqual([[{
-          reason,
+          reason: reason === 'retryable-control-error' ? 'control-error' : reason,
           ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
           ...(reason === 'webrtc-closed' ? { transport: 'p2p' } : {}),
+          ...(reason === 'retryable-control-error' ? { errorCode: 'CONNECTION_FAILED' } : {}),
+          ...(reason === 'invalid-control-frame' ? { errorCode: 'INVALID_MESSAGE' } : {}),
         }]])
         socket.onclose?.({ code: 1006, reason: '' })
         expect(closed).toHaveBeenCalledOnce()
@@ -684,6 +689,37 @@ describe('AdaptiveTransport capability negotiation', () => {
       lastControlReceivedAt: Date.parse('2026-09-29T02:00:07.000Z'),
       lastControlSentAt: before.lastControlSentAt,
     })
+  })
+
+  it('constrains TURN-only ICE, preserves automatic ICE, and keeps Relay fallback', async () => {
+    await runScenarios([
+      { name: 'TURN-only', preferred: ['turn', 'relay'] as const, policy: 'relay' },
+      { name: 'automatic', preferred: ['lan', 'p2p', 'turn', 'relay'] as const, policy: 'all' },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const rtc = stalledRtc()
+      const transport = createAdaptiveTransport({
+        rtcFactory: rtc.factory,
+        preferredTransports: [...row.preferred],
+        negotiateTimeoutMs: 1000,
+        fetchIceServers: async () => [{ urls: 'turn:turn.example.test', username: 'user', credential: 'secret' }],
+      })
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.turn', 'transport.relay'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await vi.advanceTimersByTimeAsync(1)
+      expect(rtc.factory.create).toHaveBeenCalledWith(expect.objectContaining({ iceTransportPolicy: row.policy }))
+      expect(lastSentPayload(socket, 'connect.request')).toMatchObject({
+        preferredTransports: row.preferred.filter(value => value !== 'lan'),
+      })
+      await vi.advanceTimersByTimeAsync(1300)
+      await connecting
+      expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: 'relay' })
+      await transport.close()
+    } })), cleanupScenario1)
   })
 
   it('requests only transports present in hello.ack capabilities', async () => {

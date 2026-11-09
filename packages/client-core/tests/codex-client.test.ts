@@ -9,6 +9,28 @@ import {
 } from '../src/codex-client.js'
 
 describe('Codex display projection', () => {
+  it('keeps the first user message as an untitled thread preview across live updates and history reads', () => {
+    const user = { id: 'u1', type: 'userMessage', content: [{ type: 'text', text: '  Check\n the latest PR  ' }] }
+    const initial = createCodexTimelineState({ id: 'untitled', turns: [] })!
+    const started = reduceCodexTimelineFrame(initial, {
+      method: 'item/started', params: { turnId: 't1', item: user },
+    })
+    expect(started.session).toMatchObject({ preview: 'Check the latest PR' })
+    expect(started.session.title).toBeUndefined()
+    const later = reduceCodexTimelineFrame(started, {
+      method: 'item/completed', params: { turnId: 't2', item: { ...user, id: 'u2', content: [{ type: 'text', text: 'Second prompt' }] } },
+    })
+    expect(later.session.preview).toBe('Check the latest PR')
+    const renamed = reduceCodexTimelineFrame(later, {
+      method: 'thread/name/updated', params: { threadName: 'PR review' },
+    })
+    expect(renamed.session.title).toBe('PR review')
+    expect(projectCodexThread({ id: 'untitled', turns: [{ id: 't1', items: [user] }] })?.preview).toBe('Check the latest PR')
+    expect(projectCodexThread({ id: 'untitled', preview: 'Server preview', turns: [{ id: 't1', items: [user] }] })?.preview).toBe('Server preview')
+    const imageOnly = createCodexTimelineState({ id: 'image', turns: [{ id: 't1', items: [{ id: 'u1', type: 'userMessage', content: [{ type: 'image', url: 'data:image/png;base64,aA==' }] }] }] })!
+    expect(imageOnly.session.preview).toBeUndefined()
+  })
+
   it('uses the bounded Codex transfer path for image prompt input', async () => {
     const rpc = vi.fn(async (method: string) => {
       if (method === 'codex.app.transfer.commit') return { kind: 'inline', response: { turn: { id: 'turn_1' } } }

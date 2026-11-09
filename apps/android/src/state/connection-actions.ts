@@ -25,6 +25,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
+      if (!sameHost) runtime.webRtcFallbackStreak = 0
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
       const recovering = sameHost && get().connection.phase === 'reconnecting'
@@ -183,11 +184,23 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           return false
         }
         const message = friendlyError(error)
+        const errorCode = error instanceof Error && typeof (error as Error & { code?: unknown }).code === 'string'
+          ? (error as Error & { code: string }).code
+          : undefined
+        const retryable = error instanceof Error && typeof (error as Error & { retryable?: unknown }).retryable === 'boolean'
+          ? (error as Error & { retryable: boolean }).retryable
+          : undefined
         // Failure inside transport negotiation means P2P/TURN could not
         // establish: remember relay-only so the automatic retry (and the next
         // manual attempt) skips the multi-second WebRTC wait entirely.
         set({
-          connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: message },
+          connection: {
+            phase: 'offline',
+            stats: { mode: 'Disconnected', connected: false },
+            error: message,
+            ...(errorCode !== undefined ? { errorCode } : {}),
+            ...(retryable !== undefined ? { retryable } : {}),
+          },
           connectionStage: undefined,
           ...(failedStage === 'transport' ? { relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS } : {}),
           codexAvailable: false,

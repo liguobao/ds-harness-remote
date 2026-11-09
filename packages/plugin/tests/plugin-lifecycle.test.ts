@@ -53,6 +53,51 @@ describe('Cordis plugin lifecycle', () => {
     }
   })
 
+  it('keeps the entry Config on a registry that resolves a registration without a stored section', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-legacy-registry-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline fixture') }))
+    const config: Config = {
+      ...disabledAgentDomains,
+      serverUrl: 'https://legacy.example.com',
+      loopback: { ports: [8080] },
+      acp: { enabled: true },
+    }
+    // `dsh-settings@0.2.1-rc.3` resolves a registration as
+    // `schema(mergeLayers(base, user))`; a plugin with no stored section has no
+    // override layer, and `mergeLayers` then returns that layer unchanged, so
+    // `base` never reaches the schema. The registry also calls the schema
+    // directly, so a volatile entry schema resolves to a `{ get }` accessor.
+    let registerSchema: ((input?: unknown) => unknown) | undefined
+    let resolvedFromSchema: unknown
+    const register = vi.fn((_ns: string, schema: (input?: unknown) => unknown, options?: { validate?: (value: unknown) => void }) => {
+      registerSchema = schema
+      resolvedFromSchema = schema(undefined)
+      options?.validate?.(resolvedFromSchema)
+      return { get: () => resolvedFromSchema, replace: async () => undefined }
+    })
+    const ctx = new Context()
+    ctx.provide('settings', { register } as never)
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', connection())
+    const fiber = await ctx.plugin(remotePlugin, config)
+    try {
+      await vi.waitFor(() => { expect(ctx.get('dshRemote')).toBeDefined() })
+      expect(register).toHaveBeenCalledOnce()
+      expect(ctx.dshRemoteClient.status().serverUrl).toBe('https://legacy.example.com')
+      // Nested entry Config must survive: schemastery resolves `loopback` and
+      // `acp` to default-only containers, which previously overwrote the entry
+      // Config when it was merged as a flat layer on read.
+      expect(resolvedFromSchema).toMatchObject({ loopback: { ports: [8080] }, acp: { enabled: true } })
+      // A stored section still wins, including an explicit reset to an empty list.
+      expect(registerSchema?.({ loopback: { ports: [] } })).toMatchObject({ loopback: { ports: [] } })
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('switches Server authority live and cancels discovery belonging to the old Server', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-server-switch-'))
     directories.push(dshHome)
@@ -127,10 +172,12 @@ describe('Cordis plugin lifecycle', () => {
     await ctx.fiber.dispose()
   })
 
-  it('loads against Typert and disposes its runtime', async () => {
+  it('automatically migrates storage on upgrade before loading Typert and disposes its runtime', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-cordis-'))
     directories.push(dshHome)
     vi.stubEnv('DSH_HOME', dshHome)
+
+    const original = await new remotePlugin.IdentityStore({ directory: join(dshHome, 'remote') }).loadOrCreate('Cordis test host')
 
     const ctx = new Context()
     let identityReadyWhenControlRegistered: boolean | undefined
@@ -153,6 +200,8 @@ describe('Cordis plugin lifecycle', () => {
         capabilities: expect.arrayContaining(['harness.remote.v1', 'harness.remote.transfer.v1']),
       })
     })
+    expect(ctx.dshRemote.currentIdentity()).toEqual(original)
+
     expect(identityReadyWhenControlRegistered).toBe(false)
 
     await fiber.dispose()
@@ -210,7 +259,7 @@ describe('Cordis plugin lifecycle', () => {
     const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis delayed rc.2 host' })
 
     expect(ctx.get('dshRemote')).toBeUndefined()
-    expect(handlers).toHaveLength(1)
+    await vi.waitFor(() => expect(handlers).toHaveLength(1))
     expect(handlers[0]?.channel).toBe('/ds-harness-remote')
     await expect(handlers[0]?.handler('status', {}, new AbortController().signal)).resolves.toMatchObject({
       ok: true,
@@ -228,6 +277,160 @@ describe('Cordis plugin lifecycle', () => {
     await fiber.dispose()
     expect(ctx.get('dshRemote')).toBeUndefined()
     await ctx.fiber.dispose()
+  })
+
+  it('keeps loopback control alive when legacy storage has a credentialed corrupt client and recovers live on reset', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-corrupt-recovery-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(
+      { error: { code: 'AUTHORIZATION_REQUIRED', message: 'Sign in required' } },
+      { status: 401 },
+    )))
+
+    const serverUrl = 'https://dsh.r2049.cn'
+    const legacyRoot = join(dshHome, 'remote')
+    const hostDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'host')
+    const clientDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'client')
+    const hostIdentity = await new remotePlugin.IdentityStore({ directory: hostDir, role: 'host' }).loadOrCreate('Host')
+    const clientIdentity = await new remotePlugin.IdentityStore({ directory: clientDir, role: 'client' }).loadOrCreate('Client')
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(join(clientDir, 'device.key'), 'corrupted-key\n')
+    await new remotePlugin.ServerCredentialStore(clientDir).save({
+      serverUrl,
+      deviceId: clientIdentity.deviceId,
+      authorizationMethod: 'owned_device',
+      accessToken: 'c'.repeat(24),
+      accessTokenExpiresAt: Date.now() + 60_000,
+      refreshToken: 'r'.repeat(24),
+      refreshTokenExpiresAt: Date.now() + 600_000,
+    })
+
+    let config: Config = { ...disabledAgentDomains, serverUrl }
+    let handler!: ControlRouteHandler
+    const ctx = new Context()
+    ctx.provide('settings', { register: () => ({
+      get: () => config,
+      replace: async (value: Config) => { config = value },
+    }) } as never)
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', { rpc: { handle: (_channel: string, value: ControlRouteHandler) => {
+      handler = value
+      return async () => undefined
+    } } } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, config)
+    const call = (endpoint: string, payload: unknown = {}) => handler(endpoint, payload, new AbortController().signal)
+    try {
+      await vi.waitFor(() => expect(handler).toBeDefined())
+      await expect(call('status')).resolves.toMatchObject({
+        ok: true,
+        value: {
+          available: false,
+          controlUnavailable: false,
+          startupError: { code: 'IDENTITY_INVALID' },
+        },
+      })
+      await expect(call('settings.identity.reset', { role: 'client' })).resolves.toMatchObject({
+        ok: true,
+        value: { applies: 'live' },
+      })
+      expect(ctx.dshRemote.currentIdentity().deviceId).toBe(hostIdentity.deviceId)
+      const statusAfter = await call('status')
+      expect(statusAfter).toMatchObject({
+        ok: true,
+        value: {
+          available: true,
+          identityReady: true,
+        },
+      })
+      expect((statusAfter as { value?: { startupError?: unknown } }).value?.startupError).toBeUndefined()
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('registers loopback control, remote tools, and live Server switching when another plugin already provides dshRemote services', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-service-conflict-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(
+      { error: { code: 'AUTHORIZATION_REQUIRED', message: 'Sign in required' } },
+      { status: 401 },
+    )))
+
+    let config: Config = { ...disabledAgentDomains, serverUrl: 'https://old.example.com' }
+    let handler: ControlRouteHandler | undefined
+    const registeredTools: string[] = []
+    const foreignHostService = { apiVersion: 1 }
+    const foreignClientService = { foreignClient: true }
+
+    const ctx = new Context()
+    ctx.provide('settings', { register: () => ({
+      get: () => config,
+      replace: async (value: Config) => { config = value },
+    }) } as never)
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', { rpc: { handle: (_channel: string, value: ControlRouteHandler) => {
+      handler = value
+      return async () => undefined
+    } } } as never)
+    ctx.provide('tools', {
+      register: (tool: { name: string }) => {
+        registeredTools.push(tool.name)
+        return () => undefined
+      },
+    } as never)
+
+    const foreignFiber = await ctx.plugin({
+      name: 'dsh-remote',
+      apply(peerCtx: Context) {
+        peerCtx.provide('dshRemote', foreignHostService as never)
+        peerCtx.provide('dshRemoteClient', foreignClientService as never)
+      },
+    })
+    const fiber = await ctx.plugin(remotePlugin, config)
+    const call = (endpoint: string, payload: unknown = {}) => handler!(endpoint, payload, new AbortController().signal)
+    try {
+      await vi.waitFor(() => {
+        expect(handler).toBeDefined()
+        expect(registeredTools).toContain('remote_list_hosts')
+      })
+      expect(ctx.get('dshRemote')).toBe(foreignHostService)
+      expect(ctx.get('dshRemoteClient')).toBe(foreignClientService)
+      await expect(call('status')).resolves.toMatchObject({
+        ok: true,
+        value: {
+          available: true,
+          serverUrl: 'https://old.example.com',
+        },
+      })
+      await expect(call('settings.server.set', { serverUrl: 'https://new.example.com/' })).resolves.toMatchObject({
+        ok: true,
+        value: {
+          config: { serverUrl: 'https://new.example.com' },
+          applies: 'live',
+        },
+      })
+      expect(ctx.get('dshRemote')).toBe(foreignHostService)
+      expect(ctx.get('dshRemoteClient')).toBe(foreignClientService)
+
+      await foreignFiber.dispose()
+      await expect(call('settings.server.set', { serverUrl: 'https://third.example.com/' })).resolves.toMatchObject({
+        ok: true,
+        value: {
+          config: { serverUrl: 'https://third.example.com' },
+          applies: 'live',
+        },
+      })
+      expect(ctx.dshRemote.currentIdentity()).toBeDefined()
+      expect(ctx.dshRemoteClient.status().serverUrl).toBe('https://third.example.com')
+    } finally {
+      await fiber.dispose()
+      await foreignFiber.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 })
 

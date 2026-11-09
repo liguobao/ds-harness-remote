@@ -77,5 +77,6 @@ export function resolveSessionDisplayTitle(session: RemoteSession): string | und
   const title = trimString(session.title)
   if (title !== undefined) return title
 
-  return trimString((session as { summary?: unknown }).summary)
+  return trimString(projectionValues?.summary)
+    ?? trimString((session as { summary?: unknown }).summary)
 }

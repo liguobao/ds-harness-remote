@@ -40,7 +40,7 @@ sudo -H bash -c '
 脚本执行：
 
 1. 检查已有 `DSH_COMMAND` 或 PATH 中的 DSH；存在则复用，不自动升级它。
-2. 找不到 DSH 时，在 `/opt/dsh-remote/runtime.*` 中安装官方 Node.js 24.9.0、DSH 与插件管理所需的私有 pnpm 9.15.4。Node.js 归档按[官方校验清单](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt)中的固定 SHA-256 校验。稳定 launcher 为 `/opt/dsh-remote/bin/dsh`，重复运行会复用。
+2. 找不到 DSH 时，在 `/opt/ds-harness-remote/runtime.*` 中安装官方 Node.js 24.9.0、DSH 与插件管理所需的私有 pnpm 9.15.4。Node.js 归档按[官方校验清单](https://nodejs.org/dist/v24.9.0/SHASUMS256.txt)中的固定 SHA-256 校验。稳定 launcher 为 `/opt/ds-harness-remote/bin/dsh`，重复运行会复用。
 3. 使用官方 `dsh plugin` 安装或更新所选 profile 的 Remote，默认 `web` profile 和 npm `latest`。
 4. 传入 Token 时，通过既有 Host 注册码接口兑换并保存设备凭据。Token 不写入日志、服务配置或持久设备凭据字段；不是模型 API Key。
 5. 检查 profile 确认启用了官方 Web Host 入口，配置 systemd **系统服务**，启用开机自启并启动/重启本安装器管理的匹配实例。无需登录或开启 linger。
@@ -54,13 +54,21 @@ sudo -H bash -c '
 默认 profile 的服务：
 
 ```sh
-sudo systemctl status dsh-remote-web.service
-sudo systemctl is-enabled dsh-remote-web.service
+sudo systemctl status ds-harness-remote-web.service
+sudo systemctl is-enabled ds-harness-remote-web.service
 ```
 
 服务 Web 端口只绑定 `127.0.0.1`。脚本确认的是 systemd 进程状态，不代替客户端上的 Host 在线验收。
 
 ### 重复安装和安全边界
+
+Remote 凭据存于 `$DSH_HOME/ds-harness-remote`（默认 `~/.dsh/ds-harness-remote`）。安装器处理凭据时，以及升级后首次启动时，都会在读取或创建凭据前自动迁移旧 `remote` 目录，无需手动迁移命令或重新配对。
+
+迁移前校验 Remote 已知目录结构、设备公私钥配对、信任指纹、凭据设备 ID 和 Server scope 哈希，不能只凭目录名认定归属；未知文件或记录不一致时停止迁移。整体移动保留身份、Server 隔离、Token 和信任记录。
+
+已确认归属的目录若因权限、文件占用或跨文件系统而无法移动，且原目录仍完整、目标目录仍不存在，在凭据树外保存回退记录，本进程和后续进程统一使用原目录，不新建替代身份、不清空授权；无法保存回退记录时停止启动，但不改动凭据。升级/重启时应停止旧 Harness 实例；新旧目录同时存在，或发现锁、符号链接时，迁移停止，不合并、不覆盖凭据。
+
+旧安装器使用 `/opt/dsh-remote` 和 `dsh-remote-<profile>.service`，新版不自动迁移这些名称；安装器发现归属本项目的旧服务仍运行或启用时，会在改包前拒绝继续。按新默认值重装前，先停用旧服务（默认 profile：`sudo systemctl disable --now dsh-remote-web.service`）。旧 `dsh-remote` 设置不再自动导入，重装后请重新配置 Remote。
 
 - 普通更新无需再次提供 Token；一次性 Token 已消费后不能重复使用。
 - 已有 Host 凭据时拒绝静默覆盖。换绑账号前，应停止原 Host 并通过官方入口退出登录，再使用新 Token。
@@ -103,7 +111,7 @@ ds-harness-remote@0.6.3
 | `DSH_VERSION` | Linux 缺少 DSH 时的新安装版本，默认 npm `latest`，不升级已有 DSH |
 | `DSH_REMOTE_REGISTRATION_TOKEN` | 一次性 Host 注册 Token；推荐通过隐藏输入传入 |
 | `DSH_REMOTE_AUTOSTART=0` | Linux 跳过系统服务配置/启动，仍要求 root |
-| `DSH_INSTALL_ROOT` | Linux 私有引导安装根目录，默认 `/opt/dsh-remote`，必须是绝对路径 |
+| `DSH_INSTALL_ROOT` | Linux 私有引导安装根目录，默认 `/opt/ds-harness-remote`，必须是绝对路径 |
 | `DSH_SYSTEMD_DIR` | 系统 unit 目录，默认 `/etc/systemd/system`；普通部署不要修改 |
 
 也接受 `bash install.sh --token '<一次性Token>'` 或位置参数，但它们可能出现在进程列表和 shell 历史中。不要使用 shell trace/debug 执行带凭据的命令。Token 无效、过期或已消费时注册明确失败。
@@ -113,13 +121,13 @@ ds-harness-remote@0.6.3
 先停用 Linux 系统服务（按实际 profile 替换 `web`）：
 
 ```sh
-sudo systemctl disable --now dsh-remote-web.service
+sudo systemctl disable --now ds-harness-remote-web.service
 ```
 
 然后使用同一 launcher、profile 和 `DSH_HOME` 执行官方插件移除命令，例如新引导安装的默认路径：
 
 ```sh
-sudo -H /opt/dsh-remote/bin/dsh plugin --profile web remove -w ds-harness-remote
+sudo -H /opt/ds-harness-remote/bin/dsh plugin --profile web remove -w ds-harness-remote
 ```
 
 Desktop 使用官方插件管理移除。不会自动删除 runtime、profile、设备凭据或服务 unit。Windows 用户仍可使用官方插件管理或已有 Harness 官方命令，但本仓库不再提供 Windows 安装脚本。

@@ -2,6 +2,8 @@ import { ControlLease } from './control-lease.js'
 import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
   PROTOCOL_VERSION,
+  errorCodeSchema,
+  type ErrorCode,
   WEBRTC_RESUME_CAPABILITY,
   RELAY_RESUME_CAPABILITY,
   type ConnectionLeaseAck,
@@ -63,6 +65,7 @@ export interface AdaptiveTransportOptions {
 export interface AdaptiveDisconnectDiagnostic {
   reason: 'control-closed' | 'control-error' | 'invalid-control-frame' | 'webrtc-closed'
   closeCode?: number
+  errorCode?: ErrorCode
   closeReason?: string
   /** Selected data-plane transport of an established WebRTC path that closed. */
   transport?: 'lan' | 'p2p' | 'turn'
@@ -341,7 +344,13 @@ export class AdaptiveTransport extends BaseTransport {
       if (frame.type === 'connect.rejected' || frame.type === 'error') {
         const payload = frame.payload as { message?: unknown; code?: unknown; retryable?: unknown }
         const message = typeof payload.message === 'string' ? payload.message : 'Server rejected the connection'
-        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable })
+        const failure = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable })
+        const code = errorCodeSchema.safeParse(payload.code)
+        this.failConnection(failure, {
+          reason: payload.retryable === true ? 'control-error' : 'invalid-control-frame',
+          ...(code.success ? { errorCode: code.data } : {}),
+        })
+        return
       }
       if (frame.type === 'relay') {
         if (this.dataSocket !== undefined) return
@@ -380,7 +389,8 @@ export class AdaptiveTransport extends BaseTransport {
     } catch (error) {
       const failure = error instanceof Error ? error : new Error('Invalid adaptive control frame')
       if (!('code' in failure)) Object.assign(failure, { code: 'INVALID_MESSAGE' })
-      this.failConnection(failure, { reason: 'invalid-control-frame' })
+      const code = errorCodeSchema.safeParse((failure as Error & { code?: unknown }).code)
+      this.failConnection(failure, { reason: 'invalid-control-frame', ...(code.success ? { errorCode: code.data } : {}) })
     }
   }
 
@@ -490,6 +500,12 @@ export class AdaptiveTransport extends BaseTransport {
       role: 'initiator',
       factory,
       iceServers,
+      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
+      // direct pair wins, then gets rejected as an unnegotiated transport.
+      iceTransportPolicy: this.negotiatedTransports().includes('turn')
+        && !this.negotiatedTransports().some(transport => transport === 'lan' || transport === 'p2p')
+        ? 'relay'
+        : 'all',
       onSignal: signal => this.sendRtcSignal(signal),
       negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,

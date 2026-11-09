@@ -3,10 +3,14 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_REMOTE_SERVER_URL, normalizeServerUrl } from './config.js'
 import {
+  IdentityInvalidError,
   IdentityStore,
+  prepareDefaultIdentityDirectory,
+  resetDefaultIdentityRoles,
   serverStorageDirectory,
   type HostIdentity,
   type IdentityStoreOptions,
+  type RemoteDeviceRole,
 } from './identity-store.js'
 import {
   HostServerApi,
@@ -17,7 +21,11 @@ import {
   type OAuthQrPollResult,
   type OAuthQrSession,
 } from './server-api.js'
-import { ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
+import {
+  ServerCredentialStore,
+  ServerCredentialsInvalidError,
+  type ServerCredentials,
+} from './server-credentials.js'
 
 const QR_POLL_INTERVAL_MS = 2_000
 const TERMINAL_QR_MARGIN = 4
@@ -75,6 +83,7 @@ export async function runCli(
     if (command === 'register') return await register(rest, runtime)
     if (command === 'status') return await status(rest, runtime)
     if (command === 'logout') return await logout(rest, runtime)
+    if (command === 'reset-identity') return await resetIdentity(rest, runtime)
     if (command === 'help' || command === '--help' || command === '-h' || command === undefined) {
       write(runtime.stdout, helpText())
       return 0
@@ -146,7 +155,7 @@ async function login(args: readonly string[], runtime: CliRuntime): Promise<numb
 async function status(args: readonly string[], runtime: CliRuntime): Promise<number> {
   if (args.length !== 0) throw new CliUsageError('Usage: ds-harness-remote status')
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
   const directory = serverStorageDirectory(root, serverUrl, 'host')
   const lines = [
     'Remote Host status',
@@ -160,7 +169,7 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
     return 0
   }
 
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env })
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: 'host' })
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
   const identity = await identities.loadOrCreate(deviceName)
   const store = new ServerCredentialStore(directory)
@@ -192,30 +201,73 @@ async function status(args: readonly string[], runtime: CliRuntime): Promise<num
 async function logout(args: readonly string[], runtime: CliRuntime): Promise<number> {
   if (args.length !== 0) throw new CliUsageError('Usage: ds-harness-remote logout')
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
+  let root: string
+  try {
+    root = await prepareDefaultIdentityDirectory({ env: runtime.env })
+  } catch (error) {
+    if (error instanceof IdentityInvalidError && error.code === 'IDENTITY_INVALID') {
+      await resetDefaultIdentityRoles(['host'], serverUrl, deviceName, {
+        env: runtime.env,
+        createIdentityStore: runtime.createIdentityStore,
+      })
+      write(runtime.stdout, 'Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n')
+      return 0
+    }
+    throw error
+  }
   const directory = serverStorageDirectory(root, serverUrl, 'host')
-  if (!await exists(join(directory, 'device.json'))) {
+  const [hasDevice, hasKey, hasCredentials] = await Promise.all([
+    exists(join(directory, 'device.json')),
+    exists(join(directory, 'device.key')),
+    exists(join(directory, 'server-credentials.json')),
+  ])
+  if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear()
     write(runtime.stdout, 'This Host is already logged out.\n')
     return 0
   }
 
-  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env })
-  const identity = await identities.loadOrCreate(deviceName)
-  const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
-  api.bindIdentity(identity)
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: 'host' })
   let revokeFailure: unknown
   try {
+    const identity = await identities.loadOrCreate(deviceName)
+    const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
+    api.bindIdentity(identity)
     await api.revokeCurrentDevice()
   } catch (error) {
     revokeFailure = error
   }
   await identities.reset(deviceName)
-  if (revokeFailure !== undefined) {
+  await new ServerCredentialStore(directory).clear()
+  if (revokeFailure !== undefined
+    && !(revokeFailure instanceof IdentityInvalidError)
+    && !(revokeFailure instanceof ServerCredentialsInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`)
   }
   write(runtime.stdout, 'Remote Host logged out and its local device identity was rotated. Restart the Harness instance.\n')
+  return 0
+}
+
+async function resetIdentity(args: readonly string[], runtime: CliRuntime): Promise<number> {
+  if (args.length > 1) {
+    throw new CliUsageError('Usage: ds-harness-remote reset-identity [host|client|all]')
+  }
+  const roleArg = args[0]
+  if (roleArg !== undefined && roleArg !== 'host' && roleArg !== 'client' && roleArg !== 'all') {
+    throw new CliUsageError('Usage: ds-harness-remote reset-identity [host|client|all]')
+  }
+  const serverUrl = selectedServer()
+  const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
+  const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
+  await resetDefaultIdentityRoles(roles, serverUrl, deviceName, {
+    env: runtime.env,
+    createIdentityStore: runtime.createIdentityStore,
+  })
+  for (const role of roles) {
+    write(runtime.stdout, `Remote ${role} identity was reset and a new key pair was created.\n`)
+  }
+  write(runtime.stdout, 'Restart the Harness instance to use the fresh identity.\n')
   return 0
 }
 
@@ -226,10 +278,10 @@ async function hostContext(runtime: CliRuntime): Promise<{
   deviceName: string
 }> {
   const serverUrl = selectedServer()
-  const root = new IdentityStore({ env: runtime.env }).directory
+  const root = await prepareDefaultIdentityDirectory({ env: runtime.env })
   const directory = serverStorageDirectory(root, serverUrl, 'host')
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname()
-  const identities = runtime.createIdentityStore({ directory, env: runtime.env })
+  const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: 'host' })
   const identity = await identities.loadOrCreate(deviceName)
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory))
   return { api, identities, identity, deviceName }
@@ -305,6 +357,7 @@ function helpText(): string {
     '  ds-harness-remote register <server-token>',
     '  ds-harness-remote status',
     '  ds-harness-remote logout',
+    '  ds-harness-remote reset-identity [host|client|all]',
     '',
     'login uses an available QR provider (preferring Zhihu). Use login list to see available providers.',
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,

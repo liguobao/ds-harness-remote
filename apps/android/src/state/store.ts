@@ -25,6 +25,7 @@ export const requireProxy = () => runtime.connection.requireProxy()
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
 export const requireBotClient = () => runtime.connection.requireBotClient()
 export const requireConnectionRpc = () => (method: string, params: unknown, signal?: AbortSignal) => runtime.connection.rpc(method, params, signal)
+export const getConnectionGeneration = () => runtime.connectionGeneration
 
 export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
 
@@ -34,7 +35,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createPromptActions({ set, get, runtime }),
   ...createSessionEventActions({ set, get, runtime }),
   ...createAccountActions({ set, get }),
-  ...createPreferenceActions({ set, get }),
+  ...createPreferenceActions({ set, get, runtime }),
   ...createScheduleActions({
     set,
     get,

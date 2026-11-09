@@ -313,7 +313,7 @@ Content-Type: application/json
 }
 ```
 
-Server 每次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值；旧 token 重用会撤销整个 token family。不要并发刷新，同一设备应使用 single-flight/互斥锁。
+Server 每次首次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值。按 [协议 §8.2](protocol.md#82-refresh)，刷新响应丢失可恢复尚未再次轮换、撤销或过期的直接后继；若恢复 pair 的 access 已过期，保存后用其 refresh token 继续正常轮换。过时 token 被拒绝但不会撤销当前有效凭据；旧版 Server 可能仍采用重用即撤销策略。不要并发刷新，同一设备应使用 single-flight/互斥锁。
 
 Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁，在获得锁后重新
 读取凭据，串行执行读取、刷新与原子落盘。等待 15 秒仍未获得锁时返回
@@ -492,3 +492,7 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 ## 最小自部署 Server
 
 本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情、Control、WebRTC signaling/TURN credential 与 Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`；WebRTC 的 STUN/TURN 由 `DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` 配置，留空时保持 Relay-only。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+
+## Device pairing v1
+
+The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.

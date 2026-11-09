@@ -1,5 +1,67 @@
 # Repository Guide for Agents
 
+## Oversized session catalogues (2026-11-07)
+
+Remote 的会话目录来自官方 `session/list`，覆盖整个账号，而客户端在
+`RemoteSessionTools.catalog()` 里用 `z.array(rowSchema).max(MAX_REMOTE_SESSIONS)` 校验这份共享列表。
+实测一台累计 5 431 行、其中 4 701 行是 subagent 会话的 Host 会让每个客户端在校验阶段抛 ZodError，
+异常被 Remote tool 包装器吞成 `REMOTE_SESSION_FAILED`，表现为手机「已连接」但会话列表永远空白，
+Desktop 面板的 Agent 工具同样失败。
+
+- Client：先按 workspace 归属与 subagent 过滤，再对结果施加行上限；超限时截断，不再整包失败。
+- Host：`session/list` 仅在超过 2 048 行预算时降级——只保留可列出的根会话（无 `parentSessionId` 且
+  `origin !== 'subagent'`），仍超预算时按 `updatedAt` 保留最新 2 048 行；正常规模账号行为不变。
+- 兼容：Harness 0.2.2 的 `SessionSummary` 去掉了顶层 `title`，标题只保留在
+  `projections.values.title`；Host 在 `session/list` 响应里把它提升回行字段，否则 Remote 列表全是空标题。
+- 实测：该账号由 5 431 行 / 5.13 MB 降到 717 行 / 643 KB，Android 与 Desktop 恢复正常；测试覆盖
+  子会话超预算、根会话超预算、正常规模与 `session/search` 不受影响四种场景。
+
+
+## Self-hosted refresh response recovery (2026-11-06)
+
+`apps/server` 对丢失成功响应的 refresh 请求返回同一直接后继 pair，支持重启和长时间
+离线恢复；后继再次轮换后拒绝祖先 token，不撤销当前有效凭据。HMAC 以旧 bearer 为
+密钥，nonce/设备/用途域分离；只持久化摘要与恢复元数据，不能从磁盘记录还原 bearer。
+消耗旧 token 和签发后继一起提交，失败回滚内存。保持绝对到期时间、撤销及账号隔离；
+旧版已消耗且无恢复元数据的 token 不能恢复，损坏的恢复记录返回可重试 503。
+
+验证：Protocol build、Server check、58 个测试与 Server build 通过。真实本地 HTTP
+丢响应/重启、并发重试，以及 Plugin ClientServerApi 即时重试/模拟两小时离线后无需
+再次登录恢复通过；覆盖过期、撤销、旧数据、写入失败和容量边界。未部署生产 Server，
+未进行跨机或长期真实断网验收。
+
+## Canonical Remote naming and credential migration (2026-11-06)
+
+按用户要求移除旧 `dsh-remote` 设置命名空间的自动导入，不再注册旧 section；保留旧
+Harness settings provider 接口。日志前缀与生命周期标签统一 `ds-harness-remote`。
+共享包 `@dsh-remote/*` 与防止重复 Host 的旧 loader 禁用逻辑保留。
+
+Linux 新安装默认使用 `/opt/ds-harness-remote` 与 `ds-harness-remote-<profile>.service`，
+不自动迁移旧 runtime 或服务。安装器在改包前检测归属本项目的旧服务，若仍运行或启用则
+拒绝继续，要求先停用；不停止、不删除未知服务。中英文安装指南同步。
+
+凭据根改为 `$DSH_HOME/ds-harness-remote`（默认 `~/.dsh/ds-harness-remote`）。安装器
+处理凭据及升级后首次启动时自动整体迁移旧 `remote` 目录，先于凭据读写及身份创建。
+迁移先只读校验整个旧目录：已知布局/文件白名单、公私钥配对、信任指纹、凭据 schema、
+deviceId 与 Server scope 哈希；未知文件、混合数据、不一致记录、锁和符号链接均拒绝。
+根目录外的跨进程锁序列化迁移；新旧根同时存在时不合并、不覆盖。升级需停止旧实例，
+不能依赖空闲旧进程持锁检测。自定义 IdentityStore.directory 保持原路径。
+
+已确认归属的旧目录 rename 遇权限/占用/只读/空间等错误时，复核同一原目录仍在且目标
+不存在后回退旧根。在 `.ds-harness-remote-migration/legacy-root.json` 私有记录原目录的
+设备号/inode，当前与后续新版进程都沿用旧根，避免活跃存储分裂；不自动重试移动已固定的
+旧根。无法持久化回退记录、固定目录消失或被替换时停止，不创建替代身份。Host、安装器、
+CLI 与默认 IdentityStore 均采用实际选定根；不重新生成密钥、不清除 Token/信任记录。
+
+验证：Plugin 源码/test 类型检查、全量 73 文件 / 537 tests、生产构建、DSH bundle、安装
+脚本语法与 diff check 通过。生产 CLI 在隔离目录验证成功自动迁移、未知目录拒绝、真实
+父目录权限拒绝后仍有授权，以及权限恢复后另一个进程仍沿用旧根；凭据字节不变。安装器
+真实 helper 在隔离 profile / 模拟 systemctl 中验证归属旧服务的 active/enabled 拦截，
+以及停用服务/无关服务不被改写。本机 `~/.dsh/remote` 只读归属检查通过，未打印私密内容
+或执行真实迁移。Windows、Linux systemd 实装与跨设备未验收。
+
+本机 hoisted 安装遗留的子包 bin wrapper 指向旧 isolated 路径，类型检查直接调用根 tsc。
+
 ## Claude / Hermes direct workspace tools (2026-11-05)
 
 Claude 与 Hermes 的 Desktop/Android 直接 Files/Terminal 已接入现有 ACP workspace tools。
@@ -1025,3 +1087,30 @@ Remote 窗口先通过 loopback `client.authorization.status` 只读检查本地
 保留已知列表，不将失败解释为退出登录；明确授权错误码才回登录。空主机文案仅用于
 成功的空列表，不用于请求失败。Plugin check、client-runtime 17 个核心测试、build、
 DSH bundle 与 diff check 通过；未新增 Windows 首次安装或跨设备验收。
+
+## DSH-Go pairing v1 (2026-11-08)
+
+The local Remote settings support Host QR → phone confirmation → one local code
+submission. No phone code retrieval, CLI confirmation, model tool or tunnel route
+is added. The exact final request is encrypted with AES-GCM and retained for safe
+result recovery; retries cannot change its code or submission ID. New paired
+Hosts retain an inbound-only policy through refresh/logout/restart and cannot
+create a Client role. Existing credentials preserve their behavior. Strict legacy
+storage ownership validation now recognizes and validates the pairing records and
+Host-only policy rather than rejecting them as unknown files.
+
+Validation: 75 plugin test files / 559 tests, source/test typecheck, production
+bundle build and verify-dsh-plugin passed. The actual C# API/Gateway integration
+(script scripts/check-device-pairing.ts) verified pairing, independent credentials,
+restart recovery, Host hello, encrypted Noise/Relay RPC and scoped revocation.
+The phone is simulated in Node: this is not Dart/Android acceptance. The actual
+React pairing component was checked in an isolated desktop/narrow preview; not a
+full Harness UI acceptance. Loopback/isTrusted cannot prove human presence against
+OS automation; a trusted native user-presence primitive would be required.
+Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
+docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
+pairing approval was performed.
+
+## Pairing sign-in placement (2026-11-08)
+
+DSH-Go pairing lives in the local settings Sign in tab list, alongside existing OAuth/password methods, rather than above general settings. Authorized Hosts retain a pairing shortcut. Provider-loading failures do not reset a manually selected pairing tab; switching/closing the panel does not cancel the Server session or reopen its single attempt.

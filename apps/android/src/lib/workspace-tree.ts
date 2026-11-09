@@ -185,6 +185,7 @@ export function buildTreeSections({
   searchQuery,
   partitionPinned,
   pageSize = 3,
+  defaultExpanded = true,
 }: {
   backend: string
   wsList: readonly WorkspaceItemLike[]
@@ -197,6 +198,7 @@ export function buildTreeSections({
   searchQuery: string
   partitionPinned: (items: RemoteSession[]) => RemoteSession[]
   pageSize?: number
+  defaultExpanded?: boolean
 }): TreeSectionResult[] {
   const parents = buildWorkspaceTreeParents(wsList)
   const allAncestorIds = new Set<string>()
@@ -240,7 +242,7 @@ export function buildTreeSections({
     const partitioned = partitionPinned(wsSessions)
     const isAncestor = allAncestorIds.has(ws.workspaceId)
     const searchExp = searchAncestors.has(ws.workspaceId)
-    const isExpanded = searchExp ? true : (expandedWorkspaces[groupId] ?? (isAncestor ? true : true))
+    const isExpanded = searchExp ? true : (expandedWorkspaces[groupId] ?? (isAncestor ? defaultExpanded : defaultExpanded))
     const limit = visibleCounts[groupId] ?? pageSize
     const title = ws.title || ws.path || ws.workspaceId
     const visibleData = isExpanded ? partitioned.slice(0, limit) : []

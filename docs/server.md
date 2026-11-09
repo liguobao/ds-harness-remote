@@ -131,7 +131,7 @@ Host 与 Client 的首次账号归属必须携带站点账号 token 注册随机
 Host 还可用账号网页生成的一次性主机匹配码接入。注册行为按 IP/账号限速；重复
 deviceId 不允许覆盖已有 public key、role 或 owner。
 
-Server credential 使用短 access token + 可旋转 refresh token。数据库仅保存 refresh token hash；检测旧 token 重用时撤销整个 token family。
+Server credential 使用短 access token + 可旋转 refresh token，凭据以摘要保存。刷新响应丢失时允许恢复尚未再次轮换、撤销或过期的直接后继；过时 token 被拒绝，但不撤销当前有效凭据。恢复边界与自部署 Server 持久化方式见 [协议 §8.2](protocol.md#82-refresh)。
 
 Host/Client private key 始终留在设备本地。
 

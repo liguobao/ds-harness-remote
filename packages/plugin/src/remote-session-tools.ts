@@ -174,10 +174,16 @@ export class RemoteSessionTools {
   private async catalog(gateway: RemoteTypertGateway, args: WorkspaceTarget, signal: AbortSignal): Promise<SessionRow[]> {
     const found = await this.requireWorkspace(gateway, args, signal)
     const response = record(await gateway.invoke({ namespace: 'session', method: 'list', args: { _request: {} }, signal }))
-    const rows = z.array(rowSchema).max(MAX_REMOTE_SESSIONS).parse(response.items)
+    // The Host catalogue covers the whole account while one workspace owns a
+    // small slice of it, so the row bound must apply after workspace ownership
+    // and the subagent filter: bound-then-filter rejects a large account
+    // outright (measured 5 431 rows against a 2 048 bound) instead of listing
+    // the handful of sessions this workspace actually owns.
+    const rows = z.array(rowSchema).parse(response.items)
     const allowed = new Set(found.sessionIds)
     // Workspace ownership comes from the official catalog, never a guessed cwd.
-    return rows.filter(row => allowed.has(row.sessionId) && row.parentSessionId === undefined && row.origin !== 'subagent')
+    const owned = rows.filter(row => allowed.has(row.sessionId) && row.parentSessionId === undefined && row.origin !== 'subagent')
+    return owned.length > MAX_REMOTE_SESSIONS ? owned.slice(0, MAX_REMOTE_SESSIONS) : owned
   }
 
   private async requireSession(gateway: RemoteTypertGateway, args: SessionTarget, signal: AbortSignal) {

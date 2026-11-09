@@ -1,3 +1,4 @@
+import type { PairingCredentials } from './pairing-contract.js'
 import { platform } from 'node:os'
 import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
@@ -33,6 +34,7 @@ export interface OAuthProviderInfo {
   displayName: string
   startUrl: string
   qrStartUrl?: string | null
+  devicePairing?: true
 }
 
 export type OAuthQrPollResult =
@@ -40,7 +42,7 @@ export type OAuthQrPollResult =
   | { status: 'complete'; authorization: DeviceAuthorization }
 
 export interface DeviceAuthorization {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
   expiresAt?: number
   isAdmin?: boolean
@@ -68,6 +70,7 @@ export interface AuthorizedPeerDevice extends ServerHostDevice {
 
 export class HostServerApi {
   readonly baseUrl: string
+  private hostOnly = false
   private identity?: HostIdentity
   private credentials?: ServerCredentials
   private credentialsPromise?: Promise<ServerCredentials>
@@ -90,6 +93,32 @@ export class HostServerApi {
   /** End this runtime's HTTP requests, including authentication and response bodies. */
   close(): void {
     this.lifetime.abort(new ServerApiError('CONNECTION_CLOSED', 'The Server API has been closed.', false))
+  }
+
+  pairingHostOnly(): boolean { return this.hostOnly }
+
+  async loadStoredPolicy(): Promise<void> {
+    this.hostOnly = this.role === 'host' && (await this.store.pairingHostOnly() || (await this.store.load(this.baseUrl, this.requireIdentity().deviceId))?.pairingRestricted === true)
+  }
+
+  async adoptPairing(result: PairingCredentials): Promise<void> {
+    const identity = this.requireIdentity()
+    if (this.role !== 'host' || result.device.role !== 'host' || result.device.deviceId !== identity.deviceId || result.device.identityKey !== identity.publicKey)
+      throw new ServerApiError('PAIRING_IDENTITY_INVALID', 'Pairing identity mismatch.', false)
+    if (result.pairingRestricted) {
+      if (!result.inboundOnly) throw new ServerApiError('DEVICE_SCOPE_REQUIRED', 'Paired Host must remain inbound only.', false)
+      this.hostOnly = true
+      await this.store.restrictPairingHostOnly()
+    }
+    this.credentials = await this.withRefreshLock(async () => {
+      const existing = await this.store.load(this.baseUrl, identity.deviceId)
+      if (existing?.account !== undefined && existing.account !== result.account)
+        throw new ServerApiError('PAIRING_ACCOUNT_CONFLICT', 'Pairing cannot replace the current account.', false)
+      if (existing !== undefined && existing.refreshTokenExpiresAt > Date.now() + 30_000) return existing
+      return this.store.save({ serverUrl: this.baseUrl, deviceId: identity.deviceId,
+        authorizationMethod: 'device_pairing', account: result.account, accountKind: result.accountKind,
+        pairingRestricted: result.pairingRestricted, inboundOnly: result.inboundOnly, ...validateTokens(result.tokens) })
+    })
   }
 
   currentAuthorization(): DeviceAuthorization | undefined {
@@ -192,7 +221,7 @@ export class HostServerApi {
     const value = requireRecord(body, 'OAuth providers')
     if (!Array.isArray(value.items)) throw invalidOAuthProviders()
     const ids = new Set<string>()
-    return value.items.map(item => {
+    const providers: OAuthProviderInfo[] = value.items.map(item => {
       const provider = requireRecord(item, 'OAuth provider')
       if (typeof provider.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id)
         || ids.has(provider.id)
@@ -204,6 +233,12 @@ export class HostServerApi {
       return { id: provider.id, displayName: provider.displayName, startUrl: provider.startUrl,
         ...(typeof provider.qrStartUrl === 'string' ? { qrStartUrl: provider.qrStartUrl } : {}) }
     })
+    const capabilities = value.capabilities
+    if (typeof capabilities === 'object' && capabilities !== null
+      && (capabilities as Record<string, unknown>).devicePairing === 'dsh-pairing-v1') {
+      providers.push({ id: 'dsh-go-pairing-v1', displayName: 'DSH-Go', startUrl: '/api/v1/device-pairing', devicePairing: true })
+    }
+    return providers
   }
 
   async startOAuthQrLogin(provider: OAuthProvider = 'zhihu'): Promise<OAuthQrSession> {
@@ -367,10 +402,7 @@ export class HostServerApi {
       throw error
     }
     return this.store.save({
-      serverUrl: this.baseUrl,
-      deviceId: identity.deviceId,
-      authorizationMethod: stored.authorizationMethod,
-      ...(stored.account === undefined ? {} : { account: stored.account }),
+      ...stored,
       ...validateTokens(tokens),
     })
   }

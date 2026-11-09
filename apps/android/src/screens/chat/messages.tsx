@@ -1,3 +1,4 @@
+import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
 import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -190,6 +191,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
   const expanded = pending || open
   const tools = items.filter((item): item is ToolActivity => item.kind === 'tool')
+  const latestTool = tools.at(-1)
   const activeTool = closed ? undefined : tools.findLast(item => item.state === 'running')
   const runningReasoning = closed ? undefined : items.findLast(item => item.kind === 'message' && item.streamingPhase === 'reasoning')
   const running = activeTool !== undefined || runningReasoning !== undefined
@@ -207,7 +209,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     : primary === 'read' || primary === 'search' || primary === 'readImage' ? FileSearch
       : primary === 'edit' || primary === 'write' ? FilePenLine
         : primary === 'plan' ? ListTree : tools.length > 0 ? Wrench : Sparkles
-  const detail = activeTool !== undefined ? processDetail(activeTool)
+  const detail = latestTool !== undefined ? processDetail(latestTool)
     : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
   return <View style={styles.activityGroup}>
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
@@ -219,9 +221,11 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
       {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
     </Pressable>
-    {running && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
-      <ReplyStatusDots />
-      <Text style={styles.processCurrentText} numberOfLines={2}>{activeTool ? toolDisplayName(activeTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
+    {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
+      {latestTool === undefined || (!closed && latestTool.state === 'running')
+        ? <ReplyStatusDots />
+        : latestTool.state === 'failed' ? <X size={14} color={colors.muted} /> : <CircleCheck size={14} color={colors.muted} />}
+      <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
     {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
@@ -290,6 +294,22 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
+function HeartbeatMessage({ text, body }: { text: string; body: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return <View>
+    <NativeMarkdown text={body} />
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
+      onPress={() => setExpanded(value => !value)} style={styles.reasoningHeader}>
+      <Code2 size={16} color={colors.muted} />
+      <Text style={styles.reasoningLabel}>{expanded ? zhCN.chat.heartbeatCollapse : zhCN.chat.heartbeatExpand}</Text>
+      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+    </Pressable>
+    {expanded && <Text selectable style={styles.toolDetailCode}>{text}</Text>}
+  </View>
+}
+
 /**
  * In-place free text selection on assistant prose (Figure 2 / IMG_1488).
  * Allows the user to freely select any snippet using native handles.
@@ -298,9 +318,10 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
  */
 function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   const styles = useThemedStyles(createStyles)
+  const body = heartbeatMessageBody(item.text, 'assistant')
   return (
     <View style={styles.assistantProseWrap}>
-      <NativeMarkdown text={item.text} />
+      {body === undefined ? <NativeMarkdown text={item.text} /> : <HeartbeatMessage text={item.text} body={body} />}
     </View>
   )
 }
@@ -349,11 +370,12 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
   if (user) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
+    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
     return <View style={styles.userBlock}>
-      <View style={styles.userBubble}>
+      <View style={styles.userContent}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
-        {quotes.length > 0 ? (
+        {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
             {quotes.map((quoteText, index) => (
               <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>

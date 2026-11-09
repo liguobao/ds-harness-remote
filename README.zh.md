@@ -9,22 +9,20 @@
   <strong>中文</strong>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">文档</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.zh.md">自部署</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue?logo=googledocs&amp;logoColor=white" alt="文档"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.zh.md"><img src="https://img.shields.io/badge/%E8%87%AA%E9%83%A8%E7%BD%B2-Docker-2496ED?logo=docker&amp;logoColor=white" alt="自部署"></a>
+  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量"></a>
 </p>
 
 
@@ -36,7 +34,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.4`
 
 ## 主要特性
 
@@ -55,7 +53,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 | 客户端 | 形态 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.3`；Host 也可以就是这台电脑 |
+| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.4`；Host 也可以就是这台电脑 |
 | Web | 浏览器页面 | 已支持 | 打开 [https://dsh.r2049.cn](https://dsh.r2049.cn)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
 | DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: DeepSeek Harness 的 Android 客户端。手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
@@ -72,10 +70,10 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.4`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.6.4`。
 
 DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
 
@@ -202,7 +200,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 - LAN 、P2P网络下，除了网络协调相关指令，所有的数据不经过服务器；TURN服务使用开源coturn服务器部署，Relay 模式使用WebSocket转发。
 - 所有的会话流量经过端到端加密；服务端只中继密文，不保存会话明文或设备私钥。
-- Server membership 与 Host 本地固定的 peer identity 必须同时授权连接。
+- 同账号设备连接无需额外确认，详见[设备信任与权限边界](docs/end-to-end-encryption.md#2-设备身份与信任)。
 - [Remote Tools 注入说明](docs/remote-tools.md)：可选的 `remote_*` 会话工具，默认开启，可在详细 Remote 设置中开启。
 - 交互终端使用 Host 本地的 `terminal.enabled`（默认开启），以 Host 用户身份运行，独立于 Agent 审批；
 - 不开放通用工具 RPC 或远程桌面。
@@ -307,6 +305,16 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 
 本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
 
+## 连接问题排查
+
+Android：复现问题后打开 **设置 → 诊断 → 导出连接日志**，选择文件夹保存 `.txt`。日志保留本次 App 进程启动以来最近 500 条连接诊断；重启 App 后清空，不包含凭据和会话内容。
+
+Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效并持久保存；排查完成后关闭（恢复 `info` 级别）。日志带 `[ds-harness-remote]` 前缀，Desktop 可在 `desktop.log` 查找。手动配置可设置 `logLevel: debug`。
+
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### 与 DSH-Go 配对
+
+在电脑本机 Remote 设置的「登录账号 → DSH-Go 扫码」中生成二维码，使用支持此协议的 DSH-Go 扫码确认，再将手机验证码输入电脑。仅允许校验一次，错误后整个配对作废。新 Host 默认仅被控，新建 Device-only 账号无 Web/Admin 权限。需要完整 Server 配对 v1 API 及按[接入文档](docs/dsh-go-pairing-integration.md)改造的 DSH-Go；随仓库提供的最小 Server 暂不支持此流程。

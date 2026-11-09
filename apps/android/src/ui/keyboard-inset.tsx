@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AppState, Keyboard, LayoutAnimation, Platform, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+
+const KeyboardInsetActiveContext = createContext(false)
 
 /**
  * Reserve the band the IME covers so the composer/content clears it,
@@ -23,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
  *    automatically re-sync or clear any stale state from dropped events.
  */
 export function KeyboardInset({ children }: { children: ReactNode }) {
+  const parentActive = useContext(KeyboardInsetActiveContext)
   const insets = useSafeAreaInsets()
   const { width: windowWidth, height: windowHeight } = useWindowDimensions()
   const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null)
@@ -115,13 +118,17 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
   // - If adjustResize already shrunk the window: windowHeight <= keyboardScreenY, cover collapses to 0 (no extra padding).
   // When keyboard is closed:
   // - Reserve insets.bottom so controls clear the navigation/gesture bar.
-  const paddingBottom = keyboardScreenY !== null
-    ? Math.max(0, windowHeight - keyboardScreenY)
-    : insets.bottom
+  const paddingBottom = parentActive
+    ? 0
+    : keyboardScreenY !== null
+      ? Math.max(0, windowHeight - keyboardScreenY)
+      : insets.bottom
 
   return (
-    <View style={[{ flex: 1 }, paddingBottom > 0 ? { paddingBottom } : null]}>
-      {children}
-    </View>
+    <KeyboardInsetActiveContext.Provider value={true}>
+      <View style={[{ flex: 1 }, paddingBottom > 0 ? { paddingBottom } : null]}>
+        {children}
+      </View>
+    </KeyboardInsetActiveContext.Provider>
   )
 }
