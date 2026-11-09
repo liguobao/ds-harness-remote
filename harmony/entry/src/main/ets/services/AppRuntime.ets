@@ -96,6 +96,11 @@ export class ChatItem {
    * 只给 attachmentId 会被网关判参数不合法；历史记录里本来就存着完整引用，原样回传最稳。
    */
   imageRefs: string[] = [];
+  /**
+   * 用户消息里带的普通文件（主机只收 png/jpeg/webp/gif，HEIC 之类会落成 file part）。
+   * 远端没有读文件字节的接口，所以这里只保留「名称 · 大小」用于展示，至少别把消息吞掉。
+   */
+  files: string[] = [];
 }
 
 /**
@@ -4779,6 +4784,7 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.images = item.images.slice();
   copy.imageAttachmentIds = item.imageAttachmentIds.slice();
   copy.imageRefs = item.imageRefs.slice();
+  copy.files = item.files.slice();
   return copy;
 }
 
@@ -4994,7 +5000,8 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   const attachmentIds: string[] = [];
   const attachmentRefs: string[] = [];
   imageAttachmentsOf(data, attachmentIds, attachmentRefs);
-  if (!hasVisibleText(text) && attachmentIds.length === 0) {
+  const files: string[] = fileLabelsOf(data);
+  if (!hasVisibleText(text) && attachmentIds.length === 0 && files.length === 0) {
     return items;
   }
   const rpcId: string = messageRequestRpcId(data);
@@ -5010,6 +5017,9 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
         if (attachmentIds.length > 0) {
           settled.imageAttachmentIds = attachmentIds;
           settled.imageRefs = attachmentRefs;
+        }
+        if (files.length > 0) {
+          settled.files = files;
         }
         if (time > 0) {
           settled.timestamp = time;
@@ -5033,6 +5043,7 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   message.requestRpcId = rpcId;
   message.imageAttachmentIds = attachmentIds;
   message.imageRefs = attachmentRefs;
+  message.files = files;
   message.timestamp = time > 0 ? time : Date.now();
   next.push(message);
   return next;
@@ -5374,6 +5385,45 @@ function collectTextBlocks(value: Object | undefined, blockType: string, parts: 
       parts.push(text);
     }
   }
+}
+
+/** 1234567 → 1.2 MB；给文件卡片用。 */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+  if (bytes >= 1024) {
+    return Math.round(bytes / 1024) + ' KB';
+  }
+  return String(Math.max(0, Math.round(bytes))) + ' B';
+}
+
+/**
+ * 从 user/message 里挑出 `file` 附件，返回「名称 · 大小」标签。
+ * 主机只把 png/jpeg/webp/gif 当图片，HEIC 等格式会以 file part 存下来，
+ * 而远端没有读文件字节的接口，所以客户端只能展示，不能预览。
+ */
+function fileLabelsOf(data: Record<string, Object>): string[] {
+  const message: Record<string, Object> = messageRecord(data);
+  const blocks: Object[] | undefined = asArray(message['content']);
+  const out: string[] = [];
+  if (blocks === undefined) {
+    return out;
+  }
+  for (const block of blocks) {
+    const record: Record<string, Object> | undefined = asRecord(block);
+    if (record === undefined || jsonStr(record, 'type', '') !== 'file') {
+      continue;
+    }
+    const attachment: Record<string, Object> | undefined = asRecord(record['attachment']);
+    if (attachment === undefined) {
+      continue;
+    }
+    const name: string = jsonStr(attachment, 'name', '');
+    const bytes: number = jsonNum(attachment, 'bytes', 0);
+    out.push((name.length > 0 ? name : '附件') + ' · ' + formatBytes(bytes));
+  }
+  return out;
 }
 
 /**

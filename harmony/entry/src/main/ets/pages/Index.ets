@@ -6390,6 +6390,27 @@ struct Index {
                   .textAlign(TextAlign.Start)
               }
             }
+            if (item.files.length > 0) {
+              Column({ space: 4 }) {
+                ForEach(item.files, (label: string, index: number) => {
+                  Row({ space: 6 }) {
+                    Text('📎')
+                      .fontSize(12)
+                    Text(label)
+                      .fontSize(12)
+                      .fontColor('rgba(255,255,255,0.94)')
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+                  }
+                  .width('100%')
+                  .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+                  .backgroundColor('rgba(255,255,255,0.16)')
+                  .borderRadius(8)
+                }, (label: string, index: number) => index + ':' + label)
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
           }
           .padding({ top: 10, bottom: 10, left: 14, right: 14 })
           .linearGradient({ angle: 135, colors: [['#3D5CF6', 0], ['#2E7CF0', 0.6], ['#22D3EE', 1]] })

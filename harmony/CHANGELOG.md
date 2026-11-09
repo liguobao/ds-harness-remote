@@ -2,6 +2,15 @@
 
 > 完整文件：本记录按版本倒序。历史版本（0.03 及更早）保留在文末，细节见 `docs/harmony-*.md`。
 
+## 0.17.102 — 2026-11-09
+
+对应 `AppScope/app.json5`：`versionName 0.17.102-lan` / `versionCode 1000224`。
+
+- **文件附件不再整条吞掉**：主机只把 PNG/JPEG/WebP/GIF 当图片，HEIC 等格式会落成 `file` part；
+  此前「只有文件、没有文字」的消息在鸿蒙端直接消失（气泡都没有）。现在渲染成 `📎 名称 · 大小` 卡片。
+- 远端没有读文件字节的接口（只有 `session/attachment` 读图片、`workspaceFiles` 读工作区文件），
+  所以文件卡片只展示、不预览；HEIC 想看到图，需要发送端先转成 JPEG。
+
 ## 0.17.101 — 2026-11-09
 
 对应 `AppScope/app.json5`：`versionName 0.17.101-lan` / `versionCode 1000223`。
