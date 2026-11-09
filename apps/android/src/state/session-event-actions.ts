@@ -10,7 +10,7 @@ import {
 import { applyCursorFrame, cursorNativeId } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
-import { inboxRpcIds } from './message-helpers'
+import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
 import type { AppState } from './store-state'
@@ -30,6 +30,11 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ...session,
             projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
           }
+          const currentSession = state.sessions.find(item => item.sessionId === sessionId) ?? state.selectedSession
+          const nextValues = {
+            ...currentSession?.projections?.values,
+            [key]: value,
+          }
           // Only local pending rows follow the inbox. A durable user/message
           // echo is stronger evidence than a delayed control-stream projection.
           // Leaving the inbox may mean execution, steering, or removal; keep the
@@ -37,18 +42,23 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           // settles it. No second projection or timer is needed for visibility.
           const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
             const queued = inboxRpcIds(value)
-            return items.map(item => {
+            const next = items.map(item => {
               if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
                 || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
               if (queued.has(item.requestRpcId)) {
-                return { ...item, sendState: 'queued', queuedAdopted: true, sendError: undefined }
+                return { ...item, sendState: 'queued' as const, queuedAdopted: true, sendError: undefined }
               }
               if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
-                return { ...item, sendState: 'unconfirmed', sendError: undefined }
+                return { ...item, sendState: 'unconfirmed' as const, sendError: undefined }
               }
               return item
             })
-          } : undefined
+            return nextValues.userQuestions === undefined
+              ? next
+              : reconcileUserQuestionsProjection(next, sessionId, nextValues.userQuestions, value)
+          } : key === 'userQuestions' ? (items: ChatItem[]): ChatItem[] => (
+            reconcileUserQuestionsProjection(items, sessionId, value, nextValues.inbox)
+          ) : undefined
           return {
             sessions: state.sessions.map(update),
             selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),

@@ -102,4 +102,40 @@ describe('Harness timed question lifetime', () => {
     expect(s.open).not.toHaveBeenCalled()
     s.questions.close(false)
   })
+
+  it('re-emits open questions on projection baseline and republish when re-opening a session', async () => {
+    const s = setup(5_000)
+    try {
+      s.questions.projection('s1', projection('open'), 1)
+      expect(s.emit).toHaveBeenCalledTimes(1)
+      expect(s.emit.mock.calls[0]![0].payload).toMatchObject({
+        type: 'question/requested',
+        sessionId: 's1',
+        callId: 'call1',
+        questionState: 'open',
+      })
+      expect(s.questions.request('s1', 'event1', request)).toBe(true)
+      await vi.waitFor(() => expect(s.emit).toHaveBeenCalledTimes(2))
+      expect(s.emit.mock.calls[1]![0].payload).toMatchObject({
+        type: 'question/requested',
+        sessionId: 's1',
+        callId: 'call1',
+        questionState: 'open',
+        deadline: expect.any(Number),
+      })
+      s.questions.projection('s1', projection('open'), 1)
+      expect(s.emit).toHaveBeenCalledTimes(3)
+      expect(s.emit.mock.calls[2]![0].payload).toMatchObject({
+        type: 'question/requested',
+        sessionId: 's1',
+        callId: 'call1',
+        questionState: 'open',
+        deadline: expect.any(Number),
+      })
+      s.questions.republish('s1')
+      expect(s.emit).toHaveBeenCalledTimes(4)
+    } finally {
+      s.questions.close(false)
+    }
+  })
 })

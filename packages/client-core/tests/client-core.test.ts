@@ -1203,6 +1203,80 @@ describe('HarnessAlphaClient', () => {
     }))
     await client.close()
   })
+
+  it('re-emits pending blocking questions and approvals when sessionHistory re-opens the session', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(
+      core as unknown as RemoteClientCore,
+      { sessionFormat: 3 },
+      frame => frames.push(frame),
+    )
+
+    client.start()
+    await vi.waitFor(() => expect(core.streamIdFor('$events')).toBeTruthy())
+    const eventsStreamId = core.streamIdFor('$events')
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: { type: 'ready', clientId: 'client-1', host: { sessionFormat: 3 } },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'waterfall',
+          event: 'user-questions/request',
+          eventId: 'evt-q-1',
+          agentId: 'session-q',
+          request: { questions: [{ id: 'q1', question: 'Confirm?' }] },
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'waterfall',
+          event: 'approval/request',
+          eventId: 'evt-a-1',
+          agentId: 'session-q',
+          request: { toolName: 'bash', callId: 'call-1' },
+        },
+      },
+    })
+    await vi.waitFor(() => expect(frames.filter(item => item.rpcId === 'evt-q-1')).toHaveLength(1))
+    expect(frames.filter(item => item.rpcId === 'evt-a-1')).toHaveLength(1)
+
+    const history = client.sessionHistory('session-q')
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const followStreamId = core.streamIdFor('session/follow')
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: followStreamId,
+        hasValue: true,
+        value: {
+          type: 'snapshot',
+          cursor: 1,
+          records: [],
+          hasMore: false,
+          projections: { asOfSeq: 1, values: {} },
+        },
+      },
+    })
+    await history
+    expect(frames.filter(item => item.rpcId === 'evt-q-1')).toHaveLength(2)
+    expect(frames.filter(item => item.rpcId === 'evt-a-1')).toHaveLength(2)
+    await client.close()
+  })
 })
 
 

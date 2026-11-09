@@ -113,8 +113,14 @@ function applyNativeEvent(
     : reduceNativeEvent(current, event, sessionId, view)
   const time = typeof event.time === 'number' && Number.isFinite(event.time) && event.time > 0 ? event.time : undefined
   const usage = nativeUsage(event.data)
+  const eventTurn = replyGroup(event.data)
   return next.map(item => {
-    if (current.includes(item)) return item
+    if (current.includes(item)) {
+      if (eventTurn !== undefined && item.turn === undefined && (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined) {
+        return { ...item, turn: eventTurn }
+      }
+      return item
+    }
     const previous = current.find(old => old.id === item.id)
     const previousSeq = previous?.nativeRevisionSeq ?? previous?.nativeSeq
     if (previousSeq !== undefined && event.seq <= previousSeq) return previous!
@@ -124,7 +130,7 @@ function applyNativeEvent(
       ...(Number.isFinite(event.seq) && event.seq >= 0 ? { nativeOrderSeq: item.nativeOrderSeq ?? event.seq } : {}),
       ...(Number.isFinite(event.seq) && event.seq >= 0 ? { nativeRevisionSeq: event.seq } : {}),
       ...(time === undefined ? {} : { createdAt: time, nativeTime: time }),
-      ...(replyGroup(event.data) === undefined ? {} : { turn: item.turn ?? replyGroup(event.data) }),
+      ...(eventTurn === undefined ? {} : { turn: item.turn ?? eventTurn }),
       ...(item.kind === 'message' && usage !== undefined ? { usage } : {}),
     }
   })
@@ -198,6 +204,12 @@ export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?:
     const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
     if ((turn !== undefined && ((owner !== undefined && owner !== turn) || (owner === undefined && hasOtherOwnedTurn)))
       || (exceptTurn !== undefined && owner === exceptTurn)) return item
+    // WHY: `$events` waterfalls can arrive before `turn/start` or `tool/call` on `session/follow`;
+    // attach an unowned pending request to the active turn instead of cancelling it on turn open/reconcile.
+    if (turn === undefined && exceptTurn !== undefined && owner === undefined
+      && (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined) {
+      return { ...item, turn: exceptTurn }
+    }
     if (item.kind === 'message' && item.streaming) return { ...item, streaming: false, streamingPhase: undefined }
     // Without a result we cannot claim a tool succeeded.
     if (item.kind === 'tool' && item.state === 'running') return { ...item, state: 'failed' }
@@ -558,19 +570,27 @@ function addApproval(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
   if (approvalId === undefined || sessionId === undefined) return current
   const id = `approval:${approvalId}`
   const existing = current.find(item => item.id === id)
-  const turn = requestTurn(current, payload)
-  const activity = {
+  const callId = stringValue(payload.callId)
+  const turn = requestTurn(current, payload, callId)
+  const activity: import('../types').ApprovalActivity = {
     kind: 'approval' as const,
     id,
     sessionId,
     approvalId,
     toolName: stringValue(payload.toolName) ?? 'Harness',
+    ...(callId === undefined ? {} : { callId }),
     ...(turn === undefined ? {} : { turn }),
     ...(stringValue(payload.reason) === undefined ? {} : { reason: stringValue(payload.reason) }),
     ...(frameRpcId.length === 0 ? {} : { frameRpcId }),
     createdAt: Date.now(),
   }
-  return existing !== undefined ? current : [...current, activity]
+  if (existing === undefined) return [...current, activity]
+  if (existing.kind === 'approval' && (existing.outcome === 'allowed-once' || existing.outcome === 'rejected')) return current
+  return current.map(item => item.id === id ? {
+    ...activity,
+    createdAt: item.createdAt,
+    ...(item.turn !== undefined && activity.turn === undefined ? { turn: item.turn } : {}),
+  } : item)
 }
 
 function resolveApproval(current: ChatItem[], payload: UnknownRecord): ChatItem[] {
@@ -589,10 +609,11 @@ function addQuestion(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
   if (sessionId === undefined || questions.length === 0) return current
   const id = `question:${frameRpcId || questions[0]?.id || localId('question')}`
   const existing = current.find(item => item.id === id)
-  const turn = requestTurn(current, payload)
+  const callId = typeof payload.callId === 'string' ? payload.callId : undefined
+  const turn = requestTurn(current, payload, callId)
   const activity: import('../types').QuestionActivity = {
     kind: 'question',
-    ...(typeof payload.callId === 'string' ? { callId: payload.callId } : {}),
+    ...(callId === undefined ? {} : { callId }),
     ...(payload.questionState === 'open' || payload.questionState === 'continued' ? { questionState: payload.questionState } : {}),
     ...(typeof payload.deadline === 'number' ? { deadline: payload.deadline } : {}),
     id,
@@ -602,17 +623,35 @@ function addQuestion(current: ChatItem[], payload: UnknownRecord, frameRpcId: st
     questions,
     createdAt: Date.now(),
   }
-  return existing !== undefined ? current.map(item => item.id === id ? { ...activity, createdAt: item.createdAt, outcome: item.kind === 'question' ? item.outcome : undefined } : item) : [...current, activity]
+  if (existing === undefined) return [...current, activity]
+  return current.map(item => {
+    if (item.id !== id) return item
+    const preservedOutcome = item.kind === 'question' && (item.outcome === 'answered' || item.outcome === 'queued')
+      ? item.outcome
+      : undefined
+    return {
+      ...activity,
+      createdAt: item.createdAt,
+      ...(item.turn !== undefined && activity.turn === undefined ? { turn: item.turn } : {}),
+      ...(preservedOutcome === undefined ? {} : { outcome: preservedOutcome }),
+    }
+  })
 }
 
 /** Approval/question frames may omit their turn; use the active transcript owner. */
-function requestTurn(current: ChatItem[], payload: UnknownRecord): string | undefined {
+function requestTurn(current: ChatItem[], payload: UnknownRecord, callId?: string): string | undefined {
   const explicit = replyGroup(payload)
   if (explicit !== undefined) return explicit
+  if (callId !== undefined) {
+    const matched = current.find(item => item.kind === 'tool' && (item.id === callId || item.id.endsWith(`:${callId}`)))
+    if (matched?.turn !== undefined) return matched.turn
+  }
   for (let index = current.length - 1; index >= 0; index -= 1) {
     const item = current[index]!
+    if (item.turnEnd !== undefined) return undefined
     const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
     if (owner !== undefined) return owner
+    if (item.kind === 'message' && item.role === 'user' && !item.context) return undefined
   }
   return undefined
 }

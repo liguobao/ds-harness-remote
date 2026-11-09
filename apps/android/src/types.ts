@@ -382,6 +382,7 @@ export interface ApprovalActivity extends ChatItemBase {
   kind: 'approval'
   approvalId: string
   toolName: string
+  callId?: string
   reason?: string
   frameRpcId?: string
   outcome?: ApprovalOutcome
