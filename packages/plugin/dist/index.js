@@ -65377,13 +65377,14 @@ function projectCodexThread(value) {
   const createdAt = normalizeTimestamp(value.createdAt);
   const updatedAt = normalizeTimestamp(value.updatedAt) || createdAt;
   const model = projectCodexModel(value);
+  const preview = typeof value.preview === "string" && value.preview.trim().length > 0 ? value.preview : firstUserPreview(projectCodexHistory(value));
   return {
     id: `codex:${value.id}`,
     backend: "codex",
     nativeId: value.id,
     ...typeof value.sessionId === "string" ? { sessionTreeId: value.sessionId } : {},
     ...typeof value.name === "string" && value.name.length > 0 ? { title: value.name } : {},
-    ...typeof value.preview === "string" && value.preview.length > 0 ? { preview: value.preview } : {},
+    ...preview === void 0 ? {} : { preview },
     ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
     ...model.model === void 0 ? {} : { model: model.model },
     ...model.reasoningEffort === void 0 ? {} : { reasoningEffort: model.reasoningEffort },
@@ -65461,6 +65462,16 @@ function projectCodexHistory(thread) {
     }
   }
   return output2;
+}
+function firstUserPreview(items) {
+  for (const item of items) {
+    if (item.kind !== "message" || item.role !== "user")
+      continue;
+    const preview = item.text?.replace(/\s+/g, " ").trim().slice(0, 160);
+    if (preview)
+      return preview;
+  }
+  return void 0;
 }
 function projectCodexItem(value, threadId, turnId, sessionId, index) {
   const item = isRecord(value) ? value : {};
@@ -68223,7 +68234,10 @@ var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers });
+      const raw = new RTCPeerConnection({
+        iceServers: configuration.iceServers,
+        iceTransportPolicy: configuration.iceTransportPolicy
+      });
       return {
         get connectionState() {
           return raw.connectionState;
@@ -68607,6 +68621,7 @@ var RtcDataChannelTransport = class {
     this.onDiagnostic = options.onDiagnostic;
     this.pc = options.factory.create({
       iceServers: options.iceServers,
+      iceTransportPolicy: options.iceTransportPolicy,
       onDiagnostic: (event) => this.handlePeerDiagnostic(event)
     });
     this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
@@ -69609,7 +69624,13 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "connect.rejected" || frame.type === "error") {
         const payload = frame.payload;
         const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const failure5 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const code = errorCodeSchema.safeParse(payload.code);
+        this.failConnection(failure5, {
+          reason: payload.retryable === true ? "control-error" : "invalid-control-frame",
+          ...code.success ? { errorCode: code.data } : {}
+        });
+        return;
       }
       if (frame.type === "relay") {
         if (this.dataSocket !== void 0)
@@ -69651,7 +69672,8 @@ var AdaptiveTransport = class extends BaseTransport {
       const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
       if (!("code" in failure5))
         Object.assign(failure5, { code: "INVALID_MESSAGE" });
-      this.failConnection(failure5, { reason: "invalid-control-frame" });
+      const code = errorCodeSchema.safeParse(failure5.code);
+      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
     }
   }
   handleRelay(payload) {
@@ -69752,6 +69774,9 @@ var AdaptiveTransport = class extends BaseTransport {
       role: "initiator",
       factory,
       iceServers,
+      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
+      // direct pair wins, then gets rejected as an unnegotiated transport.
+      iceTransportPolicy: this.negotiatedTransports().includes("turn") && !this.negotiatedTransports().some((transport) => transport === "lan" || transport === "p2p") ? "relay" : "all",
       onSignal: (signal2) => this.sendRtcSignal(signal2),
       negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,
